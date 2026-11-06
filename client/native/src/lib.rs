@@ -335,7 +335,7 @@ fn badge(count: u32) {
     let _ = count;
 }
 
-/// An access token, from the refresh token in the secret store (a request to sign-in, so off the async threads).
+/// An access token, from the refresh token in the secret store (a request to auth, so off the async threads).
 async fn token() -> Result<String, String> {
     let auth = app().auth()?;
     tauri::async_runtime::spawn_blocking(move || auth.token()).await.map_err(|e| e.to_string())?
@@ -529,7 +529,7 @@ async fn join() -> Result<Value, String> {
     Ok(json!({ "code": device.code(), "invited": invite.is_some() }))
 }
 
-/// Waits until this device is let in, as sign-in says it was approved and the relay lets it on.
+/// Waits until this device is let in, as auth says it was approved and the relay lets it on.
 #[tauri::command]
 async fn wait() -> Result<(), String> {
     let device = app().device()?;

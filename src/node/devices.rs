@@ -185,7 +185,7 @@ impl Node {
     }
 }
 
-/// A device's request to join, as sign-in keeps it (`/api/auth/devices/requests`): its endpoint's keys and name, its
+/// A device's request to join, as auth keeps it (`/api/auth/devices/requests`): its endpoint's keys and name, its
 /// person, and for a newcomer's first device, the proof that their invite's secret was theirs.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeviceRequest {
@@ -193,7 +193,7 @@ pub struct DeviceRequest {
     pub seal: String,
     pub name: String,
     pub user: String,
-    /// Their person's name, as sign-in knows it.
+    /// Their person's name, as auth knows it.
     #[serde(default)]
     pub person: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -207,7 +207,7 @@ pub struct DeviceRequest {
     /// The city it asked from, as Cloudflare placed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub place: Option<String>,
-    /// What its sign-in showed (`sign_in_proof::Proof`), as sign-in passed it on: unchecked, and read only as a proof.
+    /// What its sign-in showed (`sign_in_proof::Proof`), as auth passed it on: unchecked, and read only as a proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sign_in: Option<Value>,
 }
@@ -272,7 +272,7 @@ impl Node {
         self.with(|i| super::calls::address(i.r.db()))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
     }
 
-    /// Asks the network's sign-in something as this device, signed with its key (`one/auth`): a POST's body is
+    /// Asks the network's auth something as this device, signed with its key (`one/auth`): a POST's body is
     /// the signed request, a GET's or DELETE's is in `x-one-request`; it's signed for `path` without its query. → its
     /// answer.
     async fn ask_sign_in(&self, method: &'static str, path: &str, fields: Value) -> Result<Value> {
@@ -280,7 +280,7 @@ impl Node {
         tokio::task::spawn_blocking(move || {
             let mut fields = fields;
             fields["route"] = json!(format!("{method} {}", path.split('?').next().unwrap_or_default()));
-            let signed = crate::keys::signed_request(&key, crate::protocol::SIGN_IN_DOMAIN, fields, now_ms());
+            let signed = crate::keys::signed_request(&key, crate::protocol::AUTH_DOMAIN, fields, now_ms());
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
             let url = format!("{address}{path}");
             let header = B64U.encode(&serde_json::to_vec(&signed)?);
@@ -290,7 +290,7 @@ impl Node {
                 _ => agent.get(&url).header("x-one-request", &header).call()?,
             };
             let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-            ensure!(resp.status().is_success(), "{}", out["error"].as_str().unwrap_or("the sign-in service didn't answer"));
+            ensure!(resp.status().is_success(), "{}", out["error"].as_str().unwrap_or("auth didn't answer"));
             Ok(out)
         })
         .await?
@@ -377,7 +377,7 @@ impl Node {
     }
 
     /// Invites someone new to join, called `name`, as `role`, for this device's person, an admin: its secret is made
-    /// here, sign-in is told only its hash (signed by this device), and it's kept in their own scope, for any of their
+    /// here, auth is told only its hash (signed by this device), and it's kept in their own scope, for any of their
     /// devices to approve the newcomer's first device. → (the link, until when).
     pub async fn invite_someone(&self, caller: &Caller, name: &str, role: Role) -> Result<(String, u64)> {
         ensure!(caller.user == self.user()?, "invite from one of your own devices: {} keeps your invites with you", self.device_name());
@@ -393,12 +393,12 @@ impl Node {
         Ok((made.link, made.until))
     }
 
-    /// The requests to join that `caller` may approve, as sign-in lists them to this device: their own devices', and
+    /// The requests to join that `caller` may approve, as auth lists them to this device: their own devices', and
     /// those of the people they invited whose proof is right, but those they said weren't theirs. Each with its code,
     /// which the device asking shows too, to compare, and when and where it asked from.
     pub async fn device_requests(&self, caller: &Caller) -> Result<Vec<Value>> {
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("sign-in's requests aren't requests")?;
+        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let invites = if caller.user == self.user()? { self.invites().await? } else { BTreeMap::new() };
         let refused = self.0.refused.lock().unwrap().clone();
         let mut out = Vec::new();
@@ -431,13 +431,13 @@ impl Node {
     }
 
     /// Turns down the device whose join code is `code`, one `caller` may approve: its request (and what its sign-in
-    /// showed) is forgotten at sign-in, and it isn't shown here again when it asks again. One of their own ("Not Me") is
+    /// showed) is forgotten at auth, and it isn't shown here again when it asks again. One of their own ("Not Me") is
     /// turned down by an entry (`content::refuse`), so no device of theirs lets it in after. → which it was.
     pub async fn refuse_device(&self, caller: &Caller, code: &str) -> Result<Value> {
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("sign-in's requests aren't requests")?;
+        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = waiting(asked, &code)?;
         let invites = if caller.user == self.user()? { self.invites().await? } else { BTreeMap::new() };
         let mine = mine_or_invited(&r, caller, &invites, &r.endpoint()?).context("that device isn't yours, or someone's you invited, to turn down")?;
@@ -468,7 +468,7 @@ impl Node {
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("sign-in's requests aren't requests")?;
+        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = waiting(asked, &code)?;
         ensure!(r.proof.is_none(), "the recovery key lets in a device of someone already in {YOURS}");
         let person = self.with(|i| Ok(i.r.db().user(&r.user)?.map(|u| u.name)))?.with_context(|| format!("the recovery key lets in a device of someone already in {YOURS}"))?;
@@ -493,12 +493,12 @@ impl Node {
         }
         // Marked approved, for the device waiting on it to see, with the network it's in.
         if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
-            tracing::warn!("marking a request approved at sign-in: {err:#}");
+            tracing::warn!("marking a request approved at auth: {err:#}");
         }
         Ok(json!({ "device": r.name, "person": person, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
     }
 
-    /// Where a device's request is marked approved at sign-in, saying the network it was let into (its root),
+    /// Where a device's request is marked approved at auth, saying the network it was let into (its root),
     /// the only one that device then takes, and once `global`'s log is frozen, where this device read its scope database
     /// to, which that device starts from (`steps::Welcome`).
     fn approved_path(&self, key: &str) -> Result<String> {
@@ -542,7 +542,7 @@ impl Node {
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("sign-in's requests aren't requests")?;
+        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = waiting(asked, &code)?;
         let invite = match &r.proof {
             Some(_) if caller.user == self.user()? => self.invites().await?.remove(&r.user),
@@ -556,7 +556,7 @@ impl Node {
         let approved = self.approve_request(caller, &r, invite.as_ref()).await?;
         // Marked approved, for the device waiting on it to see, with the network it's in.
         if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
-            tracing::warn!("marking a request approved at sign-in: {err:#}");
+            tracing::warn!("marking a request approved at auth: {err:#}");
         }
         if invite.is_some() {
             self.keep_invite(&r.user, None).await?;
@@ -616,7 +616,7 @@ impl Node {
         if invite.is_some_and(|i| i.role == Role::Admin)
             && let Err(err) = self.ask_sign_in("POST", "/api/auth/people/admin", json!({ "user": r.user, "admin": true })).await
         {
-            tracing::warn!("telling sign-in {} is an admin: {err:#}", r.user);
+            tracing::warn!("telling auth {} is an admin: {err:#}", r.user);
         }
         let scopes: Vec<Scope> = self.with(|i| {
             let db = i.r.db();
@@ -719,7 +719,7 @@ impl Node {
             return Ok(());
         }
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("sign-in's requests aren't requests")?;
+        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let theirs = asked.into_iter().filter(|r| r.user == user && r.proof.is_none() && r.sign_in.is_some());
         for r in theirs {
             let accounts = self.with(|i| Ok(i.r.db().sign_ins(&user)?))?;
@@ -745,7 +745,7 @@ impl Node {
                 Ok(_) => {
                     tracing::info!("let {} in by its sign-in", r.name);
                     if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
-                        tracing::warn!("marking a request approved at sign-in: {err:#}");
+                        tracing::warn!("marking a request approved at auth: {err:#}");
                     }
                 }
                 Err(err) => tracing::warn!("letting {} in by its sign-in: {err:#}", r.name),

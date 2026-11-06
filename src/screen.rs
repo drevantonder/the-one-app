@@ -189,8 +189,8 @@ mod tests {
         let mut shared = Vec::new();
         walk(&home, &home, &mut shared);
         files.extend(shared.into_iter().map(|f| format!("../home/{f}")));
-        // And the sign-in pages, whose class names sign-in.css is made of.
-        files.push("../../../cloudflare/sign-in/pages.js".into());
+        // And the auth pages, whose class names auth.css is made of.
+        files.push("../../../cloudflare/auth/pages.js".into());
         files.sort();
         let mut hash = sha2::Sha256::new();
         for file in &files {

@@ -1,4 +1,4 @@
-//! Signing in, as every client does: an OAuth client of the network's sign-in, registered the first time, with sign-in
+//! Signing in, as every client does: an OAuth client of the network's auth, registered the first time, with sign-in
 //! and consent in a browser that comes back to a port on this machine (RFC 8252's loopback redirect), or on a phone to
 //! the app's own link (`<cli>://signed-in/`), which an iPhone's system sign-in sheet takes and an Android phone's Chrome
 //! Custom Tab opens the app on. The refresh token is kept in the
@@ -20,7 +20,7 @@ use crate::secrets;
 pub struct Auth {
     pub address: String,
     pub name: String,
-    /// Where it keeps its registration with sign-in (not a secret): `sign-in`, its address, its id there, and where
+    /// Where it keeps its registration with auth (not a secret): `sign-in`, its address, its id there, and where
     /// sign-in comes back to if not the loopback.
     data: std::path::PathBuf,
     access: Mutex<Option<(String, Instant)>>,
@@ -45,7 +45,7 @@ impl Auth {
         Auth { address: address.trim_end_matches('/').into(), name: name.into(), data, access: Mutex::default(), meta: Mutex::default() }
     }
 
-    /// This app's id as a client of sign-in at this address, if it registered there to come back to `back`.
+    /// This app's id as a client of auth at this address, if it registered there to come back to `back`.
     fn client_id(&self, back: &str) -> Option<String> {
         let kept = std::fs::read_to_string(self.data.join("sign-in")).ok()?;
         let mut lines = kept.lines();

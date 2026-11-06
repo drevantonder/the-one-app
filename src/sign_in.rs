@@ -1,4 +1,4 @@
-//! This machine's CLI and MCP signed in at the network's address, as every other client is: an OAuth client of its sign-in
+//! This machine's CLI and MCP signed in at the network's address, as every other client is: an OAuth client of its auth
 //! service, registered the first time it signs in. The person approves a short code by signing in on any device
 //! (`cloudflare/auth`'s `/sign-in/code`), here in the browser if this machine has a screen. The refresh token is kept in a
 //! file only this machine's user reads, outside the node's data: the node is only ever sent access tokens.
@@ -69,9 +69,9 @@ fn agent() -> ureq::Agent {
 }
 
 fn meta(address: &str) -> Result<Value> {
-    let mut resp = agent().get(format!("{address}/.well-known/oauth-authorization-server")).call().with_context(|| format!("the sign-in service at {address} isn't answering"))?;
+    let mut resp = agent().get(format!("{address}/.well-known/oauth-authorization-server")).call().with_context(|| format!("auth at {address} isn't answering"))?;
     if resp.status() != 200 {
-        bail!("the sign-in service at {address} isn't answering");
+        bail!("auth at {address} isn't answering");
     }
     Ok(resp.body_mut().read_json()?)
 }
@@ -96,11 +96,11 @@ fn client(address: &str, meta: &Value) -> Result<String> {
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
     });
-    let mut resp = agent().post(meta["registration_endpoint"].as_str().context("the sign-in service takes no new clients")?).send_json(&body)?;
+    let mut resp = agent().post(meta["registration_endpoint"].as_str().context("auth takes no new clients")?).send_json(&body)?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     match out["client_id"].as_str() {
         Some(id) if resp.status().is_success() => Ok(id.to_string()),
-        _ => bail!("this machine couldn't sign up to sign in: {}", said(&out, "the sign-in service said no")),
+        _ => bail!("this machine couldn't sign up to sign in: {}", said(&out, "auth said no")),
     }
 }
 
@@ -141,13 +141,13 @@ pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
     let mut resp = agent().post(format!("{address}/sign-in/code")).send_json(serde_json::json!({ "query": query }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     let (Some(code), Some(url)) = (out["code"].as_str(), out["url"].as_str()) else {
-        bail!("the sign-in service gave no code: {}", said(&out, "it may need updating"));
+        bail!("auth gave no code: {}", said(&out, "it may need updating"));
     };
     Ok(Started { code: code.into(), url: url.into(), address, client, state, verifier, meta })
 }
 
 /// Approves a sign-in as a throwaway network's first person would in a browser, with no passkey: a code's link (the CLI's) or
-/// an authorization (an app's, which then comes back to it). Only a throwaway network's sign-in signs anyone in this way
+/// an authorization (an app's, which then comes back to it). Only a throwaway network's auth signs anyone in this way
 /// (`cloudflare/auth`'s `throwawayNetwork`). `person`, someone who joined it, signs in as them instead.
 pub fn approve_on_throwaway(address: &str, url: &str, person: Option<&str>) -> Result<()> {
     let back = approved_on_throwaway(address, url, person)?;
@@ -210,7 +210,7 @@ pub fn finish(started: Started) -> Result<()> {
 /// Swaps a code or refresh token for tokens, and keeps them: each refresh token works once, so the new one is kept
 /// before anything else can ask. A refusal means this machine is signed out.
 fn grant(meta: &Value, kept: &mut Kept, fields: &[(&str, &str)]) -> Result<()> {
-    let endpoint = meta["token_endpoint"].as_str().context("the sign-in service gives no tokens")?;
+    let endpoint = meta["token_endpoint"].as_str().context("auth gives no tokens")?;
     let mut resp = agent().post(endpoint).header("content-type", "application/x-www-form-urlencoded").send(form(fields))?;
     let status = resp.status().as_u16();
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
@@ -219,7 +219,7 @@ fn grant(meta: &Value, kept: &mut Kept, fields: &[(&str, &str)]) -> Result<()> {
             let _ = std::fs::remove_file(path());
             bail!("this machine is signed out ({}): {CLI} sign-in", said(&out, "its sign-in was refused"));
         }
-        bail!("the sign-in service said {status}: {}", said(&out, "nothing"));
+        bail!("auth said {status}: {}", said(&out, "nothing"));
     };
     kept.access = Some(access.to_string());
     kept.until = now_ms() + out["expires_in"].as_u64().unwrap_or(3600) * 1000;

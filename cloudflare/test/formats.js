@@ -60,7 +60,7 @@ const ops = {
   async members({ calls }) {
     return { contents: calls.map(([name, args]) => members[name](args)) };
   },
-  /// What sign-in's word says while a device waits to be let in: `[[status, said]]` → what each says.
+  /// What auth's word says while a device waits to be let in: `[[status, said]]` → what each says.
   async joining({ said }) {
     return { said: said.map(([status, body]) => waited(status, body)) };
   },

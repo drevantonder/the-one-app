@@ -39,12 +39,10 @@ pub struct Worker {
 
 /// The network's Workers, in the order they're deployed.
 ///
-/// Sign-in's Worker is still called `auth` on Cloudflare (`<cli>-auth`, its address's host, its `AUTH` bindings) and
-/// its Durable Object `Auth`, which holds every person's passkeys and accounts, as are the paths under `/api/auth` that
-/// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer name, and `one/auth`, what devices sign
-/// their requests to it under: renaming them would move every network's sign-in, and every refresh token would stop working.
+/// Auth's Durable Object `Auth` holds every person's passkeys and accounts. The paths under `/api/auth` name the
+/// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
-    Worker { name: "auth", entry: "sign-in/worker.js", class: Some("Auth"), deleted: &[], place: Some(|s| (s.sign_in_url.as_str(), s.ports[0])), node_build: false, serves_web: false, reads_bucket: false, bindings: sign_in_bindings },
+    Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), deleted: &[], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings },
     Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings },
     Worker { name: "signer", entry: "signer/worker.js", class: None, deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings },
     Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), deleted: &[], place: None, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings },
@@ -106,16 +104,16 @@ pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
 pub struct Settings {
     /// The network's name, as sign-in screens say it.
     pub name: String,
-    /// The network's address, the one people use: the gateway's, which sends sign-in to the sign-in, MCP to the MCP
+    /// The network's address, the one people use: the gateway's, which sends signing in to auth, MCP to the MCP
     /// Worker, the relay's paths to the relay and the rest to the web client. Passkeys belong to its host name, so it
     /// doesn't change.
     pub address: String,
-    /// Where the CLI's Cloudflare commands reach sign-in; people reach it at the address.
-    pub sign_in_url: String,
+    /// Where the CLI's Cloudflare commands reach auth; people reach it at the address.
+    pub auth_url: String,
     /// Whether the network has a Cloudflare node (`cloudflare node deploy`), which the relay wakes.
     #[serde(default)]
     pub cloudflare_node: bool,
-    /// The local ports the sign-in and the gateway listen on, when this machine runs them. The other services
+    /// The local ports auth and the gateway listen on, when this machine runs them. The other services
     /// have none: other Workers reach them by binding.
     pub ports: [u16; 2],
     /// The network's devices (`{ key, role, admin }`: key in hex, roles joined by spaces), and its recovery key as a
@@ -156,7 +154,7 @@ pub struct Settings {
     /// with the Workers, and the custom build's APNs, FCM and WNS credentials, as its admin adds them.
     #[serde(default, skip)]
     pub push: std::collections::BTreeMap<String, String>,
-    /// A throwaway network's one person, `(id, name)`, whom its sign-in lets in with no passkey and no Google, so clients
+    /// A throwaway network's one person, `(id, name)`, whom its auth lets in with no passkey and no Google, so clients
     /// are tested with nobody there. Only `one throwaway` sets it, on the Workers it runs beside its throwaway network, listening
     /// only on this machine; `deploy` refuses settings with it, so no Workers people use ever have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -406,7 +404,7 @@ impl Settings {
         Settings {
             name: name.into(),
             address: address.trim_end_matches('/').into(),
-            sign_in_url: format!("http://127.0.0.1:{}", ports[0]),
+            auth_url: format!("http://127.0.0.1:{}", ports[0]),
             cloudflare_node: false,
             cloudflare_node_key: data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()),
             ports,
@@ -432,7 +430,7 @@ impl Settings {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
         let ports = [free()?, free()?];
         let mut settings = Settings::new("Throwaway", &format!("http://127.0.0.1:{}", ports[1]));
-        settings.sign_in_url = format!("http://127.0.0.1:{}", ports[0]);
+        settings.auth_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
         settings.throwaway_person = Some(person);
         settings.dir = home.to_path_buf();
@@ -559,7 +557,7 @@ fn node_bindings(settings: &Settings) -> Vec<Binding> {
         secret("NODE_KEY", settings.cloudflare_node_key.clone()),
         plain("RELAY", "service:relay:CloudflareNode"),
     ];
-    // The network's root, as sign-in's: its members are replayed from no other.
+    // The network's root, as auth's: its members are replayed from no other.
     out.extend(settings.root.clone().map(|root| plain("ROOT", root)));
     out.extend(location());
     out
@@ -578,7 +576,7 @@ fn signer_bindings(settings: &Settings) -> Vec<Binding> {
     out
 }
 
-fn sign_in_bindings(settings: &Settings) -> Vec<Binding> {
+fn auth_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         // Whether a request's signer is one of the network's endpoints, and an admin's.
         plain("RELAY", "service:relay"),
@@ -716,7 +714,7 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let web = dir.join("web");
     let served = served(settings, &web)?;
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
-    ensure!(settings.throwaway_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's sign-in lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
+    ensure!(settings.throwaway_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
     let mut files = settings.web();
     parses(&files)?;
@@ -1142,7 +1140,7 @@ pub const INVITE_DAYS: u64 = 3;
 
 /// Invites someone to join the network at `address`, `name` only a label, as `user` (who they'll be in the network; a
 /// new id if not given), and where people sign in with Google, as the Google account `email`. The link's secret is
-/// made here and never leaves but in the link: sign-in is told only its hash, in a request signed with
+/// made here and never leaves but in the link: auth is told only its hash, in a request signed with
 /// `key`, an admin's device's.
 pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: Option<&str>, email: Option<&str>) -> Result<Invite> {
     ensure!(!name.trim().is_empty(), "give their name");
@@ -1156,9 +1154,9 @@ pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: 
         fields["email"] = json!(email);
     }
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-    let mut resp = agent.post(format!("{address}/api/auth/invites")).send_json(crate::keys::signed_request(key, crate::protocol::SIGN_IN_DOMAIN, fields, now))?;
+    let mut resp = agent.post(format!("{address}/api/auth/invites")).send_json(crate::keys::signed_request(key, crate::protocol::AUTH_DOMAIN, fields, now))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-    ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("sign-in made no invite"));
+    ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("auth made no invite"));
     Ok(Invite { link: format!("{address}/invite#{secret}"), user, until })
 }
 
@@ -1235,7 +1233,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)]) -
 }
 
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
-    ensure!(settings.throwaway_person.is_none(), "a throwaway network's sign-in lets in anyone who reaches it, so its Workers run only beside its throwaway network");
+    ensure!(settings.throwaway_person.is_none(), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network");
     if workers.iter().any(|w| w.serves_web) {
         parses(web)?;
     }

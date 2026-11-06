@@ -1,6 +1,6 @@
 /* The theme: shadcn's neutral, light and dark, as variables, and what code is coloured with. Dark is the person's, by
    prefers-color-scheme, which the web client and the shells set from Settings › Appearance. ui.css has them for every
-   screen; the sign-in pages (sign-in.css) for the Workers' pages, which can't have React. */
+   screen; the auth pages (auth.css) for the Workers' pages, which can't have React. */
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);

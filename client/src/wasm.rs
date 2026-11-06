@@ -274,7 +274,7 @@ impl Response {
     }
 }
 
-/// Where the issuer of a new device's sign-in (`proof`, as sign-in passed it on, JSON) publishes its keys, for the issuers
+/// Where the issuer of a new device's sign-in (`proof`, as auth passed it on, JSON) publishes its keys, for the issuers
 /// devices of the network at `address` take: "" for a passkey's, or any other issuer.
 #[wasm_bindgen(js_name = issuerKeysAt)]
 pub fn issuer_keys_at(proof: String, address: String) -> String {

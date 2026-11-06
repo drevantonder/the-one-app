@@ -1,4 +1,4 @@
-//! The network's Workers on Cloudflare (`cloudflare/`: sign-in, the relay, the URL signer) as nodes meet them:
+//! The network's Workers on Cloudflare (`cloudflare/`: auth, the relay, the URL signer) as nodes meet them:
 //! checking access tokens, and building and running the Workers in workerd.
 
 #[cfg(feature = "node")]
@@ -24,7 +24,7 @@ pub struct Claims {
     pub exp: u64,
     #[serde(default)]
     pub jti: String,
-    /// The person's name, as sign-in knows them.
+    /// The person's name, as auth knows them.
     #[serde(default)]
     pub name: String,
 }
@@ -40,7 +40,7 @@ impl Claims {
     }
 }
 
-/// An access token's claims, if a key in `jwks` (sign-in's) signed it, `iss` issued it, and it hasn't expired
+/// An access token's claims, if a key in `jwks` (auth's) signed it, `iss` issued it, and it hasn't expired
 /// at `now` (milliseconds).
 pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> {
     let parts: Vec<&str> = token.split('.').collect();

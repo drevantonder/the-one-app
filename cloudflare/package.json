@@ -1,5 +1,5 @@
 {
-  "description": "The network's Workers on Cloudflare, each in a folder named by its job (gateway, sign-in, relay, signer, push, mcp, node) and the web client (web); shared/ is the formats several of them use, which nodes read too, and test/ their own tests. The gateway, sign-in, relay, URL signer and push Workers route, sign in, relay, carry pushes and sign bucket URLs, and open nothing; the remote MCP server (mcp) is a client, so it opens keys while an MCP client calls, and the Cloudflare node (node) a node like any other.",
+  "description": "The network's Workers on Cloudflare, each in a folder named by its job (gateway, auth, relay, signer, push, mcp, node) and the web client (web); shared/ is the formats several of them use, which nodes read too, and test/ their own tests. The gateway, sign-in, relay, URL signer and push Workers route, sign in, relay, carry pushes and sign bucket URLs, and open nothing; the remote MCP server (mcp) is a client, so it opens keys while an MCP client calls, and the Cloudflare node (node) a node like any other.",
   "name": "cloudflare",
   "private": true,
   "type": "module",

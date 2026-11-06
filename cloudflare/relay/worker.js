@@ -17,7 +17,7 @@
 // certificate's `until` or that key is taken out or made something else. With the certificate, `.`, and a request that
 // key signed just now (`proveSocket`: within ten seconds, its nonce taken once), it's taken in at once, with no
 // challenge's round trip; without one, or with one that's stale or taken, it answers the challenge as any key does. The
-// URL signer, sign-in and the push Worker ask it, by `allowed(key)`: `{ admin, role }`, or null.
+// URL signer, auth and the push Worker ask it, by `allowed(key)`: `{ admin, role }`, or null.
 //
 // A browser's WebSocket can't set a header, so its certificate is `?token=` in the relay's URL, where logs may keep
 // it. iroh shows the same token at every reconnect, so its proof is used once, by the socket the web client opens

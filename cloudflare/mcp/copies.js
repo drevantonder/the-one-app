@@ -2,15 +2,15 @@
 // each copy by its token's id, so the remote MCP server opens it only while the client calls, and with nothing of its own.
 //
 // A sign-in seals it under the client's refresh token and its access token, until each expires. Refresh tokens are
-// single-use (sign-in answers one used again only with the same new pair, for a minute, in case that answer was lost): a
+// single-use (auth answers one used again only with the same new pair, for a minute, in case that answer was lost): a
 // refresh opens the copy under the old one, seals it under the new pair, and deletes the old copy, so the old token
 // opens nothing; nor does a copy whose token has expired. An access token's copy
 // opens it for each MCP request until that token expires, even if its sign-in is revoked sooner: tokens are checked
-// offline, by sign-in's signature.
+// offline, by auth's signature.
 
 import { idOf, openUnder, sealUnder } from "../shared/crypto.js";
 
-/// How long a refresh token's copy is kept unused, as long as sign-in's refresh tokens last.
+/// How long a refresh token's copy is kept unused, as long as auth's refresh tokens last.
 export const REFRESH_LASTS = 30 * 86_400_000;
 
 export class Copies {
@@ -52,7 +52,7 @@ export class Copies {
   }
 
   /// A refresh from `old` to `refresh` and `access`: the secret, sealed under them, the old copy gone. → the secret,
-  /// or null if neither `old` nor `refresh` (the same rotation again, sign-in's lost answer given again) opens it.
+  /// or null if neither `old` nor `refresh` (the same rotation again, auth's lost answer given again) opens it.
   async rotate(old, refresh, access, accessUntil) {
     const secret = (await this.open(old)) || (await this.open(refresh));
     if (!secret) return null;

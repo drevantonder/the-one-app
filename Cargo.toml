@@ -34,7 +34,7 @@ anyhow = "1"
 aes-gcm = "0.10"
 curve25519-dalek = "4.1"
 data-encoding = "2"
-# Sign-in's access tokens are signed with Ed25519 (src/cloudflare.rs checks them), and devices sign what they send each
+# Auth's access tokens are signed with Ed25519 (src/cloudflare.rs checks them), and devices sign what they send each
 # other through the relay with it (src/node/relay.rs).
 ed25519-dalek = "3"
 # The Workers derive keys with HKDF-SHA256, because that's what WebCrypto in workerd has (src/cloudflare.rs).

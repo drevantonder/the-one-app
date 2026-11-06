@@ -69,7 +69,7 @@ targets:
         AppGroup: group.app.${CONFIG_CLI}.phone
         # Where its device keys are kept (src/secrets.rs), which its notification extension reads too.
         KeychainGroup: group.app.${CONFIG_CLI}.phone
-        # <cli>://open?…, the links it takes (web.js `opened`); <cli>://signed-in/ is sign-in's, the sheet's own.
+        # <cli>://open?…, the links it takes (web.js `opened`); <cli>://signed-in/ is auth's, the sheet's own.
         CFBundleURLTypes:
           - CFBundleURLName: app.${CONFIG_CLI}.join
             CFBundleURLSchemes:

@@ -195,7 +195,7 @@ async function verify(publicKey, domain, v, signature) {
 }
 
 /// Whether a device that says it reads `reads` of who's who (nothing, from an older build, is none) reads less than this
-/// build: the URL signer, the relay and sign-in tell it to update.
+/// build: the URL signer, the relay and auth tell it to update.
 export const behind = (reads) => (Number.isSafeInteger(reads) ? reads : 0) < READS;
 
 /// The roles in a role text (the relay's list's: roles joined by spaces).
@@ -317,7 +317,7 @@ export async function passkeyKeys(prf) {
   return { sign: await hkdf(prf, "one/passkey-device/sign"), seal: await hkdf(prf, "one/passkey-device/seal") };
 }
 
-/// What sign-in said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
+/// What auth said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
 /// `{ approved, root? }`, `{ gone }`, or `{}` while it waits. As src/keys.rs `waited`, which says what each means.
 export function waited(status, said) {
   if (status === 401) return { signedOut: true };

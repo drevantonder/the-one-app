@@ -1,4 +1,4 @@
-//! The network's Workers (`cloudflare/`) running in the pinned workerd, as nodes and the sign-in use them.
+//! The network's Workers (`cloudflare/`) running in the pinned workerd, as nodes and auth use them.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -253,7 +253,7 @@ impl Workers {
         let gateway = port();
         let mut settings = cloudflare::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
-        settings.sign_in_url = format!("http://127.0.0.1:{}", settings.ports[0]);
+        settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         // The network's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
         settings.root = Some(data_encoding::HEXLOWER.encode(&ROOT));
@@ -266,7 +266,7 @@ impl Workers {
         for s in served.iter_mut().filter(|s| ["signer", "mcp", "push"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());
         }
-        // `TEST` gives sign-in and the relay a clock a test moves and the relay a log of what it refused: a network's
+        // `TEST` gives auth and the relay a clock a test moves and the relay a log of what it refused: a network's
         // bindings come from its settings, so no deployed one has it.
         for s in served.iter_mut().filter(|s| ["auth", "relay"].contains(&s.name.as_str())) {
             s.bindings.push(("TEST".into(), "1".into()));
@@ -389,7 +389,7 @@ fn an_admin_signs_in_only_with_a_passkey() {
     assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(andre.as_str()));
 }
 
-/// A sign-in for a device names it, and sign-in passes what it showed on with that device's request to join, unchanged,
+/// A sign-in for a device names it, and auth passes what it showed on with that device's request to join, unchanged,
 /// for the person's devices to check themselves (src/sign_in_proof.rs): a passkey's assertion signs a challenge naming
 /// the device and when, which checks; a sign-in for no device, or one for another device, lets nothing in; and with
 /// Google, the ID token asked for names the device.

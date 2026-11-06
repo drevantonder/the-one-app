@@ -8,7 +8,7 @@
 // have, and who may approve or remove what (`view_of` in client/src/members.rs), so a hacked node gets no keys.
 
 import { b64u, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealTo, sha256, signStep, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
-import { CODES, NUMBER_MAX, PUSH, READS, RELAY, SIGN_IN_DOMAIN, Yours } from "../shared/protocol.js";
+import { CODES, NUMBER_MAX, PUSH, READS, RELAY, AUTH_DOMAIN, Yours } from "../shared/protocol.js";
 import { del, get, put } from "./kept.js";
 import { members } from "./members.js";
 import { net } from "./net.js";
@@ -263,7 +263,7 @@ export class Device {
   }
 
   /// Registers this browser's push subscription (`{ endpoint, keys }`) with the push Worker, signed by its key, with
-  /// its seal key, which what's pushed to it is sealed to (cloudflare/push/), and its person, whom sign-in pushes about
+  /// its seal key, which what's pushed to it is sealed to (cloudflare/push/), and its person, whom auth pushes about
   /// their devices joining.
   async registerPush({ endpoint, keys }) {
     const body = await this.signed(PUSH, { route: "POST /push/register", via: "webpush", address: endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, seal: this.me.seal, user: this.user });
@@ -294,9 +294,9 @@ export class Device {
     return r.ok ? (await r.json()).seen || {} : {};
   }
 
-  /// One of sign-in's routes, signed by this browser: a GET's or DELETE's request in `x-one-request`, `query` after it.
+  /// One of auth's routes, signed by this browser: a GET's or DELETE's request in `x-one-request`, `query` after it.
   async authSigned(method, path, fields = {}, query = "") {
-    const request = await this.signed(SIGN_IN_DOMAIN, { route: `${method} ${path}`, ...fields });
+    const request = await this.signed(AUTH_DOMAIN, { route: `${method} ${path}`, ...fields });
     const init = method === "POST" ? { method, headers: { "content-type": "application/json" }, body: JSON.stringify(request) } : { method, headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(request))) } };
     return answer(await fetch(path + query, init));
   }
@@ -304,8 +304,8 @@ export class Device {
   /// Devices waiting to be let in that this browser may approve: its person's own, and for an admin, those of people
   /// they invited from this browser, whose proof is right. Each with its code.
   async requests() {
-    // Signed too, so sign-in knows this browser's device as its person's, to push to.
-    const mine = await this.signed(SIGN_IN_DOMAIN, { route: "GET /api/auth/devices/requests" });
+    // Signed too, so auth knows this browser's device as its person's, to push to.
+    const mine = await this.signed(AUTH_DOMAIN, { route: "GET /api/auth/devices/requests" });
     const own = (await answer(await this.bearer("/api/auth/devices/requests", { headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(mine))) } }))).requests || [];
     const invited = (await this.checked()).people[this.user]?.invites ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
     const all = [...own, ...invited].filter((r, i, a) => !r.service && r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
@@ -338,7 +338,7 @@ export class Device {
     if ((k.removed || []).includes(r.key)) throw new Error(`${r.name} was turned down or taken out, so it isn’t let in again. Start again on it, for a new code.`);
     const may = k.people[this.user];
     const known = !!k.people[r.user];
-    // Listed already by an approval that didn't finish (its mark at sign-in failed): the rest is done again.
+    // Listed already by an approval that didn't finish (its mark at auth failed): the rest is done again.
     const listed = k.devices.some((d) => d.key === r.key && d.user === r.user && d.seal === r.seal);
     const own = may.approves.includes(r.user);
     if (!own && known && !listed) throw new Error("Only their own devices approve one of theirs.");

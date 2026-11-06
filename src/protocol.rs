@@ -10,8 +10,8 @@ pub const URLS: &str = "one/urls";
 /// What a device signs its requests to the relay under.
 pub const RELAY: &str = "one/relay";
 pub use crate::push::DOMAIN as PUSH;
-/// What a device signs its requests to sign-in under. (Sign-in's Worker is still `auth`: `WORKERS`.)
-pub const SIGN_IN_DOMAIN: &str = "one/auth";
+/// What a device signs its requests to auth under.
+pub const AUTH_DOMAIN: &str = "one/auth";
 /// What a session's endpoint signs to open its relay socket.
 pub const SOCKET: &str = "one/socket";
 /// How old a session's proof for its relay socket may be, either way: a socket is opened as soon as it's made.
@@ -141,7 +141,7 @@ pub fn javascript() -> String {
          export const RELAY = {relay};\n\
          export const PUSH = {push};\n\
          export const SIGNED_NOTE = {signed_note};\n\
-         export const SIGN_IN_DOMAIN = {sign_in};\n\
+         export const AUTH_DOMAIN = {auth};\n\
          export const ENDPOINT = {endpoint};\n\
          export const SOCKET = {socket};\n\
          export const STEP = {step};\n\
@@ -182,7 +182,7 @@ pub fn javascript() -> String {
         relay = json!(RELAY),
         push = json!(PUSH),
         signed_note = json!(crate::push::SIGNED_NOTE),
-        sign_in = json!(SIGN_IN_DOMAIN),
+        auth = json!(AUTH_DOMAIN),
         endpoint = json!(crate::keys::ENDPOINT),
         socket = json!(SOCKET),
         step = json!(crate::database::steps::DOMAIN),

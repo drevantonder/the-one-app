@@ -17,7 +17,7 @@
 // (its address stopped working, or the relay no longer lists it, so it's forgotten) or `failed`. `quiet` wakes the
 // device without a visible alert, where the platform can (APNs' background push); a browser always shows one.
 //
-// The network's own Workers send through the `Sender` entrypoint, by binding: sign-in, for a device asking to join, whose
+// The network's own Workers send through the `Sender` entrypoint, by binding: auth, for a device asking to join, whose
 // note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`); and asks
 // which devices registered as a person's (`theirs`), whom it pushes about their devices joining. That is only where to
 // send: a device names its person unchecked, so one that lies gets notes sealed to itself, which let no one in.

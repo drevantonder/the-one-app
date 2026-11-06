@@ -88,7 +88,7 @@ These run on Cloudflare, each named by its job, with no name for them together. 
 
 - **Gateway**: the network's address, the one people use. It sends each request where its path says, and holds and runs
   nothing.
-- **Sign-in**: who you are, and nothing more (passkey, or Google for a workplace). It opens no key. Avoid: auth, except its Worker's name, `auth` (and the names built on it: `env.AUTH`, `/api/auth`, its Durable Object `Auth`), which stays because renaming it would sign every device out (`src/cloudflare/workers.rs`; Andre's call, 2026-11-06).
+- **Auth**: who you are, and nothing more (passkey, or Google for a workplace). It opens no key. People still "sign in" to it; it is never "the sign-in". Avoid: sign-in.
 - **Relay**: carries packets between endpoints that can't reach each other directly, and keeps the list of the network's
   endpoints. It reads nothing.
 - **URL signer**: the only holder of the bucket's credentials. It hands the network's endpoints signed URLs, which open

@@ -1,14 +1,14 @@
-// Sign-in's screens: signing in, to the network or to a client, joining with an invite link, and a person's
-// passkeys. Plain HTML with a little script, served from sign-in at the network's address, so passkeys
+// Auth's screens: signing in, to the network or to a client, joining with an invite link, and a person's
+// passkeys. Plain HTML with a little script, served from auth at the network's address, so passkeys
 // belong to its name.
 
-import css from "../web/screen/ui/sign-in.css" with { type: "text" };
+import css from "../web/screen/ui/auth.css" with { type: "text" };
 
 const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // The look of these pages is @one/ui's (src/screen/ui): its theme (shadcn's neutral, light or dark with the system) and,
 // of Tailwind's utilities, only those these pages use, which @one/ui's build (bun run build there) finds in this file's
-// class names and writes as sign-in.css. Not React, as the screens are: the Worker that serves a browser's code before it
+// class names and writes as auth.css. Not React, as the screens are: the Worker that serves a browser's code before it
 // is signed in stays small, a few KB of CSS and this script, and nothing here has to be drawn again after it's drawn.
 // Inline, as the page's policy allows nothing else. The classes are shadcn's own, as the components have them (button.tsx,
 // input.tsx, problem.tsx, ListRow), written out since there's no component to ask.
@@ -75,7 +75,7 @@ const webauthn = `
     return undo;
   }
   /// A passkey prompt's options are asked for before the tap (\`ready\`), so the prompt comes the moment it's tapped. Each
-  /// is used once, and only while it's fresh: sign-in keeps one challenge, for five minutes.
+  /// is used once, and only while it's fresh: auth keeps one challenge, for five minutes.
   // A sign-in for a device (\`join\`, in its client's authorization) has the passkey sign a challenge naming it.
   const JOIN = new URLSearchParams(location.search).get("join");
   const ASK = { in: "/api/auth/passkey/generate-authenticate-options" + (/^[0-9a-f]{128}$/.test(JOIN || "") ? "?join=" + JOIN : ""), new: "/api/auth/passkey/generate-register-options" };
@@ -274,7 +274,7 @@ export function throwawayPage(look) {
   return page(`Sign in to ${name}`, body, script);
 }
 
-/// Joining with an invite link, its secret in the fragment, which goes only to sign-in's sign-up: making a first passkey,
+/// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up: making a first passkey,
 /// or signing in with Google (`google`) as the email it's for, or on a throwaway network (`throwaway`), with nothing to make. With
 /// `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the person who just joined.
 export function invitePage(look) {

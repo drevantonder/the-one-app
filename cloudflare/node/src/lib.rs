@@ -503,7 +503,7 @@ thread_local! {
     static ROOT: RefCell<Option<Hash>> = const { RefCell::new(None) };
 }
 
-/// Pins the network's root to `root` (hex, the Worker's), as sign-in pins it: a freeze naming any other is never
+/// Pins the network's root to `root` (hex, the Worker's), as auth pins it: a freeze naming any other is never
 /// taken for its first.
 #[wasm_bindgen]
 pub fn pin_root(root: &str) -> Result<(), JsError> {
@@ -647,7 +647,7 @@ pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, unt
 /// `state` is `GET /v1/state`'s, for a node that knows of no device being on; `apps` is `GET /v1/apps`'s from the
 /// members alone, each with `reach`, the scopes it reaches for `user` (what its widgets and calls are given), for
 /// `worker.js` to add what each app says it does; `me` is what an app is told of who it runs for; `erased`, the apps
-/// erased, whose copies it forgets. `client` names the sign-in's client.
+/// erased, whose copies it forgets. `client` names auth's client.
 #[wasm_bindgen]
 pub fn network(owner: &str, user: &str, client: &str, scopes: &str, now: f64) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;

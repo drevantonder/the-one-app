@@ -63,7 +63,7 @@ export default {
     await fails(async () => verify(await sign({ iss: "https://b", sub: "u", exp }), { keys: [jwk] }, "https://a"), "another issuer's token");
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp: exp - 120 }), { keys: [jwk] }, "https://a"), "an expired token");
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp }, "k2"), { keys: [jwk] }, "https://a"), "a token from an unknown key");
-    // A key sign-in rotated in after the keys were fetched is picked up by asking again, once, not after five minutes.
+    // A key auth rotated in after the keys were fetched is picked up by asking again, once, not after five minutes.
     let asked = 0;
     const rotating = new Issuer("https://a", async () => Response.json({ keys: asked++ ? [jwk] : [] }));
     equal((await rotating.verify(await sign({ iss: "https://a", sub: "u", exp }))).sub, "u", "a token from a key published since the last fetch");
@@ -160,7 +160,7 @@ async function remoteMcpClientsSecrets() {
   same(await copies.open("access token two"), "the new access token opens it");
   same(await copies.open("access token one"), "an access token opens it until it expires");
   equal(await copies.open("refresh token one"), null, "the old refresh token opens it once used");
-  same(await copies.rotate("refresh token one", "refresh token two", "access token two", now + 3_600_000), "sign-in's answer to a refresh, given again, opens it");
+  same(await copies.rotate("refresh token one", "refresh token two", "access token two", now + 3_600_000), "auth's answer to a refresh, given again, opens it");
   equal(await copies.rotate("refresh token one", "refresh token stolen", "access token stolen", now + 3_600_000), null, "an old refresh token reused rotates it");
   equal(await copies.open("refresh token stolen"), null, "a reused refresh token's new tokens open it");
 

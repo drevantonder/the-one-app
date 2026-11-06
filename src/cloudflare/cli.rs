@@ -55,8 +55,8 @@ fn cloudflare(flags: &Map<String, Value>, settings: Option<&crate::cloudflare::S
 /// Where a network's Workers are, and what they're set to, without their secrets.
 fn cloudflare_said(s: &crate::cloudflare::Settings) -> String {
     let mut out = format!("{} on Cloudflare\n  address   {}\n", s.name, s.address);
-    if s.sign_in_url.starts_with("http://127.0.0.1") {
-        out += &format!("  here on   127.0.0.1:{} (the address), :{} (sign-in)\n", s.ports[1], s.ports[0]);
+    if s.auth_url.starts_with("http://127.0.0.1") {
+        out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth)\n", s.ports[1], s.ports[0]);
     }
     if !s.resources.is_empty() {
         out += &format!("  nodes     {}\n", s.resources.join(", "));
@@ -73,11 +73,11 @@ pub fn commands() -> Command {
     Command {
         help: vec![
             ("cloudflare".into(), "the network's Workers on Cloudflare, as this machine has them: their addresses and settings".into()),
-            ("cloudflare serve [--address <url>]".into(), "run the network's Workers in workerd (sign-in, the relay, the URL signer, and the gateway people reach at the network's address) on this machine; the first time, with that address".into()),
+            ("cloudflare serve [--address <url>]".into(), "run the network's Workers in workerd (auth, the relay, the URL signer, and the gateway people reach at the network's address) on this machine; the first time, with that address".into()),
             ("cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]".into(), format!("deploy the network's Workers to Cloudflare, with an API token that may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless --address says, for good: passkeys belong to it), or at its workers.dev address; and the Cloudflare node with it, once cloudflare node deploy put it there; beside a node of the network, whose devices its relay takes, unless --new")),
             ("cloudflare invite <name> [--admin] [--user <id>] [--email <email>]".into(), "a link that lets someone join, once and for a few days, as who they'll be in the network (--user, or this machine's person if they're called that; else someone new, as devices invite does), signed with this machine's key, an admin's device's; where people sign in with Google, --email is the account they sign up with. Nobody joins uninvited, the first person too".into()),
             ("cloudflare node deploy [--account <id>]".into(), "put the network's Cloudflare node in its Workers' Cloudflare account (a node as a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over iroh when none of your machines answers".into()),
-            ("cloudflare set <setting> <value>".into(), "change one: sign-in-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or android (the SHA-256 fingerprints of the certificates the Android app is signed with, comma-separated, or -: links to the address open the app)".into()),
+            ("cloudflare set <setting> <value>".into(), "change one: auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or android (the SHA-256 fingerprints of the certificates the Android app is signed with, comma-separated, or -: links to the address open the app)".into()),
             ("cloudflare use <address>".into(), "point this network at its Workers: its nodes take sign-ins made at the address".into()),
         ],
         run: |g| {
@@ -120,7 +120,7 @@ pub fn commands() -> Command {
                             let at = |service: &str| format!("https://{}.{domain}", crate::cloudflare::worker_name(service));
                             let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
                             let mut settings = crate::cloudflare::Settings::new(NAME, &address);
-                            settings.sign_in_url = at("auth");
+                            settings.auth_url = at("auth");
                             settings.save()?;
                             println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave a 1Password reference (op://…) in its place.\n", crate::cloudflare::Settings::path().with_file_name(".env.local").display());
                             // People signing in with Google need its OAuth client, which is put beside the secrets first.
@@ -140,7 +140,7 @@ pub fn commands() -> Command {
                         crate::cloudflare::node::deploy(&cf, &settings)?;
                     }
                     // The Google client its people sign in with, signed by this admin's device: a new device's sign-in counts
-                    // only for it (`sign_in_proof::CLIENTS`), whatever sign-in says.
+                    // only for it (`sign_in_proof::CLIENTS`), whatever auth says.
                     if let Some((id, _)) = &settings.google {
                         let clients = format!("https://accounts.google.com {id}");
                         let had = node.get("/v1/state").ok().and_then(|s| s["network"]["settings"][crate::sign_in_proof::CLIENTS].as_str().map(str::to_string));
@@ -199,7 +199,7 @@ pub fn commands() -> Command {
                     let mut settings = crate::cloudflare::Settings::load()?;
                     let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
                     match *name {
-                        "sign-in-url" => settings.sign_in_url = value.trim_end_matches('/').to_string(),
+                        "auth-url" => settings.auth_url = value.trim_end_matches('/').to_string(),
                         "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
                         "bucket" if *value == "-" => {
                             let bucket = piped()?;
@@ -217,7 +217,7 @@ pub fn commands() -> Command {
                             }
                             settings.android = prints;
                         }
-                        _ => bail!("no Cloudflare setting {name}: sign-in-url, resources, bucket or android"),
+                        _ => bail!("no Cloudflare setting {name}: auth-url, resources, bucket or android"),
                     }
                     settings.save()?;
                     println!("Set {name}. {CLI} cloudflare serve takes it at its next start, and {CLI} cloudflare deploy when it next runs.");

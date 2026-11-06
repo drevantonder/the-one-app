@@ -190,7 +190,7 @@ export const net = {
     return (await ask({ op: "members", fresh })).members;
   },
 
-  /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as sign-in passed it on) shows, checked
+  /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as auth passed it on) shows, checked
   /// by the client at the network's `address`, whose root is `root` (hex) and whose people sign in
   /// with `clients` (its `sign_in_clients` setting, as its steps say): against `accounts`, its person's, for one let in
   /// by it, or with none, for one approved by its code. → the account; throws why it doesn't check out.

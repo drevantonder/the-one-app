@@ -561,10 +561,10 @@ pub enum Waited {
     /// one it then takes; and once who's who is written as steps, where that device read them to, which this one
     /// starts from (`database::steps::Welcome`), if it said. It's in once the relay lets it.
     Approved { root: Option<String>, welcome: Option<String> },
-    /// Gone from sign-in (approved and cleared, turned down, or waited too long): it's in if the relay lets it, else it
+    /// Gone from auth (approved and cleared, turned down, or waited too long): it's in if the relay lets it, else it
     /// asks again.
     Gone,
-    /// Still waiting, or sign-in didn't answer.
+    /// Still waiting, or auth didn't answer.
     Waiting,
 }
 

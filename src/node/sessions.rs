@@ -134,7 +134,7 @@ impl Node {
         })
     }
 
-    /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the network's sign-in
+    /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the network's auth
     /// service signed for them, not yet expired.
     pub(super) async fn token_of(&self, token: &str, user: &str) -> Option<String> {
         let issuer = self.issuer().ok()?;
@@ -230,7 +230,7 @@ impl Node {
         Ok(())
     }
 
-    /// When an access token expires, if the network's sign-in signed it: milliseconds.
+    /// When an access token expires, if the network's auth signed it: milliseconds.
     fn token_expiry(&self, token: &str) -> Option<u64> {
         let claims = self.issuer().ok()?.verify(token, now_ms()).ok()?;
         Some(claims.exp.saturating_mul(1000))

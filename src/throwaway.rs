@@ -1,6 +1,6 @@
 //! `throwaway`: a throwaway network, a network of its own, made as `create` makes every new one, by a node beside this machine's own with its own
 //! home and ports, so it touches nothing of the person's (`one::mode`). There's one for each checkout it's run in, from any folder in it, so threads working in different ones each have their
-//! own. Its Workers run beside it, and its sign-in lets its first person in with no passkey (cloudflare::Settings::throwaway_person), so a
+//! own. Its Workers run beside it, and its auth lets its first person in with no passkey (cloudflare::Settings::throwaway_person), so a
 //! client of this checkout's build, on a device borrowed for it (`throwaway client`), signs in with nobody there; others join
 //! as anyone does, by an invite link the first makes, and again with no passkey (`throwaway client <kind> --as <name>`). It
 //! keeps its data until `throwaway stop`: left alone it stops, and `throwaway` starts it again as it was, as it does when this build
@@ -114,7 +114,7 @@ fn inside(network: &Throwaway, rest: &[String]) -> Result<()> {
     }
 }
 
-/// `sign-in`, as the throwaway network's person, with no passkey: its sign-in asks for none.
+/// `sign-in`, as the throwaway network's person, with no passkey: its auth asks for none.
 fn sign_in() -> Result<()> {
     let address = crate::node().get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
     let started = one::sign_in::start(&address, None)?;

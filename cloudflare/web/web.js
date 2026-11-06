@@ -1,4 +1,4 @@
-// The web client: the Mac app's window, in a browser. It signs in as an OAuth client of the network's sign-in
+// The web client: the Mac app's window, in a browser. It signs in as an OAuth client of the network's auth
 // (PKCE, and the person's passkey at its sign-in page), keeps its refresh token in this browser, and asks the person's nodes over iroh (`net.js`). App screens are untrusted: each runs in a sandboxed
 // frame, and this page answers its bridge as the Mac app's web view does, making each call itself. It draws at once
 // what it showed last (the sidebar, and a still of the screen) and then what the node says now.
@@ -57,11 +57,11 @@ const h = OneUI.react.createElement;
 
     async meta() {
       const r = await fetch("/.well-known/oauth-authorization-server");
-      if (!r.ok) throw new Error("The sign-in service isn’t answering. Try again in a moment.");
+      if (!r.ok) throw new Error("Auth isn’t answering. Try again in a moment.");
       return r.json();
     },
 
-    /// This browser, as a client of sign-in: registered the first time it signs in.
+    /// This browser, as a client of auth: registered the first time it signs in.
     async client(meta) {
       const kept = JSON.parse(localStorage.getItem(CLIENT) || "null");
       if (kept?.redirect === `${location.origin}/callback`) return kept.id;
@@ -82,7 +82,7 @@ const h = OneUI.react.createElement;
       return out.client_id;
     },
 
-    /// Off to sign-in's sign-in, coming back to /callback, then to where this was.
+    /// Off to auth's sign-in page, coming back to /callback, then to where this was.
     async start() {
       const meta = await auth.meta();
       const client = await auth.client(meta);
@@ -368,7 +368,7 @@ const h = OneUI.react.createElement;
     return { out, stop: () => (done = true) };
   }
 
-  /// A request to the address that isn't a node's, with the access token: sign-in's own routes.
+  /// A request to the address that isn't a node's, with the access token: auth's own routes.
   async function bearer(path, init = {}) {
     return fetch(path, { ...init, headers: { ...init.headers, authorization: `Bearer ${await auth.token()}` } });
   }
@@ -1370,7 +1370,7 @@ const h = OneUI.react.createElement;
     return left;
   }
 
-  /// Asks sign-in which devices wait now, and tells the window and its screens if that changed. → them.
+  /// Asks auth which devices wait now, and tells the window and its screens if that changed. → them.
   async function waitingNow() {
     const now = native ? (await native.signs("GET", "/v1/devices/requests", {})).map((r) => ({ ...r, key: r.code })) : await bySignIn((await device.requests()).filter((r) => !notMine.has(r.key)));
     const changed = now.map((r) => r.key).join() !== waiting.map((r) => r.key).join();
@@ -1486,7 +1486,7 @@ const h = OneUI.react.createElement;
 
   /// Makes this browser a device of its person, before anything is asked of a node: one already, or let in by a passkey
   /// of theirs that's listed, or by one of their devices (or, for someone new, their inviter's), which it asks at
-  /// sign-in and waits for there, showing its code. → its keys.
+  /// auth and waits for there, showing its code. → its keys.
   async function join(user) {
     const keys = await browserKeys(user);
     if (await net.start(user).catch(() => false)) return keys;
@@ -1495,7 +1495,7 @@ const h = OneUI.react.createElement;
     const ask = async () => answer(await bearer("/api/auth/devices/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await joinAsk(keys, browserName(), invite)) }));
     await ask();
     await showJoin(await codeOf(keys.key, keys.seal), !!invite);
-    // Sign-in says once it was approved; then the relay lets it in. One gone from sign-in (approved and cleared, refused, or
+    // Auth says once it was approved; then the relay lets it in. One gone from auth (approved and cleared, refused, or
     // waited 15 minutes) is asked again, unless it's in. As every client does (`waited`).
     for (;;) {
       await sleep(2000);

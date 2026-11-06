@@ -51,7 +51,7 @@ fn failed(message: impl std::fmt::Display) -> Error {
 /// `join`, `start`, `takenOut` and `signOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
 /// outlives the program: `removed` asks it.
 enum Stage {
-    /// Not reaching its nodes: not let in yet, having asked sign-in with `asked` if it has since it started (`ask`, then
+    /// Not reaching its nodes: not let in yet, having asked auth with `asked` if it has since it started (`ask`, then
     /// `wait`); or let in, and its connections closed until it's asked again (`disconnect`: its app in the background,
     /// or a program ending).
     Off { asked: Option<Value> },
@@ -159,7 +159,7 @@ impl Device {
         format!("{} {}", &code[..4], &code[4..])
     }
 
-    /// Asks sign-in to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
+    /// Asks auth to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
     /// secret, its proof).
     pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
         let mut asked = json!({ "key": self.key(), "seal": hex(&self.me.seal), "name": name, "reads": one::database::READS });
@@ -179,10 +179,10 @@ impl Device {
         Ok(())
     }
 
-    /// Whether it's been let in: it reaches a node as itself. While it waits, what sign-in says of its request
+    /// Whether it's been let in: it reaches a node as itself. While it waits, what auth says of its request
     /// (`keys::waited`) is acted on as every client does: once approved, the network the device that approved it said it's
     /// in (its root) is the only one it takes, kept before it reads any, so none it's shown first can be another; one
-    /// gone from sign-in is asked again unless it's in; a sign-in that's no more fails, to sign in again.
+    /// gone from auth is asked again unless it's in; a sign-in that's no more fails, to sign in again.
     pub async fn wait(&self, token: &str) -> Result<bool, Error> {
         let at = format!("{}/api/auth/devices/requests/{}", self.address, self.key());
         let (status, said) = http("GET", &at, Some(("authorization", format!("Bearer {token}"))), None).await.unwrap_or((0, Value::Null));
@@ -391,7 +391,7 @@ impl Device {
 
     /// Registers where a push service reaches it (`one::push::Address`) with the network's push Worker
     /// (`<address>/push/register`), signed with its key and naming its seal key, which each note pushed to it is sealed
-    /// to, and its person as who's who lists it, so sign-in pushes it when another device of theirs asks to join. Once
+    /// to, and its person as who's who lists it, so auth pushes it when another device of theirs asks to join. Once
     /// it's out of the network, the Worker forgets it.
     pub async fn register_push(&self, address: &one::push::Address) -> Result<(), Error> {
         let user = self.keyring.user();
@@ -687,7 +687,7 @@ impl Device {
     /// signed for `path` without its query.
     async fn ask_sign_in(&self, method: &str, path: &str) -> Result<Value, Error> {
         let route = format!("{method} {}", path.split('?').next().unwrap_or_default());
-        let signed = keys::signed_request(&self.key, one::protocol::SIGN_IN_DOMAIN, json!({ "route": route }), now());
+        let signed = keys::signed_request(&self.key, one::protocol::AUTH_DOMAIN, json!({ "route": route }), now());
         let header = B64U.encode(&serde_json::to_vec(&signed).map_err(failed)?);
         let (status, out) = http(method, &format!("{}{path}", self.address), Some(("x-one-request", header)), None).await?;
         if !(200..300).contains(&status) {
@@ -696,7 +696,7 @@ impl Device {
         Ok(out)
     }
 
-    /// Its person's other devices waiting to be let in, as sign-in says, but those taken out or turned down, each with
+    /// Its person's other devices waiting to be let in, as auth says, but those taken out or turned down, each with
     /// the code it shows ("ABCD EFGH").
     async fn waiting(&self) -> Result<Vec<(Value, Endpoint, String)>, Error> {
         self.keyring.read(self).await?;
@@ -823,7 +823,7 @@ impl Device {
     }
 
     /// Turns down one of its person's devices waiting: a step, so none of their devices lets it in after, then its
-    /// request forgotten at sign-in.
+    /// request forgotten at auth.
     async fn refuse(&self, r: &Value, e: &Endpoint) -> Result<(), Error> {
         let user = self.keyring.user().ok_or_else(refused)?;
         self.write(&user, content::refuse(e, r["name"].as_str().unwrap_or(""))).await?;
@@ -958,7 +958,7 @@ fn what(path: &str, body: &[u8]) -> Value {
     }
 }
 
-/// A request to the network's address (sign-in, the relay), JSON in and out: → its status and JSON.
+/// A request to the network's address (auth, the relay), JSON in and out: → its status and JSON.
 async fn http(method: &str, url: &str, header: Option<(&str, String)>, body: Option<Value>) -> Result<(u16, Value), Error> {
     let (method, url, header) = (method.to_string(), url.to_string(), header.map(|(n, v)| (n.to_string(), v)));
     tokio::task::spawn_blocking(move || {

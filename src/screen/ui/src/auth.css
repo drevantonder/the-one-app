@@ -1,11 +1,11 @@
-/* The sign-in Worker's pages (cloudflare/sign-in/pages.js): plain HTML with a little script, since a Worker that serves a
+/* The auth Worker's pages (cloudflare/auth/pages.js): plain HTML with a little script, since a Worker that serves a
    browser's code before it's signed in stays small, so no React. This is @one/ui's theme (tokens.css, shadcn's neutral,
    light or dark with the system) and, of Tailwind's utilities, only the ones that file's class names use. build.js
-   writes it as dist/sign-in.css, which the Worker is built with. */
+   writes it as dist/auth.css, which the Worker is built with. */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
-@import "tailwindcss/utilities.css" layer(utilities) source("../../../../cloudflare/sign-in");
+@import "tailwindcss/utilities.css" layer(utilities) source("../../../../cloudflare/auth");
 @import "./theme.css";
 @import "./tokens.css";
 

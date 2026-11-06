@@ -6,8 +6,8 @@
 //
 // A device's secret is kept only sealed under its client's own tokens (copies.js), so nothing here opens it alone: the
 // Worker is on its clients' token path (its own token endpoint, in the authorization server's metadata it serves for
-// MCP clients, passing each request on to sign-in), sealing the secret under each new refresh and access token. A client's
-// first sign-in makes its device and asks sign-in to let it join; the person approves it by its code on one of their
+// MCP clients, passing each request on to auth), sealing the secret under each new refresh and access token. A client's
+// first sign-in makes its device and asks auth to let it join; the person approves it by its code on one of their
 // devices, which lists it, seals it the keys of their scopes and lets it in at the relay. Until then its MCP requests
 // are answered with that code. Signing in again makes a new device, as the old one's secret opened only under the
 // tokens it had.
@@ -21,7 +21,7 @@
 // takes are one-client's keyring (client/src/keyring.rs, through cloudflare/node/src/clients.rs), which keeps what each
 // tool needed in this object's storage, so a call hands only its own.
 //
-// Bindings: AUTH (the sign-in), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), CLIENT
+// Bindings: AUTH (auth), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), CLIENT
 // (this Worker's `Client`), ADDRESS (the network's), NAME (its name), LOCATION (where objects are made), IDLE (ms,
 // optional).
 
@@ -45,7 +45,7 @@ const BOUND = 3_600_000;
 const BIND_AGAIN = 600_000;
 /// Where its storage keeps what its device's keyring keeps, by name.
 const KEPT = "kept:";
-/// How long before sign-in forgets a request to join it's asked again, and how soon one sign-in didn't take is.
+/// How long before auth forgets a request to join it's asked again, and how soon one auth didn't take is.
 const JOIN_EARLY = 60_000;
 const JOIN_AGAIN = 30_000;
 
@@ -57,7 +57,7 @@ const CORS = { "access-control-allow-origin": "*" };
 let issuer = null;
 const issuerOf = (env) => (issuer ||= new Issuer(`${origin(env)}/api/auth`, () => env.AUTH.fetch(`${origin(env)}/api/auth/jwks`)));
 
-/// A token's claims, unchecked: only for one sign-in just gave us by its binding.
+/// A token's claims, unchecked: only for one auth just gave us by its binding.
 const claimsOf = (token) => JSON.parse(new TextDecoder().decode(b64u.decode(token.split(".")[1])));
 /// The `code` a node's refusal carries, if the body is one: a node's own body is JSON, but a proxy's isn't.
 const codeOf = (body) => {
@@ -75,8 +75,8 @@ function signInFirst(env, error) {
   return json({ error: error || `sign in at ${origin(env)} first` }, 401, { "www-authenticate": challenge });
 }
 
-/// The authorization server's metadata, as sign-in says it, but with this Worker's token endpoint: what MCP clients find
-/// from the resource's (RFC 8414's path for the issuer `<address>/api/auth`). Apps read sign-in's own, at the root.
+/// The authorization server's metadata, as auth says it, but with this Worker's token endpoint: what MCP clients find
+/// from the resource's (RFC 8414's path for the issuer `<address>/api/auth`). Apps read auth's own, at the root.
 async function authorizationServer(env, which) {
   const r = await env.AUTH.fetch(`${origin(env)}/.well-known/${which}`);
   if (!r.ok) return r;
@@ -119,8 +119,8 @@ async function token(request, env) {
   try {
     await deviceOf(env, client, claims.sub).signedIn(signedIn);
   } catch (err) {
-    // Sign-in rotated the refresh token, but its device's secret isn't sealed under the new one: the client isn't given
-    // tokens that open nothing, and asks again with the old refresh token, which sign-in answers the same for a minute.
+    // Auth rotated the refresh token, but its device's secret isn't sealed under the new one: the client isn't given
+    // tokens that open nothing, and asks again with the old refresh token, which auth answers the same for a minute.
     console.error(err.stack || err);
     return json({ error: "temporarily_unavailable", error_description: "Try again in a moment." }, 503, { "cache-control": "no-store", "retry-after": "2" });
   }
@@ -244,9 +244,9 @@ export class Client extends DurableObject {
     return this.env.RELAY;
   }
 
-  /// A client signed in (`old` null) or refreshed its sign-in: its device's secret, sealed under its new tokens (sign-in's
+  /// A client signed in (`old` null) or refreshed its sign-in: its device's secret, sealed under its new tokens (auth's
   /// same answer again, to a refresh whose answer was lost, opens it as it is). A sign-in, or a refresh whose old token
-  /// opens nothing, makes a new device and asks sign-in to let it join; the device it replaces is removed once the new one
+  /// opens nothing, makes a new device and asks auth to let it join; the device it replaces is removed once the new one
   /// is approved.
   async signedIn({ client, user, old, refresh, access, until }) {
     await this.ctx.storage.put("name", `${client}\n${user}`);
@@ -270,9 +270,9 @@ export class Client extends DurableObject {
     await this.join(device, access);
   }
 
-  /// A device's stages: asking sign-in to let it join, waiting there (`join`, until when sign-in keeps its request), approved
-  /// (the relay lets its key in), and running (`run`). Asks sign-in, unless it's waiting there: as every client does, one
-  /// sign-in forgot (after 15 minutes) or didn't take is asked again, so its code always has a request behind it.
+  /// A device's stages: asking auth to let it join, waiting there (`join`, until when auth keeps its request), approved
+  /// (the relay lets its key in), and running (`run`). Asks auth, unless it's waiting there: as every client does, one
+  /// auth forgot (after 15 minutes) or didn't take is asked again, so its code always has a request behind it.
   async join(device, access) {
     const waiting = await this.ctx.storage.get("join");
     if (waiting?.key === device.key && waiting.until > Date.now()) return;

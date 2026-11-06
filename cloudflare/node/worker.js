@@ -1071,7 +1071,7 @@ export default {
 export class Node extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    // The network's root, as sign-in pins it: a freeze naming any other is never taken for its first.
+    // The network's root, as auth pins it: a freeze naming any other is never taken for its first.
     if (env.ROOT) pin_root(env.ROOT);
     this.isEndpoint = ctx.id.equals(env.NODE.idFromName("node"));
     /// Datagrams it sent this turn, for the relay; asks running now, and when the last one began or ended.

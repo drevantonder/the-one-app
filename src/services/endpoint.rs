@@ -45,7 +45,7 @@ const STREAMS: u32 = 32;
 /// How long reaching a node may take.
 const CONNECT: Duration = Duration::from_secs(10);
 
-/// The network a service is in, as its device's oned gives it: its address, where its relay and sign-in are, its root,
+/// The network a service is in, as its device's oned gives it: its address, where its relay and auth are, its root,
 /// which its first freeze names, and the person whose service it is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Network {
@@ -93,7 +93,7 @@ struct Inner {
     /// A connection to each node it asks for calls.
     conns: Mutex<HashMap<Key, Connection>>,
     strangers: AtomicUsize,
-    /// The network's sign-in service, whose keys check a sign-in a node passes on to a service that serves everyone.
+    /// The network's auth, whose keys check a sign-in a node passes on to a service that serves everyone.
     issuer: crate::cloudflare::Issuer,
     /// What its app declares its program may reach, as oned gave it (`declared.json`), if it did.
     declared: Option<crate::services::sandbox::Declared>,
@@ -462,7 +462,7 @@ impl Service {
         })
     }
 
-    /// Whether `token` is an access token the network's sign-in service signed for `user`, unexpired.
+    /// Whether `token` is an access token the network's auth signed for `user`, unexpired.
     async fn signed_in(&self, token: &str, user: &str) -> bool {
         let (service, token) = (self.clone(), token.to_string());
         let claims = tokio::task::spawn_blocking(move || service.0.issuer.verify(&token, now_ms())).await;

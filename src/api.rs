@@ -2,7 +2,7 @@
 //! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in at the network's address
 //! (this machine's CLI and MCP, after `sign-in`) reaches it, as themselves, for what their sign-in opens.
 //!
-//! A request with an access token from sign-in for the network's address (never a remote MCP client's, which is for
+//! A request with an access token from auth for the network's address (never a remote MCP client's, which is for
 //! `<address>/mcp`) is its person's, and so is its call's; someone it's for who isn't a person of the network yet is
 //! let in as a member by a device whose own person is an admin, since sign-in lets in only those an admin invited
 //! or people at the network's domain. A request without one is this machine's own programs', over its loopback with the
@@ -345,7 +345,7 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 }
 
 /// Only this machine's own programs (`from_this_machine`) drive its node: no web page, an app's screen this node served
-/// included, and no program in a VM or emulator here. A request with an access token from sign-in, or from a client
+/// included, and no program in a VM or emulator here. A request with an access token from auth, or from a client
 /// device, is someone's instead, for what its route's `Who` lets them ask.
 async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<std::collections::HashMap<&'static str, Who>>)>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
@@ -540,7 +540,7 @@ impl std::error::Error for NotJoined {}
 /// A node's sign-ins checked lately, by their token's hash, until they expire.
 pub(crate) type SignedIns = std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>;
 
-/// Whom an access token from sign-in is for: one sign-in at the network's address signed for it, for a person of
+/// Whom an access token from auth is for: one auth at the network's address signed for it, for a person of
 /// the network.
 async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;
