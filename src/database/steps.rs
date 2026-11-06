@@ -34,9 +34,9 @@
 //! 1. the network's first step and its recovery key: the freeze's copy, checked as above; and only the recovery key
 //!    lets a device in by itself;
 //! 2. epochs never go down: a step names its scope's epoch its writer knew, never one above the database's;
-//! 3. its signer holds the permission the change needs, at that step (`allowed`): `may`, `may_give`, `may_take` and
-//!    `may_make` over the database's rows; and is one of its person's own devices still listed, or for a scope's own
-//!    state, a device that runs the scope's calls for them.
+//! 3. its signer is one of its person's own devices still listed, or for a scope's own state, a device that runs the
+//!    scope's calls for them (`rules::signed`); and its person holds the permission the change needs, at that step:
+//!    `may`, `may_give`, `may_take` and `may_make` over the database's rows, each kind's once (`rules::apply`).
 //!
 //! A step that doesn't count is passed over, its position taken, as a database's are: nothing it says happens. What a
 //! counted one changes is its kind's rule's (`rules`), applied to a fresh copy of the database (`scope::fresh`).
@@ -61,7 +61,7 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use crate::database::content::Content;
-use crate::database::scopes::{Principal, Role, Scope};
+use crate::database::scopes::Scope;
 use crate::keys::{Hash, Key, hex, unhex};
 use crate::permissions;
 
@@ -917,7 +917,6 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Step)
     }
     ensure!(version(db.conn())? <= READS, Newer);
     ensure!(step.epoch() <= who.epoch(scope), "it names an epoch its scope hasn't reached");
-    allowed(who, scope, step)?;
     super::rules::signed(who, scope, step)?;
     let out = super::scope::fresh(db.conn(), scope)?;
     super::rules::apply(who, &out, scope, step)?;
@@ -1062,136 +1061,10 @@ fn named(db: &Connection, step: &Step) -> Result<()> {
     Ok(())
 }
 
-/// Rule 3: whether `step`'s signer, as its person, holds the permission its change needs in `db` (`global`'s), before
-/// it. Its kind's rule is checked too, as it's applied (`rules::apply`): this is the engine's.
-pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Step) -> Result<()> {
-    let data = &step.content.data;
-    let w = step.user();
-    let text = |k: &str| data[k].as_str().map(str::to_string).with_context(|| format!("no {k}"));
-    let may = |verb: &str, object: &str| db.may(w, verb, object);
-    let role = |k: &str| -> Result<Role> { Ok(serde_json::from_value(data[k].clone())?) };
-    let ok = match (step.content.app.as_str(), step.content.kind.as_str()) {
-        // Rule 1: the recovery key lets a device in, and hands over to the next; nothing else.
-        _ if db.recovery() == Some(step.author()) => matches!(step.content.kind.as_str(), "device" | "recovery") && *scope == Scope::Global,
-        (scopes::APP, "device") => {
-            let user = text("user")?;
-            let key = unhex(&text("key")?)?;
-            let kinds: Vec<scopes::Kind> = serde_json::from_value(data["roles"].clone()).unwrap_or_default();
-            let theirs = kinds.iter().any(|k| matches!(k, scopes::Kind::Client | scopes::Kind::Service));
-            let verb = if theirs { "add-devices" } else { "add-machines" };
-            match (db.user_ever(&user), db.machine_ever(&key)) {
-                // Someone new, with their first device: given a role in the network by someone who may give it.
-                (None, None) => db.may_give(w, &user, super::scope::role(role("role")?), scopes::NETWORK),
-                (Some(_), None) => db.user(&user).is_some() && maker(db, w, verb, &scopes::person(&user), &scopes::person(&user), "owner", &scopes::device(&key)),
-                // Listed again by its person's own device, to name the device it's part of.
-                (Some(_), Some(_)) => may("add-devices", &scopes::person(&user)),
-                (None, Some(_)) => false,
-            }
-        }
-        (scopes::APP, "role") => {
-            let user = text("user")?;
-            let was = db.user(&user).context("no such person")?.role;
-            let to = role("role")?;
-            to == was || (db.may_give(w, &user, super::scope::role(to), scopes::NETWORK) && db.may_take(w, &user, super::scope::role(was), scopes::NETWORK))
-        }
-        (scopes::APP, "remove") => match text("user") {
-            Ok(user) => db.user(&user).is_some_and(|u| db.may_take(w, &user, super::scope::role(u.role), scopes::NETWORK)),
-            Err(_) => may("remove", &scopes::device(&unhex(&text("key")?)?)),
-        },
-        // A person's own say over their devices: turning one down before it's listed, and forgetting what one of
-        // theirs signed in with (its rule checks it's theirs).
-        (scopes::APP, "refuse" | "forget-sign-in") => may("add-devices", &scopes::person(w)),
-        (scopes::APP, "epoch") => {
-            let s = Scope::parse(&text("scope")?)?;
-            may("remove", &scopes::object(&s))
-        }
-        (scopes::APP, "runs") => may("choose-devices", &scopes::person(w)),
-        (scopes::APP, scopes::APP_SCHEDULES) | (scopes::APP, "vault") => may("choose-devices", &scopes::object(&Scope::parse(&text("scope")?)?)),
-        (scopes::APP, "group") => may("make-groups", scopes::NETWORK),
-        (scopes::APP, "invite") => db.may_give(w, &text("user")?, super::scope::role(role("role")?), &scopes::group(&text("group")?)),
-        // Taking up an invite: the role the invite gave, which was checked as it was given.
-        (scopes::APP, "accept") => db.roles().get(&(w.to_string(), Scope::Group(text("group")?))).is_some_and(|(_, invited)| *invited),
-        (scopes::APP, "member") => {
-            let (g, user) = (text("group")?, text("user")?);
-            let object = scopes::group(&g);
-            let was = db.group_role(&user, &g).or_else(|| db.group(&g).and_then(|grp| grp.invited.get(&user).copied()));
-            let to: Option<Role> = serde_json::from_value(data["role"].clone())?;
-            let took = was.is_none_or(|r| Some(r) == to || db.may_take(w, &user, super::scope::role(r), &object));
-            took && to.is_none_or(|r| Some(r) == was || db.may_give(w, &user, super::scope::role(r), &object))
-        }
-        (scopes::APP, "rename") => {
-            if let Ok(key) = text("key") {
-                may("rename", &scopes::device(&unhex(&key)?))
-            } else if let Ok(user) = text("user") {
-                may("rename", &scopes::person(&user))
-            } else {
-                may("rename", &scopes::group(&text("group")?))
-            }
-        }
-        (scopes::APP, "setting") => may("change-settings", scopes::NETWORK),
-        // Only while there's no recovery key (the one there was forked `global`): an admin names the next.
-        (scopes::APP, "recovery") => db.recovery().is_none() && may("change-settings", scopes::NETWORK),
-        (scopes::APP, "app") => {
-            let name = text("name")?;
-            let owner = Principal::parse(&text("owner")?)?;
-            let to = scopes::owner_object(&owner);
-            match db.app(&name) {
-                None => {
-                    let holders = match &owner {
-                        Principal::User(u) => scopes::person(u),
-                        Principal::Group(g) => format!("{}#admin", scopes::group(g)),
-                        Principal::Admins => format!("{}#admin", scopes::NETWORK),
-                    };
-                    maker(db, w, "add-apps", &to, &holders, "owner", &scopes::app(&name))
-                }
-                // Deleting, restoring, erasing or giving it away; or saying where its code is.
-                Some(a) => {
-                    let moves = a.owner != owner;
-                    let retires = data.get("deleted").is_some() || data["erased"] == true || moves;
-                    (!retires || may("delete", &scopes::app(&name))) && (!moves || may("add-apps", &to)) && (data.get("source").is_none() || may("deploy", &scopes::app(&name)))
-                }
-            }
-        }
-        (scopes::APP, "deploy") => may("deploy", &scopes::app(&text("app")?)),
-        (scopes::APP, "service") => {
-            let k = unhex(&text("device")?)?;
-            let on = data["on"] == true;
-            let adds = |s: &str| Scope::parse(s).is_ok_and(|s| may("add-apps", &scopes::object(&s)));
-            // Its scope's adders switch it off there (removing the app, or moving its service), whoever's node it is.
-            let was = db.switch(&k, &text("name")?).and_then(|s| s.scope);
-            let theirs = match db.cloudflare_node() == Some(k) {
-                true => may("change-settings", scopes::NETWORK),
-                false => may("switch", &scopes::device(&k)),
-            };
-            (theirs || (!on && was.as_deref().is_some_and(adds))) && (!on || data["scope"].as_str().is_none_or(adds))
-        }
-        (scopes::APP, "install" | "uninstall" | "schedule" | "vault-request") => may("add-apps", &scopes::object(scope)) || runs_it(db, scope, step),
-        (scopes::APP, "keep" | "forget") => may("use", &scopes::object(scope)) || runs_it(db, scope, step),
-        // A release, which every node checks is signed with the release key before it takes it.
-        (scopes::APP, kind) if scopes::RELEASES.contains(&kind) => true,
-        (scopes::APP, "arrange") => *scope == Scope::User(w.to_string()) && may("use", &scopes::object(scope)),
-        // An app's own entries, and the release's: as their rules count them, by who signed them.
-        (scopes::APP, _) => false,
-        _ => true,
-    };
-    ensure!(ok, "{} may not {} there", w, step.content.kind);
-    Ok(())
-}
-
-/// Whether `maker` may make `object`, new, with its first row `(subject, relation, object)` (`permissions::may_make`).
-fn maker(db: &ScopeDb, maker: &str, verb: &str, container: &str, subject: &str, relation: &str, object: &str) -> bool {
-    permissions::may_make(db.conn(), &scopes::person(maker), verb, container, subject, relation, object, db.now()).unwrap_or(false)
-}
-
-/// Whether a step of a scope's own state was signed by a device that runs the scope's calls, for a person who may use
-/// the scope: a node writes what a call it ran did.
-fn runs_it(db: &ScopeDb, scope: &Scope, step: &Step) -> bool {
-    db.runs_for(&step.author(), scope) && db.may(step.user(), "use", &scopes::object(scope))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::database::scopes::Role;
     use crate::database::content;
 
     /// `global`'s database as a network starts (`content::first`), and the steps after it.

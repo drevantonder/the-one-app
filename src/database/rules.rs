@@ -48,8 +48,9 @@ pub fn signed(who: &ScopeDb, scope: &Scope, step: &Step) -> Result<()> {
     Ok(())
 }
 
-/// Applies `step`, which counts by `signed` and `steps::allowed`, to `out`, `scope`'s database before it, by its kind's
-/// rule, `who` being `global`'s database before it: → why it doesn't count, if it doesn't.
+/// Applies `step`, whose signer `signed` let write it, to `out`, `scope`'s database before it, by its kind's rule, `who`
+/// being `global`'s database before it: → why it doesn't count, if it doesn't. Each kind asks once whether its person may
+/// make the change, and a step the network's recovery key signed only what `signed` lets it.
 pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()> {
     if step.content.app != APP {
         return Ok(());
@@ -142,18 +143,13 @@ impl Change<'_> {
         int(self.step.time())
     }
 
-    fn admin(&self) -> bool {
-        self.who.may(self.w, "change-settings", NETWORK)
+    fn may(&self, verb: &str, object: &str) -> bool {
+        self.who.may(self.w, verb, object)
     }
 
-    /// Whether the writer manages group `g`: its admins, and the network's (so a group whose last admin left isn't stuck).
-    fn manages(&self, g: &str) -> bool {
-        self.who.group(g).is_some() && self.who.may(self.w, "remove", &group(g))
-    }
-
-    /// Whether the writer is a scope's admin, who sets its app schedules and Vault.
-    fn scope_admin(&self, scope: &Scope) -> bool {
-        self.who.may(self.w, "choose-devices", &object(scope))
+    /// Whether the writer may make `object`, new, with its first row `(subject, relation, object)` (`permissions::may_make`).
+    fn may_make(&self, verb: &str, container: &str, subject: &str, relation: &str, object: &str) -> bool {
+        crate::permissions::may_make(self.who.conn(), &person(self.w), verb, container, subject, relation, object, self.who.now()).unwrap_or(false)
     }
 
     /// Whether `k` is one of the network's machines that run things, or its Cloudflare node.
@@ -203,8 +199,9 @@ impl Change<'_> {
         let (w, user) = (self.w, self.id("user")?);
         let mut machine = listed(self.data, &user, self.step.time())?;
         machine.by = w.to_string();
+        let theirs = self.may("add-devices", &person(&user));
         // A service answers its person's calls as them: only their own device lists one, never an admin's.
-        ensure!(!machine.is(Kind::Service) || w == user, "only a person's own device lists their services");
+        ensure!(!machine.is(Kind::Service) || theirs, "only a person's own device lists their services");
         // A machine an admin listed for someone is listed again by that person's own device to be theirs: then it runs
         // their own scope too.
         if let Some(was) = self.who.machine_ever(&machine.key) {
@@ -212,15 +209,15 @@ impl Change<'_> {
             // named no device, naming the one it's on.
             let part = was.is(Kind::Service) && was.roles == machine.roles && was.service == machine.service;
             let part = part || (was.is(Kind::Client) && was.roles == machine.roles && was.device.is_none() && machine.device.is_some() && was.passkey == machine.passkey);
-            ensure!(!was.removed && was.user == user && w == user && (was.by != user || part) && was.seal == machine.seal, "that key is listed already");
+            ensure!(!was.removed && was.user == user && theirs && (was.by != user || part) && was.seal == machine.seal, "that key is listed already");
+        } else if self.who.user_ever(&user).is_some() {
+            let verb = if machine.is(Kind::Client) || machine.is(Kind::Service) { "add-devices" } else { "add-machines" };
+            let lists = self.who.user(&user).is_some() && self.may_make(verb, &person(&user), &person(&user), "owner", &super::scopes::device(&machine.key));
+            ensure!(lists, "only a person's own device lists their devices; an admin's lists compute and services");
         } else {
-            match self.who.user_ever(&user) {
-                Some(u) => ensure!(!u.removed && (w == user || (self.admin() && !machine.is(Kind::Client))), "only a person's own device lists their devices; an admin's lists compute and services"),
-                None => {
-                    ensure!(self.admin(), "only admins add people");
-                    add_person(self.out, &user, &self.text("user_name")?, self.role_of("role")?)?;
-                }
-            }
+            let r = self.role_of("role")?;
+            ensure!(self.who.may_give(w, &user, role(r), NETWORK), "only admins add people");
+            add_person(self.out, &user, &self.text("user_name")?, r)?;
         }
         put(self.out, &machine)?;
         self.devices_changed()
@@ -247,17 +244,20 @@ impl Change<'_> {
         self.devices_changed()
     }
 
+    /// A person's role in the network, given by who may give it, in place of the one they had, which who changes it
+    /// takes from them unless they keep it.
     fn role(&self) -> Result<()> {
-        ensure!(self.admin(), "admins only");
         let (user, to) = (self.id("user")?, self.role_of("role")?);
-        self.who.user(&user).context("no such user")?;
+        let was = self.who.user(&user).context("no such user")?.role;
+        let gives = self.who.may_give(self.w, &user, role(to), NETWORK);
+        ensure!(gives && (to == was || self.who.may_take(self.w, &user, role(was), NETWORK)), "only admins change roles, and the last admin stays");
         set_role(self.out, &person(&user), NETWORK, Some(to))
     }
 
     fn remove(&self) -> Result<()> {
         if let Ok(user) = self.id("user") {
-            ensure!(self.admin(), "admins only");
-            self.who.user_ever(&user).context("no such user")?;
+            let was = self.who.user(&user).context("no such user")?.role;
+            ensure!(self.who.may_take(self.w, &user, role(was), NETWORK), "only admins take someone out, and the last admin stays");
             let theirs: Vec<Key> = self.who.machines().into_iter().filter(|d| d.user == user).map(|d| d.key).collect();
             self.owe_held_by(&theirs, Some(&Scope::User(user.clone())))?;
             // Everything they held goes with them; what they made stays.
@@ -267,7 +267,7 @@ impl Change<'_> {
         } else {
             let key = self.key("key")?;
             let gone = self.who.machine(&key).context("no such key")?;
-            ensure!(self.who.may(self.w, "remove", &super::scopes::device(&key)), "only its person or an admin removes a device");
+            ensure!(self.may("remove", &super::scopes::device(&key)), "only its person or an admin removes a device");
             // A device signing itself out deletes its own keys: signed by it, or by a node of its person's it asked
             // (`itself`). So does a sign-in before on a device signed in again (`Node::approve_request`). One removed
             // otherwise may still hold them.
@@ -284,13 +284,10 @@ impl Change<'_> {
 
     fn epoch(&self) -> Result<()> {
         let scope = Scope::parse(&self.text("scope")?)?;
-        // Its admins': a person's own scope is theirs alone, and a group's admins' or the network's.
-        let allowed = match &scope {
-            Scope::Global => self.admin(),
-            Scope::Group(g) => self.manages(g),
-            Scope::User(u) => u == self.w,
-        };
-        ensure!(allowed, "only the scope's admins start its new epoch");
+        ensure!(self.may("remove", &object(&scope)), "only the scope's admins start its new epoch");
+        if let Scope::Group(g) = &scope {
+            self.who.group(g).context("no such group")?;
+        }
         let n = self.data["n"].as_u64().context("no n")?;
         ensure!(n == u64::from(self.who.epoch(&scope)) + 1, "an epoch follows the one before it");
         let to = self.keys("to")?;
@@ -331,7 +328,7 @@ impl Change<'_> {
         for (n, h) in self.data["keys"].as_object().into_iter().flatten() {
             hashes.push((n.parse::<u32>().context("an epoch is a number")?, epoch_hash_of(h)?));
         }
-        ensure!(self.scope_admin(&scope), "only the scope's person, or its group's admins, set app schedules in it");
+        ensure!(self.may("choose-devices", &object(&scope)), "only the scope's person, or its group's admins, set app schedules in it");
         ensure!(until == 0 || self.who.machine(&endpoint).is_some(), "no such endpoint");
         let row = params![hex(&endpoint), scope.to_string(), app];
         let had = self.out.execute("DELETE FROM app_schedules WHERE device = ? AND scope = ? AND app = ?", row)? > 0;
@@ -352,7 +349,7 @@ impl Change<'_> {
     /// Who opens a scope's Vault is its admins' to say, never a member's who can only add to it.
     fn vault(&self) -> Result<()> {
         let scope = Scope::parse(&self.text("scope")?)?;
-        ensure!(self.scope_admin(&scope), "only the scope's person, or its admins, say which machines open its Vault");
+        ensure!(self.may("choose-devices", &object(&scope)), "only the scope's person, or its admins, say which machines open its Vault");
         let n = self.data["n"].as_u64().context("no n")?;
         ensure!(n == u64::from(self.who.vault(&scope).map_or(0, |v| v.n)) + 1, "a Vault key follows the one before it");
         let public = self.key("public")?;
@@ -369,6 +366,7 @@ impl Change<'_> {
 
     /// A new group, its maker its first admin.
     fn group(&self) -> Result<()> {
+        ensure!(self.may("make-groups", NETWORK), "only the network's people make groups");
         let g = self.id("group")?;
         ensure!(self.who.group(&g).is_none(), "that group exists");
         let name = self.text("name")?;
@@ -378,7 +376,8 @@ impl Change<'_> {
 
     fn invite(&self) -> Result<()> {
         let (g, user, to) = (self.id("group")?, self.id("user")?, self.role_of("role")?);
-        ensure!(self.manages(&g), "only the group's admins invite");
+        self.who.group(&g).context("no such group")?;
+        ensure!(self.who.may_give(self.w, &user, role(to), &group(&g)), "only the group's admins invite");
         self.who.user(&user).context("no such user")?;
         self.out.execute("INSERT OR REPLACE INTO invites VALUES (?, ?, ?)", params![person(&user), group(&g), role(to)])?;
         Ok(())
@@ -392,12 +391,16 @@ impl Change<'_> {
         set_role(self.out, &person(self.w), &group(&g), Some(invited))
     }
 
-    /// A member's role in a group changed, or them taken out of it (or their invite), by its admins; or leaving it.
+    /// A member's role in a group changed, or them taken out of it (or their invite), by its admins; or leaving it. Who
+    /// changes it gives the new role and takes the one they had, unless they keep it.
     fn member(&self) -> Result<()> {
         let (g, user) = (self.id("group")?, self.id("user")?);
         let to: Option<Role> = serde_json::from_value(self.data["role"].clone())?;
-        ensure!(self.manages(&g) || (to.is_none() && user == self.w), "only the group's admins change its members");
         let grp = self.who.group(&g).context("no such group")?;
+        let was = self.who.group_role(&user, &g).or_else(|| grp.invited.get(&user).copied());
+        let took = was.is_none_or(|r| Some(r) == to || self.who.may_take(self.w, &user, role(r), &group(&g)));
+        let gives = to.is_none_or(|r| self.who.may_give(self.w, &user, role(r), &group(&g)));
+        ensure!(took && gives, "only the group's admins change its members");
         let member = grp.members.contains_key(&user) && self.who.user(&user).is_some();
         ensure!(member || grp.invited.contains_key(&user), "not in the group");
         match to {
@@ -412,47 +415,40 @@ impl Change<'_> {
         set_role(self.out, &person(&user), &group(&g), to)
     }
 
+    /// A device's, person's or group's name, or a person's or group's handle: by who may `rename` it.
     fn rename(&self) -> Result<()> {
+        let (it, row) = if let Ok(key) = self.key("key") {
+            self.who.machine(&key).context("no such key")?;
+            (super::scopes::device(&key), None)
+        } else if let Ok(user) = self.id("user") {
+            self.who.user(&user).context("no such user")?;
+            (person(&user), Some(Principal::User(user)))
+        } else {
+            let g = self.id("group")?;
+            self.who.group(&g).context("no such group")?;
+            (group(&g), Some(Principal::Group(g)))
+        };
+        ensure!(self.may("rename", &it), crate::protocol::Coded::refused("not allowed to rename that"));
         // A person's or group's handle: one that's taken (wherever it sorts) or malformed doesn't count.
         if let Some(handle) = self.data.get("handle") {
             let handle = handle.as_str().context("a handle is text")?;
             ensure!(valid_handle(handle), "a handle is lowercase letters, digits and single hyphens, up to 39, like {}", handle_from(handle, "name"));
-            let mine = match (self.id("user"), self.id("group")) {
-                (Ok(user), _) => {
-                    ensure!(user == self.w || self.admin(), crate::protocol::Coded::refused("not allowed to change that person's handle"));
-                    self.who.user(&user).context("no such user")?;
-                    Principal::User(user)
-                }
-                (_, Ok(g)) => {
-                    ensure!(self.manages(&g), crate::protocol::Coded::refused("not allowed to change that group's handle"));
-                    Principal::Group(g)
-                }
-                _ => bail!("a handle is a person's or a group's"),
-            };
+            let mine = row.context("a handle is a person's or a group's")?;
             ensure!(self.who.by_handle(handle).is_none_or(|p| p == mine), "{handle} is taken");
             self.out.execute("UPDATE principals SET handle = ? WHERE id = ?", params![handle, owner(&mine)])?;
             return Ok(());
         }
         let name = self.text("name")?;
         ensure!(!name.trim().is_empty(), "no name");
-        if let Ok(key) = self.key("key") {
-            self.who.machine(&key).context("no such key")?;
-            ensure!(self.who.may(self.w, "remove", &super::scopes::device(&key)), crate::protocol::Coded::refused("not allowed to rename that"));
-            self.out.execute("UPDATE devices SET name = ? WHERE key = ?", params![name, hex(&key)])?;
-        } else if let Ok(user) = self.id("user") {
-            ensure!(user == self.w || self.admin(), crate::protocol::Coded::refused("not allowed to rename that user"));
-            self.who.user(&user).context("no such user")?;
-            self.out.execute("UPDATE principals SET name = ? WHERE id = ?", params![name, person(&user)])?;
-        } else {
-            let g = self.id("group")?;
-            ensure!(self.manages(&g), crate::protocol::Coded::refused("not allowed to rename that group"));
-            self.out.execute("UPDATE principals SET name = ? WHERE id = ?", params![name, group(&g)])?;
-        }
+        match row {
+            None => self.out.execute("UPDATE devices SET name = ? WHERE key = ?", params![name, hex(&self.key("key")?)])?,
+            Some(_) => self.out.execute("UPDATE principals SET name = ? WHERE id = ?", params![name, it])?,
+        };
         Ok(())
     }
 
     fn setting(&self) -> Result<()> {
-        ensure!(self.admin(), "admins only");
+        ensure!(self.may("change-settings", NETWORK), "admins only");
         let name = self.text("name")?;
         ensure!(crate::labs::valid_setting(&name), "setting names are lowercase words joined by _, or a lab's (lab.…)");
         match &self.data["value"] {
@@ -466,7 +462,7 @@ impl Change<'_> {
     /// own scopes too. Unless there's none: then an admin's own device names the next.
     fn recovery(&self) -> Result<()> {
         let now = self.who.recovery();
-        let named = now.is_none() && self.admin() && self.who.client(&self.step.author()).is_some_and(|c| c.user == self.w);
+        let named = now.is_none() && self.may("change-settings", NETWORK);
         ensure!(now == Some(self.step.author()) || named, "only the network's recovery key changes it");
         let key = self.key("key")?;
         ensure!(Some(key) != now && !self.who.recovery_was().contains(&key) && self.who.machine_ever(&key).is_none(), "a new recovery key is a key of its own");
@@ -480,15 +476,20 @@ impl Change<'_> {
         let name = self.text("name")?;
         ensure!(valid_app_name(&name), "app names are lowercase words joined by -");
         let to = Principal::parse(&self.text("owner")?)?;
-        let acts_for = |p: &Principal| self.who.may(self.w, "add-apps", &owner_object(p));
-        ensure!(acts_for(&to), "only someone acting for an app's owner makes it");
+        let acts_for = |p: &Principal| self.may("add-apps", &owner_object(p));
         let Some(app) = self.who.app(&name) else {
+            let holders = match &to {
+                Principal::User(u) => person(u),
+                Principal::Group(g) => format!("{}#admin", group(g)),
+                Principal::Admins => format!("{NETWORK}#admin"),
+            };
+            ensure!(self.may_make("add-apps", &owner_object(&to), &holders, "owner", &super::scopes::app(&name)), "only someone acting for an app's owner makes it");
             let from = self.data["from"].as_str();
             self.out.execute("INSERT INTO apps VALUES (?, ?, ?, NULL, 0, NULL, NULL, 0, NULL)", params![name, owner(&to), from])?;
             return Ok(());
         };
         ensure!(!app.erased, "that app was erased");
-        ensure!(acts_for(&app.owner), "only someone acting for the app's owner gives it away");
+        ensure!(acts_for(&app.owner) && acts_for(&to), "only someone acting for the app's owner, and its new one, changes it");
         self.out.execute("UPDATE apps SET owner = ? WHERE name = ?", params![owner(&to), name])?;
         if self.data["erased"] == true {
             ensure!(app.deleted.is_some(), "delete it first");
@@ -506,7 +507,7 @@ impl Change<'_> {
     fn deploy(&self) -> Result<()> {
         let (name, bundle) = (self.text("app")?, self.text("bundle")?);
         let app = self.who.app(&name).context("no such app")?;
-        ensure!(self.who.may(self.w, "add-apps", &owner_object(&app.owner)), "only someone acting for the app's owner deploys it");
+        ensure!(self.may("deploy", &super::scopes::app(&name)), "only someone acting for the app's owner deploys it");
         ensure!(app.deleted.is_none(), "it was deleted: restore it first");
         ensure!(self.step.content.blobs.contains(&bundle), "a deploy names its bundle among its blobs");
         self.out.execute("UPDATE apps SET bundle = ?, deploys = deploys + 1 WHERE name = ?", params![bundle, name])?;
@@ -525,14 +526,14 @@ impl Change<'_> {
         ensure!(valid_app_name(&name), "service names are lowercase words joined by -");
         let on = self.data["on"] == true;
         let scope = self.data["scope"].as_str().map(Scope::parse).transpose()?;
-        let adds = |s: &Scope| self.who.may(self.w, "add-apps", &object(s));
+        let adds = |s: &Scope| self.may("add-apps", &object(s));
         let was = self.who.switch(&device, &name).and_then(|s| s.scope.as_deref().map(Scope::parse)).and_then(Result::ok);
         let managed = !on && was.as_ref().is_some_and(adds);
         if self.who.cloudflare_node() == Some(device) {
-            ensure!(managed || self.admin(), "only an admin switches what the Cloudflare node runs");
+            ensure!(managed || self.may("change-settings", NETWORK), "only an admin switches what the Cloudflare node runs");
         } else {
-            let theirs = self.who.machine(&device).context("no such device")?.user == self.w;
-            ensure!(managed || theirs, "only a device's person switches what it runs");
+            self.who.machine(&device).context("no such device")?;
+            ensure!(managed || self.may("switch", &super::scopes::device(&device)), "only a device's person switches what it runs");
         }
         ensure!(!on || scope.as_ref().is_none_or(adds), "only who may add apps there runs its service for it");
         let scope = scope.or(was.filter(|_| !on)).map(|s| s.to_string());
@@ -627,7 +628,6 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             }
             out.execute("INSERT OR REPLACE INTO pages VALUES (?, ?)", params![page, kept.to_string()])?;
         }
-        _ if *scope == Scope::Global => {}
         other => bail!("{other} isn't a step of a person's or group's own"),
     }
     Ok(())

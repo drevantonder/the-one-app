@@ -120,7 +120,7 @@ insert or replace into roles (type, name, permissions, builtin) values
     ('vault', 'owner', '["use","change","invite","remove"]', 1),
     ('vault', 'user', '["use","leave"]', 1),
     ('app', 'owner', '["deploy","delete"]', 1);
--- the network's admins, who manage every group (`rules`' `manages`) and add people to it, or make someone its admin
+-- the network's admins, who manage every group and add people to it, or make someone its admin
 -- (so a group whose admins have all gone gets a new one), but open none
 insert or replace into roles (type, name, permissions, gives, builtin) values
     ('group', 'manager', '["invite","remove","rename","run"]', '["member","admin"]', 1);

@@ -1,5 +1,5 @@
-//! What a step says, as a device writes it: the content of each kind of the node's steps (`rules` says what each
-//! does, and who may write it). The web client builds the same content (cloudflare/web/members.js), and
+//! What a step says, as a device writes it: the content of each kind of the node's steps (`rules` says who may
+//! write each, and what it does). The web client builds the same content (cloudflare/web/members.js), and
 //! tests/contracts.rs checks it does.
 
 use std::collections::BTreeMap;
@@ -78,7 +78,7 @@ pub fn setting(name: &str, value: Option<&str>) -> Content {
     node("setting", json!({ "name": name, "value": value }))
 }
 
-/// The gate to the scope database is open, as an admin's own device says in the ceremony that freezes the log.
+/// A new group, its writer its first admin.
 pub fn group(id: &str, name: &str) -> Content {
     node("group", json!({ "group": id, "name": name }))
 }
@@ -96,7 +96,6 @@ pub fn member(group: &str, user: &str, role: Option<Role>) -> Content {
     node("member", json!({ "group": group, "user": user, "role": role }))
 }
 
-/// Renames a device (`key`), a person (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
 /// Turns down a device that asked to join as this person's, before it's listed ("Not Me"): every device of theirs
 /// then refuses it.
 pub fn refuse(endpoint: &crate::keys::Endpoint, name: &str) -> Content {
@@ -108,6 +107,7 @@ pub fn forget_sign_in(key: &Key) -> Content {
     node("forget-sign-in", json!({ "key": hex(key) }))
 }
 
+/// Renames a device (`key`), a person (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
 pub fn rename(what: &str, id: &str, name: &str) -> Content {
     let mut data = json!({ "name": name });
     data[what] = json!(id);
