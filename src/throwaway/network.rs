@@ -1,9 +1,10 @@
 //! The throwaway network's life: starting its node and Workers, finding them running, stopping them.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use one::api::client::{Answer, Client, Via};
 use one::config::CLI;
 use one::cloudflare::Settings;
 use one::mode::{Throwaway, programs};
@@ -17,7 +18,7 @@ pub(crate) fn running(dir: &Path) -> Option<String> {
     let addr = std::fs::read_to_string(dir.join("addr")).ok()?.trim().to_string();
     let node: i32 = std::fs::read_to_string(dir.join("pid")).ok()?.trim().parse().ok()?;
     programs(dir, false).contains(&node).then_some(())?;
-    agent().get(format!("http://{addr}/v1/state")).call().is_ok().then_some(addr)
+    node_at(dir, &addr).get("/v1/state").is_ok().then_some(addr)
 }
 
 /// Whether the throwaway network's node started before this build was made: it runs the build it started as, Workers and screens
@@ -102,27 +103,26 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
     // A free port the system picks, as for everything else here: never a fixed one every checkout's network would
     // want first, which another's would hold when this one starts again.
     let addr = spawn_node(dir, None)?;
-    let agent = || throwaway_agent(dir);
-    let on = |path: &str| format!("http://{addr}{path}");
-    let created = crate::request(agent().post(on("/v1/create")).send_json(json!({ "name": "Throwaway", "user_name": me })))?;
+    let node = node_at(dir, &addr);
+    let created = node.post("/v1/create", json!({ "name": "Throwaway", "user_name": me }))?;
     let recovery = created["recovery"].as_str().context("the throwaway network gave no recovery key")?;
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
-    let state = crate::request(agent().get(on("/v1/state")).call())?;
+    let state = node.get("/v1/state")?;
     let person = (state["user"]["id"].as_str().context("the throwaway network has no person")?.to_string(), me);
     let settings = Settings::for_throwaway(dir, &bucket, person)?;
     settings.save()?;
     // Read back as `cloudflare deploy` reads it, with its secrets.
     let settings = Settings::load_in(dir)?;
     spawn_cloudflare(dir, &settings, &addr)?;
-    crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": "address", "value": &settings.address })))?;
+    node.post("/v1/settings", json!({ "name": "address", "value": &settings.address }))?;
     // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its people sign in with.
     let clients = format!("{}/api/auth one-throwaway", settings.address);
-    crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": one::sign_in_proof::CLIENTS, "value": clients })))?;
+    node.post("/v1/settings", json!({ "name": one::sign_in_proof::CLIENTS, "value": clients }))?;
     // Its data moves to the throwaway bucket, which its node reaches only through its URL signer from then on.
-    let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" })))?;
+    let moved = node.post("/v1/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
     anyhow::ensure!(moved["kept"] == true, "the throwaway network's node couldn't reach its bucket through the URL signer: {moved}");
     let started = std::time::Instant::now();
-    while crate::request(agent().get(on("/v1/storage")).call())?["kind"] != "s3" {
+    while node.get("/v1/storage")?["kind"] != "s3" {
         anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the throwaway network's node didn't move to its bucket: node.log says why");
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -157,20 +157,40 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     let pid = spawn(dir, &mut command, "node.log", false)?;
     std::fs::write(dir.join("pid"), pid.to_string())?;
     std::fs::write(dir.join("addr"), &addr)?;
-    wait_for(&throwaway_agent(dir), &format!("http://{addr}/v1/state"), &dir.join("node.log"))?;
+    let node = node_at(dir, &addr);
+    wait_for(|| node.get("/v1/state").is_ok(), &dir.join("node.log"))?;
     Ok(addr)
 }
 
-/// A client asking the throwaway network's node as one of this machine's programs: with the token in its home.
-pub(crate) fn throwaway_agent(dir: &Path) -> ureq::Agent {
-    let dir = dir.to_path_buf();
-    let with_token = move |mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext| {
-        if let Some(token) = one::api::local_token(&dir).and_then(|t| t.parse().ok()) {
-            req.headers_mut().insert(one::api::LOCAL_TOKEN_HEADER, token);
+/// The throwaway network's node, asked at `addr` as one of this machine's programs: with the token in its home.
+pub(crate) fn node_at(dir: &Path, addr: &str) -> Client {
+    Client::new(Direct { dir: dir.to_path_buf(), addr: addr.to_string() }, false)
+}
+
+/// The throwaway network's node, at the address its folder says.
+pub(crate) fn node_in(dir: &Path) -> Result<Client> {
+    Ok(node_at(dir, std::fs::read_to_string(dir.join("addr"))?.trim()))
+}
+
+struct Direct {
+    dir: PathBuf,
+    addr: String,
+}
+
+impl Via for Direct {
+    fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>) -> Result<Answer> {
+        let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", self.addr));
+        for (name, value) in headers {
+            req = req.header(*name, *value);
         }
-        next.handle(req)
-    };
-    ureq::Agent::config_builder().http_status_as_error(false).middleware(with_token).build().into()
+        if let Some(token) = one::api::local_token(&self.dir) {
+            req = req.header(one::api::LOCAL_TOKEN_HEADER, token);
+        }
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let resp = agent.run(agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build())?;
+        let trace = resp.headers().get(one::node::trace::HEADER).and_then(|h| h.to_str().ok()).map(str::to_string);
+        Ok(Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
+    }
 }
 
 /// Starts the throwaway network's Workers, beside its node at `node`, and waits for its address to answer.
@@ -182,12 +202,13 @@ pub(crate) fn spawn_cloudflare(dir: &Path, settings: &Settings, node: &str) -> R
     let mut workers = std::process::Command::new(std::env::current_exe()?);
     Throwaway::tell(workers.args(["cloudflare", "serve"]), dir, node);
     spawn(dir, &mut workers, "cloudflare.log", false)?;
-    wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("cloudflare.log"))
+    let url = format!("{}/.well-known/oauth-authorization-server", settings.address);
+    wait_for(|| agent().get(&url).call().is_ok_and(|r| r.status().is_success()), &dir.join("cloudflare.log"))
 }
 
-pub(crate) fn wait_for(agent: &ureq::Agent, url: &str, log: &Path) -> Result<()> {
+pub(crate) fn wait_for(ready: impl Fn() -> bool, log: &Path) -> Result<()> {
     let start = Instant::now();
-    while !agent.get(url).call().is_ok_and(|r| r.status().is_success()) {
+    while !ready() {
         anyhow::ensure!(start.elapsed() < Duration::from_secs(120), "the throwaway network didn't start: {}", log.display());
         std::thread::sleep(Duration::from_millis(250));
     }

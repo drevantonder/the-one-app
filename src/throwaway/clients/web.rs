@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 
 use super::super::devices::approve_code;
-use super::super::network::{spawn, throwaway_agent};
+use super::super::network::{node_in, spawn};
 use crate::agent;
 
 /// The web client's folder in the throwaway network's, for its first person or someone else.
@@ -56,8 +56,7 @@ pub(crate) fn joined(dir: &Path, settings: &one::cloudflare::Settings, name: &st
     let marker = folder.join("joined");
     if !marker.exists() {
         eprintln!("Inviting {name}…");
-        let node = std::fs::read_to_string(dir.join("addr"))?;
-        let invited = crate::request(throwaway_agent(dir).post(format!("http://{}/v1/invite-link", node.trim())).send_json(json!({ "name": name })))?;
+        let invited = node_in(dir)?.post("/v1/invite-link", json!({ "name": name }))?;
         args.push(invited["link"].as_str().context("the throwaway network made no invite link")?.to_string());
     }
     let code = web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;

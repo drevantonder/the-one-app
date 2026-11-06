@@ -112,8 +112,7 @@ pub(crate) fn is_code(text: &str) -> bool {
 /// A native client's code, approved by the throwaway network's machine, as its person's device: then it's let in.
 pub(crate) fn approve_code(dir: &Path, code: &str) -> Result<()> {
     eprintln!("Approving the device that shows {code}…");
-    let node = std::fs::read_to_string(dir.join("addr"))?;
-    let approved = crate::request(super::network::throwaway_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": code.replace(' ', ""), "confirm": true })));
+    let approved = super::network::node_in(dir)?.post("/v1/devices/approve", json!({ "code": code.replace(' ', ""), "confirm": true }));
     // Let in already, by its sign-in, by that same machine: nothing waits.
     match approved {
         Err(err) if format!("{err:#}").contains("no device is waiting") => Ok(()),

@@ -20,7 +20,7 @@ mod devices;
 mod network;
 mod rebuild;
 
-use network::{older_build, no_client_running, running, start, stop, stop_some, throwaway_agent};
+use network::{node_at, older_build, no_client_running, running, start, stop, stop_some};
 
 /// The throwaway network for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout the
 /// current folder is in, wherever in it, as git finds it, beside the downloads every throwaway network shares: → its folder,
@@ -126,7 +126,7 @@ fn sign_in() -> Result<()> {
 }
 
 fn say_where(dir: &Path, addr: &str) -> Result<()> {
-    let state = crate::request(throwaway_agent(dir).get(format!("http://{addr}/v1/state")).call())?;
+    let state = node_at(dir, addr).get("/v1/state")?;
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
     let address = state["network"]["settings"]["address"].as_str().unwrap_or("");
     println!(
@@ -179,7 +179,7 @@ fn cloudflare_node(dir: &Path) -> Result<()> {
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
     let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no Cloudflare node key")?;
-    crate::request(throwaway_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": one::database::scopes::CLOUDFLARE_NODE, "value": key })))?;
+    node_at(dir, &addr).post("/v1/settings", json!({ "name": one::database::scopes::CLOUDFLARE_NODE, "value": key }))?;
     println!("The throwaway network's Cloudflare node runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }
