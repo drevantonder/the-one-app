@@ -13,27 +13,85 @@ use super::*;
 
 // Building and running.
 
-/// The network's Workers: each one's name, its module, and its Durable Object's class, if it keeps anything. Each
-/// one's WebAssembly is the `.wasm` files in its module's folder, modules of its own (Workers can't compile it).
+/// A binding: (name, value, whether it's secret). A value `service:<name>` is another Worker, or `service:<name>:<entrypoint>`
+/// one of its entrypoints, `object:<name>:<class>` another Worker's Durable Object class, `loader:` Worker Loader, `ai:` Workers
+/// AI, and `r2:<bucket>` an R2 bucket of the account's.
+pub type Binding = (String, String, bool);
+
+/// One of the network's Workers: everything said about it is here.
+pub struct Worker {
+    pub name: &'static str,
+    /// Its module, in `cloudflare/`. Its WebAssembly is the `.wasm` files in its module's folder, modules of its own
+    /// (Workers can't compile it).
+    pub entry: &'static str,
+    /// Its Durable Object's class, if it keeps anything.
+    pub class: Option<&'static str>,
+    /// A Durable Object class it had once, which its next upload deletes on Cloudflare.
+    pub deleted: &'static [&'static str],
+    /// Where it's reached and the local port it listens on, if anywhere but by other Workers' bindings.
+    place: Option<fn(&Settings) -> (&str, u16)>,
+    /// Whether it runs the Cloudflare node's build, which carries its devices' endpoints.
+    node_build: bool,
+    /// Whether it serves the web client's files, as its static assets.
+    pub serves_web: bool,
+    /// Whether it reads the network's bucket itself.
+    pub reads_bucket: bool,
+    bindings: fn(&Settings) -> Vec<Binding>,
+}
+
+/// The network's Workers, in the order they're deployed.
 ///
 /// Sign-in's Worker is still called `auth` on Cloudflare (`<cli>-auth`, its address's host, its `AUTH` bindings) and
 /// its Durable Object `Auth`, which holds every person's passkeys and accounts, as are the paths under `/api/auth` that
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer name, and `one/auth`, what devices sign
-/// their requests to it under: renaming them would move every network's sign-in, and older devices would stop reaching it.
-pub const WORKERS: &[(&str, &str, Option<&str>)] = &[
-    ("auth", "sign-in/worker.js", Some("Auth")),
-    ("relay", "relay/worker.js", Some("Relay")),
-    ("signer", "signer/worker.js", None),
-    ("mcp", "mcp/worker.js", Some("Client")),
-    ("gateway", "gateway/worker.js", None),
-    ("push", "push/worker.js", Some("Push")),
+/// their requests to it under: renaming them would move every network's sign-in, and every refresh token would stop working.
+pub const WORKERS: &[Worker] = &[
+    Worker { name: "auth", entry: "sign-in/worker.js", class: Some("Auth"), deleted: &[], place: Some(|s| (s.sign_in_url.as_str(), s.ports[0])), node_build: false, serves_web: false, reads_bucket: false, bindings: sign_in_bindings },
+    Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings },
+    Worker { name: "signer", entry: "signer/worker.js", class: None, deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings },
+    Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), deleted: &[], place: None, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings },
+    Worker { name: "gateway", entry: "gateway/worker.js", class: None, deleted: &["Relay"], place: Some(|s| (s.address.as_str(), s.ports[1])), node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings },
+    Worker { name: "push", entry: "push/worker.js", class: Some("Push"), deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings },
 ];
 
-/// A Durable Object class a service had once, (service, class), which its next upload deletes on Cloudflare.
-const DELETED: &[(&str, &str)] = &[("gateway", "Relay")];
+/// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
+/// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
+pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
 
-/// A service's WebAssembly modules, (name, bytes): the `.wasm` files in its module's folder, as this release has them.
-pub fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
+impl Worker {
+    /// The Worker called `name`, one of `WORKERS`'.
+    pub fn named(name: &str) -> &'static Worker {
+        WORKERS.iter().find(|w| w.name == name).expect("one of the network's Workers")
+    }
+
+    /// Where it's reached, and the local port it listens on.
+    pub fn place<'a>(&self, settings: &'a Settings) -> Option<(&'a str, u16)> {
+        self.place.map(|place| place(settings))
+    }
+
+    /// Its bindings.
+    pub fn bindings(&self, settings: &Settings) -> Vec<Binding> {
+        (self.bindings)(settings)
+    }
+
+    /// Its modules besides its own, (name, bytes): its WebAssembly, and, for the remote MCP server, the Cloudflare node's
+    /// build (`node`), which runs its devices' endpoints. None if it needs that and there's none.
+    pub fn modules(&self, node: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
+        let mut out = wasm(self.entry);
+        if self.node_build {
+            out.extend(node?.iter().filter(|(name, _, _)| name.starts_with("one_cloudflare_node")).map(|(name, _, bytes)| (name.clone(), bytes.clone())));
+        }
+        Some(out)
+    }
+
+    /// Its Worker's name on Cloudflare: `<cli>-<name>`, so custom builds sharing an account don't clash.
+    pub fn worker_name(&self) -> String {
+        worker_name(self.name)
+    }
+}
+
+/// A Worker's WebAssembly modules, (name, bytes): the `.wasm` files in its module's folder, as this release has them.
+fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
     let dir = entry.rsplit_once('/').map_or("", |(dir, _)| dir);
     crate::config::CLOUDFLARE
         .iter()
@@ -46,17 +104,6 @@ pub fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
 
 /// The Cloudflare node's modules, as `node::modules` gives them.
 pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
-
-/// A service's modules besides its own, (name, bytes): its WebAssembly, and for the remote MCP server the Cloudflare node's
-/// build (`cloudflare_node`), which runs its devices' endpoints. None if there's none.
-pub fn modules_of(service: &str, entry: &str, cloudflare_node: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
-    let mut out = wasm(entry);
-    if service == "mcp" {
-        let built = cloudflare_node?.clone();
-        out.extend(built.into_iter().filter(|(name, _, _)| name.starts_with("one_cloudflare_node")).map(|(name, _, bytes)| (name, bytes)));
-    }
-    Some(out)
-}
 
 /// How a network's Workers are set up, wherever they run: kept in `<home>/cloudflare/settings.json`, with its secrets in
 /// `.env.local` beside it, which Varlock reads (see `SCHEMA`): their values, for Workers tried here, or
@@ -430,168 +477,164 @@ impl Settings {
         let seed: [u8; 32] = data_encoding::HEXLOWER.decode(self.cloudflare_node_key.as_bytes()).ok()?.try_into().ok()?;
         Some(data_encoding::HEXLOWER.encode(ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().as_bytes()))
     }
-
-    /// Where a service is reached, and the local port it listens on: none for the relay and the URL signer, which only
-    /// other Workers' bindings reach.
-    pub fn place(&self, service: &str) -> Option<(&str, u16)> {
-        let i = ["auth", "gateway"].iter().position(|s| *s == service)?;
-        Some(([&self.sign_in_url, &self.address][i].as_str(), self.ports[i]))
-    }
-
-    /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service,
-    /// `object:<name>:<class>` another service's Durable Object class, `loader:` Worker Loader, `ai:` Workers AI, and `r2:<bucket>` an R2
-    /// bucket of the account's.
-    pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
-        // The gateway holds no secrets.
-        if service == "gateway" {
-            let named = [("NAME", crate::config::NAME.into()), ("YOURS", crate::config::YOURS.into()), ("CLI", crate::config::CLI.into())].map(|(n, v)| (n.into(), v, false));
-            let bound = [("AUTH", "auth"), ("IROH", "relay"), ("SIGNER", "signer"), ("MCP", "mcp"), ("PUSH", "push")].map(|(n, s)| (n.into(), format!("service:{s}"), false));
-            return bound.into_iter().chain(named).collect();
-        }
-        // The push Worker: the network's push credentials, and the relay, which says which devices are the network's.
-        if service == "push" {
-            let cli = crate::config::CLI;
-            let mut out = vec![
-                ("RELAY".into(), "service:relay".into(), false),
-                ("ADDRESS".into(), self.address.clone(), false),
-                ("NAME".into(), self.name.clone(), false),
-                // The Apple apps' bundle ids (client/native/iphone/project.yml, mac/build.sh), which their pushes go to.
-                ("APNS_TOPICS".into(), json!([format!("app.{cli}.phone"), format!("app.{cli}.mac")]).to_string(), false),
-            ];
-            out.extend(self.push.iter().map(|(name, value)| (name.clone(), value.clone(), true)));
-            return out;
-        }
-        let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
-        // Nor does the relay: only the keys of the network's first devices, which it starts its list with, and the
-        // Cloudflare node's, whose datagrams it hands its Durable Object.
-        if service == "relay" {
-            let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
-            let bound = self.cloudflare_node_endpoint().filter(|_| self.cloudflare_node).map(|key| [("BOUND".into(), key, false), ("NODE".into(), format!("object:{}:Node", crate::cloudflare::node::SERVICE), false)]);
-            // And the remote MCP server's devices, each bound to its object while it runs.
-            let mcp = ("MCP".into(), "object:mcp:Client".into(), false);
-            let yours = ("YOURS".into(), crate::config::YOURS.into(), false);
-            return devices.into_iter().chain(bound.into_iter().flatten()).chain([mcp, yours]).chain(location).collect();
-        }
-        // The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches
-        // the relay only by its entrypoint for them, and reads the bucket through the URL signer as any device does.
-        if service == "mcp" {
-            let mut out = vec![
-                ("AUTH".into(), "service:auth".into(), false),
-                ("RELAY".into(), "service:relay:McpDevices".into(), false),
-                ("SIGNER".into(), "service:signer".into(), false),
-                ("ADDRESS".into(), self.address.clone(), false),
-                ("NAME".into(), self.name.clone(), false),
-                ("YOURS".into(), crate::config::YOURS.into(), false),
-            ];
-            out.extend(location);
-            return out;
-        }
-        // The Cloudflare node: its endpoint's key, and the relay it's reached through.
-        if service == crate::cloudflare::node::SERVICE {
-            let mut out = vec![
-                ("AUTH".into(), "service:auth".into(), false),
-                ("SIGNER".into(), "service:signer".into(), false),
-                ("LOADER".into(), "loader:".into(), false),
-                // Workers AI, for the services built for Cloudflare that use it.
-                ("AI".into(), "ai:".into(), false),
-                ("ADDRESS".into(), self.address.clone(), false),
-                ("NAME".into(), self.name.clone(), false),
-                ("NODE_KEY".into(), self.cloudflare_node_key.clone(), true),
-                ("RELAY".into(), "service:relay:CloudflareNode".into(), false),
-            ];
-            // The network's root, as sign-in's: its members are replayed from no other.
-            out.extend(self.root.clone().map(|g| ("ROOT".into(), g, false)));
-            out.extend(location);
-            return out;
-        }
-        // The URL signer holds only the bucket's credentials, and asks the relay who's allowed.
-        if service == "signer" {
-            let mut out = vec![("RELAY".into(), "service:relay".into(), false), ("YOURS".into(), crate::config::YOURS.into(), false)];
-            if let Some(bucket) = &self.bucket {
-                out.push(("BUCKET".into(), bucket.to_string(), true));
-                let endpoint = bucket["endpoint"].as_str().unwrap_or("");
-                if endpoint.split("://").nth(1).unwrap_or(endpoint).trim_end_matches('/').ends_with(".r2.cloudflarestorage.com") {
-                    out.push(("R2".into(), format!("r2:{}", bucket["bucket"].as_str().unwrap_or("")), false));
-                }
-            }
-            return out;
-        }
-        let issuer = format!("{}/api/auth", self.address);
-        let mut out = vec![];
-        let mut plain = |name: &str, value: String| out.push((name.into(), value, false));
-        match service {
-            "auth" => {
-                // Whether a request's signer is one of the network's endpoints, and an admin's.
-                plain("RELAY", "service:relay".into());
-                // Pushes to a person's devices, by the push Worker's entrypoint for the network's own Workers.
-                plain("PUSH", "service:push:Sender".into());
-                plain("ADDRESS", self.address.clone());
-                plain("NAME", self.name.clone());
-                plain("YOURS", crate::config::YOURS.into());
-                // Its own apps' sign-ins come back to `<cli>://signed-in/`.
-                plain("CLI", crate::config::CLI.into());
-                if let Some((id, name)) = &self.throwaway_person {
-                    plain("SIGN_IN", "throwaway".into());
-                    plain("THROWAWAY_USER", id.clone());
-                    plain("THROWAWAY_NAME", name.clone());
-                } else if google() {
-                    plain("SIGN_IN", "google".into());
-                    plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN.into());
-                }
-                if let Some(root) = &self.root {
-                    plain("ROOT", root.clone());
-                }
-                // Tokens are for the network's address unless a client asks for a node's own.
-                let resources: Vec<&String> = std::iter::once(&self.address).chain(&self.resources).collect();
-                plain("RESOURCES", json!(resources).to_string());
-            }
-            _ => {
-                plain("AUTH", "service:auth".into());
-                plain("ISSUER", issuer);
-                if self.throwaway_person.is_some() {
-                    plain("SIGN_IN", "throwaway".into());
-                }
-            }
-        }
-        if service == "auth" {
-            out.push(("AUTH_SECRET".into(), self.auth_secret.clone(), true));
-            if let Some((id, secret)) = self.google.clone().filter(|_| google()) {
-                out.push(("GOOGLE_CLIENT_ID".into(), id, false));
-                out.push(("GOOGLE_CLIENT_SECRET".into(), secret, true));
-            }
-        }
-        out
-    }
 }
 
-/// The network's Workers as one workerd runs them, with `modules` in `WORKERS`' order, and the gateway serving the
-/// web client's files from `web`; and the Cloudflare node, if the network has one and this build carries it.
-pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Served> {
-    served_with(settings, modules, web, crate::cloudflare::node::modules().ok())
+/// The location Workers' objects are made in, where the config sets one.
+fn location() -> Option<Binding> {
+    (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false))
+}
+
+fn plain(name: &str, value: impl Into<String>) -> Binding {
+    (name.into(), value.into(), false)
+}
+
+fn secret(name: &str, value: impl Into<String>) -> Binding {
+    (name.into(), value.into(), true)
+}
+
+/// The gateway holds no secrets.
+fn gateway_bindings(_: &Settings) -> Vec<Binding> {
+    let named = [("NAME", crate::config::NAME), ("YOURS", crate::config::YOURS), ("CLI", crate::config::CLI)].map(|(n, v)| plain(n, v));
+    let bound = [("AUTH", "auth"), ("IROH", "relay"), ("SIGNER", "signer"), ("MCP", "mcp"), ("PUSH", "push")].map(|(n, s)| plain(n, format!("service:{s}")));
+    bound.into_iter().chain(named).collect()
+}
+
+/// The push Worker: the network's push credentials, and the relay, which says which devices are the network's.
+fn push_bindings(settings: &Settings) -> Vec<Binding> {
+    let cli = crate::config::CLI;
+    let mut out = vec![
+        plain("RELAY", "service:relay"),
+        plain("ADDRESS", settings.address.clone()),
+        plain("NAME", settings.name.clone()),
+        // The Apple apps' bundle ids (client/native/iphone/project.yml, mac/build.sh), which their pushes go to.
+        plain("APNS_TOPICS", json!([format!("app.{cli}.phone"), format!("app.{cli}.mac")]).to_string()),
+    ];
+    out.extend(settings.push.iter().map(|(name, value)| secret(name, value.clone())));
+    out
+}
+
+/// The relay holds no secrets: only the keys of the network's first devices, which it starts its list with, and the
+/// Cloudflare node's, whose datagrams it hands its Durable Object, and the remote MCP server's devices, each bound to its
+/// object while it runs.
+fn relay_bindings(settings: &Settings) -> Vec<Binding> {
+    let devices = (!settings.devices.is_empty()).then(|| plain("DEVICES", json!(settings.devices).to_string()));
+    let node = settings.cloudflare_node_endpoint().filter(|_| settings.cloudflare_node).map(|key| [plain("BOUND", key), plain("NODE", format!("object:{}:{}", NODE.name, NODE.class.unwrap()))]);
+    let mcp = plain("MCP", format!("object:mcp:{}", Worker::named("mcp").class.unwrap()));
+    devices.into_iter().chain(node.into_iter().flatten()).chain([mcp, plain("YOURS", crate::config::YOURS)]).chain(location()).collect()
+}
+
+/// The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches the
+/// relay only by its entrypoint for them, and reads the bucket through the URL signer as any device does.
+fn mcp_bindings(settings: &Settings) -> Vec<Binding> {
+    let mut out = vec![
+        plain("AUTH", "service:auth"),
+        plain("RELAY", "service:relay:McpDevices"),
+        plain("SIGNER", "service:signer"),
+        plain("ADDRESS", settings.address.clone()),
+        plain("NAME", settings.name.clone()),
+        plain("YOURS", crate::config::YOURS),
+    ];
+    out.extend(location());
+    out
+}
+
+/// The Cloudflare node: its endpoint's key, and the relay it's reached through.
+fn node_bindings(settings: &Settings) -> Vec<Binding> {
+    let mut out = vec![
+        plain("AUTH", "service:auth"),
+        plain("SIGNER", "service:signer"),
+        plain("LOADER", "loader:"),
+        // Workers AI, for the services built for Cloudflare that use it.
+        plain("AI", "ai:"),
+        plain("ADDRESS", settings.address.clone()),
+        plain("NAME", settings.name.clone()),
+        secret("NODE_KEY", settings.cloudflare_node_key.clone()),
+        plain("RELAY", "service:relay:CloudflareNode"),
+    ];
+    // The network's root, as sign-in's: its members are replayed from no other.
+    out.extend(settings.root.clone().map(|root| plain("ROOT", root)));
+    out.extend(location());
+    out
+}
+
+/// The URL signer holds only the bucket's credentials, and asks the relay who's allowed.
+fn signer_bindings(settings: &Settings) -> Vec<Binding> {
+    let mut out = vec![plain("RELAY", "service:relay"), plain("YOURS", crate::config::YOURS)];
+    if let Some(bucket) = &settings.bucket {
+        out.push(secret("BUCKET", bucket.to_string()));
+        let endpoint = bucket["endpoint"].as_str().unwrap_or("");
+        if endpoint.split("://").nth(1).unwrap_or(endpoint).trim_end_matches('/').ends_with(".r2.cloudflarestorage.com") {
+            out.push(plain("R2", format!("r2:{}", bucket["bucket"].as_str().unwrap_or(""))));
+        }
+    }
+    out
+}
+
+fn sign_in_bindings(settings: &Settings) -> Vec<Binding> {
+    let mut out = vec![
+        // Whether a request's signer is one of the network's endpoints, and an admin's.
+        plain("RELAY", "service:relay"),
+        // Pushes to a person's devices, by the push Worker's entrypoint for the network's own Workers.
+        plain("PUSH", "service:push:Sender"),
+        plain("ADDRESS", settings.address.clone()),
+        plain("NAME", settings.name.clone()),
+        plain("YOURS", crate::config::YOURS),
+        // Its own apps' sign-ins come back to `<cli>://signed-in/`.
+        plain("CLI", crate::config::CLI),
+    ];
+    if let Some((id, name)) = &settings.throwaway_person {
+        out.extend([plain("SIGN_IN", "throwaway"), plain("THROWAWAY_USER", id.clone()), plain("THROWAWAY_NAME", name.clone())]);
+    } else if google() {
+        out.extend([plain("SIGN_IN", "google"), plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN)]);
+    }
+    out.extend(settings.root.clone().map(|root| plain("ROOT", root)));
+    // Tokens are for the network's address unless a client asks for a node's own.
+    let resources: Vec<&String> = std::iter::once(&settings.address).chain(&settings.resources).collect();
+    out.push(plain("RESOURCES", json!(resources).to_string()));
+    out.push(secret("AUTH_SECRET", settings.auth_secret.clone()));
+    if let Some((id, client_secret)) = settings.google.clone().filter(|_| google()) {
+        out.extend([plain("GOOGLE_CLIENT_ID", id), secret("GOOGLE_CLIENT_SECRET", client_secret)]);
+    }
+    out
+}
+
+/// The Worker, if any, that a binding's value reaches: `service:<name>` or `object:<name>:<class>`.
+fn reaches(value: &str) -> Option<&str> {
+    value.strip_prefix("service:").or_else(|| value.strip_prefix("object:")).map(|rest| rest.split(':').next().unwrap())
+}
+
+/// The network's Workers as one workerd runs them, the gateway serving the web client's files from `web`; and the
+/// Cloudflare node, if the network has one and this build carries it.
+pub fn served(settings: &Settings, web: &Path) -> Result<Vec<Served>> {
+    served_with(settings, web, crate::cloudflare::node::modules().ok())
 }
 
 /// `served`, with the Cloudflare node's build `cloudflare_node` (this build's, or a test's).
-pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, cloudflare_node: Option<Modules>) -> Vec<Served> {
+pub fn served_with(settings: &Settings, web: &Path, cloudflare_node: Option<Modules>) -> Result<Vec<Served>> {
     let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::cloudflare::node::served(settings, modules));
     // A build without the Cloudflare node's WebAssembly has no remote MCP server, and nothing binds one.
-    let mcp = cloudflare_node.is_some();
-    WORKERS
-        .iter()
-        .zip(modules)
-        .filter_map(|((name, entry, class), module)| Some((name, class, module, modules_of(name, entry, cloudflare_node.as_ref())?)))
-        .map(|(name, class, module, modules)| Served {
-            name: name.to_string(),
-            module,
+    let mut served = Vec::new();
+    for worker in WORKERS {
+        let Some(modules) = worker.modules(cloudflare_node.as_ref()) else { continue };
+        served.push(Served {
+            name: worker.name.to_string(),
+            module: module(worker.entry)?,
             modules,
-            class: class.map(str::to_string),
-            listen: settings.place(name).map(|(_, port)| format!("127.0.0.1:{port}")),
-            bindings: settings.bindings(name).into_iter().filter(|(_, v, _)| mcp || !v.starts_with("service:mcp") && !v.starts_with("object:mcp:")).map(|(n, v, _)| (n, v)).collect(),
-            assets: (*name == "gateway").then(|| web.to_path_buf()),
+            class: worker.class.map(str::to_string),
+            listen: worker.place(settings).map(|(_, port)| format!("127.0.0.1:{port}")),
+            bindings: worker.bindings(settings).into_iter().map(|(n, v, _)| (n, v)).collect(),
+            assets: worker.serves_web.then(|| web.to_path_buf()),
             // A throwaway network's URL signer, and the remote MCP server's devices reading by its URLs, reach its bucket on this machine.
-            outbound: (matches!(*name, "signer" | "mcp") && settings.throwaway_person.is_some()).then(|| NEARBY.to_string()),
-        })
-        .chain(node)
-        .collect()
+            outbound: (worker.reads_bucket && settings.throwaway_person.is_some()).then(|| NEARBY.to_string()),
+        });
+    }
+    served.extend(node);
+    // What's bound to a Worker that isn't here isn't bound.
+    let names: Vec<String> = served.iter().map(|s| s.name.clone()).collect();
+    for s in &mut served {
+        s.bindings.retain(|(_, v)| reaches(v).is_none_or(|other| names.iter().any(|n| n == other)));
+    }
+    Ok(served)
 }
 
 /// The client's build, as the web client fetches it (`/client/<version>/`): what its files hash to, so a browser
@@ -663,9 +706,8 @@ fn windows_links() -> Vec<u8> {
 /// release, the web client's files in `<home>/cloudflare/web`, and their storage in `<home>/cloudflare/data`.
 pub fn serve(settings: &Settings) -> Result<()> {
     let dir = Settings::path().parent().unwrap().to_path_buf();
-    let modules = WORKERS.iter().map(|(_, entry, _)| module(entry)).collect::<Result<Vec<_>>>()?;
     let web = dir.join("web");
-    let served = served(settings, modules, &web);
+    let served = served(settings, &web)?;
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
     ensure!(settings.throwaway_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's sign-in lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
@@ -1131,18 +1173,19 @@ fn mime(path: &str) -> &'static str {
     }
 }
 
-/// A Worker's name on Cloudflare: `<cli>-<service>`, so custom builds sharing an account don't clash.
-pub fn worker_name(service: &str) -> String {
-    format!("{}-{service}", crate::config::CLI)
+/// A Worker's name on Cloudflare: `<cli>-<name>`, so custom builds sharing an account don't clash.
+pub fn worker_name(name: &str) -> String {
+    format!("{}-{name}", crate::config::CLI)
 }
 
 /// What a Worker's upload says besides its module: its bindings (another service's by its Worker's name), its Durable
 /// Object class, and that class's migration the first time, or the migration that deletes a class it had (`migration`:
 /// the tag of the one the Worker has had).
-pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> (Value, bool) {
+pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> (Value, bool) {
     let mut complete = true;
+    let class = worker.class;
     let mut bindings: Vec<Value> = class.iter().map(|class| json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })).collect();
-    for (name, value, secret) in settings.bindings(service) {
+    for (name, value, secret) in worker.bindings(settings) {
         let object = value.strip_prefix("object:").and_then(|o| o.split_once(':'));
         // `service:<name>` or `service:<name>:<entrypoint>`, one of its named entrypoints.
         let service = value.strip_prefix("service:").map(|s| s.split_once(':').map_or((s, None), |(s, e)| (s, Some(e))));
@@ -1175,9 +1218,8 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrati
         meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
     }
     if class.is_none() && migration == Some("v1") {
-        let gone: Vec<&str> = DELETED.iter().filter(|(s, _)| *s == service).map(|(_, class)| *class).collect();
-        if !gone.is_empty() {
-            meta["migrations"] = json!({ "old_tag": "v1", "new_tag": "v2", "deleted_classes": gone });
+        if !worker.deleted.is_empty() {
+            meta["migrations"] = json!({ "old_tag": "v1", "new_tag": "v2", "deleted_classes": worker.deleted });
         }
     }
     (meta, complete)
@@ -1186,32 +1228,32 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrati
 /// Deploys the network's Workers to Cloudflare, each with its Durable Object, built from this release, the
 /// gateway with the web client's files (`web`) as its static assets, which it serves itself. A service whose binding
 /// names one not deployed yet goes up without it, and again once that one is.
-pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)]) -> Result<()> {
-    deploy_some(cf, settings, modules, web, &WORKERS.iter().map(|(s, _, _)| *s).collect::<Vec<_>>())
+pub fn deploy(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)]) -> Result<()> {
+    deploy_some(cf, settings, web, &WORKERS.iter().collect::<Vec<_>>())
 }
 
 /// `deploy`, of only the services named.
-pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)], services: &[&str]) -> Result<()> {
+pub fn deploy_some(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
     ensure!(settings.throwaway_person.is_none(), "a throwaway network's sign-in lets in anyone who reaches it, so its Workers run only beside its throwaway network");
-    if services.contains(&"gateway") {
+    if workers.iter().any(|w| w.serves_web) {
         parses(web)?;
     }
-    let mut left: Vec<usize> = (0..WORKERS.len()).filter(|i| services.contains(&WORKERS[*i].0)).collect();
+    let mut left = workers.to_vec();
     let mut scripts = cf.scripts()?;
     let uploaded = Uploaded::load();
     let mut sent = Vec::new();
     for _ in 0..2 {
         let mut again = Vec::new();
-        for i in left {
-            let (service, _, class) = WORKERS[i];
-            let name = worker_name(service);
+        for worker in left {
+            let name = worker.worker_name();
             let migration = scripts.get(&name).and_then(|s| s.migration.clone());
-            let (mut meta, complete) = metadata(settings, service, class, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
-            let url = settings.place(service).map(|(url, _)| url);
-            let Some(wasm) = modules_of(service, WORKERS[i].1, crate::cloudflare::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {service} service runs: {} update builds one", crate::config::CLI) };
-            let mut what = vec![meta.to_string().into_bytes(), modules[i].clone(), url.unwrap_or("").as_bytes().to_vec()];
+            let (mut meta, complete) = metadata(settings, worker, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
+            let url = worker.place(settings).map(|(url, _)| url);
+            let Some(wasm) = worker.modules(crate::cloudflare::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {} Worker runs: {} update builds one", worker.name, crate::config::CLI) };
+            let module = module(worker.entry)?;
+            let mut what = vec![meta.to_string().into_bytes(), module.clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
-            if service == "gateway" {
+            if worker.serves_web {
                 what.extend(web.iter().flat_map(|(path, bytes)| [path.as_bytes().to_vec(), bytes.clone()]));
             }
             let what = Uploaded::hash(&what);
@@ -1224,12 +1266,12 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
                 reach()?;
                 continue;
             }
-            if service == "gateway" {
+            if worker.serves_web {
                 let jwt = cf.assets(&name, web)?;
                 meta["assets"] = json!({ "jwt": jwt, "config": { "html_handling": "none", "not_found_handling": "none", "run_worker_first": true } });
                 meta["bindings"].as_array_mut().unwrap().push(json!({ "type": "assets", "name": "ASSETS" }));
             }
-            let mut parts: Vec<(&str, &str, &[u8])> = vec![("worker.js", "application/javascript+module", &modules[i])];
+            let mut parts: Vec<(&str, &str, &[u8])> = vec![("worker.js", "application/javascript+module", &module)];
             parts.extend(wasm.iter().map(|(name, bytes)| (name.as_str(), if name.ends_with(".js") { "application/javascript+module" } else { "application/wasm" }, bytes.as_slice())));
             let version = cf.upload(&name, &parts, &meta)?;
             reach()?;
@@ -1239,7 +1281,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
             if complete {
                 sent.push((name, what, version));
             } else {
-                again.push(i);
+                again.push(worker);
             }
         }
         left = again;

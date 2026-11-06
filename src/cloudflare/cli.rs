@@ -133,10 +133,9 @@ pub fn commands() -> Command {
                     let mut settings = settings;
                     at_home(&mut settings)?;
                     let settings = devices_here(g.node, settings, !flags.contains_key("new"))?;
-                    let modules = crate::cloudflare::WORKERS.iter().map(|(_, entry, _)| crate::cloudflare::module(entry)).collect::<Result<Vec<_>>>()?;
                     let mut web = settings.web();
                     web.extend(crate::cloudflare::precompressed(&web)?);
-                    crate::cloudflare::deploy(&cf, &settings, &modules, &web)?;
+                    crate::cloudflare::deploy(&cf, &settings, &web)?;
                     if settings.cloudflare_node {
                         crate::cloudflare::node::deploy(&cf, &settings)?;
                     }

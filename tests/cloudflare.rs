@@ -269,12 +269,11 @@ impl Workers {
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
         settings.root = Some(data_encoding::HEXLOWER.encode(&ROOT));
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "network", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
-        let modules = cloudflare::WORKERS.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();
         let web = crate::temp("web");
         std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
-        let mut served = cloudflare::served_with(&settings, modules, &web, None);
+        let mut served = cloudflare::served_with(&settings, &web, None).unwrap();
         for s in served.iter_mut().filter(|s| ["signer", "mcp", "push"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());
         }
