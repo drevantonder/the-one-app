@@ -112,7 +112,7 @@ impl Auth {
     /// which its person's devices then let in by this sign-in.
     pub fn ask(&self, client: &str, redirect: &str, join: Option<&str>) -> Asked {
         let verifier = B64U.encode(&rand::random::<[u8; 32]>());
-        let state = B64U.encode(&rand::random::<[u8; 16]>());
+        let state = B64U.encode(&rand::random::<[u8; 32]>());
         let challenge = B64U.encode(&one::keys::sha256(verifier.as_bytes()));
         let mut fields = vec![
             ("response_type", "code"),
