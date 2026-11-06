@@ -133,7 +133,7 @@ pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Re
 
 /// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as a node
 /// on a machine says it (src/node/sessions.rs): every epoch from the oldest it needs (`one::keys::oldest_needed`) to the
-/// scope's current one, as the network's signed entries say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
+/// scope's current one, as the network's signed steps say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
 /// holds, where any endpoint can put a name. → `[{ scope, epoch, app, database }]`.
 #[wasm_bindgen]
 pub async fn needs(bucket: JsValue, wants: String, epochs: String) -> Result<String, JsError> {
@@ -158,7 +158,7 @@ fn usable(keys: &str, current: u32) -> Result<one::database::stored::Keys, JsVal
     one::database::stored::handed(keys_of(keys).map_err(failed)?, current.max(1)).map_err(|m| failed(m.into()))
 }
 
-/// How many people's databases and entries one isolate keeps, the least lately used going first: each person's are
+/// How many people's databases and steps one isolate keeps, the least lately used going first: each person's are
 /// their Durable Object's, and several may share an isolate, which outlives them.
 const OWNERS_MOST: usize = 16;
 
@@ -170,7 +170,7 @@ thread_local! {
 }
 
 /// Notes that `owner`'s object is using what this isolate keeps for it, forgetting the least lately used owner's
-/// databases and entries once there are too many.
+/// databases and steps once there are too many.
 fn touch(owner: &str) {
     let gone = OWNERS.with(|o| {
         let mut o = o.borrow_mut();
@@ -633,7 +633,7 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) ->
     })
 }
 
-/// The groups `user` is in, as scopes: whose entries to read next.
+/// The groups `user` is in, as scopes: whose steps to read next.
 #[wasm_bindgen]
 pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
     let groups = replayed(owner, &[], |r| r.global().groups_of(user).into_keys().map(|g| format!("group:{g}")).collect::<Vec<_>>()).map_err(thrown)?;
@@ -659,7 +659,7 @@ pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsErro
     Ok(out.to_string())
 }
 
-/// Each of `scopes`' (JSON) current epoch, as the network's signed `epoch` entries say, 1 for one with none yet:
+/// Each of `scopes`' (JSON) current epoch, as the network's signed `epoch` steps say, 1 for one with none yet:
 /// `{ <scope>: n }`, all a node writes under.
 #[wasm_bindgen]
 pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
@@ -694,7 +694,7 @@ pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, unt
     Ok(asked.to_string())
 }
 
-/// The network as `user` sees it, from the entries of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.
+/// The network as `user` sees it, from the steps of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.
 /// `state` is `GET /v1/state`'s, for a node that knows of no device being on; `apps` is `GET /v1/apps`'s from the
 /// members alone, each with `reach`, the scopes it reaches for `user` (what its widgets and calls are given), for
 /// `worker.js` to add what each app says it does; `me` is what an app is told of who it runs for; `erased`, the apps
@@ -732,7 +732,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
             client: Some(json!({ "key": "", "name": client })),
             device: json!({ "key": m.cloudflare_node().map(|k| one::keys::hex(&k)).unwrap_or_default(), "name": "Cloudflare", "ready": true, "guide": null }),
             member: false,
-            entries: 0,
+            steps: 0,
             waiting: waiting as usize,
             arrangements: Value::Object(arrangements),
             backups: None,

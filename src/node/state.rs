@@ -107,7 +107,7 @@ impl Node {
             device: json!({ "key": hex(&self.0.id), "name": self.device_name(), "ready": ready, "guide": crate::skills::address() }),
             member: network.as_ref().is_some_and(|i| i.r.db().compute(&self.0.id).is_some()),
             // `global`'s steps read.
-            entries: network.as_ref().map(|i| i.r.at().unwrap_or(0)).unwrap_or(0),
+            steps: network.as_ref().map(|i| i.r.at().unwrap_or(0)).unwrap_or(0),
             waiting,
             arrangements: json!(arrangements),
             backups,

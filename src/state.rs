@@ -22,7 +22,7 @@ pub struct Here<'a> {
     pub device: Value,
     /// Whether that node is one of the network's devices.
     pub member: bool,
-    pub entries: u64,
+    pub steps: u64,
     /// Requests for an item waiting for this person to answer.
     pub waiting: usize,
     /// How this person arranged each of their pages.
@@ -151,7 +151,7 @@ fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         // scope, until when, and who set them. Ones whose endpoint is gone, or whose setter may set them no more, are
         // over.
         "app_schedules": m.app_schedules().iter().filter(|((k, s, _), g)| m.may(me, "choose-devices", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "choose-devices", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
-        "entries": here.entries, "settings": settings,
+        "steps": here.steps, "settings": settings,
         // The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets it).
         // Its parts, as a device's oned lists its own: it always runs apps, and an admin switches on each service built
         // for it that it carries (a built-in app's `service/cloudflare.js`).

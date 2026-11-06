@@ -835,7 +835,7 @@ fn status(node: &Client, state: &Value) {
     }
     let users: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
     let name = |id: &str| users.get(id).copied().unwrap_or(id).to_string();
-    println!("\n{}  {} changes", i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), i["entries"]);
+    println!("\n{}  {} changes", i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), i["steps"]);
     println!("\nUsers");
     for u in i["users"].as_array().into_iter().flatten() {
         let me = if u["me"] == true { " (you)" } else { "" };
