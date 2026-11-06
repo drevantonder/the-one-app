@@ -13,6 +13,24 @@ use crate::keys::hex;
 
 use super::{Bucket, Failed, Object, Trouble};
 
+/// One pool of connections for every request of a bucket's, so a request after the first reaches it over a connection
+/// already open, not a new TCP and TLS handshake: each is `timeout` seconds at most.
+fn pooled(pool: &'static std::sync::OnceLock<ureq::Agent>, timeout: u64) -> ureq::Agent {
+    pool.get_or_init(|| ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(timeout))).max_idle_connections_per_host(16).build().into()).clone()
+}
+
+/// The pool for requests to a bucket's own place.
+fn requests() -> ureq::Agent {
+    static POOL: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    pooled(&POOL, 300)
+}
+
+/// The pool for requests to the URL signer.
+pub(super) fn signer_requests() -> ureq::Agent {
+    static POOL: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    pooled(&POOL, 30)
+}
+
 /// A folder's I/O error, as a disk's trouble, in words.
 fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
     use std::io::ErrorKind::*;
@@ -343,6 +361,10 @@ impl Bucket for Place {
         tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
     }
 
+    fn now(&self) -> u64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+    }
+
     async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
         let (place, folder) = (self.clone(), folder.to_string());
         let listed = tokio::task::spawn_blocking(move || Place::objects(&place, &folder)).await??;
@@ -514,7 +536,7 @@ impl S3 {
     /// A request by presigned URL: → its status, ETag and body.
     fn request(&self, method: &str, name: &str, query: &[(&str, &str)], headers: &[(&str, &str)], body: &[u8]) -> Result<(u16, Option<String>, Vec<u8>)> {
         let url = self.url(&Ask { method, name, query, headers })?;
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(300))).build().into();
+        let agent = requests();
         let mut builder = ureq::http::Request::builder().method(method).uri(&url);
         for (k, v) in headers {
             builder = builder.header(*k, *v);

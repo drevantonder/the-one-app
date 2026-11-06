@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -52,8 +51,7 @@ impl Signer {
         let address = (self.address)()?;
         fields["reads"] = serde_json::json!(crate::database::READS);
         let body = crate::keys::signed_request(&self.key, "one/urls", fields, now_ms());
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-        let mut resp = agent.post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})")))?;
+        let mut resp = super::place::signer_requests().post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})")))?;
         let status = resp.status().as_u16();
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         let said = out["error"].as_str().unwrap_or("nothing").to_string();
