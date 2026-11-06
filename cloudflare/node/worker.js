@@ -442,8 +442,9 @@ class Person {
     return runs;
   }
 
-  /// The network as a request's person sees it (src/lib.rs: `network`): `{ state, apps, me, epochs }`, from the
-  /// steps of Everyone's, their own and the groups' they handed the keys of. Their device is checked first.
+  /// The network as a request's person sees it (src/lib.rs: `network`): `{ state, apps, me, epochs, runs }`, `runs` the
+  /// scopes of theirs this node runs, from the steps of Everyone's, their own and the groups' they handed the keys of.
+  /// Their device is checked first.
   async networkFor(who) {
     await this.readScopes(who, ["global"]);
     const runs = this.forgetLost(who);
@@ -457,6 +458,7 @@ class Person {
     const view = JSON.parse(network(this.owner, who.user, who.clientName, JSON.stringify(read), Date.now()));
     this.bucket.sealed.forgetErased(view.erased || []);
     view.epochs = this.epochs(read);
+    view.runs = runs;
     return view;
   }
 
@@ -946,8 +948,8 @@ async function route(p, request) {
     const run = new Run(p, who, await p.networkFor(who));
     const app = !req.service && !req.device && deployed(run.view, req.app);
     const d = app && (await p.describe(who, app));
-    // An app that keeps to its own data runs here; the rest on a machine, when one answers.
-    if (d && plain(d, run.view)) return json(await run.call(req));
+    // An app that keeps to its own data, in scopes this node runs, runs here; the rest on a machine, when one answers.
+    if (d && plain(d, run.view) && p.callScopes(who, run.view, req).every((s) => run.view.runs.includes(s))) return json(await run.call(req));
     const r = await p.onMachine(who, run.view, req, 120_000);
     if (r) return json(r, r.ok !== undefined ? 200 : 400);
     if (!d || !servedHere(run.view, d)) refuse(503, needsDevice(d, req.app));

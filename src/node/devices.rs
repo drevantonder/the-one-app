@@ -1018,8 +1018,8 @@ impl Node {
         self.with(|i| {
             Ok(match scope {
                 Scope::Global => "everyone's".to_string(),
-                Scope::User(u) => format!("{}'s own", Some(super::whose(i.r.db(), scope)?).filter(|n| !n.is_empty()).unwrap_or(u.clone())),
-                Scope::Group(g) => format!("{}'s", Some(super::whose(i.r.db(), scope)?).filter(|n| !n.is_empty()).unwrap_or(g.clone())),
+                Scope::User(u) => format!("{}'s own", Some(crate::state::whose(i.r.db(), scope)?).filter(|n| !n.is_empty()).unwrap_or(u.clone())),
+                Scope::Group(g) => format!("{}'s", Some(crate::state::whose(i.r.db(), scope)?).filter(|n| !n.is_empty()).unwrap_or(g.clone())),
             })
         })
         .unwrap_or_default()

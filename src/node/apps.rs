@@ -175,32 +175,21 @@ impl Node {
             apps.iter()
                 .filter(|a| !a.erased)
                 .map(|a| -> Result<_> {
-                    let mut added: Vec<String> = i
-                        .views
-                        .iter()
-                        .filter(|(scope, s)| s.added.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may(&viewer.user, "use", &scopes::object(&s))))
-                        .map(|(scope, _)| scope.clone())
-                        .collect();
-                    added.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
-                    let reach = reachable(i, &a.name, &viewer.user)?;
-                    let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
-                    let forks: Vec<&String> = apps.iter().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
+                    let states = i.views.iter().filter_map(|(scope, st)| Some((Scope::parse(scope).ok()?, st))).collect::<Vec<_>>();
+                    let added = crate::state::added(m, &a.name, &viewer.user, states.iter().map(|(s, st)| (s, *st)));
                     let runs_on = runs_on(self, i, &switches, &parts_here, &a.name, &added, &viewer.user)?;
-                    let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "added": added, "runs_on": runs_on });
+                    let mut info = crate::state::app_info(m, a, &apps, &viewer.user, added)?;
+                    info["runs_on"] = json!(runs_on);
                     if let Some(bundle) = self.built_in(a) {
                         info["built_in"] = json!(bundle);
                     }
-                    match &a.source {
-                        Some(link) if !link.is_empty() => info["source"] = json!(link),
-                        Some(_) => {}
-                        None => info["source"] = json!(self.built_in(a).and(built_in_source(&a.name))),
+                    if a.source.is_none() {
+                        info["source"] = json!(self.built_in(a).and(built_in_source(&a.name)));
                     }
-                    // A deleted app leaves every page; its owners see it in Recently Deleted.
-                    if let Some((time, by)) = &a.deleted {
-                        info["added"] = json!([]);
-                        info["deleted"] = json!({ "time": time, "by": m.user_ever(by)?.map(|u| u.name), "yours": m.may(&viewer.user, "delete", &scopes::app(&a.name)) });
+                    if a.deleted.is_some() {
                         return Ok((a.name.clone(), info, false));
                     }
+                    let reach = reachable(i, &a.name, &viewer.user)?;
                     Ok((a.name.clone(), info, !reach.is_empty()))
                 })
                 .collect::<Result<Vec<_>>>()

@@ -443,7 +443,7 @@ impl Service {
                 return Ok(json!({ "error": format!("{err:#}") }));
             }
             let person = m.user(&user)?;
-            crate::app::runtime::Me {
+            crate::state::Me {
                 key: hex(&key),
                 user: user.clone(),
                 name: m.machine(&key)?.map(|d| d.name).unwrap_or_default(),

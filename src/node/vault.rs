@@ -10,7 +10,6 @@ use crate::vault::{Items, Lookup};
 
 use super::*;
 
-const REQUEST_LIFE: u64 = 86_400_000;
 
 pub mod tools;
 pub mod cli;
@@ -614,7 +613,7 @@ impl Node {
             let state = &i.views.get(&scope.to_string()).with_context(|| format!("no request {id} in {scope}"))?;
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
             ensure!(r.answer.is_none(), "that request was already answered");
-            ensure!(now_ms().saturating_sub(r.time) <= REQUEST_LIFE, "that request has expired: ask for it again");
+            ensure!(now_ms().saturating_sub(r.time) <= crate::state::REQUEST_LIFE, "that request has expired: ask for it again");
             ensure!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string())?);
             Ok(r.clone())
         })?;
@@ -684,7 +683,7 @@ impl Node {
                 for (rid, r) in state.requests.iter().filter(|(rid, _)| wanted(rid)) {
                     let state_now = match &r.answer {
                         Some((how, ..)) => how.as_str(),
-                        None if now.saturating_sub(r.time) > REQUEST_LIFE => "expired",
+                        None if now.saturating_sub(r.time) > crate::state::REQUEST_LIFE => "expired",
                         None => "waiting",
                     };
                     let answered = r.answer.as_ref().map(|(_, by, t)| name(by).map(|by| json!({ "by": by, "time": t }))).transpose()?;
@@ -710,9 +709,6 @@ impl Node {
     pub(super) fn waiting_requests(&self, viewer: &Caller) -> Result<usize> {
         let now = now_ms();
         let scopes = self.managed_scopes(viewer, None)?;
-        self.with(|i| {
-            let waiting = |s: &Scope| i.views.get(&s.to_string()).map_or(0, |st| st.requests.values().filter(|r| r.answer.is_none() && now.saturating_sub(r.time) <= REQUEST_LIFE).count());
-            Ok(scopes.iter().map(waiting).sum())
-        })
+        self.with(|i| Ok(crate::state::waiting(i.r.db(), &viewer.user, scopes.iter().filter_map(|s| Some((s, i.views.get(&s.to_string())?))), now)))
     }
 }

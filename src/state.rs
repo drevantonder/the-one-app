@@ -5,12 +5,13 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::database::scopes::{NETWORK, ScopeDb, object};
 use crate::keys::hex;
 use crate::database::scopes;
-use crate::database::scopes::{Kind, Machine};
+use crate::database::scopes::{App, Kind, Machine, Role, Scope, ScopeState};
 use crate::rank;
 
 /// What the node answering knows that the scope database doesn't.
@@ -233,3 +234,119 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, st
     Ok(out)
 }
 
+
+// What a node tells an app and a person of the network beyond `state`, the same from a node on a machine and from the
+// Cloudflare node: each gives who's who (`global`'s scope database) and what it read of each scope (`ScopeState`).
+
+/// Who a call, widget or hook runs for.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Me {
+    pub key: String,
+    pub user: String,
+    pub name: String,
+    pub role: Option<Role>,
+    /// The user's name.
+    pub user_name: String,
+    /// The user's handle (`scopes::valid_handle`).
+    #[serde(default)]
+    pub handle: String,
+    /// The agent that asked (an MCP client's name, like "Claude Code"), when one did.
+    pub agent: Option<String>,
+}
+
+/// `user` as an app is told of them, on the device `key` (hex) named `name`.
+pub fn me(m: &ScopeDb, user: &str, key: String, name: String, agent: Option<String>) -> Result<Me> {
+    let u = m.user(user)?;
+    Ok(Me {
+        key,
+        user: user.to_string(),
+        name,
+        role: u.as_ref().map(|u| u.role),
+        user_name: u.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
+        handle: u.map(|u| u.handle).unwrap_or_default(),
+        agent,
+    })
+}
+
+/// A scope a call may reach, and the caller's role there.
+#[derive(Clone, Debug, Serialize)]
+pub struct ScopeHandle {
+    pub id: String,
+    pub name: String,
+    pub role: Option<Role>,
+}
+
+pub fn handles(m: &ScopeDb, scopes: &[Scope], user: &str) -> Result<Vec<ScopeHandle>> {
+    scopes.iter().map(|s| Ok(ScopeHandle { id: s.to_string(), name: whose(m, s)?, role: m.role_in(user, s)? })).collect()
+}
+
+/// A scope's name: the network's, a group's, or a person's, removed people's too.
+pub fn whose(m: &ScopeDb, scope: &Scope) -> Result<String> {
+    Ok(match scope {
+        Scope::Global => m.name()?,
+        Scope::Group(g) => m.group(g)?.map(|g| g.name).unwrap_or_default(),
+        Scope::User(u) => m.user_ever(u)?.map(|u| u.name).unwrap_or_default(),
+    })
+}
+
+/// The scopes a call of an app as `user` reaches: their own if it's added for them at all, each of their groups it's
+/// added for (in the group or in `global`), and `global` if it's added there. `added` says whether the app is added in
+/// a scope, or None for one the node answering doesn't run, and so can't read: such a group counts, so that the call
+/// goes to a node that runs it, which answers for it, and what a call reaches never depends on which node answers. A
+/// scope the node runs but hasn't read yet has nothing added.
+pub fn reachable(m: &ScopeDb, user: &str, added: impl Fn(&Scope) -> Option<bool>) -> Result<Vec<Scope>> {
+    let is = |s: &Scope| added(s) == Some(true);
+    let global = is(&Scope::Global);
+    let mut out = Vec::new();
+    for g in m.groups_of(user)?.into_keys() {
+        let s = Scope::Group(g);
+        if global || added(&s) != Some(false) {
+            out.push(s);
+        }
+    }
+    let mine = Scope::User(user.into());
+    if global || is(&mine) || out.iter().any(is) {
+        out.insert(0, mine);
+    }
+    if global {
+        out.push(Scope::Global);
+    }
+    Ok(out)
+}
+
+/// How long an app's or agent's request for an item waits for an answer.
+pub const REQUEST_LIFE: u64 = 86_400_000;
+
+/// How many requests for an item `user` may answer are waiting, of the scopes read (`states`), at `now`.
+pub fn waiting<'a>(m: &ScopeDb, user: &str, states: impl IntoIterator<Item = (&'a Scope, &'a ScopeState)>, now: u64) -> usize {
+    states
+        .into_iter()
+        .filter(|(s, _)| m.may(user, "add-apps", &object(s)))
+        .map(|(_, st)| st.requests.values().filter(|r| r.answer.is_none() && now.saturating_sub(r.time) <= REQUEST_LIFE).count())
+        .sum()
+}
+
+/// The scopes `viewer` may use that `app` is added in, of those read (`states`): theirs first, everyone's last.
+pub fn added<'a>(m: &ScopeDb, app: &str, viewer: &str, states: impl IntoIterator<Item = (&'a Scope, &'a ScopeState)>) -> Vec<String> {
+    let mut added: Vec<String> = states.into_iter().filter(|(s, st)| st.added.contains(app) && m.may(viewer, "use", &object(s))).map(|(s, _)| s.to_string()).collect();
+    added.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
+    added
+}
+
+/// What `GET /v1/apps` says of `a`, of every app in the network (`every`), to `viewer`, from who's who alone: owner,
+/// `from`, forks, deploys, bundle, history, the scopes it's `added` in (`added`), its source if it was deployed from
+/// one, and, deleted, when and by whom, added nowhere.
+pub fn app_info(m: &ScopeDb, a: &App, every: &[App], viewer: &str, added: Vec<String>) -> Result<Value> {
+    let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
+    let forks: Vec<&String> = every.iter().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
+    let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "added": added });
+    if let Some(link) = a.source.as_ref().filter(|l| !l.is_empty()) {
+        info["source"] = json!(link);
+    }
+    // A deleted app leaves every page; its owners see it in Recently Deleted.
+    if let Some((time, by)) = &a.deleted {
+        info["added"] = json!([]);
+        info["deleted"] = json!({ "time": time, "by": m.user_ever(by)?.map(|u| u.name), "yours": m.may(viewer, "delete", &scopes::app(&a.name)) });
+    }
+    Ok(info)
+}

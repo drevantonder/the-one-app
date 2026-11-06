@@ -15,13 +15,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::Digest;
 
 
 use crate::call::{Append, appends};
-use crate::database::scopes::Role;
+use crate::state::{Me, ScopeHandle};
 
 /// The workerd build every node runs, and each platform's npm package of it with its sha512.
 const WORKERD: &str = "1.20261031.1";
@@ -37,29 +37,6 @@ const TIME_LIMIT: Duration = Duration::from_secs(30);
 /// How long the runtime may take to start before it's given up on: seconds on a quiet machine, a minute or more on
 /// one whose cores are all busy.
 const START_LIMIT: Duration = Duration::from_secs(300);
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Me {
-    pub key: String,
-    pub user: String,
-    pub name: String,
-    pub role: Option<Role>,
-    /// The user's name.
-    pub user_name: String,
-    /// The user's handle (`scopes::valid_handle`).
-    #[serde(default)]
-    pub handle: String,
-    /// The agent that asked (an MCP client's name, like "Claude Code"), when one did.
-    pub agent: Option<String>,
-}
-
-/// A scope a call may reach, and the caller's role there.
-#[derive(Clone, Debug, Serialize)]
-pub struct ScopeHandle {
-    pub id: String,
-    pub name: String,
-    pub role: Option<Role>,
-}
 
 /// Who a call, widget or hook runs for, and what it may reach.
 #[derive(Clone, Debug, Serialize)]

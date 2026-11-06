@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
-use crate::app::runtime::{Apps, Context, Me, ScopeHandle};
+use crate::app::runtime::{Apps, Context};
+use crate::state::{Me, handles, whose};
 use crate::call::Append;
 use crate::bucket::{Copied, Place};
 use crate::database::stored::Db;
@@ -537,41 +538,10 @@ fn note_change(i: &mut Network, scope: &Scope) {
     i.changed.entry(scope.clone()).and_modify(|c| c.1 = now).or_insert((now, now));
 }
 
-/// The scopes a call of `app` as `user` may reach: their own if it's added for them at all, each of their groups
-/// it's added for (in the group or in `global`; a group whose apps added this device can't see counts), and `global`
-/// if it's added there.
+/// The scopes a call of `app` as `user` reaches (`state::reachable`), as this device can tell: of each scope it holds,
+/// by what it read.
 fn reachable(i: &Network, app: &str, user: &str) -> Result<Vec<Scope>> {
-    let db = i.r.db();
-    let added = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|st| st.added.contains(app));
-    let global = added(&Scope::Global);
-    let mut out = Vec::new();
-    for g in db.groups_of(user)?.keys() {
-        let s = Scope::Group(g.clone());
-        if global || added(&s) || !i.r.holds(&s) {
-            out.push(s);
-        }
-    }
-    let mine = Scope::User(user.into());
-    if global || added(&mine) || out.iter().any(|s| added(s)) {
-        out.insert(0, mine);
-    }
-    if global {
-        out.push(Scope::Global);
-    }
-    Ok(out)
-}
-
-fn handles(db: &ScopeDb, scopes: &[Scope], user: &str) -> Result<Vec<ScopeHandle>> {
-    scopes.iter().map(|s| Ok(ScopeHandle { id: s.to_string(), name: whose(db, s)?, role: db.role_in(user, s)? })).collect()
-}
-
-/// A scope's name: the network's, a group's, or a person's, removed people's too.
-fn whose(db: &ScopeDb, scope: &Scope) -> Result<String> {
-    Ok(match scope {
-        Scope::Global => db.name()?,
-        Scope::Group(g) => db.group(g)?.map(|g| g.name).unwrap_or_default(),
-        Scope::User(u) => db.user_ever(u)?.map(|u| u.name).unwrap_or_default(),
-    })
+    crate::state::reachable(i.r.db(), user, |s| i.r.holds(s).then(|| i.views.get(&s.to_string()).is_some_and(|st| st.added.contains(app))))
 }
 
 /// A person's name in the network, removed people's too; none if it never knew them.
@@ -581,16 +551,7 @@ fn user_name(db: &ScopeDb, user: &str) -> Result<String> {
 
 fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Result<Me> {
     let name = if caller.key == node.0.id { node.device_name() } else { db.machine(&caller.key)?.map(|k| k.name).unwrap_or_default() };
-    let user = db.user(&caller.user)?;
-    Ok(Me {
-        key: hex(&caller.key),
-        user: caller.user.clone(),
-        name,
-        role: user.as_ref().map(|u| u.role),
-        user_name: user.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
-        handle: user.map(|u| u.handle).unwrap_or_default(),
-        agent: caller.agent.clone(),
-    })
+    crate::state::me(db, &caller.user, hex(&caller.key), name, caller.agent.clone())
 }
 
 fn scope_name(i: &Network, scope: &str) -> Result<String> {
