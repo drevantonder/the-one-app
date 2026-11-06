@@ -1,8 +1,8 @@
 //! The scope database: who and what a scope has (people, groups, devices, who holds which role, epochs, app schedules, apps,
-//! deploys, installs, services, settings, the Vault's bookkeeping, recovery) as SQLite rows. Until the log is frozen
-//! it's built, never written: `build` makes it from what replay made (`Members`, and the scope's `ScopeState`), so
-//! replay stays the truth and this is its projection, the same on every reader. It's small, so it's built again as
-//! entries arrive.
+//! deploys, installs, services, settings, the Vault's bookkeeping, recovery) as SQLite rows: the truth, written as
+//! signed steps (`steps`). Each step is applied by reading what it changes into `Members` and the scope's
+//! `ScopeState`, changing them by the step's rules, and building the database again from them (`build`), the same on
+//! every reader. It's small, so it's built again at each step.
 //!
 //! Every scope's database has the same tables, `permissions`' among them with its defaults. What `global`'s entries
 //! say of the whole network (people, groups, invites, devices, relations, epochs and app schedules of every scope, apps,

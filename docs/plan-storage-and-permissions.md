@@ -1,6 +1,6 @@
 # Plan: one storage model, and permissions as data
 
-Decided by Andre on 2026-11-05. This file goes once phase 3 is done: from then on the code and ARCHITECTURE.md say it.
+Decided by Andre on 2026-11-05. Phases 0 to 2 are done, and phase 3 mostly (below). This file goes once phase 3 is done: from then on the code and ARCHITECTURE.md say it.
 
 ## Why
 
@@ -106,35 +106,24 @@ This phase is docs only.
 
 This release is **R1**.
 
-### Phase 2, switch: the scope database becomes the truth
+### Phase 2, switch: the scope database becomes the truth (done, 2026-11-06)
 
-This phase has one owner. It's a cut-over while we're pre-production (Andre, 2026-11-06): one release, and once a network is frozen every device that reads less than the scope database (`switch::GATE`) is told "Update this device", by the nodes it asks, the relay (`computes`) and the URL signer, which refuses its writes so an older node can't write to the frozen log, though it still reads, to take its update. `one status` lists, for an admin, the devices not updated yet, until it's frozen. A network made with this release starts frozen: its creation runs the ceremony with its new recovery key. Once both networks are switched, the migration code goes.
-
-1. **The cut-over.**
-   - The first copy of the scope database is the one built from the log at a final position.
-   - Every R1 device checks that copy once by building it itself, from the entries it has already checked, in its own release's form, and keeps it. That's the anchor for existing networks.
-   - The scope database's first step marks the log frozen: the network's **recovery key** signs it, once, in a ceremony Andre runs when he gives his go (`one switch --recovery-key <file>`; `one throwaway switch` uses the throwaway's own). No admin device signs one (Andre, 2026-11-05). The ceremony runs only on an admin's own machine, and waits for no device; it writes a `gate` entry to the log from the admin's own device first, unless one by someone still an admin is there, then `FREEZING`, then the freeze with the copy and the final position (the last step of `global`'s log, and of each other scope's), read just before. A freeze counts only if the log it names ends after a `gate` entry an admin's own device wrote, by someone still an admin where it ends, so none signed before this release, by a recovery key replaced since, ever does; and the ceremony refuses, saying so, when a freeze it didn't write already counts, and says why when its own doesn't. `one switch check` (read only) says whether the bucket holds any of the scope database's steps yet, or any step of `global`'s log that opens to a step rather than entries.
-   - The same freeze goes first as the log's step after that end, its mark, so the end it names is the log's real one: a recovery key replaced since can't name an end from before it was.
-   - A recovery key that forked `global` is no recovery key, wherever it handed over to: replay cuts it at the fork, so it could otherwise fork away its own replacement. While there's none, an admin's own device names the next with a `recovery` entry (or step), and only then (Andre, 2026-11-05): in the log, only once replay has passed every entry the forked key wrote before its fork, its handover among them, so an admin's device that hadn't read that handover can't replace the key it handed over to. Epochs made meanwhile are sealed to no recovery key. A known limit of the log: a retired recovery key that leaks can still fork at or before its handover's seq and so undo the handover; neither network's log has a handover, so it can't happen before the freeze, and after it who's who is ordered steps, which can't fork.
-   - Every reader (nodes, clients, browsers, the Cloudflare node) looks only at a freeze a key it knows was ever the recovery key signed (the genesis's, or one a `recovery` entry by such a key names); anything else shaped like a freeze is passed over without reading any log end it names. Before it judges a step shaped like a freeze, a reader reads `global`'s log from the bucket to its end, so a client whose entries are behind still knows every key that was ever the recovery key. It replays exactly `global`'s log's steps up to the end the freeze names, forks among those only, and counts it only if the recovery key there signed it, so every reader takes the same one whenever it reads it. One the recovery key signed that doesn't check out stops the reader, never passed over.
-   - A service, which can't read the log, takes the freeze the recovery key its entries name signed, its copy checked against the hash it names. A device let in starts from its Welcome, checked the same way as every reader, plus the Welcome's hash.
-2. **Changes to who may do what are written as signed steps to the scope database**, from every client through the client crate's code. The log is never written again.
-3. **A device that missed the gate and comes back older** still reads the frozen log, so it can't change who's in until it updates. It can't leak anything either:
-   - epochs it makes don't count, and steps under them are skipped, which is the rule already;
-   - the relay refuses removed devices regardless.
-4. **Storage switches on what R1 built**, on each device once it knows the log is frozen (a freeze that counts), never because of what its build is. A database is opened with phase 2 on for it (`Db::switched`), and one opened before is opened again once its device knows:
-   - a writer signs a step in it (`db::SIGNED`: the changeset, its signer, its signature and, on a step a copy follows, the state hash, in one create-only write), not beside it in `<n>.sig`. R1 reads both kinds; an older reader passes over a kind it doesn't know, so it's told to update.
-   - `DELETE_COVERED_STEPS`, a constant in `src/db.rs`, off until Andre decides: the steps a copy covers go after the retention period. An older reader that can't start from the copy would read what's left as the whole database.
-     - Once they can go, writing a backup back into a bucket, or moving storage, must start from the copy: a database's newest copy, then its steps after. The URL signer creates a step only once the one before it, or the copy up to it, is there, and a copy only once its step is, so it must first take a copy whose covered steps are gone. Moving storage today copies each database's steps up to the first position with nothing (`node::storage`).
-   - From the first step a writer signs in it, which records its position (`db::Sig::from`), every reader refuses a step that isn't signed in it, or whose signature or state hash doesn't hold (`db::refused`, `db::copy_holds`); before it, nothing is. The scope database's readers and writers also check its signer (`db::Signers`, `Db::open_checking`).
+One cut-over release (`dc8d0351`). Each network's recovery key signed one freeze, in a ceremony Andre ran: The One App's log froze at its step 833, the PTC App's at 615. The freeze is the first step of `global`'s scope database the recovery key signed, carrying the database there; who's who has been the scope database's signed steps since, checked by `may` at each. Storage signs each step in it and refuses those that aren't (`db::SIGNED`, `db::refused`, `db::copy_holds`). Deleting the steps a copy covers (`DELETE_COVERED_STEPS`) stays off until Andre decides.
 
 ### Phase 3, contract: delete, rename, move
 
-These are separate pieces of work, in parallel:
-- delete the log's code and its JavaScript copies, and trim `tests/contracts.rs`;
-- rename grants to app schedules everywhere: code, CLI, MCP, screens and data, in one change, as AGENTS.md requires (done but for what older devices read: the `grant` entry, the `keep` verb, the `keeps` tables, `_grants` in the bucket);
-- move to those folders one at a time, each move a quick commit announced on the board;
-- generate the file map, and finish ARCHITECTURE.md;
+Done (2026-11-06):
+- **The gate**: a device older than this build is told to update by one number, `database::READS`, which nodes, the relay, sign-in and the URL signer each check as it asks. Devices no longer say what they read or when; `one status` no longer lists devices not updated yet.
+- **The freeze, read without replay**: every reader (nodes, clients, browsers, the Cloudflare node, services, backups) takes who's who from the first freeze the recovery key the genesis names signed, its copy checked against its hash, or from its Welcome's hash; a new network writes that freeze as it's made (`steps::first_freeze`). The ceremony (`one switch`, `one switch check`, `one throwaway switch`), `FREEZING`, the freeze's mark, `left_out`, the `gate` entry, `/v1/entries/global`, posting entries, and the JavaScript that signed and checked entries are gone. The recovery key lets a device in by a step it signs.
+- **Storage always on**: `Db::open_switched`, `MaybeFrozen`, asking whether the log is frozen before a write, and the per-device frozen flag are gone.
+- **Repos** asks the node's `may`, with no fallback for nodes from before it; a browser's record of who's who has no `roles` or `runs` for older tabs.
+
+Left, each its own piece of work:
+- **The frozen logs, read only.** Every scope but `global` starts, before its first step, from what its frozen log's entries add up to (`steps::scope_anchor`), which needs `global`'s frozen log replayed to the freeze (`Members::replay`, causal order, forks). A node keeps each scope's database once worked out (`scope-kept/`), but a new node and the Cloudflare node, which keeps nothing, work it out again. To delete replay: each scope gets a signed starting point, such as a step by one of its people's devices naming the hash of its database at the freeze, written once by the first device of theirs on this release; once every scope has one, readers start there and `members::replay`, `entry::causal`, the forks and the log reading go. Backups of history from before the freeze read their entries the same way.
+- **The store of entries** (`src/store.rs`, `src/node/logs.rs`, `Replica::store`) still mirrors the frozen logs, for that and for what still asks it: blobs an entry names, backups' snapshots, release entries, device seqs. Each moves to the scope database's rows, then the store goes.
+- **Step rules as rows.** A step is applied by `members`' hand-written rules on `Members` read from the database and built back (`steps::apply`); replacing them with SQL over the rows and `may` deletes most of `src/members.rs`.
+- **`members.js`** stays: it builds the content of the steps a browser signs, the same content entries carried.
+- **Renaming** what older devices read (`grant`, the `keep` verb, `keeps` tables, `_grants`), **moving folders**, and **generating the file map**, as planned.
 
 ## The scope database's tables
 

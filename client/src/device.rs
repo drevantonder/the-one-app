@@ -4,9 +4,9 @@
 //! each request the database keys it needed last time (`x-one-keys`), sent again once with those a node's 428 names.
 //! cloudflare/web/device.js is the same in a browser.
 //!
-//! It trusts no node, nor the relay, for who's who: it reads `global`'s entries from the bucket itself, opens them with
-//! the epochs sealed to it, and replays them by the node's own rules (`crate::members`, as browsers and the MCP
-//! Worker's devices do). It asks only endpoints those list
+//! It trusts no node, nor the relay, for who's who: it reads `global`'s scope database's steps from the bucket itself,
+//! opens them with the epochs sealed to it, and applies them by the node's own rules (`crate::members`, as browsers and
+//! the remote MCP server's devices do). It asks only endpoints those list
 //! as compute that run its person's things, takes a 428 only from the node that answered, naming the seal key they list
 //! for it, and only for scopes they say it runs, databases that kind of request uses (`keys::may_hand`) and epochs
 //! from each one's newest copy (`keys::oldest_needed`); and hands what it named to the one node each request is sent

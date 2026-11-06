@@ -1,5 +1,5 @@
-//! A scope database's steps, once `global`'s log is frozen (`switch`): the database is the truth, and every change to
-//! it is a step at the next free position of its own in the bucket, which the bucket keeps in one order.
+//! A scope database's steps: the database is the truth, and every change to it is a step at the next free position of
+//! its own in the bucket, which the bucket keeps in one order.
 //!
 //! A step is one change, signed by the device that made it as its person: the same content an entry of the log carried
 //! (`members`' kinds, and a scope's own), for one position, under `entry::STEP_DOMAIN`, so it's never taken for an
@@ -7,22 +7,18 @@
 //! but where its writer meant it: one that loses its position to another is signed again for the next. A node only
 //! carries a client's step to the bucket: it can hold one back, but change none.
 //!
-//! The cut-over is `global`'s first step that is a freeze the network's recovery key signed (`FREEZE`, `claimed`), in
-//! the one ceremony an admin runs with it (`one switch`, `Node::switch`): it names the step of `global`'s log where the
-//! log ends (and of every other scope's log its last step in order), and carries the database there, its first copy.
-//! The same freeze is written first as the step of the log after that end, its mark: the bucket takes a position once,
-//! so a freeze names the log's real end as it was read just before, never an older one, and a recovery key replaced
-//! since can't name one from before it was. Every reader replays exactly the entries in `global`'s log's steps up to
-//! it (`Log`), forks only among those, so every reader replays the same ones whatever it holds or reads later; judges
-//! the signer there and only there (the recovery key the genesis or a `recovery` entry up to there names), so it
-//! judges the same whenever it reads it; and checks that the copy says what those entries add up to (`anchor`). Then
-//! it keeps it: from then on it reads the copy it keeps and the steps after, never the entries again. A freeze the
-//! recovery key signed that doesn't check out stops the reader there, as a newer release's step does, never passed
-//! over for the next. Anything else shaped like a freeze is nothing, passed over before any log it names is read: a
-//! reader looks only at those a key it knows was ever the recovery key signed (`recovery_keys`). A `FREEZING` step
-//! the recovery key signed before it tells writers of the log to look whether what they wrote is inside it.
-//! Every other scope's database starts, before its first step, from what its log's entries up to the freeze's position
-//! there add up to (`scope_anchor`), which every reader of it works out itself: no writer chooses it.
+//! `global`'s database starts at its first step that is a freeze the network's recovery key signed (`FREEZE`,
+//! `Truth::first`), the key its genesis names (`recovery_of`), the first entry of `global`'s log, whose hash every
+//! device of the network pins: a network made since starts with one (`first_freeze`), and the two made before were
+//! frozen by their recovery key once, their logs read only from then on. The freeze carries the database there, its
+//! first copy, which counts only if it comes to the hash the freeze names. A freeze the recovery key signed that doesn't
+//! check out stops the reader there, as a newer release's step does, never passed over for the next; anything else
+//! shaped like a freeze is nothing. A device let in starts where the device that let it in had read to (its `Welcome`),
+//! which pins who's who by its hash.
+//!
+//! Every other scope's database starts, before its first step, from what its frozen log's entries up to the freeze's
+//! end of it add up to (`scope_anchor`), which every reader of it works out itself from the frozen logs: no writer
+//! chooses it.
 //!
 //! Every reader applies each step after to the database as the steps before it left it, and counts it only if all
 //! three of the protocol's rules hold there:

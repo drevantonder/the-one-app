@@ -1,9 +1,8 @@
 //! What a device asks of a scope database (`scope`): who's who and who may do what, from `global`'s, and what a
 //! scope's own entries add up to, from its own. Every question of who may do what is `permissions::may` over its rows;
-//! the rest are its tables as they are. Until the log is frozen, a device builds `global`'s again from replay whenever
-//! replay changes (`Replica`), so it answers as replay does, and nothing but the builder reads `Members`.
+//! the rest are its tables as they are.
 //!
-//! Three things replay checks that the rows don't say stay in callers, each in one helper there: moving an app to
+//! Three things a step's rules check that the rows don't say stay in callers, each in one helper there: moving an app to
 //! another owner, an admin listing a person's machines but never their clients, and a person's machine running their
 //! own scope only if they listed it themselves (the builder writes that as `runner` rows).
 
