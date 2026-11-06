@@ -122,10 +122,21 @@ fn local_node() -> Option<String> {
 
 /// What this computer's own node says of itself, where one runs here.
 fn local_state() -> Option<Value> {
-    let token = std::fs::read_to_string(one::home().join("local-token")).ok()?;
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(2))).build().into();
-    let mut r = agent.get(format!("http://127.0.0.1:{}/v1/state", one::config::PORT)).header("x-one-local-token", token.trim()).call().ok()?;
-    r.body_mut().read_json().ok()
+    local("/v1/state", None, 2).ok().filter(|(ok, _)| *ok).map(|(_, out)| out)
+}
+
+/// Asks this computer's own node as one of its programs (by its local token): `body` posted, or a GET, waiting at
+/// most `secs` → whether it did, and what it said.
+fn local(path: &str, body: Option<Value>, secs: u64) -> Result<(bool, Value), String> {
+    let token = std::fs::read_to_string(one::home().join("local-token")).map_err(|_| "This computer's node isn't running.".to_string())?;
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(secs))).http_status_as_error(false).build().into();
+    let url = format!("http://127.0.0.1:{}{path}", one::config::PORT);
+    let mut r = match body {
+        Some(body) => agent.post(url).header("x-one-local-token", token.trim()).send_json(body),
+        None => agent.get(url).header("x-one-local-token", token.trim()).call(),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok((r.status().is_success(), r.body_mut().read_json().unwrap_or_default()))
 }
 
 /// A response's body the page reads, and what stops a read waiting on it once the page cancels.
@@ -290,7 +301,6 @@ async fn token() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || auth.token()).await.map_err(|e| e.to_string())?
 }
 
-
 // MARK: What the page asks
 
 /// Who and where this is: the custom build's name and CLI, the address (if one's given), whether someone's signed in
@@ -385,31 +395,29 @@ fn address_of(typed: &str) -> Result<String, String> {
 #[tauri::command]
 async fn sign_in() -> Result<(), String> {
     let a = app();
-    let address = a.address().ok_or("Enter your address first.")?;
-    let _ = &address;
+    a.address().ok_or("Enter your address first.")?;
     let join = one_client::join_of(secrets::signing_in()?);
     let auth = a.auth()?;
     #[cfg(not(target_os = "android"))]
     let handle = a.handle.clone();
-    let auth2 = auth.clone();
     let print = env("SIGN_IN_PRINT").is_some();
     tauri::async_runtime::spawn_blocking(move || {
         // An iPhone signs in in the system's sheet, which comes back to the app's own link; a test's prints the link.
         #[cfg(target_os = "ios")]
         if !print {
-            return auth2.sign_in_here(&join, iphone::sign_in);
+            return auth.sign_in_here(&join, iphone::sign_in);
         }
         // An Android phone signs in in a Chrome Custom Tab, which comes back to the app's own link; a test's prints the
         // link and waits for it to be opened.
         #[cfg(target_os = "android")]
-        return auth2.sign_in_here(&join, |u| {
+        return auth.sign_in_here(&join, |u| {
             if print {
                 println!("Sign in: {u}");
             }
             android::sign_in(u, !print)
         });
         #[cfg(not(target_os = "android"))]
-        auth2.sign_in(&join, |u| {
+        auth.sign_in(&join, |u| {
             if print {
                 println!("Sign in: {u}");
                 return Ok(());
@@ -777,21 +785,11 @@ fn computer_use_now() -> Option<bool> {
 /// join` does) → its address, which the app signs in to next.
 #[tauri::command]
 async fn pair(code: String) -> Result<String, String> {
-    let token = std::fs::read_to_string(one::home().join("local-token")).map_err(|_| "This Mac's node isn't running.".to_string())?;
+    if !one::home().join("local-token").exists() {
+        return Err("This Mac's node isn't running.".into());
+    }
     let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
-    let said = tauri::async_runtime::spawn_blocking(move || {
-        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(60))).http_status_as_error(false).build().into();
-        let mut r = agent
-            .post(format!("http://127.0.0.1:{}/v1/join", one::config::PORT))
-            .header("x-one-local-token", token.trim())
-            .send_json(json!({ "code": code }))
-            .map_err(|e| e.to_string())?;
-        let ok = r.status().is_success();
-        let out: Value = r.body_mut().read_json().unwrap_or_default();
-        Ok::<_, String>((ok, out))
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let said = tauri::async_runtime::spawn_blocking(move || local("/v1/join", Some(json!({ "code": code })), 60)).await.map_err(|e| e.to_string())?;
     let failed = match said {
         Ok((true, _)) => None,
         Ok((false, out)) => Some(out["error"].as_str().unwrap_or_default().to_lowercase()),
@@ -833,15 +831,8 @@ fn approve_here(code: String) {
     if !cfg!(target_os = "macos") {
         return;
     }
-    let Ok(token) = std::fs::read_to_string(one::home().join("local-token")) else { return };
-    std::thread::spawn(move || {
-        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).build().into();
-        let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
-        let _ = agent
-            .post(format!("http://127.0.0.1:{}/v1/devices/approve", one::config::PORT))
-            .header("x-one-local-token", token.trim())
-            .send_json(json!({ "code": code, "confirm": true }));
-    });
+    let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    std::thread::spawn(move || local("/v1/devices/approve", Some(json!({ "code": code, "confirm": true })), 30));
 }
 
 /// The panel this tall, as its screen is: under its item it grows down, over one (a taskbar) up.
