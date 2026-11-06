@@ -15,17 +15,12 @@ const MENU = "More options for ";
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-const NEEDS = "Messenger needs Agent Devices on one of your nodes. Add it in the App Store, choosing the node it runs on; its page there shows where it runs. Then messenger_sign_in signs in.";
-
-/// Runs a tool of Agent Devices (`agent-devices`) or Computer Use (`computer`) for the caller. When none of their
-/// devices runs Agent Devices, says what's needed instead of how the call failed.
+/// Runs a tool of Agent Devices (`agent-devices`) or Computer Use (`computer`) for the caller; a failure says which.
 async function use(ctx, app, op, input) {
   try {
     return await ctx.apps[app][op](input);
   } catch (err) {
-    const why = String(err.message);
-    if (why.includes("none of yours runs it") || why.includes("No device of yours lets agents use it")) throw new Error(NEEDS);
-    throw new Error(`agent devices ${op}: ${why}`);
+    throw new Error(`agent devices ${op}: ${err.message}`);
   }
 }
 
@@ -758,12 +753,6 @@ export default {
         found(ctx, await load(ctx), profile, null);
         return `Saved the ${profile} profile.`;
       },
-    },
-    _running: {
-      reads: true,
-      description: "Which of your devices run Agent Devices, for the screens to say when none does.",
-      input: { type: "object", properties: {} },
-      run: async (ctx) => ({ devices: (await ctx.devices()).filter((d) => d.online && (d.services || []).includes("agent-devices")).map((d) => d.name) }),
     },
     _idle: {
       reads: false,

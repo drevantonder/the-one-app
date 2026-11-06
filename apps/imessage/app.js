@@ -1,21 +1,17 @@
 // iMessage: Messages on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Messages;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the imessage service's functions, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
+/// Runs one of the imessage service's functions; when a chat isn't found, says where to find it.
 async function service(ctx, fn, input) {
   try {
     return await ctx.services.imessage[fn](input);
   } catch (err) {
     const why = String(err.message);
-    if (why.includes("no device runs imessage for you")) throw new Error(NEEDS);
     if (/^no chat (called|with) /.test(why)) throw new Error(`${why}: imessage_chats lists the chats; anyone else by their phone number with its country code, or email address`);
     if (why.includes("matches several chats")) throw new Error(`${why}. Give more of the name, or the chat's id from imessage_chats`);
     throw err;
   }
 }
-
-const NEEDS = "iMessage runs on a Mac with The One App open, and none of yours is online with it.";
 
 const CHAT = "the chat: its name as imessage_chats gives it, a part of the name only one chat has, or its id; or a phone number with its country code (+61 400 000 000) or an email address";
 const SINCE = { type: "string", description: "only messages after this: an ISO 8601 date (2026-11-01) or date-time (2026-11-01T09:00), in the Mac's time zone without an offset" };
@@ -35,22 +31,6 @@ export default {
   service: { network: [], person: true, platforms: ["mac"] },
 
   tools: {
-    devices: {
-      reads: true,
-      description: "The Macs iMessage runs on: each { device, online }, device the Mac's name.",
-      input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("imessage")).map((s) => ({ device: s.name, online: s.online })),
-    },
-    remove: {
-      reads: false,
-      confirm: true,
-      description: "Stop using iMessage on one of your Macs: removes it from that Mac, for one of its owners. The messages themselves stay as they are.",
-      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the Mac's name, as imessage_devices lists it" } } },
-      run: (ctx, { device }) => {
-        ctx.service("imessage", device, false);
-        return `iMessage is removed from ${device}.`;
-      },
-    },
     chats: {
       reads: true,
       description: "Recent chats, most recent first, to see what's new or find a chat to read: each { chat, id, with, last, from, text, unread }, chat its name, id for imessage_read, with the people in a group, and last (an ISO 8601 time), from and text its last message. Page back with skip.",

@@ -165,41 +165,32 @@ function k(t) {
 	}), n[18] = E, n[19] = x, n[20] = T, n[21] = D) : D = n[21], D;
 }
 function A() {
-	let { accounts: e, problem: i, retry: s, failed: c, signOut: l, reload: u } = x(), [d, g] = r(null), [_, v] = r(!1), y = n(null);
-	y.current ||= E();
-	let b = async () => {
-		let e = await y.current;
-		y.current = E(), g({ picking: [...new Set(e)] });
-	}, T = () => (g(null), u());
+	let { accounts: e, problem: i, retry: s, failed: c, signOut: l, reload: u } = x(), [d, g] = r(null), _ = n(null);
+	_.current ||= E();
+	let v = async () => {
+		let e = await _.current;
+		_.current = E(), g({ picking: [...new Set(e)] });
+	}, y = () => (g(null), u());
 	if (t(() => {
-		one.params.add && y.current.then(() => b()), one.call("_running").then(({ devices: e }) => e.length || v(!0), () => {});
+		one.params.add && _.current.then(() => v());
 	}, []), i && !e) return /* @__PURE__ */ S(p, {
 		problem: i,
 		retry: s
 	});
 	if (!e) return /* @__PURE__ */ S(f, {});
-	let O = !!d, A = e.filter((e) => !e.ok);
+	let b = !!d, T = e.filter((e) => !e.ok);
 	return /* @__PURE__ */ C("div", {
 		className: "flex flex-col gap-6",
 		children: [
-			_ && /* @__PURE__ */ S(h, {
-				warn: !0,
-				title: "Messenger needs Agent Devices.",
-				text: "Add Agent Devices to one of your devices in the App Store, then sign in here.",
-				action: {
-					label: "Open App Store",
-					run: () => one.open("app", { app: "agent-devices" }, "apps")
-				}
-			}),
-			!e.length && !_ && !O && /* @__PURE__ */ S(o, {
+			!e.length && !b && /* @__PURE__ */ S(o, {
 				className: "mx-auto max-w-md",
 				action: {
 					label: "Add Account",
-					run: b
+					run: v
 				},
 				children: w
 			}),
-			A.map((e) => /* @__PURE__ */ S(h, {
+			T.map((e) => /* @__PURE__ */ S(h, {
 				warn: !0,
 				title: e.account + " needs signing in",
 				text: "Sign it out, then add it again."
@@ -213,10 +204,10 @@ function A() {
 					text: "Sign in again",
 					warn: !0
 				},
-				children: !_ && !O && /* @__PURE__ */ S(m, {
+				children: !b && /* @__PURE__ */ S(m, {
 					variant: "secondary",
 					className: "self-start",
-					run: b,
+					run: v,
 					children: "Add Account"
 				})
 			}),
@@ -226,7 +217,7 @@ function A() {
 			}),
 			d?.link && /* @__PURE__ */ S(k, {
 				link: d.link,
-				onDone: T
+				onDone: y
 			})
 		]
 	});

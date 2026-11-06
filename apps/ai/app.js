@@ -69,7 +69,7 @@ export default {
         type: "object",
         properties: {
           provider: { type: "string", enum: ["local", "gemini"], description: "local, the models on your devices, or gemini, Google's, which reads PDFs too" },
-          local_device: { type: "string", description: "the device whose local models answer, by its name as models_devices lists them" },
+          local_device: { type: "string", description: "the device whose local models answer, by its name, as apps_devices with app models lists where it runs" },
           read_model: { type: "string", description: "the local model ai_read uses, as models_here lists them; default gemma4:12b" },
           decide_model: { type: "string", description: "the local decision model ai_decide uses, as models_here lists them; default clef-flash" },
           gemini_model: { type: "string", description: "the Gemini model ai_read uses with provider gemini, as Google names it; default gemini-3.5-flash-lite" },

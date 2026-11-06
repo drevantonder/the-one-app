@@ -13,6 +13,8 @@ use axum::response::{IntoResponse, Response};
 
 use crate::node::Node;
 
+/// The header an error's code (`protocol::code`) is answered in, to an app.
+const CODE_HEADER: &str = "x-one-code";
 const LIMIT: usize = 64 << 20;
 
 pub fn router(node: Node) -> axum::Router {
@@ -22,7 +24,15 @@ pub fn router(node: Node) -> axum::Router {
 async fn handle(State(node): State<Node>, req: Request) -> Response {
     match out(node, req).await {
         Ok(resp) => resp,
-        Err(err) => (StatusCode::BAD_GATEWAY, format!("{err:#}")).into_response(),
+        // A kind of error callers act on (`protocol::code`) goes on in a header, which an app's ctx.apps and ctx.services
+        // calls throw with.
+        Err(err) => {
+            let mut reply = (StatusCode::BAD_GATEWAY, format!("{err:#}")).into_response();
+            if let Some(code) = crate::protocol::Coded::of(&err).and_then(|c| c.parse().ok()) {
+                reply.headers_mut().insert(CODE_HEADER, code);
+            }
+            reply
+        }
     }
 }
 

@@ -87,7 +87,6 @@ function Settings() {
   const { accounts, problem, retry, failed, signOut, reload } = useAccounts()
   // What's under way: choosing a profile (`picking`), or signing in to one (`link`).
   const [step, setStep] = useState(null)
-  const [nowhere, setNowhere] = useState(false)
   const known = useRef(null)
   known.current ||= profiles()
 
@@ -100,7 +99,6 @@ function Settings() {
 
   useEffect(() => {
     if (one.params.add) known.current.then(() => pick())
-    one.call("_running").then(({ devices }) => devices.length || setNowhere(true), () => {})
   }, [])
 
   if (problem && !accounts) return <LoadFailure problem={problem} retry={retry} />
@@ -110,16 +108,7 @@ function Settings() {
   const needs = accounts.filter((a) => !a.ok)
   return (
     <div className="flex flex-col gap-6">
-      {nowhere && (
-        <Problem
-          warn
-          title="Messenger needs Agent Devices."
-          text="Add Agent Devices to one of your devices in the App Store, then sign in here."
-          action={{ label: "Open App Store", run: () => one.open("app", { app: "agent-devices" }, "apps") }}
-        />
-      )}
-      {/* With nowhere to sign in, what's missing shows instead, with the way to add it. */}
-      {!accounts.length && !nowhere && !picking && <Empty className="mx-auto max-w-md" action={{ label: "Add Account", run: pick }}>{BLURB}</Empty>}
+      {!accounts.length && !picking && <Empty className="mx-auto max-w-md" action={{ label: "Add Account", run: pick }}>{BLURB}</Empty>}
       {needs.map((a) => <Problem key={a.account} warn title={a.account + " needs signing in"} text="Sign it out, then add it again." />)}
       {accounts.length > 0 && (
         <AccountList
@@ -129,7 +118,7 @@ function Settings() {
           signOut={signOut}
           line={(a, i) => (a.ok ? (i ? null : { text: "Used first" }) : { text: "Sign in again", warn: true })}
         >
-          {!nowhere && !picking && <LoadingButton variant="secondary" className="self-start" run={pick}>Add Account</LoadingButton>}
+          {!picking && <LoadingButton variant="secondary" className="self-start" run={pick}>Add Account</LoadingButton>}
         </AccountList>
       )}
       {step?.picking && (

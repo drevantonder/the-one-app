@@ -73,7 +73,6 @@ function Tile({ c, hosts, src }) {
 function Page() {
   const [devices, setDevices] = useState(null) // null until first listed
   const [problem, setProblem] = useState(null) // what the last list failed with
-  const [none, setNone] = useState(false) // none of their devices runs it
   const [pics, setPics] = useState({}) // by the device it's on/name: a data URL
   // What the timers read: the devices as last listed, the pictures' hashes, when each was asked for, the list's hash (the
   // service sends it only when it changed), and whether a list is out.
@@ -141,9 +140,6 @@ function Page() {
     const timer = setInterval(tick, 5000)
     document.addEventListener("visibilitychange", tick)
     addEventListener("scroll", pictures, { passive: true })
-    one.call("_running").then(({ devices }) => {
-      if (!devices.length) setNone(true)
-    })
     return () => {
       clearInterval(timer)
       document.removeEventListener("visibilitychange", tick)
@@ -156,10 +152,6 @@ function Page() {
     requestAnimationFrame(pictures)
   }, [devices])
 
-  if (none) return (
-    <Problem warn title="None of your devices runs Agent Devices." text="It needs a Mac, or a Linux device with Podman."
-      action={{ label: "Open App Store", run: () => one.open("app", { app: "agent-devices" }, "apps") }} />
-  )
   // Tried again every few seconds, so no button.
   if (problem) return <Problem title={problem.title} text={problem.next} />
   if (!devices) return <Empty>Loading…</Empty>

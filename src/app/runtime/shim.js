@@ -69,7 +69,7 @@ function describe() {
 /// Asks the node something for the call with `token`: other apps' tools and its own service's functions, blobs, the network's apps.
 async function askNode(token, path, init = {}) {
   const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": token } }));
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw Object.assign(new Error(await r.text()), r.headers.has("x-one-code") ? { code: r.headers.get("x-one-code") } : {});
   return r;
 }
 

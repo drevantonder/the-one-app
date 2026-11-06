@@ -5,22 +5,18 @@
 import settings from "./dist/settings.html" with { type: "text" };
 
 /// Runs one of the whatsapp service's functions, wherever it runs for the caller, or on the device `input.device`
-/// names. When none of their devices runs it, says what's needed instead of how the call failed; when a chat isn't
-/// found, where to find it.
+/// names; when a chat isn't found, says where to find it.
 async function service(ctx, fn, input = {}) {
   const { device, ...rest } = input;
   try {
     return await ctx.services.whatsapp[fn](rest, device ? { device } : undefined);
   } catch (err) {
     const why = String(err.message);
-    if (why.includes("no device runs whatsapp for you")) throw new Error(NEEDS);
     if (why.startsWith("no chat called ")) throw new Error(`${why}: whatsapp_chats lists the chats; anyone else by their phone number with its country code`);
     if (why.includes("matches several chats")) throw new Error(`${why}. Give more of the name, or a phone number with its country code`);
     throw err;
   }
 }
-
-const NEEDS = "WhatsApp's service runs on none of your nodes yet. It runs on one that stays on, which your phone links to: apps_move whatsapp <node> puts it there, and apps_devices whatsapp lists the nodes it can run on. Then whatsapp_sign_in links your phone.";
 
 const ACCOUNT = { type: "string", description: "which WhatsApp account: its number, as whatsapp_accounts lists them; default the first linked here" };
 const CHAT = "the chat: its name as whatsapp_chats gives it, or a part of it only one chat has; or a phone number with its country code (+61 400 000 000), or a JID (61400000000@s.whatsapp.net)";

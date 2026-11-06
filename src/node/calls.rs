@@ -86,11 +86,6 @@ async fn unless_writing<T>(deadline: tokio::time::Instant, writing: &AtomicBool,
     if writing.load(Ordering::Relaxed) { Some(work.await) } else { None }
 }
 
-/// No device of the person's runs `app`: it isn't installed anywhere, or its node or service is starting (`restarting`).
-fn no_device(app: &str) -> crate::protocol::Coded {
-    crate::protocol::Coded::new(crate::protocol::code::RESTARTING, format!("None of your devices can do this: no device runs {app} for you"))
-}
-
 /// A call a client device picked this node for that this node can't run: the API answers 421 with the nodes that can,
 /// in the order to ask them (`{ error, elsewhere }`), which the client asks itself, handing each its own keys.
 #[derive(Debug)]
@@ -141,7 +136,9 @@ impl Node {
         }
         let req = self.reaching(req, &me)?;
         let devices = self.candidates(&req, &me)?;
-        ensure!(!devices.is_empty(), no_device(&req.app));
+        if devices.is_empty() {
+            bail!(self.no_device(&req.app, &me).await);
+        }
         let others: Vec<String> = devices.iter().filter(|k| **k != self.0.id).map(hex).collect();
         let started = Instant::now();
         let name = self.device_name();
@@ -268,9 +265,23 @@ impl Node {
             bail!("{problem}");
         }
         if why.is_empty() {
-            bail!(no_device(&req.app));
+            bail!(self.no_device(&req.app, &me).await);
         }
         bail!("None of your devices can do this now. Try again soon. ({})", why.join("; "))
+    }
+
+    /// No device of `me`'s runs `app`, in words: not on any yet, with what it needs and how to add it, or on one that's
+    /// starting (`restarting`: asking again in a moment answers).
+    async fn no_device(&self, app: &str, me: &Caller) -> crate::protocol::Coded {
+        let title = self.title(app).await;
+        let info = self.catalog(me, false).await.ok().and_then(|c| c.into_iter().find(|a| a["name"] == app));
+        let starting = info.as_ref().is_some_and(|a| a["runs_on"].as_array().is_some_and(|r| r.iter().any(|r| r["online"] == true)));
+        let text = match &info {
+            _ if starting => format!("{title} is starting: try again in a moment."),
+            Some(a) => format!("{title} isn't on any of your devices yet.{} apps_add {app} user adds it, on a node you choose (apps_devices {app} lists them).", a["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()),
+            None => format!("{title} isn't on any of your devices yet."),
+        };
+        crate::protocol::Coded::new(crate::protocol::code::RESTARTING, text)
     }
 
     /// Why `app`'s service runs nowhere for `me` though it was put on a node, as its problem box in the App Store says
@@ -282,6 +293,9 @@ impl Node {
         let added = info["installed"].as_array().is_some_and(|a| !a.is_empty());
         if !added || runs.iter().any(|r| r["name"].is_string() && r["online"] == true && r["problem"].is_null()) {
             return None;
+        }
+        if runs.is_empty() && info["nodes"].as_array().is_some_and(|n| n.is_empty()) {
+            return Some(format!("{title} isn't on any of your devices yet.{}", info["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()));
         }
         let r = runs.first().unwrap_or(&Value::Null);
         let why = match (r["name"].as_str(), r["online"] == true, r["problem"].as_str()) {
@@ -312,7 +326,9 @@ impl Node {
             };
             out.insert(self.name_of(&device), answer);
         }
-        ensure!(!out.is_empty(), no_device(&req.app));
+        if out.is_empty() {
+            bail!(self.no_device(&req.app, &me).await);
+        }
         Ok(Value::Object(out))
     }
 

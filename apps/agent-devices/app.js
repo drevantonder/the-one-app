@@ -10,16 +10,8 @@ import mainHtml from "./dist/main.html" with { type: "text" };
 import deviceHtml from "./dist/device.html" with { type: "text" };
 import settingsHtml from "./dist/settings.html" with { type: "text" };
 
-/// Runs one of the agent-devices service's functions, wherever it runs for the caller. When none of their devices
-/// runs it, says what's needed instead of how the call failed.
-async function service(ctx, fn, input, on) {
-  try {
-    return await ctx.services["agent-devices"][fn](input, on ? { device: on } : undefined);
-  } catch (err) {
-    if (String(err.message).includes("no device runs agent-devices for you")) throw Object.assign(new Error(NEEDS), { code: "restarting" });
-    throw err;
-  }
-}
+/// Runs one of the agent-devices service's functions, wherever it runs for the caller, or on the device `on`.
+const service = (ctx, fn, input, on) => ctx.services["agent-devices"][fn](input, on ? { device: on } : undefined);
 
 /// A short hash of a string (FNV-1a), to tell whether it changed.
 function fnv(s) {
@@ -28,16 +20,10 @@ function fnv(s) {
   return (h >>> 0).toString(36);
 }
 
-const NEEDS = "Agent Devices needs a device with Podman, or a Mac, and none of yours runs it.";
 
 /// The service's functions Computer Use acts on agent devices with (`_act`).
 const ACTS = ["list", "view", "screen", "tools", "refresh_tools", "use", "get_browser_state", "browser_prepare", "browser_navigate", "browser_click", "browser_type", "browser_select", "browser_dialog", "browser_pointer"];
 const TYPE = "Browser profile";
-
-/// The caller's online devices that run the service, by name.
-async function running(ctx) {
-  return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("agent-devices")).map((s) => s.name);
-}
 
 /// The browser profiles: the Vault items of their type this app is switched on for.
 async function profiles(ctx) {
@@ -72,6 +58,7 @@ export default {
   color: "#a2845e",
   advanced: true,
   description: "Devices your agents use: Linux with a browser, Windows, Android and iPhones",
+  needs: "Needs a Linux device with Podman, or a Mac",
   instructions: "Agent Devices are devices, on the person's own devices, that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where one of their devices can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Where kinds lists chrome as available, kind chrome is quicker (under a second) and lighter: the device's own Chrome, without a container, whose borrow gives target_id and tab_id for the browser tools at once, with no browser_prepare or list_windows; its owner allows it in Agent Devices' Settings. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or Work) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
   uses: { services: ["agent-devices"] },
   service: { network: ["*"], person: true, platforms: ["linux", "mac"] },
@@ -317,12 +304,6 @@ export default {
         if (!ACTS.includes(fn)) throw new Error(`Computer Use doesn't act on agent devices with ${fn}: only ${ACTS.join(", ")}`);
         return service(ctx, fn, input);
       },
-    },
-    _running: {
-      reads: true,
-      description: "Which of your devices it runs on, for the page to say when none does.",
-      input: { type: "object", properties: {} },
-      run: async (ctx) => ({ devices: await running(ctx) }),
     },
   },
 

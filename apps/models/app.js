@@ -2,18 +2,8 @@
 // the ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
 // agents and other apps use.
 
-/// Runs one of the models service's functions, on `device` if it's given, else wherever it runs for the caller. When
-/// none of their devices runs it, says what's needed instead of how the call failed.
-async function service(ctx, fn, { device, ...input }) {
-  try {
-    return await ctx.services.models[fn](input, device ? { device } : undefined);
-  } catch (err) {
-    if (String(err.message).includes("no device runs models for you")) throw new Error(NEEDS);
-    throw err;
-  }
-}
-
-const NEEDS = "Models runs on your devices, and none of them is online.";
+/// Runs one of the models service's functions, on `device` if it's given, else wherever it runs for the caller.
+const service = (ctx, fn, { device, ...input }) => ctx.services.models[fn](input, device ? { device } : undefined);
 
 const IMAGES = "images (JPEG, PNG or WebP) as base64 strings, shown to the model with the prompt";
 
@@ -31,22 +21,6 @@ export default {
   service: { network: ["127.0.0.1:11434"], person: false, platforms: ["linux", "mac"] },
 
   tools: {
-    devices: {
-      reads: true,
-      description: "The devices Models runs on: each { device, online }, device the device's name. models_here lists the models on each.",
-      input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("models")).map((s) => ({ device: s.name, online: s.online })),
-    },
-    remove: {
-      reads: false,
-      confirm: true,
-      description: "Stop using Models on one of your devices: removes it from that device, for one of its owners. The models stay on its disk.",
-      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the device's name, as models_devices lists it" } } },
-      run: (ctx, { device }) => {
-        ctx.service("models", device, false);
-        return `Models is removed from ${device}.`;
-      },
-    },
     here: {
       reads: true,
       description: "The local models on this device, or with device \"all\" on every device: each { name, size, family, parameters, loaded }, as Ollama gives them (size in bytes, parameters like 12.2B), loaded when it's in memory and answers at once. Use a name as model in models_chat or models_decide.",

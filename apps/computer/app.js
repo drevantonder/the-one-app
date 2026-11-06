@@ -8,23 +8,8 @@
 
 import main from "./dist/main.html" with { type: "text" };
 
-/// Runs one of the agent-devices service's functions through Agent Devices, whose service it is, wherever it runs for
-/// the caller. When none of their devices runs it, says what's needed instead of how the call failed.
-async function service(ctx, fn, input) {
-  try {
-    return await ctx.apps["agent-devices"]._act({ function: fn, input });
-  } catch (err) {
-    if (/no device runs agent-devices for you|none of yours runs it/.test(String(err.message))) throw new Error(NEEDS);
-    throw err;
-  }
-}
-
-const NEEDS = "No device of yours lets agents use it yet. Agents use your Mac once you turn on Let Agents Use This Mac in the Mac app's menu bar; agent devices, each with a browser, need Agent Devices on a Linux device with Podman, or a Mac.";
-
-/// The caller's online devices that run the service, by name.
-async function running(ctx) {
-  return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("agent-devices")).map((s) => s.name);
-}
+/// Runs one of the agent-devices service's functions through Agent Devices, whose service it is.
+const act = (ctx, fn, input) => ctx.apps["agent-devices"]._act({ function: fn, input });
 
 /// The caller's devices whose computer service serves them, by device name: `{ device, on, title, kind, using,
 /// permissions, missing }`, or `{ device, why }` for one that didn't answer.
@@ -99,34 +84,15 @@ export default {
 
 
   tools: {
-    devices: {
-      reads: true,
-      description: "Your devices that run Computer Use, as { device, online }: device is its name. computer_list lists the devices agents use on them.",
-      input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => ({ device: s.name, online: s.online })),
-    },
-    remove: {
-      reads: false,
-      confirm: true,
-      description: "Stop agents using one of your devices or the agent devices on it: removes Computer Use from that device, for one of its owners. Its agent devices and backups stay there, and switching Computer Use on for that device in Settings › Devices puts it back.",
-      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "a device's name, from computer_devices" } } },
-      run: async (ctx, { device }) => {
-        const all = await ctx.devices();
-        const there = all.find((s) => s.name.toLowerCase() === String(device).toLowerCase() && (s.services || []).some((d) => d === "agent-devices" || d === "computer"));
-        if (!there) throw new Error(`Computer Use isn't on ${device}: it's on ${all.filter((s) => (s.services || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => s.name).join(", ") || "none of your devices"}`);
-        for (const d of ["agent-devices", "computer"]) if ((there.services || []).includes(d)) ctx.service(d, there.name, false);
-        return `Computer Use is removed from ${there.name}.`;
-      },
-    },
     list: {
       reads: true,
       description: "Every device agents can act on: the agent devices on all of your devices, and your own devices you let agents use (own: true, like your Mac). Each with its kind, the device it's on, whether it's running, paused or stopped, and who has borrowed it and what for. Borrow one with agent-devices_borrow; act on it with computer_screen, computer_use and the browser tools.",
       input: {"properties": {"here": {"description": "only the agent devices on the device you call from", "type": "boolean"}}, "type": "object"},
       run: async (ctx, input) => {
-        const [listed, devs] = await Promise.all([service(ctx, "list", input).catch((err) => err), input.here ? [] : devices(ctx)]);
+        const [listed, devs] = await Promise.all([act(ctx, "list", input).catch((err) => err), input.here ? [] : devices(ctx)]);
         const on = devs.filter((d) => d.on).map(asListed);
         if (listed instanceof Error) {
-          if (on.length && listed.message === NEEDS) return { devices: on };
+          if (on.length && listed.code === "restarting") return { devices: on };
           throw listed;
         }
         const { devices: theirs = [], ...rest } = listed || {};
@@ -140,7 +106,7 @@ export default {
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (d) throw new Error(`${d} is the person's own device: they watch it on the Computer Use page and on the device itself, and stop agents there.`);
-        return service(ctx, "view", input);
+        return act(ctx, "view", input);
       },
     },
     screen: {
@@ -150,7 +116,7 @@ export default {
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (d) return ctx.services.computer._screen({ width: input.width }, { device: d });
-        return service(ctx, "screen", input);
+        return act(ctx, "screen", input);
       },
     },
     tools: {
@@ -160,14 +126,14 @@ export default {
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (d) return ctx.services.computer._tools(input.name ? { name: input.name } : {}, { device: d });
-        return service(ctx, "tools", input);
+        return act(ctx, "tools", input);
       },
     },
     refresh_tools: {
       reads: false,
       description: "Read the agent devices' tools again from a running one, as after it was updated, when computer_tools seems out of date.",
       input: {"properties": {}, "type": "object"},
-      run: (ctx, input) => service(ctx, "refresh_tools", input),
+      run: (ctx, input) => act(ctx, "refresh_tools", input),
     },
     use: {
       reads: false,
@@ -175,7 +141,7 @@ export default {
       input: {"properties": {"args": {"description": "the tool's input, as computer_tools with its name describes it, like { \"x\": 120, \"y\": 300 }", "type": "object"}, "device": DEVICE, "tool": {"description": "the tool's name, from computer_tools", "type": "string"}}, "required": ["tool"], "type": "object"},
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) return service(ctx, "use", input);
+        if (!d) return act(ctx, "use", input);
         const r = await ctx.services.computer._use({ tool: input.tool, args: input.args || {} }, { device: d });
         if (r.started) {
           const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -200,7 +166,7 @@ export default {
         "target_id": TARGET,
         "window_id": {"description": "the browser window's id, from computer_use list_windows: with pid, on the first call", "type": "integer"},
       }, "type": "object"},
-      run: (ctx, input) => service(ctx, "get_browser_state", input),
+      run: (ctx, input) => act(ctx, "get_browser_state", input),
     },
     browser_prepare: {
       reads: false,
@@ -215,13 +181,13 @@ export default {
         "strategy": {"additionalProperties": false, "description": "{ kind: \"existing_profile\" } attaches to the browser open at pid and window_id", "properties": {"kind": {"enum": ["existing_profile"], "type": "string"}}, "required": ["kind"], "type": "object"},
         "window_id": {"description": "the browser window's id, from computer_use list_windows; needed with strategy", "type": "integer"},
       }, "required": [], "type": "object"},
-      run: (ctx, input) => service(ctx, "browser_prepare", input),
+      run: (ctx, input) => act(ctx, "browser_prepare", input),
     },
     browser_navigate: {
       reads: false,
       description: "Open a web address in a browser tab. Refs from earlier reads stop working: read the page again with computer_get_browser_state.",
       input: {"additionalProperties": true, "properties": {"device": DEVICE, "session": SESSION, "tab_id": TAB, "target_id": TARGET, "url": {"description": "an http, https or about address, like https://example.com", "type": "string"}}, "required": ["target_id", "tab_id", "url"], "type": "object"},
-      run: (ctx, input) => service(ctx, "browser_navigate", input),
+      run: (ctx, input) => act(ctx, "browser_navigate", input),
     },
     browser_click: {
       reads: false,
@@ -234,7 +200,7 @@ export default {
         "x": {"description": "instead of ref: a point in the tab, in CSS pixels from its left", "type": "number"},
         "y": {"description": "instead of ref: a point in the tab, in CSS pixels from its top", "type": "number"},
       }, "required": ["target_id", "tab_id"], "type": "object"},
-      run: (ctx, input) => service(ctx, "browser_click", input),
+      run: (ctx, input) => act(ctx, "browser_click", input),
     },
     browser_type: {
       reads: false,
@@ -247,7 +213,7 @@ export default {
         "session": SESSION, "tab_id": TAB, "target_id": TARGET,
         "text": {"description": "what to type", "type": "string"},
       }, "required": ["target_id", "tab_id", "ref", "text"], "type": "object"},
-      run: (ctx, input) => service(ctx, "browser_type", input),
+      run: (ctx, input) => act(ctx, "browser_type", input),
     },
     browser_select: {
       reads: false,
@@ -258,7 +224,7 @@ export default {
         "ref": REF, "session": SESSION, "tab_id": TAB, "target_id": TARGET,
         "value": {"description": "instead of label: the option's value", "type": "string"},
       }, "required": ["target_id", "tab_id", "ref"], "type": "object"},
-      run: (ctx, input) => service(ctx, "browser_select", input),
+      run: (ctx, input) => act(ctx, "browser_select", input),
     },
     browser_dialog: {
       reads: false,
@@ -271,7 +237,7 @@ export default {
         "prompt_text": {"description": "what to answer a prompt with, when accepting it", "type": "string"},
         "session": SESSION, "tab_id": TAB, "target_id": TARGET,
       }, "required": ["target_id", "tab_id", "action"], "type": "object"},
-      run: (ctx, input) => service(ctx, "browser_dialog", input),
+      run: (ctx, input) => act(ctx, "browser_dialog", input),
     },
     browser_pointer: {
       reads: false,
@@ -292,7 +258,7 @@ export default {
         "x": {"description": "where to start, in CSS pixels from the tab's left", "type": "number"},
         "y": {"description": "where to start, in CSS pixels from the tab's top", "type": "number"},
       }, "required": ["target_id", "tab_id", "session", "action"], "type": "object"},
-      run: (ctx, input) => service(ctx, "browser_pointer", input),
+      run: (ctx, input) => act(ctx, "browser_pointer", input),
     },
     _devices: {
       description: "The person's devices that agents may use once they let them, each with whether they do and who is using it now, and the recent sessions.",

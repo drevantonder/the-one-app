@@ -1,19 +1,6 @@
 // Reminders: Reminders on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Reminders;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the reminders service's functions, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed.
-async function service(ctx, fn, input) {
-  try {
-    return await ctx.services.reminders[fn](input);
-  } catch (err) {
-    if (String(err.message).includes("no device runs reminders for you")) throw new Error(NEEDS);
-    throw err;
-  }
-}
-
-const NEEDS = "Reminders runs on a Mac with The One App open, and none of yours is online with it.";
-
 const ID = { type: "string", description: "the reminder's id, as reminders_list gives it" };
 const PRIORITY = { type: "string", enum: ["high", "medium", "low", "none"], description: "high, medium, low or none" };
 const REMINDER = "{ id, title, list, due, priority, notes, completed }, due a date or, with a time, an ISO 8601 date-time in the Mac's time zone, and completed when it was done";
@@ -31,27 +18,11 @@ export default {
   service: { network: [], person: true, platforms: ["mac"] },
 
   tools: {
-    devices: {
-      reads: true,
-      description: "The Macs Reminders runs on: each { device, online }, device the Mac's name.",
-      input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("reminders")).map((s) => ({ device: s.name, online: s.online })),
-    },
-    remove: {
-      reads: false,
-      confirm: true,
-      description: "Stop using Reminders on one of your Macs: removes it from that Mac, for one of its owners. The reminders themselves stay as they are.",
-      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the Mac's name, as reminders_devices lists it" } } },
-      run: (ctx, { device }) => {
-        ctx.service("reminders", device, false);
-        return `Reminders is removed from ${device}.`;
-      },
-    },
     lists: {
       reads: true,
       description: "Every reminder list: each { name, id, account, default }, account being where it syncs (iCloud, Exchange). Use a name as list in reminders_list or reminders_create.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => service(ctx, "lists", input),
+      run: (ctx, input) => ctx.services.reminders.lists(input),
     },
     list: {
       reads: true,
@@ -66,7 +37,7 @@ export default {
           limit: { type: "integer", description: "at most this many, the soonest due; default 100. For more, narrow by list, until or query" },
         },
       },
-      run: (ctx, input) => service(ctx, "list", input),
+      run: (ctx, input) => ctx.services.reminders.list(input),
     },
     create: {
       reads: false,
@@ -82,7 +53,7 @@ export default {
           priority: PRIORITY,
         },
       },
-      run: (ctx, input) => service(ctx, "create", input),
+      run: (ctx, input) => ctx.services.reminders.create(input),
     },
     update: {
       reads: false,
@@ -100,14 +71,14 @@ export default {
           completed: { type: "boolean", description: "true marks it done; false makes it not done again" },
         },
       },
-      run: (ctx, input) => service(ctx, "update", input),
+      run: (ctx, input) => ctx.services.reminders.update(input),
     },
     delete: {
       reads: false,
       confirm: true,
       description: "Delete a reminder from its list, on every Apple device. It can't be undone; to tick one off instead, reminders_update with completed.",
       input: { type: "object", required: ["id"], properties: { id: ID } },
-      run: (ctx, input) => service(ctx, "delete", input),
+      run: (ctx, input) => ctx.services.reminders.delete(input),
     },
   },
 };

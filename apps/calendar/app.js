@@ -1,19 +1,6 @@
 // Calendar: Calendar on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Calendar;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the calendar service's functions, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed.
-async function service(ctx, fn, input) {
-  try {
-    return await ctx.services.calendar[fn](input);
-  } catch (err) {
-    if (String(err.message).includes("no device runs calendar for you")) throw new Error(NEEDS);
-    throw err;
-  }
-}
-
-const NEEDS = "Calendar runs on a Mac with The One App open, and none of yours is online with it.";
-
 const TIME = "an ISO 8601 date (2026-11-01) or date-time (2026-11-01T09:00); without an offset, in the Mac's time zone";
 const ID = { type: "string", description: "the event's id, as calendar_events gives it; a repeating event's names one occurrence" };
 const FUTURE = { type: "boolean", description: "for a repeating event: this occurrence and every later one, not just this one" };
@@ -40,27 +27,11 @@ export default {
   service: { network: [], person: true, platforms: ["mac"] },
 
   tools: {
-    devices: {
-      reads: true,
-      description: "The Macs Calendar runs on: each { device, online }, device the Mac's name. Calendar's own accounts (iCloud, Google, Exchange) are in calendar_calendars.",
-      input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("calendar")).map((s) => ({ device: s.name, online: s.online })),
-    },
-    remove: {
-      reads: false,
-      confirm: true,
-      description: "Stop using Calendar on one of your Macs: removes it from that Mac, for one of its owners. The calendars themselves stay as they are.",
-      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the Mac's name, as calendar_devices lists it" } } },
-      run: (ctx, { device }) => {
-        ctx.service("calendar", device, false);
-        return `Calendar is removed from ${device}.`;
-      },
-    },
     calendars: {
       reads: true,
       description: "Every calendar on the Mac: each { name, id, account, writable, default }, account being where it syncs (iCloud, Google, Exchange). Use a name as calendar in calendar_events or calendar_create; only writable ones take new events.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => service(ctx, "calendars", input),
+      run: (ctx, input) => ctx.services.calendar.calendars(input),
     },
     events: {
       reads: true,
@@ -75,26 +46,26 @@ export default {
           limit: { type: "integer", description: "at most this many, the earliest; default 200. For more, narrow from and to" },
         },
       },
-      run: (ctx, input) => service(ctx, "events", input),
+      run: (ctx, input) => ctx.services.calendar.events(input),
     },
     create: {
       reads: false,
       description: "Add an event to one of the Mac's calendars, which syncs it to that calendar's account; invitees aren't added. Gives back the new event as calendar_events lists it, with its id for calendar_update or calendar_delete.",
       input: { type: "object", required: ["title", "start"], properties: FIELDS },
-      run: (ctx, input) => service(ctx, "create", input),
+      run: (ctx, input) => ctx.services.calendar.create(input),
     },
     update: {
       reads: false,
       description: "Change an event: only the fields given change, and moving start keeps its length unless end is given too. Gives back the event as it is now.",
       input: { type: "object", required: ["id"], properties: { id: ID, ...FIELDS, calendar: { type: "string", description: "move it to this calendar, by its name as calendar_calendars lists them" }, future: FUTURE } },
-      run: (ctx, input) => service(ctx, "update", input),
+      run: (ctx, input) => ctx.services.calendar.update(input),
     },
     delete: {
       reads: false,
       confirm: true,
       description: "Delete an event from its calendar, or one occurrence of a repeating event (with future, every later one too). It can't be undone: the calendar's account deletes it everywhere.",
       input: { type: "object", required: ["id"], properties: { id: ID, future: FUTURE } },
-      run: (ctx, input) => service(ctx, "delete", input),
+      run: (ctx, input) => ctx.services.calendar.delete(input),
     },
   },
 };

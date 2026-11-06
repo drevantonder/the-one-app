@@ -120,39 +120,39 @@ function x(t) {
 	}), n[26] = E, n[27] = j, n[28] = M, n[29] = D, n[30] = O, n[31] = k, n[32] = A, n[33] = N) : N = n[33], N;
 }
 function S() {
-	let [e, i] = r(null), [l, f] = r(null), [h, g] = r(!1), [_, v] = r({}), b = n({
+	let [e, i] = r(null), [l, f] = r(null), [h, g] = r({}), _ = n({
 		devices: null,
 		hashes: {},
 		asked: {},
 		retried: {},
 		listed: "",
 		busy: !1
-	}), S = (e) => {
+	}), v = (e) => {
 		let t = [...document.querySelectorAll("[data-k]")].find((t) => t.dataset.k === e);
 		if (!t) return !1;
 		let n = t.getBoundingClientRect();
 		return n.bottom > 0 && n.top < innerHeight;
 	};
-	function C() {
-		let e = b.current;
+	function b() {
+		let e = _.current;
 		for (let t of e.devices || []) {
 			let n = u(t);
-			p(t) || m(t) || Date.now() - (e.asked[n] || 0) < 2e4 || !S(n) || (e.asked[n] = Date.now(), one.call("_screen", {
+			p(t) || m(t) || Date.now() - (e.asked[n] || 0) < 2e4 || !v(n) || (e.asked[n] = Date.now(), one.call("_screen", {
 				...d(t),
 				width: y(t) ? 160 : 480,
 				have: e.hashes[n] || ""
 			}).then((t) => {
 				if (t.age > 20 && !e.retried[n] && ([e.retried[n], e.asked[n]] = [!0, Date.now() - 16e3]), t.same) return;
 				let r = (t.content || []).find((e) => e.type === "image");
-				r && (e.hashes[n] = t.hash, v((e) => ({
+				r && (e.hashes[n] = t.hash, g((e) => ({
 					...e,
 					[n]: `data:${r.mimeType};base64,${r.data}`
 				})));
 			}).catch(() => {}));
 		}
 	}
-	async function w() {
-		let e = b.current;
+	async function S() {
+		let e = _.current;
 		try {
 			let t = await one.call("_list", { have: e.listed });
 			t.same || (e.devices = (t.devices || []).filter((e) => !e.spare || e.borrowed), e.listed = t.hash || "", i(e.devices)), f(null);
@@ -160,52 +160,41 @@ function S() {
 			e.listed = "", f(one.plain(t));
 			return;
 		}
-		requestAnimationFrame(C);
+		requestAnimationFrame(b);
 	}
-	async function T() {
-		let e = b.current;
+	async function C() {
+		let e = _.current;
 		if (!(e.busy || document.visibilityState === "hidden")) {
 			e.busy = !0;
 			try {
-				await w();
+				await S();
 			} finally {
 				e.busy = !1;
 			}
 		}
 	}
 	if (t(() => {
-		one.title("Agent Devices"), T();
-		let e = setInterval(T, 5e3);
-		return document.addEventListener("visibilitychange", T), addEventListener("scroll", C, { passive: !0 }), one.call("_running").then(({ devices: e }) => {
-			e.length || g(!0);
-		}), () => {
-			clearInterval(e), document.removeEventListener("visibilitychange", T), removeEventListener("scroll", C);
+		one.title("Agent Devices"), C();
+		let e = setInterval(C, 5e3);
+		return document.addEventListener("visibilitychange", C), addEventListener("scroll", b, { passive: !0 }), () => {
+			clearInterval(e), document.removeEventListener("visibilitychange", C), removeEventListener("scroll", b);
 		};
 	}, []), t(() => {
-		requestAnimationFrame(C);
-	}, [e]), h) return /* @__PURE__ */ c(s, {
-		warn: !0,
-		title: "None of your devices runs Agent Devices.",
-		text: "It needs a Mac, or a Linux device with Podman.",
-		action: {
-			label: "Open App Store",
-			run: () => one.open("app", { app: "agent-devices" }, "apps")
-		}
-	});
-	if (l) return /* @__PURE__ */ c(s, {
+		requestAnimationFrame(b);
+	}, [e]), l) return /* @__PURE__ */ c(s, {
 		title: l.title,
 		text: l.next
 	});
 	if (!e) return /* @__PURE__ */ c(a, { children: "Loading…" });
 	if (!e.length) return /* @__PURE__ */ c(a, { children: "None yet. Agents make one when they need a browser." });
-	let E = new Set(e.map((e) => e.on)).size, D = (e) => e.borrowed ? 0 : p(e) ? 2 : 1, O = [...e].sort((e, t) => D(e) - D(t) || (Date.parse(e.borrowed?.since) || 0) - (Date.parse(t.borrowed?.since) || 0) || e.name.localeCompare(t.name));
+	let w = new Set(e.map((e) => e.on)).size, T = (e) => e.borrowed ? 0 : p(e) ? 2 : 1, E = [...e].sort((e, t) => T(e) - T(t) || (Date.parse(e.borrowed?.since) || 0) - (Date.parse(t.borrowed?.since) || 0) || e.name.localeCompare(t.name));
 	return /* @__PURE__ */ c(o, {
 		min: "16rem",
 		max: 4,
-		children: O.map((e) => /* @__PURE__ */ c(x, {
+		children: E.map((e) => /* @__PURE__ */ c(x, {
 			c: e,
-			hosts: E,
-			src: _[u(e)]
+			hosts: w,
+			src: h[u(e)]
 		}, u(e)))
 	});
 }
