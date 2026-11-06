@@ -251,7 +251,6 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
 /// Headers that say a request was passed on from elsewhere, as proxies add them.
 pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
 
-
 /// The skills for this machine's person (src/skills.rs).
 async fn skills(node: &Node) -> Vec<crate::skills::Skill> {
     let apps = match Caller::local(node) {
@@ -621,15 +620,6 @@ async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>)
     })
 }
 
-
-
-
-
-
-
-
-
-
 /// What a client that picks the node it asks itself says with each request (client/src/lib.rs): a call this node can't
 /// run is answered 421 with the nodes that can (`node::Elsewhere`), not passed on.
 const ELSEWHERE_HEADER: &str = "x-one-elsewhere";
@@ -669,9 +659,6 @@ pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::
     };
     ran.await.unwrap_or_else(|err| failed(&err))
 }
-
-
-
 
 /// A new network, named `name`, whose first person is `user_name` (with `user`, their id).
 #[derive(serde::Deserialize)]
@@ -724,7 +711,6 @@ async fn settings(State(node): State<Node>, me: Me, Body(body): Body<Setting>) -
     done()
 }
 
-
 /// A step as `POST /v1/steps` takes it, each part base64url.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -750,23 +736,6 @@ async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q):
     Ok(Json(node.global_steps(&me.caller, from, welcome).await?))
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /// For agent harnesses' prompt hooks: the body is the hook's JSON, the reply is plain text to show the agent.
 async fn prompt(State(node): State<Node>, body: String) -> Response {
     let event: Value = serde_json::from_str(&body).unwrap_or_default();
@@ -775,9 +744,6 @@ async fn prompt(State(node): State<Node>, body: String) -> Response {
         Err(err) => (StatusCode::BAD_REQUEST, format!("{err:#}")).into_response(),
     }
 }
-
-
-
 
 /// A request to `/<app>/<path>`, answered by the app's `_http` tool, run as whoever asked (this machine's person,
 /// a client device's, or a sign-in's), whose checks are the app's own: the body reaches it as a blob, read as it comes
@@ -808,15 +774,6 @@ async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(Str
     Ok((status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response())
 }
 
-
-
-
-
-
-
-
-
-
 /// An answer named by its content (`tag`, its ETag): to a client that has it already, only that.
 pub(crate) fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl IntoResponse) -> Response {
     if headers.get(axum::http::header::IF_NONE_MATCH).is_some_and(|had| had.as_bytes() == tag.as_bytes()) {
@@ -824,8 +781,6 @@ pub(crate) fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl 
     }
     ([(axum::http::header::ETAG, tag)], answer).into_response()
 }
-
-
 
 #[cfg(test)]
 mod tests {
