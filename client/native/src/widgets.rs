@@ -15,7 +15,12 @@ const IMAGE_MOST: usize = 2 << 20;
 
 /// Asks the person's devices for every page's widgets and keeps them in `dir`. Pages a device didn't answer for keep
 /// what they had; `fetched` says when all last answered.
+///
+/// One at a time: each writes the same files (through the same `.part` name), and the window's events, the five-minute
+/// timer and the platform's own asking while the app runs all start one.
 pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), String> {
+    static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one = ONE.lock().await;
     let state = crate::node_json(device, "/v1/state").await?;
     let apps = crate::node_json(device, "/v1/apps").await?;
     let apps: Vec<Value> = apps.as_array().cloned().unwrap_or_default();
