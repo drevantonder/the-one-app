@@ -1,6 +1,6 @@
 # Plan: one storage model, and permissions as data
 
-Decided by Andre on 2026-11-05. Phases 0 to 2 are done, and phase 3 mostly (below). This file goes once phase 3 is done: from then on the code and ARCHITECTURE.md say it.
+Decided by Andre on 2026-11-05. Phases 0 to 2 are done, and phase 3's deletions (below); what's left of it is its own pieces of work. This file goes once phase 3 is done: from then on the code and ARCHITECTURE.md say it.
 
 ## Why
 
@@ -117,10 +117,10 @@ Done (2026-11-06):
 - **The freeze, read without replay**: every reader (nodes, clients, browsers, the Cloudflare node, services, backups) takes who's who from the first freeze the recovery key the genesis names signed, its copy checked against its hash, or from its Welcome's hash; a new network writes that freeze as it's made (`steps::first_freeze`). The ceremony (`one switch`, `one switch check`, `one throwaway switch`), `FREEZING`, the freeze's mark, `left_out`, the `gate` entry, `/v1/entries/global`, posting entries, and the JavaScript that signed and checked entries are gone. The recovery key lets a device in by a step it signs.
 - **Storage always on**: `Db::open_switched`, `MaybeFrozen`, asking whether the log is frozen before a write, and the per-device frozen flag are gone.
 - **Repos** asks the node's `may`, with no fallback for nodes from before it; a browser's record of who's who has no `roles` or `runs` for older tabs.
+- **The frozen logs, read only, with no replay**: each scope but `global` starts from its start, step 0 of its database, signed once by a node that runs its calls (`steps::START`), and only the genesis, the first entry of `global`'s frozen log, is read from it, from the bucket. `Members::replay`, causal order, cuts and forks are gone.
+- **The store of entries**: `src/store.rs`, `src/log.rs` and `/v1/entries` are gone. Blobs, releases and device seqs read the scope databases (what only the frozen logs said was written once as steps), backups copy the bucket's databases and the genesis, and a device signs a step with the epoch `/v1/steps/global` gives. `READS` is 5, so a device that still asks `/v1/entries` is told to update. The frozen logs stay in the bucket, read by nothing but the genesis.
 
 Left, each its own piece of work:
-- **The frozen logs, read only.** Every scope but `global` starts, before its first step, from what its frozen log's entries add up to (`steps::scope_anchor`), which needs `global`'s frozen log replayed to the freeze (`Members::replay`, causal order, forks). A node keeps each scope's database once worked out (`scope-kept/`), but a new node and the Cloudflare node, which keeps nothing, work it out again. To delete replay: each scope gets a signed starting point, such as a step by one of its people's devices naming the hash of its database at the freeze, written once by the first device of theirs on this release; once every scope has one, readers start there and `members::replay`, `entry::causal`, the forks and the log reading go. Backups of history from before the freeze read their entries the same way.
-- **The store of entries** (`src/store.rs`, `src/node/logs.rs`, `Replica::store`) still mirrors the frozen logs, for that and for what still asks it: blobs an entry names, backups' snapshots, release entries, device seqs. Each moves to the scope database's rows, then the store goes.
 - **Step rules as rows.** A step is applied by `members`' hand-written rules on `Members` read from the database and built back (`steps::apply`); replacing them with SQL over the rows and `may` deletes most of `src/members.rs`.
 - **`members.js`** stays: it builds the content of the steps a browser signs, the same content entries carried.
 - **Moving folders** and **generating the file map**, as planned. (The renames are done: `app-schedules` steps, the `choose-devices` verb, the `network`, `app_schedules` and `app_schedule_keys` tables, `_app_schedules`, the bucket's `network` object; what older releases wrote is read in these names by `src/database/migrate.rs`.)
