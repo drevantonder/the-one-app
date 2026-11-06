@@ -27,6 +27,11 @@ pub fn request_app(app: Option<&str>) -> &str {
     app.unwrap_or(scopes::AGENTS)
 }
 
+/// Whether an installed app can declare what it needs: the agents and the Vault itself are not apps.
+fn declares_needs(app: &str) -> bool {
+    app != scopes::AGENTS && app != scopes::APP
+}
+
 impl Node {
     async fn vault_db(&self, me: &Caller, scope: &Scope) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
         let (db, bucket) = self.call_database(me, scope, VAULT.0, VAULT.1, Some(vec![crate::vault::SCHEMA.into()])).await?;
@@ -485,6 +490,11 @@ impl Node {
         Ok(())
     }
 
+    /// What `app` declares it needs, by name.
+    async fn declared_needs(&self, app: &str) -> Result<Value> {
+        Ok(self.0.apps.describe(app).await.map_err(|_| anyhow!("Not asked: {app} isn't added, so it declares nothing it needs"))?["vault"].clone())
+    }
+
     /// Asks a person for an item `app` may use, in `scope`, for `caller` (an agent, or an app's page), who never sees
     /// its secret fields: what `app` declares as `need`, or `ask`'s `{ title, fields, hosts }`. → `{ id, link, scope }`.
     /// From a page whose Vault they can't change (a member on Everyone's), it's asked in their own, which the app's calls
@@ -493,7 +503,7 @@ impl Node {
     pub async fn request_item(&self, caller: &Caller, scope: &Scope, app: &str, need: Option<&str>, ask: &Value, why: &str) -> Result<Value> {
         let own = Scope::User(caller.user.clone());
         let shared = match need {
-            Some(need) if app != scopes::AGENTS && app != scopes::APP => self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d["shared"] == true),
+            Some(need) if declares_needs(app) => Some(self.declared_needs(app).await?[need].clone()).filter(|d| d["shared"] == true),
             _ => None,
         };
         let manages = |scope: &Scope| self.with(|i| Ok(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope))));
@@ -508,7 +518,7 @@ impl Node {
                 "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
             ),
             Some(need) if app != scopes::APP => {
-                let declared = self.0.apps.describe(app).await.map_err(|_| anyhow!("Not asked: {app} isn't added, so it declares nothing it needs"))?["vault"].clone();
+                let declared = self.declared_needs(app).await?;
                 let d = declared[need].clone();
                 if !d.is_object() {
                     let names: Vec<&str> = declared.as_object().into_iter().flatten().map(|(n, _)| n.as_str()).collect();
@@ -569,7 +579,7 @@ impl Node {
     /// app that declares a shared need of the same type, so one item an admin sets counts for them all.
     async fn sharing(&self, app: &str, need: Option<&str>) -> Vec<String> {
         let mut out = vec![app.to_string()];
-        let Some(need) = need.filter(|_| app != scopes::AGENTS && app != scopes::APP) else { return out };
+        let Some(need) = need.filter(|_| declares_needs(app)) else { return out };
         let Ok(d) = self.0.apps.describe(app).await else { return out };
         let d = &d["vault"][need];
         if d["shared"] != true || d["type"].as_str().is_none_or(str::is_empty) {
@@ -592,7 +602,7 @@ impl Node {
         let asked = self.with(|i| Ok(i.views.get(&scope.to_string()).and_then(|s| s.requests.get(id)).map(|r| (r.app.clone(), r.need.clone()))))?;
         let (sharing, kind) = match &asked {
             Some((app, need)) => {
-                let kind = match need.as_deref().filter(|_| app != scopes::AGENTS && app != scopes::APP) {
+                let kind = match need.as_deref().filter(|_| declares_needs(app)) {
                     Some(need) => self.0.apps.describe(app).await.ok().and_then(|d| d["vault"][need]["type"].as_str().map(str::to_string)),
                     None => None,
                 };

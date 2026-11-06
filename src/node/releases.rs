@@ -67,13 +67,7 @@ impl Node {
     }
 
     pub(super) async fn apply(&self, r: &Release) -> Result<PathBuf> {
-        let path = release::blob_path(&self.0.dir, &r.blob)?;
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(_) => self.blob(&r.blob).await?,
-        };
-        release::verify(crate::config::RELEASE_KEY, &bytes, &r.signature)?;
-        release::install(r, &bytes)
+        release::install(r, &self.release_bytes(r).await?)
     }
 
     /// The newest release of `service`'s program for this device's platform, signed with the release key.
@@ -83,7 +77,7 @@ impl Node {
     }
 
     /// `r`'s program, fetched if it isn't here, once its signature is the release key's.
-    pub async fn service_program(&self, r: &Release) -> Result<Vec<u8>> {
+    pub async fn release_bytes(&self, r: &Release) -> Result<Vec<u8>> {
         let bytes = match std::fs::read(release::blob_path(&self.0.dir, &r.blob)?) {
             Ok(b) => b,
             Err(_) => self.blob(&r.blob).await?,

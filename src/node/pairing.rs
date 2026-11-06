@@ -145,7 +145,7 @@ impl Node {
     pub(super) async fn admit(&self, key: Key, request: JoinRequest) -> Result<JoinReply> {
         let mut pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms()).context("this pairing code was already used or has expired")?;
         if pairing.tried.as_ref().is_some_and(|t| *t != hex(&key)) {
-            let _ = self.keep_pairing(request.secret, pairing);
+            self.keep_pairing(request.secret, pairing);
             bail!("this pairing code was already used or has expired");
         }
         let admitted = self.admit_with(key, &request, &pairing).await;
@@ -154,15 +154,17 @@ impl Node {
             if self.with(|i| Ok(i.r.db().machine(&key)?.is_some()))? {
                 pairing.tried = Some(hex(&key));
             }
-            let _ = self.keep_pairing(request.secret, pairing);
+            self.keep_pairing(request.secret, pairing);
         }
         admitted
     }
 
-    fn keep_pairing(&self, secret: [u8; 16], pairing: Pairing) -> Result<()> {
+    fn keep_pairing(&self, secret: [u8; 16], pairing: Pairing) {
         let mut pairings = self.0.pairings.lock().unwrap();
         pairings.insert(secret, pairing);
-        self.save_pairings(&pairings)
+        if let Err(err) = self.save_pairings(&pairings) {
+            tracing::warn!("keeping a half-finished pairing code: {err:#}");
+        }
     }
 
     async fn admit_with(&self, key: Key, request: &JoinRequest, pairing: &Pairing) -> Result<JoinReply> {

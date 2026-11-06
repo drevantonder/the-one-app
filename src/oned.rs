@@ -211,7 +211,7 @@ fn taken(name: &str) -> (Option<u64>, String) {
 fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, build: &Build) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let (bytes, kept) = match build {
-        Build::Released(r) => (runtime.block_on(node.service_program(r))?, format!("{} {}", r.committed, r.blob)),
+        Build::Released(r) => (runtime.block_on(node.release_bytes(r))?, format!("{} {}", r.committed, r.blob)),
         Build::Deployed(hash) => (runtime.block_on(node.service_build(hash))?, format!("deploy {hash}")),
         Build::None => anyhow::bail!("its deploy names no build for this platform"),
     };

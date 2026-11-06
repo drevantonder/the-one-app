@@ -216,7 +216,7 @@ impl Node {
                 if node.say_hello_to(&device, &hello).await.is_ok()
                     && let Some(far) = node.round_trip(&device)
                 {
-                    let _ = node.with(|i| Ok(i.far.insert(device, far)));
+                    node.with_or(None, |i| Ok(i.far.insert(device, far)));
                 }
             });
         }
