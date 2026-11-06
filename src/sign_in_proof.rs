@@ -65,6 +65,9 @@ pub fn challenge(root: &[u8; 32], device: &Endpoint, at: u64) -> Vec<u8> {
 /// admin's (`cloudflare deploy`, and `one throwaway` for its own).
 pub const CLIENTS: &str = "sign_in_clients";
 
+/// How many days an invite link works.
+pub const INVITE_DAYS: u64 = 3;
+
 /// The network a sign-in must be for, as the checking device's own signed entries say.
 #[derive(Clone, Debug)]
 pub struct Network {

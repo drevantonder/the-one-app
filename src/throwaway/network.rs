@@ -133,7 +133,7 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
 pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, client: bool) -> Result<u32> {
     use std::os::unix::process::CommandExt;
     let log = std::fs::File::create(dir.join(log))?;
-    let child = command.env(format!("{}_HOME", CLI.to_uppercase()), dir).stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn()?;
+    let child = command.env(one::config::env("HOME"), dir).stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn()?;
     one::mode::record(dir, child.id(), client)?;
     Ok(child.id())
 }
@@ -183,11 +183,11 @@ impl Via for Direct {
             req = req.header(*name, *value);
         }
         if let Some(token) = one::api::local_token(&self.dir) {
-            req = req.header(one::api::LOCAL_TOKEN_HEADER, token);
+            req = req.header(one::protocol::header::LOCAL_TOKEN, token);
         }
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         let resp = agent.run(agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build())?;
-        let trace = resp.headers().get(one::node::trace::HEADER).and_then(|h| h.to_str().ok()).map(str::to_string);
+        let trace = resp.headers().get(one::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
     }
 }

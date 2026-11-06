@@ -212,7 +212,7 @@ fn skill_resource(node: &Client, uri: &str) -> Result<Value, Value> {
 /// The agent running this program, if one is: `<CLI>_AGENT`, else what agent harnesses say about themselves.
 pub fn agent_from_env() -> Option<String> {
     let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
-    if let Some(a) = var(&format!("{}_AGENT", CLI.to_uppercase().replace('-', "_"))) {
+    if let Some(a) = var(&crate::config::env("AGENT")) {
         return Some(a);
     }
     // AI_AGENT is `<name>_<version>_<kind>`, like claude-code_2-1-314_agent.

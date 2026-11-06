@@ -234,7 +234,7 @@ impl one::api::client::Via for Http {
         let agent = agent();
         let req = agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build();
         let resp = agent.run(req).map_err(unreached)?;
-        let trace = resp.headers().get(one::node::trace::HEADER).and_then(|h| h.to_str().ok()).map(str::to_string);
+        let trace = resp.headers().get(one::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(one::api::client::Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
     }
 

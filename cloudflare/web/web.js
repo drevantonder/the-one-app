@@ -10,6 +10,7 @@
 // who can do what, and hands each call the keys it needs.
 import { del, put } from "./kept.js";
 import { waited } from "../shared/crypto.js";
+import { HEADER } from "../shared/protocol.js";
 import { answer, browserKeys, browserName, codeOf, joinAsk, passkeyKeysOf, signingInFor } from "./device.js";
 import { net } from "./net.js";
 import { qrSvg } from "./qr.js";
@@ -231,8 +232,8 @@ const h = OneUI.react.createElement;
       }
     };
     for (let misses = 0; ; ) {
-      const headers = { "x-one-user": user };
-      if (trace) headers["x-one-trace"] = "1";
+      const headers = { [HEADER.user]: user };
+      if (trace) headers[HEADER.trace] = "1";
       if (body !== undefined) headers["content-type"] = "application/json";
       const until = auth.kept()?.until || Date.now() + 60_000;
       const sent = body === undefined ? undefined : JSON.stringify(body);

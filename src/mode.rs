@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::config::CLI;
 
 /// How long a throwaway network's node runs with nobody asking it anything.
 const IDLE: Duration = Duration::from_secs(60 * 60);
@@ -28,7 +27,7 @@ pub struct Throwaway {
 }
 
 fn var() -> String {
-    format!("{}_THROWAWAY", CLI.to_uppercase())
+    crate::config::env("THROWAWAY")
 }
 
 pub fn here() -> &'static Mode {
@@ -54,7 +53,7 @@ impl Throwaway {
     /// Makes `command` a program of the throwaway network in `home`, whose node is at `addr`: its home and address, which
     /// it asks its node at as one of this machine's programs, and its mode.
     pub fn tell(command: &mut std::process::Command, home: &Path, addr: &str) {
-        command.env(var(), home).env(format!("{}_HOME", CLI.to_uppercase()), home).env(format!("{}_ADDR", CLI.to_uppercase()), addr);
+        command.env(var(), home).env(crate::config::env("HOME"), home).env(crate::config::env("ADDR"), addr);
     }
 
     pub fn home(&self) -> &Path {

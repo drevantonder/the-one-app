@@ -610,7 +610,7 @@ fn refused(code: StatusCode, why: impl std::fmt::Display) -> Response {
 
 /// Whether a request is the program's on this machine: it sends the token in the service's folder.
 fn ours(s: &Service, headers: &HeaderMap) -> Result<(), Response> {
-    match headers.get(crate::api::LOCAL_TOKEN_HEADER).and_then(|v| v.to_str().ok()) {
+    match headers.get(crate::protocol::header::LOCAL_TOKEN).and_then(|v| v.to_str().ok()) {
         Some(t) if crate::keys::same_secret(t.as_bytes(), s.0.token.as_bytes()) => Ok(()),
         _ => Err(refused(StatusCode::UNAUTHORIZED, "send the local token in the service's folder")),
     }
@@ -703,8 +703,8 @@ async fn blobs(s: &Service, headers: &HeaderMap, method: &'static str, path: &st
         let token = std::fs::read_to_string(crate::home().join(crate::api::LOCAL_TOKEN)).context("its device's oned has no local token")?;
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         let resp = match body {
-            Some(body) => agent.post(&url).header(crate::api::LOCAL_TOKEN_HEADER, token.trim()).header("content-type", "application/octet-stream").send(&body[..])?,
-            None => agent.get(&url).header(crate::api::LOCAL_TOKEN_HEADER, token.trim()).call()?,
+            Some(body) => agent.post(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).header("content-type", "application/octet-stream").send(&body[..])?,
+            None => agent.get(&url).header(crate::protocol::header::LOCAL_TOKEN, token.trim()).call()?,
         };
         let status = resp.status().as_u16();
         Ok((status, resp.into_body().with_config().limit(u64::MAX).read_to_vec()?))

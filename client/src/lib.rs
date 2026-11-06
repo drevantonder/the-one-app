@@ -14,12 +14,13 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
+use one::protocol::header;
 use iroh::endpoint::{Connection, RecvStream, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
 use n0_future::time::{Duration, Instant, timeout};
 
 pub mod keyring;
-mod settings;
+pub mod settings;
 pub use settings::answered;
 #[cfg(feature = "relayed")]
 pub mod relayed;
@@ -54,13 +55,9 @@ const SKIP: Duration = Duration::from_secs(10);
 const HEAD_LIMIT: usize = 64 << 10;
 const READ: usize = 64 << 10;
 
-const ENDPOINT_HEADER: &str = "x-one-endpoint";
 /// What every request says, so a node that can't run a call itself answers 421 with the nodes that can
 /// (`{ elsewhere }`), which this client asks itself, handing each its own keys, rather than passing it on.
-const ELSEWHERE_HEADER: &str = "x-one-elsewhere";
 const MOST_ELSEWHERE: usize = 2;
-/// What a request in developer mode asks for a trace with, and a node answers its own part in (src/node/trace.rs).
-pub const TRACE_HEADER: &str = "x-one-trace";
 
 /// What this custom build's clients speak to its nodes.
 fn alpn() -> Vec<u8> {
@@ -165,7 +162,7 @@ pub struct Response {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Body,
-    /// For a request that asked for one (`TRACE_HEADER`): `{ tries, node }`, each node it tried in order, with how
+    /// For a request that asked for one (`header::TRACE`): `{ tries, node }`, each node it tried in order, with how
     /// long it waited and why it moved on, and what the node that answered did, as it said.
     pub trace: Option<serde_json::Value>,
 }
@@ -404,7 +401,7 @@ impl Client {
         let certificate = self.0.certificate.lock().unwrap().clone();
         let again = matches!(req.method.as_str(), "GET" | "HEAD");
         let mut why = unsent("there's no node to ask");
-        let traced = req.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(TRACE_HEADER));
+        let traced = req.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(header::TRACE));
         let mut tries = traced.then(|| Trace { start: Instant::now(), tries: Vec::new() });
         let traces = |tries: &mut Option<Trace>, node: Option<serde_json::Value>| tries.as_mut().map(|t| serde_json::json!({ "tries": std::mem::take(&mut t.tries), "node": node }));
         let (mut skipped, mut fresh, mut only, mut followed, mut reconnected) = (Vec::new(), Vec::new(), None::<Vec<PublicKey>>, 0, false);
@@ -436,7 +433,7 @@ impl Client {
                 Ok(mut response) => {
                     if response.status != 421 || followed >= MOST_ELSEWHERE {
                         tried(&mut tries, &key, began, "answered", opened);
-                        let theirs = response.headers.iter().find(|h| h.0 == TRACE_HEADER).and_then(|h| data_encoding::BASE64.decode(h.1.as_bytes()).ok()).and_then(|b| serde_json::from_slice(&b).ok());
+                        let theirs = response.headers.iter().find(|h| h.0 == header::TRACE).and_then(|h| data_encoding::BASE64.decode(h.1.as_bytes()).ok()).and_then(|b| serde_json::from_slice(&b).ok());
                         response.trace = traces(&mut tries, theirs);
                         return Ok(response);
                     }
@@ -699,17 +696,17 @@ fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certif
             return Err(unsent(format!("{name} isn't a header")));
         }
         // How the request is framed, and who it's from, is this library's to say.
-        if ["host", "content-length", "transfer-encoding", "connection", ENDPOINT_HEADER, ELSEWHERE_HEADER, one::database::HEADER].iter().any(|h| name.eq_ignore_ascii_case(h)) {
+        if ["host", "content-length", "transfer-encoding", "connection", header::ENDPOINT, header::ELSEWHERE, header::READS].iter().any(|h| name.eq_ignore_ascii_case(h)) {
             continue;
         }
         head.push_str(&format!("{name}: {value}\r\n"));
     }
     if let Some(certificate) = certificate.filter(|c| c.bytes().all(|b| b.is_ascii_graphic())) {
-        head.push_str(&format!("{ENDPOINT_HEADER}: {certificate}\r\n"));
+        head.push_str(&format!("{}: {certificate}\r\n", header::ENDPOINT));
     }
     // A client that reads less than the network needs is told to update (`one::database::READS`).
-    head.push_str(&format!("{}: {}\r\n", one::database::HEADER, one::database::READS));
-    head.push_str(&format!("{ELSEWHERE_HEADER}: 1\r\ncontent-length: {len}\r\n\r\n"));
+    head.push_str(&format!("{}: {}\r\n", header::READS, one::database::READS));
+    head.push_str(&format!("{}: 1\r\ncontent-length: {len}\r\n\r\n", header::ELSEWHERE));
     Ok(head.into_bytes())
 }
 

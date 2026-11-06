@@ -36,7 +36,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let xvfb = spawn(dir, std::process::Command::new("Xvfb").args([display.as_str(), "-screen", "0", "1280x800x24", "-nolisten", "tcp"]), &format!("{name}/display.log"), true)?;
     std::fs::write(home.join("display.pid"), xvfb.to_string())?;
     std::thread::sleep(Duration::from_secs(1));
-    let env = |key: &str| format!("{}_{key}", CLI.to_uppercase());
+    let env = |key: &str| one::config::env(key);
     let log = format!("{name}/app.log");
     let app = spawn(
         dir,

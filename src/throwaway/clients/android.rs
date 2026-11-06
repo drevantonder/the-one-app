@@ -39,7 +39,7 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
     }
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{device}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
-    let env = |key: &str| format!("{}_{key}", CLI.to_uppercase());
+    let env = |key: &str| one::config::env(key);
     on_device(device, "logcat -c")?;
     on_device(
         device,

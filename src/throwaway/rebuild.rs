@@ -49,7 +49,7 @@ pub(crate) fn cloudflare_node_built(checkout: &Path, rest: &[String]) -> Result<
 /// build, which starts them again (when no client session is running).
 pub(crate) fn rebuilt(checkout: &Path, rest: &[String], what: &str) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
-    let again = format!("{}_THROWAWAY_REBUILT", CLI.to_uppercase());
+    let again = one::config::env("THROWAWAY_REBUILT");
     anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again and doesn't hold what it was built with: {what}");
     eprintln!("Building {what} (dev profile, not release)…");
     std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;

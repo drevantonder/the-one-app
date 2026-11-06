@@ -26,7 +26,7 @@ pub(crate) fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one:
     let kept = std::fs::read_to_string(&signed_in).is_ok_and(|was| was == here);
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{device}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
-    let env = |key: &str| format!("{}_{key}", CLI.to_uppercase());
+    let env = |key: &str| one::config::env(key);
     // A copy of the person's computer may have the app signed in elsewhere, or as someone else: what it kept goes (its
     // folder, the package's, and its sign-in in the Credential Manager), and it signs in again. Started on the device's
     // desktop, as a task signed in there (a window started from SSH never draws), as build.ps1 does; what it says, in a

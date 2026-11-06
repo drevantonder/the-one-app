@@ -25,7 +25,7 @@ pub(crate) fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[S
     // No node answers at its address, nor anything of this machine's in its home, git's own config included (sign-in tells it where repos are).
     let as_device = |args: &[String]| {
         let mut c = std::process::Command::new(&program);
-        c.args(args).env(format!("{}_ADDR", CLI.to_uppercase()), "127.0.0.1:1").env(format!("{}_HOME", CLI.to_uppercase()), &home).env("XDG_CONFIG_HOME", &home).env("GIT_CONFIG_GLOBAL", home.join("gitconfig")).env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY");
+        c.args(args).env(one::config::env("ADDR"), "127.0.0.1:1").env(one::config::env("HOME"), &home).env("XDG_CONFIG_HOME", &home).env("GIT_CONFIG_GLOBAL", home.join("gitconfig")).env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY");
         c
     };
     let joined = home.join("joined");

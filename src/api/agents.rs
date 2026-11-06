@@ -31,7 +31,7 @@ fn markdown(text: String) -> Response {
 
 /// The root skill's body, each skill under it linked at this device, as whoever asked reached it.
 pub(super) fn routes() -> Routes {
-    Routes::default().route("/llms.txt", Who::ThisMachine, get(llms)).route("/skills/{name}/{*path}", Who::ThisMachine, get(skill_file)).route("/hooks/prompt", Who::ThisMachine, post(prompt))
+    Routes::default().route("/llms.txt", Who::ThisMachine, get(llms)).route("/skills/{name}/{*path}", Who::ThisMachine, get(skill_file)).route(crate::protocol::path::HOOKS_PROMPT, Who::ThisMachine, post(prompt))
 }
 
 async fn llms(State(node): State<Node>, headers: axum::http::HeaderMap) -> Response {

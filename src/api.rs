@@ -29,15 +29,15 @@ mod serve;
 pub use agents::serve_guide;
 pub use calls::app_route;
 pub(crate) use calls::call_from_cloudflare_node;
-pub use guard::{ENDPOINT_HEADER, FromClient, guarded};
+pub use guard::{FromClient, guarded};
 pub(crate) use guard::{Me, SignedIns};
-pub use local::{LOCAL_TOKEN, LOCAL_TOKEN_HEADER, agent, as_this_machine, local_token};
+pub use local::{LOCAL_TOKEN, agent, as_this_machine, local_token};
 pub(crate) use reply::{Body, Error, Reply, done, given, tagged};
 pub use serve::{serve, serve_until};
 
 /// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
 pub fn addr() -> String {
-    std::env::var(format!("{}_ADDR", crate::config::CLI.to_uppercase())).unwrap_or_else(|_| format!("127.0.0.1:{}", crate::config::PORT))
+    std::env::var(crate::config::env("ADDR")).unwrap_or_else(|_| format!("127.0.0.1:{}", crate::config::PORT))
 }
 
 pub fn router(node: Node) -> Router {
@@ -170,7 +170,7 @@ mod tests {
                                 Asker::Nobody => req,
                                 Asker::SignIn => req.header("authorization", "Bearer not-a-sign-in"),
                                 Asker::Client => req.header("x-test-client", "1"),
-                                Asker::ThisMachine => req.header(super::LOCAL_TOKEN_HEADER, &token).header("authorization", "Bearer not-a-sign-in"),
+                                Asker::ThisMachine => req.header(crate::protocol::header::LOCAL_TOKEN, &token).header("authorization", "Bearer not-a-sign-in"),
                             };
                             let mut resp = agent.run(req.body("{}".to_string()).unwrap()).unwrap();
                             let status = resp.status().as_u16();

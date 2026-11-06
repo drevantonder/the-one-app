@@ -41,9 +41,9 @@ pub fn find(node: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
 pub fn exit_code(err: &anyhow::Error) -> i32 {
     match err.downcast_ref::<Failed>() {
         Some(Failed::Typed(_)) => 2,
-        Some(Failed::Refused(_)) => crate::protocol::exit::REFUSED,
+        Some(Failed::Refused(_)) => crate::cli::exit::REFUSED,
         None => match crate::protocol::Coded::of(err).as_deref() {
-            Some(crate::protocol::code::REFUSED | crate::protocol::code::NOT_SIGNED_IN) => crate::protocol::exit::REFUSED,
+            Some(crate::protocol::code::REFUSED | crate::protocol::code::NOT_SIGNED_IN) => crate::cli::exit::REFUSED,
             _ => 1,
         },
     }

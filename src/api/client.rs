@@ -98,7 +98,7 @@ impl Client {
         drop(self.via.tries());
         let mut headers = vec![("content-type", "application/json")];
         if trace {
-            headers.push((crate::node::trace::HEADER, "1"));
+            headers.push((crate::protocol::header::TRACE, "1"));
         }
         let (ok, node) = match self.via.send("POST", "/v1/call", &headers, Some(serde_json::to_vec(body).unwrap_or_default()), None) {
             Ok(mut answer) => {
@@ -162,7 +162,7 @@ pub struct InProcess {
 impl InProcess {
     /// As a request that came with `client` (over iroh), from `peer` (over TCP), and `headers`. Called in the runtime.
     pub fn new(node: Node, client: Option<super::FromClient>, peer: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>, headers: &axum::http::HeaderMap) -> InProcess {
-        let proof = [axum::http::header::AUTHORIZATION.as_str(), super::LOCAL_TOKEN_HEADER, crate::database::HEADER];
+        let proof = [axum::http::header::AUTHORIZATION.as_str(), crate::protocol::header::LOCAL_TOKEN, crate::protocol::header::READS];
         let headers = headers.iter().filter(|(n, _)| proof.contains(&n.as_str())).map(|(n, v)| (n.clone(), v.clone())).collect();
         InProcess { router: super::guarded(super::routes(), node), client, peer, headers, runtime: tokio::runtime::Handle::current() }
     }
@@ -195,7 +195,7 @@ impl Via for InProcess {
                 }
             }
         });
-        let trace = parts.headers.get(crate::node::trace::HEADER).and_then(|h| h.to_str().ok()).map(str::to_string);
+        let trace = parts.headers.get(crate::protocol::header::TRACE).and_then(|h| h.to_str().ok()).map(str::to_string);
         Ok(Answer { status: parts.status.as_u16(), trace, body: Box::new(Streamed { chunks, part: Default::default() }) })
     }
 }

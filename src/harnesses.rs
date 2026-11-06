@@ -14,6 +14,8 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use serde_json::Value;
 
+use crate::protocol::path::HOOKS_PROMPT;
+
 /// Marks a skill folder as this custom build's to replace, so the nodes of two custom builds on one machine leave each other's alone.
 fn marker() -> String {
     format!(".synced-{}", crate::config::CLI)
@@ -69,16 +71,13 @@ fn skill_roots(home: &Path) -> Vec<PathBuf> {
     roots.into_iter().filter(|r| r.parent().is_some_and(Path::is_dir) && std::fs::create_dir_all(r).is_ok()).collect()
 }
 
-/// Where the node answers a harness's prompt hook with what every app of this machine's person says with it.
-const HOOK_PATH: &str = "/hooks/prompt";
-
 /// Harnesses without settings hooks but with a way to add a message of their own get a plugin that does what the hook
 /// does: Pi an extension that says it with each prompt, OpenCode one that keeps it in the session's instructions.
 const PI_EXTENSION: &str = r#"// Installed by {{name}}: adds to each prompt what your apps say with it, like
 // what other agents have posted since this session last looked.
 import { readFileSync } from "node:fs"
 
-const url = "http://{{addr}}/hooks/prompt"
+const url = "http://{{addr}}{{hook}}"
 // Asked as one of this machine's own programs: with the token only its user can read.
 const token = () => readFileSync({{token}}, "utf8").trim()
 
@@ -99,7 +98,7 @@ const OPENCODE_PLUGIN: &str = r#"// Installed by {{name}}: keeps in each session
 import { Plugin } from "@opencode/plugin"
 import { readFileSync } from "node:fs"
 
-const url = "http://{{addr}}/hooks/prompt"
+const url = "http://{{addr}}{{hook}}"
 // Asked as one of this machine's own programs: with the token only its user can read.
 const token = () => readFileSync({{token}}, "utf8").trim()
 
@@ -143,9 +142,9 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
     let pi = dir("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     // Asked as one of this machine's own programs: with the token only its user can read.
     let token = node_home.join(crate::api::LOCAL_TOKEN);
-    let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{HOOK_PATH} || true", crate::api::LOCAL_TOKEN_HEADER, token.display());
+    let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{} || true", crate::protocol::header::LOCAL_TOKEN, token.display(), crate::protocol::path::HOOKS_PROMPT);
     // Another custom build's node on this machine has a hook of its own, on its own port; an older hook of its own is replaced.
-    let port = format!(":{}/hooks/", crate::api::port_of(addr));
+    let port = format!(":{}{}", crate::api::port_of(addr), &HOOKS_PROMPT[..=HOOKS_PROMPT.rfind('/').unwrap_or_default()]);
     let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
@@ -157,8 +156,8 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
     };
     let token = serde_json::to_string(&token.to_string_lossy()).unwrap_or_default();
     let plugin = |text: &str| {
-        let text = text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", addr);
-        text.replace("{{header}}", crate::api::LOCAL_TOKEN_HEADER).replace("{{token}}", &token)
+        let text = text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", addr).replace("{{hook}}", HOOKS_PROMPT);
+        text.replace("{{header}}", crate::protocol::header::LOCAL_TOKEN).replace("{{token}}", &token)
     };
     let s = |v: &str| CstInputValue::String(v.to_string());
     let args = |harness: &str| mcp_args(harness).iter().map(|a| s(a)).collect::<Vec<_>>();
@@ -196,7 +195,7 @@ fn git(node_home: &Path, addr: &str) {
     let Some(token) = crate::api::local_token(node_home) else { return };
     let port = crate::api::port_of(addr);
     let file = node_home.join("git-config");
-    let text: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", crate::api::LOCAL_TOKEN_HEADER)).collect();
+    let text: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", crate::protocol::header::LOCAL_TOKEN)).collect();
     if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;

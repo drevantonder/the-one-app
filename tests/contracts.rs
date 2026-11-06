@@ -768,3 +768,74 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
     }
     assert!(unknown.is_empty(), "these read what the node's state doesn't say (src/state.rs):\n{}", unknown.join("\n"));
 }
+
+/// Every path of the node's API that the Workers, the screens, the web client and the native apps ask is one of its routes
+/// (`api::routes`) or one a device answers itself (`one_client::settings::answered`): a path misspelled or dropped from one
+/// fails as a 404, which no one sees until it's used.
+#[test]
+fn every_path_asked_of_a_node_is_one_it_serves() {
+    // Not an app's own requests (`/{app}/{*path}`), which take any path that isn't the API's.
+    let routes: Vec<Vec<String>> = one::api::routes().who().iter().map(|(path, _)| path.trim_start_matches('/').split('/').map(str::to_string).collect::<Vec<_>>()).filter(|route| !route[0].starts_with('{')).collect();
+    // `{app}` and `{*path}` take what's there; so does what a page or format fills in (`${id}`, `{}`).
+    let matches = |asked: &[&str]| {
+        routes.iter().any(|route| {
+            let tail = route.last().is_some_and(|s| s.starts_with("{*"));
+            (route.len() == asked.len() || (tail && asked.len() >= route.len() - 1)) && route.iter().zip(asked).all(|(r, a)| r.starts_with('{') || r == a || a.contains("${") || a.contains('{'))
+        })
+    };
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let mut files = Vec::new();
+    for dir in ["cloudflare", "src/screen", "client/src", "client/native/src", "apps"] {
+        let mut stack = vec![root.join(dir)];
+        while let Some(dir) = stack.pop() {
+            let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            if matches!(name, "node_modules" | "dist" | "target" | "test" | "relay" | "service") {
+                continue;
+            }
+            for f in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = f.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| matches!(e.to_str(), Some("js" | "jsx" | "rs"))) {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    let mut unserved = Vec::new();
+    for path in &files {
+        let source = std::fs::read_to_string(path).unwrap();
+        for (n, line) in source.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for (at, _) in line.match_indices("/v1/") {
+                // A literal: the quote before it is its own start.
+                let start = line[..at].chars().next_back();
+                if !matches!(start, Some('"' | '\'' | '`')) {
+                    continue;
+                }
+                let end = line[at..].find(['"', '\'', '`', '?', ' ', '\\']).map_or(line.len(), |e| at + e);
+                let literal = &line[at..end];
+                let asked: Vec<&str> = literal.trim_start_matches('/').split('/').collect();
+                // A start of a path, which more is added to.
+                if !literal.ends_with('/') && !matches(&asked) && !one_client::settings::answered(literal) {
+                    unserved.push(format!("{}:{}: {}", path.strip_prefix(root).unwrap().display(), n + 1, &line[at..end]));
+                }
+            }
+        }
+    }
+    assert!(unserved.is_empty(), "these paths aren't routes of the node (src/api.rs):\n{}", unserved.join("\n"));
+}
+
+/// What isn't an app's own request (`protocol::path::ROOTS`) is every first segment the API's routes have: a route under
+/// another would be taken for an app's by every client that hands keys, and by git.
+#[test]
+fn the_apis_paths_are_never_taken_for_an_apps() {
+    for (path, _) in one::api::routes().who() {
+        let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+        if segments.len() > 1 && !segments[0].starts_with('{') {
+            assert!(one::protocol::path::ROOTS.contains(&segments[0]), "{path} would be an app's: add {} to protocol::path::ROOTS", segments[0]);
+        }
+    }
+}

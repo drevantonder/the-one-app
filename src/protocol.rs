@@ -12,8 +12,6 @@ pub const RELAY: &str = "one/relay";
 pub use crate::push::DOMAIN as PUSH;
 /// What a device signs its requests to auth under.
 pub const AUTH_DOMAIN: &str = "one/auth";
-/// How many days an invite link works.
-pub const INVITE_DAYS: u64 = 3;
 /// How long a pairing code works (ms): what a node tells the relay it lasts, which the relay holds it to.
 pub const PAIRING_LIFE: u64 = 7 * 86_400_000;
 /// What a session's endpoint signs to open its relay socket.
@@ -23,6 +21,47 @@ pub const SOCKET_FRESH: u64 = 10_000;
 
 /// The most objects the URL signer signs URLs for at once, and a step range it names may be.
 pub const MOST_URLS: usize = 256;
+
+/// The headers of requests between machines, which every language that sends or reads one names by these.
+pub mod header {
+    /// The database keys a caller hands a node with a request, sealed to it (`keys::Handoff`).
+    pub const KEYS: &str = "x-one-keys";
+    /// A session's endpoint, certified by its device, so the node takes it as that device.
+    pub const ENDPOINT: &str = "x-one-endpoint";
+    /// A client that picks its node itself: the node it asks says where else to ask, if it won't run the call.
+    pub const ELSEWHERE: &str = "x-one-elsewhere";
+    /// A request that asks for a trace of what it did, answered in the same header.
+    pub const TRACE: &str = "x-one-trace";
+    /// Whose request it is, which a node checks against the device's key.
+    pub const USER: &str = "x-one-user";
+    /// A signed request that has no body to carry it (a GET's or DELETE's).
+    pub const REQUEST: &str = "x-one-request";
+    /// How much of who's who a client says it reads (`database::READS`).
+    pub const READS: &str = "x-one-reads";
+    /// What a machine's own programs send a node of theirs to say they're its own.
+    pub const LOCAL_TOKEN: &str = "x-one-local-token";
+}
+
+/// The paths of the local API that more than one place names: what is kept apart by what a request runs (`keys::Route`),
+/// and what is the API's own, not an app's (`/<app>/…` is an app's, reached by git).
+pub mod path {
+    pub const CALL: &str = "/v1/call";
+    pub const SCREENS: &str = "/v1/screens/";
+    pub const MCP: &str = "/mcp";
+    pub const WIDGETS: &str = "/v1/widgets";
+    pub const BADGES: &str = "/v1/badges";
+    pub const APPS: &str = "/v1/apps";
+    pub const VAULT: &str = "/v1/vault";
+    pub const HOOKS_PROMPT: &str = "/hooks/prompt";
+    /// The first segments of the API's own routes with more under them (`routes()` holds to it: `api::tests`).
+    pub const ROOTS: [&str; 4] = ["v1", "mcp", "hooks", "skills"];
+
+    /// The app an app's own request (`/<app>/…`, with something after) is for: none for the API's own.
+    pub fn app_request(path: &str) -> Option<&str> {
+        let (app, rest) = path.strip_prefix('/')?.split_once('/')?;
+        (!app.is_empty() && !rest.is_empty() && !ROOTS.contains(&app)).then_some(app)
+    }
+}
 
 /// What a database keeps in the bucket beside its steps (`<prefix>/<n>`): the newest step's hint, where its steps
 /// were deleted past (`tidied`), and the copy of its steps up to one, in a folder of its own.
@@ -51,44 +90,59 @@ pub const NOTE_FALLBACK: &str = "You have a new notification.";
 
 /// The codes the node's errors carry beside their text (`{ error, code }`), which callers act on, never on the text.
 /// An app's error may carry one too (an error with a `code`), the Workers and clients of other languages read the
-/// same ones from `shared/protocol.js`.
+/// same ones from `shared/protocol.js`'s `CODES`, each as its value in camelCase.
 pub mod code {
-    /// A device that reads less of who's who than this build.
-    pub const UPDATE: &str = "update";
-    /// A device the network doesn't list.
-    pub const NOT_LET_IN: &str = "not_let_in";
-    /// What was asked isn't the caller's to do, or needs `--confirm`.
-    pub const REFUSED: &str = "refused";
-    /// What was asked needs an account or a sign-in that isn't there.
-    pub const NOT_SIGNED_IN: &str = "not_signed_in";
-    /// No device runs what was asked now: its node or service is starting, asking again in a moment answers.
-    pub const RESTARTING: &str = "restarting";
-    /// An app that isn't added, or isn't on the person's pages.
-    pub const NOT_ADDED: &str = "not_added";
-    /// A step signed for a position of who's who that another device's step has taken: sign it again for the next.
-    pub const TAKEN: &str = "taken";
-    /// A signed request the relay already took once (it takes each `(by, at)` once): sign it again with a new `at`.
-    pub const REPLAYED: &str = "replayed";
-    /// What was asked is there already: a key the relay lists, a key sealed to a device.
-    pub const ALREADY: &str = "already";
-    /// A device or key to take out that the network doesn't list.
-    pub const NOT_LISTED: &str = "not_listed";
-    /// A pairing code that was used already or has expired.
-    pub const PAIRING_USED: &str = "pairing_used";
-    /// Not a pairing code: copied in part, or not one.
-    pub const BAD_PAIRING_CODE: &str = "bad_pairing_code";
-    /// A device that already belongs to a network, asked to join another.
-    pub const ALREADY_IN_NETWORK: &str = "already_in_network";
-    /// The device a pairing code is for couldn't be reached.
-    pub const UNREACHABLE: &str = "unreachable";
-    /// An app's sign-in needs the Vault's `client` first (Google's OAuth client), which an admin sets once.
-    pub const NO_CLIENT: &str = "no_client";
-    /// A sign-in to finish that nothing is waiting for: it finished already, or was never started.
-    pub const NOT_WAITING: &str = "not_waiting";
-    /// A limit of what the person's plan gives (AI's, by the minute or the day), which asking again later gets past.
-    pub const LIMIT: &str = "limit";
-    /// A browser profile an app asked an agent device for that isn't there.
-    pub const NO_PROFILE: &str = "no_profile";
+    macro_rules! codes {
+        ($($(#[$doc:meta])* $name:ident = $value:literal,)*) => {
+            $($(#[$doc])* pub const $name: &str = $value;)*
+            /// Every code.
+            pub const ALL: &[&str] = &[$($value),*];
+        };
+    }
+
+    codes! {
+        /// A device that reads less of who's who than this build.
+        UPDATE = "update",
+        /// A device the network doesn't list.
+        NOT_LET_IN = "not_let_in",
+        /// What was asked isn't the caller's to do, or needs `--confirm`.
+        REFUSED = "refused",
+        /// What was asked needs an account or a sign-in that isn't there.
+        NOT_SIGNED_IN = "not_signed_in",
+        /// No device runs what was asked now: its node or service is starting, asking again in a moment answers.
+        RESTARTING = "restarting",
+        /// An app that isn't added, or isn't on the person's pages.
+        NOT_ADDED = "not_added",
+        /// A step signed for a position of who's who that another device's step has taken: sign it again for the next.
+        TAKEN = "taken",
+        /// A signed request the relay already took once (it takes each `(by, at)` once): sign it again with a new `at`.
+        REPLAYED = "replayed",
+        /// What was asked is there already: a key the relay lists, a key sealed to a device.
+        ALREADY = "already",
+        /// A device or key to take out that the network doesn't list.
+        NOT_LISTED = "not_listed",
+        /// A pairing code that was used already or has expired.
+        PAIRING_USED = "pairing_used",
+        /// Not a pairing code: copied in part, or not one.
+        BAD_PAIRING_CODE = "bad_pairing_code",
+        /// A device that already belongs to a network, asked to join another.
+        ALREADY_IN_NETWORK = "already_in_network",
+        /// The device a pairing code is for couldn't be reached.
+        UNREACHABLE = "unreachable",
+        /// An app's sign-in needs the Vault's `client` first (Google's OAuth client), which an admin sets once.
+        NO_CLIENT = "no_client",
+        /// A sign-in to finish that nothing is waiting for: it finished already, or was never started.
+        NOT_WAITING = "not_waiting",
+        /// A limit of what the person's plan gives (AI's, by the minute or the day), which asking again later gets past.
+        LIMIT = "limit",
+        /// A browser profile an app asked an agent device for that isn't there.
+        NO_PROFILE = "no_profile",
+    }
+
+    /// `not_let_in` as `notLetIn`, as `shared/protocol.js` names it.
+    pub fn camel(code: &str) -> String {
+        code.split('_').enumerate().map(|(n, w)| if n == 0 { w.to_string() } else { w[..1].to_uppercase() + &w[1..] }).collect()
+    }
 }
 
 /// An error that says what kind it is, as `{ error, code }` on the wire: the node's answers, and what a device passes
@@ -137,23 +191,12 @@ impl std::fmt::Display for Coded {
 
 impl std::error::Error for Coded {}
 
-/// What `<cli> cloudflare deploy` and the shell `update` runs it in exit with, which `update` acts on.
-pub mod exit {
-    /// Refused: a command that wasn't allowed, or needs `--confirm` (`tools::exit_code`); a deploy from a device that isn't
-    /// the Workers' home.
-    pub const REFUSED: i32 = 3;
-    /// This device has no Cloudflare settings, so it has nothing to deploy.
-    pub const NO_SETTINGS: i32 = 4;
-    /// The device's node isn't the build being sent out yet: ask again once it is (the exit code `sh` programs use for
-    /// "try again", EX_TEMPFAIL).
-    pub const NOT_YET: i32 = 75;
-}
-
 /// `shared/protocol.js`: the constants above, and what the Workers need to say names of the bucket in them.
 pub fn javascript() -> String {
     format!(
         "// What the Workers and the web client say that the Rust does too, written by src/protocol.rs when they're built:\n\
          // never edit it, and it isn't kept in git.\n\
+         export const HEADER = {header};\n\
          export const URLS = {urls};\n\
          export const RELAY = {relay};\n\
          export const PUSH = {push};\n\
@@ -195,6 +238,7 @@ pub fn javascript() -> String {
          export const newestName = (prefix) => `${{prefix}}/${{NEWEST}}`;\n\
          export const updateRefusal = (yours) => {update}.replace(\"{{yours}}\", yours);\n\
 ",
+        header = json!({ "keys": header::KEYS, "endpoint": header::ENDPOINT, "elsewhere": header::ELSEWHERE, "trace": header::TRACE, "user": header::USER, "request": header::REQUEST }),
         urls = json!(URLS),
         relay = json!(RELAY),
         push = json!(PUSH),
@@ -224,7 +268,7 @@ pub fn javascript() -> String {
         blobs = json!(crate::bucket::BLOBS),
         fallback = json!(NOTE_FALLBACK),
         yours = json!(crate::config::YOURS),
-        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notAdded": code::NOT_ADDED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED, "pairingUsed": code::PAIRING_USED, "badPairingCode": code::BAD_PAIRING_CODE, "alreadyInNetwork": code::ALREADY_IN_NETWORK, "unreachable": code::UNREACHABLE, "noClient": code::NO_CLIENT, "notWaiting": code::NOT_WAITING, "limit": code::LIMIT, "noProfile": code::NO_PROFILE }),
+        codes = json!(code::ALL.iter().map(|c| (code::camel(c), c)).collect::<std::collections::BTreeMap<_, _>>()),
         update = json!(UPDATE_REFUSAL),
     )
 }

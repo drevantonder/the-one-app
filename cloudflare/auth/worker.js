@@ -64,7 +64,7 @@ import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
 import { b64u, behind, checkRequest, hex, isKey, joinChallenge, joinCode, joinNonce, random, sha256 } from "../shared/crypto.js";
 import { json } from "../shared/http.js";
-import { AUTH_DOMAIN, updateRefusal } from "../shared/protocol.js";
+import { AUTH_DOMAIN, HEADER, updateRefusal } from "../shared/protocol.js";
 import { bearer, verify } from "../shared/token.js";
 import { codePage, invitePage, passkeysPage, signInPage, throwawayPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
@@ -374,9 +374,9 @@ export class Auth extends DurableObject {
     const route = `${request.method} ${new URL(request.url).pathname}`;
     let asked = body;
     if (asked === undefined) {
-      const header = request.headers.get("x-one-request");
+      const header = request.headers.get(HEADER.request);
       if (!header) return null;
-      try { asked = JSON.parse(new TextDecoder().decode(b64u.decode(header))); } catch { refuse(400, "x-one-request isn't a signed request"); }
+      try { asked = JSON.parse(new TextDecoder().decode(b64u.decode(header))); } catch { refuse(400, `${HEADER.request} isn't a signed request`); }
     }
     const { by, fields } = await checkRequest(AUTH_DOMAIN, asked).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
     if (fields.route !== route) refuse(403, `That request was signed for ${fields.route}, not ${route}.`);

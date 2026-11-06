@@ -263,7 +263,7 @@ pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware:
     let headers: Vec<(String, String)> = parts
         .headers
         .iter()
-        .filter(|(name, _)| !matches!(name.as_str(), "authorization" | "host") && name.as_str() != one::api::LOCAL_TOKEN_HEADER)
+        .filter(|(name, _)| !matches!(name.as_str(), "authorization" | "host") && name.as_str() != one::protocol::header::LOCAL_TOKEN)
         .filter_map(|(name, value)| Some((name.to_string(), value.to_str().ok()?.to_string())))
         .collect();
     match connected(&device) {

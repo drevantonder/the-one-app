@@ -509,14 +509,55 @@ pub struct Need {
     pub database: String,
 }
 
-/// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
-/// or its screens (`/v1/screens/<app>`). None for any other.
-pub fn app_of(route: &str) -> Option<&str> {
-    route.strip_prefix("call ").or_else(|| route.strip_prefix("/v1/screens/").filter(|a| !a.contains('/'))).filter(|a| !a.is_empty())
+/// What a request runs, which decides what a client hands a node with it (`may_hand`), and what it remembers each kind of
+/// request needed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Route {
+    /// An app's call: `/v1/call` for it, or its own request (`/<app>/…`).
+    Call(String),
+    /// An app's screens.
+    Screens(String),
+    /// Any other path.
+    Path(String),
 }
 
-/// Whether a client hands a node the key of `need`'s database with a kind of request (`route`, as `app_of` reads it),
-/// when the node asks (428): only what that kind of request can use. One that runs an app, that app's databases; an
+impl Route {
+    /// The route of a request for `path` (a query is left off); `call_app` names the app of a `/v1/call`, from its body.
+    pub fn of(path: &str, call_app: impl FnOnce() -> String) -> Route {
+        use crate::protocol::path;
+        let at = path.split('?').next().unwrap_or(path);
+        if let Some(app) = path::app_request(at) {
+            return Route::Call(app.to_string());
+        }
+        match at.strip_prefix(path::SCREENS).and_then(|s| s.split('/').next()) {
+            Some(app) => Route::Screens(app.to_string()),
+            None if at == path::CALL => Route::Call(call_app()),
+            None => Route::Path(at.to_string()),
+        }
+    }
+
+    /// The app it runs, for a call or its screens.
+    fn app(&self) -> Option<&str> {
+        match self {
+            Route::Call(app) | Route::Screens(app) => Some(app).filter(|a| !a.is_empty()).map(String::as_str),
+            Route::Path(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Route {
+    /// What a client remembers a kind of request by.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Route::Call(app) => write!(f, "call {app}"),
+            Route::Screens(app) => write!(f, "{}{app}", crate::protocol::path::SCREENS),
+            Route::Path(path) => f.write_str(path),
+        }
+    }
+}
+
+/// Whether a client hands a node the key of `need`'s database with a kind of request (`route`), when the node asks (428):
+/// only what that kind of request can use. One that runs an app, that app's databases; an
 /// MCP request (`/mcp`), which may run any, or widgets and badges, which run every app's, apps' own databases; and each
 /// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
 /// blobs, where apps' deployed code is (a node that keeps nothing, the Cloudflare node, reads it there). The list of
@@ -526,16 +567,16 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the network
 /// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
 /// never go with a request.
-pub fn may_hand(route: &str, need: &Need) -> bool {
-    use crate::{bucket::BLOBS, database::steps::KEY_NAME as LOG, vault::DATABASE as VAULT};
+pub fn may_hand(route: &Route, need: &Need) -> bool {
+    use crate::{bucket::BLOBS, database::steps::KEY_NAME as LOG, protocol::path, vault::DATABASE as VAULT};
     let node = |of: &[&str]| need.app == crate::database::scopes::APP && of.contains(&need.database.as_str());
     let apps = need.app != crate::database::scopes::APP && need.database == crate::database::scopes::APP_DATABASE;
     let code = need.scope == "global" && node(&[BLOBS]);
-    match (app_of(route), route) {
+    match (route.app(), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,
-        (None, "/mcp" | "/v1/widgets" | "/v1/badges") => apps || node(&[VAULT, LOG]) || code,
-        (None, "/v1/apps") => node(&[LOG]) || code,
-        (None, r) if r == "/v1/vault" || r.starts_with("/v1/vault/") => node(&[VAULT, LOG]),
+        (None, Route::Path(p)) if matches!(p.as_str(), path::MCP | path::WIDGETS | path::BADGES) => apps || node(&[VAULT, LOG]) || code,
+        (None, Route::Path(p)) if p == path::APPS => node(&[LOG]) || code,
+        (None, Route::Path(p)) if p == path::VAULT || p.starts_with(&format!("{}/", path::VAULT)) => node(&[VAULT, LOG]),
         (None, _) => node(&[LOG]),
     }
 }
@@ -568,7 +609,7 @@ pub const MOST_NEEDED: usize = 64;
 /// as its connection proved), naming itself; one or more keys, MOST_NEEDED at most, each of a database that kind of
 /// request uses (`may_hand`). None if it asks for anything else. The seal key it names isn't read: what's handed is
 /// sealed to the one the network's entries list for that node.
-pub fn asked_for(route: &str, node: &str, answer: &Value) -> Option<Vec<Need>> {
+pub fn asked_for(route: &Route, node: &str, answer: &Value) -> Option<Vec<Need>> {
     if answer["to"].as_str() != Some(node) {
         return None;
     }
@@ -662,18 +703,26 @@ mod b64key {
 mod tests {
     use super::*;
 
+    fn call(app: &str) -> Route {
+        Route::Call(app.into())
+    }
+
+    fn at(path: &str) -> Route {
+        Route::Path(path.into())
+    }
+
     #[test]
     fn a_node_is_handed_only_the_keys_a_kind_of_request_uses() {
         let need = |app: &str, database: &str| Need { scope: "global".into(), epoch: 1, app: app.into(), database: database.into() };
-        assert!(may_hand("call tally", &need("tally", "main")) && !may_hand("call tally", &need("notes", "main")));
-        assert!(may_hand("/v1/steps", &need("node", "log")) && !may_hand("/v1/steps", &need("tally", "main")) && !may_hand("/v1/state", &need("node", "vault")));
-        assert!(may_hand("/v1/vault", &need("node", "vault")) && !may_hand("/v1/vault", &need("tally", "main")));
+        assert!(may_hand(&call("tally"), &need("tally", "main")) && !may_hand(&call("tally"), &need("notes", "main")));
+        assert!(may_hand(&at("/v1/steps"), &need("node", "log")) && !may_hand(&at("/v1/steps"), &need("tally", "main")) && !may_hand(&at("/v1/state"), &need("node", "vault")));
+        assert!(may_hand(&at("/v1/vault"), &need("node", "vault")) && !may_hand(&at("/v1/vault"), &need("tally", "main")));
         // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
         // blobs, its people's files, never.
         let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
-        assert!(may_hand("call tally", &blobs("global")) && may_hand("/v1/screens/tally", &blobs("global")) && may_hand("/v1/badges", &blobs("global")) && may_hand("/v1/apps", &blobs("global")));
-        assert!(!may_hand("/v1/apps", &need("tally", "main")) && !may_hand("/v1/apps", &blobs("user:ab")));
-        assert!(!may_hand("call tally", &blobs("user:ab")) && !may_hand("/mcp", &blobs("group:cd")) && !may_hand("/v1/state", &blobs("global")));
+        assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/v1/badges"), &blobs("global")) && may_hand(&at("/v1/apps"), &blobs("global")));
+        assert!(!may_hand(&at("/v1/apps"), &need("tally", "main")) && !may_hand(&at("/v1/apps"), &blobs("user:ab")));
+        assert!(!may_hand(&call("tally"), &blobs("user:ab")) && !may_hand(&at("/mcp"), &blobs("group:cd")) && !may_hand(&at("/v1/state"), &blobs("global")));
         assert_eq!(oldest_needed("main", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
         assert_eq!(oldest_needed("log", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 1, "a scope's steps are read from the first");
         assert_eq!(oldest_needed("log", None, 3), 1, "a scope's steps are read from the first, before any hint");
@@ -686,16 +735,16 @@ mod tests {
         let need = |app: &str, database: &str| json!({ "scope": "global", "epoch": 1, "app": app, "database": database });
         let every = |n: usize| (0..n).map(|i| need(&format!("app{i}"), "main")).collect::<Vec<_>>();
         let twice = json!({ "to": node, "need": [need("tally", "main"), need("tally", "main"), need("node", "log")] });
-        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [need("tally", "main")] })).is_some());
-        assert!(asked_for("call tally", &node, &twice).is_some_and(|n| n.len() == 2), "a key asked for twice is handed once");
-        assert!(asked_for("call tally", &node, &json!({ "to": "cd".repeat(32), "need": [need("tally", "main")] })).is_none(), "only the node that answered");
-        assert!(asked_for("call tally", &node, &json!({ "need": [need("tally", "main")] })).is_none(), "naming itself");
-        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [] })).is_none() && asked_for("call tally", &node, &json!({ "to": node, "need": null })).is_none());
-        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [need("notes", "main")] })).is_none(), "another app's");
-        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [need("tally", "main"), { "scope": "global", "epoch": "1", "app": "tally", "database": "main" }] })).is_none());
-        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "tally", "database": "main" }] })).is_none());
-        assert!(asked_for("/v1/badges", &node, &json!({ "to": node, "need": every(MOST_NEEDED) })).is_some());
-        assert!(asked_for("/v1/badges", &node, &json!({ "to": node, "need": every(MOST_NEEDED + 1) })).is_none());
+        assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [need("tally", "main")] })).is_some());
+        assert!(asked_for(&call("tally"), &node, &twice).is_some_and(|n| n.len() == 2), "a key asked for twice is handed once");
+        assert!(asked_for(&call("tally"), &node, &json!({ "to": "cd".repeat(32), "need": [need("tally", "main")] })).is_none(), "only the node that answered");
+        assert!(asked_for(&call("tally"), &node, &json!({ "need": [need("tally", "main")] })).is_none(), "naming itself");
+        assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [] })).is_none() && asked_for(&call("tally"), &node, &json!({ "to": node, "need": null })).is_none());
+        assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [need("notes", "main")] })).is_none(), "another app's");
+        assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [need("tally", "main"), { "scope": "global", "epoch": "1", "app": "tally", "database": "main" }] })).is_none());
+        assert!(asked_for(&call("tally"), &node, &json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "tally", "database": "main" }] })).is_none());
+        assert!(asked_for(&at("/v1/badges"), &node, &json!({ "to": node, "need": every(MOST_NEEDED) })).is_some());
+        assert!(asked_for(&at("/v1/badges"), &node, &json!({ "to": node, "need": every(MOST_NEEDED + 1) })).is_none());
     }
 
     #[test]

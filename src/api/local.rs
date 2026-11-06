@@ -3,10 +3,9 @@
 use super::addr;
 use crate::node::Node;
 
-/// The file in a node's home holding the token its machine's own programs send, in `LOCAL_TOKEN_HEADER`, to say they
+/// The file in a node's home holding the token its machine's own programs send, in `protocol::header::LOCAL_TOKEN`, to say they
 /// are: only the machine's user can read it. The CLI, its MCP, services and the Mac app read it there.
 pub const LOCAL_TOKEN: &str = "local-token";
-pub const LOCAL_TOKEN_HEADER: &str = "x-one-local-token";
 
 /// An HTTP client for this machine's programs, asking the node as one (`as_this_machine`).
 pub fn agent() -> ureq::Agent {
@@ -20,7 +19,7 @@ pub fn as_this_machine(mut req: ureq::http::Request<ureq::SendBody>, next: ureq:
         && let Some(token) = local_token(&crate::home())
         && let Ok(value) = token.parse()
     {
-        req.headers_mut().insert(LOCAL_TOKEN_HEADER, value);
+        req.headers_mut().insert(crate::protocol::header::LOCAL_TOKEN, value);
     }
     next.handle(req)
 }
@@ -51,7 +50,7 @@ pub(super) fn from_this_machine(node: &Node, req: &axum::extract::Request) -> bo
     let peer = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().is_some_and(|c| c.0.ip().is_loopback());
     // Compared as hashes, so how long it takes says nothing of the token.
     let digest = |t: &str| <sha2::Sha256 as sha2::Digest>::digest(t.as_bytes());
-    let token = header(LOCAL_TOKEN_HEADER).is_some_and(|t| digest(t.trim()) == digest(node.local_token()));
+    let token = header(crate::protocol::header::LOCAL_TOKEN).is_some_and(|t| digest(t.trim()) == digest(node.local_token()));
     // A proxy on this machine still says it passed on someone else's request.
     let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
     let page = header("origin").is_some() || header("sec-fetch-site").is_some_and(|s| s != "none");

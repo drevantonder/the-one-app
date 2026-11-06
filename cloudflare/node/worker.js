@@ -35,7 +35,7 @@ import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
 import { Refused, json, near, refuse, textOf } from "./http.js";
-import { BLOBS, CODES, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT } from "./protocol.js";
+import { BLOBS, CODES, HEADER, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT } from "./protocol.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -64,7 +64,7 @@ const DATABASES_MOST = 512;
 /// until }`. Only the endpoint object sets it: nothing else reaches a person's object.
 const FROM = "x-one-from";
 /// Whose a request says it is: the person's object it goes to, which checks the network lists its device as theirs.
-const USER = "x-one-user";
+const USER = HEADER.user;
 /// How long the keys a request hands are kept, at most: they come again with the next.
 const HANDED_FOR = 3_600_000;
 
@@ -326,7 +326,7 @@ class Person {
     if (!from?.device || !this.env.NODE.idFromName(`user:${user}`).equals(this.ctx.id)) refuse(403, "that request is someone else's");
     this.owner ||= user;
     const who = { hash: from.device, device: from.device, user, clientName: "", until: Math.min(from.until ?? Infinity, Date.now() + HANDED_FOR) };
-    const sealed = request.headers.get("x-one-keys");
+    const sealed = request.headers.get(HEADER.keys);
     if (sealed) {
       try {
         who.offered = JSON.parse(handoff(this.env.NODE_KEY, who.device, sealed, Date.now(), who.until));
@@ -991,7 +991,7 @@ async function route(p, request) {
   }
   // Anything else only a machine does: to a client that asks one itself (`x-one-elsewhere`), the machines of its
   // person's that are on, as a node on a machine names those that run a call it can't (421).
-  if (request.headers.get("x-one-elsewhere")) {
+  if (request.headers.get(HEADER.elsewhere)) {
     const view = await p.networkFor(p.whom(request));
     const theirs = view.state.network.devices.filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
     const on = new Set(await p.env.RELAY.connected(theirs));
@@ -1027,7 +1027,7 @@ function failure(err) {
 /// Who a client's request over iroh is from: the device `remote` (hex) is, or, for a session's key, the device its
 /// certificate (`x-one-endpoint`) says vouched for it, until then. → `{ device, until }`.
 function fromOf(remote, headers) {
-  const certificate = headers.get("x-one-endpoint");
+  const certificate = headers.get(HEADER.endpoint);
   if (!certificate) return { device: remote, until: null };
   let session;
   try {
@@ -1157,7 +1157,7 @@ export class Node extends DurableObject {
         const user = h.get(USER) || "";
         if (!/^[A-Za-z0-9_-]{1,64}$/.test(user)) refuse(400, `say whose request it is (${USER})`);
         h.set(FROM, JSON.stringify(fromOf(remote, h)));
-        h.delete("x-one-endpoint");
+        h.delete(HEADER.endpoint);
         h.delete("authorization");
         if (body.length > BODY_MOST) refuse(413, "that's more than a request may carry");
         const request = new Request(`${this.env.ADDRESS}${path.startsWith("/") ? path : `/${path}`}`, { method, headers: h, body: ["GET", "HEAD"].includes(method) ? null : body });

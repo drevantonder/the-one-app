@@ -414,7 +414,7 @@ async fn a_client_devices_mcp_runs_as_its_person() {
     a.approve_request(&asks, Some(&sam)).await.unwrap();
     // Asked as the node asks its routes for a request over iroh: as the device its connection proved.
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert(one::database::HEADER, one::database::READS.into());
+    headers.insert(one::protocol::header::READS, one::database::READS.into());
     let from = InProcess::new(a.clone(), Some(one::api::FromClient(device.verifying_key().to_bytes(), u64::MAX)), None, &headers);
     let from = std::sync::Arc::new(from);
     let mcp = async |body: Value| {

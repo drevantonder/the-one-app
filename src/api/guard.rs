@@ -15,12 +15,6 @@ use super::local::{from_this_machine, not_this_machine};
 use super::reply::Error;
 use super::{Routes, Who};
 
-/// The keys a token caller hands this device for its calls: `keys::seal_handoff`'s.
-pub const KEYS_HEADER: &str = "x-one-keys";
-
-/// A session's endpoint's certificate (`keys::certify`), on each request it sends over iroh: who it asks as.
-pub const ENDPOINT_HEADER: &str = "x-one-endpoint";
-
 /// A request a client device sent over iroh (src/node/net.rs), with the key its connection proved it holds (or the
 /// device that vouched for a session's endpoint), and until when what it hands counts (that session's certificate's
 /// `until`): only the node puts this on a request, as an extension, which nothing a client sends can set.
@@ -42,7 +36,7 @@ pub fn guarded(routes: Routes, node: Node) -> Router {
 /// header of its answer, as base64 of its JSON (`node::trace`).
 async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     use crate::node::trace;
-    if !req.headers().contains_key(trace::HEADER) {
+    if !req.headers().contains_key(crate::protocol::header::TRACE) {
         return next.run(req).await;
     }
     let t = trace::Trace::new();
@@ -51,7 +45,7 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
     done["names"] = node.compute_names();
     let done = data_encoding::BASE64.encode(done.to_string().as_bytes());
     if let Ok(value) = done.parse() {
-        resp.headers_mut().insert(trace::HEADER, value);
+        resp.headers_mut().insert(crate::protocol::header::TRACE, value);
     }
     resp
 }
@@ -80,7 +74,7 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
             Ok(me) if from_this_machine(&node, &req) && node.user().is_ok_and(|u| u == me.caller.user) => next.run(req).await,
             Ok(me) => {
                 // The keys its caller hands this device for the token's calls, sealed to it.
-                if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
+                if let Some(handed) = req.headers().get(crate::protocol::header::KEYS).and_then(|h| h.to_str().ok())
                     && let Err(err) = node.hand(&me.caller.credential, &me.caller.user, handed, u64::MAX)
                 {
                     return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
@@ -109,13 +103,13 @@ async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, m
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": crate::protocol::code::NOT_LET_IN }))).into_response()).await;
     };
     let credential = Credential::Client(key);
-    if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
+    if let Some(handed) = req.headers().get(crate::protocol::header::KEYS).and_then(|h| h.to_str().ok())
         && let Err(err) = node.hand(&credential, &user, handed, until)
     {
         return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
     }
     // A client older than what this build reads of who's who is told to update before it does anything.
-    if crate::database::reads_of(req.headers().get(crate::database::HEADER).and_then(|h| h.to_str().ok())) < crate::database::READS {
+    if crate::database::reads_of(req.headers().get(crate::protocol::header::READS).and_then(|h| h.to_str().ok())) < crate::database::READS {
         return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": crate::protocol::update_refusal(YOURS), "code": crate::protocol::code::UPDATE }))).into_response()).await;
     }
     req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, credential }, sign_in: Some(name) });

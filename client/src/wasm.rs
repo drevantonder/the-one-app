@@ -69,7 +69,7 @@ impl Client {
             async move {
                 let Some(asked) = keys.and_then(|k| k.call1(&JsValue::NULL, &JsValue::from_str(&node)).ok()) else { return Vec::new() };
                 match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&asked)).await.ok().and_then(|v| v.as_string()) {
-                    Some(k) if !k.is_empty() => vec![("x-one-keys".to_string(), k)],
+                    Some(k) if !k.is_empty() => vec![(one::protocol::header::KEYS.to_string(), k)],
                     _ => Vec::new(),
                 }
             }

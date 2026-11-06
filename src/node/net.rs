@@ -400,10 +400,10 @@ impl Node {
             let (node, closing, vouched, found) = (node.clone(), closing.clone(), vouched.clone(), found.clone());
             async move {
                 // Who asks is the key the connection proved, or the device that vouched for it, and nothing it says of itself.
-                for header in [axum::http::header::AUTHORIZATION.as_str(), crate::api::LOCAL_TOKEN_HEADER] {
+                for header in [axum::http::header::AUTHORIZATION.as_str(), crate::protocol::header::LOCAL_TOKEN] {
                     req.headers_mut().remove(header);
                 }
-                let certificate = req.headers_mut().remove(crate::api::ENDPOINT_HEADER);
+                let certificate = req.headers_mut().remove(crate::protocol::header::ENDPOINT);
                 let who = if listed || found.load(std::sync::atomic::Ordering::SeqCst) {
                     Ok((remote, u64::MAX))
                 } else if certificate.is_none() && node.client_now(&remote).await.is_some() {

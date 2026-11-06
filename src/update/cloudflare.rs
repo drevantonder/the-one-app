@@ -8,7 +8,7 @@ use super::*;
 /// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every network
 /// has its Workers on Cloudflare, so it fails if no device deployed them. True if it failed.
 pub(super) fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
-    let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
+    let home = format!("${{{}:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", one::config::env("HOME"));
     // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent out:
     // `exit::NOT_YET` says it isn't yet, `exit::NO_SETTINGS` that this device has none to deploy. Shell's program, which runs this on another
     // device, has its own folder in services/ as its home, so its home is two up, and its address (`_ADDR`) is the services' registry's, not
@@ -17,10 +17,11 @@ pub(super) fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
     let deploy = format!(
         r#"h="{home}"; [ -f "$h/pid" ] || h=$(cd "$h/../.." && pwd); [ -f "$h/cloudflare/settings.json" ] || exit {no_settings}; node=/proc/$(cat "$h/pid")/exe
 case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit {not_yet} ;; esac
-. "$HOME/.profile" >/dev/null 2>&1; unset {var}_ADDR; {var}_HOME="$h" PATH="$HOME/.local/bin:$PATH" "$node" cloudflare deploy"#,
-        var = CLI.to_uppercase(),
-        no_settings = one::protocol::exit::NO_SETTINGS,
-        not_yet = one::protocol::exit::NOT_YET,
+. "$HOME/.profile" >/dev/null 2>&1; unset {addr}; {home_var}="$h" PATH="$HOME/.local/bin:$PATH" "$node" cloudflare deploy"#,
+        addr = one::config::env("ADDR"),
+        home_var = one::config::env("HOME"),
+        no_settings = one::cli::exit::NO_SETTINGS,
+        not_yet = one::cli::exit::NOT_YET,
     );
     let (here, others): (Vec<&Value>, Vec<&Value>) = linux.iter().filter(|d| d["online"] == true).partition(|d| d["here"] == true);
     let (mut failed, mut deployed) = (false, false);
@@ -37,8 +38,8 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             let said = if local { run_here(&deploy) } else { shell(device, &deploy, 600) };
             let again = match &said {
                 Err(_) => true,
-                Ok(r) if r["exit"] == one::protocol::exit::NOT_YET => true,
-                Ok(r) if r["exit"] == one::protocol::exit::REFUSED || r["exit"] == one::protocol::exit::NO_SETTINGS => false,
+                Ok(r) if r["exit"] == one::cli::exit::NOT_YET => true,
+                Ok(r) if r["exit"] == one::cli::exit::REFUSED || r["exit"] == one::cli::exit::NO_SETTINGS => false,
                 Ok(r) if r["exit"] != 0 => {
                     failures += 1;
                     failures < 3
@@ -51,8 +52,8 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             std::thread::sleep(Duration::from_secs(10));
         };
         match said {
-            Ok(r) if r["exit"] == one::protocol::exit::NO_SETTINGS => {}
-            Ok(r) if r["exit"] == one::protocol::exit::REFUSED => println!("  {name}: {}", r["stderr"].as_str().unwrap_or("").trim()),
+            Ok(r) if r["exit"] == one::cli::exit::NO_SETTINGS => {}
+            Ok(r) if r["exit"] == one::cli::exit::REFUSED => println!("  {name}: {}", r["stderr"].as_str().unwrap_or("").trim()),
             Ok(r) if r["exit"] == 0 => {
                 deployed = true;
                 println!("  {name}: deployed to Cloudflare at {commit}");

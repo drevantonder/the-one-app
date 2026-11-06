@@ -145,3 +145,15 @@ pub fn ago(ms: u64) -> String {
         _ => format!("{}d ago", s / 86400),
     }
 }
+
+/// What `<cli> cloudflare deploy` and the shell `update` runs it in exit with, which `update` acts on.
+pub mod exit {
+    /// Refused: a command that wasn't allowed, or needs `--confirm` (`tools::exit_code`); a deploy from a device that isn't
+    /// the Workers' home.
+    pub const REFUSED: i32 = 3;
+    /// This device has no Cloudflare settings, so it has nothing to deploy.
+    pub const NO_SETTINGS: i32 = 4;
+    /// The device's node isn't the build being sent out yet: ask again once it is (the exit code `sh` programs use for
+    /// "try again", EX_TEMPFAIL).
+    pub const NOT_YET: i32 = 75;
+}

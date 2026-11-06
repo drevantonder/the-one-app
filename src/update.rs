@@ -67,7 +67,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     // It runs from its own cache, not the folder it was started in, which (an agent's worktree) may be gone before it ends.
-    ensure!(cache().is_absolute(), "give {}_HOME as a full path", CLI.to_uppercase());
+    ensure!(cache().is_absolute(), "give {} as a full path", one::config::env("HOME"));
     std::fs::create_dir_all(cache())?;
     std::env::set_current_dir(cache())?;
     if let Some(tag) = tag {

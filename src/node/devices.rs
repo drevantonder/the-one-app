@@ -286,8 +286,8 @@ impl Node {
             let header = B64U.encode(&serde_json::to_vec(&signed)?);
             let mut resp = match method {
                 "POST" => agent.post(&url).send_json(&signed)?,
-                "DELETE" => agent.delete(&url).header("x-one-request", &header).call()?,
-                _ => agent.get(&url).header("x-one-request", &header).call()?,
+                "DELETE" => agent.delete(&url).header(crate::protocol::header::REQUEST, &header).call()?,
+                _ => agent.get(&url).header(crate::protocol::header::REQUEST, &header).call()?,
             };
             let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
             ensure!(resp.status().is_success(), "{}", out["error"].as_str().unwrap_or("auth didn't answer"));

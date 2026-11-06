@@ -4,6 +4,12 @@
 pub mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 
+    /// The environment variable this build's programs read for `suffix`: its CLI's name in capitals, then `_<suffix>`
+    /// (`ONE_HOME`), with a hyphen in the name an underscore.
+    pub fn env(suffix: &str) -> String {
+        format!("{}_{suffix}", CLI.to_uppercase().replace('-', "_"))
+    }
+
     /// How this build's people sign in (`sign_in` in the config): with a passkey, or with their workplace's Google account.
     #[derive(PartialEq, Eq)]
     pub enum SignIn {
@@ -16,7 +22,7 @@ use std::path::PathBuf;
 
 /// Where this machine's node keeps its data: `<CLI>_HOME`, else `~/.local/share/<cli>`.
 pub fn home() -> PathBuf {
-    match std::env::var_os(format!("{}_HOME", config::CLI.to_uppercase())) {
+    match std::env::var_os(config::env("HOME")) {
         Some(dir) => dir.into(),
         None => std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| user_home().join(".local/share")).join(config::CLI),
     }
@@ -25,7 +31,7 @@ pub fn home() -> PathBuf {
 /// Where it keeps what it can download or build again: inside a home given with `<CLI>_HOME`, so a node given one
 /// writes nowhere else; otherwise `~/.cache/<cli>`.
 pub fn cache() -> PathBuf {
-    match std::env::var_os(format!("{}_HOME", config::CLI.to_uppercase())) {
+    match std::env::var_os(config::env("HOME")) {
         Some(dir) => PathBuf::from(dir).join("cache"),
         None => std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| user_home().join(".cache")).join(config::CLI),
     }

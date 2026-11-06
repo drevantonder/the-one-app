@@ -255,7 +255,7 @@ impl Node {
     pub(super) fn passing_on(&self, credential: &Credential, scopes: &[Scope], app: &str) -> (Vec<crate::keys::Handed>, u64) {
         let Some(held) = credential.held() else { return (Vec::new(), 0) };
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
-        let route = format!("call {app}");
+        let route = crate::keys::Route::Call(app.to_string());
         let kept = self.0.sessions.kept.lock().unwrap();
         let Some(session) = kept.get(&held).filter(|s| s.live(now_ms())) else { return (Vec::new(), 0) };
         let keys = session

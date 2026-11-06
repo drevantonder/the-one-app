@@ -15,15 +15,13 @@ use super::reply::{Body, Error, Reply, failed};
 
 /// What a client that picks the node it asks itself says with each request (client/src/lib.rs): a call this node can't
 /// run is answered 421 with the nodes that can (`node::Elsewhere`), not passed on.
-const ELSEWHERE_HEADER: &str = "x-one-elsewhere";
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.
 pub(super) const APP_ROUTE: &str = "/{app}/{*path}";
 
 /// Whether `path` is one of an app's own requests (`APP_ROUTE`), not the API's.
 pub fn app_route(path: &str) -> bool {
-    let (app, rest) = path.strip_prefix('/').and_then(|p| p.split_once('/')).unwrap_or_default();
-    !app.is_empty() && !rest.is_empty() && !matches!(app, "v1" | "mcp" | "hooks" | "skills")
+    crate::protocol::path::app_request(path).is_some()
 }
 
 pub(super) fn routes() -> Routes {
@@ -34,7 +32,7 @@ pub(super) fn routes() -> Routes {
 }
 
 async fn call(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Body(req): Body<CallRequest>) -> Reply {
-    Ok(Json(call_for(&node, me, req, headers.contains_key(ELSEWHERE_HEADER)).await?))
+    Ok(Json(call_for(&node, me, req, headers.contains_key(crate::protocol::header::ELSEWHERE)).await?))
 }
 
 /// A call as `/v1/call` takes it, for `me`: → `{ ok }`. A client that `picks` its node has it run here, or told where.

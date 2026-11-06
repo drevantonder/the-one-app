@@ -8,9 +8,6 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-/// The header a client asks for a trace with, and gets it back in, as base64 of its JSON.
-pub const HEADER: &str = "x-one-trace";
-
 tokio::task_local! {
     static TRACE: Trace;
 }

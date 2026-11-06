@@ -65,8 +65,8 @@ fn local(path: &str, body: Option<Value>, secs: u64) -> Result<(bool, Value), St
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(secs))).http_status_as_error(false).build().into();
     let url = format!("http://127.0.0.1:{}{path}", one::config::PORT);
     let mut r = match body {
-        Some(body) => agent.post(url).header("x-one-local-token", token.trim()).send_json(body),
-        None => agent.get(url).header("x-one-local-token", token.trim()).call(),
+        Some(body) => agent.post(url).header(one::protocol::header::LOCAL_TOKEN, token.trim()).send_json(body),
+        None => agent.get(url).header(one::protocol::header::LOCAL_TOKEN, token.trim()).call(),
     }
     .map_err(|e| e.to_string())?;
     Ok((r.status().is_success(), r.body_mut().read_json().unwrap_or_default()))

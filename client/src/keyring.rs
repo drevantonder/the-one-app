@@ -16,12 +16,13 @@ use std::sync::{Arc, Mutex};
 use data_encoding::BASE64URL_NOPAD as B64U;
 use n0_future::time::{Duration, Instant};
 use one::config::YOURS;
+use one::protocol::header;
 use one::database::scopes::{Scope, ScopeDb};
 use one::database::steps::{Reader, Welcome};
 use one::keys::{self, Handed, Handoff, Hash, Need, Opens, Signs, hex};
 use serde_json::{Value, json};
 
-use crate::{Body, Client, Error, Request, Response, TRACE_HEADER, not_let_in, unsent};
+use crate::{Body, Client, Error, Request, Response, not_let_in, unsent};
 
 const REREAD: u64 = 30_000;
 /// How long a node keeps the keys a request handed it.
@@ -310,8 +311,8 @@ impl<O: Opens> Keyring<O> {
     /// `request`, of its nodes.
     async fn to_nodes(&self, client: &Client, on: &(impl Address + Keep), mut request: Request, until: u64, mut fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
         let kind = Kind::of(&request.path, request.body.bytes());
-        if fetches.is_some() && !request.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(TRACE_HEADER)) {
-            request.headers.push((TRACE_HEADER.into(), "1".into()));
+        if fetches.is_some() && !request.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(header::TRACE)) {
+            request.headers.push((header::TRACE.into(), "1".into()));
         }
         if self.needs.lock().unwrap().is_none() {
             let kept = on.get(NEEDS).await.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
@@ -381,7 +382,7 @@ impl<O: Opens> Keyring<O> {
     /// seal key it lists for it: never to a node it only raced a connection to, nor one it doesn't list.
     async fn send(&self, client: &Client, mut request: Request, handed: &[Handed], until: u64) -> Result<Response, Error> {
         let user = self.user().ok_or_else(refused)?;
-        request.headers.push(("x-one-user".into(), user));
+        request.headers.push((header::USER.into(), user));
         client.fetch_with(request, |node| std::future::ready(self.sealed_for(node, handed, until))).await
     }
 
@@ -395,7 +396,7 @@ impl<O: Opens> Keyring<O> {
             return Vec::new();
         }
         let handoff = Handoff { for_: hex(&self.key), until, keys };
-        keys::seal_handoff(seal, &handoff).map(|k| vec![("x-one-keys".to_string(), k)]).unwrap_or_default()
+        keys::seal_handoff(seal, &handoff).map(|k| vec![(header::KEYS.to_string(), k)]).unwrap_or_default()
     }
 
     /// A request's JSON, handing no keys: what this device asks to open them, and to write.
@@ -603,35 +604,25 @@ impl<O: Opens> Keyring<O> {
     }
 }
 
-/// What a request is, to remember what it needed: its route, as `keys::may_hand` reads it, and the name it's
-/// remembered by.
+/// What a request is, to remember what it needed: its route (`keys::Route`) and the name it's remembered by.
 struct Kind {
-    route: String,
+    route: keys::Route,
     name: String,
 }
 
 impl Kind {
-    /// An app's call by its app, as is an app's own request (`/<app>/…`, its `_http` call), a screen by its app, an MCP
-    /// request by its method and tool (a batch by none), anything else by its path.
+    /// An MCP request is remembered by its method and tool (a batch by none), anything else by its route.
     fn of(path: &str, body: &[u8]) -> Kind {
-        let at = path.split('?').next().unwrap_or(path);
-        let route = match at.strip_prefix('/').and_then(|p| p.split_once('/')) {
-            Some((app, rest)) if !app.is_empty() && !rest.is_empty() && !matches!(app, "v1" | "mcp" | "hooks" | "skills") => format!("call {app}"),
-            _ if at == "/v1/call" => format!("call {}", serde_json::from_slice::<Value>(body).ok().and_then(|b| b["app"].as_str().map(str::to_string)).unwrap_or_default()),
-            _ => match at.strip_prefix("/v1/screens/").and_then(|s| s.split('/').next()) {
-                Some(app) => format!("/v1/screens/{app}"),
-                None => at.to_string(),
-            },
-        };
-        let name = match route.as_str() {
-            "/mcp" => match serde_json::from_slice::<Value>(body).ok().filter(|m| m["method"].is_string()) {
+        let route = keys::Route::of(path, || serde_json::from_slice::<Value>(body).ok().and_then(|b| b["app"].as_str().map(str::to_string)).unwrap_or_default());
+        let name = match &route {
+            keys::Route::Path(p) if p == one::protocol::path::MCP => match serde_json::from_slice::<Value>(body).ok().filter(|m| m["method"].is_string()) {
                 Some(m) => {
                     let tool = m["params"]["name"].as_str().filter(|_| m["method"] == "tools/call").map(|t| format!(" {t}")).unwrap_or_default();
-                    format!("/mcp {}{tool}", m["method"].as_str().unwrap_or_default()).chars().take(160).collect()
+                    format!("{route} {}{tool}", m["method"].as_str().unwrap_or_default()).chars().take(160).collect()
                 }
-                None => route.clone(),
+                None => route.to_string(),
             },
-            _ => route.clone(),
+            _ => route.to_string(),
         };
         Kind { route, name }
     }

@@ -34,7 +34,7 @@ pub fn path() -> PathBuf {
         return t.home().join("sign-in.json");
     }
     let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| ".".into())).join(".config"));
-    let name = match std::env::var(format!("{}_ADDR", CLI.to_uppercase())) {
+    let name = match std::env::var(one::config::env("ADDR")) {
         Ok(addr) => format!("sign-in-{}.json", addr.replace(|c: char| !c.is_ascii_alphanumeric(), "-")),
         Err(_) => "sign-in.json".into(),
     };

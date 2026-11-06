@@ -454,7 +454,7 @@ impl<O: Opens> Keyring<O> {
         let url = format!("{}{path}", on.address());
         let (status, out) = match method {
             "POST" => on.ask(method, &url, None, Some(signed)).await?,
-            _ => on.ask(method, &url, Some(("x-one-request", B64U.encode(&serde_json::to_vec(&signed).map_err(failed)?))), None).await?,
+            _ => on.ask(method, &url, Some((one::protocol::header::REQUEST, B64U.encode(&serde_json::to_vec(&signed).map_err(failed)?))), None).await?,
         };
         if !(200..300).contains(&status) {
             return Err(failed(error(&out).unwrap_or_else(|| format!("{YOURS}'s auth answered {status}."))));
@@ -482,7 +482,7 @@ impl<O: Opens> Keyring<O> {
         }
         let secret = B64U.encode(&rand::random::<[u8; 32]>());
         let user = scopes::new_id();
-        let until = now() + one::protocol::INVITE_DAYS * DAY;
+        let until = now() + one::sign_in_proof::INVITE_DAYS * DAY;
         let fields = json!({ "id": hex(&keys::sha256(secret.as_bytes())), "name": name, "user": user, "until": until });
         self.ask_auth(on, "POST", "/api/auth/invites", fields).await?;
         let mut invites = self.invites(on).await;
