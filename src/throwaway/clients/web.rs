@@ -37,6 +37,7 @@ pub(crate) fn web(dir: &Path, settings: &one::cloudflare::Settings, person: Opti
         "The web client of this build is signed in to the throwaway network{who}, in a browser of its own on this machine.
   See it: {}
   Use it: its DevTools are at http://127.0.0.1:{port} (Playwright's connectOverCDP, or chrome-devtools-mcp --browserUrl)
+  In its page, self.oneNet.net asks the person's nodes as this browser (never import('/net.js'): that's a second copy, which refuses)
   In any browser here: {}",
         picture.display(),
         settings.address

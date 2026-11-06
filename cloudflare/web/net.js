@@ -5,8 +5,16 @@
 
 import { Yours } from "../shared/protocol.js";
 
-const started = self.oneNet || {};
+const started = (self.oneNet ||= {});
 const url = started.url || "";
+
+// The page's modules are named by their build (net.js?v=…), so an agent's script that imports "/net.js" gets a second
+// copy, which would take the SharedWorker port's messages from the page's and leave its requests unanswered.
+if (started.net) {
+  const why = "net.js is already running in this page: use self.oneNet.net, not import('/net.js')";
+  console.error(why);
+  throw new Error(why);
+}
 
 const waiting = new Map();
 let n = 0;
@@ -199,6 +207,8 @@ export const net = {
     if (net.has) send({ op: "reconnect" });
   },
 };
+
+started.net = net;
 
 // The network back, or a frozen tab running again: a fresh endpoint, rather than one waiting out its relay's backoff.
 addEventListener("online", () => net.reconnect());
