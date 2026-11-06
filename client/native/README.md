@@ -43,8 +43,13 @@ Shared, every platform:
 - [ ] Speed: usable within 1.5 s of a cold open (ARCHITECTURE.md), measured
 - [ ] Icons and names from config.toml (custom builds)
 
-Linux (new): app, `.desktop` entry, tray item, open at login; built and installed by `one update`, `one release`,
-install.sh.
+Linux (new):
+
+- [x] In the launcher with its icon, what opens `<cli>://` links, and open at login (on from the first start, a tray
+      switch), each written where XDG says (checked in the throwaway's own folders)
+- [x] `one release` builds it (`<cli>-app-<target>`, signed with the release key) and install.sh puts it on a desktop
+      and starts it; no `one update` step, as no device of ours is a Linux desktop
+- [ ] Notifications: Linux has no push service, so notes show only while the app runs (from the node's events)
 
 Mac (`apple/Mac`, `apple/Shared`), iPhone (`apple/Phone`, `Notifications`, `Widget`), Windows (`windows/`), Android
 (`android/`): each old app's full inventory lands here before that platform is written.

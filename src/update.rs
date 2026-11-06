@@ -167,6 +167,22 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let name = format!("{CLI}-{TARGET}");
     std::fs::copy(&binary, dir.join(&name))?;
     assets.push(name);
+    // The native app for this platform (client/native, its own workspace), which install.sh puts on a desktop.
+    if cfg!(target_os = "linux") {
+        println!("Building the Linux app");
+        let native = src.join("client/native");
+        match run_quiet(Command::new(cargo()).current_dir(&native).env("CONFIG", &config).args(["build", "--release"])) {
+            Ok(()) => {
+                let name = format!("{CLI}-app-{TARGET}");
+                std::fs::copy(native.join("target/release/one-native"), dir.join(&name))?;
+                assets.push(name);
+            }
+            Err(err) => {
+                failed = true;
+                println!("  couldn't build the Linux app: {err:#}");
+            }
+        }
+    }
     for (mac, since) in &started {
         let name = mac["name"].as_str().unwrap_or("");
         match await_mac(mac) {

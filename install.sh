@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installs the latest release for this machine, if its signature is the release key's: on Linux the program, with
-# <cli>d, the device, run as a system service; on a Mac the app, which is the Mac's <cli>d. Run again to update.
+# <cli>d, the device, run as a system service, and on a desktop the app; on a Mac the app, which is the Mac's <cli>d.
+# Run again to update.
 # `sh install.sh <binary>` installs a binary you built instead.
 set -eu
 # config.toml's repo, cli and release_key; a test keeps them the same.
@@ -66,6 +67,13 @@ else
 	install -m 755 "$bin" "$HOME/.local/bin/$cli"
 	ln -sf "$cli" "$HOME/.local/bin/git-remote-$cli"
 	ln -sf "$cli" "$HOME/.local/bin/${cli}d"
+	# On a desktop, the app too, started once: it puts itself in the launcher and opens at login.
+	if [ $# -eq 0 ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+		fetch "$cli-app-$arch-unknown-linux-gnu"
+		install -m 755 "$tmp/$cli-app-$arch-unknown-linux-gnu" "$HOME/.local/bin/$cli-app"
+		(setsid "$HOME/.local/bin/$cli-app" >/dev/null 2>&1 &)
+		echo "Installed ~/.local/bin/$cli-app, the app, which is in your launcher."
+	fi
 	if [ -d /run/systemd/system ]; then
 		# Its environment (a custom build's <CLI>_HOME) as it was, when installed again.
 		env=$(sed -n 's/^Environment=//p' "$units/${cli}d.service" 2>/dev/null | grep -v '^HOME=' || true)
