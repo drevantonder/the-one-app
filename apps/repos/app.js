@@ -246,7 +246,8 @@ const app = {
       async run(ctx, { source } = {}) {
         if (source === "github") return github.list(ctx);
         const own = await ownList(ctx);
-        return source === "one" ? own : [...own, ...(await github.list(ctx).catch(() => []))];
+        if (source === "one") return own;
+        return [...own, ...(await github.list(ctx).catch((err) => { throw new Error(`${err.message} (source one lists only this network's repos)`); }))];
       },
     },
     get: {
@@ -487,10 +488,11 @@ const app = {
       async render(ctx) {
         if (!ctx.global) return { t: "col", c: [] };
         const many = { small: 1, medium: 2, large: 4, xl: 6 }[ctx.size] || 2;
-        const { commits, week } = await recent(ctx, many, ctx.options.repo);
+        const { commits, week, left } = await recent(ctx, many, ctx.options.repo);
+        const problem = left.length ? { t: "text", text: `Couldn't read ${left.join(", ")}`, size: "xs", tone: "danger", lines: 1 } : null;
         if (!commits.length) {
           const any = (await ctx.global.query("select 1 from repos where deleted is null limit 1")).length;
-          return { t: "text", text: any ? "No commits yet." : "No repos yet.", size: "sm", tone: "muted" };
+          return problem || { t: "text", text: any ? "No commits yet." : "No repos yet.", size: "sm", tone: "muted" };
         }
         const total = week.reduce((a, n) => a + n, 0);
         const now = ctx.now(), DAY = 86400000;
@@ -507,13 +509,14 @@ const app = {
         const activity = (w = 64) => ({ t: "row", gap: 8, c: [muted(`${total} this week`, { weight: "medium" }), { t: "col", grow: true, c: [] }, { t: "spark", values: week, tone: "muted", w, h: 14, alt: "Commits a day this week" }] });
         const spacer = { t: "col", grow: true, gap: 0, c: [] };
         const spread = (nodes) => nodes.flatMap((n, i) => (i ? [spacer, n] : [n]));
-        if (ctx.size === "small") return { t: "col", gap: 4, c: [commit(commits[0], 3, true), spacer, activity(44)] };
-        if (ctx.size === "medium") return { t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 1)), activity()]) };
+        const shown = (tree) => (problem ? { ...tree, c: [...tree.c, problem] } : tree);
+        if (ctx.size === "small") return shown({ t: "col", gap: 4, c: [commit(commits[0], 3, true), spacer, activity(44)] });
+        if (ctx.size === "medium") return shown({ t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 1)), activity()]) });
         const chart = { t: "chart", values: week, labels: days, tone: "muted", h: 36, alt: "Commits a day this week" };
-        if (ctx.size === "large") return { t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), { t: "col", gap: 4, c: [muted(`${total} commits this week`, { weight: "medium" }), chart] }]) };
+        if (ctx.size === "large") return shown({ t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), { t: "col", gap: 4, c: [muted(`${total} commits this week`, { weight: "medium" }), chart] }]) });
         // Extra large: the rows of medium and large, wider and taller, spread to fill the card (a row at the top of a
         // tree doesn't take the card's height on every client; a column does).
-        return { t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), activity(160)]) };
+        return shown({ t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), activity(160)]) });
       },
     },
   },
@@ -556,20 +559,23 @@ const git = {
   },
 };
 
-/// A repo whose packs can't be read is left out.
+/// The latest commits of the repos that moved last, and the repos whose packs couldn't be read, which are left out.
 async function recent(ctx, many, repo = "") {
   const heads = await ctx.global.query(
     `select r.id, r.owner, r.name, b.branch from branches b join repos r on r.id = b.repo
       where (? = '' or r.id = ?) and r.deleted is null order by b.time desc limit ?`,
     [repo || "", repo || "", Math.max(many, 8)],
   );
-  const all = [];
+  const all = [], left = new Set();
   for (const h of heads) {
+    const r = withPath(ctx, h);
     try {
-      const r = withPath(ctx, h);
       const { commits } = await browse.log(ctx, ctx.global, { repo: r, ref: h.branch });
       all.push(...commits.map((c) => ({ ...c, repo: r.path, branch: h.branch })));
-    } catch {}
+    } catch (err) {
+      console.warn(`reading ${r.path}'s commits: ${err.message}`);
+      left.add(r.path);
+    }
   }
   const seen = new Set();
   const key = (c) => `${c.time} ${c.subject}`;
@@ -579,5 +585,5 @@ async function recent(ctx, many, repo = "") {
     const d = Math.floor((ctx.now() - c.time) / DAY);
     if (d >= 0 && d < 7) week[6 - d]++;
   }
-  return { commits: unique.slice(0, many), week };
+  return { commits: unique.slice(0, many), week, left: [...left] };
 }
