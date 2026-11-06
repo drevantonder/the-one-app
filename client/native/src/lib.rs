@@ -125,9 +125,9 @@ impl App {
         }
     }
 
-    /// The network's address, as the person gave it, or `ADDRESS` for a test.
+    /// The network's address: `ADDRESS` for a test, the custom build's if it has one, else as the person gave it.
     fn address(&self) -> Option<String> {
-        env("ADDRESS").or_else(|| self.kept("address")).map(|a| a.trim_end_matches('/').to_string())
+        env("ADDRESS").or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| self.kept("address")).map(|a| a.trim_end_matches('/').to_string())
     }
 
     fn auth(&self) -> Result<Arc<signin::Auth>, String> {

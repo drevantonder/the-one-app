@@ -38,7 +38,7 @@ pub fn answer(args: &[String]) -> bool {
 /// The person signed in here, and this device's key for them.
 fn signed_in(data: &std::path::Path) -> Result<(String, String, [u8; 32]), String> {
     let read = |name: &str| std::fs::read_to_string(data.join(name)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let address = crate::env("ADDRESS").or_else(|| read("address")).ok_or("Sign in first.")?;
+    let address = crate::env("ADDRESS").or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| read("address")).ok_or("Sign in first.")?;
     let user = read("user").ok_or("Sign in first.")?;
     let id = format!("{address} {user}");
     let key = crate::secrets::device(&id).ok_or("Sign in first.")?;

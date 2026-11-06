@@ -5,6 +5,9 @@ cli = "one"
 port = 4747
 # What the App Store calls the apps made in the network, beside the ones built in.
 made_here = "Made here"
+# A custom build that serves one network (a workplace's) gives its address, so its native app never asks where;
+# empty, the person types it.
+address = ""
 # Where `one update` and `one release` get the code, and the installer the releases.
 repo = "drevantonder/the-one-app"
 # Nodes and the installer take only releases signed by this key (OpenSSH, Ed25519). Its private half stays with the

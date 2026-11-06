@@ -59,6 +59,8 @@ fn main() {
     let name = get("name").as_str().unwrap().to_string();
     let yours = if optional("join_domain").is_empty() { format!("your {} network", name.trim_start_matches("The ")) } else { format!("{} network", name.replacen("The ", "the ", 1)) };
     let out = format!("{out}pub const YOURS: &str = {yours:?};\n");
+    // A custom build's one network's address, if it serves only one: its native app never asks where.
+    let out = format!("{out}pub const ADDRESS: &str = {:?};\n", optional("address").trim_end_matches('/'));
     // The network settings a network has until its admins set them (`setting` entries).
     let mut settings = String::new();
     for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {
