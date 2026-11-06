@@ -302,6 +302,12 @@ pub struct CallRequest {
     /// it (`Node::carried`): never a client's to name.
     #[serde(skip)]
     pub puts: Vec<String>,
+    /// This node named the call (`Node::identified`), no client did.
+    #[serde(skip)]
+    pub named_here: bool,
+    /// It runs where it was named, first, so no other device has it or the id: it takes no lease.
+    #[serde(skip)]
+    pub unleased: bool,
 }
 
 /// What a device says to a call.

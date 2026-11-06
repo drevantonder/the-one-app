@@ -148,6 +148,7 @@ impl Node {
     /// runs once, as it names its lease in the bucket), or a new one.
     fn identified(&self, req: CallRequest) -> Result<CallRequest> {
         let mut req = self.resolve(req);
+        req.named_here = req.id.is_none();
         let id = req.id.get_or_insert_with(new_id);
         ensure!(id.len() <= 64 && !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "a call's id is up to 64 letters, digits, - and _");
         Ok(req)
@@ -179,7 +180,8 @@ impl Node {
             };
             let reply = match device == self.0.id {
                 // Keys it lacks are its caller's to hand this device, which they were sealed to: no other runs it.
-                true => match self.run_or_need(&req, &me).await {
+                // A call this node named, that no device has tried before, has no other to take its lease first: none is.
+                true => match self.run_or_need(&CallRequest { unleased: req.named_here && why.is_empty(), ..req.clone() }, &me).await {
                     Ok(reply) => Ok((reply, None)),
                     Err(need) => {
                         tried("needs keys", json!({ "here": true }));
@@ -546,7 +548,7 @@ impl Node {
         trace::note(json!({ "step": "keys" }), checking.elapsed());
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
         let mut lease = None;
-        if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
+        if let (Some(id), Some(scope), false) = (&req.id, scopes.first(), req.unleased) {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.tool.as_str() && o["reads"] == true);
             if !reads {
                 let base = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
