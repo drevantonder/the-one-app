@@ -6,6 +6,7 @@ mod e2e;
 mod map;
 mod sandbox;
 mod sim;
+mod tree;
 
 use std::path::{Path, PathBuf};
 
