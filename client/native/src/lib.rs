@@ -6,6 +6,10 @@
 //! the system's browser, notifications, the clipboard, files, and links outside.
 
 mod headless;
+#[cfg(target_os = "macos")]
+mod mac;
+#[cfg(target_os = "macos")]
+mod menubar;
 mod secrets;
 mod signin;
 mod widgets;
@@ -32,20 +36,18 @@ fn client_name() -> String {
     std::env::consts::OS.replace("macos", "mac")
 }
 
-/// The app's id, as build.rs names it for this platform: `app.<cli>.<platform>`.
-fn identifier() -> String {
-    let platform = match std::env::consts::OS {
-        "macos" => "mac",
-        "ios" => "phone",
-        "windows" => "windows",
-        "android" => "android",
-        _ => "linux",
-    };
-    format!("app.{}.{platform}", one::config::CLI)
+/// The app's id, as build.rs names it for this platform: `app.<cli>.<platform>` (a throwaway's, `….throwaway`).
+fn identifier() -> &'static str {
+    env!("IDENTIFIER")
 }
 
 /// What the person calls this device, as their other devices list it.
 fn device_name() -> String {
+    // A Mac, as it's named in its settings ("Andre's MacBook Air"), as the Mac app named it.
+    #[cfg(target_os = "macos")]
+    if let Some(name) = std::process::Command::new("/usr/sbin/scutil").args(["--get", "ComputerName"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|n| !n.is_empty()) {
+        return name;
+    }
     // Windows names it in COMPUTERNAME.
     let host = std::env::var("HOSTNAME").ok().or_else(|| std::env::var("COMPUTERNAME").ok()).or_else(|| std::fs::read_to_string("/etc/hostname").ok()).map(|h| h.trim().to_string()).filter(|h| !h.is_empty());
     host.unwrap_or_else(|| platform().into())
@@ -89,11 +91,15 @@ fn this_device() -> Option<String> {
 
 /// This computer's own node's key, where one runs here.
 fn local_node() -> Option<String> {
+    local_state()?["device"]["key"].as_str().map(str::to_string)
+}
+
+/// What this computer's own node says of itself, where one runs here.
+fn local_state() -> Option<Value> {
     let token = std::fs::read_to_string(one::home().join("local-token")).ok()?;
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(2))).build().into();
     let mut r = agent.get(format!("http://127.0.0.1:{}/v1/state", one::config::PORT)).header("x-one-local-token", token.trim()).call().ok()?;
-    let state: Value = r.body_mut().read_json().ok()?;
-    state["device"]["key"].as_str().map(str::to_string)
+    r.body_mut().read_json().ok()
 }
 
 /// A response's body the page reads, and what stops a read waiting on it once the page cancels.
@@ -210,6 +216,8 @@ fn changed() {
         if let Err(e) = widgets::refresh(&device, &widgets_dir()).await {
             eprintln!("widgets: {e}");
         }
+        #[cfg(target_os = "macos")]
+        menubar::update();
     });
 }
 
@@ -246,14 +254,19 @@ fn native() -> Value {
     let signed_in = address.as_ref().is_some_and(|_| a.auth().is_ok_and(|auth| auth.signed_in()));
     a.page.store(true, Ordering::Relaxed);
     let opened = a.opened.lock().unwrap().take();
+    let local = local_state();
     json!({
         "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": platform(), "device": device_name(), "client": client_name(),
         "address": address, "signedIn": signed_in, "user": if signed_in { a.kept("user") } else { None },
         "opened": opened,
         // This computer's own node, where one runs here: "This device" in the panel.
-        "node": local_node(),
+        "node": local.as_ref().and_then(|s| s["device"]["key"].as_str().map(str::to_string)),
+        // A Mac whose own node is in no network yet joins one with a pairing code (`pair`), as the Mac app did.
+        "unpaired": cfg!(target_os = "macos") && local.is_some_and(|s| s["network"].is_null()),
         // Open at login: whether it's on, where the app switches it (none where it can't yet).
         "login": login_now(&a.handle),
+        // Let Agents Use This Mac, on a Mac (Computer Use's helper reads it).
+        "computerUse": computer_use_now(),
     })
 }
 
@@ -270,6 +283,10 @@ fn claim() {
 /// device's request to be let in.
 #[tauri::command]
 fn address(typed: String) -> Result<String, String> {
+    address_of(&typed)
+}
+
+fn address_of(typed: &str) -> Result<String, String> {
     let mut text = typed.trim().to_string();
     if !text.contains("://") {
         text = format!("https://{text}");
@@ -363,6 +380,7 @@ async fn join() -> Result<Value, String> {
     let name = if cfg!(desktop) { format!("{} on {}", one::config::NAME, device_name()) } else { device_name() };
     device.ask(&token, &name, invite.as_deref()).await.map_err(|e| e.to_string())?;
     println!("Code: {}", device.code());
+    approve_here(device.code());
     Ok(json!({ "code": device.code(), "invited": invite.is_some() }))
 }
 
@@ -531,11 +549,90 @@ fn login(on: bool) -> Option<bool> {
     login_now(&app().handle)
 }
 
+fn computer_use_now() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    return Some(mac::computer_use());
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// This computer's own node joins a network with a pairing code another of its person's computers made (as `<cli>
+/// join` does) → its address, which the app signs in to next.
+#[tauri::command]
+async fn pair(code: String) -> Result<String, String> {
+    let token = std::fs::read_to_string(one::home().join("local-token")).map_err(|_| "This Mac's node isn't running.".to_string())?;
+    let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    let said = tauri::async_runtime::spawn_blocking(move || {
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(60))).http_status_as_error(false).build().into();
+        let mut r = agent
+            .post(format!("http://127.0.0.1:{}/v1/join", one::config::PORT))
+            .header("x-one-local-token", token.trim())
+            .send_json(json!({ "code": code }))
+            .map_err(|e| e.to_string())?;
+        let ok = r.status().is_success();
+        let out: Value = r.body_mut().read_json().unwrap_or_default();
+        Ok::<_, String>((ok, out))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let failed = match said {
+        Ok((true, _)) => None,
+        Ok((false, out)) => Some(out["error"].as_str().unwrap_or_default().to_lowercase()),
+        Err(e) => Some(e.to_lowercase()),
+    };
+    if let Some(e) = failed {
+        let has = |words: &[&str]| words.iter().any(|w| e.contains(w));
+        return Err(if has(&["already used", "expired", "refused"]) {
+            "That pairing code was used or has expired. Make a new one on your other device.".into()
+        } else if has(&["already belongs"]) {
+            format!("This device is already in another {}. Remove it there first.", one::config::NAME.trim_start_matches("The "))
+        } else if has(&["decode", "invalid", "base", "parse", "bad"]) {
+            "That isn’t a whole pairing code. Copy it again, all of it.".into()
+        } else if has(&["timed out", "timeout", "connect", "unreachable", "no route", "network"]) {
+            "Couldn’t reach the device that made the code. Check both are online, then try again.".into()
+        } else {
+            "Couldn’t join. Make a new pairing code on your other device and try again.".into()
+        });
+    }
+    // Its network's address, which the person signs in to here.
+    let address = local_state().and_then(|s| s["network"]["settings"]["address"].as_str().map(str::to_string)).ok_or("Joined. Now type your network’s address.")?;
+    address_of(&address)
+}
+
+/// Let Agents Use This Mac, switched → whether it's on.
+#[tauri::command]
+fn computer_use(on: bool) -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    mac::set_computer_use(on);
+    let _ = on;
+    #[cfg(desktop)]
+    tray_menu(&app().handle);
+    computer_use_now()
+}
+
+/// On a Mac, its own node approves the window by its code, as one of the Mac's own programs, if it's a device of the
+/// same person (as the Mac app's did): else the code waits for another of theirs.
+fn approve_here(code: String) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let Ok(token) = std::fs::read_to_string(one::home().join("local-token")) else { return };
+    std::thread::spawn(move || {
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).build().into();
+        let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+        let _ = agent
+            .post(format!("http://127.0.0.1:{}/v1/devices/approve", one::config::PORT))
+            .header("x-one-local-token", token.trim())
+            .send_json(json!({ "code": code, "confirm": true }));
+    });
+}
+
 /// The panel this tall, as its screen is: under its item it grows down, over one (a taskbar) up.
 #[tauri::command]
-fn fit(height: f64) {
+fn fit(window: tauri::WebviewWindow, height: f64) {
     #[cfg(desktop)]
-    if let Some(p) = app().handle.get_webview_window("panel") {
+    if ["panel", "widget"].contains(&window.label()) {
+        let p = window;
         let height = height.clamp(160.0, 900.0);
         let scale = p.scale_factor().unwrap_or(1.0);
         let was = p.outer_size().map(|s| s.height as f64).unwrap_or(PANEL.1 * scale);
@@ -546,7 +643,8 @@ fn fit(height: f64) {
             let _ = p.set_position(tauri::PhysicalPosition::new(at.x, at.y + (was - height * scale) as i32));
         }
     }
-    let _ = height;
+    #[cfg(not(desktop))]
+    let _ = (window, height);
 }
 
 #[tauri::command]
@@ -567,7 +665,15 @@ const PANEL: (f64, f64) = (340.0, 560.0);
 
 #[cfg(desktop)]
 fn toggle_panel(at: Option<tauri::Rect>) {
-    let Some(p) = app().handle.get_webview_window("panel") else { return };
+    if let Some(p) = app().handle.get_webview_window("panel") {
+        toggle_under(&p, at);
+    }
+}
+
+/// A window like the panel's, shown under the menu bar or tray item at `at` (its place and size on the screen,
+/// physical), or hidden if it shows; with none, at the top right.
+#[cfg(desktop)]
+fn toggle_under(p: &tauri::WebviewWindow, at: Option<tauri::Rect>) {
     if p.is_visible().unwrap_or(false) {
         let _ = p.hide();
         return;
@@ -596,24 +702,44 @@ fn toggle_panel(_: Option<()>) {}
 
 // MARK: Starting
 
-/// The tray item (the menu bar's, on a Mac): Open, Open at Login, Quit.
+/// A window like a menu bar item's popover, of this page at `page`: hidden until its item's clicked, gone when it loses
+/// focus.
+#[cfg(desktop)]
+fn popup(handle: &AppHandle, label: &str, page: &str) -> tauri::Result<tauri::WebviewWindow> {
+    let window = WebviewWindowBuilder::new(handle, label, WebviewUrl::App(page.into()))
+        .title(one::config::NAME)
+        .initialization_script(include_str!("native.js"))
+        .use_https_scheme(true)
+        .inner_size(PANEL.0, PANEL.1)
+        // Sized by its screen (`fit`), which GTK refuses a window that isn't resizable; with no edges to drag, a person
+        // can't.
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build()?;
+    let hide = window.clone();
+    window.on_window_event(move |e| {
+        if let tauri::WindowEvent::Focused(false) = e {
+            let _ = hide.hide();
+        }
+    });
+    Ok(window)
+}
+
+/// The tray item (the menu bar's, on a Mac): a click shows the panel; its menu (a right click's) has Open, Open at Login,
+/// on a Mac Let Agents Use This Mac and the widgets hidden from the menu bar, and Quit.
 #[cfg(desktop)]
 fn tray(app: &tauri::App) -> tauri::Result<()> {
-    use tauri::menu::{CheckMenuItem, Menu, MenuItem};
-    // Open at login from the first start, as the Mac app was; the person's choice after that.
+    // Open at login from the first start, as the Mac app was; the person's choice after that. Never a test's build.
     let first = app.path().app_data_dir()?.join("opened-at-login");
-    if !first.exists() {
+    if !first.exists() && !identifier().ends_with(".throwaway") {
         login::set(app.handle(), true);
         let _ = std::fs::create_dir_all(first.parent().unwrap());
         let _ = std::fs::write(&first, "");
     }
-    let open = MenuItem::with_id(app, "open", format!("Open {}", one::config::NAME), true, None::<&str>)?;
-    let login = CheckMenuItem::with_id(app, "login", "Open at Login", true, login::on(app.handle()), None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &login, &quit])?;
     let mut tray = tauri::tray::TrayIconBuilder::with_id("main")
         .tooltip(one::config::NAME)
-        .menu(&menu)
         // A click shows the panel; the menu is a right click's (Linux's tray items show only their menu).
         .show_menu_on_left_click(cfg!(target_os = "linux"))
         .on_tray_icon_event(|_, e| {
@@ -622,19 +748,91 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
             }
         })
         .on_menu_event(move |app, e| match e.id().as_ref() {
-        "open" => show(),
-        "login" => {
-            login::set(app, !login::on(app));
-            let _ = login.set_checked(login::on(app));
-        }
-        "quit" => app.exit(0),
-        _ => {}
-    });
+            "open" => show(),
+            "login" => {
+                login::set(app, !login::on(app));
+                tray_menu(app);
+            }
+            "computer-use" => drop(computer_use(!computer_use_now().unwrap_or(true))),
+            "quit" => app.exit(0),
+            #[cfg(target_os = "macos")]
+            id => {
+                if let Some(kind) = id.strip_prefix("show ") {
+                    menubar::set_hidden(kind, false);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            _ => {}
+        });
+    // The Mac's menu bar mark: the custom build's (build.rs), a template macOS tints for the menu bar.
+    #[cfg(target_os = "macos")]
+    {
+        tray = tray.icon(tauri::image::Image::from_bytes(include_bytes!(concat!(env!("OUT_DIR"), "/menubar.png")))?).icon_as_template(true);
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    tray_menu(app.handle());
     Ok(())
+}
+
+/// The tray item's menu, as things are now.
+#[cfg(desktop)]
+fn tray_menu(app: &AppHandle) {
+    use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
+    let Some(tray) = app.tray_by_id("main") else { return };
+    let made = || -> tauri::Result<Menu<tauri::Wry>> {
+        let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = vec![
+            Box::new(MenuItem::with_id(app, "open", format!("Open {}", one::config::NAME), true, None::<&str>)?),
+            Box::new(CheckMenuItem::with_id(app, "login", "Open at Login", true, login::on(app), None::<&str>)?),
+        ];
+        if let Some(on) = computer_use_now() {
+            items.push(Box::new(CheckMenuItem::with_id(app, "computer-use", "Let Agents Use This Mac", true, on, None::<&str>)?));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let hidden = menubar::hidden();
+            let widgets: Vec<_> = menubar::widgets().into_iter().filter(|w| hidden.contains(&w.0)).collect();
+            if !widgets.is_empty() {
+                items.push(Box::new(PredefinedMenuItem::separator(app)?));
+                for (kind, title, ..) in widgets {
+                    items.push(Box::new(MenuItem::with_id(app, format!("show {kind}"), format!("Show {title} in the Menu Bar"), true, None::<&str>)?));
+                }
+            }
+        }
+        items.push(Box::new(PredefinedMenuItem::separator(app)?));
+        items.push(Box::new(MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?));
+        let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|i| i.as_ref()).collect();
+        Menu::with_items(app, &refs)
+    };
+    match made() {
+        Ok(menu) => drop(tray.set_menu(Some(menu))),
+        Err(e) => eprintln!("the tray's menu: {e}"),
+    }
+}
+
+/// A widget's menu bar item clicked: the widget under it (the panel's page, showing only that widget, in a window of
+/// its own), or gone if it shows.
+#[cfg(target_os = "macos")]
+fn toggle_widget(kind: &str, at: tauri::Rect) {
+    let handle = &app().handle;
+    let page = format!("index.html?panel&widget={}", url::form_urlencoded::byte_serialize(kind.as_bytes()).collect::<String>());
+    let window = match handle.get_webview_window("widget") {
+        Some(w) => {
+            if !w.url().is_ok_and(|u| u.as_str().ends_with(&page)) {
+                let _ = w.hide();
+                let _ = w.navigate(tauri::Url::parse(&format!("https://tauri.localhost/{page}")).unwrap());
+            }
+            w
+        }
+        None => match popup(handle, "widget", &page) {
+            Ok(w) => w,
+            Err(e) => return eprintln!("the widget's window: {e}"),
+        },
+    };
+    toggle_under(&window, Some(at));
 }
 
 /// A link the app was opened with (`<cli>://…`, or one to the network's address, which Windows hands it): to the page,
@@ -653,7 +851,8 @@ fn opened(url: &str) {
     }
 }
 
-/// Opening at login. Linux: an XDG autostart entry, where XDG_CONFIG_HOME says; Windows: the package's startup task.
+/// Opening at login. Linux: an XDG autostart entry, where XDG_CONFIG_HOME says; Windows: the package's startup task; a
+/// Mac: its login item (SMAppService's main app).
 #[cfg(desktop)]
 mod login {
     use tauri::AppHandle;
@@ -667,7 +866,7 @@ mod login {
 
     /// Whether the app switches it on this platform yet.
     pub fn supported() -> bool {
-        cfg!(any(target_os = "linux", windows))
+        cfg!(any(target_os = "linux", windows, target_os = "macos"))
     }
 
     pub fn on(app: &AppHandle) -> bool {
@@ -678,7 +877,12 @@ mod login {
             let _ = app;
             crate::windows::login()
         };
-        #[cfg(not(any(target_os = "linux", windows)))]
+        #[cfg(target_os = "macos")]
+        return {
+            let _ = app;
+            crate::mac::login()
+        };
+        #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
         return {
             let _ = app;
             false
@@ -697,6 +901,8 @@ mod login {
         }
         #[cfg(windows)]
         crate::windows::set_login(on);
+        #[cfg(target_os = "macos")]
+        crate::mac::set_login(on);
         let _ = (app, on);
     }
 }
@@ -737,7 +943,7 @@ fn show() {
 }
 
 /// In a debug build, a loopback port an agent drives the window by (`CONTROL`): `POST /eval` runs its body in the
-/// window's page (`/eval/<label>`, another window's). Never in a build people use.
+/// window's page (`/eval/<label>`, another window's); `POST /value` gives an expression's value, as JSON. Never in a build people use.
 #[cfg(debug_assertions)]
 fn control(port: u16) {
     use std::io::{BufRead, BufReader, Read, Write};
@@ -760,10 +966,16 @@ fn control(port: u16) {
             let mut body = vec![0; len];
             r.read_exact(&mut body).ok();
             // `/eval` the window's page, `/eval/<label>` another's (the panel's).
-            let label = line.split(' ').nth(1).and_then(|p| p.strip_prefix("/eval/")).unwrap_or("main").to_string();
+            let label = line.split(' ').nth(1).and_then(|p| p.strip_prefix("/eval/").or(p.strip_prefix("/value/"))).unwrap_or("main").to_string();
             let out = match app().handle.get_webview_window(&label) {
                 Some(w) if line.starts_with("POST /eval") => w.eval(String::from_utf8_lossy(&body)).map(|_| "ok".to_string()).unwrap_or_else(|e| e.to_string()),
-                _ => "POST /eval or /eval/<window>".into(),
+                // An expression's value, as JSON (what a promise gives, left in a global by /eval first, read back).
+                Some(w) if line.starts_with("POST /value") => {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let _ = w.eval_with_callback(String::from_utf8_lossy(&body), move |v| drop(tx.send(v)));
+                    rx.recv_timeout(Duration::from_secs(5)).unwrap_or_else(|_| "no answer".into())
+                }
+                _ => "POST /eval or /value, or /eval/<window> or /value/<window>".into(),
             };
             let mut s = &s;
             let _ = write!(s, "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{out}", out.len());
@@ -789,10 +1001,16 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, quit, panel, fit, badge])
+        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, computer_use, pair, quit, panel, fit, badge])
         .setup(|app| {
             // Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
             let data = app.path().app_local_data_dir()?;
+            // What the old Mac app kept, taken over once; and this Mac's node kept running.
+            #[cfg(target_os = "macos")]
+            {
+                mac::take_over(&data);
+                mac::start_node();
+            }
             #[cfg(debug_assertions)]
             if let Some(port) = env("CONTROL").and_then(|p| p.parse().ok()) {
                 control(port);
@@ -852,25 +1070,11 @@ pub fn run() {
                     }
                 });
                 tray(app)?;
+                // The widgets' own items, as last kept, until the node's answer redraws them.
+                #[cfg(target_os = "macos")]
+                menubar::update();
                 // The panel: this page in panel mode, hidden until the tray item's clicked, gone when it loses focus.
-                let panel = WebviewWindowBuilder::new(app, "panel", WebviewUrl::App("index.html?panel".into()))
-                    .title(one::config::NAME)
-                    .initialization_script(include_str!("native.js"))
-                    .use_https_scheme(true)
-                    .inner_size(PANEL.0, PANEL.1)
-                    // Sized by its screen (`fit`), which GTK refuses a window that isn't resizable; with no edges to
-                    // drag, a person can't.
-                    .decorations(false)
-                    .always_on_top(true)
-                    .skip_taskbar(true)
-                    .visible(false)
-                    .build()?;
-                let hide = panel.clone();
-                panel.on_window_event(move |e| {
-                    if let tauri::WindowEvent::Focused(false) = e {
-                        let _ = hide.hide();
-                    }
-                });
+                popup(app.handle(), "panel", "index.html?panel")?;
             }
             Ok(())
         })

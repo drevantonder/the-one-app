@@ -7,7 +7,7 @@
 // dist/panel.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Skeleton, WidgetCard, cn } from "@one/ui"
+import { Button, Skeleton, WidgetCard, cn } from "@one/ui"
 import { home } from "./lib/model.js"
 
 /// Each widget on the person's pages once, in their pages' order, at its medium size.
@@ -63,6 +63,19 @@ function Panel() {
   const state = home.data.state
   if (!state) return <div className="flex flex-col gap-2 p-4"><Skeleton className="h-5 w-32" /><Skeleton className="h-4 w-48" /></div>
   const shown = widgets()
+  // A Mac's menu bar item of one widget (`widget`, `<app>.<widget>`): only it, and Open for its app.
+  const only = one.params?.widget
+  if (only) {
+    const found = shown.find(({ w }) => `${w.app}.${w.widget}` === only)
+    if (!found) return <p className="p-4 text-sm text-muted-foreground">This widget isn’t on your pages any more.</p>
+    const { w, p } = found, h = host(p), tree = home.tree(w, "medium")
+    return (
+      <div className="flex flex-col gap-2 p-3 text-sm">
+        <WidgetCard w={w} host={h} tree={tree} className="cursor-pointer rounded-2xl" onClick={(e) => !e.defaultPrevented && h.follow(tree?.link || { screen: "main" }, w)} />
+        <Button variant="ghost" className="self-end" onClick={() => h.follow({ screen: "main" }, w)}>Open {home.label(home.app(w.app)) || w.title}</Button>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-4 p-4 text-sm">
       <section className="flex flex-col gap-1.5">

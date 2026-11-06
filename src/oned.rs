@@ -65,7 +65,7 @@ pub fn fetched(name: &str) -> PathBuf {
 }
 
 /// A service's program built with this one and carried beside it, which oned runs as it is and fetches none of: the
-/// Mac app's, inside it (apple/build.sh), and a checkout's (`one throwaway`), which Cargo builds beside it.
+/// Mac app's, inside it (client/native/mac/build.sh), and a checkout's (`one throwaway`), which Cargo builds beside it.
 pub fn carried(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let path = exe.parent()?.join(format!("{CLI}-{name}"));

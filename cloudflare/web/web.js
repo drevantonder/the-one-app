@@ -26,6 +26,8 @@ let about = null;
 /// The app's menu bar (tray) panel, a small window of its own: this page showing only the client's own `panel` screen,
 /// with the app's rows under it.
 const panel = !!native && new URLSearchParams(location.search).has("panel");
+/// On a Mac, a widget's own menu bar item opens the panel showing only that widget (`<app>.<widget>`), with no rows.
+const panelWidget = panel ? new URLSearchParams(location.search).get("widget") : null;
 /// The app on a phone: its home is the pages side by side, with no sidebar (`Shell`'s `phone`), as Andre decided.
 const phone = () => !!native && ["iPhone", "Android"].includes(about?.platform);
 const h = OneUI.react.createElement;
@@ -709,12 +711,18 @@ const h = OneUI.react.createElement;
     const signedIn = !!store.state && !!network();
     const name = network()?.name || config().name;
     windowShown = true;
+    if (panelWidget) {
+      show(h("div", { className: "panel" }, signedIn ? h("div", { className: "panel-screen", ref: (el) => el && detail.parentElement !== el && el.append(detail) }) : h("p", { className: "panel-note" }, "Signed out")));
+      if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", { here: about.node || "", widget: panelWidget }));
+      return;
+    }
     show(h("div", { className: "panel" },
       h("div", { className: "panel-head" }, h("img", { src: "/logo.png", alt: "" }), h("span", null, name)),
       signedIn ? h("div", { className: "panel-screen", ref: (el) => el && detail.parentElement !== el && el.append(detail) }) : h("p", { className: "panel-note" }, "Signed out"),
       h("div", { className: "panel-rows" },
         row(signedIn ? `Open ${config().name}` : "Sign In…", () => native.main()),
         about.login != null && row("Open at Login", async () => ((about.login = await native.login(!about.login)), drawPanel()), about.login),
+        about.computerUse != null && row("Let Agents Use This Mac", async () => ((about.computerUse = await native.computerUse(!about.computerUse)), drawPanel()), about.computerUse),
         row("Quit", () => native.quit()))));
     if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", { here: about.node || "" }));
   }
@@ -1487,10 +1495,28 @@ const h = OneUI.react.createElement;
       const whose = about.yours.charAt(0).toUpperCase() + about.yours.slice(1);
       const field = { label: "Address", placeholder: "one.example.com", note: `${whose}’s address, or the invite link you were sent.` };
       // An invite link opens in the browser, where its person makes their passkey, then signs in here with it.
-      return void show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name, field, action: { label: "Sign In", invite: "Open Invite", run: take }, problem: error }));
+      // A Mac whose own node is in no network yet joins one with a pairing code, as the Mac app did.
+      const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing() } : undefined;
+      return void show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name, field, action: { label: "Sign In", invite: "Open Invite", run: take }, note: about.unpaired ? `This Mac isn’t part of ${about.yours} yet. Join it from another of your computers, with a pairing code.` : undefined, other, problem: error }));
     }
     const signIn = () => auth.start().catch((err) => showSignedOut(err.message));
     show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name, action: { label: "Sign In", run: signIn }, note, problem: error }));
+  }
+
+  /// A Mac's own node joining a network with a pairing code another of its person's computers shows, then signing in
+  /// to it here.
+  function showPairing(error) {
+    const join = async (code) => {
+      try {
+        await native.pair(code);
+        about = await native.about();
+        await auth.start();
+      } catch (err) {
+        showPairing(err.message);
+      }
+    };
+    const field = { label: "Pairing Code", placeholder: "Pairing code", note: "Paste the pairing code another device shows. Each code works once." };
+    show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name: "Join with a Pairing Code", field, action: { label: "Join", run: join }, other: { label: "Cancel", run: () => showSignedOut() }, problem: error }));
   }
 
   /// Back from a sign-in at another site, in a browser that isn't signed in here: on to the app, which finishes it.

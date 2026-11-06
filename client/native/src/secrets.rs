@@ -1,24 +1,117 @@
-//! The OS's secret store (keyring: the Secret Service, the Keychain, the Credential Manager), its items named as the
-//! Mac and iPhone apps named theirs, so the native app reads those: this app's device keys, one for each person at each
-//! address (service `<cli> device`, account `<address> <sub>`, or `signing in` until a sign-in says whose), and the
-//! sign-in's refresh token (service `<cli> sign-in`, account `refresh`). Kept as bytes, as they were.
+//! The OS's secret store (the Secret Service, the Credential Manager, the Keychain), its items named as the Mac and
+//! iPhone apps named theirs, so the native app reads those: this app's device keys, one for each person at each address
+//! (service `<cli> device`, account `<address> <sub>`, or `signing in` until a sign-in says whose), and the sign-in's
+//! refresh token (service `<cli> sign-in`, account `refresh`). Kept as bytes, as they were.
 
-fn entry(service: &str, account: &str) -> Option<keyring::Entry> {
-    keyring::Entry::new(&format!("{} {service}", one::config::CLI), account).ok()
-}
-
-fn get(service: &str, account: &str) -> Option<Vec<u8>> {
-    entry(service, account)?.get_secret().ok()
-}
-
-fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
-    entry(service, account).ok_or("the secret store isn't there")?.set_secret(value).map_err(|e| format!("the secret store: {e}"))
-}
-
-fn delete(service: &str, account: &str) {
-    if let Some(e) = entry(service, account) {
-        let _ = e.delete_credential();
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+mod store {
+    fn entry(service: &str, account: &str) -> Option<keyring::Entry> {
+        keyring::Entry::new(service, account).ok()
     }
+
+    pub fn get(service: &str, account: &str) -> Option<Vec<u8>> {
+        entry(service, account)?.get_secret().ok()
+    }
+
+    pub fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
+        entry(service, account).ok_or("the secret store isn't there")?.set_secret(value).map_err(|e| format!("the secret store: {e}"))
+    }
+
+    pub fn delete(service: &str, account: &str) {
+        if let Some(e) = entry(service, account) {
+            let _ = e.delete_credential();
+        }
+    }
+}
+
+/// The Keychain, as the Mac and iPhone apps kept it (apple/Shared/DeviceKeys.swift, Auth.swift's `Keychain`): on an
+/// iPhone readable once it's been unlocked since it started (a widget's button works from the lock screen), on this
+/// device only. The device keys are kept in the group Info.plist's `KeychainGroup` names, where the notification
+/// extension reads them too (the App Group's on an iPhone, the team's on a Mac built with push, in the data-protection
+/// keychain), moved there from where an older build kept them; the refresh token is the app's alone.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod store {
+    use security_framework::access_control::{ProtectionMode, SecAccessControl};
+    use security_framework::passwords::{PasswordOptions, delete_generic_password_options, generic_password, set_generic_password_options};
+
+    /// Where the device keys are kept, as Info.plist says (none run outside a bundle).
+    fn group(service: &str) -> Option<String> {
+        static GROUP: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        if !service.ends_with(" device") {
+            return None;
+        }
+        GROUP
+            .get_or_init(|| {
+                use core_foundation::string::CFString;
+                let info = core_foundation::bundle::CFBundle::main_bundle().info_dictionary();
+                let value = info.find(CFString::new("KeychainGroup"))?;
+                value.downcast::<CFString>().map(|s| s.to_string()).filter(|s| !s.is_empty())
+            })
+            .clone()
+    }
+
+    /// The item's query: in its group (`shared`), or where an older build kept it.
+    fn options(service: &str, account: &str, shared: bool) -> PasswordOptions {
+        let mut o = PasswordOptions::new_generic_password(service, account);
+        if shared && let Some(group) = group(service) {
+            o.set_access_group(&group);
+            #[cfg(target_os = "macos")]
+            o.use_protected_keychain();
+        }
+        o
+    }
+
+    fn add(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
+        let mut o = options(service, account, true);
+        if cfg!(target_os = "ios") || group(service).is_some() {
+            let only = SecAccessControl::create_with_protection(Some(ProtectionMode::AccessibleAfterFirstUnlockThisDeviceOnly), 0).map_err(|e| e.to_string())?;
+            o.set_access_control(only);
+        }
+        set_generic_password_options(value, o).map_err(|e| format!("the Keychain: {e}"))
+    }
+
+    pub fn get(service: &str, account: &str) -> Option<Vec<u8>> {
+        if let Ok(v) = generic_password(options(service, account, true)) {
+            return Some(v);
+        }
+        group(service)?;
+        // Moved, not copied: the old one goes only once the new one is kept.
+        let old = generic_password(options(service, account, false)).ok()?;
+        if add(service, account, &old).is_ok() {
+            let _ = delete_generic_password_options(options(service, account, false));
+        }
+        Some(old)
+    }
+
+    pub fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
+        let _ = delete_generic_password_options(options(service, account, true));
+        add(service, account, value)
+    }
+
+    pub fn delete(service: &str, account: &str) {
+        let _ = delete_generic_password_options(options(service, account, true));
+        if group(service).is_some() {
+            let _ = delete_generic_password_options(options(service, account, false));
+        }
+    }
+}
+
+/// `<cli> <name>`; a throwaway build's, `<cli> throwaway <name>`, beside the person's own.
+fn service(name: &str) -> String {
+    let throwaway = if env!("IDENTIFIER").ends_with(".throwaway") { " throwaway" } else { "" };
+    format!("{}{throwaway} {name}", one::config::CLI)
+}
+
+fn get(name: &str, account: &str) -> Option<Vec<u8>> {
+    store::get(&service(name), account)
+}
+
+fn set(name: &str, account: &str, value: &[u8]) -> Result<(), String> {
+    store::set(&service(name), account, value)
+}
+
+fn delete(name: &str, account: &str) {
+    store::delete(&service(name), account)
 }
 
 /// The key a sign-in here is for, until it knows whose.

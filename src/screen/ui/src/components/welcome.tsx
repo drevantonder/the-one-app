@@ -13,14 +13,15 @@ function Centered({ className, children }: { className?: string; children: React
 
 /// Its logo and name, and the one thing to do (Sign In; Open, back from another site), as a button that runs or a link;
 /// `field`, what to type first (a native app's address), with a line under it, which the button runs with, named
-/// `invite` instead when what's typed is an invite link; `note`, a grey line under the button; `problem`, why the last
-/// try didn't work.
-function Welcome({ logo, name, action, field, note, problem }: {
+/// `invite` instead when what's typed is an invite link; `note`, a grey line under the button; `other`, a second way in
+/// (a Mac's Join with a Pairing Code), or back from it; `problem`, why the last try didn't work.
+function Welcome({ logo, name, action, field, note, other, problem }: {
   logo?: string
   name: string
   action: { label: string; invite?: string; run?: (typed?: string) => unknown; href?: string }
   field?: { label: string; placeholder?: string; note?: string }
   note?: string
+  other?: { label: string; run: () => unknown }
   problem?: string
 }) {
   const [typed, setTyped] = React.useState("")
@@ -43,6 +44,7 @@ function Welcome({ logo, name, action, field, note, problem }: {
         <Button size="lg" data-slot="welcome-action" disabled={busy || (!!field && !typed.trim())} onClick={run}>{action.invite && typed.includes("/invite#") ? action.invite : action.label}</Button>
       )}
       {note && <p className="text-sm text-muted-foreground">{note}</p>}
+      {other && <Button variant="ghost" onClick={() => other.run()}>{other.label}</Button>}
       {problem && <Problem title={problem} className="mt-4 w-full max-w-md text-left" />}
     </Centered>
   )

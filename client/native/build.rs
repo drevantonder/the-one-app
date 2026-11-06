@@ -18,7 +18,11 @@ fn main() {
         };
         std::fs::write(to, bytes).unwrap();
     }
-    let identifier = |platform: &str| format!("app.{}.{platform}", one::config::CLI);
+    // A test's build (`one throwaway client mac`) is another app beside the real one: its own id, so its own folder,
+    // instance and Keychain items, never the person's.
+    println!("cargo:rerun-if-env-changed=THROWAWAY");
+    let throwaway = std::env::var("THROWAWAY").is_ok_and(|v| !v.is_empty());
+    let identifier = |platform: &str| format!("app.{}.{platform}{}", one::config::CLI, if throwaway { ".throwaway" } else { "" });
     let platform = match std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default().as_str() {
         "macos" => "mac",
         "ios" => "phone",
@@ -26,6 +30,15 @@ fn main() {
         "android" => "android",
         _ => "linux",
     };
+    // The Mac's menu bar mark, the custom build's (config.toml's `menubar`, its @2x), which the app draws as a template.
+    if platform == "mac" {
+        let config = std::env::var("CONFIG").map(std::path::PathBuf::from).unwrap_or_else(|_| Path::new("../../config.toml").to_path_buf());
+        let text = std::fs::read_to_string(&config).expect("the custom build's config.toml");
+        let named = text.lines().take_while(|l| !l.starts_with('[')).find_map(|l| l.strip_prefix("menubar")?.trim().strip_prefix('=')).expect("config.toml's menubar");
+        let mark = config.parent().unwrap().join(named.trim().trim_matches('"').replace(".png", "@2x.png"));
+        println!("cargo:rerun-if-changed={}", mark.display());
+        std::fs::copy(&mark, Path::new(&std::env::var("OUT_DIR").unwrap()).join("menubar.png")).unwrap_or_else(|e| panic!("{}: {e}", mark.display()));
+    }
     // The custom build's app icon, as the web client's files have it; on Windows, the program's own too (its window's,
     // the taskbar's), an .ico.
     let mut icons = vec!["gen/web/icon.png"];
@@ -43,8 +56,9 @@ fn main() {
     // SAFETY: nothing else runs in this build script.
     unsafe { std::env::set_var("TAURI_CONFIG", config.to_string()) };
     println!("cargo:rustc-env=TAURI_CONFIG={config}");
+    println!("cargo:rustc-env=IDENTIFIER={}", identifier(platform));
     println!("cargo:rerun-if-env-changed=CONFIG");
-    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit", "badge"]);
+    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit", "badge", "computer_use", "pair"]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands)).expect("the app's build")
 }
 

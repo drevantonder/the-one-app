@@ -78,5 +78,38 @@ Windows VM by `windows/build.sh`; `one throwaway client windows`). The package k
       is taken as if typed on the welcome, as the old app took it: opened in the browser for its passkey, then "Made
       your passkey? Sign in with it." (web.js `opened`, e768aea5; not checked on Windows: the throwaway's address is http)
 
-Mac (`apple/Mac`, `apple/Shared`), iPhone (`apple/Phone`, `Notifications`, `Widget`), Android (`android/`): each old
-app's full inventory lands here before that platform is written.
+Mac (`mac/build.sh`, the bundle `apple/build.sh` made, in the same identity: `app.<cli>.mac`, the Developer ID team,
+the same designated requirement, so it reads the old app's Keychain items and defaults; `one throwaway client mac`, a
+build with its own id, folder and Keychain names beside the person's app, on the Mac `MAC` names to ssh):
+
+- [x] The bundle as before: `Contents/MacOS/<NAME>` (the window), `<cli>`, `<cli>d`, `<cli>-<service>`, the launch agent
+      `app.<cli>.mac.oned`, `Contents/Helpers` (service/mac-helpers.sh), Info.plist's `CLI`, `Yours`, `NodePort`,
+      `BuildCommit`, `CFBundleVersion` (commits), signed with the Developer ID and the hardened runtime, notarized by
+      `<cli>-notary` with `--release`; `one update` and `one release` build it (update.rs, `client/native/disk.sh`),
+      install.sh as before (checked: built on the Mac, `codesign -dr` the same as the old app's, verified)
+- [x] Signed in, in the throwaway, as linux() is; a new build stays signed in (its Keychain items, by its signature)
+      (checked, the Mac)
+- [x] Screens reach none of the app's commands in WKWebView: a deployed screen has no `__TAURI_INTERNALS__` or
+      `__oneNative`, its posts to `webkit.messageHandlers.ipc` run nothing (the clipboard stayed), its IPC fetch is
+      refused (no invoke key), the parent page is out of reach; the page's own copy works (checked, the Mac)
+- [x] The panel's rows: Open, Open at Login (SMAppService's main app, on from the first start), Let Agents Use This
+      Mac (the app's defaults' `computerUse`, which Computer Use's helper reads), Quit; the same in the item's right-click
+      menu (checked, the Mac: the rows, and the switch writing `computerUse`)
+- [x] Per-widget menu bar items: one per widget kind, its headline as title (≤40), hidden when empty; a click shows
+      it under the item (the panel's page with `widget`), a right click Open <app> / Hide from Menu Bar, which hides it
+      (the old app's Hide never did); the main item's right-click menu shows a hidden one again (checked, the Mac: Repos'
+      item titled "No repos yet."). Their places in the menu bar aren't remembered (the old app's autosaveName)
+- [ ] The dock's count (Tauri's badge), the window, panel and widget popovers drawn: not yet seen (the Mac was locked)
+- [ ] The old app's sign-in, address and client folder taken over (`mac::take_over`, the Keychain's same items): on
+      the real Mac at the cut-over
+- [ ] This Mac's node kept running (its launch agent registered, kickstarted, or a child), and it approves the window's
+      code at once (`approve_here`): on the real Mac at the cut-over
+- [ ] Join with a Pairing Code for a Mac whose node is in no network (the welcome's second button, `pair`): built, not
+      checked (no Mac without a network to try it on)
+- [ ] Keyboard shortcuts: ⌘\ (fold the sidebar), ⌘⇧I (Pair a Computer), ⌘⇧J (Join) aren't carried; the Edit menu's and
+      ⌘W, ⌘Q are Tauri's own
+- Not carried: a Mac build with push (its notification extension): no custom build has one; notes show on a Mac only
+  as they did, with none
+
+iPhone (`apple/Phone`, `Notifications`, `Widget`), Android (`android/`): each old app's full inventory lands here
+before that platform is written.

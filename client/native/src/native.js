@@ -29,6 +29,10 @@
     /// The window in front (at a `<cli>://` link, if given), from the menu bar panel; Open at Login switched; Quit.
     main: (link) => invoke("main", { link: link ?? null }),
     login: (on) => invoke("login", { on }),
+    /// Let Agents Use This Mac, switched (a Mac's alone: `about().computerUse` is null elsewhere).
+    computerUse: (on) => invoke("computer_use", { on }),
+    /// A Mac's own node joins a network with a pairing code (`about().unpaired`) → its address.
+    pair: (code) => invoke("pair", { code }),
     quit: () => invoke("quit"),
     /// The menu bar panel this tall (CSS pixels), its top where it is.
     fit: (height) => invoke("fit", { height }),

@@ -24,6 +24,8 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     let state = crate::node_json(device, "/v1/state").await?;
     let apps = crate::node_json(device, "/v1/apps").await?;
     let apps: Vec<Value> = apps.as_array().cloned().unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    crate::menubar::named(&apps);
     let Some(me) = state["user"]["id"].as_str() else { return Ok(()) };
     let mut pages = vec![("user".to_string(), "You".to_string())];
     let mut groups: Vec<(String, String)> = state["network"]["groups"]

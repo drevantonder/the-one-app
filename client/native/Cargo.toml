@@ -51,9 +51,6 @@ data-encoding = "2"
 rand = "0.8"
 url = "2"
 tokio = { version = "1", features = ["sync", "time", "macros"] }
-# The OS's secret store for the device key and the refresh token: the Secret Service, the Keychain, the Credential
-# Manager.
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 # Windows' own, beside the window (src/windows.rs): the taskbar button's count (BadgeUpdateManager), opening at login
 # (StartupTask), the links to the network's address (AppUriHandler), and the machine's id in the registry. Both already built for Tauri and iroh.
@@ -61,6 +58,18 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "ApplicationModel", "System"] }
 windows-collections = "0.3"
 windows-registry = "0.6"
+
+# The OS's secret store for the device key and the refresh token: the Secret Service, the Credential Manager.
+[target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
+keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
+
+# Apple's own (src/secrets.rs, src/mac.rs): the Keychain in the group the extensions read, Info.plist, and the Mac's
+# login item, node and defaults. All already built for Tauri (wry, tao) and keyring.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+security-framework = { version = "3", features = ["OSX_10_15"] }
+core-foundation = "0.10"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSUserDefaults", "NSString", "NSObject", "NSArray"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

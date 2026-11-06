@@ -300,8 +300,10 @@ impl Parts {
                 Some("service") => parts.service = true,
                 // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
-                // The native app (client/native) is its own workspace, in neither the node nor today's Mac app.
-                Some("client") if file.starts_with("client/native/") => {}
+                // The native app (client/native) is its own workspace, not in the node: the Mac app, but for Windows' own
+                // (client/native/windows/), which Windows' package is built from where it's released.
+                Some("client") if file.starts_with("client/native/windows/") => {}
+                Some("client") if file.starts_with("client/native/") => parts.mac = true,
                 // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
                 Some("client") => (parts.node, parts.mac) = (true, true),
                 Some("docs" | "tests" | "android" | "cloudflare") => {}
@@ -1157,7 +1159,7 @@ exec > "$c/update.log" 2>&1
 trap 'echo $? > "$c/update.status"' EXIT
 set -e
 {checkout}
-CONFIG="$config" apple/disk.sh retry apple/build.sh --release
+CONFIG="$config" client/native/disk.sh retry client/native/mac/build.sh --release
 {assets}
 JOB
 {start}"#,
@@ -1190,7 +1192,7 @@ cat > build.sh <<'JOB'
 set -e
 c="$HOME/Library/Caches/{CLI}"
 {checkout}
-CONFIG="$config" apple/disk.sh retry apple/build.sh
+CONFIG="$config" client/native/disk.sh retry client/native/mac/build.sh
 JOB
 cat > phone.sh <<'JOB'
 set -e
@@ -1199,13 +1201,13 @@ c="$HOME/Library/Caches/{CLI}"
 # Only what the iPhone app is made of: the node isn't in it, and each network closes the app on the phone.
 last=$(cat "$c/phone.built" 2>/dev/null || true)
 if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- apple ':!apple/Mac' vendor/phosphor {CONFIG_FILE} 2>/dev/null; then exit 3; fi
-CONFIG="$config" apple/disk.sh retry apple/build-phone.sh device "$c/phone"
+CONFIG="$config" client/native/disk.sh retry apple/build-phone.sh device "$c/phone"
 JOB
 cat > follow.sh <<'JOB'
 # launchd runs this in the login shell, zsh on a Mac; the job control it uses is bash's.
 [ -n "$BASH_VERSION" ] || exec /bin/bash "$0" "$@"
 c="$HOME/Library/Caches/{CLI}"
-# Each build in a process group of its own, which a newer update stops (apple/build.sh's install ignores that).
+# Each build in a process group of its own, which a newer update stops (client/native/mac/build.sh's install ignores that).
 set -m
 want() {{ cat "$c/want"; }}
 # Runs a build at a lower priority, so the Mac stays quick to use, and stops it for a newer update's (sets stopped).
@@ -1276,9 +1278,9 @@ config="$c/config/{CONFIG_FILE}""#
 cd "$c/src"
 git fetch -q --tags --force origin
 git checkout -q --detach --force "{commit}"
-git clean -qfdx -e /target -e /apple/build
+git clean -qfdx -e /target -e /client/native/target -e /apple/build
 # What the builds leave in target/ is kept in bounds, and a Mac with no room says so here, not in a link step.
-apple/disk.sh prune
+client/native/disk.sh prune
 {config}"#
     )
 }
