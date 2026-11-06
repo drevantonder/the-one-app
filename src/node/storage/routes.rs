@@ -3,9 +3,9 @@
 use axum::Json;
 use axum::extract::State;
 use axum::routing::get;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 
-use crate::api::{Reply, Routes, Who};
+use crate::api::{Body, Reply, Routes, Who};
 use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
@@ -16,7 +16,16 @@ async fn storage(State(node): State<Node>) -> Reply {
     Ok(Json(node.storage()?))
 }
 
-/// `{ endpoint, bucket, region? }`: moves the network's data there.
-async fn set(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    Ok(Json(node.set_storage(&Caller::local(&node)?, &body).await?))
+/// S3-compatible storage to move the network's data to.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Storage {
+    endpoint: String,
+    bucket: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region: Option<String>,
+}
+
+async fn set(State(node): State<Node>, Body(body): Body<Storage>) -> Reply {
+    Ok(Json(node.set_storage(&Caller::local(&node)?, &serde_json::to_value(body)?).await?))
 }

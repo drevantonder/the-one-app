@@ -5,9 +5,10 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::api::{Error, Me, Reply, Routes, Who, done, only, text};
+use crate::api::{Body, Error, Me, Reply, Routes, Who, done, given};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
@@ -19,11 +20,19 @@ pub fn routes() -> Routes {
         .route("/v1/services/{app}/calls/{id}/vault", Who::ThisMachine, post(fill))
 }
 
-/// `{ name, device?, installed? }`: removes a service from a device (this one by default, for this machine's own
-/// programs), or with `installed` lets it register there again.
-async fn service(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["name", "device", "on"])?;
-    node.set_service(&me.caller, body["device"].as_str(), text(&body, "name")?, body["on"] == true).await?;
+/// Removes a service from a device (this one by default, for this machine's own programs), or with `on` lets it
+/// register there again.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Service {
+    name: String,
+    device: Option<String>,
+    #[serde(default)]
+    on: bool,
+}
+
+async fn service(State(node): State<Node>, me: Me, Body(body): Body<Service>) -> Reply {
+    node.set_service(&me.caller, body.device.as_deref(), given(&body.name, "name")?, body.on).await?;
     done()
 }
 
@@ -45,8 +54,15 @@ async fn reply(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, J
     done()
 }
 
-/// A service's text filled from the Vault for a call of its that waits, for the host it's going to.
-async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
-    let text = node.service_fill(&app, id, text(&body, "text")?, text(&body, "host")?).await?;
+/// A service's text to fill from the Vault for a call of its that waits, for the host it's going to.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Fill {
+    text: String,
+    host: String,
+}
+
+async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Body(body): Body<Fill>) -> Reply {
+    let text = node.service_fill(&app, id, given(&body.text, "text")?, given(&body.host, "host")?).await?;
     Ok(Json(json!({ "text": text })))
 }

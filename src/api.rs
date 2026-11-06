@@ -568,20 +568,24 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     Ok(me)
 }
 
-/// Refuses a body with anything but `keys`, so a word a route doesn't take (one renamed, say) fails rather than being
-/// passed over: a call or service meant for one device running on another.
-pub(crate) fn only(body: &Value, keys: &[&str]) -> Result<(), Error> {
-    match body.as_object().and_then(|o| o.keys().find(|k| !keys.contains(&k.as_str()))) {
-        Some(other) => Err(anyhow::anyhow!("{other} isn't something this takes: {}", keys.join(", ")).into()),
-        None => Ok(()),
+/// A request's JSON body as `T`, whose type says every field a route takes (`#[serde(deny_unknown_fields)]`), so a
+/// word it doesn't take (one renamed, say) fails rather than being passed over: a call or service meant for one device
+/// running on another.
+pub(crate) struct Body<T>(pub T);
+
+impl<S: Send + Sync, T: serde::de::DeserializeOwned> axum::extract::FromRequest<S> for Body<T> {
+    type Rejection = Error;
+
+    async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Error> {
+        let Json(body) = <Json<Value> as axum::extract::FromRequest<S>>::from_request(req, state).await.map_err(|e| anyhow::anyhow!("{}", e.body_text()))?;
+        Ok(Body(serde_json::from_value(body).map_err(|e| anyhow::anyhow!("{e}"))?))
     }
 }
 
-pub(crate) fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
-    body[key].as_str().filter(|s| !s.trim().is_empty()).map(str::trim).ok_or_else(|| anyhow::anyhow!("give {key}").into())
+/// `value`, trimmed, or what to give when it's blank.
+pub(crate) fn given<'a>(value: &'a str, key: &str) -> Result<&'a str, Error> {
+    Some(value.trim()).filter(|v| !v.is_empty()).ok_or_else(|| anyhow::anyhow!("give {key}").into())
 }
-
-
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
 async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
@@ -589,13 +593,21 @@ async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collect
     Ok(Json(node.sealed_keys(&me.caller, &scope, q.get("to").map(String::as_str), q.get("app").map(String::as_str)).await?))
 }
 
-/// `{ scope, n, to, sealed }`, `{ scope, n, app, sealed }` or `{ scope, n, app, to, sealed }`: keeps a key sealed by the
-/// caller's device (`Node::seal_key`).
-async fn keys_post(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["scope", "n", "to", "app", "sealed"])?;
-    let scope = crate::database::scopes::Scope::parse(text(&body, "scope")?)?;
-    let n = body["n"].as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| anyhow::anyhow!("give n, the epoch"))?;
-    Ok(Json(node.seal_key(&me.caller, &scope, n, body["to"].as_str(), body["app"].as_str(), text(&body, "sealed")?).await?))
+/// A key sealed by the caller's device, for a device (`to`), an app, or an app's key for a device (`Node::seal_key`).
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SealedKey {
+    scope: String,
+    /// The epoch.
+    n: u32,
+    to: Option<String>,
+    app: Option<String>,
+    sealed: String,
+}
+
+async fn keys_post(State(node): State<Node>, me: Me, Body(body): Body<SealedKey>) -> Reply {
+    let scope = crate::database::scopes::Scope::parse(given(&body.scope, "scope")?)?;
+    Ok(Json(node.seal_key(&me.caller, &scope, body.n, body.to.as_deref(), body.app.as_deref(), given(&body.sealed, "sealed")?).await?))
 }
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {
@@ -618,14 +630,12 @@ async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>)
 /// run is answered 421 with the nodes that can (`node::Elsewhere`), not passed on.
 const ELSEWHERE_HEADER: &str = "x-one-elsewhere";
 
-async fn call(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Json(body): Json<Value>) -> Reply {
-    Ok(Json(call_for(&node, me, body, headers.contains_key(ELSEWHERE_HEADER)).await?))
+async fn call(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Body(req): Body<CallRequest>) -> Reply {
+    Ok(Json(call_for(&node, me, req, headers.contains_key(ELSEWHERE_HEADER)).await?))
 }
 
 /// A call as `/v1/call` takes it, for `me`: → `{ ok }`. A client that `picks` its node has it run here, or told where.
-async fn call_for(node: &Node, me: Me, body: Value, picks: bool) -> anyhow::Result<Value> {
-    only(&body, &["id", "app", "service", "op", "input", "scopes", "device", "agent", "depth", "from", "client"]).map_err(|e| e.0)?;
-    let mut req: CallRequest = serde_json::from_value(body)?;
+async fn call_for(node: &Node, me: Me, mut req: CallRequest, picks: bool) -> anyhow::Result<Value> {
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
     if picks {
@@ -651,7 +661,7 @@ pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::
         let credential = node.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
         // As the Cloudflare node's, never this device's own: no service counts it as its person's own node.
-        call_for(node, Me { caller: Caller { key: remote, user, agent: None, credential }, sign_in: Some(client) }, call, false).await
+        call_for(node, Me { caller: Caller { key: remote, user, agent: None, credential }, sign_in: Some(client) }, serde_json::from_value(call)?, false).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))
 }
@@ -659,39 +669,72 @@ pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::
 
 
 
-async fn create(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let recovery = node.create_with(text(&body, "name")?, text(&body, "user_name")?, body["user"].as_str(), crate::config::STARTERS).await?;
+/// A new network, named `name`, whose first person is `user_name` (with `user`, their id).
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Create {
+    name: String,
+    user_name: String,
+    user: Option<String>,
+}
+
+async fn create(State(node): State<Node>, Body(body): Body<Create>) -> Reply {
+    let recovery = node.create_with(given(&body.name, "name")?, given(&body.user_name, "user_name")?, body.user.as_deref(), crate::config::STARTERS).await?;
     Ok(Json(json!({ "recovery": recovery })))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Join {
+    code: String,
+}
 
-async fn join(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.join(text(&body, "code")?).await?;
+async fn join(State(node): State<Node>, Body(body): Body<Join>) -> Reply {
+    node.join(given(&body.code, "code")?).await?;
+    done()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetRole {
+    user: String,
+    role: Role,
+}
+
+async fn role(State(node): State<Node>, me: Me, Body(body): Body<SetRole>) -> Reply {
+    node.member_as(&me.caller, "role", json!({ "user": node.find_user(given(&body.user, "user")?)?, "role": body.role })).await?;
+    done()
+}
+
+/// One of the network's settings, for admins; `value: null` puts back the custom build's default.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Setting {
+    name: String,
+    #[serde(default)]
+    value: Value,
+}
+
+async fn settings(State(node): State<Node>, me: Me, Body(body): Body<Setting>) -> Reply {
+    node.member_as(&me.caller, "setting", json!({ "name": given(&body.name, "name")?, "value": body.value })).await?;
     done()
 }
 
 
-
-
-async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let role: Role = serde_json::from_value(body["role"].clone())?;
-    node.member_as(&me.caller, "role", json!({ "user": node.find_user(text(&body, "user")?)?, "role": role })).await?;
-    done()
+/// A step as `POST /v1/steps` takes it, each part base64url.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SignedStep {
+    header: String,
+    signature: String,
+    body: String,
 }
 
-/// `{ name, value }`: one of the network's settings, for admins; `value: null` puts back the custom build's default.
-async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.member_as(&me.caller, "setting", json!({ "name": text(&body, "name")?, "value": body["value"] })).await?;
-    done()
-}
-
-
-/// `[{ header, signature, body }]` (each base64url): steps of `global`'s scope database the caller's own device
-/// signed, each for the next position, which this device checks count and writes (`database::steps`).
-async fn steps(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let list = body.as_array().ok_or_else(|| anyhow::anyhow!("give a list of steps"))?;
-    let b = |v: &Value, k: &str| data_encoding::BASE64URL_NOPAD.decode(v[k].as_str().unwrap_or("").as_bytes()).map_err(|_| anyhow::anyhow!("{k} isn't base64url"));
-    let list = list.iter().map(|v| crate::database::steps::Step::decode(&b(v, "header")?, &b(v, "signature")?, &b(v, "body")?)).collect::<anyhow::Result<Vec<_>>>()?;
+/// Steps of `global`'s scope database the caller's own device signed, each for the next position, which this device
+/// checks count and writes (`database::steps`).
+async fn steps(State(node): State<Node>, me: Me, Body(list): Body<Vec<SignedStep>>) -> Reply {
+    let b = |v: &str, k: &str| data_encoding::BASE64URL_NOPAD.decode(v.as_bytes()).map_err(|_| anyhow::anyhow!("{k} isn't base64url"));
+    let list = list.iter().map(|s| crate::database::steps::Step::decode(&b(&s.header, "header")?, &b(&s.signature, "signature")?, &b(&s.body, "body")?)).collect::<anyhow::Result<Vec<_>>>()?;
     node.put_signed_steps(&me.caller, list).await?;
     done()
 }

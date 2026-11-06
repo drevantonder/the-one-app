@@ -1287,7 +1287,7 @@ impl Node {
             // Passed on with no sign-in: run on the keys it was handed alone, never this device's own.
             me.credential = self.take_passed(&remote, &me.user, request, keys, true)?;
         }
-        let mut req: CallRequest = serde_json::from_value(request.clone())?;
+        let mut req = call_in(request)?;
         let (own, serves) = self.with(|i| Ok((!passed && i.r.db().client(&remote).is_some_and(|c| c.user == me.user), i.r.db().serves(&remote, &me.user))))?;
         // Only a node that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
         if !serves {
@@ -1317,7 +1317,7 @@ impl Node {
     /// `from`'s key, of the scopes the call names alone, every one of which `user` may use and, for a node on a machine
     /// (`machine`), `from` runs. → its credential.
     pub(crate) fn take_passed(&self, from: &Key, user: &str, call: &Value, sealed: &str, machine: bool) -> Result<Credential> {
-        let service = serde_json::from_value::<CallRequest>(call.clone()).map(|req| self.resolve(req).service.is_some())?;
+        let service = self.resolve(call_in(call)?).service.is_some();
         let named = call["scopes"].as_array().context("a call passed on names its scopes")?;
         let scopes: Vec<Scope> = named.iter().map(|s| Scope::parse_for(s.as_str().context("a scope is its name")?, user)).collect::<Result<_>>()?;
         self.with(|i| {
@@ -1403,6 +1403,15 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
     }
     let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None, address: address(m), handles: m.handles(), labs: crate::labs::on_keys(&m.settings()) };
     Ok(Ok((ctx, scopes)))
+}
+
+/// The call in a request another node sent: what's left once who asks and the keys and files it brings are taken off.
+fn call_in(request: &Value) -> Result<CallRequest> {
+    let mut call = request.as_object().cloned().unwrap_or_default();
+    for envelope in ["me", "keys", "blobs"] {
+        call.remove(envelope);
+    }
+    Ok(serde_json::from_value(Value::Object(call))?)
 }
 
 #[cfg(test)]

@@ -3,9 +3,10 @@
 use axum::Json;
 use axum::extract::State;
 use axum::routing::{get, post};
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
-use crate::api::{Me, Reply, Routes, Who};
+use crate::api::{Body, Me, Reply, Routes, Who};
 use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
@@ -17,9 +18,9 @@ pub fn routes() -> Routes {
         .route("/v1/backups/check", Who::SignedIn, post(check))
 }
 
-/// Who asked, crediting the agent the body names, if any.
-fn caller(me: Me, body: &Value) -> Caller {
-    Caller { agent: body["agent"].as_str().map(str::to_string).or(me.caller.agent.clone()), ..me.caller }
+/// Who asked, crediting the `agent` the body names, if any.
+fn caller(me: Me, agent: Option<String>) -> Caller {
+    Caller { agent: agent.or(me.caller.agent.clone()), ..me.caller }
 }
 
 async fn status(State(node): State<Node>) -> Reply {
@@ -31,23 +32,60 @@ async fn now(State(node): State<Node>, me: Me) -> Reply {
     Ok(Json(json!({})))
 }
 
-/// `{ path | endpoint…, title? }` adds a place, after trying it; `{ id, deleted: true }` removes one.
-async fn place(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let me = caller(me, &body);
-    if body["deleted"] == true {
-        node.remove_place(&me, body["id"].as_str().unwrap_or("")).await?;
-        return Ok(Json(json!({})));
-    }
-    if me.agent.is_some() && !body["secret"].is_null() {
-        return Err(anyhow::anyhow!("agents never handle a place's key: ask the person with request").into());
-    }
-    Ok(Json(node.add_place(&me, &body).await?))
+/// A place to add, a folder (`path`) or S3-compatible storage (`endpoint…`), after trying it (only trying it, with
+/// `test`); or with `id` and `deleted: true`, one to remove.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Place {
+    #[serde(skip_serializing)]
+    agent: Option<String>,
+    #[serde(skip_serializing)]
+    id: Option<String>,
+    #[serde(default, skip_serializing)]
+    deleted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bucket: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    secret: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default)]
+    test: bool,
 }
 
-/// `{ endpoint, title? }`: asks the person for a bucket and its key, on their own device.
-async fn request(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let me = caller(me, &body);
-    Ok(Json(node.request_place(&me, &body).await?))
+async fn place(State(node): State<Node>, me: Me, Body(mut body): Body<Place>) -> Reply {
+    let me = caller(me, body.agent.take());
+    if body.deleted {
+        node.remove_place(&me, body.id.as_deref().unwrap_or("")).await?;
+        return Ok(Json(json!({})));
+    }
+    if me.agent.is_some() && body.secret.is_some() {
+        return Err(anyhow::anyhow!("agents never handle a place's key: ask the person with request").into());
+    }
+    Ok(Json(node.add_place(&me, &serde_json::to_value(body)?).await?))
+}
+
+/// S3-compatible storage at `endpoint` to ask the person for a bucket and its key of, on their own device.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Request {
+    #[serde(skip_serializing)]
+    agent: Option<String>,
+    endpoint: Option<String>,
+    title: Option<String>,
+}
+
+async fn request(State(node): State<Node>, me: Me, Body(mut body): Body<Request>) -> Reply {
+    let me = caller(me, body.agent.take());
+    Ok(Json(node.request_place(&me, &serde_json::to_value(body)?).await?))
 }
 
 async fn check(State(node): State<Node>) -> Reply {

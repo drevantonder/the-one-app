@@ -6,7 +6,7 @@ use axum::routing::post;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::api::{Reply, Routes, Who};
+use crate::api::{Body, Reply, Routes, Who};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
@@ -16,6 +16,7 @@ pub fn routes() -> Routes {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReleaseRequest {
     path: String,
     /// For a service's program, which.
@@ -30,7 +31,7 @@ struct ReleaseRequest {
 
 /// A build of the node, or with `service` of a service's program (at its own path, so a node too old to know them
 /// refuses it rather than taking it for its own), for `target` and signed: published as its newest release.
-async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
+async fn release(State(node): State<Node>, Body(req): Body<ReleaseRequest>) -> Reply {
     let r = node.publish(std::path::Path::new(&req.path), req.service.as_deref(), &req.commit, &req.target, req.committed, &req.signature).await?;
     Ok(Json(json!(r)))
 }

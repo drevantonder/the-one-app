@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::routing::{get, post};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::api::{Error, Me, Reply, Routes, Who};
+use crate::api::{Body, Error, Me, Reply, Routes, Who};
 use crate::database::scopes::Scope;
 use crate::node::{Caller, Node};
 
@@ -22,69 +23,140 @@ pub fn routes() -> Routes {
         .route("/v1/vault/grant", Who::ThisMachine, post(grant))
 }
 
-/// Who asked, crediting the agent the body (or query) names, if any.
-fn caller(me: Me, body: &Value) -> Caller {
-    Caller { agent: body["agent"].as_str().map(str::to_string).or(me.caller.agent.clone()), ..me.caller }
+/// Who asked, crediting the `agent` the body (or query) names, if any.
+fn caller(me: Me, agent: Option<&str>) -> Caller {
+    Caller { agent: agent.map(str::to_string).or(me.caller.agent.clone()), ..me.caller }
 }
 
 /// The scope a body names, `user` by default.
-fn scope(node: &Node, me: &Caller, body: &Value) -> Result<Scope, Error> {
-    Ok(node.scope_for(me, body["scope"].as_str().unwrap_or("user"))?)
-}
-
-fn query(q: HashMap<String, String>) -> Value {
-    Value::Object(q.into_iter().map(|(k, v)| (k, json!(v))).collect())
+fn scope(node: &Node, me: &Caller, scope: Option<&str>) -> Result<Scope, Error> {
+    Ok(node.scope_for(me, scope.unwrap_or("user"))?)
 }
 
 /// `?scope=`: the items the caller may change, in one scope or all.
 async fn list(State(node): State<Node>, me: Me, Query(q): Query<HashMap<String, String>>) -> Reply {
-    let q = query(q);
-    let me = caller(me, &q);
-    let scope = q["scope"].as_str().map(|s| node.scope_for(&me, s)).transpose()?;
+    let me = caller(me, q.get("agent").map(String::as_str));
+    let scope = q.get("scope").map(|s| node.scope_for(&me, s)).transpose()?;
     Ok(Json(json!(node.vault(&me, scope.as_ref()).await?)))
 }
 
-/// An item's changes, `{ scope?, id?, title?, fields?, hosts?, apps?, deleted? }`: → `{ id }`.
-async fn set(State(node): State<Node>, me: Me, Json(mut body): Json<Value>) -> Reply {
-    let me = caller(me, &body);
-    let scope = scope(&node, &me, &body)?;
-    body.as_object_mut().ok_or_else(|| anyhow::anyhow!("an item is an object"))?.remove("scope");
-    Ok(Json(json!({ "id": node.set_item(&me, &scope, body).await? })))
+/// An item's changes (`vault::apply`), in `scope`: → `{ id }`.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Change {
+    #[serde(skip_serializing)]
+    scope: Option<String>,
+    #[serde(skip_serializing)]
+    agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fields: Option<serde_json::Map<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hosts: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    apps: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deleted: Option<bool>,
+}
+
+async fn set(State(node): State<Node>, me: Me, Body(body): Body<Change>) -> Reply {
+    let me = caller(me, body.agent.as_deref());
+    let scope = scope(&node, &me, body.scope.as_deref())?;
+    Ok(Json(json!({ "id": node.set_item(&me, &scope, serde_json::to_value(body)?).await? })))
 }
 
 /// `?scope=&id=`: the requests for items the caller may answer, or one.
 async fn requests(State(node): State<Node>, me: Me, Query(q): Query<HashMap<String, String>>) -> Reply {
-    let q = query(q);
-    let me = caller(me, &q);
-    let scope = q["scope"].as_str().map(|s| node.scope_for(&me, s)).transpose()?;
-    Ok(Json(json!(node.item_requests(&me, scope.as_ref(), q["id"].as_str()).await?)))
+    let me = caller(me, q.get("agent").map(String::as_str));
+    let scope = q.get("scope").map(|s| node.scope_for(&me, s)).transpose()?;
+    Ok(Json(json!(node.item_requests(&me, scope.as_ref(), q.get("id").map(String::as_str)).await?)))
 }
 
-/// `{ scope?, app, need?, title?, fields?, hosts?, why? }`: asks the person for an item.
-async fn request(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let me = caller(me, &body);
-    let scope = scope(&node, &me, &body)?;
-    Ok(Json(node.request_item(&me, &scope, body["app"].as_str().unwrap_or(""), body["need"].as_str(), &body, body["why"].as_str().unwrap_or("")).await?))
+/// Asks the person for an item: what `app` declares as `need`, or with neither, one of `title`, `fields` and `hosts`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Ask {
+    scope: Option<String>,
+    agent: Option<String>,
+    app: Option<String>,
+    need: Option<String>,
+    title: Option<String>,
+    fields: Option<serde_json::Map<String, Value>>,
+    hosts: Option<Vec<String>>,
+    why: Option<String>,
 }
 
-/// `{ scope?, id, item? | fields? | declined? }`: answers a request.
-async fn answer(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let me = caller(me, &body);
-    let scope = scope(&node, &me, &body)?;
-    node.answer_request(&me, &scope, body["id"].as_str().unwrap_or(""), &body).await?;
+async fn request(State(node): State<Node>, me: Me, Body(body): Body<Ask>) -> Reply {
+    let me = caller(me, body.agent.as_deref());
+    let scope = scope(&node, &me, body.scope.as_deref())?;
+    let ask = json!({ "title": body.title, "fields": body.fields, "hosts": body.hosts });
+    Ok(Json(node.request_item(&me, &scope, body.app.as_deref().unwrap_or(""), body.need.as_deref(), &ask, body.why.as_deref().unwrap_or("")).await?))
+}
+
+/// Answers request `id`: with one of the caller's items, the `fields` (and `title`) of a new one, or `declined`.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Answer {
+    #[serde(skip_serializing)]
+    scope: Option<String>,
+    #[serde(skip_serializing)]
+    agent: Option<String>,
+    id: String,
+    item: Option<String>,
+    title: Option<String>,
+    fields: Option<serde_json::Map<String, Value>>,
+    #[serde(default)]
+    declined: bool,
+}
+
+async fn answer(State(node): State<Node>, me: Me, Body(body): Body<Answer>) -> Reply {
+    let me = caller(me, body.agent.as_deref());
+    let scope = scope(&node, &me, body.scope.as_deref())?;
+    node.answer_request(&me, &scope, &body.id, &serde_json::to_value(&body)?).await?;
     Ok(Json(json!({})))
 }
 
-/// `{ url, method?, headers?, body? }`: a request with the items agents may use filled in.
-async fn fetch(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let me = caller(me, &body);
-    Ok(Json(node.vault_fetch(&me, &body).await?))
+/// A request with the items agents may use filled in.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Fetch {
+    #[serde(skip_serializing)]
+    agent: Option<String>,
+    url: String,
+    method: Option<String>,
+    headers: Option<serde_json::Map<String, Value>>,
+    body: Option<Value>,
 }
 
-/// `{ scope?, device, on }`: lets a machine open a scope's Vault, or no longer.
-async fn grant(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let me = caller(me, &body);
-    let scope = scope(&node, &me, &body)?;
-    let device = body["device"].as_str().ok_or_else(|| anyhow::anyhow!("give device"))?;
-    Ok(Json(node.vault_grant(&me, &scope, device, body["on"] != false).await?))
+async fn fetch(State(node): State<Node>, me: Me, Body(body): Body<Fetch>) -> Reply {
+    let me = caller(me, body.agent.as_deref());
+    Ok(Json(node.vault_fetch(&me, &serde_json::to_value(body)?).await?))
+}
+
+/// Lets a machine open a scope's Vault, or no longer (`on: false`).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Grant {
+    scope: Option<String>,
+    agent: Option<String>,
+    device: String,
+    #[serde(default = "yes")]
+    on: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+async fn grant(State(node): State<Node>, me: Me, Body(body): Body<Grant>) -> Reply {
+    let me = caller(me, body.agent.as_deref());
+    let scope = scope(&node, &me, body.scope.as_deref())?;
+    Ok(Json(node.vault_grant(&me, &scope, &body.device, body.on).await?))
 }

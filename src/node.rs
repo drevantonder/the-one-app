@@ -266,6 +266,7 @@ impl Node {
 
 /// A call to run: an app's tool, or a service's function.
 #[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CallRequest {
     /// Names this call wherever it's tried, so a call that writes runs on one device only: the first to take its lease.
     #[serde(default, skip_serializing_if = "Option::is_none")]

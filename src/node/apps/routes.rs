@@ -8,7 +8,7 @@ use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::api::{Error, Me, Reply, Routes, Who, done, tagged, text};
+use crate::api::{Body, Error, Me, Reply, Routes, Who, done, given, tagged};
 use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
@@ -57,11 +57,22 @@ async fn image(State(node): State<Node>, Path(name): Path<String>) -> Response {
     }
 }
 
-/// `{ app, bundle, owner?, wait? }`, or `{ app, files, … }` (each file's path → its text, built here as `one deploy`
-/// builds a folder): deploys it, making the app first if there's none by that name, owned by `owner` (as `owner` reads it) or the
-/// caller. → what `Node::deploy_making` says.
-async fn deploy(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let bundle = match body["files"].as_object() {
+/// An app's `bundle`, or its `files` (each file's path → its text, built here as `one deploy` builds a folder), to
+/// deploy, making the app first if there's none by that name, owned by `owner` (as `owner` reads it) or the caller.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Deploy {
+    app: String,
+    bundle: Option<String>,
+    files: Option<serde_json::Map<String, Value>>,
+    owner: Option<String>,
+    #[serde(default)]
+    wait: bool,
+}
+
+/// → what `Node::deploy_making` says.
+async fn deploy(State(node): State<Node>, me: Me, Body(body): Body<Deploy>) -> Reply {
+    let bundle = match &body.files {
         Some(files) => {
             let files = crate::app::deploy::given(files)?;
             // Built only where the deploy was asked, by its runtime: never on a node for someone elsewhere.
@@ -71,10 +82,10 @@ async fn deploy(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
             let built = tokio::task::spawn_blocking(move || crate::app::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>()));
             node.put_blob_for(&me.caller, &built.await.map_err(anyhow::Error::from)??)?
         }
-        None => text(&body, "bundle")?.to_string(),
+        None => given(body.bundle.as_deref().unwrap_or_default(), "bundle")?.to_string(),
     };
-    let owner = body["owner"].as_str().map(|o| owner(&node, o)).transpose()?;
-    Ok(Json(node.deploy_making(&me.caller, text(&body, "app")?, &bundle, owner.as_deref(), body["wait"] == true).await?))
+    let owner = body.owner.as_deref().map(|o| owner(&node, o)).transpose()?;
+    Ok(Json(node.deploy_making(&me.caller, given(&body.app, "app")?, &bundle, owner.as_deref(), body.wait).await?))
 }
 
 #[derive(Deserialize)]
@@ -83,37 +94,89 @@ struct SourceQuery {
     path: Option<String>,
 }
 
-/// `{ app, scope, installed, node }`: `scope` is `user`, `group:<id>` (or a group's name) or `global`; `node`, the
-/// device (by name, or `cloudflare`) that runs its services. Installing an app also installs the apps it uses.
-async fn install(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let scope = node.scope_for(&me.caller, text(&body, "scope")?)?;
-    node.install(&me.caller, text(&body, "app")?, &scope, body["installed"] != false, body["node"].as_str()).await?;
+/// Adds an app (or with `installed: false` takes it out) in `scope`: `user`, `group:<id>` (or a group's name) or
+/// `global`; `node`, the device (by name, or `cloudflare`) that runs its services. Adding an app also adds the apps
+/// it uses.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Install {
+    app: String,
+    scope: String,
+    #[serde(default = "yes")]
+    installed: bool,
+    node: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+async fn install(State(node): State<Node>, me: Me, Body(body): Body<Install>) -> Reply {
+    let scope = node.scope_for(&me.caller, given(&body.scope, "scope")?)?;
+    node.install(&me.caller, given(&body.app, "app")?, &scope, body.installed, body.node.as_deref()).await?;
     done()
 }
 
-async fn schedule(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let scope = node.scope_for(&me.caller, body["scope"].as_str().unwrap_or("user"))?;
-    node.switch_schedule(&me.caller, text(&body, "app")?, text(&body, "schedule")?, &scope, body["on"] != false).await?;
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Schedule {
+    app: String,
+    schedule: String,
+    scope: Option<String>,
+    #[serde(default = "yes")]
+    on: bool,
+}
+
+async fn schedule(State(node): State<Node>, me: Me, Body(body): Body<Schedule>) -> Reply {
+    let scope = node.scope_for(&me.caller, body.scope.as_deref().unwrap_or("user"))?;
+    node.switch_schedule(&me.caller, given(&body.app, "app")?, given(&body.schedule, "schedule")?, &scope, body.on).await?;
     done()
 }
 
-/// `{ page, items, hidden, pages }`: how the local user arranges one of their pages (`pages` with their own: the order
-/// of their groups' pages, `{ order, hidden }`).
-async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.arrange(&me.caller, text(&body, "page")?, body["items"].clone(), body["hidden"].clone(), body["pages"].clone()).await?;
+/// How the local user arranges one of their pages (`pages` with their own: the order of their groups' pages,
+/// `{ order, hidden }`).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Arrange {
+    page: String,
+    #[serde(default)]
+    items: Value,
+    #[serde(default)]
+    hidden: Value,
+    #[serde(default)]
+    pages: Value,
+}
+
+async fn arrange(State(node): State<Node>, me: Me, Body(body): Body<Arrange>) -> Reply {
+    node.arrange(&me.caller, given(&body.page, "page")?, body.items, body.hidden, body.pages).await?;
     done()
 }
 
-/// `{ app, how }`: deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`).
-async fn retire(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.retire(&me.caller, text(&body, "app")?, text(&body, "how")?).await?;
+/// Deletes an app (`how: deleted`), restores it (`restored`) or erases it for good (`erased`).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Retire {
+    app: String,
+    how: String,
+}
+
+async fn retire(State(node): State<Node>, me: Me, Body(body): Body<Retire>) -> Reply {
+    node.retire(&me.caller, given(&body.app, "app")?, given(&body.how, "how")?).await?;
     done()
 }
 
-/// `{ app, name, owner? }`: a new app called `name`, from `app`, with data of its own. `owner` as `owner` reads it.
-async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let owner = body["owner"].as_str().map(|o| owner(&node, o)).transpose()?;
-    node.fork(&Caller::local(&node)?, text(&body, "app")?, text(&body, "name")?, owner.as_deref()).await?;
+/// A new app called `name`, from `app`, with data of its own. `owner` as `owner` reads it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Fork {
+    app: String,
+    name: String,
+    owner: Option<String>,
+}
+
+async fn fork(State(node): State<Node>, Body(body): Body<Fork>) -> Reply {
+    let owner = body.owner.as_deref().map(|o| owner(&node, o)).transpose()?;
+    node.fork(&Caller::local(&node)?, given(&body.app, "app")?, given(&body.name, "name")?, owner.as_deref()).await?;
     done()
 }
 
