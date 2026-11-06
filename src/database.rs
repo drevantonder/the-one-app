@@ -2,6 +2,7 @@
 //! and what a device asks of it (`scopes`); apps' databases are still `src/db.rs`.
 
 pub mod migrate;
+pub mod rules;
 pub mod scope;
 pub mod scopes;
 pub mod steps;

@@ -58,6 +58,7 @@ use crate::permissions;
 
 use super::scopes::{self, ScopeDb};
 use super::READS;
+use super::scope::RULE;
 
 /// The node's database of a scope that its steps are: its `scope`.
 pub const NAME: &str = "scope";
@@ -312,10 +313,7 @@ pub fn connection(bytes: &[u8]) -> Result<Connection> {
 /// form: what it says, built again here, with what only its steps said carried over (`carry`).
 pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
     ensure!(version(&copy)? <= READS, Newer);
-    let copy = ScopeDb::open(copy, now)?;
-    let built = super::scope::build(&if *scope == Scope::Global { copy.members() } else { Members::default() }, scope, &copy.state())?;
-    carry(copy.conn(), &built)?;
-    ScopeDb::open(built, now)
+    ScopeDb::open(super::scope::fresh(&copy, scope)?, now)
 }
 
 /// The freeze a new network starts with, at step 1 of `global`'s database, signed by its recovery key as `user`: who's
@@ -574,9 +572,21 @@ pub struct Applied {
     pub db: Connection,
 }
 
+/// The kinds of step applied by their rules as rows (`rules`): the rest are still by `members`' rules, until each moves.
+const BY_RULES: &[&str] = &["install", "uninstall", "schedule", "keep", "forget", "vault-request", "arrange", DEFAULTS];
+
 /// Applies `step` to `db`, `scope`'s database as the steps before it left it, with `global`'s as it is now (for a
 /// scope other than `global`, whose permissions are `global`'s): → the database it leaves, or why it doesn't count.
 pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
+    let by_rules = step.content.app != members::APP || BY_RULES.contains(&step.content.kind.as_str());
+    let applied = if by_rules { apply_rules(db, global, scope, step) } else { apply_members(db, global, scope, step) };
+    #[cfg(test)]
+    oracle::same_as_members(db, global, scope, step);
+    applied
+}
+
+/// As `apply`, by `members`' rules, for the kinds not yet applied by their rules as rows (`BY_RULES`).
+fn apply_members(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
     ensure!(step.scope() == *scope, "a step of another scope");
     let who = global.unwrap_or(db);
     if step.content.app == members::APP && step.content.kind == DEFAULTS {
@@ -604,6 +614,25 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry
     carry(db.conn(), &built)?;
     named(&built, step)?;
     Ok(Applied { db: built })
+}
+
+fn apply_rules(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
+    ensure!(step.scope() == *scope, "a step of another scope");
+    let who = global.unwrap_or(db);
+    if step.content.app == members::APP && step.content.kind == DEFAULTS {
+        return defaults(db, who, scope, step);
+    }
+    ensure!(version(db.conn())? <= READS, Newer);
+    ensure!(step.epoch() <= who.epoch(scope), "it names an epoch its scope hasn't reached");
+    allowed(who, scope, step)?;
+    super::rules::signed(who, scope, step)?;
+    let out = super::scope::fresh(db.conn(), scope)?;
+    super::rules::apply(who, &out, scope, step)?;
+    if *scope == Scope::Global {
+        super::scope::derive(&out)?;
+    }
+    named(&out, step)?;
+    Ok(Applied { db: out })
 }
 
 /// A scope's database (not `global`'s) as `take_scope` left it: the last position it applied or passed over, the
@@ -693,8 +722,6 @@ pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
     }))
 }
 
-/// A row of `relations` that's a rule: the release's, never given or taken (`permissions`).
-const RULE: &str = "(substr(subject, 1, 1) IN ('#', '@') OR instr(subject, '*') > 0 OR instr(object, '*') > 0)";
 
 /// A `DEFAULTS` step: by an admin's device, the release's types, roles and rules as it says them, in place of those
 /// the database had; the network's own roles stay.
@@ -705,8 +732,7 @@ fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<
     let reads = u32::try_from(step.content.data["reads"].as_u64().context("a release's roles name its version")?)?;
     ensure!(reads <= READS, Newer);
     ensure!(reads > version(db.conn())?, "a release's roles only ever move on");
-    let out = super::scope::build(&if *scope == Scope::Global { who.members() } else { Members::default() }, scope, &db.state())?;
-    carry(db.conn(), &out)?;
+    let out = super::scope::fresh(db.conn(), scope)?;
     let data = &step.content.data;
     let list = |k: &str| data[k].as_array().cloned().unwrap_or_default();
     let tx = out.unchecked_transaction()?;
@@ -911,9 +937,27 @@ fn runs_it(db: &ScopeDb, scope: &Scope, step: &Entry) -> bool {
 }
 
 #[cfg(test)]
+mod oracle {
+    use super::*;
+    /// That `apply` by the rules leaves what `members`' did, or counts nothing where it did.
+    pub(crate) fn same_as_members(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) {
+        let applied = &apply_rules(db, global, scope, step);
+        let was = apply_members(db, global, scope, step);
+        for (d, s) in [(Some(db), scope), (global, &Scope::Global)] {
+            let Some(d) = d else { continue };
+            let old = super::super::scope::build(&if *s == Scope::Global { d.members() } else { Members::default() }, s, &d.state()).unwrap();
+            carry(d.conn(), &old).unwrap();
+            let new = super::super::scope::fresh(d.conn(), s).unwrap();
+            assert_eq!(crate::db::state_hash(&new).unwrap(), crate::db::state_hash(&old).unwrap(), "fresh {s}");
+        }
+        let hash = |a: &Result<Applied>| a.as_ref().ok().map(|a| crate::db::state_hash(&a.db).unwrap());
+        assert_eq!(hash(applied), hash(&was), "{} step {}: rules {:?}, members {:?}", scope, step.content.kind, applied.as_ref().err().map(|e| format!("{e:#}")), was.as_ref().err().map(|e| format!("{e:#}")));
+    }
+}
+
+#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use serde_json::json;
 
     /// That `entries`, applied as steps from the genesis on, leave the database `m`, those entries stepped in memory,
     /// builds: what each counted for and changed is the same read from and built back into the database each time.
@@ -1190,5 +1234,191 @@ pub(crate) mod tests {
         let s = sign(&mac, &Scope::Global, 9, ANDRE, 1, 0, setting("name", Some("x"))).unwrap();
         assert!(decode(&Scope::Global, 10, &encode(&s, None)).is_err() && decode(&Scope::User(ANDRE.into()), 9, &encode(&s, None)).is_err());
         assert!(decode(&Scope::Global, 0, &encode(&g, None)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod every_kind {
+    use super::*;
+    use crate::keys::Endpoint;
+    use crate::members::*;
+    use crate::entry::hex;
+    use serde_json::json;
+
+    const ANDRE: &str = "a000000000000001";
+    const BOB: &str = "b000000000000002";
+    const CY: &str = "c000000000000004";
+    const G: &str = "c000000000000003";
+
+    /// Every kind of step, allowed and not, in `global`, a person's own scope and a group's: `apply` holds each to what
+    /// `members`' rules made of it (`oracle`).
+    #[test]
+    fn every_kind_of_step_by_its_rule() {
+        let k = |n: u8| SigningKey::from_bytes(&[n; 32]);
+        let (mac, laptop, linux, phone, recovery, cy) = (k(1), k(2), k(4), k(5), k(7), k(6));
+        let id = |s: &SigningKey| s.verifying_key().to_bytes();
+        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, crate::members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client, Kind::Compute], &id(&recovery), &"e".repeat(64)));
+        let first = first_freeze(&recovery, &g, ANDRE, 0).unwrap();
+        let mut global = normalize(connection(first.copy.as_deref().unwrap()).unwrap(), &Scope::Global, 0).unwrap();
+        let mut scopes: BTreeMap<String, ScopeDb> = BTreeMap::new();
+        let mut at: BTreeMap<String, u64> = BTreeMap::new();
+        let mut counted = 0;
+        let mut step = |global: &mut ScopeDb, key: &SigningKey, user: &str, scope: &Scope, content: Content| {
+            let n = at.entry(scope.to_string()).or_insert(1);
+            *n += 1;
+            let epoch = global.epoch(scope).max(1).min(global.epoch(scope));
+            let s = sign(key, scope, *n, user, epoch, 5, content).unwrap();
+            if *scope == Scope::Global {
+                if let Ok(a) = apply(global, None, scope, &s) {
+                    *global = ScopeDb::open(a.db, 0).unwrap();
+                    counted += 1;
+                }
+            } else {
+                let db = scopes.remove(&scope.to_string()).unwrap_or_else(|| ScopeDb::open(super::super::scope::empty(scope).unwrap(), 0).unwrap());
+                let db = match apply(&db, Some(global), scope, &s) {
+                    Ok(a) => {
+                        counted += 1;
+                        ScopeDb::open(a.db, 0).unwrap()
+                    }
+                    Err(_) => db,
+                };
+                scopes.insert(scope.to_string(), db);
+            }
+        };
+        let gl = Scope::Global;
+        let (me, bob, grp) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()), Scope::Group(G.into()));
+        let h = "a".repeat(64);
+        let db = &mut global;
+        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Member))));
+        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&linux), ANDRE, "linux", &[Kind::Compute], None));
+        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&cy), CY, "cy", &[Kind::Client], Some(("Bob", Role::Admin))));
+        step(db, &laptop, BOB, &gl, setting("name", Some("x")));
+        step(db, &mac, ANDRE, &gl, setting("name", Some("Ours")));
+        step(db, &mac, ANDRE, &gl, setting("Bad Name", Some("x")));
+        step(db, &mac, ANDRE, &gl, setting("name", None));
+        step(db, &laptop, BOB, &gl, group(G, "Work"));
+        step(db, &mac, ANDRE, &gl, group(G, "Again"));
+        step(db, &laptop, BOB, &gl, invite(G, ANDRE, Role::Member));
+        step(db, &laptop, BOB, &gl, invite(G, CY, Role::Admin));
+        step(db, &mac, ANDRE, &gl, accept(G));
+        step(db, &cy, CY, &gl, accept(G));
+        step(db, &laptop, BOB, &gl, member(G, ANDRE, Some(Role::Admin)));
+        step(db, &mac, ANDRE, &gl, member(G, BOB, Some(Role::Member)));
+        step(db, &mac, ANDRE, &gl, member(G, CY, None));
+        step(db, &laptop, BOB, &gl, handle("group", G, "work"));
+        step(db, &laptop, BOB, &gl, handle("user", BOB, "andre"));
+        step(db, &laptop, BOB, &gl, handle("user", BOB, "bobby"));
+        step(db, &laptop, BOB, &gl, handle("user", ANDRE, "x"));
+        step(db, &mac, ANDRE, &gl, handle("user", BOB, "Not-Valid"));
+        step(db, &laptop, BOB, &gl, rename("group", G, "Work Ltd"));
+        step(db, &laptop, BOB, &gl, rename("key", &hex(&id(&mac)), "mine"));
+        step(db, &mac, ANDRE, &gl, rename("key", &hex(&id(&laptop)), "Bob's"));
+        step(db, &mac, ANDRE, &gl, rename("user", BOB, "Robert"));
+        step(db, &laptop, BOB, &gl, rename("user", ANDRE, "Dre"));
+        step(db, &laptop, BOB, &gl, role(BOB, Role::Admin));
+        step(db, &mac, ANDRE, &gl, role(BOB, Role::Admin));
+        step(db, &laptop, BOB, &gl, role(ANDRE, Role::Member));
+        step(db, &mac, ANDRE, &gl, role(ANDRE, Role::Member));
+        step(db, &laptop, BOB, &gl, role(ANDRE, Role::Admin));
+        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "notes", "owner": format!("group:{G}") })));
+        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "tally", "owner": "admins", "from": "notes" })));
+        step(db, &laptop, BOB, &gl, node("app", json!({ "name": "mine", "owner": format!("user:{ANDRE}") })));
+        step(db, &laptop, BOB, &gl, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
+        let deploy = |app: &str, bundle: &str| Content { blobs: vec![bundle.to_string()], ..node("deploy", json!({ "app": app, "bundle": bundle })) };
+        step(db, &mac, ANDRE, &gl, deploy("notes", &h));
+        step(db, &mac, ANDRE, &gl, deploy("notes", &"b".repeat(64)));
+        step(db, &mac, ANDRE, &gl, node("deploy", json!({ "app": "notes", "bundle": h })));
+        step(db, &laptop, BOB, &gl, deploy("tally", &h));
+        step(db, &mac, ANDRE, &gl, retire("tally", "admins", "erased").unwrap());
+        step(db, &mac, ANDRE, &gl, retire("tally", "admins", "deleted").unwrap());
+        step(db, &mac, ANDRE, &gl, deploy("tally", &h));
+        step(db, &mac, ANDRE, &gl, retire("tally", "admins", "restored").unwrap());
+        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "tally", "owner": "admins", "source": "https://example.com/x" })));
+        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "tally", "owner": "admins", "source": "ftp://x" })));
+        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "tally", "owner": format!("group:{G}") })));
+        step(db, &mac, ANDRE, &gl, retire("bobs", &format!("user:{BOB}"), "deleted").unwrap());
+        step(db, &laptop, BOB, &gl, retire("bobs", &format!("user:{BOB}"), "deleted").unwrap());
+        step(db, &laptop, BOB, &gl, retire("bobs", &format!("user:{BOB}"), "erased").unwrap());
+        step(db, &laptop, BOB, &gl, retire("bobs", &format!("user:{BOB}"), "restored").unwrap());
+        step(db, &mac, ANDRE, &gl, setting("serverless", Some(&hex(&id(&k(14))))));
+        step(db, &laptop, BOB, &gl, service(&id(&linux), "whatsapp", true, None));
+        step(db, &mac, ANDRE, &gl, service(&id(&linux), "whatsapp", true, Some(&gl)));
+        step(db, &laptop, BOB, &gl, service(&id(&linux), "whatsapp", false, None));
+        step(db, &laptop, BOB, &gl, service(&id(&k(14)), "shell", true, None));
+        step(db, &mac, ANDRE, &gl, service(&id(&k(14)), "shell", true, Some(&grp)));
+        step(db, &mac, ANDRE, &gl, service(&id(&k(9)), "shell", true, None));
+        step(db, &linux, ANDRE, &gl, service_endpoint(&Endpoint::of(&k(8)), ANDRE, "linux", "whatsapp", true, &id(&linux)));
+        step(db, &mac, ANDRE, &gl, service_endpoint(&Endpoint::of(&k(8)), ANDRE, "linux", "whatsapp", true, &id(&mac)));
+        step(db, &mac, ANDRE, &gl, runs(&[id(&linux), id(&k(14))]));
+        step(db, &laptop, BOB, &gl, runs(&[id(&linux), id(&laptop)]));
+        step(db, &laptop, BOB, &gl, runs(&[id(&linux), id(&k(14))]));
+        step(db, &laptop, BOB, &gl, epoch(&bob, 1, &[id(&laptop)], &h));
+        step(db, &laptop, BOB, &gl, epoch(&grp, 1, &[id(&laptop), id(&mac)], &h));
+        step(db, &mac, ANDRE, &gl, epoch(&me, 1, &[id(&mac)], &h));
+        step(db, &mac, ANDRE, &gl, epoch(&me, 3, &[id(&mac)], &h));
+        step(db, &mac, ANDRE, &gl, epoch(&gl, 2, &[id(&mac), id(&laptop), id(&k(30))], &h));
+        step(db, &laptop, BOB, &gl, app_schedules(&id(&linux), &bob, "notes", 99, &[(1, h.clone()), (2, "c".repeat(64))].into()));
+        step(db, &laptop, BOB, &gl, app_schedules(&id(&linux), &grp, "notes", 99, &[(1, h.clone())].into()));
+        step(db, &mac, ANDRE, &gl, app_schedules(&id(&linux), &bob, "notes", 99, &BTreeMap::new()));
+        step(db, &laptop, BOB, &gl, app_schedules(&id(&k(30)), &bob, "notes", 99, &BTreeMap::new()));
+        step(db, &laptop, BOB, &gl, app_schedules(&id(&linux), &bob, "node", 99, &BTreeMap::new()));
+        step(db, &laptop, BOB, &gl, vault(&bob, 1, &[3; 32], &[id(&linux)]));
+        step(db, &laptop, BOB, &gl, vault(&bob, 1, &[4; 32], &[id(&linux), id(&k(14))]));
+        step(db, &laptop, BOB, &gl, vault(&bob, 2, &[4; 32], &[id(&linux), id(&k(14))]));
+        step(db, &laptop, BOB, &gl, vault(&grp, 1, &[4; 32], &[id(&laptop)]));
+        // A scope's own, by its people and by the node that runs it.
+        for (key, user, scope) in [(&mac, ANDRE, &me), (&laptop, BOB, &bob), (&laptop, BOB, &grp), (&mac, ANDRE, &grp), (&linux, ANDRE, &me), (&linux, BOB, &bob), (&mac, ANDRE, &gl), (&laptop, BOB, &me)] {
+            step(db, key, user, scope, install("notes", true));
+            step(db, key, user, scope, install("nothing", true));
+            step(db, key, user, scope, install("tally", false));
+            step(db, key, user, scope, node("schedule", json!({ "app": "notes", "schedule": "daily", "on": true })));
+            step(db, key, user, scope, node("schedule", json!({ "app": "notes", "schedule": "daily" })));
+            step(db, key, user, scope, node("forget", json!({ "blob": "A".repeat(64) })));
+            step(db, key, user, scope, node("forget", json!({ "blob": "z" })));
+            step(db, key, user, scope, node("keep", json!({})));
+            let ask = |id: &str| node("vault-request", json!({ "id": id, "app": "notes", "title": " Key ", "fields": { "token": { "secret": true }, "user": {} }, "hosts": ["api.example.com"], "why": "w", "agent": "a" }));
+            step(db, key, user, scope, ask("d000000000000001"));
+            step(db, key, user, scope, ask("d000000000000001"));
+            step(db, key, user, scope, node("vault-request", json!({ "id": "d000000000000002", "app": "agents", "title": "x", "fields": { "bad name": {} } })));
+            step(db, key, user, scope, node("vault-request", json!({ "id": "d000000000000003", "app": "node", "title": "x", "fields": { "t": { "secret": true } } })));
+            step(db, key, user, scope, node("vault-request", json!({ "id": "d000000000000001", "declined": true })));
+            step(db, key, user, scope, node("vault-request", json!({ "id": "d000000000000001", "set": true })));
+            step(db, key, user, scope, node("arrange", json!({ "page": "user", "items": [{ "app": "notes" }, { "app": "notes", "widget": "w", "id": "1", "options": { "n": 1.5 } }], "hidden": ["tally"], "pages": { "order": [format!("group:{G}")], "hidden": [] } })));
+            step(db, key, user, scope, node("arrange", json!({ "page": "elsewhere", "items": [] })));
+            step(db, key, user, scope, node("device", json!({})));
+            step(db, key, user, scope, Content::new("notes", "anything", json!({})));
+        }
+        // Devices: turned down, forgotten, signing in again, and taken out.
+        step(db, &mac, ANDRE, &gl, refuse(&Endpoint::of(&k(20)), "MacBook"));
+        step(db, &mac, ANDRE, &gl, refuse(&Endpoint::of(&laptop), "laptop"));
+        step(db, &k(20), ANDRE, &gl, setting("name", Some("sneaky")));
+        let mut signed_in = device(&Endpoint::of(&phone), BOB, "phone", &[Kind::Client], None);
+        signed_in.data["sign_in"] = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
+        step(db, &laptop, BOB, &gl, signed_in);
+        step(db, &mac, ANDRE, &gl, forget_sign_in(&id(&phone)));
+        step(db, &laptop, BOB, &gl, forget_sign_in(&id(&phone)));
+        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&k(21)), BOB, "box", &[Kind::Compute], None));
+        step(db, &laptop, BOB, &gl, device(&Endpoint::of(&k(21)), BOB, "box", &[Kind::Compute], None));
+        step(db, &laptop, BOB, &gl, device(&Endpoint::of(&k(22)), ANDRE, "x", &[Kind::Client], None));
+        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&k(23)), "d000000000000009", "new", &[Kind::Client], Some(("New Person", Role::Member))));
+        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&k(24)), "d00000000000000a", "new", &[Kind::Client], Some(("New Person", Role::Member))));
+        step(db, &recovery, BOB, &gl, device(&Endpoint::of(&k(25)), BOB, "recovered", &[Kind::Client], None));
+        step(db, &recovery, BOB, &gl, device(&Endpoint::of(&k(26)), BOB, "box", &[Kind::Compute], None));
+        step(db, &recovery, ANDRE, &gl, setting("name", Some("r")));
+        step(db, &mac, ANDRE, &gl, node("recovery", json!({ "key": hex(&id(&k(31))) })));
+        step(db, &recovery, ANDRE, &gl, node("recovery", json!({ "key": hex(&id(&mac)) })));
+        step(db, &recovery, ANDRE, &gl, node("recovery", json!({ "key": hex(&id(&k(31))) })));
+        step(db, &k(31), ANDRE, &gl, node("recovery", json!({ "key": hex(&id(&k(32))) })));
+        step(db, &laptop, BOB, &gl, node("remove", json!({ "key": hex(&id(&phone)), "itself": true })));
+        step(db, &mac, ANDRE, &gl, remove_device(&id(&k(25))));
+        step(db, &mac, ANDRE, &gl, remove_device(&id(&linux)));
+        step(db, &laptop, BOB, &gl, remove_device(&id(&mac)));
+        step(db, &laptop, BOB, &gl, remove_user(ANDRE));
+        step(db, &mac, ANDRE, &gl, remove_user(BOB));
+        step(db, &laptop, BOB, &gl, rename("user", BOB, "Gone"));
+        step(db, &mac, ANDRE, &gl, remove_user(ANDRE));
+        step(db, &mac, ANDRE, &gl, node("member", json!({ "group": G, "user": ANDRE })));
+        step(db, &mac, ANDRE, &gl, epoch(&grp, 2, &[id(&mac)], &h));
+        assert!(counted > 100, "{counted} counted");
     }
 }
