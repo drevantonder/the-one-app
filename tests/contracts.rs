@@ -611,12 +611,12 @@ mod service_protocol {
     }
 
     /// A node's registry behind its routes, on a runtime of its own so that it can stop, as a node does, with its calls
-    /// waiting.
-    fn start_node(at: &str) -> (Arc<Node>, tokio::runtime::Runtime, std::net::SocketAddr) {
+    /// waiting. It serves on a copy of `port`, which the test keeps open, so a node started again has the same address
+    /// and no other test's listener takes it in between.
+    fn start_node(port: &std::net::TcpListener) -> (Arc<Node>, tokio::runtime::Runtime) {
         let node = Arc::new(Node { services: Services::default(), registered: tokio::sync::watch::channel(0).0, refused: Mutex::new(Vec::new()) });
-        let listener = std::net::TcpListener::bind(at).unwrap();
+        let listener = port.try_clone().unwrap();
         listener.set_nonblocking(true).unwrap();
-        let addr = listener.local_addr().unwrap();
         let app = Router::new()
             .route("/v1/services/{app}", post(register))
             .route("/v1/services/{app}/calls", get(next))
@@ -624,7 +624,7 @@ mod service_protocol {
             .with_state(node.clone());
         let server = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
         server.spawn(async move { axum::serve(tokio::net::TcpListener::from_std(listener).unwrap(), app).await });
-        (node, server, addr)
+        (node, server)
     }
 
     /// Waits for a service to register with `node`.
@@ -700,7 +700,9 @@ mod service_protocol {
 
         for case in rust_and_go() {
             let name = case.name;
-            let (mut node, mut server, addr) = start_node("127.0.0.1:0");
+            let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = port.local_addr().unwrap();
+            let (mut node, mut server) = start_node(&port);
 
             let home = crate::temp(&format!("service-{name}"));
             std::fs::write(home.join("local-token"), format!("{TOKEN}\n")).unwrap();
@@ -748,7 +750,7 @@ mod service_protocol {
 
             // It registers again with a node that starts again, which forgot it.
             tokio::task::block_in_place(|| server.shutdown_timeout(Duration::from_secs(10)));
-            (node, server, _) = start_node(&addr.to_string());
+            (node, server) = start_node(&port);
             registered(&node, name).await;
             assert!(node.services.has(name), "{name} is listed again");
             let (function, input) = case.ok.clone();
