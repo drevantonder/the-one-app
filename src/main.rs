@@ -393,7 +393,7 @@ fn running() -> Command {
                     println!("{app}'s schedule {name} is {on} in {scope}.");
                 }
                 ["logs", device] => {
-                    takes_only(&flags, &["service", "since", "grep", "lines"])?;
+                    g.takes_only(&["service", "since", "grep", "lines"])?;
                     let mut input = flags.clone();
                     input.insert("device".into(), json!(device));
                     let read = one::mcp::logs_read(g.node, &input, g.agent, "cli", g.trace);
@@ -631,15 +631,6 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
         (true, true) => None,
         (false, true) => Some(format!("{}\n", help(node))),
         (_, false) => Some(format!("Usage:\n{out}")),
-    }
-}
-
-/// Refuses a flag a command doesn't take, rather than running as if it weren't given: the Vault's, backups' and groups'
-/// commands run here, as the person, so `--device` among them.
-fn takes_only(flags: &Map<String, Value>, takes: &[&str]) -> Result<()> {
-    match flags.keys().find(|k| !takes.contains(&k.as_str())) {
-        Some(other) => Err(one::cli::Failed::Typed(format!("--{other} isn't an input of this: see --help")).into()),
-        None => Ok(()),
     }
 }
 
