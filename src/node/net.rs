@@ -643,28 +643,10 @@ impl Node {
         self.send(&to, "ask", &body, true, limit).await
     }
 
-    /// Says hello to a service endpoint, with how many of `global`'s entries this device has: it answers what it
-    /// offers once it lists this device as one that may call it; until then, that it's behind, and is sent them all,
-    /// which it checks itself. → what it offers, and whom it serves.
+    /// Says hello to a service endpoint, with how many of `global`'s steps this device has: it answers what it offers
+    /// once it lists this device as one that may call it; until then, that it's behind, and is sent the network's
+    /// genesis and the steps, which it checks itself. → what it offers, and whom it serves.
     pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
-        // Only the member entries: a service needs who's who, not what anyone's apps wrote.
-        // And only those by an endpoint the network listed: a service passes over the rest, so counting them would leave it
-        // behind for good.
-        let (entries, depths): (Vec<Entry>, Value) = self.with(|i| {
-            let all = i.r.store.scope("global")?;
-            let depth: std::collections::HashMap<_, _> = all.iter().map(|e| (e.hash(), e.depth)).collect();
-            let listed: std::collections::HashSet<Key> = i.r.db().machines().iter().map(|d| d.key).collect();
-            let entries: Vec<Entry> = all.into_iter().filter(|e| members::is_member_entry(e) && listed.contains(&e.author())).collect();
-            // It sees only those, so it orders them by how deep the entries they follow, which it isn't sent, are.
-            let sent: std::collections::HashSet<_> = entries.iter().map(Entry::hash).collect();
-            let mut depths = serde_json::Map::new();
-            for f in entries.iter().flat_map(Entry::follows_all).filter(|f| !sent.contains(f)) {
-                if let Some(d) = depth.get(&f) {
-                    depths.insert(f.to_hex(), json!(d));
-                }
-            }
-            Ok((entries, Value::Object(depths)))
-        })?;
         // Once `global`'s log is frozen, its scope database's steps too (`database::steps`), its freeze among them.
         let mut steps = Vec::new();
         if self.frozen() {
@@ -678,13 +660,14 @@ impl Node {
                 steps.push(None);
             }
         }
-        let hello = json!({ "entries": entries.len(), "steps": steps.len() });
+        let hello = json!({ "entries": 1, "steps": steps.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         if answer["behind"] == true {
-            let pack = data_encoding::BASE64.encode(&crate::entry::pack(&entries.iter().collect::<Vec<_>>()));
-            let taken = self.send(&to, "entries", &json!({ "pack": pack, "depths": depths }), true, CONNECT).await?;
+            let genesis = crate::database::steps::genesis(&self.bucket()?, &self.log_key(&Scope::Global).await?).await?;
+            let pack = data_encoding::BASE64.encode(&crate::entry::pack(&genesis.iter().collect::<Vec<_>>()));
+            let taken = self.send(&to, "entries", &json!({ "pack": pack }), true, CONNECT).await?;
             if let Some(err) = taken["error"].as_str() {
-                bail!("{} didn't take the network's entries: {err}", short(&to));
+                bail!("{} didn't take the network's genesis: {err}", short(&to));
             }
             answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         }

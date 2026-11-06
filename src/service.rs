@@ -1,9 +1,9 @@
 //! A service endpoint: a device's abilities (a service) offered over iroh, as a part of its device's oned, a process of
 //! its own (`oned <name>`). It's an endpoint of its own key, kept in its folder, and gets in when its device's oned lists
 //! it as its person's, a part of that device (`Node::list_part`), which tells the relay to let it in. It holds no keys
-//! and reads no bucket: the nodes that call it bring it `global`'s entries, whose member entries it replays from the
-//! network's first entry (given by oned, so nothing on the way can make it another network's) and checks each caller by
-//! itself: a compute endpoint of the network that runs the calls of a person it serves. The program offering it, its
+//! and reads no bucket: the nodes that call it bring it the network's genesis (whose hash oned gives it, so nothing on
+//! the way can make it another network's) and `global`'s scope database's steps, from which it works out who's who and
+//! checks each caller by itself: a compute endpoint of the network that runs the calls of a person it serves. The program offering it, its
 //! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
 //! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
 
@@ -33,11 +33,11 @@ use crate::services::Services;
 
 /// The most an ask or its answer may carry, as between nodes.
 const MESSAGE_LIMIT: usize = 64 << 20;
-/// The most a computer this service doesn't know of yet may send it: `global`'s entries.
+/// The most a computer this service doesn't know of yet may send it: the network's genesis, or `global`'s steps.
 const STRANGER_LIMIT: usize = 16 << 20;
 /// How many messages a computer this service doesn't know of may send on a connection: a hello, the network's
-/// entries, and a hello again.
-const STRANGER_MESSAGES: usize = 3;
+/// genesis, a hello again, `global`'s steps, and a last hello.
+const STRANGER_MESSAGES: usize = 5;
 /// How many computers it doesn't know of may be connected at once.
 const STRANGERS: usize = 4;
 /// How many streams a node may have open on a connection at once.
@@ -46,7 +46,7 @@ const STREAMS: u32 = 32;
 const CONNECT: Duration = Duration::from_secs(10);
 
 /// The network a service is in, as its device's oned gives it: its address, where its relay and sign-in are, the hash
-/// of its first entry, which its member entries are replayed from, and the person whose service it is.
+/// of its genesis, which names its recovery key, and the person whose service it is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Network {
     pub address: String,
@@ -85,14 +85,11 @@ struct Inner {
     dir: PathBuf,
     key: SigningKey,
     network: Network,
-    /// `global`'s entries, as the nodes brought them, and what its member entries add up to.
+    /// The network's genesis, once a node brought it, and who's who.
     known: Mutex<(Vec<Entry>, ScopeDb)>,
     /// Once `global`'s log is frozen, its scope database's steps nodes brought, by position from the first
     /// (`database::steps`), kept in its folder as `steps`.
     steps: Mutex<Vec<Option<crate::database::steps::Given>>>,
-    /// The depths in `global`'s replay order of the entries its member entries follow that nodes didn't bring: a service
-    /// is brought only member entries, and orders them as the nodes do with these.
-    depths: Mutex<HashMap<Hash, u64>>,
     /// Where the program offering it registers and waits for calls.
     services: Services,
     /// What that program sends to say it's on this machine.
@@ -153,9 +150,8 @@ impl Service {
         let root = Hash::from_hex(&network.root)?;
         let network_address = network.address.clone();
         let entries = std::fs::read(dir.join("entries")).ok().and_then(|b| crate::entry::unpack(&b).ok()).unwrap_or_default();
-        let depths: HashMap<Hash, u64> = std::fs::read(dir.join("depths")).ok().and_then(|b| serde_json::from_slice::<HashMap<String, u64>>(&b).ok()).map(|m| m.into_iter().filter_map(|(h, d)| Some((Hash::from_hex(&h).ok()?, d))).collect()).unwrap_or_default();
         let steps = read_steps(&dir.join("steps"));
-        let (entries, members) = placed(root, entries, &depths, &steps);
+        let (entries, members) = placed(root, entries, &steps);
         Ok(Service(Arc::new(Inner {
             name: name.to_string(),
             dir: dir.to_path_buf(),
@@ -163,7 +159,6 @@ impl Service {
             network,
             known: Mutex::new((entries, members)),
             steps: Mutex::new(steps),
-            depths: Mutex::new(depths),
             services: Services::default(),
             token,
             endpoint: Mutex::new(None),
@@ -311,7 +306,7 @@ impl Service {
     }
 
     /// Answers what a computer asks on a connection it opened: a node of the network anything a node asks a service;
-    /// one it doesn't know of only a hello and the network's entries, a few messages, a few at once, since anyone who
+    /// one it doesn't know of only a hello, the network's genesis and `global`'s steps, a few messages, a few at once, since anyone who
     /// reaches it directly can connect.
     async fn take(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
@@ -360,7 +355,7 @@ impl Service {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
-            Some("entries") => match self.take_entries(&remote, body["pack"].as_str().unwrap_or(""), &body["depths"]) {
+            Some("entries") => match self.take_entries(&remote, body["pack"].as_str().unwrap_or("")) {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
@@ -369,8 +364,8 @@ impl Service {
         }
     }
 
-    /// A node's hello, with how many of `global`'s entries it has: → what this service offers and whom it
-    /// serves, to a node of the network that may call it; that it's behind, if the node has more entries than it.
+    /// A node's hello, with whether it brings the genesis and how many of `global`'s steps it has: → what this service
+    /// offers and whom it serves, to a node of the network that may call it; that it's behind, if the node has more.
     fn hello(&self, remote: Key, entries: usize, steps: usize) -> Value {
         let (count, may) = {
             let known = self.0.known.lock().unwrap();
@@ -393,46 +388,34 @@ impl Service {
         json!({ "describe": describe, "users": users })
     }
 
-    /// Takes `global`'s member entries a node of the network brought (anyone's, while it knows of no node yet, since
-    /// they must replay from the network's first entry): added to those it has, never in place of any, each signed,
-    /// replayed from the first entry; those signed by no endpoint the network ever listed are passed over.
-    fn take_entries(&self, remote: &Key, pack: &str, depths: &Value) -> Result<()> {
+    /// Takes the network's genesis a node of the network brought (anyone's, while it knows of no node yet): the entry
+    /// among those in `pack` whose hash is the network's.
+    fn take_entries(&self, remote: &Key, pack: &str) -> Result<()> {
         let bytes = data_encoding::BASE64.decode(pack.as_bytes()).map_err(|_| anyhow!("the entries aren't base64"))?;
         let given = crate::entry::unpack(&bytes)?;
         let root = Hash::from_hex(&self.0.network.root)?;
         let mut known = self.0.known.lock().unwrap();
-        ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its entries");
-        let mut depths_known = self.0.depths.lock().unwrap();
-        let mut grown = depths_known.clone();
-        for (hash, depth) in depths.as_object().into_iter().flatten() {
-            if let (Ok(hash), Some(depth)) = (Hash::from_hex(hash), depth.as_u64()) {
-                grown.insert(hash, depth);
-            }
+        ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its genesis");
+        if !known.0.is_empty() {
+            return Ok(());
         }
-        let more_depths = grown.len() > depths_known.len();
         let steps = self.0.steps.lock().unwrap().clone();
-        let (entries, members) = match merged(root, &known.0, given, &grown, &steps) {
-            Some(merged) => merged,
-            // Only more depths: what was known may order better with them.
-            None if more_depths => placed(root, known.0.clone(), &grown, &steps),
-            None => return Ok(()),
-        };
-        ensure!(!members.users().is_empty(), "those aren't {YOURS}'s entries");
+        let (entries, members) = placed(root, given, &steps);
+        ensure!(!entries.is_empty(), "that isn't {YOURS}'s genesis");
         write_private(&self.0.dir.join("entries"), &crate::entry::pack(&entries.iter().collect::<Vec<_>>()))?;
-        let text: HashMap<String, u64> = grown.iter().map(|(h, d)| (h.to_hex(), *d)).collect();
-        write_private(&self.0.dir.join("depths"), &serde_json::to_vec(&text)?)?;
         *known = (entries, members);
-        *depths_known = grown;
         Ok(())
     }
 
     /// Takes `global`'s scope database's steps a node of the network brought (`{ at, step }` each, as
     /// `GET /v1/steps/global` gives them): those after the ones it has, each checked as from anyone, then who's who
-    /// from them, once its log is frozen.
+    /// from them.
     fn take_steps(&self, remote: &Key, given: &Value) -> Result<()> {
         let root = Hash::from_hex(&self.0.network.root)?;
         let mut known = self.0.known.lock().unwrap();
-        ensure!(known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its steps");
+        // Anyone's while it knows of no node yet, as its genesis: its freeze is checked against the recovery key the genesis
+        // names, so none but the network's makes who's who.
+        ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its steps");
         let mut steps = self.0.steps.lock().unwrap();
         for s in given.as_array().into_iter().flatten() {
             let at = s["at"].as_u64().unwrap_or(0);
@@ -443,8 +426,7 @@ impl Service {
         }
         let kept: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
         write_private(&self.0.dir.join("steps"), &serde_json::to_vec(&kept)?)?;
-        let depths = self.0.depths.lock().unwrap().clone();
-        *known = placed(root, known.0.clone(), &depths, &steps);
+        *known = placed(root, known.0.clone(), &steps);
         Ok(())
     }
 
@@ -614,36 +596,18 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
     Ok(asked)
 }
 
-/// `known` with `given`'s member entries added, if any are new: → them, replayed from the network's first entry, with
-/// those signed by no endpoint it ever listed passed over (junk anyone could sign counts for nothing, and isn't kept).
-/// `depths` are those of the entries they follow that nodes don't bring.
-fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<crate::database::steps::Given>]) -> Option<(Vec<Entry>, ScopeDb)> {
-    let mut all: HashMap<String, Entry> = known.iter().map(|e| (e.hash().to_hex(), e.clone())).collect();
-    let before = all.len();
-    for e in given.into_iter().filter(members::is_member_entry) {
-        all.entry(e.hash().to_hex()).or_insert(e);
-    }
-    if all.len() == before {
-        return None;
-    }
-    Some(placed(root, all.into_values().collect(), depths, steps))
-}
-
-/// `entries` in the nodes' replay order, those that can be placed in it and are signed by an endpoint the network
-/// listed, and the scope database they add up to.
-fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<crate::database::steps::Given>]) -> (Vec<Entry>, ScopeDb) {
-    let ordered = crate::entry::causal(entries, depths);
-    // Who's who is the scope database the freeze the network's recovery key signed anchors, as its genesis among the
-    // entries names it, and the steps after.
-    let built = crate::database::steps::recovery_of(root, &ordered)
+/// The network's genesis among `entries`, the one whose hash is `root`, and who's who: the scope database the freeze
+/// the recovery key it names signed anchors, and the steps after.
+fn placed(root: Hash, entries: Vec<Entry>, steps: &[Option<crate::database::steps::Given>]) -> (Vec<Entry>, ScopeDb) {
+    let genesis: Vec<Entry> = entries.into_iter().filter(|e| e.hash() == root).take(1).collect();
+    let built = crate::database::steps::recovery_of(root, &genesis)
         .context("its genesis isn't among the entries")
         .and_then(|recovery| crate::database::steps::Truth::read(steps, recovery, now_ms())?.map(|t| t.db).context("who's who has no freeze yet"));
     let db = built.unwrap_or_else(|err| {
         tracing::warn!("building the scope database: {err:#}");
         ScopeDb::build(&Members::default(), &crate::entry::Scope::Global, &Default::default(), 0).expect("an empty scope database builds")
     });
-    let listed: std::collections::HashSet<Key> = db.machines().iter().map(|d| d.key).collect();
-    (ordered.into_iter().filter(|e| e.hash() == root || listed.contains(&e.author())).collect(), db)
+    (genesis, db)
 }
 
 fn now_ms() -> u64 {

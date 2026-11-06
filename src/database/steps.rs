@@ -267,6 +267,12 @@ pub fn genesis_entries(keys: &crate::db::Keys, sealed: &[u8]) -> Result<Vec<Entr
     crate::entry::unpack(&crate::keys::open(key, &genesis_name(), sealed)?)
 }
 
+/// The entries of `global`'s frozen log's first step, the genesis among them, read from the bucket with `keys`.
+pub async fn genesis(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys) -> Result<Vec<Entry>> {
+    let sealed = bucket.get(&genesis_name()).await?.with_context(|| format!("{YOURS}'s genesis isn't in its bucket"))?;
+    genesis_entries(keys, &sealed.bytes)
+}
+
 /// The network's recovery key, as its genesis names it: the entry whose hash is `root` among `entries`, those of
 /// `global`'s log's first step. Only the first freeze it signed is who's who (`Truth::first`).
 pub fn recovery_of(root: Hash, entries: &[Entry]) -> Option<Key> {
@@ -288,8 +294,7 @@ pub fn genesis_of(pinned: Option<Hash>, entries: &[Entry]) -> Option<Hash> {
 /// The network's genesis (`root`, or for a reader that pins none, `genesis_of`) and the recovery key it names, read
 /// from the bucket with `keys`, `global`'s by epoch (`genesis_entries`).
 pub async fn recovery_key(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, root: Option<Hash>) -> Result<(Hash, Key)> {
-    let sealed = bucket.get(&genesis_name()).await?.with_context(|| format!("{YOURS}'s genesis isn't in its bucket"))?;
-    let entries = genesis_entries(keys, &sealed.bytes)?;
+    let entries = genesis(bucket, keys).await?;
     let root = genesis_of(root, &entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
     let key = recovery_of(root, &entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
     Ok((root, key))
