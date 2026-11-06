@@ -49,14 +49,17 @@ fn download(url: &str) -> Result<Option<Object>> {
 
 impl Bucket for Signed {
     async fn get(&self, name: &str) -> Result<Option<Object>> {
-        let mut ahead = self.ahead.lock().unwrap();
-        if let Some(found) = ahead.remove(name) {
-            if found.is_none() {
-                ahead.clear();
+        // In a block of its own, so the lock is never held across an await: a future that holds it can't move between
+        // threads, as the native app's do.
+        {
+            let mut ahead = self.ahead.lock().unwrap();
+            if let Some(found) = ahead.remove(name) {
+                if found.is_none() {
+                    ahead.clear();
+                }
+                return Ok(found);
             }
-            return Ok(found);
         }
-        drop(ahead);
         let (address, secret, asked) = (self.address.clone(), self.secret, name.to_string());
         let (found, next) = tokio::task::spawn_blocking(move || -> Result<_> {
             let name = &asked;
