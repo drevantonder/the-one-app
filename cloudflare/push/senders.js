@@ -15,16 +15,10 @@
 //   the network's VAPID key for the push service's origin, good for 12 hours (push services refuse more than 24). The
 //   note goes as base64url text: Edge's push service drops a payload that isn't text.
 
-import { b64u } from "../shared/crypto.js";
+import { b64u, concat } from "../shared/crypto.js";
 import { NOTE_FALLBACK } from "../shared/protocol.js";
 
 const text = new TextEncoder();
-const concat = (...parts) => {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const p of parts) out.set(p, at), (at += p.length);
-  return out;
-};
 const json64 = (v) => b64u.encode(text.encode(JSON.stringify(v)));
 
 /// The bytes of a PEM block, however its lines were broken when it was pasted.
@@ -58,20 +52,17 @@ const forget = (whose) => tokens.delete(whose);
 // MARK: APNs
 
 /// `config`: `{ team, key_id, key }` (the .p8's text). `device`: `{ address, env, topic }`. `note`: the sealed bytes.
-/// `legacy`: a plain alert's payload, for a phone that registered the old way and can't open notes.
-export async function apns(fetch, config, device, { note, quiet, name, payload }) {
+export async function apns(fetch, config, device, { note, quiet, name }) {
   if (!config?.key) return { failed: "APNs isn't set up for this network" };
   const whose = `apns:${config.team}/${config.key_id}`;
   const token = await kept(whose, 50 * 60_000, async () => {
     const key = await crypto.subtle.importKey("pkcs8", pem(config.key), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
     return jwt({ alg: "ES256", kid: config.key_id }, { iss: config.team, iat: Math.floor(Date.now() / 1000) }, key);
   });
-  const body = payload
-    ? payload
-    : quiet
-      ? { aps: { "content-available": 1 }, n: b64u.encode(note) }
-      : { aps: { alert: { title: name, body: NOTE_FALLBACK }, "mutable-content": 1, sound: "default" }, n: b64u.encode(note) };
-  const host = device.env === "sandbox" || device.env === "development" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+  const body = quiet
+    ? { aps: { "content-available": 1 }, n: b64u.encode(note) }
+    : { aps: { alert: { title: name, body: NOTE_FALLBACK }, "mutable-content": 1, sound: "default" }, n: b64u.encode(note) };
+  const host = device.env === "sandbox" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
   const resp = await fetch(`https://${host}/3/device/${device.address}`, {
     method: "POST",
     headers: {

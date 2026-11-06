@@ -58,7 +58,7 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
-import { b64u, behind, checkCertificate, checkRequest, rolesOf } from "../shared/crypto.js";
+import { b64u, behind, checkCertificate, checkRequest, hex, rolesOf, sha256 } from "../shared/crypto.js";
 import { FRESH, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
 
 initSync({ module: wasm });
@@ -86,10 +86,8 @@ const GONE_KEPT = 1024;
 /// The most datagrams for the Cloudflare node gathered in one turn before they're handed to it.
 const FOR_NODE_MOST = 1024;
 
-const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (h) => parseInt(h, 16));
 const isKey = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
-const sha256 = async (text) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
 const refuse = (status, error) => Response.json({ error }, { status });
 const CORS = { "Access-Control-Allow-Origin": "*" };
 
@@ -326,7 +324,7 @@ export class Relay extends DurableObject {
     // A pairing code's ticket (64 hex), or a session's certificate, if it shows one: whether it lets this key in is
     // decided once the key is proved, here if the certificate comes with its endpoint's proof.
     const ticket = token(request, url);
-    const joining = isKey(ticket) ? await sha256(ticket) : null;
+    const joining = isKey(ticket) ? hex.encode(await sha256(ticket)) : null;
     if (joining && !(this.pairing(joining)?.until > now)) return refuse(403, "that pairing code has expired");
     let session = null;
     let proved = false;
@@ -369,7 +367,7 @@ export class Relay extends DurableObject {
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     const made = challenge();
-    server.serializeAttachment({ challenge: hex(made.slice(0, 16)), at: now, from, site, joining, session });
+    server.serializeAttachment({ challenge: hex.encode(made.slice(0, 16)), at: now, from, site, joining, session });
     server.send(made.slice(16));
     return new Response(null, { status: 101, webSocket: client, headers: { "Sec-WebSocket-Protocol": PROTOCOL } });
   }
@@ -393,7 +391,7 @@ export class Relay extends DurableObject {
     }
     if (out[0] === 1) return ws.send(out.subarray(1));
     if (out[0] !== 0) return;
-    const to = hex(out.subarray(1, 33));
+    const to = hex.encode(out.subarray(1, 33));
     if (said.pairing && to !== said.to) return;
     if (to === this.env.BOUND && this.env.NODE) return this.toNode(said.id, bytes);
     const client = this.boundTo(to);
@@ -481,7 +479,7 @@ export class Relay extends DurableObject {
     if (!this.key(fields.by)) return { error: "that key isn't one of the network's: a device of its person approves it" };
     if (this.sockets.has(fields.by)) return { error: "that key is connected here itself" };
     const until = Date.now() + 3_600_000;
-    const ticket = hex(crypto.getRandomValues(new Uint8Array(32)));
+    const ticket = hex.encode(crypto.getRandomValues(new Uint8Array(32)));
     this.sql.exec("INSERT OR REPLACE INTO bound VALUES (?, ?, ?, ?)", fields.by, name, until, ticket);
     this.bound.set(fields.by, { name, until, ticket });
     return { ticket, until };
@@ -542,7 +540,7 @@ export class Relay extends DurableObject {
   async prove(ws, said, bytes) {
     let id;
     try {
-      id = hex(verify(unhex(said.challenge), bytes));
+      id = hex.encode(verify(unhex(said.challenge), bytes));
     } catch {
       id = null;
     }

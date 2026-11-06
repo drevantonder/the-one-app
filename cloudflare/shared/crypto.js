@@ -32,7 +32,7 @@ function bytes(v) {
   return typeof v === "string" ? text.encode(v) : new Uint8Array(v);
 }
 
-function concat(...parts) {
+export function concat(...parts) {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
   for (const p of parts) {

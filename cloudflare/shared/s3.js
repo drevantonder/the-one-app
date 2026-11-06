@@ -3,8 +3,9 @@
 // `If-None-Match: *` in, so the request must send it and can only make an object that isn't there; a replace URL signs
 // `If-Match: <ETag>` in, so it changes only the version it names.
 
+import { hex } from "./crypto.js";
+
 const text = new TextEncoder();
-const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 
 async function hmac(key, data) {
   const k = await crypto.subtle.importKey("raw", typeof key === "string" ? text.encode(key) : key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -35,10 +36,10 @@ export async function presign({ method, scheme = "https", host, path, query = {}
   const canonicalQuery = Object.keys(all).map((k) => [encode(k), encode(all[k])]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => `${k}=${v}`).join("&");
   const canonicalPath = path.split("/").map(encode).join("/");
   const canonical = [method, canonicalPath, canonicalQuery, names.map((n) => `${n}:${signed[n]}\n`).join(""), names.join(";"), "UNSIGNED-PAYLOAD"].join("\n");
-  const toSign = ["AWS4-HMAC-SHA256", stamp, scope, hex(await crypto.subtle.digest("SHA-256", text.encode(canonical)))].join("\n");
+  const toSign = ["AWS4-HMAC-SHA256", stamp, scope, hex.encode(await crypto.subtle.digest("SHA-256", text.encode(canonical)))].join("\n");
   let key = await hmac(`AWS4${secret}`, day);
   for (const part of [region, "s3", "aws4_request"]) key = await hmac(key, part);
-  return `${scheme}://${host}${canonicalPath}?${canonicalQuery}&X-Amz-Signature=${hex(await hmac(key, toSign))}`;
+  return `${scheme}://${host}${canonicalPath}?${canonicalQuery}&X-Amz-Signature=${hex.encode(await hmac(key, toSign))}`;
 }
 
 /// URLs in a bucket `{ endpoint, bucket, region, key_id, secret }` (path-style), good for `expires` seconds: to read
