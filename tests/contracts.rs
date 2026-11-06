@@ -45,27 +45,16 @@ fn b(v: &Value) -> Vec<u8> {
     B64U.decode(v.as_str().unwrap().as_bytes()).unwrap()
 }
 
-/// The Workers (JavaScript, `cloudflare/shared/crypto.js`) and nodes each open what the other seals: app keys under
-/// scope keys, keys to key pairs and under secrets;.
+/// The Workers (JavaScript, `cloudflare/shared/crypto.js`) and nodes each open what the other seals: to key pairs and
+/// under secrets.
 #[test]
 fn the_workers_and_nodes_seal_keys_for_each_other() {
     let formats = Formats::start();
     let js = |body: Value| formats.js(body);
 
-    // An app's key, sealed under its scope's: each opens what the other sealed.
+    // Sealed to a key pair (the recovery key's twin): Rust opens what JavaScript sealed to it (push's notes).
     let scope: [u8; 32] = rand::random();
-    let app: [u8; 32] = rand::random();
-    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "sealed": B64U.encode(&keys::seal_app_key(&scope, "tally", &app)) }));
-    assert_eq!(b(&opened["key"]), app, "JavaScript opens an app's key Rust sealed");
-    let sealed = js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "key": B64U.encode(&app) }));
-    assert_eq!(keys::open_app_key(&scope, "tally", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
-    assert!(keys::open_app_key(&scope, "calendar", &b(&sealed["sealed"])).is_err(), "only as that app's");
-
-    // Sealed to a key pair (the recovery key's twin): sealed in Rust and opened in JavaScript, and the other way.
     let (secret, public) = keys::twin(&rand::random());
-    let sealed = keys::seal_to(&public, &scope).unwrap();
-    let opened = js(json!({ "op": "openSealed", "secret": B64U.encode(&secret), "public": B64U.encode(&public), "sealed": B64U.encode(&sealed) }));
-    assert_eq!(b(&opened["plain"]), scope, "JavaScript opens what Rust sealed to it");
     let sealed = js(json!({ "op": "sealTo", "to": B64U.encode(&public), "plain": B64U.encode(&scope) }));
     assert_eq!(keys::open_sealed(&secret, &b(&sealed["sealed"])).unwrap(), scope, "Rust opens what JavaScript sealed to it");
 
@@ -78,7 +67,7 @@ fn the_workers_and_nodes_seal_keys_for_each_other() {
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
 }
 
-/// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, epoch hashes, join codes, invite proofs,
+/// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, join codes, invite proofs,
 /// passkeys' device keys and a session endpoint's certificate.
 #[test]
 fn a_device_signs_and_proves_as_the_nodes_read_it() {
@@ -91,13 +80,12 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     let request = keys::signed_request(&signer, "one/urls", fields.clone(), 1_000_000);
     let node = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let to = keys::Endpoint::of(&node).seal;
-    let epoch_key: [u8; 32] = rand::random();
     let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
     let device_seal: [u8; 32] = rand::random();
     let prf: [u8; 32] = rand::random();
     let out = js(json!({
         "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
-        "request": request, "now": 1_000_000 + keys::FRESH, "key": B64U.encode(&epoch_key),
+        "request": request, "now": 1_000_000 + keys::FRESH,
         "pair": { "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
         "secret": B64U.encode(b"an invite's secret"), "prf": B64U.encode(&prf),
     }));
@@ -105,9 +93,7 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     assert_eq!(out["signed"], request, "the same request signed the same, Ed25519 being deterministic");
     assert_eq!(out["checked"], json!(data_encoding::HEXLOWER.encode(signer.verifying_key().as_bytes())), "JavaScript checks a request Rust signed");
     assert!(keys::check_request("one/urls", &out["signed"], 1_000_000).is_ok(), "Rust checks one JavaScript signed");
-    assert_eq!(out["epochHash"], keys::epoch_hash(&epoch_key), "an epoch key's hash");
     assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
-    assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&keys::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
     assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
     let asking = keys::Endpoint { key: device, seal: device_seal };
     assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
@@ -149,26 +135,8 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     assert!(out["checked"].as_array().unwrap().iter().skip(1).all(|c| c.get("error").is_some()), "only the first is good");
 }
 
-/// A step (`src/database/steps.rs`) signed in JavaScript is the one Rust signs for its position.
-#[test]
-fn a_step_is_signed_the_same_for_its_position() {
-    let formats = Formats::start();
-    let js = |body: Value| formats.js(body);
-
-    use one::database::content::Content;
-    use one::database::steps::Step;
-    let seed: [u8; 32] = rand::random();
-    let key = ed25519_dalek::SigningKey::from_bytes(&seed);
-    let content = Content::new("node", "group", json!({ "group": "0123456789abcdef", "name": "Café \"Ü\"\n" }));
-    let step = one::database::steps::sign(&key, &one::database::scopes::Scope::Global, 7, "0123456789abcdef", 2, 1_700_000_000_123, content).unwrap();
-    let fields = json!({ "log": "global", "at": 7, "time": 1_700_000_000_123u64, "user": "0123456789abcdef", "epoch": 2 });
-    let out = js(json!({ "op": "step", "seed": B64U.encode(&seed), "fields": fields, "body": String::from_utf8(step.body.clone()).unwrap() }));
-    assert_eq!(out["signed"], step.to_json(), "the same step signed the same");
-    assert!(Step::from_json(&out["signed"]).is_ok(), "and Rust checks it");
-}
-
-/// Who's who as steps (`src/database/steps.rs`), as a browser reads it: the node's key sealed under an epoch as a
-/// browser that makes one seals it, the freeze the recovery key signed and a step a browser signed, sealed as a node
+/// Who's who as steps (`src/database/steps.rs`), as a browser reads it: the node's key sealed under an epoch, the
+/// freeze the recovery key signed and a step a browser signed, sealed as a node
 /// puts them in the bucket and read from it as the URL signer's `get` gives them (`cloudflare/web/net-worker.js`),
 /// opened and applied by the client's keyring; and from a Welcome, sign-in's word passed on as JavaScript reads it.
 #[test]
@@ -184,18 +152,14 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     use one::keys::{Endpoint, Hash};
     use one::database::steps::Reader;
     const ANDRE: &str = "a000000000000001";
-    let browser_seed: [u8; 32] = rand::random();
-    let (mac, browser, recovery) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&browser_seed), SigningKey::from_bytes(&rand::random()));
+    let (mac, browser, recovery) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()));
     let (epoch, app): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
     let root = Hash::from_bytes(rand::random());
     let start = content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch));
     let first = steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();
     let listed = steps::sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None)).unwrap();
-    let (_, _, body) = steps::sign(&browser, &Scope::Global, 3, ANDRE, 1, 5, content::setting("greeting", Some("hi"))).unwrap().encode();
-    let fields = json!({ "log": "global", "at": 3, "time": 5, "user": ANDRE, "epoch": 1 });
-    let out = js(json!({ "op": "step", "seed": B64U.encode(&browser_seed), "fields": fields, "body": String::from_utf8(body).unwrap() }));
-    let signed = Step::decode(&b(&out["signed"]["header"]), &b(&out["signed"]["signature"]), &b(&out["signed"]["body"])).unwrap();
-    let sealed_app = b(&js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&epoch), "app": scopes::APP, "key": B64U.encode(&app) }))["sealed"]);
+    let signed = steps::sign(&browser, &Scope::Global, 3, ANDRE, 1, 5, content::setting("greeting", Some("hi"))).unwrap();
+    let sealed_app = one::keys::seal_app_key(&epoch, scopes::APP, &app);
     let keys: one::database::stored::Keys = [(1, one::keys::database_key(&app, one::database::scopes::APP, one::database::steps::NAME))].into();
     let prefix = steps::prefix("global");
     let sealed = |at: u64, step: &Step, copy: Option<&[u8]>| {

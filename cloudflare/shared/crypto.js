@@ -11,7 +11,7 @@
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
 // nonce ‖ AES-256-GCM(key, nonce, plain), with key and the copy's id both derived from the secret.
 
-import { CODES, ENDPOINT, FRESH, NUMBER_MAX, READS, SESSION, SIGNED_NOTE, SOCKET, STEP } from "./protocol.js";
+import { CODES, ENDPOINT, FRESH, NUMBER_MAX, READS, SESSION, SIGNED_NOTE, SOCKET } from "./protocol.js";
 
 const text = new TextEncoder();
 
@@ -42,32 +42,14 @@ export function concat(...parts) {
   return out;
 }
 
-/// HKDF-SHA256's 32 bytes from `ikm`: bytes, or a non-extractable HKDF CryptoKey (`hkdfKey`) a browser keeps in memory.
+/// HKDF-SHA256's 32 bytes from `ikm`.
 async function hkdf(ikm, info, salt = new Uint8Array()) {
-  const key = ikm instanceof CryptoKey ? ikm : await crypto.subtle.importKey("raw", bytes(ikm), "HKDF", false, ["deriveBits"]);
+  const key = await crypto.subtle.importKey("raw", bytes(ikm), "HKDF", false, ["deriveBits"]);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: bytes(salt), info: bytes(info) }, key, 256));
-}
-
-export async function hkdfKey(raw) {
-  const key = await crypto.subtle.importKey("raw", raw, "HKDF", false, ["deriveBits"]);
-  raw.fill(0);
-  return key;
 }
 
 export function random(n = 32) {
   return crypto.getRandomValues(new Uint8Array(n));
-}
-
-export async function sealAppKey(scopeKey, app, key) {
-  const nonce = random(12);
-  const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, await aes(await hkdf(scopeKey, `one/app\0${app}`), "encrypt"), key);
-  return concat(nonce, new Uint8Array(sealed));
-}
-
-export async function openAppKey(scopeKey, app, sealed) {
-  sealed = bytes(sealed);
-  const key = await aes(await hkdf(scopeKey, `one/app\0${app}`), "decrypt");
-  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: sealed.slice(0, 12) }, key, sealed.slice(12)));
 }
 
 async function aes(key, use) {
@@ -89,7 +71,7 @@ export async function sealTo(to, plain) {
 
 /// Opens what was sealed to the key pair `{ secret, public }`: its secret 32 bytes, or a CryptoKey (a browser's, not
 /// extractable).
-export async function openSealed(pair, sealed) {
+async function openSealed(pair, sealed) {
   sealed = bytes(sealed);
   if (sealed.length < 48) throw new Error("not sealed");
   const share = sealed.slice(0, 32);
@@ -166,23 +148,6 @@ export async function x25519Public(secret) {
   const pkcs8 = concat(new Uint8Array([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20]), bytes(secret));
   const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "X25519" }, true, ["deriveBits"]);
   return b64u.decode((await crypto.subtle.exportKey("jwk", key)).x);
-}
-
-/// The X25519 key an Ed25519 public key is the twin of (`keys::twin_public`): what's sealed to a Rust endpoint, or
-/// to the recovery key, is sealed to it. u = (1 + y) / (1 - y) mod 2^255 - 19.
-export function twinPublic(edPublic) {
-  const b = bytes(edPublic), P = (1n << 255n) - 19n;
-  let y = 0n;
-  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? b[i] & 0x7f : b[i]);
-  const pow = (a, e) => {
-    let r = 1n;
-    for (a %= P; e; e >>= 1n, a = (a * a) % P) if (e & 1n) r = (r * a) % P;
-    return r;
-  };
-  let u = ((1n + y) * pow((1n - y + P) % P, P - 2n)) % P;
-  const out = new Uint8Array(32);
-  for (let i = 0; i < 32; i++, u >>= 8n) out[i] = Number(u & 255n);
-  return out;
 }
 
 async function sign(key, domain, v) {
@@ -275,17 +240,6 @@ export async function checkCertificate(certificate, now = Date.now()) {
   if (fields.until > Math.min(fields.at, now) + SESSION) throw new Error("a session lasts a day at most");
   return { by, endpoint: fields.endpoint, until: fields.until };
 }
-
-/// Signs a step of a scope's database for position `at` (src/database/steps.rs): an entry's header, following nothing,
-/// under a domain of its own, so neither is ever taken for the other.
-export async function signStep(key, by, { log, at, time, user, epoch }, body) {
-  body = bytes(body);
-  const header = { v: 1, author: hex.encode(by), log, seq: at, backlink: null, previous: [], time, user, epoch, body: hex.encode(await sha256(body)), size: body.length };
-  return { header: canonical(header), signature: await sign(key, STEP, header), body };
-}
-
-/// What an `epoch` entry says of its key: HKDF-SHA256(key, "one/epoch-hash"), hex.
-export const epochHash = async (key) => hex.encode(await hkdf(key, "one/epoch-hash"));
 
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 

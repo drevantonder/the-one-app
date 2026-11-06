@@ -146,7 +146,6 @@ pub fn javascript() -> String {
          export const AUTH_DOMAIN = {auth};\n\
          export const ENDPOINT = {endpoint};\n\
          export const SOCKET = {socket};\n\
-         export const STEP = {step};\n\
          export const FRESH = {fresh};\n\
          export const SESSION = {session};\n\
          export const SOCKET_FRESH = {socket_fresh};\n\
@@ -187,7 +186,6 @@ pub fn javascript() -> String {
         auth = json!(AUTH_DOMAIN),
         endpoint = json!(crate::keys::ENDPOINT),
         socket = json!(SOCKET),
-        step = json!(crate::database::steps::DOMAIN),
         fresh = crate::keys::FRESH,
         session = crate::keys::SESSION,
         socket_fresh = SOCKET_FRESH,

@@ -1,5 +1,5 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { b64u, canonical, certify, checkCertificate, epochHash, checkRequest, ed25519Public, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, openAppKey, openNote, openSealed, openUnder, passkeyKeys, sealAppKey, sealTo, sealUnder, signStep, signedRequest, twinPublic, waited, x25519Public } from "../shared/crypto.js";
+import { b64u, canonical, certify, checkCertificate, checkRequest, ed25519Public, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, openNote, openUnder, passkeyKeys, sealTo, sealUnder, signedRequest, waited, x25519Public } from "../shared/crypto.js";
 import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { AGENTS } from "../screen/agents.js";
 
@@ -10,17 +10,8 @@ const ops = {
     const checked = await Promise.all(check.map((c) => checkCertificate(c, now).catch((err) => ({ error: String(err.message || err) }))));
     return { made, checked };
   },
-  async sealAppKey({ scopeKey, app, key }) {
-    return { sealed: b64u.encode(await sealAppKey(b64u.decode(scopeKey), app, b64u.decode(key))) };
-  },
-  async openAppKey({ scopeKey, app, sealed }) {
-    return { key: b64u.encode(await openAppKey(b64u.decode(scopeKey), app, b64u.decode(sealed))) };
-  },
   async sealTo({ to, plain }) {
     return { sealed: b64u.encode(await sealTo(b64u.decode(to), b64u.decode(plain))) };
-  },
-  async openSealed({ secret, public: pub, sealed }) {
-    return { plain: b64u.encode(await openSealed({ secret: b64u.decode(secret), public: b64u.decode(pub) }, b64u.decode(sealed))) };
   },
   /// A note, opened as the service worker does: the note, or why not.
   async openNote({ secret, public: pub, sealed }) {
@@ -29,7 +20,7 @@ const ops = {
   async sealUnder({ secret, plain }) {
     return { sealed: b64u.encode(await sealUnder(secret, b64u.decode(plain))), id: await idOf(secret) };
   },
-  async keys({ seed, domain, fields, at, request, now, key, pair, secret, prf }) {
+  async keys({ seed, domain, fields, at, request, now, pair, secret, prf }) {
     const signedBy = await signedRequest(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), domain, fields, at);
     const checked = await checkRequest(domain, request, now).then((c) => c.by, (err) => ({ error: String(err) }));
     const pk = await passkeyKeys(b64u.decode(prf));
@@ -37,19 +28,12 @@ const ops = {
       canonical: new TextDecoder().decode(canonical(fields)),
       signed: signedBy,
       checked,
-      epochHash: await epochHash(b64u.decode(key)),
-      twin: hex.encode(twinPublic(hex.decode(pair.key))),
       joinCode: await joinCode(hex.decode(pair.key), hex.decode(pair.seal)),
       proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key), hex.decode(pair.seal)),
       nonce: await joinNonce(hex.decode(pair.seal), hex.decode(pair.key), hex.decode(pair.seal)),
       challenge: b64u.encode(joinChallenge(hex.decode(pair.seal), hex.decode(pair.key), hex.decode(pair.seal), 1_800_000_000_123)),
       passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal), sealPublic: hex.encode(await x25519Public(pk.seal)) },
     };
-  },
-  /// A step signed with `seed` for `fields`' position: → it, as POST /v1/steps takes it.
-  async step({ seed, fields, body }) {
-    const signed = await signStep(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), fields, body);
-    return { signed: { header: b64u.encode(signed.header), signature: b64u.encode(signed.signature), body: b64u.encode(signed.body) } };
   },
   /// Who the Settings screens say agents are in an item's apps.
   async agents() {
