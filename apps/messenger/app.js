@@ -618,6 +618,7 @@ export default {
   tools: {
     accounts: {
       reads: true,
+      accounts: true,
       description: "The browser profiles Messenger reads, the default first: each { account, ok }, account the profile's name, with why when ok is false and it needs signing in again. Give account to the others to pick one.",
       input: { type: "object", properties: {} },
       async run(ctx) {

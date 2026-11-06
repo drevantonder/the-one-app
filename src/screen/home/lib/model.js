@@ -10,7 +10,8 @@ export const home = (() => {
   const app = (name) => h.apps.find((a) => a.name === name);
   const has = (a, screen) => !!a?.screens?.some((s) => s.name === screen);
   const hasScreens = (a) => has(a, "main");
-  const keepsAccounts = (a) => !!a?.ops?.some((o) => o.name === "accounts");
+  // The tool that lists an app's accounts, the one it says does (`accounts: true`): none for an app without.
+  const accountsTool = (a) => a?.ops?.find((o) => o.accounts)?.name;
   const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
   const userName = (id) => (id === me()?.id ? "You" : network()?.users.find((u) => u.id === id)?.name || "Someone");
   // People by name, you last, as "you".
@@ -75,7 +76,7 @@ export const home = (() => {
   }
 
   const appsOn = (p) => h.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
-  const accountsOn = (p) => h.apps.filter((a) => keepsAccounts(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
+  const accountsOn = (p) => h.apps.filter((a) => accountsTool(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const badge = (name, p) => Math.max(0, h.badges[p.scope]?.[name] || 0);
 
   /// Every widget a page could show: those of the apps installed in its scope.
@@ -259,7 +260,7 @@ export const home = (() => {
   }
 
   return {
-    data: h, me, network, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, accountsOn, badge, widgetsOn, waiting, items,
+    data: h, me, network, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, accountsOn, accountsTool, badge, widgetsOn, waiting, items,
     supported, tree, store, open, settings, inStore, addAccountApp, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
   };
 })();

@@ -76,6 +76,7 @@ export default {
   tools: {
     accounts: {
       reads: true,
+      accounts: true,
       description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, account its number and device where it's linked, with why when ok is false. Give account to the others to pick one.",
       input: { type: "object", properties: {} },
       async run(ctx, input) {

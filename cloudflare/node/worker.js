@@ -806,7 +806,7 @@ class Run {
       const mine = reach.length > 0;
       const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "needs"];
       for (const [k, v] of Object.entries(d || {})) if (k !== "name" && k !== "schedules" && (mine || shown.includes(k))) info[k] = v;
-      if (d) info.offers = { screens: !!d.screens?.some((s) => s.name === "main") || !!d.widgets?.length, accounts: !!d.ops?.some((o) => o.name === "accounts") };
+      if (d) info.offers = { screens: !!d.screens?.some((s) => s.name === "main") || !!d.widgets?.length, accounts: !!d.ops?.some((o) => o.accounts) };
       return light ? Object.fromEntries(Object.entries(info).filter(([k]) => drawn.includes(k))) : info;
     }));
   }

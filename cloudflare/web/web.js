@@ -463,7 +463,7 @@ const h = OneUI.react.createElement;
   const reads = (name, op) => !!app(name)?.ops?.some((o) => o.name === op && o.reads === true);
   const label = (a) => a?.title || a?.name || "";
   const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
-  const keepsAccounts = (a) => !!a?.ops?.some((o) => o.name === "accounts");
+  const keepsAccounts = (a) => !!a?.ops?.some((o) => o.accounts);
   const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
 
   /// Every page this person can read, as the sidebar lists them: theirs, their groups', then everyone's.

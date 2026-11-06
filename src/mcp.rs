@@ -23,32 +23,32 @@ pub struct Session {
 
 /// Serves MCP over stdio, asking `node`, for an agent on this machine.
 pub fn stdio(node: Client, mode: Mode) -> Result<()> {
-    use std::io::{BufRead, Write};
+    use std::io::BufRead;
     let mut session = Session { agent: agent_from_env(), mode, stdio: true };
     for line in std::io::stdin().lock().lines() {
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
         let node = node.again();
-        // A chat's view waiting on a change is answered beside the rest, which go on meanwhile.
-        if msg["method"] == "tools/call" && msg["params"]["name"] == "screens_changes" {
+        // A tool call is answered beside the rest, which go on meanwhile: some wait (a chat's view waiting on a change).
+        if msg["method"] == "tools/call" {
             let mut session = Session { agent: session.agent.clone(), ..session };
-            std::thread::spawn(move || {
-                if let Some((reply, _)) = answer(&node, &msg, &mut session) {
-                    let mut out = std::io::stdout().lock();
-                    let _ = writeln!(out, "{reply}").and_then(|_| out.flush());
-                }
-            });
+            std::thread::spawn(move || say(answer(&node, &msg, &mut session)));
             continue;
         }
-        if let Some((reply, changed)) = answer(&node, &msg, &mut session) {
-            let mut out = std::io::stdout().lock();
-            writeln!(out, "{reply}")?;
-            if changed {
-                writeln!(out, "{}", json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }))?;
-            }
-            out.flush()?;
-        }
+        say(answer(&node, &msg, &mut session))?;
     }
     Ok(())
+}
+
+/// Writes an answer, and that the tools listed changed when they did.
+fn say(answered: Option<(Value, bool)>) -> std::io::Result<()> {
+    use std::io::Write;
+    let Some((reply, changed)) = answered else { return Ok(()) };
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "{reply}")?;
+    if changed {
+        writeln!(out, "{}", json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }))?;
+    }
+    out.flush()
 }
 
 /// MCP over Streamable HTTP, at `/mcp`: for a client device over iroh, as its person (the remote MCP server,
@@ -441,7 +441,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             with_trace(
                 match ran.ok {
                     // A script gets an empty list as it is; an agent reading gets it in words.
-                    Ok(ok) => match name.strip_suffix("_accounts").filter(|_| ok == json!([])).and_then(|app| tools::find(node, app, "accounts")).and_then(|(a, _)| tools::none_said(node, &a, "accounts", &ok, false)) {
+                    Ok(ok) => match name.split_once('_').filter(|_| ok == json!([])).and_then(|(app, tool)| tools::find(node, app, tool)).and_then(|(a, o)| tools::none_said(node, &a, &o, &ok, false)) {
                         Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
                         None => json!({ "content": tools::mcp_content(node, &ok) }),
                     },

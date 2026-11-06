@@ -91,10 +91,10 @@ function R(e) {
 			if (e.account) {
 				let n = /* @__PURE__ */ new Set([e.title, ...e.fields.filter((e) => !e.secret).map((e) => e.value)]);
 				if (await Promise.all([...new Set([...e.apps, e.app].filter(Boolean))].map(async (e) => {
-					let r = t(e);
-					if (!A(r, "accounts") || !A(r, "sign_out")) return;
-					let i = (await D(e, "accounts", {})).find((e) => n.has(e.account));
-					i && await D(e, "sign_out", { account: i.account });
+					let r = t(e), i = Array.isArray(r?.ops) && r.ops.find((e) => e.accounts)?.name;
+					if (!i || !A(r, "sign_out")) return;
+					let a = (await D(e, i, {})).find((e) => n.has(e.account));
+					a && await D(e, "sign_out", { account: a.account });
 				})), !(await O(e.scope)).some((t) => t.id === e.id)) return;
 			}
 			await k(e.scope, e.id, { deleted: !0 });

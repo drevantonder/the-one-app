@@ -99,7 +99,7 @@ function Accounts() {
       if (asked.current.has(a.name) && !stale.current.has(a.name)) continue
       stale.current.delete(a.name)
       asked.current.add(a.name)
-      home.call(a.name, "accounts").then((list) => (Array.isArray(list) ? list : [])).catch((err) => err).then((out) => setAccounts((all) => ({ ...all, [a.name]: out })))
+      home.call(a.name, home.accountsTool(a)).then((list) => (Array.isArray(list) ? list : [])).catch((err) => err).then((out) => setAccounts((all) => ({ ...all, [a.name]: out })))
     }
   }
 

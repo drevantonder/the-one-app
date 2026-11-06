@@ -529,6 +529,7 @@ export function tools({ global }) {
   return {
     accounts: {
       reads: true,
+      accounts: true,
       description: "The GitHub accounts you've signed in to Repos, the first used first: [{ account, ok }], with why when ok is false (repos_sign_in fixes it). Their repos show in repos_list as github.com/<owner>/<repo>.",
       input: { type: "object", properties: {} },
       async run(ctx) {

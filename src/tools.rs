@@ -101,7 +101,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
             });
         }
     };
-    if let Some(none) = none_said(node, a, tool, &ok, true).filter(|_| !g.json) {
+    if let Some(none) = none_said(node, a, o, &ok, true).filter(|_| !g.json) {
         println!("{none}");
         print_trace(ran.trace.as_deref());
         return Ok(());
@@ -156,9 +156,10 @@ pub fn named(app: &str, tool: &str, cli: bool) -> String {
     }
 }
 
-/// An empty list of accounts in words, with what to do: screens want the list, a person or agent reading wants this.
-pub fn none_said(node: &Client, app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<String> {
-    if tool != "accounts" || ok.as_array().is_none_or(|a| !a.is_empty()) {
+/// An empty list of accounts, from a tool that says it lists them (`accounts: true`), in words, with what to do:
+/// screens want the list, a person or agent reading wants this.
+pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, cli: bool) -> Option<String> {
+    if tool["accounts"] != true || ok.as_array().is_none_or(|a| !a.is_empty()) {
         return None;
     }
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));

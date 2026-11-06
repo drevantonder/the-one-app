@@ -40,7 +40,7 @@ function describe() {
     // with `lab` is there only while its lab is on.
     ...(app.labs && Object.keys(app.labs).length ? { labs: Object.fromEntries(Object.entries(app.labs).map(([name, l]) => [name, { title: String(l.title || name), description: String(l.description || "") }])) } : {}),
     // The wire calls tools `ops`, and a call's tool `op` (tests/contracts.rs).
-    ops: Object.entries(tools()).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}), ...(o.lab ? { lab: String(o.lab) } : {}) })),
+    ops: Object.entries(tools()).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.accounts ? { accounts: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}), ...(o.lab ? { lab: String(o.lab) } : {}) })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => {
       const size = w.size || "medium";
       const options = Object.entries(w.options || {}).map(([name, o]) => ({ name, title: o.title || name, default: o.default ?? null }));

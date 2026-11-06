@@ -73,8 +73,9 @@ function know(apps) {
         // Every app at once.
         await Promise.all([...new Set([...item.apps, item.app].filter(Boolean))].map(async (name) => {
           const a = app(name)
-          if (!has(a, "accounts") || !has(a, "sign_out")) return
-          const account = (await call(name, "accounts", {})).find((x) => known.has(x.account))
+          const accounts = Array.isArray(a?.ops) && a.ops.find((o) => o.accounts)?.name
+          if (!accounts || !has(a, "sign_out")) return
+          const account = (await call(name, accounts, {})).find((x) => known.has(x.account))
           if (account) await call(name, "sign_out", { account: account.account })
         }))
         // Signing out may have let go of it already.

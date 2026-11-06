@@ -174,6 +174,7 @@ export function google({ app, title, scopes, base }) {
   const tools = {
     accounts: {
       reads: true,
+      accounts: true,
       description: `The Google accounts ${title} can use, the default first: [{ account, ok }], with why when ok is false (${app}_sign_in with that account fixes it). Every other tool's account takes one of these.`,
       input: { type: "object", properties: {} },
       async run(ctx) {
