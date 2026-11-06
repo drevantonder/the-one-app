@@ -46,6 +46,30 @@ pub fn claim(address: Option<&str>) {
     }
 }
 
+/// A flyout (the panel) with rounded corners, as Windows 11 draws its own; Windows 10 has none, and says no.
+pub fn round(window: &tauri::WebviewWindow) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
+    let Ok(hwnd) = window.hwnd() else { return };
+    let corner = DWMWCP_ROUND;
+    // SAFETY: the window's own handle, and a value of the attribute's type and size.
+    let _ = unsafe { DwmSetWindowAttribute(windows::Win32::Foundation::HWND(hwnd.0), DWMWA_WINDOW_CORNER_PREFERENCE, (&raw const corner).cast(), size_of_val(&corner) as u32) };
+}
+
+/// How far a window reaches past what shows of it, on each side (left, top, right, bottom), physical: Windows keeps
+/// invisible borders around it for resizing, which its place and size include.
+pub fn unseen(window: &tauri::WebviewWindow) -> (i32, i32, i32, i32) {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
+    let (Ok(hwnd), Ok(at), Ok(size)) = (window.hwnd(), window.outer_position(), window.outer_size()) else { return (0, 0, 0, 0) };
+    let mut seen = RECT::default();
+    // SAFETY: the window's own handle, and a RECT of the attribute's size to fill.
+    let got = unsafe { DwmGetWindowAttribute(windows::Win32::Foundation::HWND(hwnd.0), DWMWA_EXTENDED_FRAME_BOUNDS, (&raw mut seen).cast(), size_of::<RECT>() as u32) };
+    if got.is_err() || seen.right <= seen.left {
+        return (0, 0, 0, 0);
+    }
+    (seen.left - at.x, seen.top - at.y, at.x + size.width as i32 - seen.right, at.y + size.height as i32 - seen.bottom)
+}
+
 /// The package's helper, beside this program.
 fn helper() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;

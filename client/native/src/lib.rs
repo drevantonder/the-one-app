@@ -902,31 +902,86 @@ fn toggle_panel(at: Option<tauri::Rect>) {
     }
 }
 
-/// A window like the panel's, shown under the menu bar or tray item at `at` (its place and size on the screen,
-/// physical), or hidden if it shows; with none, at the top right.
+/// A window like the panel's, shown where this computer shows its tray's flyouts, or hidden if it shows: by the item at
+/// `at` (its place and size on the screen, physical) if given, else in the corner where the tray is.
 #[cfg(desktop)]
 fn toggle_under(p: &tauri::WebviewWindow, at: Option<tauri::Rect>) {
     if p.is_visible().unwrap_or(false) {
         let _ = p.hide();
         return;
     }
-    // Its size as made: a window never shown yet says none.
-    let scale = p.scale_factor().unwrap_or(1.0);
-    let size = tauri::PhysicalSize::new((PANEL.0 * scale) as u32, (PANEL.1 * scale) as u32);
-    if let Some(at) = at {
-        let (pos, item) = (at.position.to_physical::<f64>(scale), at.size.to_physical::<f64>(scale));
-        let x = pos.x + item.width / 2.0 - size.width as f64 / 2.0;
-        // Under an item at the top of the screen (a Mac's menu bar), over one at the bottom (a Windows taskbar).
-        let top = p.current_monitor().ok().flatten().map(|m| (m.position().y as f64 + m.size().height as f64 / 2.0) > pos.y).unwrap_or(true);
-        let y = if top { pos.y + item.height } else { pos.y - size.height as f64 };
-        let _ = p.set_position(tauri::PhysicalPosition::new(x.max(0.0), y.max(0.0)));
-    } else if let Some(m) = p.current_monitor().ok().flatten() {
-        // With no item to sit under (opened by its command), at the screen's top right, as a menu bar item's would.
-        let margin = (8.0 * m.scale_factor()) as i32;
-        let _ = p.set_position(tauri::PhysicalPosition::new(m.position().x + m.size().width as i32 - size.width as i32 - margin, m.position().y + margin));
-    }
+    let Some(m) = p.current_monitor().ok().flatten() else { return };
+    let scale = m.scale_factor();
+    // Its size as last fitted to its screen; a window never shown yet says none, so as made.
+    let size = p.outer_size().ok().filter(|s| s.width > 0 && s.height > 0).unwrap_or(tauri::PhysicalSize::new((PANEL.0 * scale) as u32, (PANEL.1 * scale) as u32));
+    // What shows of it is what's placed: Windows' window reaches past it, invisibly.
+    #[cfg(windows)]
+    let (left, top, right, bottom) = windows::unseen(p);
+    #[cfg(not(windows))]
+    let (left, top, right, bottom) = (0, 0, 0, 0);
+    let seen = ((size.width as i32 - left - right).max(1) as u32, (size.height as i32 - top - bottom).max(1) as u32);
+    let item = at.map(|at| (at.position.to_physical::<f64>(scale), at.size.to_physical::<f64>(scale)));
+    let place = flyout(m.work_area(), (m.position().x, m.position().y, m.size().width, m.size().height), seen, item.map(|(p, s)| (p.x, p.y, s.width, s.height)), scale);
+    let _ = p.set_position(tauri::PhysicalPosition::new(place.0 - left, place.1 - top));
     let _ = p.show();
     let _ = p.set_focus();
+}
+
+/// The bar the tray is on: which side of the screen it takes from the work area.
+#[derive(Clone, Copy, PartialEq)]
+enum Bar {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+/// Where a flyout of `size` goes, all physical: inside the monitor's work area (`work`; the taskbar's or panel's room
+/// left out of `screen`), a gap from the bar and the edges as the OS keeps its own (Windows 11's 12 px, a Mac's popover
+/// just under the menu bar), centred on its tray `item` if it has one and that's on the bar, else in the bar's corner:
+/// the end where the tray is (the right, or the bottom of a side bar). An item in Windows' overflow, above its taskbar,
+/// is off the bar, so it goes in the corner, as Windows' own flyouts do.
+#[cfg(desktop)]
+fn flyout(work: &tauri::PhysicalRect<i32, u32>, screen: (i32, i32, u32, u32), size: (u32, u32), item: Option<(f64, f64, f64, f64)>, scale: f64) -> (i32, i32) {
+    let gap = scale * if cfg!(target_os = "macos") { 5.0 } else if cfg!(windows) { 12.0 } else { 8.0 };
+    let (wx, wy, ww, wh) = (work.position.x as f64, work.position.y as f64, work.size.width as f64, work.size.height as f64);
+    let (sx, sy, sw, sh) = (screen.0 as f64, screen.1 as f64, screen.2 as f64, screen.3 as f64);
+    let (w, h) = (size.0 as f64, size.1 as f64);
+    // The side the work area gives up, else the item's side of the screen, else where this OS keeps it.
+    let bar = if wy > sy {
+        Bar::Top
+    } else if wy + wh < sy + sh {
+        Bar::Bottom
+    } else if wx > sx {
+        Bar::Left
+    } else if wx + ww < sx + sw {
+        Bar::Right
+    } else if let Some((_, iy, _, _)) = item {
+        if iy < sy + sh / 2.0 { Bar::Top } else { Bar::Bottom }
+    } else if cfg!(windows) {
+        Bar::Bottom
+    } else {
+        Bar::Top
+    };
+    let on_bar = item.filter(|&(ix, iy, iw, ih)| match bar {
+        Bar::Top => iy < wy,
+        Bar::Bottom => iy + ih > wy + wh,
+        Bar::Left => ix < wx,
+        Bar::Right => ix + iw > wx + ww,
+    });
+    let (min_x, max_x) = (wx + gap, (wx + ww - w - gap).max(wx + gap));
+    let (min_y, max_y) = (wy + gap, (wy + wh - h - gap).max(wy + gap));
+    let (x, y) = match (bar, on_bar) {
+        (Bar::Top, Some((ix, _, iw, _))) => (ix + iw / 2.0 - w / 2.0, min_y),
+        (Bar::Bottom, Some((ix, _, iw, _))) => (ix + iw / 2.0 - w / 2.0, max_y),
+        (Bar::Left, Some((_, iy, _, ih))) => (min_x, iy + ih / 2.0 - h / 2.0),
+        (Bar::Right, Some((_, iy, _, ih))) => (max_x, iy + ih / 2.0 - h / 2.0),
+        (Bar::Top, None) => (max_x, min_y),
+        (Bar::Bottom, None) => (max_x, max_y),
+        (Bar::Left, None) => (min_x, max_y),
+        (Bar::Right, None) => (max_x, max_y),
+    };
+    (x.clamp(min_x, max_x).round() as i32, y.clamp(min_y, max_y).round() as i32)
 }
 
 #[cfg(not(desktop))]
@@ -949,8 +1004,12 @@ fn popup(handle: &AppHandle, label: &str, page: &str) -> tauri::Result<tauri::We
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false)
+        // Windows' system shadow, as its flyouts have.
+        .shadow(true)
         .build()?;
     appear(&window);
+    #[cfg(windows)]
+    windows::round(&window);
     let hide = window.clone();
     window.on_window_event(move |e| {
         if let tauri::WindowEvent::Focused(false) = e {
