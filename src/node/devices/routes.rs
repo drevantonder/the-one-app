@@ -57,10 +57,10 @@ struct Remove {
     user: Option<String>,
 }
 
-async fn remove(State(node): State<Node>, me: Me, Body(body): Body<Remove>) -> Reply {
+async fn remove(State(node): State<Node>, Body(body): Body<Remove>) -> Reply {
     match body.user {
-        Some(user) => Ok(Json(node.remove_person(&me.caller, &user).await?)),
-        None => Ok(Json(node.remove_device(&me.caller, given(body.key.as_deref().unwrap_or_default(), "key")?).await?)),
+        Some(user) => Ok(Json(node.remove_person(&user).await?)),
+        None => Ok(Json(node.remove_device(given(body.key.as_deref().unwrap_or_default(), "key")?).await?)),
     }
 }
 
@@ -86,15 +86,15 @@ struct Invite {
 }
 
 /// → `{ link, until }`.
-async fn invite_link(State(node): State<Node>, me: Me, Body(body): Body<Invite>) -> Reply {
+async fn invite_link(State(node): State<Node>, Body(body): Body<Invite>) -> Reply {
     let role = if body.admin { Role::Admin } else { Role::Member };
-    let (link, until) = node.invite_someone(&me.caller, given(&body.name, "name")?, role).await?;
+    let (link, until) = node.invite_someone(given(&body.name, "name")?, role).await?;
     Ok(Json(json!({ "link": link, "until": until })))
 }
 
 /// The requests to join this device's person may approve (`Node::device_requests`).
-async fn device_requests(State(node): State<Node>, me: Me) -> Reply {
-    Ok(Json(json!(node.device_requests(&me.caller).await?)))
+async fn device_requests(State(node): State<Node>) -> Reply {
+    Ok(Json(json!(node.device_requests().await?)))
 }
 
 /// Lets in the device showing `code`, as whoever asked, or with `recovery`, the network's recovery key (hex), read from
@@ -108,14 +108,14 @@ struct Approve {
     recovery: Option<String>,
 }
 
-async fn approve(State(node): State<Node>, me: Me, Body(body): Body<Approve>) -> Reply {
+async fn approve(State(node): State<Node>, Body(body): Body<Approve>) -> Reply {
     let code = given(&body.code, "code")?;
     if let Some(recovery) = &body.recovery {
         let secret: [u8; 32] = crate::keys::unhex(recovery.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
         let key = ed25519_dalek::SigningKey::from_bytes(&secret);
-        return Ok(Json(node.approve_with_recovery(&me.caller, code, &key, body.confirm).await?));
+        return Ok(Json(node.approve_with_recovery(code, &key, body.confirm).await?));
     }
-    Ok(Json(node.approve(&me.caller, code, body.confirm).await?))
+    Ok(Json(node.approve(code, body.confirm).await?))
 }
 
 #[derive(Deserialize)]
@@ -125,13 +125,13 @@ struct Code {
 }
 
 /// Turns down the device showing `code` (`Node::refuse_device`).
-async fn refuse_device(State(node): State<Node>, me: Me, Body(body): Body<Code>) -> Reply {
-    Ok(Json(node.refuse_device(&me.caller, given(&body.code, "code")?).await?))
+async fn refuse_device(State(node): State<Node>, Body(body): Body<Code>) -> Reply {
+    Ok(Json(node.refuse_device(given(&body.code, "code")?).await?))
 }
 
 /// Forgets what one of the caller's devices signed in with.
-async fn forget_sign_in(State(node): State<Node>, me: Me, Body(body): Body<Device>) -> Reply {
-    node.forget_sign_in(&me.caller, given(&body.key, "key")?).await?;
+async fn forget_sign_in(State(node): State<Node>, Body(body): Body<Device>) -> Reply {
+    node.forget_sign_in(given(&body.key, "key")?).await?;
     Ok(Json(json!({})))
 }
 

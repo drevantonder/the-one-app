@@ -252,11 +252,11 @@ fn waiting(asked: Vec<DeviceRequest>, code: &str) -> Result<DeviceRequest> {
     Ok(r)
 }
 
-/// Whether `caller` may answer request `r`: `Some(None)` for one of their own devices, `Some(invite)` for the first
+/// Whether `user` may answer request `r`: `Some(None)` for one of their own devices, `Some(invite)` for the first
 /// device of someone they invited, whose proof is that invite's.
-fn mine_or_invited<'a>(r: &DeviceRequest, caller: &Caller, invites: &'a BTreeMap<String, Invited>, device: &crate::keys::Endpoint) -> Option<Option<&'a Invited>> {
+fn mine_or_invited<'a>(r: &DeviceRequest, user: &str, invites: &'a BTreeMap<String, Invited>, device: &crate::keys::Endpoint) -> Option<Option<&'a Invited>> {
     match (&r.proof, invites.get(&r.user)) {
-        (None, _) if r.user == caller.user => Some(None),
+        (None, _) if r.user == user => Some(None),
         (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), device) => Some(Some(i)),
         _ => None,
     }
@@ -379,9 +379,9 @@ impl Node {
     /// Invites someone new to join, called `name`, as `role`, for this device's person, an admin: its secret is made
     /// here, auth is told only its hash (signed by this device), and it's kept in their own scope, for any of their
     /// devices to approve the newcomer's first device. → (the link, until when).
-    pub async fn invite_someone(&self, caller: &Caller, name: &str, role: Role) -> Result<(String, u64)> {
-        ensure!(caller.user == self.user()?, "invite from one of your own devices: {} keeps your invites with you", self.device_name());
-        ensure!(self.with(|i| Ok(i.r.db().may(&caller.user, "invite", scopes::NETWORK)))?, "only admins invite someone");
+    pub async fn invite_someone(&self, name: &str, role: Role) -> Result<(String, u64)> {
+        let me = self.user()?;
+        ensure!(self.with(|i| Ok(i.r.db().may(&me, "invite", scopes::NETWORK)))?, "only admins invite someone");
         let (address, key, name_) = (self.address()?, self.signing_key(), name.to_string());
         let user = new_id();
         let made = {
@@ -393,13 +393,13 @@ impl Node {
         Ok((made.link, made.until))
     }
 
-    /// The requests to join that `caller` may approve, as auth lists them to this device: their own devices', and
+    /// The requests to join that this device's person may approve, as auth lists them to it: their own devices', and
     /// those of the people they invited whose proof is right, but those they said weren't theirs. Each with its code,
     /// which the device asking shows too, to compare, and when and where it asked from.
-    pub async fn device_requests(&self, caller: &Caller) -> Result<Vec<Value>> {
+    pub async fn device_requests(&self) -> Result<Vec<Value>> {
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let invites = if caller.user == self.user()? { self.invites().await? } else { BTreeMap::new() };
+        let (me, invites) = (self.user()?, self.invites().await?);
         let refused = self.0.refused.lock().unwrap().clone();
         let mut out = Vec::new();
         for r in asked {
@@ -407,7 +407,7 @@ impl Node {
             if refused.contains(&r.key) || self.taken_out(&device.key)? {
                 continue;
             }
-            let mut shown = match mine_or_invited(&r, caller, &invites, &device) {
+            let mut shown = match mine_or_invited(&r, &me, &invites, &device) {
                 Some(None) => json!({ "device": r.name, "person": r.person, "yours": true }),
                 Some(Some(i)) => json!({ "device": r.name, "person": i.name, "role": i.role, "new": true }),
                 None => continue,
@@ -430,20 +430,19 @@ impl Node {
         Ok(out)
     }
 
-    /// Turns down the device whose join code is `code`, one `caller` may approve: its request (and what its sign-in
+    /// Turns down the device whose join code is `code`, one this device's person may approve: its request (and what its sign-in
     /// showed) is forgotten at auth, and it isn't shown here again when it asks again. One of their own ("Not Me") is
     /// turned down by an entry (`content::refuse`), so no device of theirs lets it in after. → which it was.
-    pub async fn refuse_device(&self, caller: &Caller, code: &str) -> Result<Value> {
+    pub async fn refuse_device(&self, code: &str) -> Result<Value> {
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = waiting(asked, &code)?;
-        let invites = if caller.user == self.user()? { self.invites().await? } else { BTreeMap::new() };
-        let mine = mine_or_invited(&r, caller, &invites, &r.endpoint()?).context("that device isn't yours, or someone's you invited, to turn down")?;
+        let invites = self.invites().await?;
+        let mine = mine_or_invited(&r, &self.user()?, &invites, &r.endpoint()?).context("that device isn't yours, or someone's you invited, to turn down")?;
         if mine.is_none() && !self.taken_out(&r.endpoint()?.key)? {
-            ensure!(caller.user == self.user()?, "{} isn't one of your devices, so turn it down on one that is", self.device_name());
-            self.member_content(caller, content::refuse(&r.endpoint()?, &r.name)).await?;
+            self.member_content(&Caller::local(self)?, content::refuse(&r.endpoint()?, &r.name)).await?;
         }
         {
             let mut refused = self.0.refused.lock().unwrap();
@@ -461,8 +460,7 @@ impl Node {
     /// (which counts as an admin's approval, and is listed as its use), sealed each epoch of each scope they may open
     /// (opened through the recovery key's copy), and let onto the network by the recovery key. Without `confirm`, says
     /// whose it is. → what it is, or what was done.
-    pub async fn approve_with_recovery(&self, caller: &Caller, code: &str, recovery: &ed25519_dalek::SigningKey, confirm: bool) -> Result<Value> {
-        ensure!(self.this_machine(caller), "the recovery key is used only on the machine it's kept on");
+    pub async fn approve_with_recovery(&self, code: &str, recovery: &ed25519_dalek::SigningKey, confirm: bool) -> Result<Value> {
         let at = recovery.verifying_key().to_bytes();
         ensure!(self.with(|i| Ok(i.r.db().recovery()? == Some(at)))?, "that isn't {YOURS}'s recovery key");
         let code = code_of(code);
@@ -534,26 +532,25 @@ impl Node {
         Ok(opened)
     }
 
-    /// Approves the device whose join code is `code`, for `caller`, whose device this is: with `confirm`, lets it in
+    /// Approves the device whose join code is `code`, for this device's person: with `confirm`, lets it in
     /// (`approve_request`) and forgets its request; without, says what it is. → what it is, or what was done.
-    pub async fn approve(&self, caller: &Caller, code: &str, confirm: bool) -> Result<Value> {
-        // Its entries count, and the keys it seals are its person's, only as one of their own devices.
-        ensure!(caller.user == self.user()?, "{} isn't one of your devices, so approve it on one that is", self.device_name());
+    pub async fn approve(&self, code: &str, confirm: bool) -> Result<Value> {
+        let me = self.user()?;
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = waiting(asked, &code)?;
         let invite = match &r.proof {
-            Some(_) if caller.user == self.user()? => self.invites().await?.remove(&r.user),
+            Some(_) => self.invites().await?.remove(&r.user),
             _ => None,
         };
         let who = invite.as_ref().map(|i| i.name.clone()).unwrap_or(r.person.clone());
         if !confirm {
-            ensure!(r.user == caller.user || invite.is_some(), "that device is {who}'s: one of their own devices approves it");
+            ensure!(r.user == me || invite.is_some(), "that device is {who}'s: one of their own devices approves it");
             return Ok(json!({ "device": r.name, "person": who, "new": invite.is_some() }));
         }
-        let approved = self.approve_request(caller, &r, invite.as_ref()).await?;
+        let approved = self.approve_request(&r, invite.as_ref()).await?;
         // Marked approved, for the device waiting on it to see, with the network it's in.
         if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
             tracing::warn!("marking a request approved at auth: {err:#}");
@@ -568,7 +565,8 @@ impl Node {
     /// device may), seals it every epoch this device holds of each scope its person uses (a newcomer's own scope is
     /// theirs: their device makes its first epoch), and tells the relay to let it in. A newcomer's request counts only with
     /// the proof their invite's secret makes with its key. → what it was sealed, and what it wasn't.
-    pub async fn approve_request(&self, caller: &Caller, r: &DeviceRequest, invite: Option<&Invited>) -> Result<Value> {
+    pub async fn approve_request(&self, r: &DeviceRequest, invite: Option<&Invited>) -> Result<Value> {
+        let caller = &Caller::local(self)?;
         let endpoint = r.endpoint()?;
         ensure!(!self.taken_out(&endpoint.key)?, "{} was turned down or taken out, so it isn't let in again: start again on it, for a new code", r.name);
         let on = r.device.as_deref().map(crate::keys::unhex).transpose().context("the device it's on is 64 hex characters")?;
@@ -674,10 +672,10 @@ impl Node {
         self.with(|i| Ok(i.r.db().machine_ever(key)?.is_some_and(|m| m.removed)))
     }
 
-    /// Forgets what one of `caller`'s devices (`key`, hex) signed in with: a new device's sign-in is no longer checked
-    /// against it.
-    pub async fn forget_sign_in(&self, caller: &Caller, key: &str) -> Result<()> {
-        ensure!(caller.user == self.user()?, "{} isn't one of your devices, so do this on one that is", self.device_name());
+    /// Forgets what one of this device's person's devices (`key`, hex) signed in with: a new device's sign-in is no
+    /// longer checked against it.
+    pub async fn forget_sign_in(&self, key: &str) -> Result<()> {
+        let caller = &Caller::local(self)?;
         let key = crate::keys::unhex(key).context("a device's key is 64 hex characters")?;
         let theirs = self.with(|i| Ok(i.r.db().machine(&key)?.is_some_and(|m| m.user == caller.user && m.sign_in.is_some())))?;
         ensure!(theirs, "that isn't one of your devices with a sign-in to forget");
@@ -739,8 +737,7 @@ impl Node {
             }
             // Another device of theirs may have just let it in.
             self.read_scope_now(&Scope::Global).await?;
-            let caller = Caller::own(self.0.id, user.clone());
-            let approved = self.approve_request(&caller, &r, None).await;
+            let approved = self.approve_request(&r, None).await;
             match approved {
                 Ok(_) => {
                     tracing::info!("let {} in by its sign-in", r.name);
@@ -826,11 +823,12 @@ impl Node {
     /// Removes a device (by name or key), and what's part of it (its services, and its apps' sign-ins), for its person or
     /// an admin: the relay told to let each in no more first, so it reaches the bucket no more, then their `remove`
     /// entries, and a new epoch of each scope it could open (as a client:
-    /// compute holds no epochs) that `caller` starts epochs of, sealed to every client left that opens it and the
-    /// recovery key; databases move to it at their next routine copy. A scope `caller` can't start a new epoch of is
+    /// compute holds no epochs) that this device's person starts epochs of, sealed to every client left that opens it and
+    /// the recovery key; databases move to it at their next routine copy. A scope they can't start a new epoch of is
     /// said: one of its own admins' devices does. Off the relay first, then unlisted. A device removing itself (as it
     /// signs out) does it itself, never through a node. → what was done.
-    pub async fn remove_device(&self, caller: &Caller, device: &str) -> Result<Value> {
+    pub async fn remove_device(&self, device: &str) -> Result<Value> {
+        let caller = &Caller::local(self)?;
         let key = self.find_machine(device)?;
         let (gone, keys, scopes) = self.with(|i| {
             let db = i.r.db();
@@ -863,7 +861,8 @@ impl Node {
     /// and a new epoch of each scope they could open but their own (`global`, and each group they were in),
     /// sealed to every client left that opens it and the recovery key. Their own scope is kept as it is: removing deletes
     /// nothing. → what was done.
-    pub async fn remove_person(&self, caller: &Caller, user: &str) -> Result<Value> {
+    pub async fn remove_person(&self, user: &str) -> Result<Value> {
+        let caller = &Caller::local(self)?;
         let user = self.find_user(user)?;
         let (name, keys, scopes) = self.with(|i| {
             let db = i.r.db();

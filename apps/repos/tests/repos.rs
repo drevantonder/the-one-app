@@ -68,7 +68,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let e = one::keys::Endpoint::of(&sams);
     let proof = one::keys::invite_proof(secret.as_bytes(), &e);
     let asks = DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
-    a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
+    a.approve_request(&asks, Some(&sam)).await.unwrap();
 
     // Repos' keys in global, as Sam's device opens them and hands them to the node with his calls.
     let global = one::database::scopes::Scope::Global;
@@ -271,7 +271,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let e = one::keys::Endpoint::of(&sams);
     let proof = one::keys::invite_proof(secret.as_bytes(), &e);
     let asks = DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
-    a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
+    a.approve_request(&asks, Some(&sam)).await.unwrap();
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
     let epochs = a.sealed_keys(&me, &global, Some(&one::keys::hex(&e.key)), None).await.unwrap();
     let mut keys = Vec::new();
