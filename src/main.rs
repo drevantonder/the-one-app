@@ -1524,6 +1524,7 @@ static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0
 fn oned(args: &[String]) -> Result<()> {
     let named: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     match named.as_slice() {
+        #[cfg(target_os = "linux")]
         [] if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--sandboxed=")) => one::sandbox::launch(std::path::Path::new(dir)),
         [] => {
             usual_path();
