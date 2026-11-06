@@ -1267,7 +1267,18 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare
         if let Some(code) = said.iter().rev().find_map(|l| l.strip_prefix("Code: "))
             && !approved
         {
-            approve_code(dir, code)?;
+            // Someone else's device is approved by one of theirs (their browser, which joined first), not this machine's.
+            match approve_code(dir, code) {
+                Err(err) if person.is_some() && format!("{err:#}").contains("one of their own devices approves it") => {
+                    println!(
+                        "The Android app of this build is signed in to the throwaway network as {who}, on the device {device}, and waits for one of {who}'s own devices to let it in.
+  Approve it as {who}: in their browser (`{CLI} throwaway client web --as {who}` makes it), open {address}/approve#{}, or {CLI} computer screen --device {device} for the code",
+                        code.replace(' ', "")
+                    );
+                    return Ok(());
+                }
+                approved => approved?,
+            }
             approved = true;
         }
     }
