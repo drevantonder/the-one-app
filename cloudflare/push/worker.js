@@ -13,7 +13,7 @@
 //
 // One of the network's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }] }`,
 // each `note` base64url bytes sealed to `to`'s seal key by the sender, which takes that key from the
-// network's signed entries, never from here. It says, of each `to`, `sent`, `none` (it registered no address), `gone`
+// network's signed steps, never from here. It says, of each `to`, `sent`, `none` (it registered no address), `gone`
 // (its address stopped working, or the relay no longer lists it, so it's forgotten) or `failed`. `quiet` wakes the
 // device without a visible alert, where the platform can (APNs' background push); a browser always shows one.
 //

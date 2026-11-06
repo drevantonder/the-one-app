@@ -116,7 +116,7 @@ async function anOlderBuildWritesNothing() {
 
 /// The URL signer creates a step only once the one before it is there (or the copy up to it, or the database's older
 /// steps were deleted), and a copy only once its step is: an endpoint without the keys can't leave a gap in a
-/// database's or log's steps that its readers take for the end, nor plant one past it. A writer that asks for the positions after its own in the same trip, as an older one does, is given its own.
+/// database's steps that its readers take for the end, nor plant one past it. A writer that asks for the positions after its own in the same trip, as an older one does, is given its own.
 async function stepsAreCreatedInTurn() {
   const there = new Set(["s/a/node/log/000000000001", "s/a/node/log/000000000002", "s/a/db/copy/000000000005", "s/a/old/tidied"]);
   const R2 = { head: async (name) => (there.has(name) ? {} : null) };

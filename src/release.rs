@@ -12,7 +12,7 @@ use crate::database::content::Content;
 use crate::keys::Key;
 
 pub const APP: &str = "node";
-/// The kind of entry, or step, that says a release of the node.
+/// The kind of step that says a release of the node.
 pub const NODE_KIND: &str = "node-release";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -35,7 +35,7 @@ pub struct Release {
 /// The namespace release signatures are made in, so nothing else the key signs passes for a release.
 pub const NAMESPACE: &str = "release";
 
-/// A service's release is an entry of its own kind, which a device that doesn't know it ignores.
+/// A service's release is a step of its own kind, which a device that doesn't know it ignores.
 pub const SERVICE_KIND: &str = "service-release";
 
 pub fn content(release: &Release) -> Content {
@@ -128,7 +128,7 @@ pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
     }
-    // The entry's commit and date aren't signed; the binary's own are.
+    // The release step's commit and date aren't signed; the binary's own are.
     let version = Version::of(&tmp);
     if !version.as_ref().is_some_and(|v| v.commit == r.commit && v.target == crate::config::TARGET && v.committed >= crate::config::COMMITTED) {
         let _ = std::fs::remove_file(&tmp);

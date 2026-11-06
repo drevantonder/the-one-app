@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "kernel",
+      "name": "cloudflare",
       "dependencies": {
         "@better-auth/oauth-provider": "1.7.15",
         "@better-auth/passkey": "1.7.15",

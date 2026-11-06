@@ -1,10 +1,10 @@
 // The Cloudflare node: a node of the network on Cloudflare Workers, which client devices ask over iroh as they ask
 // any node, last in run priority's order: when none of their person's machines answers. It holds no keys. Each
 // request is from the device its connection proved (or the device that vouched for that session's key, as nodes take
-// one: `x-one-endpoint`), says whose it is (`x-one-user`), which the network's entries must list that device as, and
+// one: `x-one-endpoint`), says whose it is (`x-one-user`), which the network must list that device as, and
 // brings the keys of the databases its call reaches, sealed to this node for that device (`x-one-keys`); one that lacks
 // some is answered 428 with what it needs, as a node on a machine answers. Who can do what it reads from the network's
-// log in the bucket and asks of the scope database it builds from it (src/lib.rs, the machine node's own Rust), and
+// steps in the bucket and asks of the scope database it builds from them (src/lib.rs, the machine node's own Rust), and
 // each app's latest deploy from the bucket too, through the URL signer's URLs, keeping what it read sealed in its
 // Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, src/app/runtime/shim.js as its `ctx`) and writes
 // what a call wrote as one step (src/database/stored.rs). An app's requests go out from here, filled in with the Vault's items it's
@@ -17,7 +17,7 @@
 // device that's off.
 //
 // Its Durable Objects are of one class, `Node`, in two parts. Each person's requests run in an object of their own
-// (`user:<id>`), which alone holds what they handed and what it opened with it: their databases, the entries it read,
+// (`user:<id>`), which alone holds what they handed and what it opened with it: their databases, the steps it read,
 // their apps' isolates and its own copy of what it read from the bucket, so nothing one person's call opened is ever
 // another's. The object `node` is this node as an iroh endpoint (src/net.rs), of its own key, with no socket, which
 // the relay wakes with the datagrams sent to it and which sends its own back through the relay; it passes each request
@@ -329,7 +329,7 @@ class Person {
     /// database's (`<scope>/<app>/<database>`) keys by epoch, base64url. Forgotten when they expire, or its person loses
     /// the scope.
     this.handed = new Map();
-    /// When each scope's entries were last read here, and with which keys.
+    /// When each scope's steps were last read here, and with which keys.
     this.scopesRead = new Map();
     /// Databases it has open, by where they are in the bucket, each brought up to what the bucket has when a call
     /// reaches it again: `{ handle, keys, queue, used, users }`. A call uses one only if it was handed exactly the keys
@@ -342,8 +342,8 @@ class Person {
 
   /// Whom a request is from: the device the endpoint object proved, for this object's person, until when its word
   /// lasts (a session's certificate's). Whether the network lists it as theirs is checked as soon as the network's
-  /// entries are read (`networkFor`), before anything else of theirs is: until then the keys it hands only read those
-  /// entries, and are kept, and what they open fetched, only once it's checked (`forgetLost`). Keys sealed to another
+  /// steps are read (`networkFor`), before anything else of theirs is: until then the keys it hands only read those
+  /// steps, and are kept, and what they open fetched, only once it's checked (`forgetLost`). Keys sealed to another
   /// node, or for another device, are left.
   whom(request) {
     const from = JSON.parse(request.headers.get(FROM) || "null");
@@ -385,7 +385,7 @@ class Person {
   }
 
   /// A sign-in's keys of `app`'s `database` in `scope`, by epoch, or null. Before its device is checked, of the
-  /// network's own entries, those it hands now too, which check it.
+  /// network's own steps, those it hands now too, which check it.
   keysOf(who, scope, app, database) {
     const kept = this.handed.get(who.hash);
     const found = (kept && kept.until > Date.now() && kept.keys.get(`${scope}/${app}/${database}`)) || null;
@@ -448,8 +448,8 @@ class Person {
     })));
   }
 
-  /// Refuses a device the network's log doesn't list as its person's, forgetting what it handed, and forgets what a
-  /// device was handed for scopes its person may no longer use, as soon as the log says so.
+  /// Refuses a device the network doesn't list as its person's, forgetting what it handed, and forgets what a
+  /// device was handed for scopes its person may no longer use, as soon as the network says so.
   forgetLost(who) {
     const { scopes, joined, removed, device, runs } = JSON.parse(scopes_of(this.owner, who.user, who.device));
     if (removed || !joined || device == null) {
@@ -468,11 +468,11 @@ class Person {
   }
 
   /// The network as a request's person sees it (src/lib.rs: `network`): `{ state, apps, me, epochs }`, from the
-  /// entries of Everyone's, their own and the groups' they handed the keys of. Their device is checked first.
+  /// steps of Everyone's, their own and the groups' they handed the keys of. Their device is checked first.
   async networkFor(who) {
     await this.readScopes(who, ["global"]);
     const runs = this.forgetLost(who);
-    // Their own log's keys are asked for only if they chose this node to run their own things; it and their groups'
+    // Their own scope database's keys are asked for only if they chose this node to run their own things; it and their groups'
     // are read whenever they're handed.
     const own = `user:${who.user}`;
     if (runs.includes(own) && !this.keysOf(who, own, NODE_APP, LOG)) await this.needs([{ scope: own, app: NODE_APP, database: LOG, have: [] }], who);

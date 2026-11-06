@@ -17,8 +17,8 @@
 // nodes kept warm between calls, and the keys it opened, all while it's asked; once nobody has asked for `IDLE`, it
 // closes its endpoint, forgets its keys and ends itself.
 //
-// It trusts no node for who's who or for keys: it reads the network's signed entries from the bucket itself, through
-// the URL signer, replays them as nodes do, and asks the scope database it builds from them, with the same Rust as
+// It trusts no node for who's who or for keys: it reads the network's signed steps from the bucket itself, through
+// the URL signer, and asks the scope database it builds from them, with the same Rust as
 // every node (cloudflare/node/src/clients.rs). It asks only the compute endpoints that lists as running its person's
 // calls, hands each only the keys of the scopes it runs, of databases an MCP request uses (`mayHand`) and epochs from
 // each one's newest copy, and takes a 428 only from the node that answered, for its own listed seal key. What a tool needed is kept per tool, so a call hands only its own.
@@ -342,7 +342,7 @@ export class Client extends DurableObject {
       try {
         nodes = await this.start(me);
       } catch (err) {
-        // Taken out since it was approved: the relay no longer lets its key in, nor the entries list it.
+        // Taken out since it was approved: the relay no longer lets its key in, nor the network lists it.
         this.isApproved = false;
         return answerAll(body, /isn't one of the network's|not listed|no keys of your/.test(err.message) ? approve : `${device.name} couldn't start: ${err.message}`);
       }
@@ -431,7 +431,7 @@ export class Client extends DurableObject {
   }
 
   /// Reads who's who from the bucket (what's new, after the first time), one reading at a time, and the nodes it asks
-  /// with it: those the entries list as running its person's calls, that are on the relay now, in run priority's
+  /// with it: those the network lists as running its person's calls, that are on the relay now, in run priority's
   /// order as it last read it.
   see(me) {
     const reading = this.viewing.then(async () => {
@@ -453,7 +453,7 @@ export class Client extends DurableObject {
     return this.order;
   }
 
-  /// Reads run priority's order from the network's state, for the nodes it asks: only nodes the entries list are
+  /// Reads run priority's order from the network's state, for the nodes it asks: only nodes the network lists are
   /// ever in it, whatever the state says.
   async learnOrder(me) {
     if (!this.run || this.run.learned) return;
@@ -549,7 +549,7 @@ export class Client extends DurableObject {
     }
   }
 
-  /// What it hands `node` with a call of `tool`: the keys of `needs` in the scopes the entries say it runs for this
+  /// What it hands `node` with a call of `tool`: the keys of `needs` in the scopes the network says it runs for this
   /// device's person, each epoch it opens, sealed to that node's listed seal key, for this device's key, until its
   /// access token expires. Null if the node has them already (unless `again`), or there's nothing to hand.
   async handoff(me, to, tool, needs, again) {

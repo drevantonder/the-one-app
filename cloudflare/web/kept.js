@@ -1,5 +1,5 @@
 // What this browser keeps in IndexedDB's `one` database, its one store: its keys by person (`device:<user>`), the
-// invites it made (`invite:<user>`), the nodes it asks (`nodes:<user>`), and `global`'s entries it checked, with the
+// invites it made (`invite:<user>`), the nodes it asks (`nodes:<user>`), and `global`'s steps it checked, with the
 // network's first and the members they make (`global:<user>`). A module of its own, for the worker that reaches the
 // nodes (net-worker.js) to read with nothing else.
 

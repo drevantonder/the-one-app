@@ -61,7 +61,7 @@ export function server(version) {
   glue.catch(() => {});
   // Imported here, not above, so the WebAssembly is fetched first.
   const code = Promise.all([import("/shared/crypto.js"), import("/shared/protocol.js"), import("/kept.js")]);
-  /// Of `keys`, the nodes the network's signed entries, as this browser last checked them (`global`), list as running
+  /// Of `keys`, the nodes the network's signed steps, as this browser last checked them (`global`), list as running
   /// something of `user`'s: all of them before it's checked any. A node the relay or a node names besides isn't asked.
   async function theirs(user, keys, kept) {
     const k = (kept === undefined ? await (await code)[2].get(`global:${user}`) : kept)?.members;

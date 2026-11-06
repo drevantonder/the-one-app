@@ -60,7 +60,7 @@ fn main() {
     let out = format!("{out}pub const YOURS: &str = {yours:?};\n");
     // A custom build's one network's address, if it serves only one: its native app never asks where.
     let out = format!("{out}pub const ADDRESS: &str = {:?};\n", optional("address").trim_end_matches('/'));
-    // The network settings a network has until its admins set them (`setting` entries).
+    // The network settings a network has until its admins set them (`setting` steps).
     let mut settings = String::new();
     for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {
         settings.push_str(&format!("({name:?}, {:?}),", value.as_str().unwrap_or_else(|| panic!("the setting {name} isn't text"))));

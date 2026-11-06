@@ -366,7 +366,7 @@ const h = OneUI.react.createElement;
   }
 
   /// This browser's key goes: a removed key can't be let in again, so signing in makes a new one. With it, what it kept
-  /// as that device: the nodes it asks, and the network it was let into and its entries, which the next approval names
+  /// as that device: the nodes it asks, and the network it was let into and its steps, which the next approval names
   /// again. As a native app's device forgets (one-client's `Device::sign_out`).
   async function forgetDevice() {
     events?.abort();

@@ -1,6 +1,6 @@
 # Architecture
 
-Your devices, and your team's, as one place for apps and agents. A network is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; at its address, a few small Workers on Cloudflare, each named by its job, only route, sign in, relay and carry pushes. Each app's database for a scope is the truth, kept as signed steps in the bucket, and who can do what is the scope database's rows.
+Your devices, and your team's, as one place for apps and agents. A network is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; at its address, a few small Workers on Cloudflare, each named by its job, route, sign in, relay, carry pushes and sign bucket URLs. Two Workers are not like those: the remote MCP server is a client, and the Cloudflare node is a node. Each app's database for a scope is the truth, kept as signed steps in the bucket, and who can do what is the scope database's rows.
 
 It's held to targets measured in `one throwaway`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.
 
@@ -33,9 +33,20 @@ A removed device's later steps fail rule 3, because they come after its removal 
 
 ## Designed, not built
 
-- One storage model, and permissions as data: the plan under way is `docs/plan-storage-and-permissions.md`.
 - One key per scope at a time, changed only when a person or a lost device is removed, every database copied under the new key and the old one dropped. Today a scope has numbered epochs, and a new one is made when someone loses the right to open it.
-- Backups' recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.
+- Backups' recovery from nothing: `one backups check --folder` opens a backup with the recovery key alone, but a device restoring with no one left to pair with doesn't yet admit itself. The rules already let the recovery key sign a device's step (`database::rules`); nothing does it yet.
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
 - The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in.
+- What's left of the storage move: `docs/plan-storage-and-permissions.md`.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.
+
+## Decided
+
+Andre, 2026-11-05: the dumbest choice that works.
+
+- A service's identity is its own OS user on Linux (systemd's `DynamicUser=`), Seatbelt as the person on a Mac, AppContainer on Windows once Windows runs a node.
+- A service that needs the person (`person: true`: Shell, AGENTS.md, AI Usage, the Mac's Apple-data services) is allowed for any app, said plainly when adding ("Runs as you on mac"), never silently.
+- The machine that deploys builds a network's own app's service, for every platform it can build; nodes never build. A network's own Mac service gets no Mac permissions.
+- One node runs a service. When it's gone nothing moves by itself: the app shows one problem box with Move. For a group's or everyone's app, the admin adding it picks one of their own nodes or the Cloudflare node, and any admin may move it to one of theirs.
+- No Cloudflare Containers. The Cloudflare node runs the app runtime and services built for Cloudflare (Models answers with Workers AI there); Agent Devices stays on computers. Left: a network's own app's service built for Cloudflare, until someone needs one; a call a machine's node runs doesn't reach Workers AI; AI Usage doesn't show its spend.
+- Risks: TCC attribution on a Mac is only learned by trying; `sandbox-exec` is deprecated though Apple ships on it (the fallback is an App Sandbox entitlement per helper, which only we can sign); moving a service loses its state unless it moves it itself.

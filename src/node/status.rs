@@ -1,5 +1,5 @@
 //! How things went, as devices say it: who used each app, its errors and its AI cost; schedules' runs; the build each
-//! device runs; backups' runs. Rows each scope's node database changes in place, not entries: written often, and
+//! device runs; backups' runs. Rows each scope's node database changes in place, not steps of their own: written often, and
 //! needed only as they are now. Each device reads them back into `Status`, which the rest of the node looks at.
 
 use super::*;
@@ -50,7 +50,7 @@ pub struct Status {
     pub builds: HashMap<Key, release::Running>,
     /// In `global`: the latest backup runs, oldest first.
     pub backups: Vec<BackupRun>,
-    /// In `global`: by (place, scope), the newest entry's time a snapshot there holds, and when it was written.
+    /// In `global`: by (place, scope), the newest step's time a snapshot there holds, and when it was written.
     pub covered: BTreeMap<(String, String), (u64, u64)>,
     /// In `global`: when admins were last told of a place's trouble, by place.
     pub alerted: BTreeMap<String, u64>,

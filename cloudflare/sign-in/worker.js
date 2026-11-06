@@ -44,7 +44,7 @@
 // "<device> joined · <place>" once one is approved, opening Settings › Devices. It knows a person's devices as those that
 // asked to join as them here, or said they're theirs as they asked which wait (`devices`), and those that registered
 // with the push Worker as theirs, by a request each signed (`PUSH.theirs`): only for whom to push to, since a device
-// opens a note, and acts on its code, only as the network's signed entries say.
+// opens a note, and acts on its code, only as the network's signed steps say.
 //
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
 // /api/auth/invites"`), is taken once, and counts only from one of the network's endpoints, as the relay's list says
@@ -614,7 +614,7 @@ export class Auth extends DurableObject {
 
   /// Requests waiting: the signed-in person's own devices', or, for a signed request from one of the network's
   /// devices, every one: a device approves only its own person's, or a newcomer's whose invite its person keeps, as
-  /// the entries it writes count only then. Signed in and signed both, it's their device asking: kept as theirs, for
+  /// the steps it writes count only then. Signed in and signed both, it's their device asking: kept as theirs, for
   /// pushes, and shown their own.
   async requests(request) {
     this.expire();

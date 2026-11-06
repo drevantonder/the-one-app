@@ -37,7 +37,7 @@ impl Node {
     }
 
     /// The Vault secret keys of `scope` this machine holds, by number, if it's granted the scope's Vault now: each
-    /// sealed to it in the bucket whose public half is the one its `vault` entry names. None if it isn't granted.
+    /// sealed to it in the bucket whose public half is the one its `vault` step names. None if it isn't granted.
     pub(super) async fn vault_secrets(&self, scope: &Scope) -> Result<Option<BTreeMap<u32, [u8; 32]>>> {
         let publics: Vec<(u32, [u8; 32])> = self.with(|i| {
             let m = i.r.db();
@@ -63,7 +63,7 @@ impl Node {
                     self.0.app_schedules.vault.lock().unwrap().insert((scope.clone(), n), key);
                     out.insert(n, key);
                 }
-                None => tracing::warn!("{name} isn't the Vault key its entry names: passed over"),
+                None => tracing::warn!("{name} isn't the Vault key its step names: passed over"),
             }
         }
         Ok(Some(out))
@@ -71,7 +71,7 @@ impl Node {
 
     /// Says which machines open `scope`'s Vault: `device` added to them (`on`) or taken off, as this device's person,
     /// who must be the scope's admin. Always a new key pair, sealed to each machine and the network's recovery key,
-    /// its public half in a `vault` entry; what's sealed to the old one is sealed to the new by a machine granted both,
+    /// its public half in a `vault` step; what's sealed to the old one is sealed to the new by a machine granted both,
     /// at its next write there. → what it did, in words.
     pub async fn vault_grant(&self, me: &Caller, scope: &Scope, device: &str, on: bool) -> Result<Value> {
         ensure!(me.user == self.user()?, "{} grants only for its own person", self.device_name());
@@ -100,7 +100,7 @@ impl Node {
         } }))
     }
 
-    /// Makes `scope`'s Vault key `n`, for the machines `to`: its `vault` entry first (which, first in causal order,
+    /// Makes `scope`'s Vault key `n`, for the machines `to`: its `vault` step first (which, first in causal order,
     /// makes it), then its secret half sealed to each of them and to the recovery key.
     pub(super) async fn new_vault_key(&self, scope: &Scope, n: u32, to: &[Key], recovery: &Key) -> Result<()> {
         let secret: [u8; 32] = rand::random();
@@ -589,7 +589,7 @@ impl Node {
         if answer["declined"] == true {
             return self.append_as(scope, &caller.user, content::node("vault-request", json!({ "id": id, "declined": true }))).await.map(|_| ());
         }
-        // Named by the request it answers, so answering again (its `set` entry failed, or two devices answered at once)
+        // Named by the request it answers, so answering again (its `set` step failed, or two devices answered at once)
         // changes that item rather than making another.
         let made = id.to_string();
         self.write_item(caller, scope, |items| {

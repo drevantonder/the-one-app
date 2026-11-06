@@ -11,7 +11,7 @@
 // An item is a name, or a database's steps from one position to another (`{ steps: prefix, from, to }`), so a node
 // asks for the positions it reads or writes next in one trip. Any endpoint of the network may read, list and create
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
-// admin's endpoint removes. A step at position n of a database or log (`<prefix>/<n>`, n > 1) is created only once the
+// admin's endpoint removes. A step at position n of a database (`<prefix>/<n>`, n > 1) is created only once the
 // one before it is there, or the copy of the steps up to it (`<prefix>/copy/<n-1>`), or the database's older steps
 // were deleted (`<prefix>/tidied`, src/database/stored.rs), past which its readers look for a copy that holds; and a
 // copy only once its step is: so no endpoint without the keys leaves a gap in the steps its readers take for the end,

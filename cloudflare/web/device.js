@@ -4,7 +4,7 @@
 // call (`x-one-keys`). What it opens stays in this page's memory, as keys that can't be read back. What changes who can
 // do what it signs itself (members.js).
 //
-// Who's who it takes only from the network's own signed entries, checked by its client's WebAssembly (`checked`), never
+// Who's who it takes only from the network's own signed steps, checked by its client's WebAssembly (`checked`), never
 // from what a node says (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must
 // have, which nodes may be handed a scope's keys, and who may approve or remove what. Each is answered there
 // (`steps::Reader`, `view_of` in client/src/members.rs) and only looked up here, so a hacked node gets no keys.
@@ -61,7 +61,7 @@ export async function joinAsk(keys, name, invite) {
 /// The code this browser shows to be approved: its key's, as 4 and 4.
 export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
 
-// Who opens what, as the network's signed entries say (`k`, one-client's `members::view`)
+// Who opens what, as the network's signed steps say (`k`, one-client's `members::view`)
 
 /// What a scope's epochs are sealed to: the client devices of the people who may use it, and nothing that only runs
 /// calls.
@@ -148,7 +148,7 @@ export class Device {
     return { epochs: opened, apps: apps || {} };
   }
 
-  /// Opens epoch `n`'s key sealed to `as` from what the node gave, if its hash is the one its epoch entry gave.
+  /// Opens epoch `n`'s key sealed to `as` from what the node gave, if its hash is the one its `epoch` step gave.
   async openEpoch(scope, n, sealed, as = this.me) {
     const key = await openSealed(as.opens, b64u.decode(sealed));
     const hash = await epochHash(key);
@@ -183,7 +183,7 @@ export class Device {
     return this.epochs.get(scope).get(n);
   }
 
-  /// Starts a scope's epoch `n`: a random key, written first as an `epoch` entry naming its hash (which, first in
+  /// Starts a scope's epoch `n`: a random key, written first as an `epoch` step naming its hash (which, first in
   /// causal order, makes it), then sealed to the recovery key, if there is one, and each client device of the people who
   /// may open it but those in `except` (keys being taken out), before it's used.
   async newEpoch(scope, n, { except = [] } = {}) {
@@ -332,7 +332,7 @@ export class Device {
   }
 
   /// The `x-one-keys` a request goes with, to `node`, the one it's sent to: what its kind of request needed the last
-  /// time, of the scopes the network's entries say that node runs, sealed to the seal key they list for it, for this
+  /// time, of the scopes the network's steps say that node runs, sealed to the seal key they list for it, for this
   /// browser's key, until `until`. No other node can open it; null if it runs none of them.
   /// A request sent while another of its kind learns what it needs waits for that first, and goes with it.
   async handoff(route, until, node, note = noting) {
@@ -346,7 +346,7 @@ export class Device {
   }
 
   /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must ask only what
-  /// `askedFor` lets it, be listed by the network's entries, and run every scope it needs keys of, as they say. Of each,
+  /// `askedFor` lets it, be listed by the network's steps, and run every scope it needs keys of, as they say. Of each,
   /// only epochs from the one its newest copy is under are handed (`oldestNeeded`): older ones open only its history.
   /// What it needed is all this kind of request hands next time, to whichever node it's sent to, of the scopes that one
   /// runs. Throws if it asks for more, or this browser can't open it. Requests of a kind that get the same 428 at once
@@ -478,7 +478,7 @@ export class Device {
     const invited = (await this.checked()).people[this.user]?.invites ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
     const all = [...own, ...invited].filter((r, i, a) => !r.service && r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
     const ours = await Promise.all(all.map(async (r) => r.user === this.user || (await this.invitedHere(r))));
-    // Those turned down, or taken out, never again: as the log says now, since another device may have just said so.
+    // Those turned down, or taken out, never again: as the network says now, since another device may have just said so.
     const out = new Set((await this.checked(true).catch(() => this.checked())).removed || []);
     return Promise.all(all.filter((r, i) => ours[i] && !out.has(r.key)).map(async (r) => ({ ...r, code: await codeOf(r.key, r.seal), mine: r.user === this.user })));
   }
@@ -490,7 +490,7 @@ export class Device {
   }
 
   /// Turns down a device waiting to be let in: its request is forgotten, and one of this person's own is turned down
-  /// by an entry, so none of their devices lets it in after.
+  /// by a step, so none of their devices lets it in after.
   async refuse(r) {
     const k = await this.checked(true);
     if (r.mine && !(k.removed || []).includes(r.key)) await this.write("global", members.refuse({ key: r.key, seal: r.seal, name: r.name }));
@@ -553,7 +553,7 @@ export class Device {
   /// Takes one of this person's devices out (or, for an admin, anyone's): off the network first, then unlisted, then
   /// each scope it opened that this person may move on gets a new epoch it doesn't have.
   async remove(key, as = this.me) {
-    // Itself, it goes in the order `leave` says: its removal counts only if it's the last entry of its own that does.
+    // Itself, it goes in the order `leave` says: its removal counts only if it's the last step of its own that does.
     if (key === this.me.key) return this.leave();
     const k = await this.checked(true);
     const it = k.devices.find((e) => e.key === key);

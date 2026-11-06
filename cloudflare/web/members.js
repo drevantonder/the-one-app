@@ -1,4 +1,4 @@
-// What a person's device signs to change who can do what: `global`'s member entries' content, built here and never
+// What a person's device signs to change who can do what: `global`'s steps' content for who can do what, built here and never
 // taken from a node, the same as src/database/content.rs builds it (tests/contracts.rs checks they agree).
 
 const node = (kind, data) => ({ app: "node", kind, data });

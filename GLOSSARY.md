@@ -47,7 +47,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 
 - **App**: code deployed into a scope, run in the app runtime. It publishes any of four things: **screens** (pages
   people open), **widgets** (what it shows on a home page), **tools** (what agents use, through MCP and the CLI), and
-  **services**. An app with only tools is still an app (Gmail, Shell). Avoid: worker, connector, operation (for a tool).
+  **services**. An app with only tools is still an app (Gmail, Shell). Avoid: worker, connector, operation (for a tool), except `op`, the wire's name for a tool's name (`{ op }` in a call, `ops` for its tools), kept until the Swift helpers and the Workers move to one word together.
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
   as its own process, an endpoint of its own key. Adding WhatsApp asks which of your nodes runs its service. A service
@@ -63,7 +63,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   wrapper around workerd (Cloudflare's open-source Workers runtime). Avoid: node, app service.
 - **Call**: one run of an app's tool, screen or schedule, on one node, with the keys the caller hands it for that call,
   which expire with the caller's sign-in.
-- **Deploy**: a version of an app put into a scope. **Built-in apps** are the folders in `apps/`, shipped with every
+- **Deploy**: a version of an app put into a scope. **Built-in apps** are the folders in `apps/` with an `app.js`, shipped with every
   release; every other one is made in the network.
 - **App schedules**: a person choosing a node to keep an app running there, holding that app's keys in that scope (for
   up to 30 days, and longer as they use it), so its schedules run while no one has it open. Avoid: keep, grant, standing
@@ -80,7 +80,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Database**: one SQLite database, kept sealed in the bucket as steps at numbered positions, the bucket deciding their
   order. A scope has three kinds: **an app's database**, its data and the truth; **the node's database**, how things
   went (usage, errors, runs); and **the scope database**, who's who, permissions and keys.
-- **Blob**: bytes a database or entry names, kept in the bucket sealed with their scope's key.
+- **Blob**: bytes a database's step names, kept in the bucket sealed with their scope's key.
 
 ## At the network's address
 
@@ -88,7 +88,7 @@ These run on Cloudflare, each named by its job, with no name for them together. 
 
 - **Gateway**: the network's address, the one people use. It sends each request where its path says, and holds and runs
   nothing.
-- **Sign-in**: who you are, and nothing more (passkey, or Google for a workplace). It opens no key. Avoid: auth.
+- **Sign-in**: who you are, and nothing more (passkey, or Google for a workplace). It opens no key. Avoid: auth, except its Worker's name, `auth` (and the names built on it: `env.AUTH`, `/api/auth`, its Durable Object `Auth`), which stays because renaming it would sign every device out (`src/cloudflare/workers.rs`; Andre's call, 2026-11-06).
 - **Relay**: carries packets between endpoints that can't reach each other directly, and keeps the list of the network's
   endpoints. It reads nothing.
 - **URL signer**: the only holder of the bucket's credentials. It hands the network's endpoints signed URLs, which open

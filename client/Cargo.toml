@@ -26,7 +26,7 @@ n0-future = "0.3"
 httparse = "1"
 data-encoding = "2"
 tokio = { version = "1", default-features = false, features = ["sync"] }
-# A client checks the network's signed entries itself with the nodes' own Rust (src/members.rs): who's who as they say
+# A client checks the network's signed steps itself with the nodes' own Rust (src/database): who's who as they say
 # it, never as a node does, asked of the scope database they build (`one`'s `db`, SQLite) and its permissions; and a
 # new device's sign-in, before letting it in (`sign-in-proof`).
 one = { path = "..", default-features = false, features = ["sign-in-proof"] }

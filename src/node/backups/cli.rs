@@ -14,7 +14,7 @@ pub fn commands() -> Command {
             ("backups place add <folder> [--title t]".into(), "back up to a folder on this device, like a USB disk's: tried before it's added".into()),
             ("backups place add --endpoint <url> [--title t]".into(), "back up to S3-compatible storage (R2, B2, MinIO): piped a JSON object of bucket, key_id and secret (and region) it tries and adds it; otherwise it asks the person for them, with a link to a sheet on their device".into()),
             ("backups place remove <place>".into(), "stop backing up to a place (what's there stays)".into()),
-            ("backups check [--folder <path>]".into(), "restore each place's newest backup into a throwaway copy, check every entry and blob, and say what came back; with --folder, any backup on a disk, opened with the recovery key on stdin, with or without a network here".into()),
+            ("backups check [--folder <path>]".into(), "restore each place's newest backup into a throwaway copy, check every database and blob, and say what came back; with --folder, any backup on a disk, opened with the recovery key on stdin, with or without a network here".into()),
         ],
         run,
     }

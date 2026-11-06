@@ -59,7 +59,7 @@ const ops = {
     const signed = await signStep(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), fields, body);
     return { signed: { header: b64u.encode(signed.header), signature: b64u.encode(signed.signature), body: b64u.encode(signed.body) } };
   },
-  /// Member entries' content as the web client builds it: `[[builder, args]]` → each content.
+  /// The content of steps for who can do what, as the web client builds it: `[[builder, args]]` → each content.
   async members({ calls }) {
     return { contents: calls.map(([name, args]) => members[name](args)) };
   },

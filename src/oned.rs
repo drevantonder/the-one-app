@@ -2,15 +2,15 @@
 //! and exits. Its key and endpoint are the device's, and everyone calls it; its parts are the app runtime (`oned apps`,
 //! `apps::run`: workerd, which oned hands apps' calls to over a loopback, holding no key or endpoint of its own) and
 //! each service: each a process of oned's own (`oned <name>`, `service::run`) with its own key, which oned lists as its
-//! device's. Each is on while the device's latest `service` entry for it says so; with none, the app runtime is on, the
+//! device's. Each is on while the device's latest `service` step for it says so; with none, the app runtime is on, the
 //! rest off; and each is started again when it stops, the rest left running.
-//! Only the device's person writes that entry (its switch in Settings' Devices), and oned starts and stops the parts as
+//! Only the device's person writes that step (its switch in Settings' Devices), and oned starts and stops the parts as
 //! it changes. Each process part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
 //! person whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
 //! its device lists it. Its program is its app's own (`apps/<name>/service/`), and oned runs only a build its app's
 //! latest deploy names for this platform (`bundle::SERVICES`), which `<cli> deploy` builds where it's run, or, for one
 //! whose deploy names none, as a built-in app's, the newest `<cli> update` built and published signed with the release
-//! key (a `service-release` entry, which an older device ignores). oned fetches it, checks its hash or signature and puts
+//! key (a `service-release` step, which an older device ignores). oned fetches it, checks its hash or signature and puts
 //! it at `~/.local/bin/<cli>-<name>` when it's switched on and again when another is named or a newer one's published;
 //! a Mac app carries the built-in ones in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
 //! stopping, failed and why) and how it runs: in its sandbox as its app declares (`sandbox`, which oned tells each
@@ -224,7 +224,7 @@ pub fn erase(dir: &std::path::Path) {
     *ERASING.lock().unwrap() = Some(dir.to_path_buf());
 }
 
-/// Keeps this device's parts that run as processes of their own running as its entries say: when one is switched on,
+/// Keeps this device's parts that run as processes of their own running as its steps say: when one is switched on,
 /// its program fetched from the newest release for this platform if it isn't here (and again when a newer one is
 /// published), then started (and again if it stops); stopped when it's switched off; and listed as this device's once
 /// each asks. What each is doing meanwhile, and what went wrong, its hello says (`parts`). In a thread of its own for
@@ -599,7 +599,7 @@ async fn serve(args: &[String]) -> Result<()> {
     // Its app runtime is a program of its own, which oned starts as its parts.
     crate::app::runtime::APART.store(true, std::sync::atomic::Ordering::SeqCst);
     let node = Node::start(&dir).await?;
-    // Its parts that run as processes of their own, as its entries switch them.
+    // Its parts that run as processes of their own, as its steps switch them.
     crate::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
     // Git here reaches the network's repos at their address, as on every computer of its person's.
     let mode = crate::mode::here();
