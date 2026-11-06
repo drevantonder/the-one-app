@@ -272,6 +272,58 @@ impl Node {
         Ok(!read.is_empty())
     }
 
+    /// What only the frozen logs say that a reader still needs, written once as steps of the same content, so none
+    /// reads the logs for it: the newest release of each target and service that no step has said, and in each scope
+    /// held, the blobs its `keep` entries named that it hasn't forgotten and no step names. Every node of this release
+    /// looks, as it first reads its scopes; one that finds them written writes nothing.
+    pub(super) async fn carry_frozen(&self) -> Result<()> {
+        type Said = (String, Option<String>, Option<String>);
+        let said = |c: &Content| -> Said { (c.kind.clone(), c.data["target"].as_str().map(str::to_string), c.data["service"].as_str().map(str::to_string)) };
+        let releases = self.with(|i| {
+            let have: std::collections::BTreeSet<Said> = i.r.db().releases().iter().map(|(c, _, _)| said(c)).collect();
+            let mut newest: BTreeMap<Said, Entry> = BTreeMap::new();
+            for e in i.r.store.scope("global")?.into_iter().filter(|e| e.content.app == members::APP && members::RELEASES.contains(&e.content.kind.as_str())) {
+                newest.insert(said(&e.content), e);
+            }
+            Ok(newest.into_iter().filter(|(k, _)| !have.contains(k)).map(|(_, e)| e).collect::<Vec<_>>())
+        })?;
+        for e in releases {
+            let wrote = self.write_step(e.user(), e.content.clone()).await?;
+            tracing::info!("wrote the frozen log's {} for {:?} as step {}", e.content.kind, said(&e.content), wrote.seq());
+        }
+        let logs = self.with(|i| Ok(i.r.store.logs()?))?;
+        for log in logs {
+            let scope = Scope::parse(&log)?;
+            if scope != Scope::Global {
+                self.read_scope_steps_now(&scope).await?;
+            }
+            let keeps = self.with(|i| {
+                let Some(db) = (if scope == Scope::Global { Some(i.r.db()) } else { i.scope_dbs.get(&scope).map(|(_, d)| d) }) else { return Ok(BTreeMap::new()) };
+                let forgotten = db.state().forgotten;
+                let mut by: BTreeMap<String, Vec<String>> = BTreeMap::new();
+                for e in i.r.store.scope(&log)?.into_iter().filter(|e| e.content.app == members::APP && e.content.kind == "keep") {
+                    for b in e.content.blobs.iter().filter(|b| !forgotten.contains(*b) && !db.names_blob(b)) {
+                        let list = by.entry(e.user().to_string()).or_default();
+                        if !list.contains(b) {
+                            list.push(b.clone());
+                        }
+                    }
+                }
+                Ok(by)
+            })?;
+            for (user, blobs) in keeps {
+                let content = Content { blobs, ..members::node("keep", json!({})) };
+                let n = content.blobs.len();
+                let wrote = match scope {
+                    Scope::Global => self.write_step(&user, content).await?,
+                    _ => self.write_scope_step(&scope, &user, content).await?,
+                };
+                tracing::info!("wrote the {n} blobs the frozen log of {scope} kept for {user} as step {}", wrote.seq());
+            }
+        }
+        Ok(())
+    }
+
     /// Writes `content` to a scope's own database (not `global`'s) as a step this device signs as `user`, once
     /// `global`'s log is frozen, at the next position.
     pub(super) async fn write_scope_step(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {

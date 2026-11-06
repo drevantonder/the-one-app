@@ -680,14 +680,15 @@ impl ScopeDb {
     }
 
     /// Whether a step named `blob` and the scope still needs it: forgotten, only if a node entry other than a keep
-    /// named it.
+    /// named it; or it's a deploy's bundle, which is never forgotten.
     pub fn names_blob(&self, blob: &str) -> bool {
-        self.row("SELECT pinned OR NOT EXISTS (SELECT 1 FROM forgotten WHERE blob = ?1) FROM blobs WHERE blob = ?1", [blob], |r| r.get::<_, bool>(0)).unwrap_or(false)
+        let named = self.row("SELECT pinned OR NOT EXISTS (SELECT 1 FROM forgotten WHERE blob = ?1) FROM blobs WHERE blob = ?1", [blob], |r| r.get::<_, bool>(0)).unwrap_or(false);
+        named || self.row("SELECT 1 FROM deploys WHERE bundle = ?1", [blob], |_| Ok(())).is_some()
     }
 
-    /// Every blob steps named that the scope still needs (`names_blob`).
+    /// Every blob the scope still needs (`names_blob`).
     pub fn blobs(&self) -> BTreeSet<String> {
-        self.rows("SELECT blob FROM blobs WHERE pinned OR blob NOT IN (SELECT blob FROM forgotten)", [], |r| r.get(0)).into_iter().collect()
+        self.rows("SELECT blob FROM blobs WHERE pinned OR blob NOT IN (SELECT blob FROM forgotten) UNION SELECT bundle FROM deploys", [], |r| r.get(0)).into_iter().collect()
     }
 
     /// `global`'s database as replay's members, for applying a step to them as replay applies an entry

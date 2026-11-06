@@ -466,6 +466,8 @@ pub struct Inner {
     making_keys: tokio::sync::Mutex<()>,
     /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
     junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
+    /// Whether this device has written what only the frozen logs said (`Node::carry_frozen`), since it started.
+    carried: Mutex<bool>,
     /// When this device last tidied each database (by prefix), ms.
     tidied: Mutex<HashMap<String, u64>>,
     /// The last position this device wrote an entry of each scope at.
@@ -613,6 +615,7 @@ impl Node {
             moved: Arc::default(),
             making_keys: tokio::sync::Mutex::new(()),
             junk: Mutex::new(HashMap::new()),
+            carried: Mutex::new(false),
             tidied: Mutex::new(HashMap::new()),
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),

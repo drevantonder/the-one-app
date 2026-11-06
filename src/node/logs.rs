@@ -30,7 +30,18 @@ impl Node {
         self.with(|i| {
             i.read = true;
             Ok(())
-        })
+        })?;
+        if !std::mem::replace(&mut *self.0.carried.lock().unwrap(), true) {
+            let node = self.clone();
+            tokio::spawn(async move {
+                // Tried again the next time it reads them, as one not handed a scope's keys yet waits for them.
+                if let Err(err) = node.carry_frozen().await {
+                    tracing::warn!("writing what only the frozen logs said as steps: {err:#}");
+                    *node.0.carried.lock().unwrap() = false;
+                }
+            });
+        }
+        Ok(())
     }
 
     /// Reads a scope's entries in the bucket after the last this device read: whether it now holds a scope it didn't.
