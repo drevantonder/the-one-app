@@ -69,8 +69,8 @@ func serve(node string, w *whatsapp) {
 				reply := map[string]any{"ok": result}
 				var away elsewhere
 				switch {
-				case errors.As(err, &away): // error too, for nodes that don't know elsewhere
-					reply = map[string]any{"elsewhere": err.Error(), "error": err.Error()}
+				case errors.As(err, &away):
+					reply = map[string]any{"elsewhere": err.Error()}
 				case err != nil:
 					reply = map[string]any{"error": err.Error()}
 				}

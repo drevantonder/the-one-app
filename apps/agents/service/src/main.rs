@@ -56,10 +56,9 @@ fn marker() -> String {
     format!(".synced-{}-agents", cli())
 }
 
-/// What the node marked them with before this service wrote them, and earlier versions before that: taken over by the
-/// next write, never removed.
-fn old_markers() -> [String; 3] {
-    [format!(".synced-{}", cli()), ".synced".into(), ".theoneapp".into()]
+/// What the node marked them with before this service wrote them: taken over by the next write, never removed.
+fn node_marker() -> String {
+    format!(".synced-{}", cli())
 }
 
 fn cli() -> &'static str {
@@ -110,7 +109,7 @@ fn sync(host: &Host) -> Result<()> {
 
 fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
     let ours = |dir: &Path| dir.join(marker()).is_file();
-    if dir.exists() && !ours(dir) && !old_markers().iter().any(|m| dir.join(m).is_file()) {
+    if dir.exists() && !ours(dir) && !dir.join(node_marker()).is_file() {
         once(format!("left {} alone: it isn't a synced skill", dir.display()));
         return Ok(());
     }
@@ -155,12 +154,9 @@ struct Written {
 }
 
 impl Written {
-    /// Its own, or the first time, the node's from when it wrote them (`agents-written.json` beside this service's folder).
     fn load(host: &Host) -> Self {
         let path = host.dir.join("written.json");
-        let before = host.dir.parent().map(|d| d.join("agents-written.json")).unwrap_or_default();
-        let read = |p: &Path| std::fs::read(p).ok().and_then(|b| serde_json::from_slice(&b).ok());
-        let hashes = read(&path).or_else(|| read(&before)).unwrap_or_default();
+        let hashes = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         Written { path, hashes }
     }
 

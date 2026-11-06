@@ -22,14 +22,9 @@ pub const BUILD: &str = match option_env!("ONE_BUILD") {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Me {
-    pub key: String,
     pub user: String,
     /// Their device's name.
     pub name: String,
-    pub role: Value,
-    /// Their own name.
-    pub user_name: String,
-    pub handle: String,
     /// The agent that asked (an MCP client's name, like "Claude Code"), when one did.
     pub agent: Option<String>,
 }

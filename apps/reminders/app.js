@@ -25,7 +25,6 @@ export default {
   icon: "list-checks",
   color: "#007aff",
   description: "Reminders on your Mac, for your apps and agents",
-  connector: true,
   needs: "Needs a Mac",
   instructions: "Reminders are the person's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.",
   uses: { services: ["reminders"] },

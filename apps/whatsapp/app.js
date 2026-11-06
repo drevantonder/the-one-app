@@ -1,6 +1,6 @@
 // WhatsApp: the person's WhatsApp accounts, each a phone linked to one of their devices as WhatsApp Desktop is linked.
 // The whatsapp service links the phone and keeps its messages, on each device whose owner installed it; this app is
-// what people and agents use, and a connector.
+// what people and agents use.
 
 import settings from "./dist/settings.html" with { type: "text" };
 
@@ -60,14 +60,11 @@ async function keep(ctx, accounts, answered) {
   }
 }
 
-/// The accounts, keeping their items as they go. The service says which devices answered; one built before it did
-/// gives only the list, so nothing is let go.
+/// The accounts, keeping their items as they go. The service says which devices answered.
 async function listAndKeep(ctx, input) {
-  const got = await service(ctx, "_accounts", input).catch(() => null);
-  const complete = Array.isArray(got?.accounts) && Array.isArray(got?.answered);
-  const listed = complete ? got.accounts : await service(ctx, "accounts", input);
-  await keep(ctx, listed, complete ? got.answered : []).catch(() => {}); // a call that only reads lists them all the same
-  return listed;
+  const { accounts, answered } = await service(ctx, "_accounts", input);
+  await keep(ctx, accounts, answered).catch(() => {}); // a call that only reads lists them all the same
+  return accounts;
 }
 
 export default {
@@ -77,7 +74,6 @@ export default {
   icon: "whatsapp-logo",
   color: "#25d366",
   description: "Your WhatsApp chats, for your agents: read, search and send",
-  connector: true,
   needs: "Needs a device of yours to link your phone to",
   instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. Each list pages back with limit and skip. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
   uses: { services: ["whatsapp"] },
@@ -90,7 +86,7 @@ export default {
       reads: true,
       description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, account its number and device where it's linked, with why when ok is false. Give account to the others to pick one.",
       input: { type: "object", properties: {} },
-      // A connector lists no accounts, rather than failing, where no device runs its service; its settings say why.
+      // No accounts, rather than a failure, where no device runs its service; its settings say why.
       async run(ctx, input) {
         if (!(await running(ctx)).length) return [];
         return listAndKeep(ctx, input);

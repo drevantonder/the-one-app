@@ -22,7 +22,6 @@ export default {
   color: "#3a3a3c",
   advanced: true,
   description: "Run commands on your own devices",
-  connector: true,
   needs: "Needs one of your devices",
   instructions: "Run a shell command on one of your own devices with shell_run; give device (a name from shell_devices) to choose which, or it runs on the first online one in Device Activity's order. Every command is logged where only you can read it.",
   uses: { services: ["shell"] },

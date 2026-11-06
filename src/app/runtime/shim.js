@@ -34,7 +34,7 @@ const tools = () => app.tools || {};
 function describe() {
   return {
     name: app.name, title: app.title, icon: app.icon, color: app.color, domain: app.domain, ...(app.tagline ? { tagline: String(app.tagline) } : {}), description: app.description || "", instructions: app.instructions || "",
-    ...(app.connector ? { connector: true } : {}), ...(app.advanced ? { advanced: true } : {}), ...(app.needs ? { needs: String(app.needs) } : {}),
+    ...(app.advanced ? { advanced: true } : {}), ...(app.needs ? { needs: String(app.needs) } : {}),
     ...(app.vault && Object.keys(app.vault).length ? { vault: app.vault } : {}),
     // Features still being built, each off until an admin switches it on in Settings › Labs (src/labs.rs). A tool
     // with `lab` is there only while its lab is on.

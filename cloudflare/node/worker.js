@@ -827,7 +827,7 @@ class Run {
       const app = deployed(this.view, info.name);
       const d = app && (await this.person.describe(this.who, app).catch(keysFirst));
       const mine = reach.length > 0;
-      const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "connector", "needs"];
+      const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "needs"];
       for (const [k, v] of Object.entries(d || {})) if (k !== "name" && k !== "schedules" && (mine || shown.includes(k))) info[k] = v;
       return light ? Object.fromEntries(Object.entries(info).filter(([k]) => drawn.includes(k))) : info;
     }));

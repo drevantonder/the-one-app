@@ -23,7 +23,6 @@ export default {
   icon: "user-circle",
   color: "#8e8e93",
   description: "Contacts on your Mac, for your apps and agents",
-  connector: true,
   needs: "Needs a Mac",
   instructions: "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; contacts_me is the person's own card.",
   uses: { services: ["contacts"] },

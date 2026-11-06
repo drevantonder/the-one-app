@@ -145,8 +145,7 @@ struct NetworkFile {
     folders: BTreeMap<String, String>,
 }
 
-/// A service serving on a device: its name, the users it serves, and what it does (its functions), which callers
-/// list until apps wrap services.
+/// A service serving on a device: its name, the users it serves, and what it describes of itself.
 pub type Service = (String, Vec<String>, Value);
 
 /// Another device, as it last said hello: the services serving there, and how loaded it is.

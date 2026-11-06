@@ -121,7 +121,7 @@ impl Services {
     }
 
     /// Whether a registered service serves every user its device serves (`serves: "everyone"` in its description), not only
-    /// its device's local user: a push sender on an admin's device, say.
+    /// its device's local user.
     pub fn serves_everyone(&self, app: &str) -> bool {
         self.get(app).is_some_and(|p| p.describe["serves"] == "everyone")
     }
