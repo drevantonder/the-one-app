@@ -3,21 +3,21 @@
 //! its own as someone's device, or itself as where their things run, to be sealed or handed keys. What a device seals,
 //! and to whom it hands keys, it takes only from here.
 //!
-//! A device starts from the freeze the network's recovery key signed, which the genesis it joined names, its copy
-//! checked against its hash, or from where the device that let it in had read to (its Welcome), and applies each step
+//! A device starts from the network's first freeze (`steps::Truth::first`), signed by the recovery key its copy names,
+//! of the network it joined, or from where the device that let it in had read to (its Welcome), and applies each step
 //! after itself, opened with its own keys. What it asks of who's who it asks `global`'s scope database and `may` over
 //! it (`one::database::scopes::ScopeDb`, as nodes ask theirs): native apps directly, browsers as JSON (`view`).
 
-use one::config::YOURS;
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Result, bail, ensure};
 use serde_json::{Map, Value, json};
 
 pub use one::database::scopes::ScopeDb;
 use one::database::steps;
 use one::database::scopes::{NETWORK, device, object, person};
-use one::entry::{Hash, Key, Scope, hex};
+use one::keys::{Hash, hex};
+use one::database::scopes::Scope;
 use one::database::scopes::{Kind, Role};
 
 /// `global`'s scope database's steps as far as this device read them (`one::database::steps`): the database the
@@ -25,75 +25,53 @@ use one::database::scopes::{Kind, Role};
 /// it counts. Never what a node says of a step: a node passes them on sealed.
 pub struct Global {
     root: Option<Hash>,
-    /// The recovery key the genesis names, once read (`steps::recovery_of`).
-    recovery: Option<Key>,
     truth: Option<steps::Truth>,
     /// Before it's read the freeze, the last step looked at, none of them its freeze.
     looked: u64,
 }
 
 impl Global {
-    /// For the network whose genesis is `root`, or, for a device that's only now joined, the one genesis its log's
-    /// first step holds.
+    /// For the network whose root is `root`, or, for a device that's only now joined, the first freeze there is.
     pub fn new(root: Option<Hash>) -> Global {
-        Global { root, recovery: None, truth: None, looked: 0 }
+        Global { root, truth: None, looked: 0 }
     }
 
     /// Starts from what `kept` (`kept`'s, as a device keeps it) says: who's who, checked against the hash kept with it,
-    /// or where it looked to before, and the recovery key its genesis names.
+    /// or where it looked to before.
     pub fn restart(&mut self, kept: &Value) -> Result<()> {
         match kept.get("truth").filter(|t| !t.is_null()) {
             Some(t) => self.truth = Some(steps::Truth::kept(t, now())?),
             None => self.looked = kept["looked"].as_u64().unwrap_or(0),
         }
-        self.recovery = kept["recovery"].as_str().and_then(|k| one::entry::unhex(k).ok());
         Ok(())
     }
 
     /// Where it read to, to keep and start again from (`restart`).
     pub fn kept(&mut self) -> Result<Value> {
-        Ok(json!({ "truth": self.truth.as_mut().map(steps::Truth::keep).transpose()?, "looked": self.looked, "recovery": self.recovery.as_ref().map(hex) }))
+        Ok(json!({ "truth": self.truth.as_mut().map(steps::Truth::keep).transpose()?, "looked": self.looked }))
     }
 
     /// Takes step `at`, the next, as this device opened it (none for one that will never be a step): before it's read
-    /// the freeze, the freeze if the network's recovery key signed it; after, applied if it counts. Fails at a freeze the
-    /// recovery key signed that doesn't check out, so it's never passed over.
+    /// the freeze, the network's first freeze (`steps::Truth::first`); after, applied if it counts. Fails at a newer
+    /// release's, so it's never passed over.
     pub fn take(&mut self, at: u64, given: Option<&steps::Given>) -> Result<()> {
         ensure!(at == self.at() + 1, "step {at} isn't the next");
         match &mut self.truth {
             Some(t) => drop(t.take(at, given.map(|g| &g.step))?),
             None => {
-                let recovery = self.recovery.context("this device hasn't read its network's genesis yet")?;
-                self.truth = steps::Truth::first(at, given, recovery, now())?;
+                self.truth = steps::Truth::first(at, given, self.root, now())?;
                 self.looked = at;
+                if let Some(t) = &self.truth {
+                    self.root = t.db.root();
+                }
             }
         }
         Ok(())
     }
 
-    /// Whether it needs `global`'s log's first step, its genesis, to judge the steps it reads: before it's read the
-    /// freeze, while it doesn't know the recovery key.
-    pub fn wants_genesis(&self) -> bool {
-        self.truth.is_none() && self.recovery.is_none()
-    }
-
-    /// The genesis among the entries of `global`'s log's first step, and the recovery key it names: of `root`, or for
-    /// a device that pins none, the one there.
-    fn genesis(&mut self, entries: &[one::entry::Entry]) -> Result<()> {
-        let root = steps::genesis_of(self.root, entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
-        self.recovery = Some(steps::recovery_of(root, entries).with_context(|| format!("this isn't the {YOURS} this device joined"))?);
-        self.root = Some(root);
-        Ok(())
-    }
-
     /// Reads `global`'s steps after those held from `bucket`, opened with `keys`, its log's keys by epoch, and takes
-    /// them, its genesis first if it needs it: one under an epoch above every one made, as the steps before it leave
-    /// it, is junk, passed over.
+    /// them: one under an epoch above every one made, as the steps before it leave it, is junk, passed over.
     pub async fn read_steps(&mut self, bucket: &impl one::bucket::Bucket, keys: &one::database::stored::Keys) -> Result<()> {
-        if self.wants_genesis() {
-            let (root, recovery) = steps::recovery_key(bucket, keys, self.root).await?;
-            (self.root, self.recovery) = (Some(root), Some(recovery));
-        }
         loop {
             let read = steps::read(bucket, keys, &Scope::Global, self.at()).await?;
             for given in &read.steps {
@@ -116,20 +94,14 @@ impl Global {
     /// sealed to this device (raw, by number), each used once it's read the freeze only if who's who says it's that
     /// epoch's, and `apps`, the node's key in each epoch sealed under it (base64url, by number). One the bucket holds
     /// that doesn't open is junk, passed over as every reader passes it over; one whose bytes didn't come stops it, to
-    /// be asked again. Stops at one under an epoch this device has no key for yet. Before it knows the recovery key, it
-    /// takes its genesis from `log` or `entries` (`{ steps: [{ at, sealed }] }`, `global`'s log's first step); without
-    /// it, → 1, the step of the log to read and give again. With `welcome` (`steps::Welcome`), before it's read the
-    /// freeze, it starts from there (`add_welcomed`): what it's given for that is checked against the Welcome's hash.
-    pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<Option<u64>> {
+    /// be asked again. Stops at one under an epoch this device has no key for yet. With `welcome` (`steps::Welcome`),
+    /// before it's read the freeze, it starts from there (`add_welcomed`): what it's given for that is checked against
+    /// the Welcome's hash.
+    pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
         let welcome = given["welcome"].as_str().and_then(steps::Welcome::parse).filter(|_| self.truth.is_none());
         // One that doesn't check out is read from the freeze on.
         if let Some(welcome) = &welcome {
             let _ = self.add_welcomed(welcome, given, epochs, apps);
-        }
-        if self.wants_genesis() {
-            let first = [&given["log"]["steps"], &given["entries"]["steps"]].into_iter().flat_map(|s| s.as_array().into_iter().flatten()).find(|s| s["at"].as_u64() == Some(1)).cloned();
-            let Some(bytes) = first.and_then(|s| data_encoding::BASE64URL_NOPAD.decode(s["sealed"].as_str()?.as_bytes()).ok()) else { return Ok(Some(1)) };
-            self.genesis(&steps::genesis_entries(&all_keys(epochs, apps), &bytes)?)?;
         }
         let mut keys = one::database::stored::Keys::new();
         let key = |keys: &mut one::database::stored::Keys, g: &Global, e: u32| {
@@ -167,7 +139,7 @@ impl Global {
             }
             ensure!(!matches!(steps::open(&keys, u32::MAX, &Scope::Global, next + 1, &sealed), steps::Opened::Step(_)), "global's step {next} isn't in the bucket, though later ones were written: this device reads no further until it's back");
         }
-        Ok(None)
+        Ok(())
     }
 
     /// Starts from `truth`, worked out from where the device that let this one in read who's who to
@@ -235,7 +207,7 @@ impl Global {
         }
     }
 
-    /// The network's genesis, once known.
+    /// The network's root, its id, once known.
     pub fn root(&self) -> Option<Hash> {
         self.root
     }

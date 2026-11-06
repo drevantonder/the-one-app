@@ -377,7 +377,7 @@ const h = OneUI.react.createElement;
   async function forgetDevice() {
     events?.abort();
     const user = auth.user();
-    if (user) await Promise.all([`device:${user}`, `nodes:${user}`, `genesis:${user}`, `global:${user}`].map(del)).catch(() => {});
+    if (user) await Promise.all([`device:${user}`, `nodes:${user}`, `root:${user}`, `global:${user}`].map(del)).catch(() => {});
   }
 
   /// Signs out as a device: out of its person's devices first (`Device.leave`), so signing in again replaces it, then its
@@ -1382,7 +1382,7 @@ const h = OneUI.react.createElement;
     if (!r.sign_in) return null;
     const k = await device.checked().catch(() => null);
     if (!k?.root) return null;
-    return net.signedInWith(r.sign_in, r.key, r.seal, location.origin, { genesis: k.root, clients: k.sign_in_clients || "" }, accounts).catch(() => null);
+    return net.signedInWith(r.sign_in, r.key, r.seal, location.origin, { root: k.root, clients: k.sign_in_clients || "" }, accounts).catch(() => null);
   };
 
   /// Requests whose sign-in was checked here and didn't let them in, with the accounts it was checked against: left
@@ -1527,7 +1527,7 @@ const h = OneUI.react.createElement;
       if (said.signedOut) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
       // The network it was let into, as the device that approved it said: the only one it then takes; and where that
       // device read who's who to, which it starts from.
-      if (said.genesis) await put(`genesis:${user}`, said.genesis);
+      if (said.root) await put(`root:${user}`, said.root);
       if (said.welcome) await put(`welcome:${user}`, said.welcome);
       if ((said.gone || said.approved) && (await net.start(user, true).catch(() => false))) break;
       if (said.gone) await ask().catch(() => {});

@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 use serde_json::Value;
 
-use crate::entry::Content;
+use crate::database::content::Content;
 
 /// A scope database as an earlier release made it, renamed in place: its tables, and its types', roles' and rules'
 /// names. Nothing changes in one this release made.

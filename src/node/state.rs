@@ -165,7 +165,7 @@ impl Node {
     pub async fn rename(&self, caller: &Caller, key: Option<&str>, name: &str) -> Result<()> {
         let name = name.trim();
         let key = match key {
-            Some(k) => crate::entry::unhex(k).context("a device's key is 64 hex characters")?,
+            Some(k) => crate::keys::unhex(k).context("a device's key is 64 hex characters")?,
             None => {
                 ensure!(caller.key == self.0.id, "say which device");
                 self.0.id

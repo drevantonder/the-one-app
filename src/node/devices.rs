@@ -491,14 +491,14 @@ impl Node {
         Ok(json!({ "device": r.name, "person": person, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
     }
 
-    /// Where a device's request is marked approved at sign-in, saying the network it was let into (its first entry's hash),
+    /// Where a device's request is marked approved at sign-in, saying the network it was let into (its root),
     /// the only one that device then takes, and once `global`'s log is frozen, where this device read its scope database
     /// to, which that device starts from (`steps::Welcome`).
     fn approved_path(&self, key: &str) -> Result<String> {
         let (root, welcome) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()), i.r.welcome()?)))?;
         let root = root.with_context(|| format!("this device isn't in {YOURS} yet"))?;
         let welcome = welcome.map(|w| format!("&welcome={w}")).unwrap_or_default();
-        Ok(format!("/api/auth/devices/requests/{key}?approved&genesis={root}{welcome}"))
+        Ok(format!("/api/auth/devices/requests/{key}?approved&root={root}{welcome}"))
     }
 
     /// Seals each epoch of `scope` its entries made, opened through the recovery key's copy, to `to` where it isn't yet.
@@ -779,7 +779,7 @@ impl Node {
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
-            tracing::warn!("service {} was listed but this device hasn't reached it", crate::entry::short(&key));
+            tracing::warn!("service {} was listed but this device hasn't reached it", crate::keys::short(&key));
         });
         Ok(())
     }

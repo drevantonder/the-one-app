@@ -399,10 +399,10 @@ pub const BEHIND: [u64; 2] = [2_000, 4_000];
 pub enum Waited {
     /// Its sign-in is no more: it signs in again.
     SignedOut,
-    /// Approved, in the network whose first entry (hex) the device that approved it named, if it named one: the only
+    /// Approved, in the network whose root (hex) the device that approved it named, if it named one: the only
     /// one it then takes; and once who's who is written as steps, where that device read them to, which this one
     /// starts from (`database::steps::Welcome`), if it said. It's in once the relay lets it.
-    Approved { genesis: Option<String>, welcome: Option<String> },
+    Approved { root: Option<String>, welcome: Option<String> },
     /// Gone from sign-in (approved and cleared, turned down, or waited too long): it's in if the relay lets it, else it
     /// asks again.
     Gone,
@@ -415,7 +415,7 @@ pub fn waited(status: u16, said: &Value) -> Waited {
         401 => Waited::SignedOut,
         404 => Waited::Gone,
         200..=299 if said["approved"] == true => Waited::Approved {
-            genesis: said["genesis"].as_str().filter(|g| g.len() == 64 && g.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).map(str::to_string),
+            root: said["root"].as_str().filter(|g| g.len() == 64 && g.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).map(str::to_string),
             welcome: said["welcome"].as_str().filter(|w| crate::database::steps::Welcome::parse(w).is_some()).map(str::to_string),
         },
         _ => Waited::Waiting,
@@ -527,4 +527,46 @@ mod tests {
         assert!(open_handoff(&seal_secret(&other), &sealed).is_err());
     }
 
+}
+
+pub type Key = [u8; 32];
+
+/// A sha256: a step's (of its header), or a network's root.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+pub struct Hash([u8; 32]);
+
+impl Hash {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Hash {
+        Hash(bytes)
+    }
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+    pub fn to_hex(&self) -> String {
+        hex(&self.0)
+    }
+    pub fn from_hex(s: &str) -> Result<Hash> {
+        Ok(Hash(unhex(s)?))
+    }
+}
+
+impl std::fmt::Display for Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_hex())
+    }
+}
+
+impl std::fmt::Debug for Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Hash({})", &self.to_hex()[..12])
+    }
+}
+
+pub fn hex(key: &Key) -> String {
+    HEXLOWER.encode(key)
+}
+
+/// A short, readable form of a key for people and logs.
+pub fn short(key: &Key) -> String {
+    hex(key)[..8].to_string()
 }

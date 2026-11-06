@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use ed25519_dalek::SigningKey;
-use one::entry::hex;
+use one::keys::hex;
 use one::keys;
 use serde_json::{Value, json};
 

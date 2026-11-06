@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
-use crate::entry::{Hash, Key, Scope, hex, is_id, unhex};
+use crate::keys::{Hash, Key, hex, unhex};
+
 use crate::permissions;
 
 pub use super::scope::{app, device, group, object, person, service};
@@ -286,7 +287,7 @@ impl ScopeDb {
         self.row("SELECT name FROM network", [], |r| r.get(0)).unwrap_or_default()
     }
 
-    /// The network's genesis.
+    /// The network's root, its id.
     pub fn root(&self) -> Option<Hash> {
         self.row("SELECT root FROM network", [], |r| r.get::<_, Option<String>>(0)).flatten().and_then(|h| Hash::from_hex(&h).ok())
     }
@@ -668,7 +669,7 @@ impl ScopeDb {
 
     /// The releases steps said (`steps`), oldest first, as entries of their author's (`release::latest` reads them as
     /// it reads the log's): their content, author and time.
-    pub fn releases(&self) -> Vec<(crate::entry::Content, Key, u64)> {
+    pub fn releases(&self) -> Vec<(crate::database::content::Content, Key, u64)> {
         self.rows("SELECT content, author, time FROM releases ORDER BY at", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))
             .into_iter()
             .filter_map(|(c, a, t)| Some((serde_json::from_str(&c).ok()?, key(&a), t as u64)))
@@ -805,7 +806,7 @@ pub enum Kind {
     Service,
 }
 
-/// An endpoint of the network, listed by a `device` entry (or the genesis): its key, the key things are sealed to,
+/// An endpoint of the network, listed by a `device` step (or a new network's first, `content::first`): its key, the key things are sealed to,
 /// whose it is, and what it does.
 #[derive(Clone, Debug)]
 pub struct Machine {
@@ -1057,4 +1058,42 @@ pub(crate) mod tests {
         assert_eq!(db.app_may("bob", &asks, &types, &rows, 0), [true, false, false]);
         assert_eq!((count("types"), count("roles"), count("relations")), before);
     }
+}
+
+/// Where everything lives.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Scope {
+    Global,
+    Group(String),
+    User(String),
+}
+
+impl Scope {
+    pub fn parse(s: &str) -> Result<Scope> {
+        Ok(match s.split_once(':') {
+            None if s == "global" => Scope::Global,
+            Some(("group", id)) if is_id(id) => Scope::Group(id.into()),
+            Some(("user", id)) if is_id(id) => Scope::User(id.into()),
+            _ => anyhow::bail!("{s} isn't a scope: global, group:<id> or user:<id>"),
+        })
+    }
+}
+
+impl std::fmt::Display for Scope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Scope::Global => write!(f, "global"),
+            Scope::Group(id) => write!(f, "group:{id}"),
+            Scope::User(id) => write!(f, "user:{id}"),
+        }
+    }
+}
+
+/// User and group ids: 16 random hex characters.
+pub fn is_id(s: &str) -> bool {
+    s.len() == 16 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+pub fn new_id() -> String {
+    data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>())
 }

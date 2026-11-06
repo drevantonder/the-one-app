@@ -161,7 +161,7 @@ fn keep(dir: &std::path::Path, address: &str) -> Result<()> {
     std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
     let new = dir.join("secret.new");
     let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&new)?;
-    file.write_all(one::entry::hex(&one_client::new_secret()).as_bytes())?;
+    file.write_all(one::keys::hex(&one_client::new_secret()).as_bytes())?;
     file.sync_all()?;
     std::fs::write(dir.join("address"), address)?;
     std::fs::rename(&new, dir.join("secret"))?;
@@ -319,7 +319,7 @@ impl Spooled {
         if sent.len() <= IN_MEMORY {
             return Ok(Spooled::Bytes(sent));
         }
-        let path = std::env::temp_dir().join(format!("{CLI}-sending-{}", one::entry::hex(&rand::random::<[u8; 32]>())));
+        let path = std::env::temp_dir().join(format!("{CLI}-sending-{}", one::keys::hex(&rand::random::<[u8; 32]>())));
         let spooled = Spooled::File(path.clone());
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
         file.write_all(&sent)?;

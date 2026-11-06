@@ -418,7 +418,7 @@ impl Node {
     /// anew), one it's switched on for that it changes (its hosts only with every secret field given anew), or one it
     /// lets go of (`release`), deleted once no app uses it.
     pub(super) async fn call_item(&self, app: &str, me: &Caller, scopes: &[Scope], id: &str, scope: Option<String>, mut data: Value, same: Option<String>, release: bool) -> Result<()> {
-        ensure!(crate::entry::is_id(id), "an item's id is 16 hex characters");
+        ensure!(crate::database::scopes::is_id(id), "an item's id is 16 hex characters");
         crate::vault::generate(&mut data);
         let obj = data.as_object_mut().context("an item is an object")?;
         for key in ["id", "app", "apps", "deleted"] {

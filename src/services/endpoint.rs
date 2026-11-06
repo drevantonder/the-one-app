@@ -1,8 +1,8 @@
 //! A service endpoint: a device's abilities (a service) offered over iroh, as a part of its device's oned, a process of
 //! its own (`oned <name>`). It's an endpoint of its own key, kept in its folder, and gets in when its device's oned lists
 //! it as its person's, a part of that device (`Node::list_part`), which tells the relay to let it in. It holds no keys
-//! and reads no bucket: the nodes that call it bring it the network's genesis (whose hash oned gives it, so nothing on
-//! the way can make it another network's) and `global`'s scope database's steps, from which it works out who's who and
+//! and reads no bucket: the nodes that call it bring it `global`'s scope database's steps, from the first freeze naming
+//! the network's root (which oned gives it, so nothing on the way can make it another network's), from which it works out who's who and
 //! checks each caller by itself: a compute endpoint of the network that runs the calls of a person it serves. The program offering it, its
 //! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
 //! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use axum::extract::{Path as UrlPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -26,17 +26,18 @@ use iroh::{Endpoint, EndpointAddr, PublicKey, RelayMode, SecretKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::entry::{Entry, Hash, Key, hex, short, unhex};
+
+use crate::keys::{Hash, Key, hex, short, unhex};
 use crate::database::scopes::{self, ScopeDb};
 use crate::services::Services;
 
 /// The most an ask or its answer may carry, as between nodes.
 const MESSAGE_LIMIT: usize = 64 << 20;
-/// The most a computer this service doesn't know of yet may send it: the network's genesis, or `global`'s steps.
+/// The most a computer this service doesn't know of yet may send it: `global`'s steps.
 const STRANGER_LIMIT: usize = 16 << 20;
-/// How many messages a computer this service doesn't know of may send on a connection: a hello, the network's
-/// genesis, a hello again, `global`'s steps, and a last hello.
-const STRANGER_MESSAGES: usize = 5;
+/// How many messages a computer this service doesn't know of may send on a connection: a hello, `global`'s steps, and
+/// a last hello.
+const STRANGER_MESSAGES: usize = 3;
 /// How many computers it doesn't know of may be connected at once.
 const STRANGERS: usize = 4;
 /// How many streams a node may have open on a connection at once.
@@ -44,8 +45,8 @@ const STREAMS: u32 = 32;
 /// How long reaching a node may take.
 const CONNECT: Duration = Duration::from_secs(10);
 
-/// The network a service is in, as its device's oned gives it: its address, where its relay and sign-in are, the hash
-/// of its genesis, which names its recovery key, and the person whose service it is.
+/// The network a service is in, as its device's oned gives it: its address, where its relay and sign-in are, its root,
+/// which its first freeze names, and the person whose service it is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Network {
     pub address: String,
@@ -84,8 +85,8 @@ struct Inner {
     dir: PathBuf,
     key: SigningKey,
     network: Network,
-    /// The network's genesis, once a node brought it, and who's who.
-    known: Mutex<(Vec<Entry>, ScopeDb)>,
+    /// Who's who, once a node brought `global`'s steps.
+    known: Mutex<ScopeDb>,
     /// Once `global`'s log is frozen, its scope database's steps nodes brought, by position from the first
     /// (`database::steps`), kept in its folder as `steps`.
     steps: Mutex<Vec<Option<crate::database::steps::Given>>>,
@@ -148,15 +149,14 @@ impl Service {
         };
         let root = Hash::from_hex(&network.root)?;
         let network_address = network.address.clone();
-        let entries = std::fs::read(dir.join("entries")).ok().and_then(|b| crate::entry::unpack(&b).ok()).unwrap_or_default();
         let steps = read_steps(&dir.join("steps"));
-        let (entries, members) = placed(root, entries, &steps);
+        let members = placed(root, &steps);
         Ok(Service(Arc::new(Inner {
             name: name.to_string(),
             dir: dir.to_path_buf(),
             key,
             network,
-            known: Mutex::new((entries, members)),
+            known: Mutex::new(members),
             steps: Mutex::new(steps),
             services: Services::default(),
             token,
@@ -192,7 +192,7 @@ impl Service {
 
     /// Whose service it is, once a person's device approved it.
     pub fn owner(&self) -> Option<String> {
-        self.owner_in(&self.0.known.lock().unwrap().1)
+        self.owner_in(&self.0.known.lock().unwrap())
     }
 
     fn owner_in(&self, m: &ScopeDb) -> Option<String> {
@@ -290,7 +290,7 @@ impl Service {
         let ask = self.0.dir.join("ask");
         loop {
             let registered = !self.0.services.describe().is_empty();
-            let listed = self.owner().is_some() && self.0.known.lock().unwrap().1.service(&self.key()).is_some_and(|s| s.device.is_some());
+            let listed = self.owner().is_some() && self.0.known.lock().unwrap().service(&self.key()).is_some_and(|s| s.device.is_some());
             if listed || !registered {
                 let _ = std::fs::remove_file(&ask);
             } else if !ask.exists() {
@@ -305,7 +305,7 @@ impl Service {
     }
 
     /// Answers what a computer asks on a connection it opened: a node of the network anything a node asks a service;
-    /// one it doesn't know of only a hello, the network's genesis and `global`'s steps, a few messages, a few at once, since anyone who
+    /// one it doesn't know of only a hello and `global`'s steps, a few messages, a few at once, since anyone who
     /// reaches it directly can connect.
     async fn take(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
@@ -349,12 +349,8 @@ impl Service {
     async fn answer(&self, remote: Key, msg: &Value) -> Value {
         let body = &msg["body"];
         match msg["kind"].as_str() {
-            Some("hello") => self.hello(remote, body["entries"].as_u64().unwrap_or(0) as usize, body["steps"].as_u64().unwrap_or(0) as usize),
+            Some("hello") => self.hello(remote, body["steps"].as_u64().unwrap_or(0) as usize),
             Some("steps") => match self.take_steps(&remote, &body["steps"]) {
-                Ok(()) => json!({ "ok": true }),
-                Err(err) => json!({ "error": format!("{err:#}") }),
-            },
-            Some("entries") => match self.take_entries(&remote, body["pack"].as_str().unwrap_or("")) {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
@@ -363,14 +359,14 @@ impl Service {
         }
     }
 
-    /// A node's hello, with whether it brings the genesis and how many of `global`'s steps it has: → what this service
-    /// offers and whom it serves, to a node of the network that may call it; that it's behind, if the node has more.
-    fn hello(&self, remote: Key, entries: usize, steps: usize) -> Value {
-        let (count, may) = {
+    /// A node's hello, with how many of `global`'s steps it has: → what this service offers and whom it serves, to a
+    /// node of the network that may call it; that it's behind, if the node has more.
+    fn hello(&self, remote: Key, steps: usize) -> Value {
+        let may = {
             let known = self.0.known.lock().unwrap();
-            (known.0.len(), known.1.compute(&remote).is_some() && known.1.service(&self.key()).is_some())
+            known.compute(&remote).is_some() && known.service(&self.key()).is_some()
         };
-        if entries > count || steps > self.0.steps.lock().unwrap().len() {
+        if steps > self.0.steps.lock().unwrap().len() {
             return json!({ "behind": true });
         }
         if !may {
@@ -381,29 +377,10 @@ impl Service {
         };
         describe["runs"] = json!("service");
         let known = self.0.known.lock().unwrap();
-        let m = &known.1;
+        let m = &*known;
         // Whom it serves is what its listing says, not what the program offering it claims.
         let users: Vec<String> = m.users().into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&self.key()))).collect();
         json!({ "describe": describe, "users": users })
-    }
-
-    /// Takes the network's genesis a node of the network brought (anyone's, while it knows of no node yet): the entry
-    /// among those in `pack` whose hash is the network's.
-    fn take_entries(&self, remote: &Key, pack: &str) -> Result<()> {
-        let bytes = data_encoding::BASE64.decode(pack.as_bytes()).map_err(|_| anyhow!("the entries aren't base64"))?;
-        let given = crate::entry::unpack(&bytes)?;
-        let root = Hash::from_hex(&self.0.network.root)?;
-        let mut known = self.0.known.lock().unwrap();
-        ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its genesis");
-        if !known.0.is_empty() {
-            return Ok(());
-        }
-        let steps = self.0.steps.lock().unwrap().clone();
-        let (entries, members) = placed(root, given, &steps);
-        ensure!(!entries.is_empty(), "that isn't {YOURS}'s genesis");
-        write_private(&self.0.dir.join("entries"), &crate::entry::pack(&entries.iter().collect::<Vec<_>>()))?;
-        *known = (entries, members);
-        Ok(())
     }
 
     /// Takes `global`'s scope database's steps a node of the network brought (`{ at, step }` each, as
@@ -412,26 +389,26 @@ impl Service {
     fn take_steps(&self, remote: &Key, given: &Value) -> Result<()> {
         let root = Hash::from_hex(&self.0.network.root)?;
         let mut known = self.0.known.lock().unwrap();
-        // Anyone's while it knows of no node yet, as its genesis: its freeze is checked against the recovery key the genesis
-        // names, so none but the network's makes who's who.
-        ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its steps");
+        // Anyone's while it knows of no node yet: who's who is the first freeze naming the network's root, signed by the
+        // recovery key it names (`Truth::first`).
+        ensure!(known.computes().is_empty() || known.compute(remote).is_some(), "only {YOURS}'s devices bring its steps");
         let mut steps = self.0.steps.lock().unwrap();
         for s in given.as_array().into_iter().flatten() {
             let at = s["at"].as_u64().unwrap_or(0);
             if at == steps.len() as u64 + 1 {
                 let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
-                steps.push(crate::database::steps::given(&crate::entry::Scope::Global, at, bytes.as_deref()));
+                steps.push(crate::database::steps::given(&crate::database::scopes::Scope::Global, at, bytes.as_deref()));
             }
         }
         let kept: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
         write_private(&self.0.dir.join("steps"), &serde_json::to_vec(&kept)?)?;
-        *known = placed(root, known.0.clone(), &steps);
+        *known = placed(root, &steps);
         Ok(())
     }
 
     /// Whether `key` is a node of the network, as this service knows it.
     fn is_node(&self, key: &Key) -> bool {
-        self.0.known.lock().unwrap().1.compute(key).is_some()
+        self.0.known.lock().unwrap().compute(key).is_some()
     }
 
     /// Runs a call a node asked for, if it may: → `{ ok }`, `{ error }`, or `{ elsewhere }` for a call this service
@@ -449,7 +426,7 @@ impl Service {
         };
         let caller = {
             let known = self.0.known.lock().unwrap();
-            let m = &known.1;
+            let m = &*known;
             if let Err(err) = may_call(m, &self.key(), &remote, &key, &user, signed_in) {
                 return json!({ "error": format!("{err:#}") });
             }
@@ -488,8 +465,8 @@ impl Service {
         call["me"] = json!({ "key": hex(&self.key()), "user": owner });
         let nodes: Vec<Key> = {
             let known = self.0.known.lock().unwrap();
-            let m = &known.1;
-            m.computes().into_iter().filter(|c| c.user == owner && m.runs_for(&c.key, &crate::entry::Scope::User(owner.clone()))).map(|c| c.key).collect()
+            let m = &*known;
+            m.computes().into_iter().filter(|c| c.user == owner && m.runs_for(&c.key, &crate::database::scopes::Scope::User(owner.clone()))).map(|c| c.key).collect()
         };
         let mut why = Vec::new();
         for node in nodes {
@@ -540,7 +517,7 @@ impl Service {
     /// What `/v1/state` says here: this service as the device, and the others offering it, as far as it knows.
     fn state(&self) -> Value {
         let known = self.0.known.lock().unwrap();
-        let m = &known.1;
+        let m = &*known;
         // Whether another is on, it can't know: asked, one that isn't says so.
         // The devices it runs on, each the device it's part of there.
         let listed = m.service(&self.key());
@@ -595,18 +572,13 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
     Ok(asked)
 }
 
-/// The network's genesis among `entries`, the one whose hash is `root`, and who's who: the scope database the freeze
-/// the recovery key it names signed anchors, and the steps after.
-fn placed(root: Hash, entries: Vec<Entry>, steps: &[Option<crate::database::steps::Given>]) -> (Vec<Entry>, ScopeDb) {
-    let genesis: Vec<Entry> = entries.into_iter().filter(|e| e.hash() == root).take(1).collect();
-    let built = crate::database::steps::recovery_of(root, &genesis)
-        .context("its genesis isn't among the entries")
-        .and_then(|recovery| crate::database::steps::Truth::read(steps, recovery, now_ms())?.map(|t| t.db).context("who's who has no freeze yet"));
-    let db = built.unwrap_or_else(|err| {
+/// Who's who in the network `root`: the scope database from its first freeze (`Truth::first`), and the steps after.
+fn placed(root: Hash, steps: &[Option<crate::database::steps::Given>]) -> ScopeDb {
+    let built = crate::database::steps::Truth::read(steps, Some(root), now_ms()).and_then(|t| t.map(|t| t.db).context("who's who has no freeze yet"));
+    built.unwrap_or_else(|err| {
         tracing::warn!("building the scope database: {err:#}");
-        ScopeDb::empty(&crate::entry::Scope::Global, 0).expect("an empty scope database builds")
-    });
-    (genesis, db)
+        ScopeDb::empty(&crate::database::scopes::Scope::Global, 0).expect("an empty scope database builds")
+    })
 }
 
 fn now_ms() -> u64 {
@@ -982,6 +954,6 @@ fn read_steps(path: &Path) -> Vec<Option<crate::database::steps::Given>> {
     let kept: Vec<Value> = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     kept.iter()
         .enumerate()
-        .map(|(i, s)| crate::database::steps::given(&crate::entry::Scope::Global, i as u64 + 1, s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()).as_deref()))
+        .map(|(i, s)| crate::database::steps::given(&crate::database::scopes::Scope::Global, i as u64 + 1, s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()).as_deref()))
         .collect()
 }

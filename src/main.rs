@@ -234,8 +234,8 @@ fn devices_here(settings: one::cloudflare::Settings, needed: bool) -> Result<one
     anyhow::ensure!(!needed || !devices.is_empty(), "no node of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new network, whose relay takes devices once this runs again beside one");
     // The network's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
     devices.extend(network["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
-    let genesis = network["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
-    Ok(one::cloudflare::Settings { devices, genesis, ..settings })
+    let root = network["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
+    Ok(one::cloudflare::Settings { devices, root, ..settings })
 }
 
 fn addr() -> String {
@@ -1499,7 +1499,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         node.warm().await;
     }
     std::fs::write(dir.join("pid"), std::process::id().to_string())?;
-    tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
+    tracing::info!("{NAME} node {} serving {} from {}", &one::keys::hex(&node.id())[..8], addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     api::serve_mcp(axum::routing::post(mcp_http));
     let mut routes = api::guarded(api::routes(), node.clone());
@@ -1573,7 +1573,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         Some(h) => h.ready(),
         None => one::handoff::notify("READY=1"),
     }
-    tracing::info!("{NAME} node {} answering", &one::entry::hex(&node.id())[..8]);
+    tracing::info!("{NAME} node {} answering", &one::keys::hex(&node.id())[..8]);
     one::handoff::watch();
     let served = http.await;
     one::app::runtime::stop_all();
@@ -2139,7 +2139,7 @@ fn checked_said(r: &Value) -> String {
 fn check_folder(folder: &str) -> Result<Value> {
     let mut key = String::new();
     std::io::stdin().read_line(&mut key)?;
-    let secret = one::entry::unhex(key.trim()).context("give the recovery key on stdin: 64 hex characters")?;
+    let secret = one::keys::unhex(key.trim()).context("give the recovery key on stdin: 64 hex characters")?;
     let place = one::bucket::Place::Folder(folder.into());
     let mut out = Vec::new();
     for network in one::backups::networks(&place)? {

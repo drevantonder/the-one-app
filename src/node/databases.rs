@@ -76,7 +76,7 @@ impl Node {
     }
 
     /// The epochs of a scope this device opens, by number: each one an `epoch` entry that counts made (or for
-    /// `global`'s first, the genesis), from its copy in the bucket sealed to this device (`keys::epoch_name`) whose
+    /// `global`'s first, the network's first freeze), from its copy in the bucket sealed to this device (`keys::epoch_name`) whose
     /// hash is the one the entry names. A copy that isn't is someone's junk, passed over; nothing in the bucket makes an
     /// epoch but its entry. The newest must be one of them. With `make`, a scope with no epoch yet gets its first here,
     /// if this device's person may make it: an admin of the group, or the person whose scope it is.
@@ -142,8 +142,8 @@ impl Node {
     }
 
     /// `global`'s epochs, for a device that has read nothing of who's who yet, so knows no epoch's hash: those sealed
-    /// to it in the bucket, each kept only once who's who, from the freeze the recovery key its genesis names signed,
-    /// says it's theirs; and that recovery key (`Replica::recovery`).
+    /// to it in the bucket, each kept only once who's who, from the network's first freeze (`Truth::first`), says it's
+    /// theirs.
     pub(super) async fn first_global_read(&self) -> Result<crate::database::stored::Keys> {
         let (bucket, me, secret, root) = (self.bucket()?, hex(&self.0.id), self.seal_secret(), self.with(|i| Ok(i.r.root))?);
         let mut candidates = crate::database::stored::Keys::new();
@@ -165,14 +165,13 @@ impl Node {
         loop {
             ensure!(!candidates.is_empty(), NotGiven(Scope::Global, self.device_name()));
             let log_keys = self.step_keys_of(&candidates).await?;
-            // Who's who as the steps say it, from the freeze the recovery key its genesis names signed: the epochs'
-            // hashes each key sealed to this device must have.
-            let (_, recovery) = crate::database::steps::recovery_key(&bucket, &log_keys, root).await?;
+            // Who's who as the steps say it, from the network's first freeze: the epochs' hashes each key sealed to this
+            // device must have.
             let mut steps = Vec::new();
             let who = loop {
                 let more = crate::database::steps::read(&bucket, &log_keys, &Scope::Global, steps.len() as u64).await?;
                 steps.extend(more.steps.iter().cloned());
-                let who = crate::database::steps::Truth::read(&steps, recovery, now_ms())?.with_context(|| format!("{YOURS}'s who's who has no freeze yet"))?.db;
+                let who = crate::database::steps::Truth::read(&steps, root, now_ms())?.with_context(|| format!("{YOURS}'s who's who has no freeze yet"))?.db;
                 if !more.junk_at_end(who.epoch(&Scope::Global)) {
                     break who;
                 }
@@ -182,10 +181,6 @@ impl Node {
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| hashes.get(*n) != Some(&crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
-                self.with(|i| {
-                    i.r.recovery = Some(recovery);
-                    Ok(())
-                })?;
                 return Ok(candidates);
             }
             tracing::warn!("global's epochs {wrong:?} sealed to {} aren't the keys who's who made: passed over", self.device_name());

@@ -10,7 +10,7 @@
 //! - a passkey's assertion: of this network's address, the person present, naming this device in this network just now,
 //!   and signed by the passkey's public key.
 //!
-//! Both name the network by its first entry's hash (`Network::genesis`), so a sign-in made for another network, or by
+//! Both name the network by its root (`Network::root`), so a sign-in made for another network, or by
 //! an older release that names none, lets no device in by itself: it's approved by its code.
 //!
 //! Only a device that signed in itself is let in by its sign-in. One whose sign-in was finished from a link opened
@@ -48,16 +48,16 @@ pub const FRESH: u64 = 10 * 60_000;
 #[cfg(feature = "sign-in-proof")]
 const SKEW: u64 = 60_000;
 
-/// The OIDC `nonce` a sign-in for `device` in the network whose first entry's hash is `genesis` asks its provider to
-/// put in its ID token: base64url(sha256("one/join\0" ‖ genesis ‖ key ‖ seal key)).
-pub fn nonce(genesis: &[u8; 32], device: &Endpoint) -> String {
-    B64U.encode(&sha256(&[DOMAIN, genesis, &device.key, &device.seal].concat()))
+/// The OIDC `nonce` a sign-in for `device` in the network whose root is `root` asks its provider to
+/// put in its ID token: base64url(sha256("one/join\0" ‖ root ‖ key ‖ seal key)).
+pub fn nonce(root: &[u8; 32], device: &Endpoint) -> String {
+    B64U.encode(&sha256(&[DOMAIN, root, &device.key, &device.seal].concat()))
 }
 
-/// The challenge a passkey signs for `device` in the network `genesis` at `at` (ms): "one/join\0" ‖ genesis ‖ key ‖
+/// The challenge a passkey signs for `device` in the network `root` at `at` (ms): "one/join\0" ‖ root ‖ key ‖
 /// seal key ‖ `at` (8 bytes, big-endian).
-pub fn challenge(genesis: &[u8; 32], device: &Endpoint, at: u64) -> Vec<u8> {
-    [DOMAIN, genesis, &device.key, &device.seal, &at.to_be_bytes()].concat()
+pub fn challenge(root: &[u8; 32], device: &Endpoint, at: u64) -> Vec<u8> {
+    [DOMAIN, root, &device.key, &device.seal, &at.to_be_bytes()].concat()
 }
 
 /// The setting naming the OIDC clients a network's people sign in with, "<issuer> <client id>", one a line: an ID
@@ -70,17 +70,17 @@ pub const CLIENTS: &str = "sign_in_clients";
 pub struct Network {
     /// Its address, whose host is its passkeys' relying party.
     pub address: String,
-    /// Its first entry's hash.
-    pub genesis: [u8; 32],
+    /// Its root.
+    pub root: [u8; 32],
     /// The OIDC clients its people sign in with, `(issuer, client id)`, from its `CLIENTS` setting.
     pub clients: Vec<(String, String)>,
 }
 
 impl Network {
-    /// The network at `address` whose first entry's hash is `genesis`, with its `CLIENTS` setting, `setting`.
-    pub fn new(address: &str, genesis: [u8; 32], setting: Option<&str>) -> Network {
+    /// The network at `address` whose root is `root`, with its `CLIENTS` setting, `setting`.
+    pub fn new(address: &str, root: [u8; 32], setting: Option<&str>) -> Network {
         let clients = setting.unwrap_or("").lines().filter_map(|l| l.trim().split_once(char::is_whitespace)).map(|(i, a)| (i.trim().to_string(), a.trim().to_string())).collect();
-        Network { address: address.trim_end_matches('/').to_string(), genesis, clients }
+        Network { address: address.trim_end_matches('/').to_string(), root, clients }
     }
 }
 
@@ -259,7 +259,7 @@ fn id_token(token: &str, device: &Endpoint, network: &Network, jwks: &Value, now
     if let Some(exp) = claims["exp"].as_u64() {
         ensure!(exp.saturating_mul(1000) > now, "that ID token has expired");
     }
-    ensure!(claims["nonce"].as_str() == Some(nonce(&network.genesis, device).as_str()), "that sign-in was for another device");
+    ensure!(claims["nonce"].as_str() == Some(nonce(&network.root, device).as_str()), "that sign-in was for another device");
     let email = claims["email"].as_str().map(|e| e.chars().take(254).collect());
     Ok(Account::Provider { issuer: issuer.to_string(), audience, subject, email })
 }
@@ -282,7 +282,7 @@ fn assertion(proof: &Proof, device: &Endpoint, network: &Network, public_key: &s
     let origin = network.address.as_str();
     ensure!(client["origin"].as_str() == Some(origin), "it was made at {}, not {origin}", client["origin"].as_str().unwrap_or("nowhere"));
     let asked = b64(client["challenge"].as_str().context("it has no challenge")?)?;
-    let at = asked.strip_prefix(DOMAIN).and_then(|rest| rest.strip_prefix(&network.genesis[..])).and_then(|rest| rest.strip_prefix(&device.key[..])).and_then(|rest| rest.strip_prefix(&device.seal[..])).context("that sign-in was for another device")?;
+    let at = asked.strip_prefix(DOMAIN).and_then(|rest| rest.strip_prefix(&network.root[..])).and_then(|rest| rest.strip_prefix(&device.key[..])).and_then(|rest| rest.strip_prefix(&device.seal[..])).context("that sign-in was for another device")?;
     let at = u64::from_be_bytes(at.try_into().ok().context("that sign-in was for another device")?);
     fresh(at, now)?;
     let host = origin.split_once("://").map_or(origin, |(_, h)| h).split(['/', ':']).next().unwrap_or("");
@@ -334,11 +334,11 @@ mod tests {
     const ADDRESS: &str = "https://one.example.com";
     const GOOGLE: &str = "https://accounts.google.com";
     const OURS: &str = "1234-ours.apps.googleusercontent.com";
-    const GENESIS: [u8; 32] = [3; 32];
+    const ROOT: [u8; 32] = [3; 32];
 
     /// The network checking, whose people sign in with Google for `OURS`.
     fn ours() -> Network {
-        Network::new(ADDRESS, GENESIS, Some(&format!("{GOOGLE} {OURS}")))
+        Network::new(ADDRESS, ROOT, Some(&format!("{GOOGLE} {OURS}")))
     }
 
     fn device(n: u8) -> Endpoint {
@@ -366,7 +366,7 @@ mod tests {
             format!("{head}.{body}.{}", B64U.encode(&sig))
         }
         fn claims(d: &Endpoint) -> Value {
-            json!({ "iss": GOOGLE, "aud": OURS, "sub": "1001", "iat": NOW / 1000 - 30, "exp": NOW / 1000 + 3000, "nonce": nonce(&GENESIS, d), "email": "a@example.com" })
+            json!({ "iss": GOOGLE, "aud": OURS, "sub": "1001", "iat": NOW / 1000 - 30, "exp": NOW / 1000 + 3000, "nonce": nonce(&ROOT, d), "email": "a@example.com" })
         }
     }
 
@@ -399,7 +399,7 @@ mod tests {
         };
         refused(with("sub", json!("2002")), "another account's");
         refused(with("aud", json!("someone-else.apps.googleusercontent.com")), "not a client this network's people sign in with");
-        refused(with("nonce", json!(nonce(&GENESIS, &device(2)))), "for another device");
+        refused(with("nonce", json!(nonce(&ROOT, &device(2)))), "for another device");
         refused(with("nonce", json!(nonce(&[4; 32], &d))), "for another device");
         refused(with("nonce", Value::Null), "for another device");
         refused(with("iat", json!(NOW / 1000 - 3600)), "too old");
@@ -428,7 +428,7 @@ mod tests {
         let theirs_app = p.token(with("aud", json!("attackers-app.apps.googleusercontent.com")));
         let err = check(&Proof::IdToken(theirs_app), &d, &ours(), Some(&jwks), NOW).unwrap_err().to_string();
         assert!(err.contains("not a client this network's people sign in with"), "{err}");
-        let none = Network::new(ADDRESS, GENESIS, None);
+        let none = Network::new(ADDRESS, ROOT, None);
         assert!(check(&Proof::IdToken(p.token(Provider::claims(&d))), &d, &none, Some(&jwks), NOW).is_err());
         let recorded = check(&Proof::IdToken(p.token(Provider::claims(&d))), &d, &ours(), Some(&jwks), NOW).unwrap();
         assert!(matches!(&recorded, Account::Provider { email: Some(e), .. } if e == "a@example.com") && recorded.same(&theirs()[0]));
@@ -441,9 +441,9 @@ mod tests {
         let sign_in_keys = json!({ "keys": [{ "kty": "OKP", "crv": "Ed25519", "alg": "EdDSA", "kid": "t", "x": B64U.encode(sign_in.verifying_key().as_bytes()) }] });
         let throwaway = |iss: &str, address: &str| {
             let head = B64U.encode(json!({ "alg": "EdDSA", "kid": "t" }).to_string().as_bytes());
-            let body = B64U.encode(json!({ "iss": iss, "aud": "one-throwaway", "sub": "a000000000000001", "iat": NOW / 1000, "nonce": nonce(&GENESIS, &d) }).to_string().as_bytes());
+            let body = B64U.encode(json!({ "iss": iss, "aud": "one-throwaway", "sub": "a000000000000001", "iat": NOW / 1000, "nonce": nonce(&ROOT, &d) }).to_string().as_bytes());
             let sig = sign_in.sign(format!("{head}.{body}").as_bytes());
-            let network = Network::new(address, GENESIS, Some(&format!("{iss} one-throwaway")));
+            let network = Network::new(address, ROOT, Some(&format!("{iss} one-throwaway")));
             check(&Proof::IdToken(format!("{head}.{body}.{}", B64U.encode(&sig.to_bytes()))), &d, &network, Some(&sign_in_keys), NOW)
         };
         assert!(throwaway(issuer, "http://127.0.0.1:8787").is_ok());
@@ -494,18 +494,18 @@ mod tests {
     fn a_passkey_lets_in_only_its_own_device() {
         let (pk, d) = (Passkey::new(), device(1));
         let accounts = vec![Account::Passkey { credential: pk.credential.clone(), public_key: pk.public_key() }];
-        let ok = pk.assert(&challenge(&GENESIS, &d, NOW - 5_000), ADDRESS, "one.example.com", 0x05);
+        let ok = pk.assert(&challenge(&ROOT, &d, NOW - 5_000), ADDRESS, "one.example.com", 0x05);
         assert_eq!(vouches(&ok, &d, &ours(), None, &accounts, NOW).unwrap(), accounts[0]);
         let refused = |proof: Proof, accounts: &[Account], why: &str| {
             let err = vouches(&proof, &d, &ours(), None, accounts, NOW).expect_err(why).to_string();
             assert!(err.contains(why), "{err} says {why}");
         };
-        refused(pk.assert(&challenge(&GENESIS, &device(2), NOW), ADDRESS, "one.example.com", 0x05), &accounts, "for another device");
+        refused(pk.assert(&challenge(&ROOT, &device(2), NOW), ADDRESS, "one.example.com", 0x05), &accounts, "for another device");
         refused(pk.assert(&challenge(&[4; 32], &d, NOW), ADDRESS, "one.example.com", 0x05), &accounts, "for another device");
-        refused(pk.assert(&challenge(&GENESIS, &d, NOW - FRESH - 1), ADDRESS, "one.example.com", 0x05), &accounts, "too old");
-        refused(pk.assert(&challenge(&GENESIS, &d, NOW), "https://evil.example.com", "one.example.com", 0x05), &accounts, "not https://one.example.com");
-        refused(pk.assert(&challenge(&GENESIS, &d, NOW), ADDRESS, "evil.example.com", 0x05), &accounts, "another site");
-        refused(pk.assert(&challenge(&GENESIS, &d, NOW), ADDRESS, "one.example.com", 0x04), &accounts, "wasn't there");
+        refused(pk.assert(&challenge(&ROOT, &d, NOW - FRESH - 1), ADDRESS, "one.example.com", 0x05), &accounts, "too old");
+        refused(pk.assert(&challenge(&ROOT, &d, NOW), "https://evil.example.com", "one.example.com", 0x05), &accounts, "not https://one.example.com");
+        refused(pk.assert(&challenge(&ROOT, &d, NOW), ADDRESS, "evil.example.com", 0x05), &accounts, "another site");
+        refused(pk.assert(&challenge(&ROOT, &d, NOW), ADDRESS, "one.example.com", 0x04), &accounts, "wasn't there");
         refused(ok.clone(), &[], "isn't one they've signed in with");
         refused(Proof::ByLink(Box::new(ok.clone())), &accounts, "from a link");
         assert_eq!(check(&Proof::ByLink(Box::new(ok.clone())), &d, &ours(), None, NOW).unwrap(), accounts[0]);
@@ -514,7 +514,7 @@ mod tests {
         refused(ok.clone(), &[Account::Passkey { credential: pk.credential.clone(), public_key: other.public_key() }], "signature");
         // Changed after it was signed.
         let Proof::Passkey { credential, authenticator_data, signature, public_key, .. } = ok.clone() else { unreachable!() };
-        let client = json!({ "type": "webauthn.get", "challenge": B64U.encode(&challenge(&GENESIS, &device(2), NOW)), "origin": ADDRESS }).to_string();
+        let client = json!({ "type": "webauthn.get", "challenge": B64U.encode(&challenge(&ROOT, &device(2), NOW)), "origin": ADDRESS }).to_string();
         let swapped = Proof::Passkey { credential, authenticator_data, client_data: B64U.encode(client.as_bytes()), signature, public_key };
         refused(swapped, &accounts, "for another device");
         let mut changed = ok.clone();

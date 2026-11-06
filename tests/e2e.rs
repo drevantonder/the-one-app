@@ -9,14 +9,14 @@ use crate::temp;
 
 async fn start(name: &str) -> Node {
     let dir = temp(name);
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": name }).to_string()).unwrap();
     Node::start(&dir).await.unwrap()
 }
 
 /// Workers whose relay the devices of `a`'s network reach each other through, taking only `a` and those it
 /// admits: `a` says it's the network's.
 async fn relay(a: &Node) -> crate::cloudflare::Workers {
-    let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![one::entry::hex(&a.id())]));
+    let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![one::keys::hex(&a.id())]));
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
     k
@@ -35,8 +35,8 @@ async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
 }
 
 /// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
-async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: one::entry::Content) {
-    let global = one::entry::Scope::Global;
+async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: one::database::content::Content) {
+    let global = one::database::scopes::Scope::Global;
     let next = a.global_steps(caller, 9007199254740991, None).await.unwrap();
     let (at, epoch) = (next["at"].as_u64().unwrap(), next["epoch"].as_u64().unwrap() as u32);
     let step = one::database::steps::sign(key, &global, at + 1, &caller.user, epoch, one::node::now_ms(), content).unwrap();
@@ -53,7 +53,7 @@ async fn add_notes(a: &Node) {
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
-    a.install(&me, "notes", &one::entry::Scope::Global, true, None).await.unwrap();
+    a.install(&me, "notes", &one::database::scopes::Scope::Global, true, None).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -66,7 +66,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     b.join(&a.pair().unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     eventually("notes to run", async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
-    a.set_item(&me, &one::entry::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
+    a.set_item(&me, &one::database::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
     // A place that can't be written isn't added.
     let bad = a.add_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" })).await.unwrap();
@@ -91,7 +91,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     // From nothing but the disk and the recovery key.
     let place = one::bucket::Place::Folder(dir.clone());
     let network = one::backups::networks(&place).unwrap().remove(0);
-    let keys = one::backups::open_keys(&place, &network, &one::entry::unhex(&recovery).unwrap()).unwrap();
+    let keys = one::backups::open_keys(&place, &network, &one::keys::unhex(&recovery).unwrap()).unwrap();
     assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
     let checked = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None }).unwrap().0;
     assert_eq!(checked["problems"], json!([]), "{checked}");
@@ -99,10 +99,10 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert_eq!(checked["people"], json!(["Andre"]));
     assert!(checked["apps"].as_array().unwrap().contains(&json!("notes")), "{checked}");
     let mine = format!("user:{}", me.user);
-    let items = backed_up(&dir, &network, &one::entry::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
+    let items = backed_up(&dir, &network, &one::keys::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
     assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
     let restored = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
-    assert_eq!(backed_up_posts(&dir, &network, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup"]);
+    assert_eq!(backed_up_posts(&dir, &network, &one::keys::unhex(&recovery).unwrap()).await, ["before the backup"]);
     let steps_then = restored.snapshot.databases["notes/main"].0;
     let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();
     assert!(!files.iter().any(|f| f.windows(12).any(|w| w == b"s3cret-value") || f.windows(17).any(|w| w == b"before the backup")), "nothing is readable on the disk");
@@ -115,7 +115,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     eventually("the second backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
     let again = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert!(again.snapshot.databases["notes/main"].0 > steps_then);
-    assert_eq!(backed_up_posts(&dir, &network, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
+    assert_eq!(backed_up_posts(&dir, &network, &one::keys::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
     let checked = a.check_backups().await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
     assert!(checked[0]["error"].is_null(), "{checked}");
@@ -143,9 +143,9 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
 
     // A folder named only by a Vault item, which anyone may write, is never written to: a folder is its own device's
     // choice. Nor is an S3 place no admin's setting names.
-    let global = one::entry::Scope::Global;
+    let global = one::database::scopes::Scope::Global;
     let planted = temp("backup-planted").join("home");
-    let fields = json!({ "path": { "value": planted }, "device": { "value": one::entry::hex(&a.id()) } });
+    let fields = json!({ "path": { "value": planted }, "device": { "value": one::keys::hex(&a.id()) } });
     a.set_item(&me, &global, json!({ "title": "Planted", "type": one::backups::KIND, "fields": fields, "apps": ["node"] })).await.unwrap();
     let s3 = json!({ "endpoint": { "value": "http://127.0.0.1:9" }, "bucket": { "value": "b" }, "key_id": { "value": "k" }, "secret": { "value": "s", "secret": true } });
     a.set_item(&me, &global, json!({ "title": "Unnamed bucket", "type": one::backups::KIND, "fields": s3, "hosts": ["127.0.0.1"], "apps": ["node"] })).await.unwrap();
@@ -209,20 +209,20 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     use one::node::{DeviceRequest, Invited};
     let dir = temp("approve");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     a.create("Home", "Andre").await.unwrap();
     add_notes(&a).await;
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     eventually("notes to run", async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
-    let global = one::entry::Scope::Global;
+    let global = one::database::scopes::Scope::Global;
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let asks = |key: &ed25519_dalek::SigningKey, user: &str, proof: Option<String>| {
         let e = one::keys::Endpoint::of(key);
-        DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Chrome".into(), user: user.into(), person: String::new(), proof, device: None, made: None, place: None, sign_in: None }
+        DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Chrome".into(), user: user.into(), person: String::new(), proof, device: None, made: None, place: None, sign_in: None }
     };
-    let opens = async |key: &ed25519_dalek::SigningKey, scope: &one::entry::Scope| -> Vec<u32> {
-        let got = a.sealed_keys(&me, scope, Some(&one::entry::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
+    let opens = async |key: &ed25519_dalek::SigningKey, scope: &one::database::scopes::Scope| -> Vec<u32> {
+        let got = a.sealed_keys(&me, scope, Some(&one::keys::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
         let sealed = got["sealed"].as_object().unwrap();
         sealed.iter().filter(|(_, v)| one::cloudflare::open_sealed(&one::keys::seal_secret(key), &data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap()).is_ok()).map(|(n, _)| n.parse().unwrap()).collect()
     };
@@ -234,7 +234,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
 
     // Sam is let in only with the proof of the secret Andre's invite made.
     let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let sams = new_key();
     let wrong = one::keys::invite_proof(b"another-secret", &one::keys::Endpoint::of(&sams));
     assert!(a.approve_request(&me, &asks(&sams, &sam.user, Some(wrong)), Some(&sam)).await.is_err());
@@ -253,7 +253,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     assert!(format!("{refused:#}").contains("isn't one of your devices"), "{refused:#}");
 
     // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the notes go on.
-    let removed = a.remove_device(&me, &one::entry::hex(&laptop.verifying_key().to_bytes())).await.unwrap();
+    let removed = a.remove_device(&me, &one::keys::hex(&laptop.verifying_key().to_bytes())).await.unwrap();
     assert!(removed["new_epochs"].as_array().unwrap().iter().any(|e| e["scope"] == "global" && e["epoch"] == 2), "{removed}");
     assert_eq!(opens(&laptop, &global).await, vec![1]);
     for f in walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_epochs/2/")) {
@@ -339,18 +339,18 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
 
     // Sam, a person of the network, with a device of his.
     let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = one::keys::Endpoint::of(&sams);
     let proof = one::keys::invite_proof(secret.as_bytes(), &e);
-    let asks = DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
+    let asks = DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
     a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
 
     // Repos' keys in global, as Sam's device opens them and hands them to the node with his calls.
-    let global = one::entry::Scope::Global;
+    let global = one::database::scopes::Scope::Global;
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
     // Repos' own, and the Vault's, which fills in its items, as a client hands them when the node asks.
-    let epochs = a.sealed_keys(&me, &global, Some(&one::entry::hex(&e.key)), None).await.unwrap();
+    let epochs = a.sealed_keys(&me, &global, Some(&one::keys::hex(&e.key)), None).await.unwrap();
     let mut keys = Vec::new();
     for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::vault::DATABASE)] {
         let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
@@ -364,7 +364,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };
     let signed_in = Caller { key: a.id(), user: sam.user.clone(), agent: None, token: Some("Sam's sign-in".into()) };
     let mut both = Vec::new();
-    for (sam, handed_for) in [(client, one::entry::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
+    for (sam, handed_for) in [(client, one::keys::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
         let handoff = one::keys::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
         a.hand(sam.token.as_deref().unwrap(), &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
         let call = |req: CallRequest| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
@@ -538,12 +538,12 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
 
     // The network's GitHub App in Everyone's Vault, its key opened on this machine, and Andre's own GitHub sign-in in his.
     let pem = String::from_utf8(std::process::Command::new("openssl").args(["genrsa", "-traditional", "2048"]).output().unwrap().stdout).unwrap();
-    let global = one::entry::Scope::Global;
+    let global = one::database::scopes::Scope::Global;
     a.vault_grant(&me, &global, &a.device_name(), true).await.unwrap();
     a.set_item(&me, &global, json!({ "title": "GitHub App", "type": "GitHub App", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
         "app_id": { "value": "1" }, "slug": { "value": "app" }, "client_id": { "value": "Iv1" }, "client_secret": { "value": "s", "secret": true },
         "private_key": { "value": pem, "secret": true }, "web": { "value": base }, "api": { "value": format!("{base}/api/v3") } } })).await.unwrap();
-    a.set_item(&me, &one::entry::Scope::User(me.user.clone()), json!({ "title": "GitHub andre-gh", "type": "GitHub account", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
+    a.set_item(&me, &one::database::scopes::Scope::User(me.user.clone()), json!({ "title": "GitHub andre-gh", "type": "GitHub account", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
         "login": { "value": "andre-gh" }, "access_token": { "value": "andre-token", "secret": true }, "expires": { "value": "0" } } })).await.unwrap();
 
     // Andre, an admin of Team, connects the organization for it.
@@ -556,14 +556,14 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     // Sam, a person of the network but not in Team, with a device of his that hands its keys with his calls: Repos'
     // and the Vault's in global.
     let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = one::keys::Endpoint::of(&sams);
     let proof = one::keys::invite_proof(secret.as_bytes(), &e);
-    let asks = DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
+    let asks = DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
     a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
-    let epochs = a.sealed_keys(&me, &global, Some(&one::entry::hex(&e.key)), None).await.unwrap();
+    let epochs = a.sealed_keys(&me, &global, Some(&one::keys::hex(&e.key)), None).await.unwrap();
     let mut keys = Vec::new();
     for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::vault::DATABASE)] {
         let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
@@ -574,7 +574,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
         }
     }
     let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };
-    let handoff = one::keys::Handoff { for_: one::entry::hex(&e.key), until: u64::MAX, keys };
+    let handoff = one::keys::Handoff { for_: one::keys::hex(&e.key), until: u64::MAX, keys };
     a.hand(client.token.as_deref().unwrap(), &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
     let sams_list = async || {
         let req = CallRequest { scopes: Some(vec!["global".into()]), ..repos("list", json!({ "source": "github" })) };
@@ -617,7 +617,7 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
 async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     use one::node::Build;
     let dir = temp("service-build");
-    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     a.create("Home", "Andre").await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };

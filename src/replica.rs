@@ -7,17 +7,18 @@ use ed25519_dalek::SigningKey;
 
 use crate::database::scopes::ScopeDb;
 use crate::database::steps::{self, Freeze, Given, Truth};
-use crate::entry::{Content, Entry, Hash, Key, Scope};
+use crate::database::content::Content;
+use crate::database::steps::Step;
+use crate::keys::{Hash, Key};
+use crate::database::scopes::Scope;
 
 /// What one device holds and knows.
 pub struct Replica {
     pub key: SigningKey,
     pub id: Key,
-    /// The network's genesis, once this device created or joined it.
+    /// The network's root, its id, once this device created or joined it: who's who is its first freeze
+    /// (`Truth::first`).
     pub root: Option<Hash>,
-    /// The recovery key the genesis names, once read (`steps::recovery_key`): only the first freeze it signed is who's
-    /// who.
-    pub recovery: Option<Key>,
     /// `global`'s scope database: one of nobody until this device has read its freeze.
     db: ScopeDb,
     /// Once this device has read the freeze: it, and the last of the scope database's steps applied to `db` (or
@@ -43,17 +44,16 @@ pub struct Handled {
 impl Replica {
     pub fn new(key: SigningKey, root: Option<Hash>, now: u64) -> Replica {
         let id = key.verifying_key().to_bytes();
-        Replica { key, id, root, recovery: None, db: nobody(now), frozen: None, looked: 0 }
+        Replica { key, id, root, db: nobody(now), frozen: None, looked: 0 }
     }
 
     /// Step `at` of `global`'s scope database before this device has read its freeze, the next it looks at: if it's
-    /// the freeze the network's recovery key signed, its copy checked against its hash, who's who from here. One that
-    /// doesn't check out fails, so this device looks at it again and never past it.
+    /// the network's first freeze (`Truth::first`), who's who from here. One a newer release wrote fails, so this
+    /// device looks at it again and never past it.
     pub fn take_first(&mut self, at: u64, given: Option<&Given>, now: u64) -> Result<Handled> {
         ensure!(self.frozen.is_none() && at == self.looked + 1, "step {at} isn't the next");
         let mut handled = Handled::default();
-        let recovery = self.recovery.context("this device hasn't read its network's genesis yet")?;
-        let truth = Truth::first(at, given, recovery, now)?;
+        let truth = Truth::first(at, given, self.root, now)?;
         self.looked = at;
         if let Some(t) = truth {
             self.frozen = Some((t.freeze, at));
@@ -99,7 +99,7 @@ impl Replica {
 
     /// A step of `global`'s scope database another device wrote, at the position after the last this device applied:
     /// applied if it counts, passed over if not; either way its position is taken.
-    pub fn take_step(&mut self, at: u64, step: Option<&Entry>, now: u64) -> Result<Handled> {
+    pub fn take_step(&mut self, at: u64, step: Option<&Step>, now: u64) -> Result<Handled> {
         let (freeze, last) = self.frozen.clone().context("this device hasn't read who's who yet")?;
         ensure!(at == last + 1, "step {at} isn't the next");
         let mut handled = Handled::default();
@@ -125,7 +125,7 @@ impl Replica {
 
     /// A step of `global`'s database signed by `key` (this device's, or the recovery key) as `user`, for the position
     /// after the last it applied, once it would count there.
-    pub fn make_step(&self, key: &SigningKey, user: &str, content: Content, now: u64) -> Result<Entry> {
+    pub fn make_step(&self, key: &SigningKey, user: &str, content: Content, now: u64) -> Result<Step> {
         let at = self.at().context("this device hasn't read who's who yet")? + 1;
         let step = steps::sign(key, &Scope::Global, at, user, self.db.epoch(&Scope::Global), now, content)?;
         steps::apply(&self.db, None, &Scope::Global, &step)?;

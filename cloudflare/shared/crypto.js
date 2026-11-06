@@ -367,18 +367,18 @@ export async function inviteProof(secret, key, seal) {
   return hex.encode(await hkdf(secret, concat(text.encode("one/invite\0"), bytes(key), bytes(seal))));
 }
 
-/// The OIDC nonce a sign-in for a device in the network whose first entry's hash is `genesis` asks its provider for
-/// (`sign_in_proof::nonce`): base64url(sha256("one/join\0" ‖ genesis ‖ key ‖ seal)).
-export async function joinNonce(genesis, key, seal) {
-  return b64u.encode(await sha256(concat(text.encode("one/join\0"), bytes(genesis), bytes(key), bytes(seal))));
+/// The OIDC nonce a sign-in for a device in the network whose root is `root` asks its provider for
+/// (`sign_in_proof::nonce`): base64url(sha256("one/join\0" ‖ root ‖ key ‖ seal)).
+export async function joinNonce(root, key, seal) {
+  return b64u.encode(await sha256(concat(text.encode("one/join\0"), bytes(root), bytes(key), bytes(seal))));
 }
 
-/// The challenge a passkey signs for a device in the network `genesis` at `at` (ms) (`sign_in_proof::challenge`):
-/// "one/join\0" ‖ genesis ‖ key ‖ seal ‖ `at`, 8 bytes big-endian.
-export function joinChallenge(genesis, key, seal, at) {
+/// The challenge a passkey signs for a device in the network `root` at `at` (ms) (`sign_in_proof::challenge`):
+/// "one/join\0" ‖ root ‖ key ‖ seal ‖ `at`, 8 bytes big-endian.
+export function joinChallenge(root, key, seal, at) {
   const time = new Uint8Array(8);
   new DataView(time.buffer).setBigUint64(0, BigInt(at));
-  return concat(text.encode("one/join\0"), bytes(genesis), bytes(key), bytes(seal), time);
+  return concat(text.encode("one/join\0"), bytes(root), bytes(key), bytes(seal), time);
 }
 
 /// A passkey's device keys from its PRF output: `{ sign: Ed25519 seed, seal: X25519 secret }`.
@@ -427,7 +427,7 @@ export function askedFor(route, node, answer) {
 export const BEHIND = [2_000, 4_000];
 
 /// What sign-in said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
-/// `{ approved, genesis? }`, `{ gone }`, or `{}` while it waits. As src/keys.rs `waited`, which says what each means.
+/// `{ approved, root? }`, `{ gone }`, or `{}` while it waits. As src/keys.rs `waited`, which says what each means.
 export function waited(status, said) {
   if (status === 401) return { signedOut: true };
   if (status === 404) return { gone: true };
@@ -435,7 +435,7 @@ export function waited(status, said) {
     // Where the approving device read who's who to (src/database/steps.rs `Welcome::parse`): `<freeze>.<at>.<hash>`.
     const w = typeof said.welcome === "string" && /^([1-9]\d{0,15})\.([1-9]\d{0,15})\.[0-9a-f]{64}$/.exec(said.welcome);
     const welcome = w && Number(w[2]) >= Number(w[1]) && Number(w[2]) < 2 ** 53 ? said.welcome : null;
-    return { approved: true, ...(typeof said.genesis === "string" && /^[0-9a-f]{64}$/.test(said.genesis) ? { genesis: said.genesis } : {}), ...(welcome ? { welcome } : {}) };
+    return { approved: true, ...(typeof said.root === "string" && /^[0-9a-f]{64}$/.test(said.root) ? { root: said.root } : {}), ...(welcome ? { welcome } : {}) };
   }
   return {};
 }

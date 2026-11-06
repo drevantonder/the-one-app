@@ -60,19 +60,19 @@ pub const ENDPOINT_HEADER: &str = "x-one-endpoint";
 /// device that vouched for a session's endpoint), and until when what it hands counts (that session's certificate's
 /// `until`): only the node puts this on a request, as an extension, which nothing a client sends can set.
 #[derive(Clone, Copy)]
-pub struct FromClient(pub crate::entry::Key, pub u64);
+pub struct FromClient(pub crate::keys::Key, pub u64);
 
 /// The client devices whose MCP requests this node's own MCP is answering (`mcp_http`), each by a ticket made for that
 /// request alone: a random secret only this process sees, so nothing a request says names a device, and the keys
 /// handed for one are reached only as its connection proved it.
-static ASKING_AS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (crate::entry::Key, u64)>>> = std::sync::LazyLock::new(Default::default);
+static ASKING_AS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (crate::keys::Key, u64)>>> = std::sync::LazyLock::new(Default::default);
 
 /// What this node's own MCP asks its API with while it answers a client device's request: its ticket, until dropped.
 pub struct AskingAs(String);
 
 impl AskingAs {
     /// For the client device `key`, whose handed keys count until `until` (`FromClient`'s).
-    pub fn new(key: crate::entry::Key, until: u64) -> AskingAs {
+    pub fn new(key: crate::keys::Key, until: u64) -> AskingAs {
         let ticket = format!("ask.{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()));
         ASKING_AS.lock().unwrap().insert(ticket.clone(), (key, until));
         AskingAs(ticket)
@@ -90,7 +90,7 @@ impl Drop for AskingAs {
 }
 
 /// The client device a ticket is for, and until when what it hands counts, while its request is answered.
-fn asking_as(ticket: &str) -> Option<(crate::entry::Key, u64)> {
+fn asking_as(ticket: &str) -> Option<(crate::keys::Key, u64)> {
     ASKING_AS.lock().unwrap().get(ticket).copied()
 }
 
@@ -476,7 +476,7 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
 
 /// A client device's request over iroh is its person's, as a sign-in's is, for what `SIGNED_IN` lists and MCP: the
 /// device must still be one of the network's, and the keys it hands are for its key, kept no longer than `until`.
-async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+async fn from_client(node: &Node, key: crate::keys::Key, until: u64, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     if !(SIGNED_IN.contains(&path) || path == "/mcp") {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
@@ -684,7 +684,7 @@ async fn endpoint(State(node): State<Node>) -> Json<Value> {
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
 async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
-    let scope = crate::entry::Scope::parse(q.get("scope").map(String::as_str).unwrap_or(""))?;
+    let scope = crate::database::scopes::Scope::parse(q.get("scope").map(String::as_str).unwrap_or(""))?;
     Ok(Json(node.sealed_keys(&me.caller, &scope, q.get("to").map(String::as_str), q.get("app").map(String::as_str)).await?))
 }
 
@@ -692,7 +692,7 @@ async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collect
 /// caller's device (`Node::seal_key`).
 async fn keys_post(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["scope", "n", "to", "app", "sealed"])?;
-    let scope = crate::entry::Scope::parse(text(&body, "scope")?)?;
+    let scope = crate::database::scopes::Scope::parse(text(&body, "scope")?)?;
     let n = body["n"].as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| anyhow::anyhow!("give n, the epoch"))?;
     Ok(Json(node.seal_key(&me.caller, &scope, n, body["to"].as_str(), body["app"].as_str(), text(&body, "sealed")?).await?))
 }
@@ -797,7 +797,7 @@ async fn call_for(node: &Node, me: Me, body: Value, picks: bool) -> anyhow::Resu
 /// Cloudflare node's key, `node::passed_token`) for the scopes the call names alone, and never this device's own: no
 /// access token comes with it, so none of theirs reaches a node on a machine, whose owner could use it as them.
 /// → `{ ok }`, or what failed as the API says it.
-pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::entry::Key, mut call: Value) -> Value {
+pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::Key, mut call: Value) -> Value {
     let (me, keys) = match call.as_object_mut() {
         Some(c) => (c.remove("me").unwrap_or_default(), c.remove("keys")),
         None => (Value::Null, None),
@@ -881,7 +881,7 @@ async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
 async fn steps(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let list = body.as_array().ok_or_else(|| anyhow::anyhow!("give a list of steps"))?;
     let b = |v: &Value, k: &str| data_encoding::BASE64URL_NOPAD.decode(v[k].as_str().unwrap_or("").as_bytes()).map_err(|_| anyhow::anyhow!("{k} isn't base64url"));
-    let list = list.iter().map(|v| crate::entry::Entry::decode_step(&b(v, "header")?, &b(v, "signature")?, &b(v, "body")?)).collect::<anyhow::Result<Vec<_>>>()?;
+    let list = list.iter().map(|v| crate::database::steps::Step::decode(&b(v, "header")?, &b(v, "signature")?, &b(v, "body")?)).collect::<anyhow::Result<Vec<_>>>()?;
     node.put_signed_steps(&me.caller, list).await?;
     done()
 }

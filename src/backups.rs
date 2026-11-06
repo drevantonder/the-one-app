@@ -3,7 +3,7 @@
 //! S3-compatible storage. Each epoch's key is sealed to the network's recovery key (`keys::epoch_name`'s `recovery`), and the place
 //! keeps that copy, so a backup and that key are all a recovery needs.
 //!
-//! A place holds a folder for each network, named by its genesis, so networks can share a bucket:
+//! A place holds a folder for each network, named by its root, so networks can share a bucket:
 //!
 //! ```text
 //! <network>/keys/<scope>/<key id>              an epoch's key, sealed to the recovery key
@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 
 use crate::bucket::{Place, folder, scope_of};
 use crate::database::scopes::ScopeDb;
-use crate::entry::{Key, hex};
+use crate::keys::{Key, hex};
 
 /// The Vault item kind a place is: an item in Everyone, with a folder's `device` and `path`, or S3's `endpoint`,
 /// `bucket`, `region`, `key_id` and `secret`.
@@ -194,10 +194,6 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
     for n in bucket.list(&format!("{folder}/_epochs"))? {
         copy(&format!("{folder}/_epochs/{n}/recovery"), true)?;
     }
-    // The network's genesis, which names the recovery key who's who starts from.
-    if scope == "global" {
-        copy(&crate::database::steps::genesis_name(), true)?;
-    }
     // And each of its Vault's keys, sealed to the recovery key, so what's sealed in its items comes back with it.
     for n in bucket.list(&format!("{folder}/_vault"))? {
         copy(&format!("{folder}/_vault/{n}/recovery"), true)?;
@@ -283,7 +279,7 @@ pub fn takes_over(at: usize, waiting: Option<u64>, added: u64, now: u64) -> bool
 
 /// A snapshot's file name: its time, so names sort by it, and its device.
 fn snapshot_name(time: u64, device: &Key) -> String {
-    format!("{time:013}-{}", crate::entry::short(device))
+    format!("{time:013}-{}", crate::keys::short(device))
 }
 
 /// The newest snapshot of a scope in a place that one of `keys` opens, with its key.
@@ -506,7 +502,7 @@ pub struct Check<'a> {
     pub network: &'a str,
     /// The keys that may open each scope's snapshots: its epochs' keys.
     pub keys: &'a BTreeMap<String, Vec<[u8; 32]>>,
-    pub root: Option<crate::entry::Hash>,
+    pub root: Option<crate::keys::Hash>,
 }
 
 /// Restores each scope's newest snapshot from a place, checking every blob, and who's who from `global`'s steps the
@@ -543,7 +539,7 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
         Ok(m) => m,
         Err(err) => {
             problems.push(format!("global: {err:#}"));
-            ScopeDb::empty(&crate::entry::Scope::Global, crate::node::now_ms())?
+            ScopeDb::empty(&crate::database::scopes::Scope::Global, crate::node::now_ms())?
         }
     };
     let bytes: u64 = place.objects(&format!("{network}/objects"))?.iter().map(|o| o.2).sum();
@@ -560,9 +556,8 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
 }
 
 /// Who's who as `global`'s scope database's steps the place's copy of the bucket holds say it (`database::steps`), from
-/// the freeze the recovery key its genesis (`root`, or for none, the one there) names signed, opened with `keys`, its
-/// epochs' keys.
-fn who(place: &Place, network: &str, root: Option<crate::entry::Hash>, keys: &[[u8; 32]]) -> Result<ScopeDb> {
+/// its first freeze, of the network `root` (or for none, the one there), opened with `keys`, its epochs' keys.
+fn who(place: &Place, network: &str, root: Option<crate::keys::Hash>, keys: &[[u8; 32]]) -> Result<ScopeDb> {
     use crate::database::steps;
     // The steps' key in each epoch: the node's app key there, opened with whichever of the epochs' keys does.
     let mut step_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
@@ -572,21 +567,17 @@ fn who(place: &Place, network: &str, root: Option<crate::entry::Hash>, keys: &[[
             step_keys.insert(n, crate::cloudflare::database_key(&app, steps::KEY_NAME));
         }
     }
-    let genesis = place.get(&format!("{network}/bucket/{}", steps::genesis_name()))?.context("its genesis isn't there")?;
-    let entries = steps::genesis_entries(&step_keys, &genesis)?;
-    let root = steps::genesis_of(root, &entries).context("its genesis isn't there")?;
-    let recovery = steps::recovery_of(root, &entries).context("its genesis isn't the network's")?;
     let prefix = steps::prefix("global");
     let now = crate::node::now_ms();
     let mut read = Vec::new();
     for at in 1.. {
         let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::database::stored::step_name(&prefix, at)))? else { break };
-        match steps::open(&step_keys, u32::MAX, &crate::entry::Scope::Global, at, &sealed) {
+        match steps::open(&step_keys, u32::MAX, &crate::database::scopes::Scope::Global, at, &sealed) {
             steps::Opened::Step(given) => read.push(Some(given)),
             steps::Opened::Junk => read.push(None),
             steps::Opened::Waits(epoch) => {
                 // Junk, under an epoch above every one made by the steps before it.
-                let held = steps::Truth::read(&read, recovery, now)?.map_or(0, |t| t.db.epoch(&crate::entry::Scope::Global));
+                let held = steps::Truth::read(&read, root, now)?.map_or(0, |t| t.db.epoch(&crate::database::scopes::Scope::Global));
                 if epoch <= held {
                     break;
                 }
@@ -594,7 +585,7 @@ fn who(place: &Place, network: &str, root: Option<crate::entry::Hash>, keys: &[[
             }
         }
     }
-    Ok(steps::Truth::read(&read, recovery, now)?.context("its who's who has no freeze")?.db)
+    Ok(steps::Truth::read(&read, root, now)?.context("its who's who has no freeze")?.db)
 }
 
 /// A place's copy of the network's bucket (`<network>/bucket/`), read as the bucket is, so a database restores from it
@@ -703,7 +694,7 @@ fn opens(keys: &crate::database::stored::Keys, name: &str, sealed: &[u8]) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry::{Entry, Ext};
+
     use ed25519_dalek::SigningKey;
     use serde_json::json;
 
@@ -717,15 +708,13 @@ mod tests {
         let blob = b"a deploy's bundle".to_vec();
         let hash = blake3::hash(&blob).to_hex().to_string();
 
-        // Who's who: the network's genesis, and the freeze its recovery key signed.
+        // Who's who: the freeze its recovery key signed.
         const ANDRE: &str = "0123456789abcdef";
         let node = crate::database::stored::app_key(&bucket, &epoch, "global", crate::database::scopes::APP, 1, true).await.unwrap().unwrap();
         let step_keys = crate::database::stored::Keys::from([(1, crate::cloudflare::database_key(&node, crate::database::steps::KEY_NAME))]);
-        let genesis = crate::database::content::genesis("Home", ANDRE, "Andre", &crate::keys::Endpoint::of(&device), "mac", &[crate::database::scopes::Kind::Client], recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&epoch));
-        let genesis = Entry::create(&device, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis);
-        let name = crate::database::steps::genesis_name();
-        bucket.put(&name, &crate::database::steps::seal(&step_keys, &name, &crate::entry::pack(&[&genesis])).unwrap()).unwrap();
-        let first = crate::database::steps::first_freeze(&recovery, &genesis, ANDRE, 0).unwrap();
+        let start = crate::database::content::first("Home", ANDRE, "Andre", &crate::keys::Endpoint::of(&device), "mac", &[crate::database::scopes::Kind::Client], recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&epoch));
+        let root = crate::keys::Hash::from_bytes(rand::random());
+        let first = crate::database::steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();
         let steps = crate::database::steps::prefix("global");
         let name = crate::database::stored::step_name(&steps, 1);
         bucket.put(&name, &crate::database::steps::seal(&step_keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref())).unwrap()).unwrap();
@@ -770,7 +759,7 @@ mod tests {
         let keys: BTreeMap<String, Vec<[u8; 32]>> = [("global".to_string(), vec![epoch])].into();
         let epochs = crate::database::stored::Keys::from([(1, epoch)]);
         let checked = || {
-            let (report, restored) = check(&Check { place: &place, network, keys: &keys, root: Some(genesis.hash()) }).unwrap();
+            let (report, restored) = check(&Check { place: &place, network, keys: &keys, root: Some(root) }).unwrap();
             (report["problems"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect::<Vec<_>>(), restored, report)
         };
         let (problems, restored, report) = checked();

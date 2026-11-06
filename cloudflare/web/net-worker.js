@@ -79,23 +79,22 @@ export function server(version) {
 
   /// `user`'s who's who from `global`'s scope database's steps, as kept and those this browser read since (`steps`),
   /// checked by the client (client/src/members.rs), then kept. The first time, of the network its approval named
-  /// (`genesis:<user>`), if it named one.
+  /// (`root:<user>`), if it named one.
   async function global(user, steps) {
     const [, { get, put }] = await code;
     const kept = await get(`global:${user}`);
     if (!steps && kept?.steps?.truth && kept?.members?.people?.[user]?.app_schedules) return kept.members;
     const { Global } = await glue;
-    const root = kept?.root || (await get(`genesis:${user}`)) || "";
-    // Where they were read to, as kept, then those this browser read since from the bucket, sealed, its log's first
-    // step, and a Welcome's freeze and copy, with the keys it opens them with itself.
+    const root = kept?.root || (await get(`root:${user}`)) || "";
+    // Where they were read to, as kept, then those this browser read since from the bucket, sealed, and a Welcome's
+    // freeze and copy, with the keys it opens them with itself.
     const { welcome, freeze, start } = steps || {};
-    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [], log: steps?.log || null, welcome, freeze, start }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
+    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [], welcome, freeze, start }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
     const g = new Global(root, JSON.stringify(held));
     const members = JSON.parse(g.members);
-    const wants_log = g.wants_log;
     await put(`global:${user}`, { root: g.root, steps: JSON.parse(g.steps), at: g.at, members });
     g.free();
-    return wants_log ? { ...members, wants_log } : members;
+    return members;
   }
 
   /// The session: none until a tab starts it (this worker, or this tab leading the others, is new); then its person, and
@@ -272,7 +271,7 @@ export function server(version) {
             const proof = JSON.stringify(m.proof);
             const at = issuerKeysAt(proof, m.address);
             const keys = at ? await (await fetch(at)).text() : "";
-            return post({ id, account: JSON.parse(signedInWith(proof, m.key, m.seal, m.address, m.genesis, m.clients || "", keys, m.accounts ? JSON.stringify(m.accounts) : undefined, Date.now())) });
+            return post({ id, account: JSON.parse(signedInWith(proof, m.key, m.seal, m.address, m.root, m.clients || "", keys, m.accounts ? JSON.stringify(m.accounts) : undefined, Date.now())) });
           }
           case "reconnect": {
             const s = await session?.ready;

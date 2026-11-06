@@ -14,8 +14,8 @@ use js_sys::{Function, Promise, Reflect, Uint8Array};
 use one::bucket::{Bucket, Failed, Object, Trouble};
 use one::call::Append;
 use one::database::stored::Db;
-use one::entry::{Entry, Hash, Scope};
-use one::database::scopes::{ScopeDb, app, object};
+use one::database::scopes::{Scope, ScopeDb, app, object};
+use one::keys::Hash;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -224,7 +224,7 @@ pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
 #[wasm_bindgen]
 pub fn check_certificate(certificate: &str, now: f64) -> Result<String, JsError> {
     let s = one::keys::check_certificate(certificate, now as u64).map_err(thrown)?;
-    Ok(json!({ "by": one::entry::hex(&s.by), "endpoint": one::entry::hex(&s.endpoint), "until": s.until }).to_string())
+    Ok(json!({ "by": one::keys::hex(&s.by), "endpoint": one::keys::hex(&s.endpoint), "until": s.until }).to_string())
 }
 
 /// Opens a database at `prefix` for `owner`'s object with the keys handed (`usable`, under the scope's `current`
@@ -440,17 +440,14 @@ struct Held {
     steps: Vec<Option<one::database::steps::Given>>,
     /// Of another scope: its start (`steps::START`, step 0), once looked for; none inside if there's none.
     start: Option<Option<one::database::steps::Given>>,
-    /// Of `global`: the entries of its frozen log's first step, the genesis among them (`steps::genesis_name`).
-    genesis: Vec<Entry>,
 }
 
 impl Held {
-    /// Of `global`'s: who's who from the freeze the recovery key its genesis names signed, and the steps after; none
-    /// before. Fails at a freeze the recovery key signed that doesn't check out, or a newer release's step, which stops
-    /// this node there as it stops every reader.
+    /// Of `global`'s: who's who from the network's first freeze (`steps::Truth::first`), of the root pinned
+    /// (`pin_root`), and the steps after; none before. Fails at a newer release's freeze or step, which stops this node
+    /// there as it stops every reader.
     fn truth(&self) -> Result<Option<one::database::steps::Truth>> {
-        let Some(recovery) = root(&self.genesis).and_then(|r| one::database::steps::recovery_of(r, &self.genesis)) else { return Ok(None) };
-        one::database::steps::Truth::read(&self.steps, recovery, now())
+        one::database::steps::Truth::read(&self.steps, ROOT.with(|r| *r.borrow()), now())
     }
 
     /// The newest epoch of `scope` made, as `global`'s steps say: any, before it's read the freeze.
@@ -506,17 +503,10 @@ pub async fn read_scope(owner: String, bucket: JsValue, scope: String, keys: Str
     read_scope_with((owner, scope), &Js(bucket), keys).await.map_err(failed)
 }
 
-/// `read_scope`, of `id`'s scope for its owner, with its `keys`: `global`'s genesis first.
+/// `read_scope`, of `id`'s scope for its owner, with its `keys`.
 async fn read_scope_with(id: (String, String), bucket: &Js, keys: one::database::stored::Keys) -> Result<()> {
     if LOGS.with(|l| l.borrow().get(&id).is_none_or(|l| l.keys != keys)) {
-        let genesis = match id.1.as_str() {
-            "global" => match bucket.get(&one::database::steps::genesis_name()).await? {
-                Some(o) => one::database::steps::genesis_entries(&keys, &o.bytes)?,
-                None => Vec::new(),
-            },
-            _ => Vec::new(),
-        };
-        LOGS.with(|l| l.borrow_mut().insert(id.clone(), Held { keys, read: reading(), steps: Vec::new(), start: None, genesis }));
+        LOGS.with(|l| l.borrow_mut().insert(id.clone(), Held { keys, read: reading(), steps: Vec::new(), start: None }));
     }
     read_steps(&id, bucket).await
 }
@@ -596,23 +586,17 @@ pub fn reads() -> u32 {
 }
 
 thread_local! {
-    /// The network's genesis, as the device that deployed this node holds it (`GENESIS`, `pin_genesis`).
-    static GENESIS: RefCell<Option<Hash>> = const { RefCell::new(None) };
+    /// The network's root, as the device that deployed this node holds it (`pin_root`).
+    static ROOT: RefCell<Option<Hash>> = const { RefCell::new(None) };
 }
 
-/// Pins the network's genesis to `genesis` (hex, the Worker's `GENESIS`), as sign-in pins it: an entry shaped like a
-/// genesis that any device writes into a step of its log is never taken for it.
+/// Pins the network's root to `root` (hex, the Worker's), as sign-in pins it: a freeze naming any other is never
+/// taken for its first.
 #[wasm_bindgen]
-pub fn pin_genesis(genesis: &str) -> Result<(), JsError> {
-    let hash = Hash::from_hex(genesis).map_err(|_| JsError::new("GENESIS isn't a hash"))?;
-    GENESIS.with(|g| *g.borrow_mut() = Some(hash));
+pub fn pin_root(root: &str) -> Result<(), JsError> {
+    let hash = Hash::from_hex(root).map_err(|_| JsError::new("the network's root isn't a hash"))?;
+    ROOT.with(|r| *r.borrow_mut() = Some(hash));
     Ok(())
-}
-
-/// The network's genesis among `global`, its frozen log's first step's entries: the one pinned (`pin_genesis`,
-/// `steps::genesis_of`).
-fn root(global: &[Entry]) -> Option<Hash> {
-    one::database::steps::genesis_of(GENESIS.with(|g| *g.borrow()), global)
 }
 
 /// `global`'s scope database's steps after `from` as the bucket holds them, sealed, for `user`, as a node on a machine
@@ -742,7 +726,7 @@ pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
 pub fn runners(owner: &str, user: &str, scopes: &str) -> Result<String, JsError> {
     let scopes = serde_json::from_str::<Vec<String>>(scopes)?.iter().map(|s| Scope::parse(s)).collect::<Result<Vec<_>>>().map_err(thrown)?;
     let out = replayed(owner, &[], |r| {
-        r.global().runners(user, &scopes).iter().map(|r| json!({ "key": one::entry::hex(&r.key), "seal": one::entry::hex(&r.seal) })).collect::<Vec<_>>()
+        r.global().runners(user, &scopes).iter().map(|r| json!({ "key": one::keys::hex(&r.key), "seal": one::keys::hex(&r.seal) })).collect::<Vec<_>>()
     })
     .map_err(thrown)?;
     Ok(Value::from(out).to_string())
@@ -795,7 +779,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
         one::state::Here {
             me: json!({ "key": "", "name": client, "user": me }),
             client: Some(json!({ "key": "", "name": client })),
-            device: json!({ "key": m.cloudflare_node().map(|k| one::entry::hex(&k)).unwrap_or_default(), "name": "Cloudflare", "ready": true, "guide": null }),
+            device: json!({ "key": m.cloudflare_node().map(|k| one::keys::hex(&k)).unwrap_or_default(), "name": "Cloudflare", "ready": true, "guide": null }),
             member: false,
             entries: 0,
             waiting: waiting as usize,

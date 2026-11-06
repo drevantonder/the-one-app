@@ -36,11 +36,11 @@ impl Node {
         self.read_scope_now(scope).await
     }
 
-    /// `read_scope`, while this device holds its writes: `global`'s steps, its genesis first while it knows no recovery
-    /// key (`first_global_read`), or another scope's own, once it has an epoch.
+    /// `read_scope`, while this device holds its writes: `global`'s steps, its first epochs first while it has read no
+    /// freeze (`first_global_read`), or another scope's own, once it has an epoch.
     pub(super) async fn read_scope_now(&self, scope: &Scope) -> Result<()> {
         if *scope == Scope::Global {
-            if self.with(|i| Ok(i.r.frozen.is_none() && i.r.recovery.is_none()))? {
+            if self.with(|i| Ok(i.r.frozen.is_none()))? {
                 self.first_global_read().await?;
             }
             self.read_steps_now().await?;

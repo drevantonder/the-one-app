@@ -19,7 +19,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
-use one::entry::{Hash, Scope, hex};
+use one::keys::{Hash, hex};
+use one::database::scopes::Scope;
 use one::keys::{self, Endpoint, Handed, Handoff, Need, Waited};
 use one::database::{content, scopes};
 use data_encoding::BASE64URL_NOPAD as B64U;
@@ -101,7 +102,7 @@ pub struct Device {
     key: SigningKey,
     me: Endpoint,
     address: String,
-    /// Where it keeps the network's genesis, once it first read it, and what each kind of request needed.
+    /// Where it keeps the network's root, once it first read it, and what each kind of request needed.
     dir: PathBuf,
     /// Held while it connects, so it connects once.
     stage: tokio::sync::Mutex<Stage>,
@@ -271,7 +272,7 @@ impl Device {
 
     /// Whether it's been let in: it reaches a node as itself. While it waits, what sign-in says of its request
     /// (`keys::waited`) is acted on as every client does: once approved, the network the device that approved it said it's
-    /// in (its genesis) is the only one it takes, kept before it reads any, so none it's shown first can be another; one
+    /// in (its root) is the only one it takes, kept before it reads any, so none it's shown first can be another; one
     /// gone from sign-in is asked again unless it's in; a sign-in that's no more fails, to sign in again.
     pub async fn wait(&self, token: &str) -> Result<bool, Error> {
         let at = format!("{}/api/auth/devices/requests/{}", self.address, self.key());
@@ -279,8 +280,8 @@ impl Device {
         let gone = match keys::waited(status, &said) {
             Waited::SignedOut => return Err(failed("Sign in again.")),
             Waited::Waiting => return Ok(false),
-            Waited::Approved { genesis, welcome } => {
-                for (name, said) in [("genesis", genesis), ("welcome", welcome)] {
+            Waited::Approved { root, welcome } => {
+                for (name, said) in [("root", root), ("welcome", welcome)] {
                     if let Some(said) = said {
                         let _ = std::fs::create_dir_all(&self.dir);
                         std::fs::write(self.dir.join(name), said).map_err(failed)?;
@@ -397,12 +398,16 @@ impl Device {
     }
 
     /// `global`'s scope database's steps, read from the bucket and opened with the epochs sealed to this device, from the
-    /// freeze the recovery key its genesis names signed, or where the device that let it in had read to: → the nodes it
-    /// may ask, with their seal keys. The network's genesis is kept the first time, and must be the same after.
+    /// network's first freeze, or where the device that let it in had read to: → the nodes it may ask, with their seal
+    /// keys. The network's root is kept the first time, and must be the same after.
     async fn read_members(&self) -> Result<HashMap<[u8; 32], [u8; 32]>, Error> {
         let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
         let (epochs, log_keys) = global_keys(&bucket, &self.key).await?;
-        let pinned = self.dir.join("genesis");
+        let pinned = self.dir.join("root");
+        // Kept as `genesis` until the network's root was called that: moved once.
+        if !pinned.exists() {
+            let _ = std::fs::rename(self.dir.join("genesis"), &pinned);
+        }
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut global = crate::members::Global::new(kept);
         // From where the device that let it in read who's who to, if it said (its Welcome), else from the first.
@@ -531,7 +536,7 @@ impl Device {
         }
         *self.known.lock().unwrap() = None;
         self.needs.lock().unwrap().clear();
-        for kept in ["needs.json", "genesis", "welcome"] {
+        for kept in ["needs.json", "root", "welcome"] {
             let _ = std::fs::remove_file(self.dir.join(kept));
         }
         self.forget_answers();
@@ -1014,7 +1019,7 @@ impl Device {
 
     /// Signs a step of `content` in `global`'s scope database for the next position (`one::database::steps`), and
     /// writes it, signing it again for the one after while another device's goes first.
-    async fn write(&self, log: &str, user: &str, content: one::entry::Content) -> Result<(), Error> {
+    async fn write(&self, log: &str, user: &str, content: one::database::content::Content) -> Result<(), Error> {
         if log != "global" {
             return Err(failed(format!("a device writes only Everyone's who's who, not {log}")));
         }

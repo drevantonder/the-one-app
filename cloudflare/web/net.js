@@ -193,21 +193,20 @@ export const net = {
   },
 
   /// `user`'s who's who as `global`'s scope database's steps say it, checked here by the client's WebAssembly and
-  /// kept: `steps` are those this browser read from the bucket (`Device.bucketSteps`), with its log's first step, its
-  /// genesis, once it asks for it (`wants_log`). Throws if one doesn't check, or they're another network's than the one
-  /// first kept.
+  /// kept: `steps` are those this browser read from the bucket (`Device.bucketSteps`). Throws if one doesn't check, or
+  /// they're another network's than the one first kept.
   async global(user, steps) {
     if (!net.has) throw new Error("This device can't check who's who in your One App network.");
     return (await ask({ op: "global", user, steps })).members;
   },
 
   /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as sign-in passed it on) shows, checked
-  /// by the client at the network's `address`, whose first entry's hash is `genesis` (hex) and whose people sign in
+  /// by the client at the network's `address`, whose root is `root` (hex) and whose people sign in
   /// with `clients` (its `sign_in_clients` setting, as its entries say): against `accounts`, its person's, for one let in
   /// by it, or with none, for one approved by its code. → the account; throws why it doesn't check out.
-  async signedInWith(proof, key, seal, address, { genesis, clients }, accounts) {
+  async signedInWith(proof, key, seal, address, { root, clients }, accounts) {
     if (!net.has) throw new Error("This device can't check a sign-in.");
-    return (await ask({ op: "signedInWith", proof, key, seal, address, genesis, clients, accounts })).account;
+    return (await ask({ op: "signedInWith", proof, key, seal, address, root, clients, accounts })).account;
   },
 
   /// Whether the relay still lets this browser in, as one of its person's devices: false once it's taken out.

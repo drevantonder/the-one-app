@@ -1090,7 +1090,7 @@ impl Sig {
     /// `from`.
     fn make(signer: &ed25519_dalek::SigningKey, domain: &str, name: &str, what: &[u8], hash: Option<&str>, from: Option<u64>) -> Vec<u8> {
         let sig = crate::keys::sign(signer, domain, &Self::signed(name, what, hash, from));
-        let mut made = json!({ "by": crate::entry::hex(signer.verifying_key().as_bytes()), "sig": data_encoding::BASE64URL_NOPAD.encode(&sig) });
+        let mut made = json!({ "by": crate::keys::hex(signer.verifying_key().as_bytes()), "sig": data_encoding::BASE64URL_NOPAD.encode(&sig) });
         if let Some(hash) = hash {
             made["hash"] = json!(hash);
         }
@@ -1563,7 +1563,7 @@ mod tests {
             objects.insert(sig_name("p", 3), moved);
             let forger = ed25519_dalek::SigningKey::from_bytes(&rand::random());
             let mut forged = serde_json::from_slice::<Value>(&crate::keys::open(&key[&1], &sig_name("p", 4), &objects[&sig_name("p", 4)]).unwrap()).unwrap();
-            forged["by"] = json!(crate::entry::hex(forger.verifying_key().as_bytes()));
+            forged["by"] = json!(crate::keys::hex(forger.verifying_key().as_bytes()));
             objects.insert(sig_name("p", 4), crate::keys::seal(1, &key[&1], &sig_name("p", 4), &serde_json::to_vec(&forged).unwrap()));
             // A step with none is an older writer's.
             objects.remove(&sig_name("p", 5));

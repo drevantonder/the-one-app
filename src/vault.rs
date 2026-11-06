@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::entry::{Scope, is_id};
+use crate::database::scopes::{Scope, is_id};
 
 /// The node's database of a scope's items.
 pub const DATABASE: &str = "vault";

@@ -17,15 +17,15 @@
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
 // its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
-// `&genesis=`, the network's first entry's hash as the approving device holds it: the only network the new device then
-// takes, so no node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
+// `&root=`, the network's root as the approving device holds it: the only network the new device then takes, so no
+// node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
 // where the approving device read them to, which the new device starts from (src/database/steps.rs `Welcome`). Set
 // once, with the approval. A service asks nothing here:
 // its device's oned lists it.
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
 // hex), so a device of the person's can check it themselves (src/sign_in_proof.rs) and let the device in with no one
-// tapping: with Google, sign-in asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `GENESIS`),
+// tapping: with Google, sign-in asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
 // and keeps the token Google gave; with a passkey, the prompt's challenge names it, the network and when
 // (`joinChallenge`), and sign-in keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
 // request to join (`sign_in`), never checked here: only the person's devices count it, and only for an account their
@@ -132,9 +132,9 @@ function joinOf(query) {
 /// A device's key and seal key, from what `join` names.
 const endpointOf = (join) => [hex.decode(join.slice(0, 64)), hex.decode(join.slice(64))];
 
-/// The network's first entry's hash (`GENESIS`, hex, as the device deploying to Cloudflare holds it), which a sign-in for
-/// a device names beside it: without it, a sign-in names no device, and its device is approved by its code.
-const genesisOf = (env) => (/^[0-9a-f]{64}$/.test(env.GENESIS || "") ? hex.decode(env.GENESIS) : null);
+/// The network's root (`ROOT`, hex, as the device deploying to Cloudflare holds it), which a sign-in for a device
+/// names beside it: without it, a sign-in names no device, and its device is approved by its code.
+const rootOf = (env) => (/^[0-9a-f]{64}$/.test(env.ROOT || "") ? hex.decode(env.ROOT) : null);
 
 /// Base64 of any kind, as base64url.
 const asB64u = (s) => String(s || "").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
@@ -177,12 +177,13 @@ export class Auth extends DurableObject {
     // device its person joined with.
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
     // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`;
-    // `approved`, when a device said it let it in, `genesis`, the network it said it let it into, and `welcome`, where
+    // `approved`, when a device said it let it in, `root`, the network it said it let it into, and `welcome`, where
     // it said to start reading who's who from; `place`, the city it asked from.
-    sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, genesis text)");
+    sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, root text)");
     const columns = sql.exec("pragma table_info(requests)").toArray().map((c) => c.name);
     if (!columns.includes("approved")) sql.exec("alter table requests add column approved integer");
-    if (!columns.includes("genesis")) sql.exec("alter table requests add column genesis text");
+    if (columns.includes("genesis")) sql.exec("alter table requests rename column genesis to root");
+    else if (!columns.includes("root")) sql.exec("alter table requests add column root text");
     if (!columns.includes("welcome")) sql.exec("alter table requests add column welcome text");
     if (!columns.includes("place")) sql.exec("alter table requests add column place text");
     if (!columns.includes("device")) sql.exec("alter table requests add column device text");
@@ -380,7 +381,7 @@ export class Auth extends DurableObject {
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
     if (one && method === "GET") return json(await this.request(request, one[1]));
-    if (one && method === "DELETE") return json(await this.unask(request, one[1], url.searchParams.has("approved"), url.searchParams.get("genesis"), url.searchParams.get("welcome")));
+    if (one && method === "DELETE") return json(await this.unask(request, one[1], url.searchParams.has("approved"), url.searchParams.get("root"), url.searchParams.get("welcome")));
     return null;
   }
 
@@ -483,10 +484,10 @@ export class Auth extends DurableObject {
   /// kept as the one its assertion must sign. Any other is as Better Auth made it, and so is one whose challenge it
   /// couldn't change: that sign-in shows nothing, and its device is approved by its code.
   async namingDevice(resp, join) {
-    const genesis = genesisOf(this.env);
-    if (!JOIN.test(join || "") || !resp.ok || !genesis) return resp;
+    const root = rootOf(this.env);
+    if (!JOIN.test(join || "") || !resp.ok || !root) return resp;
     const out = await resp.clone().json();
-    const ours = b64u.encode(joinChallenge(genesis, ...endpointOf(join), Date.now()));
+    const ours = b64u.encode(joinChallenge(root, ...endpointOf(join), Date.now()));
     const [was, now] = [`"expectedChallenge":"${out.challenge}"`, `"expectedChallenge":"${ours}"`];
     const sql = this.ctx.storage.sql;
     sql.exec("update verification set value = replace(value, ?, ?) where instr(value, ?) > 0", was, now, was);
@@ -528,15 +529,15 @@ export class Auth extends DurableObject {
   async withNonce(request, resp) {
     const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
     const [row] = secret ? this.ctx.storage.sql.exec("select join_for from google_starts where id = ?", await hash(secret)).toArray() : [];
-    const genesis = genesisOf(this.env);
-    if (!row?.join_for || !resp.ok || !genesis) return resp;
+    const root = rootOf(this.env);
+    if (!row?.join_for || !resp.ok || !root) return resp;
     const out = await resp.clone().json().catch(() => null);
     if (!out) return resp;
     const headers = new Headers(resp.headers);
     headers.delete("content-length");
     if (out.url) {
       const to = new URL(out.url);
-      to.searchParams.set("nonce", await joinNonce(genesis, ...endpointOf(row.join_for)));
+      to.searchParams.set("nonce", await joinNonce(root, ...endpointOf(row.join_for)));
       out.url = to.toString();
       if (headers.has("location")) headers.set("location", out.url);
     }
@@ -627,7 +628,7 @@ export class Auth extends DurableObject {
       const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
       const [signed] = sql.exec("select proof from proofs where key = ? and user = ?", r.key, r.user).toArray();
       const signIn = signed && (r.by_link ? { by_link: JSON.parse(signed.proof) } : JSON.parse(signed.proof));
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.root ? { root: r.root } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
     });
   }
 
@@ -666,14 +667,14 @@ export class Auth extends DurableObject {
   }
 
   /// Forgets a request, refused; or one `approved`, marked so until it would have expired, for its device to see, with
-  /// the network's `genesis` (hex) it was let into and its `welcome`, if the approving device said.
-  async unask(request, key, approved, genesis, welcome) {
+  /// the network's `root` (hex) it was let into and its `welcome`, if the approving device said.
+  async unask(request, key, approved, root, welcome) {
     const row = await this.mayTouch(request, key);
     // Approved again (a retry, or a second approving device): marked once, never forgotten by it.
     if (approved) {
       if (!row.approved) {
         const welcomed = /^\d{1,16}\.\d{1,16}\.[0-9a-f]{64}$/.test(welcome || "") ? welcome : null;
-        this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ?, welcome = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, welcomed, key);
+        this.ctx.storage.sql.exec("update requests set approved = ?, root = ?, welcome = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(root || "") ? root : null, welcomed, key);
         await this.push(row, { title: `${row.name} joined${row.place ? ` · ${row.place}` : ""}` });
       }
       return {};
@@ -924,11 +925,11 @@ function throwawayNetwork(auth, id, name) {
   // must refuse.
   const tryProof = async (ctx, user) => {
     const join = JOIN.test(ctx.body?.join || "") ? ctx.body.join : null;
-    const genesis = genesisOf(auth.env);
-    if (!join || !genesis) return;
+    const root = rootOf(auth.env);
+    if (!join || !root) return;
     const origin = new URL(auth.env.ADDRESS).origin;
     const named = ctx.body.spoil === true ? "0".repeat(128) : join;
-    const payload = { iss: `${origin}/api/auth`, aud: "one-throwaway", sub: user.id, iat: Math.floor(Date.now() / 1000), nonce: await joinNonce(genesis, ...endpointOf(named)) };
+    const payload = { iss: `${origin}/api/auth`, aud: "one-throwaway", sub: user.id, iat: Math.floor(Date.now() / 1000), nonce: await joinNonce(root, ...endpointOf(named)) };
     const { token } = await auth.auth.api.signJWT({ body: { payload } });
     auth.keepProof(join, user.id, { id_token: token });
   };

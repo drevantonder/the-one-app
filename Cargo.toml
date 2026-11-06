@@ -44,7 +44,7 @@ ed25519-dalek = "3"
 hkdf = "0.13"
 rand = "0.8"
 blake3 = "1"
-# Entries are packed in CBOR in the bucket (src/entry.rs); the Cloudflare node reads them too.
+# A scope database's steps are kept in CBOR in the bucket (src/database/steps.rs); the Cloudflare node reads them too.
 ciborium = "0.2"
 # `serialize` makes and reads an app database's copy in memory (src/database/stored.rs). Only with `db`.
 rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"], optional = true }

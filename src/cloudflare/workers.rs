@@ -81,10 +81,10 @@ pub struct Settings {
     /// them when it has none yet.
     #[serde(skip)]
     pub devices: Vec<serde_json::Value>,
-    /// The network's first entry's hash (hex), from the node on this machine as `devices` is: what a sign-in for a
+    /// The network's root (hex), from the node on this machine as `devices` is: what a sign-in for a
     /// device names beside it (`sign_in_proof`). None for Workers made before their network.
     #[serde(skip)]
-    pub genesis: Option<String>,
+    pub root: Option<String>,
     /// The Cloudflare node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
     #[serde(default, skip_serializing)]
     pub cloudflare_node_key: String,
@@ -364,7 +364,7 @@ impl Settings {
             cloudflare_token: None,
             devices: vec![],
             push: [("VAPID_KEY".to_string(), vapid_key())].into(),
-            genesis: None,
+            root: None,
             throwaway_person: None,
             home: None,
         }
@@ -498,8 +498,8 @@ impl Settings {
                 ("NODE_KEY".into(), self.cloudflare_node_key.clone(), true),
                 ("RELAY".into(), "service:relay:ServerlessNode".into(), false),
             ];
-            // The network's genesis, as sign-in's: its members are replayed from no other.
-            out.extend(self.genesis.clone().map(|g| ("GENESIS".into(), g, false)));
+            // The network's root, as sign-in's: its members are replayed from no other.
+            out.extend(self.root.clone().map(|g| ("ROOT".into(), g, false)));
             out.extend(location);
             return out;
         }
@@ -537,8 +537,8 @@ impl Settings {
                     plain("SIGN_IN", "google".into());
                     plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN.into());
                 }
-                if let Some(genesis) = &self.genesis {
-                    plain("GENESIS", genesis.clone());
+                if let Some(root) = &self.root {
+                    plain("ROOT", root.clone());
                 }
                 // Tokens are for the network's address unless a client asks for a node's own.
                 let resources: Vec<&String> = std::iter::once(&self.address).chain(&self.resources).collect();
@@ -1098,7 +1098,7 @@ pub const INVITE_DAYS: u64 = 3;
 pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: Option<&str>, email: Option<&str>) -> Result<Invite> {
     ensure!(!name.trim().is_empty(), "give their name");
     ensure!(!google() || email.is_some(), "people here sign in with Google: --email says which account they sign up with");
-    let user = user.map(str::to_string).unwrap_or_else(crate::entry::new_id);
+    let user = user.map(str::to_string).unwrap_or_else(crate::database::scopes::new_id);
     let secret = B64U.encode(&rand::random::<[u8; 32]>());
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
     let until = now + INVITE_DAYS * 86_400_000;

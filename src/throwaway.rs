@@ -28,7 +28,7 @@ fn folder() -> Option<(PathBuf, PathBuf)> {
     let top = || std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success()).map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim())).filter(|top| is_checkout(top));
     let checkout = built.or_else(top)?;
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(checkout.to_string_lossy().as_bytes()).into();
-    let hash = one::entry::hex(&hash);
+    let hash = one::keys::hex(&hash);
     let name = checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     Some((base.join(format!("{name}-{}", &hash[..6])), checkout))
 }

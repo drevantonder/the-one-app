@@ -24,7 +24,9 @@ use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
 
-use crate::entry::{Key, Scope, hex};
+use crate::keys::{Key, hex};
+
+use crate::database::scopes::Scope;
 use crate::database::scopes::{Principal, Role};
 use crate::permissions;
 
@@ -378,7 +380,7 @@ fn canonical(db: &Connection) -> Result<()> {
 /// and devices still listed, hold anything; a person's role in the network or a group is the only row a step writes.
 pub fn derive(db: &Connection) -> Result<()> {
     let cloudflare: Option<String> = db.query_row("SELECT value FROM settings WHERE name = 'serverless'", [], |r| r.get(0)).optional()?;
-    let cloudflare = cloudflare.and_then(|k| crate::entry::unhex(&k).ok()).map(|k| hex(&k));
+    let cloudflare = cloudflare.and_then(|k| crate::keys::unhex(&k).ok()).map(|k| hex(&k));
     db.execute_batch(&format!(
         "DELETE FROM relations WHERE NOT {RULE} AND NOT (
             substr(subject, 1, 7) = 'person:' AND relation IN ('admin', 'member')

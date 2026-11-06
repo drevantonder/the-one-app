@@ -140,100 +140,93 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert!(out["checked"].as_array().unwrap().iter().skip(1).all(|c| c.get("error").is_some()), "only the first is good");
     }
 
-    // A step (src/database/steps.rs): signed alike for its position, and never taken for an entry.
+    // A step (src/database/steps.rs): signed alike for its position.
     {
-        use one::entry::{Content, Entry, Ext};
+        use one::database::content::Content;
+        use one::database::steps::Step;
         let seed: [u8; 32] = rand::random();
         let key = ed25519_dalek::SigningKey::from_bytes(&seed);
         let content = Content::new("node", "group", json!({ "group": "0123456789abcdef", "name": "Café \"Ü\"\n" }));
-        let rust = Entry::create(&key, Ext { log: "global".into(), time: 1_700_000_000_123, user: "0123456789abcdef".into(), epoch: 2, previous: vec![] }, None, content);
-        let step = one::database::steps::sign(&key, &one::entry::Scope::Global, 7, "0123456789abcdef", 2, 1_700_000_000_123, rust.content.clone()).unwrap();
+        let step = one::database::steps::sign(&key, &one::database::scopes::Scope::Global, 7, "0123456789abcdef", 2, 1_700_000_000_123, content).unwrap();
         let fields = json!({ "log": "global", "at": 7, "time": 1_700_000_000_123u64, "user": "0123456789abcdef", "epoch": 2 });
-        let out = js(json!({ "op": "step", "seed": B64U.encode(&seed), "fields": fields, "body": String::from_utf8(rust.body.clone()).unwrap() }));
+        let out = js(json!({ "op": "step", "seed": B64U.encode(&seed), "fields": fields, "body": String::from_utf8(step.body.clone()).unwrap() }));
         assert_eq!(out["signed"], step.to_json(), "the same step signed the same");
-        let b = |k: &str| B64U.decode(out["signed"][k].as_str().unwrap().as_bytes()).unwrap();
-        assert!(Entry::decode_step(&b("header"), &b("signature"), &b("body")).is_ok() && Entry::from_json(&out["signed"]).is_err(), "Rust checks it as a step, never an entry");
+        assert!(Step::from_json(&out["signed"]).is_ok(), "and Rust checks it");
     }
 
     // Who's who as steps (src/database/steps.rs), as a browser reads it: the node's key sealed under an epoch as a
     // browser that makes one seals it, the freeze the recovery key signed and a step a browser signed, sealed as a node
     // puts them in the bucket and read from it as the URL signer's `get` gives them (cloudflare/web/device.js
-    // `bucketSteps`), with the log's first step, its genesis, once the client asks for it, opened and applied by the
-    // client (its WebAssembly's `Global`, cloudflare/web/net-worker.js); and from a Welcome, sign-in's word passed on as
-    // JavaScript reads it.
+    // `bucketSteps`), opened and applied by the client (its WebAssembly's `Global`, cloudflare/web/net-worker.js); and
+    // from a Welcome, sign-in's word passed on as JavaScript reads it.
     {
         use ed25519_dalek::SigningKey;
         use one::database::steps;
-        use one::entry::{Entry, Ext, Scope, pack};
-        use one::keys::Endpoint;
+        use one::database::steps::Step;
+        use one::database::scopes::{Kind, Scope};
         use one::database::{content, scopes};
-        use one::database::scopes::Kind;
+        use one::keys::{Endpoint, Hash};
         use one_client::members::Global;
         const ANDRE: &str = "a000000000000001";
         let browser_seed: [u8; 32] = rand::random();
         let (mac, browser, recovery) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&browser_seed), SigningKey::from_bytes(&rand::random()));
         let (epoch, app): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
-        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: vec![] }, None, content::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch)));
-        let first = steps::first_freeze(&recovery, &g, ANDRE, 0).unwrap();
+        let root = Hash::from_bytes(rand::random());
+        let start = content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch));
+        let first = steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();
         let listed = steps::sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None)).unwrap();
         let (_, _, body) = steps::sign(&browser, &Scope::Global, 3, ANDRE, 1, 5, content::setting("greeting", Some("hi"))).unwrap().encode();
         let fields = json!({ "log": "global", "at": 3, "time": 5, "user": ANDRE, "epoch": 1 });
         let out = js(json!({ "op": "step", "seed": B64U.encode(&browser_seed), "fields": fields, "body": String::from_utf8(body).unwrap() }));
-        let signed = Entry::decode_step(&b(&out["signed"]["header"]), &b(&out["signed"]["signature"]), &b(&out["signed"]["body"])).unwrap();
+        let signed = Step::decode(&b(&out["signed"]["header"]), &b(&out["signed"]["signature"]), &b(&out["signed"]["body"])).unwrap();
         let sealed_app = b(&js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&epoch), "app": scopes::APP, "key": B64U.encode(&app) }))["sealed"]);
         let keys: one::database::stored::Keys = [(1, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME))].into();
         let prefix = steps::prefix("global");
-        let sealed = |at: u64, step: &Entry, copy: Option<&[u8]>| {
+        let sealed = |at: u64, step: &Step, copy: Option<&[u8]>| {
             let name = one::database::stored::step_name(&prefix, at);
             json!({ "at": at, "sealed": B64U.encode(&one::database::steps::seal(&keys, &name, &steps::encode(step, copy)).unwrap()) })
         };
         let (s1, s2, s3) = (sealed(1, &first.step, first.copy.as_deref()), sealed(2, &listed, None), sealed(3, &signed, None));
         let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::database::stored::step_name(&prefix, 4), b"not a step").unwrap()) });
         let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
-        // The log's first step as the URL signer's `get` gives it.
-        let log_steps = json!([{ "at": 1, "sealed": B64U.encode(&one::database::steps::seal(&keys, &one::database::steps::genesis_name(), &pack(&[&g])).unwrap()) }]);
-        // A freeze an admin's device signed is nothing, once the recovery key is known.
-        let mut client = Global::new(Some(g.hash()));
-        let planted = json!({ "steps": [sealed(1, &steps::first_freeze(&mac, &g, ANDRE, 0).unwrap().step, first.copy.as_deref())] });
-        assert_eq!(client.add_sealed(&planted, &epochs, &apps).unwrap(), Some(1), "the log's first step, its genesis, first");
-        let mut planted = planted;
-        planted["log"] = json!({ "to": 1, "steps": log_steps });
-        assert_eq!(client.add_sealed(&planted, &epochs, &apps).unwrap(), None);
-        assert!(!client.frozen() && client.at() == 1, "and it's passed over");
-        let mut client = Global::new(Some(g.hash()));
-        let read = json!({ "steps": [s1, s2, s3, junk], "log": { "to": 1, "steps": log_steps } });
-        assert_eq!(client.add_sealed(&read, &epochs, &apps).unwrap(), None);
+        // A freeze an admin's device signed is nothing.
+        let mut client = Global::new(Some(root));
+        let planted = steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, first.step.content.clone()).unwrap();
+        client.add_sealed(&json!({ "steps": [sealed(1, &planted, first.copy.as_deref())] }), &epochs, &apps).unwrap();
+        assert!(!client.frozen() && client.at() == 1, "it's passed over");
+        let mut client = Global::new(Some(root));
+        let read = json!({ "steps": [s1, s2, s3, junk] });
+        client.add_sealed(&read, &epochs, &apps).unwrap();
         assert!(client.frozen() && client.at() == 4, "frozen, the browser's step taken and the junk passed over");
         let who = client.who().unwrap();
         assert_eq!(who.setting("greeting").as_deref(), Some("hi"), "the step a browser signed counts");
-        // Another network's genesis: refused.
-        let other = Entry::create(&mac, Ext { log: "global".into(), time: 1, user: ANDRE.into(), epoch: 0, previous: vec![] }, None, content::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &mac.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch)));
-        let mut elsewhere = Global::new(Some(other.hash()));
-        assert!(elsewhere.add_sealed(&read, &epochs, &apps).is_err(), "a log that isn't the network it joined");
+        // Another network's freeze: nothing to a device of this one.
+        let mut elsewhere = Global::new(Some(Hash::from_bytes(rand::random())));
+        elsewhere.add_sealed(&read, &epochs, &apps).unwrap();
+        assert!(!elsewhere.frozen(), "a freeze that isn't the network it joined");
         // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
         let welcome = steps::Welcome { freeze: 1, at: 3, hash: one::database::stored::state_hash(who.conn()).unwrap() };
-        let said = js(json!({ "op": "joining", "asked": [], "said": [[200, { "approved": true, "genesis": g.hash().to_hex(), "welcome": welcome.to_string() }]] }));
+        let said = js(json!({ "op": "joining", "asked": [], "said": [[200, { "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() }]] }));
         let given = json!({ "welcome": said["said"][0]["welcome"], "freeze": s1, "at": 3, "steps": [s2, s3] });
-        let mut new = Global::new(Some(g.hash()));
-        assert_eq!(new.add_sealed(&given, &epochs, &apps).unwrap(), None);
+        let mut new = Global::new(Some(root));
+        new.add_sealed(&given, &epochs, &apps).unwrap();
         assert!(new.frozen() && new.at() == 3, "a new device starts where it was welcomed");
         assert_eq!(one::database::stored::state_hash(new.who().unwrap().conn()).unwrap(), welcome.hash);
         let mut other = given.clone();
         other["welcome"] = json!(steps::Welcome { hash: "0".repeat(64), ..welcome.clone() }.to_string());
-        let mut new = Global::new(Some(g.hash()));
-        assert_eq!(new.add_sealed(&other, &epochs, &apps).unwrap(), Some(1), "nor from a Welcome its steps don't come to: it reads from the freeze");
-        assert!(!new.frozen());
+        let mut new = Global::new(Some(root));
+        assert!(new.add_sealed(&other, &epochs, &apps).is_err() && !new.frozen(), "nor from a Welcome its steps don't come to: it reads from the freeze, which it wasn't given");
         // Junk at the first position, under an epoch no one made, and anything after it: passed over, not waited for.
         let name = one::database::stored::step_name(&prefix, 1);
         let junk = json!({ "at": 1, "sealed": B64U.encode(&one::keys::seal(0xFFFF_FFFF, &rand::random(), &name, b"junk")) });
-        let mut fresh = Global::new(Some(g.hash()));
-        assert_eq!(fresh.add_sealed(&json!({ "steps": [junk, sealed(2, &first.step, first.copy.as_deref())], "log": { "to": 1, "steps": log_steps } }), &epochs, &apps).unwrap(), None);
+        let mut fresh = Global::new(Some(root));
+        fresh.add_sealed(&json!({ "steps": [junk, sealed(2, &first.step, first.copy.as_deref())] }), &epochs, &apps).unwrap();
         assert_eq!(fresh.at(), 2, "a browser reads past junk");
     }
 
     // Member entries' content (src/members.rs), as the web client builds what a browser signs (cloudflare/web/members.js).
     {
-        use one::entry::Scope;
+        use one::database::scopes::Scope;
         use one::database::content;
         use one::database::scopes::{Kind, Role};
         let endpoint = one::keys::Endpoint { key: rand::random(), seal: rand::random() };
@@ -355,15 +348,15 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             ("/v1/badges", json!({ "to": node, "need": every(MOST_NEEDED) })),
             ("/v1/badges", json!({ "to": node, "need": every(MOST_NEEDED + 1) })),
         ];
-        let genesis = "e".repeat(64);
+        let root = "e".repeat(64);
         let said: Vec<(u16, Value)> = vec![
             (401, json!({})),
             (404, json!({})),
-            (200, json!({ "approved": true, "genesis": genesis })),
-            (200, json!({ "approved": true, "genesis": genesis.to_uppercase() })),
-            (200, json!({ "approved": true, "genesis": 7 })),
+            (200, json!({ "approved": true, "root": root })),
+            (200, json!({ "approved": true, "root": root.to_uppercase() })),
+            (200, json!({ "approved": true, "root": 7 })),
             (200, json!({ "approved": true })),
-            (200, json!({ "approved": true, "genesis": genesis, "welcome": format!("3.250.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "root": root, "welcome": format!("3.250.{}", "a".repeat(64)) })),
             (200, json!({ "approved": true, "welcome": format!("3.3.{}", "a".repeat(64)) })),
             (200, json!({ "approved": true, "welcome": format!("4.3.{}", "a".repeat(64)) })),
             (200, json!({ "approved": true, "welcome": format!("03.250.{}", "a".repeat(64)) })),
@@ -400,10 +393,10 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             let rust = match waited(*status, body) {
                 Waited::SignedOut => json!({ "signedOut": true }),
                 Waited::Gone => json!({ "gone": true }),
-                Waited::Approved { genesis, welcome } => {
+                Waited::Approved { root, welcome } => {
                     let mut v = json!({ "approved": true });
-                    if let Some(g) = genesis {
-                        v["genesis"] = json!(g);
+                    if let Some(g) = root {
+                        v["root"] = json!(g);
                     }
                     if let Some(w) = welcome {
                         v["welcome"] = json!(w);
@@ -414,7 +407,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             };
             assert_eq!(js, &rust, "{status} {body}");
         }
-        assert_eq!(waited(200, &said[2].1), Waited::Approved { genesis: Some(genesis.clone()), welcome: None }, "an approval names the network it's in");
+        assert_eq!(waited(200, &said[2].1), Waited::Approved { root: Some(root.clone()), welcome: None }, "an approval names the network it's in");
         let welcomed = waited(200, &said[6].1);
         assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if one::database::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copy()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");
         assert_eq!(said.iter().filter(|(s, b)| matches!(waited(*s, b), Waited::Approved { welcome: Some(_), .. })).count(), 3, "only a welcome that's one is taken");

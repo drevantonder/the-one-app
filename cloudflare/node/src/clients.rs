@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow, ensure};
 use js_sys::{Function, Uint8Array};
 use one::database::scopes::{ScopeDb, object};
-use one::entry::Scope;
+use one::database::scopes::Scope;
 use one::database::scopes;
 use one_client::members::Global;
 use serde_json::{Value, json};
@@ -252,7 +252,7 @@ impl View {
             .filter(|c| m.serves(&c.key, &self.user))
             .map(|c| {
                 let scopes: Vec<String> = theirs.iter().filter(|s| m.runs_for(&c.key, s)).map(|s| s.to_string()).collect();
-                json!({ "key": one::entry::hex(&c.key), "seal": one::entry::hex(&c.seal), "scopes": scopes })
+                json!({ "key": one::keys::hex(&c.key), "seal": one::keys::hex(&c.seal), "scopes": scopes })
             })
             .collect()
     }

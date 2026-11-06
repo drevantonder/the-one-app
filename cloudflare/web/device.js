@@ -115,14 +115,14 @@ export class Device {
   }
 
   /// Who's who as the network's signed steps say it, checked here: as last checked, or with what's new in the bucket
-  /// if `fresh` (before it changes who opens what) or never. The first time, the network's genesis is kept, and one
-  /// that starts with any other refused.
+  /// if `fresh` (before it changes who opens what) or never. The first time, the network's root is kept, and one
+  /// whose first freeze names any other refused.
   async checked(fresh = false) {
     if (fresh || !this.known) {
       const kept = await get(`global:${this.user}`);
       // Who's who's scope database's steps after those kept, its freeze among them, which this browser reads from the
       // bucket and opens itself, never as a node passes them on.
-      const read = await this.bucketSteps("scope", kept?.at || 0).catch((err) => {
+      const read = await this.bucketSteps(kept?.at || 0).catch((err) => {
         if (fresh || !kept) throw err;
         return [];
       });
@@ -130,10 +130,8 @@ export class Device {
       // freeze and copy a node passes on, checked against the Welcome's hash.
       const welcome = !kept?.steps?.truth && read.length && (await get(`welcome:${this.user}`));
       const welcomed = welcome ? await this.api(`/v1/steps/global?from=0&welcome=${welcome}`, { keyless: !kept }).catch(() => null) : null;
-      const steps = read.length ? { steps: read, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.logKeys() } : null;
-      let k = !steps && kept?.steps?.truth && kept?.members?.people?.[this.user]?.app_schedules ? kept.members : await this.replay(this.user, steps);
-      // Before it knows the recovery key its network's genesis names: the log's first step, from the bucket.
-      if (k.wants_log) k = await this.replay(this.user, { ...steps, keys: steps?.keys || (await this.logKeys()), log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, k.wants_log, k.wants_log) } });
+      const steps = read.length ? { steps: read, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.stepKeys() } : null;
+      const k = !steps && kept?.steps?.truth && kept?.members?.people?.[this.user]?.app_schedules ? kept.members : await this.replay(this.user, steps);
       // One that didn't check out is read from the freeze on, the next time.
       if (welcome && !(await get(`global:${this.user}`))?.steps?.truth) await del(`welcome:${this.user}`).catch(() => {});
       if (!k.people[this.user]) throw new Error("Your One App network doesn't list you yet, so this device didn't use it.");
@@ -153,7 +151,7 @@ export class Device {
   /// `global`'s epochs sealed to this browser, opened (hex, by number), and the node's key in each, sealed under it
   /// (base64url, by number): what it opens `global`'s scope database's steps with. Unchecked here: who's who checks
   /// each epoch against the steps before it, before it's used (client/src/members.rs `add_sealed`).
-  async logKeys() {
+  async stepKeys() {
     const [{ sealed: epochs }, { sealed: apps }] = await Promise.all([this.api(`/v1/keys?scope=global&to=${this.me.key}`), this.api("/v1/keys?scope=global&app=node")]);
     const opened = {};
     for (const [n, s] of Object.entries(epochs || {})) opened[n] = hex.encode(await openSealed(this.me.opens, b64u.decode(s)));
@@ -400,22 +398,20 @@ export class Device {
     try { localStorage.setItem("one.needs", JSON.stringify(this.needs)); } catch {}
   }
 
-  /// `global`'s `database`'s steps after `from` (`scope`, its scope database's, or `log`, its log's, up to `to`), as
-  /// the bucket holds them, read through the URL signer's `get`, 32 at a time: `[{ at, sealed }]`, base64url, to the
-  /// first that isn't there, and the one after that, if it is: who's who says whether it's a step, which would mean
-  /// the one missing was written (client/src/members.rs `add_sealed`). One missing up to `must` throws.
-  async bucketSteps(database, from, to = Infinity, must = 0) {
-    const prefix = prefixOf({ scope: "global", app: "node", database });
+  /// `global`'s scope database's steps after `from`, as the bucket holds them, read through the URL signer's `get`, 32
+  /// at a time: `[{ at, sealed }]`, base64url, to the first that isn't there, and the one after that, if it is: who's
+  /// who says whether it's a step, which would mean the one missing was written (client/src/members.rs `add_sealed`).
+  async bucketSteps(from) {
+    const prefix = prefixOf({ scope: "global", app: "node", database: "scope" });
     const out = [];
-    for (let at = from + 1; at <= to; at += 32) {
-      const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { get: [{ steps: prefix, from: at, to: Math.min(at + 31, to) }], reads: READS })) });
+    for (let at = from + 1; ; at += 32) {
+      const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { get: [{ steps: prefix, from: at, to: at + 31 }], reads: READS })) });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || "Your One App network's storage didn't answer. Try again.");
       // A URL signer older than its `get`, which only Workers deployed before the switch are.
       if (!body.get) return out;
       const sealed = Object.keys(body.get).sort().map((name) => body.get[name]);
       const end = sealed.indexOf(null);
-      if (end >= 0 && at + end <= must) throw new Error("Part of who's who is missing from your One App network's storage, so this device read no further.");
       out.push(...sealed.slice(0, end >= 0 ? end : sealed.length).map((b, i) => ({ at: at + i, sealed: b })));
       if (end >= 0) {
         if (sealed[end + 1]) out.push({ at: at + end + 1, sealed: sealed[end + 1] });
@@ -560,7 +556,7 @@ export class Device {
     // `Welcome`).
     const held = await get(`global:${this.user}`);
     const t = held?.steps?.truth;
-    const approved = `?approved&genesis=${held?.root || ""}${t ? `&welcome=${t.freeze_at}.${t.at}.${t.hash}` : ""}`;
+    const approved = `?approved&root=${held?.root || ""}${t ? `&welcome=${t.freeze_at}.${t.at}.${t.hash}` : ""}`;
     if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`, {}, approved).catch(() => {});
     else await this.bearer(`/api/auth/devices/requests/${r.key}${approved}`, { method: "DELETE" }).catch(() => {});
   }

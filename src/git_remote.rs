@@ -29,7 +29,7 @@ pub fn run(args: &[String]) -> Result<i32> {
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
-    let secret = one::entry::hex(&rand::random::<[u8; 32]>());
+    let secret = one::keys::hex(&rand::random::<[u8; 32]>());
     let auth = format!("Basic {}", data_encoding::BASE64.encode(format!("git:{secret}").as_bytes()));
     std::thread::spawn(move || proxy(listener, auth));
     // Git's proxy for this one address alone, in its environment (no other user reads it), not its command line.

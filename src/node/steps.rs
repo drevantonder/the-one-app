@@ -117,13 +117,13 @@ impl Node {
 
     /// Writes `content` to `global`'s scope database as a step this device signs as `user`, at the next position: when
     /// another device wrote there first, it reads that, and signs it again for the one after.
-    pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<Entry> {
+    pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<Step> {
         self.write_step_as(&self.0.key, user, content).await
     }
 
     /// `write_step`, signed by `key`: this device's, or the network's recovery key, which only ever signs on the machine
     /// it's kept on.
-    pub(super) async fn write_step_as(&self, key: &SigningKey, user: &str, content: Content) -> Result<Entry> {
+    pub(super) async fn write_step_as(&self, key: &SigningKey, user: &str, content: Content) -> Result<Step> {
         let _write = self.own_writes().await?;
         for _ in 0..50 {
             self.read_steps_now().await?;
@@ -137,7 +137,7 @@ impl Node {
 
     /// Writes a step its device signed to the bucket at its position, once it would count there, and applies it:
     /// whether the position was free. Its blobs go first, so a device that reads the step finds them.
-    async fn put_step(&self, step: &Entry) -> Result<bool> {
+    async fn put_step(&self, step: &Step) -> Result<bool> {
         let at = u64::from(step.seq());
         ensure!(self.with(|i| Ok(i.r.at()))? == Some(at - 1), "step {at} isn't the next here");
         for blob in &step.content.blobs {
@@ -162,7 +162,7 @@ impl Node {
 
     /// Writes steps `caller`'s own device signed (a browser's, say), each once it's checked: it's for the next
     /// position here, written as them, and counts. A step for a position already taken fails, saying the next.
-    pub async fn put_signed_steps(&self, caller: &Caller, list: Vec<Entry>) -> Result<()> {
+    pub async fn put_signed_steps(&self, caller: &Caller, list: Vec<Step>) -> Result<()> {
         self.read_callers_scopes(caller).await?;
         for step in list {
             ensure!(step.user() == caller.user, "step {} isn't written as you", step.seq());
@@ -279,7 +279,7 @@ impl Node {
 
     /// Writes `content` to a scope's own database (not `global`'s) as a step this device signs as `user`, once
     /// `global`'s log is frozen, at the next position.
-    pub(super) async fn write_scope_step(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
+    pub(super) async fn write_scope_step(&self, scope: &Scope, user: &str, content: Content) -> Result<Step> {
         self.first_epoch(scope).await?;
         let _write = self.own_writes().await?;
         for _ in 0..50 {

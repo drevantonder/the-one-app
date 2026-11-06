@@ -1,19 +1,28 @@
 //! A scope database's steps: the database is the truth, and every change to it is a step at the next free position of
 //! its own in the bucket, which the bucket keeps in one order.
 //!
-//! A step is one change, signed by the device that made it as its person: the same content an entry of the log carried
-//! (`content`'s kinds), for one position, under `entry::STEP_DOMAIN`, so it's never taken for an
-//! entry nor an entry for it. Its position is signed in it (its `seq`), so a step can't be written twice, or anywhere
-//! but where its writer meant it: one that loses its position to another is signed again for the next. A node only
-//! carries a client's step to the bucket: it can hold one back, but change none.
+//! A step is one change, signed by the device that made it as its person (`Step`): its content (`content`'s kinds), for
+//! one position. Its position is signed in it (its `seq`), so a step can't be written twice, or anywhere but where its
+//! writer meant it: one that loses its position to another is signed again for the next. A node only carries a client's
+//! step to the bucket: it can hold one back, but change none.
 //!
-//! `global`'s database starts at its first step that is a freeze the network's recovery key signed (`FREEZE`,
-//! `Truth::first`), the key its genesis names (`recovery_of`), the first entry of `global`'s log, whose hash every
-//! device of the network pins: a network made since starts with one (`first_freeze`), and the two made before were
-//! frozen by their recovery key once, their logs read only from then on. The freeze carries the database there, its
-//! first copy, which counts only if it comes to the hash the freeze names. A freeze the recovery key signed that doesn't
-//! check out stops the reader there, as a newer release's step does, never passed over for the next; anything else
-//! shaped like a freeze is nothing. A device let in starts where the device that let it in had read to (its `Welcome`),
+//! ```text
+//! header     canonical JSON { v: 1, author, log, seq, backlink: null, previous: [], time, user, epoch, body, size }
+//! signature  Ed25519 by `author` over "one/step\0" ‖ header
+//! hash       sha256(header)
+//! ```
+//!
+//! `log` is the scope, `seq` the position, `epoch` the scope's its writer knew, `body` the sha256 of the body (hex, the
+//! content as JSON) and `size` its length; `backlink` and `previous` are always empty, as every step signed has them.
+//! `cloudflare/shared/crypto.js` signs and checks steps the same (`signStep`), and `tests/contracts.rs` checks they
+//! agree.
+//!
+//! `global`'s database starts at its first step that is a freeze (`FREEZE`, `Truth::first`): it carries the database
+//! there, its first copy, which counts only if it comes to the hash the freeze names, names the network (its `root`,
+//! which every device of the network pins) and its recovery key, and was signed by that key. A network starts with one
+//! (`first_freeze`); the two made before steps were frozen by their recovery key once, at step 2. A freeze whose copy a
+//! newer release wrote stops the reader there, as a newer release's step does, never passed over for the next; anything
+//! else shaped like a freeze is nothing. A device let in starts where the device that let it in had read to (its `Welcome`),
 //! which pins who's who by its hash.
 //!
 //! Every other scope's database starts, before its first step, from its start (`START`, step 0): for a scope whose
@@ -33,8 +42,8 @@
 //! counted one changes is its kind's rule's (`rules`), applied to a fresh copy of the database (`scope::fresh`).
 //!
 //! Its steps are sealed with the key the frozen log had in each epoch (`KEY_NAME`, `seal`), under their own names. A
-//! reader opens them itself: a node passes them on sealed. The frozen logs are read no more, but for the genesis, the
-//! first entry of `global`'s, whose hash every device pins and which names the recovery key (`genesis_name`).
+//! reader opens them itself: a node passes them on sealed. The frozen logs (`<prefix>/../log/`) are history, kept in the
+//! bucket and read by nothing.
 //!
 //! ```text
 //! <prefix>/0                  a scope's start, but `global`'s, with its copy
@@ -51,8 +60,9 @@ use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use crate::entry::{Content, Entry, Ext, Hash, Key, Scope, unhex};
-use crate::database::scopes::{Principal, Role};
+use crate::database::content::Content;
+use crate::database::scopes::{Principal, Role, Scope};
+use crate::keys::{Hash, Key, hex, unhex};
 use crate::permissions;
 
 use super::scopes::{self, ScopeDb};
@@ -67,21 +77,146 @@ pub fn prefix(scope: &str) -> String {
     format!("{}/{}/{}", crate::bucket::folder(scope), scopes::APP, NAME)
 }
 
+/// What a step's signature is for.
+pub const DOMAIN: &str = "one/step";
+
+/// The most any number in a step's header may be: 2^53 - 1, the most JavaScript's JSON keeps exactly.
+pub const NUMBER_MAX: u64 = (1 << 53) - 1;
+
+/// A step's header, as signed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Header {
+    pub author: Key,
+    pub log: String,
+    pub seq: u32,
+    pub time: u64,
+    pub user: String,
+    pub epoch: u32,
+    /// The sha256 of the body.
+    pub body: [u8; 32],
+    pub size: u64,
+}
+
+impl Header {
+    fn json(&self) -> Value {
+        json!({
+            "v": 1, "author": hex(&self.author), "log": self.log, "seq": self.seq, "backlink": null, "previous": [],
+            "time": self.time, "user": self.user, "epoch": self.epoch, "body": hex(&self.body), "size": self.size,
+        })
+    }
+
+    fn parse(v: &Value) -> Result<Header> {
+        ensure!(v["v"] == 1, "not a step this device reads");
+        ensure!(v["backlink"].is_null() && v["previous"] == json!([]), "a step follows nothing but its position");
+        let text = |k: &str| v[k].as_str().with_context(|| format!("no {k}"));
+        let number = |k: &str| v[k].as_u64().filter(|n| *n <= NUMBER_MAX).with_context(|| format!("no {k}, or one above 2^53"));
+        Ok(Header {
+            author: unhex(text("author")?)?,
+            log: text("log")?.to_string(),
+            seq: u32::try_from(number("seq")?)?,
+            time: number("time")?,
+            user: text("user")?.to_string(),
+            epoch: u32::try_from(number("epoch")?)?,
+            body: unhex(text("body")?)?,
+            size: number("size")?,
+        })
+    }
+}
+
+/// A checked step with its decoded content.
+#[derive(Clone, Debug)]
+pub struct Step {
+    pub header: Header,
+    /// The header's bytes, as signed and hashed.
+    raw: Vec<u8>,
+    signature: [u8; 64],
+    hash: Hash,
+    pub body: Vec<u8>,
+    pub content: Content,
+}
+
+impl Step {
+    /// Decodes and checks a step from the wire: its header canonical, its signature, body and content.
+    pub fn decode(header: &[u8], signature: &[u8], body: &[u8]) -> Result<Self> {
+        let v: Value = serde_json::from_slice(header).context("decode header")?;
+        ensure!(crate::keys::canonical(&v) == header, "its header isn't canonical JSON");
+        let h = Header::parse(&v)?;
+        crate::keys::verify(&h.author, DOMAIN, &v, signature).context("bad signature")?;
+        Scope::parse(&h.log)?;
+        ensure!(h.size == body.len() as u64, "body size mismatch");
+        ensure!(h.body == crate::keys::sha256(body), "body hash mismatch");
+        let mut content: Content = serde_json::from_slice(body).context("decode body")?;
+        crate::database::migrate::content(&mut content);
+        Ok(Step { hash: Hash::from_bytes(crate::keys::sha256(header)), header: h, raw: header.to_vec(), signature: signature.try_into().context("a signature is 64 bytes")?, body: body.to_vec(), content })
+    }
+
+    /// (header, signature, body), as the bucket keeps it (`encode`).
+    pub fn encode(&self) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        (self.raw.clone(), self.signature.to_vec(), self.body.clone())
+    }
+
+    /// As `POST /v1/steps` takes it: `{ header, signature, body }`, each base64url.
+    pub fn to_json(&self) -> Value {
+        let b = |v: &[u8]| data_encoding::BASE64URL_NOPAD.encode(v);
+        json!({ "header": b(&self.raw), "signature": b(&self.signature), "body": b(&self.body) })
+    }
+
+    /// As `to_json` says it, checked.
+    pub fn from_json(v: &Value) -> Result<Self> {
+        let b = |k: &str| data_encoding::BASE64URL_NOPAD.decode(v[k].as_str().unwrap_or("").as_bytes()).map_err(|_| anyhow::anyhow!("{k} isn't base64url"));
+        Step::decode(&b("header")?, &b("signature")?, &b("body")?)
+    }
+
+    pub fn author(&self) -> Key {
+        self.header.author
+    }
+    pub fn seq(&self) -> u32 {
+        self.header.seq
+    }
+    pub fn hash(&self) -> Hash {
+        self.hash
+    }
+    pub fn log(&self) -> &str {
+        &self.header.log
+    }
+    pub fn scope(&self) -> Scope {
+        Scope::parse(self.log()).expect("checked when it arrived")
+    }
+    pub fn time(&self) -> u64 {
+        self.header.time
+    }
+    pub fn user(&self) -> &str {
+        &self.header.user
+    }
+    pub fn epoch(&self) -> u32 {
+        self.header.epoch
+    }
+    /// How apps name a step: the first 8 hex characters of its author, and its position.
+    pub fn id(&self) -> String {
+        format!("{}:{}", crate::keys::short(&self.author()), self.seq())
+    }
+}
+
 /// A step of `scope`'s database for position `at`, signed by `key` as `user`, the scope at `epoch`.
-pub fn sign(key: &SigningKey, scope: &Scope, at: u64, user: &str, epoch: u32, time: u64, content: Content) -> Result<Entry> {
-    let at = u32::try_from(at).context("that database has more steps than a step can name")?;
-    Ok(Entry::create_step(key, Ext { log: scope.to_string(), time, user: user.into(), epoch, previous: Vec::new() }, at, content))
+pub fn sign(key: &SigningKey, scope: &Scope, at: u64, user: &str, epoch: u32, time: u64, content: Content) -> Result<Step> {
+    let seq = u32::try_from(at).context("that database has more steps than a step can name")?;
+    let body = serde_json::to_vec(&content)?;
+    let header = Header { author: key.verifying_key().to_bytes(), log: scope.to_string(), seq, time, user: user.into(), epoch, body: crate::keys::sha256(&body), size: body.len() as u64 };
+    let v = header.json();
+    let signature = crate::keys::sign(key, DOMAIN, &v);
+    let raw = crate::keys::canonical(&v);
+    Ok(Step { hash: Hash::from_bytes(crate::keys::sha256(&raw)), header, raw, signature, body, content })
 }
 
 /// A step as a reader has it: the step, and the copy a freeze carries.
 #[derive(Clone)]
 pub struct Given {
-    pub step: Entry,
+    pub step: Step,
     pub copy: Option<Vec<u8>>,
 }
 
 /// A step as the bucket holds it, before it's sealed: its header, signature and body, and a freeze's copy, as CBOR.
-pub fn encode(step: &Entry, copy: Option<&[u8]>) -> Vec<u8> {
+pub fn encode(step: &Step, copy: Option<&[u8]>) -> Vec<u8> {
     let (h, s, b) = step.encode();
     let mut parts = vec![ciborium::Value::Bytes(h), ciborium::Value::Bytes(s), ciborium::Value::Bytes(b)];
     parts.extend(copy.map(|c| ciborium::Value::Bytes(c.to_vec())));
@@ -98,7 +233,7 @@ pub fn decode(scope: &Scope, at: u64, bytes: &[u8]) -> Result<Given> {
         [ciborium::Value::Bytes(h), ciborium::Value::Bytes(s), ciborium::Value::Bytes(b), ciborium::Value::Bytes(c)] => (h, s, b, Some(c.clone())),
         _ => bail!("not a step"),
     };
-    let step = Entry::decode_step(h, s, b)?;
+    let step = Step::decode(h, s, b)?;
     ensure!(step.log() == scope.to_string() && u64::from(step.seq()) == at, "a step for another place");
     Ok(Given { step, copy })
 }
@@ -216,7 +351,7 @@ pub struct Freeze {
 
 impl Freeze {
     /// The freeze `step` at position `at` says.
-    pub fn of(step: &Entry, at: u64) -> Result<Freeze> {
+    pub fn of(step: &Step, at: u64) -> Result<Freeze> {
         ensure!(step.content.app == scopes::APP && step.content.kind == FREEZE && step.scope() == Scope::Global, "not a freeze");
         Freeze::from_data(&step.content.data, at)
     }
@@ -254,52 +389,6 @@ pub fn seal(keys: &crate::database::stored::Keys, name: &str, bytes: &[u8]) -> R
     Ok(crate::keys::seal(*epoch, key, name, bytes))
 }
 
-/// Where the network's genesis is: the first step of `global`'s frozen log, a pack of entries under its first epoch,
-/// read only. Every device pins its hash.
-pub fn genesis_name() -> String {
-    crate::database::stored::step_name(&format!("{}/{}/{KEY_NAME}", crate::bucket::folder("global"), scopes::APP), 1)
-}
-
-/// The entries in `sealed`, the first step of `global`'s frozen log as the bucket holds it (`genesis_name`), opened
-/// with `keys`, `global`'s by epoch: the genesis among them (`recovery_of`).
-pub fn genesis_entries(keys: &crate::database::stored::Keys, sealed: &[u8]) -> Result<Vec<Entry>> {
-    let key = keys.get(&crate::keys::epoch_of(sealed)?).context("the genesis is under a key this device wasn't given")?;
-    crate::entry::unpack(&crate::keys::open(key, &genesis_name(), sealed)?)
-}
-
-/// The entries of `global`'s frozen log's first step, the genesis among them, read from the bucket with `keys`.
-pub async fn genesis(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys) -> Result<Vec<Entry>> {
-    let sealed = bucket.get(&genesis_name()).await?.with_context(|| format!("{YOURS}'s genesis isn't in its bucket"))?;
-    genesis_entries(keys, &sealed.bytes)
-}
-
-/// The network's recovery key, as its genesis names it: the entry whose hash is `root` among `entries`, those of
-/// `global`'s log's first step. Only the first freeze it signed is who's who (`Truth::first`).
-pub fn recovery_of(root: Hash, entries: &[Entry]) -> Option<Key> {
-    let genesis = entries.iter().find(|e| e.hash() == root && e.content.app == scopes::APP && e.content.kind == "genesis")?;
-    genesis.content.data["recovery"].as_str().and_then(|k| unhex(k).ok())
-}
-
-/// The network's genesis for a reader that pins none of its own: the one genesis among `entries`, none while there
-/// are two; or `pinned`, whatever genesis anyone writes.
-pub fn genesis_of(pinned: Option<Hash>, entries: &[Entry]) -> Option<Hash> {
-    if pinned.is_some() {
-        return pinned;
-    }
-    let mut found = entries.iter().filter(|e| e.content.app == scopes::APP && e.content.kind == "genesis").map(Entry::hash);
-    let first = found.next()?;
-    found.next().is_none().then_some(first)
-}
-
-/// The network's genesis (`root`, or for a reader that pins none, `genesis_of`) and the recovery key it names, read
-/// from the bucket with `keys`, `global`'s by epoch (`genesis_entries`).
-pub async fn recovery_key(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, root: Option<Hash>) -> Result<(Hash, Key)> {
-    let entries = genesis(bucket, keys).await?;
-    let root = genesis_of(root, &entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
-    let key = recovery_of(root, &entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
-    Ok((root, key))
-}
-
 /// The database a copy is, as bytes.
 pub fn connection(bytes: &[u8]) -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
@@ -316,20 +405,21 @@ pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
 }
 
 /// The freeze a new network starts with, at step 1 of `global`'s database, signed by its recovery key as `user`: who's
-/// who as `genesis`, its log's first entry, says it, with its log's one step. → the step, and its copy.
-pub fn first_freeze(recovery: &SigningKey, genesis: &Entry, user: &str, now: u64) -> Result<Given> {
-    let mut db = first(genesis, now)?;
+/// who as `start` says it (`content::first`), the network `root`. → the step, and its copy.
+pub fn first_freeze(recovery: &SigningKey, root: Hash, start: &Value, user: &str, now: u64) -> Result<Given> {
+    let mut db = first(root, start, now)?;
+    ensure!(db.recovery() == Some(recovery.verifying_key().to_bytes()), "a network's first freeze is signed by the recovery key it names");
     let freeze = Freeze { at: 1, hash: crate::database::stored::state_hash(db.conn())?, logs: [("global".to_string(), 1)].into() };
     let step = sign(recovery, &Scope::Global, 1, user, 1, now, freeze.content())?;
     Ok(Given { step, copy: Some(db.bytes()?) })
 }
 
-/// `global`'s database as `genesis`, its log's first entry, makes it: the network's first person, device, epoch and
-/// recovery key, with this release's types, roles and rules.
-pub fn first(genesis: &Entry, now: u64) -> Result<ScopeDb> {
+/// `global`'s database as a new network starts, `root`, from `start` (`content::first`): its first person, device,
+/// epoch and recovery key, with this release's types, roles and rules.
+pub fn first(root: Hash, start: &Value, now: u64) -> Result<ScopeDb> {
     let db = super::scope::empty(&Scope::Global)?;
     db.pragma_update(None, "user_version", READS)?;
-    super::rules::genesis(&db, genesis)?;
+    super::rules::first(&db, root, start, now)?;
     super::scope::derive(&db)?;
     ScopeDb::open(db, now)
 }
@@ -381,28 +471,36 @@ pub struct Truth {
 }
 
 impl Truth {
-    /// From the steps a reader has, by position from the first (none for one that will never be a step): from the first
-    /// freeze `recovery`, the network's recovery key (`recovery_of`), signed (`first`), each step after taken. None
-    /// before there's one. Fails there if it doesn't check out.
-    pub fn read(steps: &[Option<Given>], recovery: Key, now: u64) -> Result<Option<Truth>> {
+    /// From the steps a reader has, by position from the first (none for one that will never be a step): from the
+    /// network's first freeze (`first`), each step after taken. None before there's one. Fails there if it's a newer
+    /// release's.
+    pub fn read(steps: &[Option<Given>], root: Option<Hash>, now: u64) -> Result<Option<Truth>> {
         let mut truth: Option<Truth> = None;
         for (i, given) in steps.iter().enumerate() {
             let at = i as u64 + 1;
             match &mut truth {
                 Some(t) => drop(t.take(at, given.as_ref().map(|g| &g.step))?),
-                None => truth = Truth::first(at, given.as_ref(), recovery, now)?,
+                None => truth = Truth::first(at, given.as_ref(), root, now)?,
             }
         }
         Ok(truth)
     }
 
-    /// Step `at` of `global`'s database before its freeze: the freeze, if `recovery` signed it, its copy checked against
-    /// the hash it names. Any other step is nothing. One the recovery key signed that doesn't check out stops the
-    /// reader here, as a newer release's does (`Newer`): it's never passed over for another.
-    pub fn first(at: u64, given: Option<&Given>, recovery: Key, now: u64) -> Result<Option<Truth>> {
-        let Some(g) = given.filter(|g| g.step.content.kind == FREEZE && g.step.author() == recovery) else { return Ok(None) };
-        let t = Truth::of_freeze(g, at, now).with_context(|| format!("{YOURS}'s freeze at step {at}, which its recovery key signed, doesn't check out: this device reads who's who no further"))?;
-        Ok(Some(t))
+    /// Step `at` of `global`'s database before its first freeze: the freeze, if its copy comes to the hash it names,
+    /// names the network `root` (when the reader pins one), and was signed by the recovery key it names. Any other step
+    /// is nothing. One whose copy a newer release wrote stops the reader here (`Newer`): it's never passed over for
+    /// another.
+    pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, now: u64) -> Result<Option<Truth>> {
+        let Some(g) = given.filter(|g| g.step.content.app == scopes::APP && g.step.content.kind == FREEZE) else { return Ok(None) };
+        match Truth::of_freeze(g, at, now) {
+            Ok(t) if t.db.recovery() == Some(g.step.author()) && root.is_none_or(|r| t.db.root() == Some(r)) => Ok(Some(t)),
+            Ok(_) => Ok(None),
+            Err(err) if err.is::<Newer>() => Err(err.context(format!("{YOURS}'s freeze at step {at} is a newer release's: this device reads who's who no further"))),
+            Err(err) => {
+                tracing::info!("global's step {at} isn't its freeze: {err:#}");
+                Ok(None)
+            }
+        }
     }
 
     /// The freeze `given` is at `at`, whoever signed it: its copy, if it comes to the hash it names.
@@ -414,7 +512,7 @@ impl Truth {
     }
 
     /// Takes step `at`, the next: applied if it counts, passed over if not (or none). → whether it counted.
-    pub fn take(&mut self, at: u64, step: Option<&Entry>) -> Result<bool> {
+    pub fn take(&mut self, at: u64, step: Option<&Step>) -> Result<bool> {
         ensure!(at == self.at + 1, "step {at} isn't the next");
         self.at = at;
         let Some(step) = step else { return Ok(false) };
@@ -467,7 +565,7 @@ pub async fn written(bucket: &impl crate::bucket::Bucket, keys: &crate::database
 /// the last step it had taken, and the database's state hash there, in its release's form. The new device starts from
 /// the copy at or before that step, takes the steps after it up to there, and keeps what it made only if it comes to
 /// that hash: the steps from the freeze on are never all read again. Said `<freeze>.<at>.<hash>`, as sign-in passes it on
-/// beside the genesis (`cloudflare/sign-in/worker.js`), which a device that knows none of it never reads.
+/// beside the network's root (`cloudflare/sign-in/worker.js`), which a device that knows none of it never reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Welcome {
     pub freeze: u64,
@@ -580,7 +678,7 @@ pub struct Applied {
 
 /// Applies `step` to `db`, `scope`'s database as the steps before it left it, with `global`'s as it is now (for a
 /// scope other than `global`, whose permissions are `global`'s): → the database it leaves, or why it doesn't count.
-pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
+pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Step) -> Result<Applied> {
     ensure!(step.scope() == *scope, "a step of another scope");
     let who = global.unwrap_or(db);
     if step.content.app == scopes::APP && step.content.kind == DEFAULTS {
@@ -689,7 +787,7 @@ pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
 
 /// A `DEFAULTS` step: by an admin's device, the release's types, roles and rules as it says them, in place of those
 /// the database had; the network's own roles stay.
-fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<Applied> {
+fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Step) -> Result<Applied> {
     // Whose it is first: one that doesn't count is passed over, whatever release it names.
     ensure!(who.client(&step.author()).is_some_and(|c| c.user == step.user()), "only a person's own device writes for them");
     ensure!(who.may(step.user(), "change-roles", scopes::NETWORK), "only the network's admins say the release's roles");
@@ -719,7 +817,7 @@ fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<
 }
 
 /// What a counted step names that no other table keeps: its blobs, and a release.
-fn named(db: &Connection, step: &Entry) -> Result<()> {
+fn named(db: &Connection, step: &Step) -> Result<()> {
     let pinned = step.content.app == scopes::APP && step.content.kind != "keep";
     for blob in &step.content.blobs {
         db.execute("INSERT INTO blobs VALUES (?1, ?2) ON CONFLICT (blob) DO UPDATE SET pinned = max(pinned, ?2)", rusqlite::params![blob, pinned])?;
@@ -727,7 +825,7 @@ fn named(db: &Connection, step: &Entry) -> Result<()> {
     if step.content.app == scopes::APP && scopes::RELEASES.contains(&step.content.kind.as_str()) {
         db.execute(
             "INSERT INTO releases VALUES (?, ?, ?, ?, ?)",
-            rusqlite::params![step.seq(), step.content.kind, serde_json::to_string(&step.content)?, crate::entry::hex(&step.author()), i64::try_from(step.time()).unwrap_or(i64::MAX)],
+            rusqlite::params![step.seq(), step.content.kind, serde_json::to_string(&step.content)?, crate::keys::hex(&step.author()), i64::try_from(step.time()).unwrap_or(i64::MAX)],
         )?;
     }
     Ok(())
@@ -735,7 +833,7 @@ fn named(db: &Connection, step: &Entry) -> Result<()> {
 
 /// Rule 3: whether `step`'s signer, as its person, holds the permission its change needs in `db` (`global`'s), before
 /// it. Its kind's rule is checked too, as it's applied (`rules::apply`): this is the engine's.
-pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
+pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Step) -> Result<()> {
     let data = &step.content.data;
     let w = step.user();
     let text = |k: &str| data[k].as_str().map(str::to_string).with_context(|| format!("no {k}"));
@@ -744,7 +842,6 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
     let ok = match (step.content.app.as_str(), step.content.kind.as_str()) {
         // Rule 1: the recovery key lets a device in, and hands over to the next; nothing else.
         _ if db.recovery() == Some(step.author()) => matches!(step.content.kind.as_str(), "device" | "recovery") && *scope == Scope::Global,
-        (scopes::APP, "genesis") => false,
         (scopes::APP, "device") => {
             let user = text("user")?;
             let key = unhex(&text("key")?)?;
@@ -857,7 +954,7 @@ fn maker(db: &ScopeDb, maker: &str, verb: &str, container: &str, subject: &str, 
 
 /// Whether a step of a scope's own state was signed by a device that runs the scope's calls, for a person who may use
 /// the scope: a node writes what a call it ran did.
-fn runs_it(db: &ScopeDb, scope: &Scope, step: &Entry) -> bool {
+fn runs_it(db: &ScopeDb, scope: &Scope, step: &Step) -> bool {
     db.runs_for(&step.author(), scope) && db.may(step.user(), "use", &scopes::object(scope))
 }
 
@@ -866,36 +963,30 @@ pub(crate) mod tests {
     use super::*;
     use crate::database::content;
 
-    /// `global`'s entries, each written after every one before it.
-    #[derive(Clone, Default)]
+    /// `global`'s database as a network starts (`content::first`), and the steps after it.
+    #[derive(Clone)]
     struct History {
-        entries: Vec<Entry>,
-        heads: std::collections::HashMap<Key, crate::entry::Head>,
+        start: Value,
+        steps: Vec<Step>,
     }
 
     impl History {
-        fn write(&mut self, key: &SigningKey, user: &str, content: Content) -> Entry {
-            let me = key.verifying_key().to_bytes();
-            let previous = self.entries.iter().filter(|e| e.author() != me).map(Entry::hash).collect();
-            let e = Entry::create(key, Ext { log: "global".into(), time: 0, user: user.into(), epoch: 1, previous }, self.heads.get(&me).copied(), content);
-            self.heads.insert(me, e.head());
-            self.entries.push(e.clone());
-            e
-        }
-
-        fn root(&self) -> Hash {
-            self.entries[0].hash()
+        fn write(&mut self, key: &SigningKey, user: &str, content: Content) -> Step {
+            let s = sign(key, &Scope::Global, self.steps.len() as u64 + 2, user, 1, 0, content).unwrap();
+            self.steps.push(s.clone());
+            s
         }
     }
 
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";
+    const ROOT: Hash = Hash::from_bytes([5; 32]);
 
-    /// `global`'s database after `entries`, the first the genesis, each after it applied as a step if it counts.
-    fn global_of(entries: &[Entry]) -> ScopeDb {
-        let mut db = first(&entries[0], 0).unwrap();
-        for e in &entries[1..] {
-            if let Ok(a) = apply(&db, None, &Scope::Global, e) {
+    /// `global`'s database after `h`'s steps, each applied if it counts.
+    fn global_of(h: &History) -> ScopeDb {
+        let mut db = first(ROOT, &h.start, 0).unwrap();
+        for s in &h.steps {
+            if let Ok(a) = apply(&db, None, &Scope::Global, s) {
                 db = ScopeDb::open(a.db, 0).unwrap();
             }
         }
@@ -905,39 +996,43 @@ pub(crate) mod tests {
     /// Andre's Mac starts the network, its recovery key kept offline, and lists Bob's laptop, Bob an admin too.
     fn two_admins() -> (History, SigningKey, SigningKey, SigningKey) {
         use crate::keys::Endpoint;
-        use crate::database::content::{device, genesis};
+        use crate::database::content::device;
         use crate::database::scopes::Kind;
         let (mac, laptop, recovery) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[7; 32]));
-        let mut h = History::default();
-        h.write(&mac, ANDRE, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)));
+        let mut h = History { start: content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)), steps: Vec::new() };
         h.write(&mac, ANDRE, device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Admin))));
         (h, mac, laptop, recovery)
     }
 
-    /// Who's who is the first freeze the recovery key its genesis names signed, its copy checked against the hash it
-    /// names: anyone else's, an admin's own device's too, is nothing, and one it signed whose copy isn't what it says
-    /// stops the reader there, never passed over. A device let in starts from its Welcome, whose hash pins it.
+    /// Who's who is the network's first freeze: signed by the recovery key its copy names, its copy checked against the
+    /// hash it names, and naming the network the reader pins. Anyone else's, an admin's own device's too, is nothing,
+    /// as is one whose copy isn't what it says, or another network's; one a newer release wrote stops the reader there,
+    /// never passed over. A device let in starts from its Welcome, whose hash pins it.
     #[test]
     fn a_reader_takes_only_the_recovery_key_s_freeze() {
         let (h, mac, _, recovery) = two_admins();
-        let key = recovery_of(h.root(), &h.entries).unwrap();
-        assert_eq!(key, recovery.verifying_key().to_bytes(), "the genesis names it");
-        assert_eq!(recovery_of(h.entries[1].hash(), &h.entries), None, "and only the genesis does");
-        let theirs = first_freeze(&recovery, &h.entries[0], ANDRE, 0).unwrap();
-        let mut admins = first_freeze(&mac, &h.entries[0], ANDRE, 0).unwrap();
-        assert!(Truth::read(&[Some(admins.clone())], key, 0).unwrap().is_none(), "an admin's is nothing");
-        admins.step = sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, admins.step.content.clone()).unwrap();
+        let key = recovery.verifying_key().to_bytes();
+        let theirs = first_freeze(&recovery, ROOT, &h.start, ANDRE, 0).unwrap();
+        assert!(first_freeze(&mac, ROOT, &h.start, ANDRE, 0).is_err(), "only the recovery key it names signs it");
+        let admins = Given { step: sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, theirs.step.content.clone()).unwrap(), copy: theirs.copy.clone() };
+        assert!(Truth::read(&[Some(admins.clone())], Some(ROOT), 0).unwrap().is_none(), "an admin's is nothing");
         let at2 = Given { step: sign(&recovery, &Scope::Global, 2, ANDRE, 1, 0, theirs.step.content.clone()).unwrap(), copy: theirs.copy.clone() };
-        let t = Truth::read(&[Some(admins), Some(at2.clone())], key, 0).unwrap().unwrap();
+        let t = Truth::read(&[Some(admins), Some(at2.clone())], Some(ROOT), 0).unwrap().unwrap();
         assert_eq!(t.at, 2);
         assert_eq!(t.db.recovery(), Some(key));
+        assert!(Truth::read(&[Some(theirs.clone())], Some(Hash::from_bytes([6; 32])), 0).unwrap().is_none(), "nor another network's");
+        assert!(Truth::read(&[Some(theirs.clone())], None, 0).unwrap().is_some(), "though a reader that pins none takes the first");
         let mut swapped = at2;
         let mut db = connection(swapped.copy.as_deref().unwrap()).unwrap();
         db.execute_batch("UPDATE principals SET name = 'Mallory'").unwrap();
         swapped.copy = Some(db.serialize("main").unwrap().to_vec());
-        assert!(Truth::read(&[None, Some(swapped.clone())], key, 0).is_err(), "a copy that isn't what it says stops it");
+        assert!(Truth::read(&[None, Some(swapped.clone())], Some(ROOT), 0).unwrap().is_none(), "nor one whose copy isn't what it says");
+        db.pragma_update(None, "user_version", READS + 1).unwrap();
+        let newer = Freeze { at: 1, hash: crate::database::stored::state_hash(&db).unwrap(), logs: [("global".to_string(), 1)].into() };
+        let newer = Given { step: sign(&recovery, &Scope::Global, 1, ANDRE, 1, 0, newer.content()).unwrap(), copy: Some(db.serialize("main").unwrap().to_vec()) };
+        assert!(Truth::read(&[Some(newer), Some(theirs.clone())], Some(ROOT), 0).err().unwrap().is::<Newer>(), "a newer release's stops it");
         // A Welcome's hash pins who's who, whoever signed the freeze it names.
-        let mut t = Truth::read(&[Some(theirs.clone())], key, 0).unwrap().unwrap();
+        let mut t = Truth::read(&[Some(theirs.clone())], Some(ROOT), 0).unwrap().unwrap();
         let step = sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content::setting("name", Some("Ours"))).unwrap();
         assert!(t.take(2, Some(&step)).unwrap());
         let w = t.welcome().unwrap();
@@ -947,12 +1042,24 @@ pub(crate) mod tests {
         assert!(Truth::welcomed(&w, &theirs, None, &[None], 0).is_err(), "nor a step held back");
     }
 
+    #[test]
+    fn a_step_checks_only_as_it_was_signed() {
+        let key = SigningKey::from_bytes(&[1; 32]);
+        let (h, sig, b) = sign(&key, &Scope::Global, 5, ANDRE, 1, 5, content::setting("n", Some("5"))).unwrap().encode();
+        assert!(Step::decode(&h, &sig, &b).is_ok());
+        assert!(Step::decode(&h, &sig, br#"{"app":"node","kind":"setting","data":{}}"#).is_err(), "not with another body");
+        let other = String::from_utf8(h.clone()).unwrap().replace("\"time\":5", "\"time\":6");
+        assert!(Step::decode(other.as_bytes(), &sig, &b).is_err(), "not with another time");
+        let spaced = String::from_utf8(h).unwrap().replace(',', ", ");
+        assert!(Step::decode(spaced.as_bytes(), &sig, &b).is_err(), "only as canonical JSON");
+    }
+
     /// A scope the freeze names starts from its start, step 0, as it was written, by a device the network listed, its
     /// copy checked against its hash; without one it can't be read, and a scope the freeze doesn't name starts empty.
     #[test]
     fn a_scope_starts_from_its_start() {
         let (h, mac, _, _) = two_admins();
-        let global = global_of(&h.entries);
+        let global = global_of(&h);
         let scope = Scope::User(ANDRE.into());
         let conn = super::super::scope::empty(&scope).unwrap();
         conn.execute_batch(r#"INSERT INTO installs VALUES ('notes', 1, 'person:a000000000000001', 0); INSERT INTO pages VALUES ('user', '{"items":["notes"]}');"#).unwrap();
@@ -977,7 +1084,7 @@ pub(crate) mod tests {
     #[test]
     fn a_scope_s_reader_stops_at_a_newer_release_s_step() {
         let (h, mac, _, _) = two_admins();
-        let global = global_of(&h.entries);
+        let global = global_of(&h);
         let scope = Scope::User(ANDRE.into());
         let db = || ScopeDb::empty(&scope, 0).unwrap();
         let mut newer = release_defaults().unwrap();
@@ -1028,7 +1135,7 @@ pub(crate) mod tests {
         let (h, mac, laptop, _) = two_admins();
         let mut h = h;
         h.write(&mac, ANDRE, content::role(BOB, Role::Member));
-        let db = global_of(&h.entries);
+        let db = global_of(&h);
         let step = |key: &SigningKey, user: &str| {
             let mut content = release_defaults().unwrap();
             content.data["reads"] = json!(999);
@@ -1049,13 +1156,10 @@ pub(crate) mod tests {
     #[test]
     fn a_release_s_roles_only_move_on_and_an_older_reader_stops_at_a_newer_one() {
         use crate::keys::Endpoint;
-        use crate::database::content::genesis;
         use crate::database::scopes::Kind;
-        const ANDRE: &str = "a000000000000001";
         let mac = SigningKey::from_bytes(&[1; 32]);
-        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
         // A database an older release made.
-        let db = first(&g, 0).unwrap();
+        let db = first(ROOT, &content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)), 0).unwrap();
         db.conn().pragma_update(None, "user_version", READS - 1).unwrap();
         let step = |at: u64, reads: u32| {
             let mut content = release_defaults().unwrap();
@@ -1079,17 +1183,14 @@ pub(crate) mod tests {
     }
 
     /// Who may write what as a step, by the rows at that step: a member makes a group but changes no setting, a removed
-    /// device's next step counts for nothing, nor one naming an epoch not reached; and a step is never an entry.
+    /// device's next step counts for nothing, nor one naming an epoch not reached.
     #[test]
     fn a_step_counts_only_if_its_signer_may_make_that_change_there() {
         use crate::keys::Endpoint;
-        use crate::database::content::{device, genesis, group, node, remove_device, setting};
+        use crate::database::content::{device, group, node, remove_device, setting};
         use crate::database::scopes::Kind;
-        const ANDRE: &str = "a000000000000001";
-        const BOB: &str = "b000000000000002";
         let (mac, laptop, phone) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[3; 32]));
-        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
-        let mut db = first(&g, 0).unwrap();
+        let mut db = first(ROOT, &content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)), 0).unwrap();
         let mut at = 0;
         let mut step = |db: &mut ScopeDb, key: &SigningKey, user: &str, epoch: u32, content: Content| -> bool {
             at += 1;
@@ -1111,9 +1212,8 @@ pub(crate) mod tests {
         assert!(step(&mut db, &mac, ANDRE, 1, remove_device(&laptop.verifying_key().to_bytes())));
         assert!(!step(&mut db, &laptop, BOB, 1, node("rename", json!({ "user": BOB, "name": "Robert" }))), "a removed device's next step counts for nothing");
         assert!(db.group("c000000000000003").is_some() && db.setting("name").is_none());
-        // Signed for one place, it's nowhere else; and an entry, signed the same way, is never a step.
+        // Signed for one place, it's nowhere else.
         let s = sign(&mac, &Scope::Global, 9, ANDRE, 1, 0, setting("name", Some("x"))).unwrap();
         assert!(decode(&Scope::Global, 10, &encode(&s, None)).is_err() && decode(&Scope::User(ANDRE.into()), 9, &encode(&s, None)).is_err());
-        assert!(decode(&Scope::Global, 0, &encode(&g, None)).is_err());
     }
 }

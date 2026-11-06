@@ -30,7 +30,7 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, sealed_global_steps, reads } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps, reads } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 
@@ -1110,8 +1110,8 @@ export default {
 export class Node extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    // The network's genesis, as sign-in pins it: a genesis any device writes into the log is never taken for it.
-    if (env.GENESIS) pin_genesis(env.GENESIS);
+    // The network's root, as sign-in pins it: a freeze naming any other is never taken for its first.
+    if (env.ROOT) pin_root(env.ROOT);
     this.isEndpoint = ctx.id.equals(env.NODE.idFromName("node"));
     /// Datagrams it sent this turn, for the relay; asks running now, and when the last one began or ended.
     this.out = [];

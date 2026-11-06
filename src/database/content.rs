@@ -7,19 +7,37 @@ use std::collections::BTreeMap;
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
-use crate::entry::{Content, Key, Scope, hex};
+use crate::keys::{Key, hex};
+
+use crate::database::scopes::Scope;
 
 use super::scopes::{APP, APP_SCHEDULES, Kind, Role};
+
+/// What a step says: its app, its kind, what it says, and the blobs it names.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct Content {
+    pub app: String,
+    pub kind: String,
+    pub data: Value,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blobs: Vec<String>,
+}
+
+impl Content {
+    pub fn new(app: &str, kind: &str, data: Value) -> Self {
+        Content { app: app.into(), kind: kind.into(), data, blobs: Vec::new() }
+    }
+}
 
 pub fn node(kind: &str, data: Value) -> Content {
     Content::new(APP, kind, data)
 }
 
-/// The network's first entry: its name, its first person, the first device (signing it), the recovery key, and the
-/// hash of `global`'s first epoch (`keys::epoch_hash`), made with it.
-pub fn genesis(name: &str, user: &str, user_name: &str, device: &crate::keys::Endpoint, device_name: &str, roles: &[Kind], recovery: &Key, epoch: &str) -> Content {
+/// What a network starts with, as its first freeze's copy holds it (`steps::first_freeze`): its name, its first person
+/// and their device, the recovery key, and the hash of `global`'s first epoch (`keys::epoch_hash`), made with it.
+pub fn first(name: &str, user: &str, user_name: &str, device: &crate::keys::Endpoint, device_name: &str, roles: &[Kind], recovery: &Key, epoch: &str) -> Value {
     let device = json!({ "key": hex(&device.key), "seal": hex(&device.seal), "name": device_name, "roles": roles });
-    node("genesis", json!({ "name": name, "user": user, "user_name": user_name, "device": device, "recovery": hex(recovery), "epoch": epoch }))
+    json!({ "name": name, "user": user, "user_name": user_name, "device": device, "recovery": hex(recovery), "epoch": epoch })
 }
 
 /// Lists an endpoint as `user`'s, and with `new_user` lets them in, by an admin's device.

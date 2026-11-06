@@ -643,7 +643,7 @@ impl Node {
         self.send(&to, "ask", &body, true, limit).await
     }
 
-    /// Says hello to a service endpoint, with the network's genesis and how many of `global`'s steps this device has:
+    /// Says hello to a service endpoint, with how many of `global`'s steps this device has:
     /// it answers what it offers once it lists this device as one that may call it; until then, that it's behind, and
     /// is sent them, which it checks itself. → what it offers, and whom it serves.
     pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
@@ -660,17 +660,8 @@ impl Node {
                 steps.push(None);
             }
         }
-        let hello = json!({ "entries": 1, "steps": steps.len() });
+        let hello = json!({ "steps": steps.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
-        if answer["behind"] == true {
-            let genesis = crate::database::steps::genesis(&self.bucket()?, &self.step_keys(&Scope::Global).await?).await?;
-            let pack = data_encoding::BASE64.encode(&crate::entry::pack(&genesis.iter().collect::<Vec<_>>()));
-            let taken = self.send(&to, "entries", &json!({ "pack": pack }), true, CONNECT).await?;
-            if let Some(err) = taken["error"].as_str() {
-                bail!("{} didn't take the network's genesis: {err}", short(&to));
-            }
-            answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
-        }
         if answer["behind"] == true && !steps.is_empty() {
             let list: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
             let taken = self.send(&to, "steps", &json!({ "steps": list }), true, CONNECT).await?;

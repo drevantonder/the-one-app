@@ -166,7 +166,7 @@ impl Response {
 }
 
 /// Who's who as this browser reads it (src/database/steps.rs, client/src/members.rs): from where it read `global`'s
-/// scope database's steps to, as it kept that, of the network whose genesis is `root` (hex, or none the first time).
+/// scope database's steps to, as it kept that, of the network whose root is `root` (hex, or none the first time).
 /// Throws if a step doesn't check, or they're another network's.
 #[wasm_bindgen]
 pub struct Global {
@@ -174,21 +174,19 @@ pub struct Global {
     steps: String,
     at: u64,
     members: String,
-    wants_log: u64,
 }
 
 #[wasm_bindgen]
 impl Global {
     #[wasm_bindgen(constructor)]
     /// `steps`, as JSON: `{ kept, given, epochs, apps }`, where its scope database's steps were read to as it kept that
-    /// (`members::Global::kept`), and those this browser read since from the bucket itself (`{ steps, log, welcome,
-    /// freeze, start }`, through the URL signer's `get`) with the keys to open them: `global`'s epochs sealed to this
+    /// (`members::Global::kept`), and those this browser read since from the bucket itself (`{ steps, welcome, freeze,
+    /// start }`, through the URL signer's `get`) with the keys to open them: `global`'s epochs sealed to this
     /// device, opened (hex, by number), and the node's key sealed in each (base64url, by number)
     /// (`members::Global::add_sealed`).
     pub fn new(root: String, steps: Option<String>) -> Result<Global, JsError> {
-        let root = (!root.is_empty()).then(|| one::entry::Hash::from_hex(&root)).transpose().map_err(js)?;
+        let root = (!root.is_empty()).then(|| one::keys::Hash::from_hex(&root)).transpose().map_err(js)?;
         let mut g = crate::members::Global::new(root);
-        let mut wants_log = 0;
         if let Some(steps) = steps.filter(|s| !s.is_empty()) {
             let steps: serde_json::Value = serde_json::from_str(&steps).map_err(js)?;
             if steps["kept"].is_object() {
@@ -196,17 +194,10 @@ impl Global {
             }
             let epochs = steps["epochs"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, key(k.as_str()?).ok()?))).collect();
             let apps = steps["apps"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, data_encoding::BASE64URL_NOPAD.decode(k.as_str()?.as_bytes()).ok()?))).collect();
-            wants_log = g.add_sealed(&steps["given"], &epochs, &apps).map_err(js)?.unwrap_or(0);
+            g.add_sealed(&steps["given"], &epochs, &apps).map_err(js)?;
         }
         let members = crate::members::view_of(&g.who().map_err(js)?).map_err(js)?.to_string();
-        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members, wants_log })
-    }
-
-    /// The step of `global`'s log this browser reads to and gives again (`given.log`) before it reads on: its genesis's,
-    /// 1, which names the recovery key, while it doesn't know it; 0 for none.
-    #[wasm_bindgen(getter)]
-    pub fn wants_log(&self) -> f64 {
-        self.wants_log as f64
+        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members })
     }
 
     /// Where its scope database's steps were read to, as JSON (`members::Global::kept`): to keep, and give again.
@@ -221,7 +212,7 @@ impl Global {
         self.at as f64
     }
 
-    /// The network's genesis, hex: to keep, and give again.
+    /// The network's root, hex: to keep, and give again.
     #[wasm_bindgen(getter)]
     pub fn root(&self) -> String {
         self.root.clone()
@@ -244,16 +235,16 @@ pub fn issuer_keys_at(proof: String, address: String) -> String {
 
 /// What a new device (`key`, `seal`, hex) signed in with, as its sign-in (`proof`, JSON) shows, checked here
 /// (`one::sign_in_proof`): with its issuer's `keys` (JSON, or "" for a passkey's), for the network at `address` whose
-/// first entry's hash is `genesis` (hex) and whose people sign in with `clients` (its `sign_in_clients` setting, as
+/// root is `root` (hex) and whose people sign in with `clients` (its `sign_in_clients` setting, as
 /// its entries say, or ""); against `accounts` (its person's, as their devices record them, JSON), for one let in by
 /// it, or with none, for one approved by its code. → the account, as JSON, to record with it; throws why it doesn't
 /// check out.
 #[wasm_bindgen(js_name = signedInWith)]
 #[allow(clippy::too_many_arguments)]
-pub fn signed_in_with(proof: String, key: String, seal: String, address: String, genesis: String, clients: String, keys: String, accounts: Option<String>, now: f64) -> Result<String, JsError> {
+pub fn signed_in_with(proof: String, key: String, seal: String, address: String, root: String, clients: String, keys: String, accounts: Option<String>, now: f64) -> Result<String, JsError> {
     let proof: one::sign_in_proof::Proof = serde_json::from_str(&proof).map_err(js)?;
     let device = one::keys::Endpoint { key: self::key(&key)?, seal: self::key(&seal)? };
-    let network = one::sign_in_proof::Network::new(&address, self::key(&genesis)?, Some(&clients));
+    let network = one::sign_in_proof::Network::new(&address, self::key(&root)?, Some(&clients));
     let keys: Option<serde_json::Value> = (!keys.is_empty()).then(|| serde_json::from_str(&keys)).transpose().map_err(js)?;
     let now = now as u64;
     let account = match accounts {

@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use ssh_key::{HashAlg, LineEnding, PrivateKey, PublicKey, SshSig};
 
-use crate::entry::{Content, Key};
+use crate::database::content::Content;
+
+use crate::keys::Key;
 
 pub const APP: &str = "node";
 /// The kind of entry, or step, that says a release of the node.
@@ -61,14 +63,14 @@ fn signed_by(key: &str, signature: &str) -> bool {
 
 /// What `global` said of releases, oldest first, as each release's content and who published it, from its scope
 /// database's steps (`ScopeDb::releases`).
-pub fn said(steps: &[(crate::entry::Content, Key, u64)]) -> Vec<(crate::entry::Content, Key)> {
+pub fn said(steps: &[(crate::database::content::Content, Key, u64)]) -> Vec<(crate::database::content::Content, Key)> {
     steps.iter().map(|(c, k, _)| (c.clone(), *k)).collect()
 }
 
 /// The newest release for `target` signed with `key`, of the node or the service `service`, and the device that
 /// published it, of what `said` gives. Any device may publish or pass on a release: only the signature counts. The
 /// newest of any newer ones without it is logged.
-pub fn latest_said(key: &str, said: &[(crate::entry::Content, Key)], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
+pub fn latest_said(key: &str, said: &[(crate::database::content::Content, Key)], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
     let kind = if service.is_some() { SERVICE_KIND } else { NODE_KIND };
     let releases = said.iter().rev().filter(|(c, _)| c.app == APP && c.kind == kind);
     let mut logged = false;
@@ -82,7 +84,7 @@ pub fn latest_said(key: &str, said: &[(crate::entry::Content, Key)], target: &st
             return Some((r, e.author));
         }
         if !std::mem::replace(&mut logged, true) {
-            tracing::warn!("ignoring the release of {} by {}: it isn't signed by this build's release key", r.commit, &crate::entry::hex(&e.author)[..8]);
+            tracing::warn!("ignoring the release of {} by {}: it isn't signed by this build's release key", r.commit, &crate::keys::hex(&e.author)[..8]);
         }
     }
     None
@@ -90,7 +92,7 @@ pub fn latest_said(key: &str, said: &[(crate::entry::Content, Key)], target: &st
 
 /// A release as `global` said it.
 struct Said<'a> {
-    content: &'a crate::entry::Content,
+    content: &'a crate::database::content::Content,
     author: Key,
 }
 
@@ -151,7 +153,6 @@ pub struct Running {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::SigningKey;
     use ssh_key::private::Ed25519Keypair;
 
     fn key(seed: u8) -> PrivateKey {

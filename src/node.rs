@@ -17,7 +17,10 @@ use crate::app::runtime::{Apps, Context, Me, ScopeHandle};
 use crate::call::Append;
 use crate::bucket::{Copied, Place};
 use crate::database::stored::Db;
-use crate::entry::{Content, Entry, Hash, Key, Scope, hex, new_id, short, unhex};
+use crate::database::content::Content;
+use crate::database::steps::Step;
+use crate::keys::{Hash, Key, hex, short, unhex};
+use crate::database::scopes::{Scope, new_id};
 use crate::database::scopes::{self, ScopeDb};
 use crate::database::content;
 use crate::database::scopes::{Principal, Role, ScopeState};
@@ -93,7 +96,7 @@ const FAILURES_KEPT: u32 = 30;
 const REQUEST_LIFE: u64 = 86_400_000;
 /// How long an app's page says a deploy changed or removed one of its schedules.
 const CHANGED_SHOWN: u64 = 14 * 86_400_000;
-/// The object in a network's bucket that says whose it is: the network's genesis.
+/// The object in a network's bucket that says whose it is: the network's root.
 const NETWORK_OBJECT: &str = "network";
 
 /// Whose the bucket at `place` is, as its `NETWORK_OBJECT` says: or as `install` says, the name a build from before it
@@ -130,7 +133,7 @@ struct DeviceFile {
 
 #[derive(Serialize, Deserialize)]
 struct NetworkFile {
-    /// The hash of the network's genesis.
+    /// The network's root, its id.
     root: String,
     /// This device's local user.
     user: String,
@@ -861,7 +864,7 @@ impl Node {
     /// Creates the network, with every built-in app added (owned by admins), so anyone may add one to their own page,
     /// and these installed in `global`. Its first person is `user` if given (who they were in a network this one
     /// replaces, so their account at its sign-in is still theirs), else someone new. Who's who is its scope database from
-    /// its genesis on, at the freeze its new recovery key signs as it starts (`steps::first_freeze`).
+    /// its first freeze on, which its new recovery key signs as it starts (`steps::first_freeze`).
     pub async fn create_with(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str]) -> Result<String> {
         self.ensure_no_network()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the network a name, and yourself one");
@@ -869,15 +872,15 @@ impl Node {
         let user = user.map_or_else(new_id, str::to_string);
         let recovery = SigningKey::from_bytes(&rand::random());
         let me = crate::keys::Endpoint::of(&self.0.key);
-        // `global`'s first epoch, named by the genesis before anything is sealed under it.
+        // The network's id, which every device of it pins, and `global`'s first epoch, named by its first freeze before
+        // anything is sealed under it.
+        let root = Hash::from_bytes(rand::random());
         let global: [u8; 32] = rand::random();
-        let genesis = content::genesis(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&global));
-        let ext = crate::entry::Ext { log: "global".into(), time: now_ms(), user: user.clone(), epoch: 0, previous: Vec::new() };
-        let entry = Entry::create(&self.0.key, ext, None, genesis);
+        let start = content::first(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&global));
         // Until it's moved to S3-compatible storage, the network's bucket is a folder here.
         let bucket: BTreeMap<String, String> = [("path".to_string(), self.network_dir().join("bucket").display().to_string())].into();
-        Place::from_fields(&bucket)?.create(NETWORK_OBJECT, entry.hash().to_hex().as_bytes())?;
-        self.save_network(&NetworkFile { root: entry.hash().to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
+        Place::from_fields(&bucket)?.create(NETWORK_OBJECT, root.to_hex().as_bytes())?;
+        self.save_network(&NetworkFile { root: root.to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
         self.open_network()?;
         let bucket = self.bucket()?;
         let recovery_seal = crate::cloudflare::twin_public(recovery.verifying_key().as_bytes())?;
@@ -885,17 +888,13 @@ impl Node {
             crate::database::stored::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::cloudflare::seal_to(&seal, &global)?).await?;
         }
         self.0.epochs.lock().unwrap().insert(Scope::Global, crate::database::stored::Keys::from([(1, global)]));
-        // Its genesis, where every device reads it (`steps::genesis_name`), and who's who, as the freeze its recovery key
-        // signs at step 1 of its scope database: its genesis's.
+        // Who's who, as the freeze its recovery key signs at step 1 of its scope database.
         let keys = self.step_keys(&Scope::Global).await?;
-        let name = crate::database::steps::genesis_name();
-        ensure!(crate::bucket::Bucket::create(&bucket, &name, &crate::database::steps::seal(&keys, &name, &crate::entry::pack(&[&entry]))?).await?, "the new network's bucket isn't empty");
         self.with(|i| {
-            i.r.recovery = Some(*recovery.verifying_key().as_bytes());
             i.read = true;
             Ok(())
         })?;
-        let first = crate::database::steps::first_freeze(&recovery, &entry, &user, now_ms())?;
+        let first = crate::database::steps::first_freeze(&recovery, root, &start, &user, now_ms())?;
         let name = crate::database::stored::step_name(&crate::database::steps::prefix("global"), 1);
         let sealed = crate::database::steps::seal(&keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref()))?;
         ensure!(crate::bucket::Bucket::create(&bucket, &name, &sealed).await?, "the new network's bucket isn't empty");
@@ -919,13 +918,13 @@ impl Node {
     }
 
     /// Writes an entry as this device's local user.
-    pub async fn append(&self, scope: &Scope, content: Content) -> Result<Entry> {
+    pub async fn append(&self, scope: &Scope, content: Content) -> Result<Step> {
         let user = self.user()?;
         self.append_as(scope, &user, content).await
     }
 
     /// Writes an entry to this device's log of `scope`, signed by this device, as `user`.
-    async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
+    async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Step> {
         if !self.frozen() {
             self.read_steps().await?;
         }

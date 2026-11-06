@@ -14,7 +14,11 @@ use anyhow::{Context, Result, bail, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
-use crate::entry::{Entry, Key, Scope, hex, is_id, unhex};
+use crate::database::steps::Step;
+
+use crate::keys::{Hash, Key, hex, unhex};
+
+use crate::database::scopes::{Scope, is_id};
 use crate::database::scopes;
 use crate::database::scopes::{AGENTS, APP, APP_SCHEDULES, Kind, Machine, Principal, Role, handle_from, source_link, valid_app_name, valid_handle, valid_host, valid_page, valid_secret_name};
 
@@ -25,12 +29,12 @@ use super::scopes::{NETWORK, ScopeDb, object, owner_object};
 const OWN: &[&str] = &["schedule", "vault-request", "keep", "forget", "arrange"];
 
 /// Whether a step is one of `global`'s own: who's who, written only by its person's own device (or the recovery key).
-fn of_global(step: &Entry, scope: &Scope) -> bool {
+fn of_global(step: &Step, scope: &Scope) -> bool {
     *scope == Scope::Global && step.content.app == APP && !OWN.contains(&step.content.kind.as_str())
 }
 
 /// Whether `step`'s signer may write it as its person, in `scope`, by `who`, `global`'s database before it.
-pub fn signed(who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
+pub fn signed(who: &ScopeDb, scope: &Scope, step: &Step) -> Result<()> {
     let (w, author) = (step.user(), step.author());
     if who.recovery() == Some(author) {
         // The network's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would,
@@ -40,13 +44,13 @@ pub fn signed(who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
     }
     ensure!(who.may(w, "use", &object(scope)), "{w} can't write in {scope}");
     let theirs = who.client(&author).is_some_and(|c| c.user == w);
-    ensure!(theirs || (!of_global(step, scope) && who.runs_for(&author, scope)), "{} can't write in {scope} for that person", crate::entry::short(&author));
+    ensure!(theirs || (!of_global(step, scope) && who.runs_for(&author, scope)), "{} can't write in {scope} for that person", crate::keys::short(&author));
     Ok(())
 }
 
 /// Applies `step`, which counts by `signed` and `steps::allowed`, to `out`, `scope`'s database before it, by its kind's
 /// rule, `who` being `global`'s database before it: → why it doesn't count, if it doesn't.
-pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Entry) -> Result<()> {
+pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()> {
     if step.content.app != APP {
         return Ok(());
     }
@@ -82,23 +86,23 @@ pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Entry) -> Re
     }
 }
 
-/// The network's first person, device, epoch and recovery key, as its genesis says them, into `out`, empty.
-pub fn genesis(out: &Connection, genesis: &Entry) -> Result<()> {
-    let data = &genesis.content.data;
+/// The network `root`'s first person, device, epoch and recovery key, as `data` says them (`content::first`), into
+/// `out`, empty, at `now`.
+pub fn first(out: &Connection, root: Hash, data: &Value, now: u64) -> Result<()> {
     let text = |k: &str| data[k].as_str().map(str::to_string).with_context(|| format!("no {k}"));
     let user = text("user")?;
-    ensure!(is_id(&user) && user == genesis.user(), "genesis is written as its first user");
-    let machine = listed(&data["device"], &user, genesis.time())?;
-    ensure!(machine.key == genesis.author() && machine.is(Kind::Client), "genesis is signed by the first device it lists, a client");
+    ensure!(is_id(&user), "a person's id is 16 hex characters");
+    let machine = listed(&data["device"], &user, now)?;
+    ensure!(machine.is(Kind::Client), "a network's first device is a client");
     let hash = epoch_hash_of(&data["epoch"])?;
-    let time = int(genesis.time());
-    out.execute("UPDATE network SET root = ?, name = ?, devices_at = ?", params![genesis.hash().to_hex(), text("name")?, time])?;
+    let time = int(now);
+    out.execute("UPDATE network SET root = ?, name = ?, devices_at = ?", params![root.to_hex(), text("name")?, time])?;
     out.execute("INSERT INTO recovery VALUES (0, ?, ?)", params![hex(&unhex(&text("recovery")?)?), time])?;
     add_person(out, &user, &text("user_name")?, Role::Admin)?;
     put(out, &machine)?;
     // `global`'s first epoch, made with the network, before anything is sealed under it.
     out.execute("INSERT INTO epochs VALUES ('global', 1, ?)", [&hash])?;
-    out.execute("INSERT INTO sealed VALUES ('global', 1, ?)", [hex(&genesis.author())])?;
+    out.execute("INSERT INTO sealed VALUES ('global', 1, ?)", [hex(&machine.key)])?;
     Ok(())
 }
 
@@ -106,7 +110,7 @@ pub fn genesis(out: &Connection, genesis: &Entry) -> Result<()> {
 struct Change<'a> {
     who: &'a ScopeDb,
     out: &'a Connection,
-    step: &'a Entry,
+    step: &'a Step,
     w: &'a str,
     data: &'a Value,
 }
@@ -538,7 +542,7 @@ impl Change<'_> {
 }
 
 /// A step of a scope's own state, in `out`: installs, schedules, Vault requests, pages and the blobs it no longer needs.
-fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Entry) -> Result<()> {
+fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()> {
     let w = step.user();
     let data = &step.content.data;
     let time = int(step.time());
@@ -685,14 +689,14 @@ fn put(out: &Connection, d: &Machine) -> Result<()> {
     Ok(())
 }
 
-/// The `hash` an `epoch` step (or `epoch`, the genesis) names its key by: `keys::epoch_hash`, 64 hex characters.
+/// The `hash` an `epoch` step (or `epoch`, a new network's first, `content::first`) names its key by: `keys::epoch_hash`, 64 hex characters.
 fn epoch_hash_of(hash: &Value) -> Result<String> {
     let hash = hash.as_str().context("an epoch names its key's hash")?;
     ensure!(hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "an epoch's hash is 64 hex characters");
     Ok(hash.to_string())
 }
 
-/// A device as a `device` step (or the genesis's `device`) lists it, for `user`, by them.
+/// A device as a `device` step (or a new network's first, `content::first`) lists it, for `user`, by them.
 fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
     let text = |key: &str| data[key].as_str().with_context(|| format!("no {key}"));
     let roles: BTreeSet<Kind> = serde_json::from_value(data["roles"].clone()).context("roles are client, compute or service")?;
@@ -727,8 +731,8 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use serde_json::{Value, json};
 
-    use crate::entry::{Content, Entry, Ext, Key, Scope, hex};
-    use crate::keys::Endpoint;
+    use crate::database::scopes::Scope;
+    use crate::keys::{Endpoint, Hash, Key, hex};
     use crate::database::content::*;
     use crate::database::scopes::{APPS_PART, Kind, Role};
 
@@ -762,10 +766,10 @@ mod tests {
     }
 
     impl Net {
-        /// A network whose genesis `mac` signs, listing itself as Andre's `kinds`, its recovery key `recovery`.
+        /// A network whose first device is `mac`, listing itself as Andre's `kinds`, its recovery key `recovery`.
         fn new(mac: &Dev, kinds: &[Kind], recovery: &Key) -> Net {
-            let g = Entry::create(&mac.0, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &mac.endpoint(), "mac", kinds, recovery, &H.repeat(64)));
-            Net { db: steps::first(&g, 0).unwrap(), at: 1 }
+            let start = first("Home", ANDRE, "Andre", &mac.endpoint(), "mac", kinds, recovery, &H.repeat(64));
+            Net { db: steps::first(Hash::from_bytes([5; 32]), &start, 0).unwrap(), at: 1 }
         }
 
         /// Writes `content` as `user` from `dev`: whether it counted.
@@ -942,7 +946,7 @@ mod tests {
         let (mac, mut net) = setup();
         let bobs = Dev::new(3);
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        assert_eq!((net.db.epoch(&Scope::Global), net.db.sealed_to(&Scope::Global)), (1, vec![mac.id()]), "global's first is the genesis's");
+        assert_eq!((net.db.epoch(&Scope::Global), net.db.sealed_to(&Scope::Global)), (1, vec![mac.id()]), "global's first is its first device's");
         let to = json!([hex(&mac.id())]);
         let epoch = |scope: &str, n: u32, hash: Option<String>| node("epoch", json!({ "scope": scope, "n": n, "to": to, "hash": hash }));
         assert!(!net.step(&bobs, BOB, epoch("global", 2, Some(H.repeat(64)))), "not Bob's to start");

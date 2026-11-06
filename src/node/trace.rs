@@ -47,11 +47,11 @@ impl Default for Trace {
 }
 
 /// A scope as a trace names it: its kind alone, never whose.
-pub fn kind(scope: &crate::entry::Scope) -> &'static str {
+pub fn kind(scope: &crate::database::scopes::Scope) -> &'static str {
     match scope {
-        crate::entry::Scope::Global => "everyone",
-        crate::entry::Scope::Group(_) => "group",
-        crate::entry::Scope::User(_) => "user",
+        crate::database::scopes::Scope::Global => "everyone",
+        crate::database::scopes::Scope::Group(_) => "group",
+        crate::database::scopes::Scope::User(_) => "user",
     }
 }
 

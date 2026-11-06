@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use sha2::{Digest, Sha256};
 
-use crate::entry::hex;
+use crate::keys::hex;
 
 use super::{Bucket, Failed, Object, Trouble};
 
