@@ -18,6 +18,15 @@ pub(crate) mod routes;
 
 const VAULT: (&str, &str) = (scopes::APP, crate::vault::DATABASE);
 
+/// How an agent is told to ask the person for an item it may use: a request with no app is for agents, the person's own
+/// items, which they use with `vault_fetch`.
+pub const ASK_FOR_AGENTS: &str = "vault_request, leaving out app,";
+
+/// The app a request is for: the one given, else agents.
+pub fn request_app(app: Option<&str>) -> &str {
+    app.unwrap_or(scopes::AGENTS)
+}
+
 impl Node {
     async fn vault_db(&self, me: &Caller, scope: &Scope) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
         let (db, bucket) = self.call_database(me, scope, VAULT.0, VAULT.1, Some(vec![crate::vault::SCHEMA.into()])).await?;
@@ -266,7 +275,7 @@ impl Node {
     /// Why an agent's placeholder `name` found nothing in the items it was filled from (`lookup`), and what to do, in
     /// a sentence.
     fn why_unfilled(lookup: &crate::vault::Lookup, name: &str) -> String {
-        let ask = "vault_request, leaving out app, asks the person to let you";
+        let ask = format!("{ASK_FOR_AGENTS} asks the person to let you");
         let found = name.split_once(':').map(|(id, field)| (id, field, lookup.scopes.iter().find_map(|(_, items)| items.get(id).cloned())));
         match found {
             Some((id, _, None)) => format!("no item {id} is in a Vault you may use: vault_list shows them, and {ask} use one"),
@@ -277,7 +286,7 @@ impl Node {
             }
             None => {
                 let field = name.rsplit('/').next().unwrap_or(name);
-                format!("no item agents may use has a field {field}: vault_request, leaving out app, asks the person for one")
+                format!("no item agents may use has a field {field}: {ASK_FOR_AGENTS} asks the person for one")
             }
         }
     }
@@ -396,7 +405,7 @@ impl Node {
         self.write_item(caller, scope, |items| {
             // Agents use an item (vault_fetch) only once its person lets agents use it, never by themselves.
             let had = items.get(&id).is_some_and(|it| it.apps.contains(scopes::AGENTS));
-            ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with vault_request, leaving out app, and they pick or make it");
+            ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with {ASK_FOR_AGENTS} and they pick or make it");
             Ok(data.clone())
         })
         .await?;

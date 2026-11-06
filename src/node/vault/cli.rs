@@ -80,8 +80,7 @@ fn run(g: &Given) -> Result<bool> {
         }
         ["vault", "request", app @ ..] if app.len() < 2 => {
             g.takes_only(&["scope", "need", "title", "fields", "secret-fields", "hosts", "why"])?;
-            // With no app, it's for agents: the person's own, with vault fetch.
-            let app = app.first().copied().unwrap_or(crate::database::scopes::AGENTS);
+            let app = super::request_app(app.first().copied());
             let scope = g.flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             let list = |k: &str| g.flags.get(k).and_then(Value::as_str).map(|v| v.split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
             let secret = list("secret-fields");

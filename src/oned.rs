@@ -10,7 +10,7 @@
 //! its device lists it. Its program is its app's own (`apps/<name>/service/`), and oned runs only a build its app's
 //! latest deploy names for this platform (`bundle::SERVICES`), which `<cli> deploy` builds where it's run, or, for one
 //! whose deploy names none, as a built-in app's, the newest `<cli> update` built and published signed with the release
-//! key (a `service-release` step, which an older device ignores). oned fetches it, checks its hash or signature and puts
+//! key (a `service-release` step). oned fetches it, checks its hash or signature and puts
 //! it at `~/.local/bin/<cli>-<name>` when it's switched on and again when another is named or a newer one's published;
 //! a Mac app carries the built-in ones in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
 //! stopping, failed and why) and how it runs: in its sandbox as its app declares (`sandbox`, which oned tells each

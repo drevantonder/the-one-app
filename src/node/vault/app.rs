@@ -48,8 +48,7 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
         "fetch" => node.post("/v1/vault/fetch", json!({ "url": text("url")?, "method": input.get("method"), "headers": input.get("headers"), "body": input.get("body"), "agent": agent })),
         "remove" => Ok(json!(remove(node, scope, text("item")?, input.get("field").and_then(Value::as_str))?)),
         "request" => {
-            // With no app, it's for agents: the person's own, with vault_fetch.
-            let app = input.get("app").and_then(Value::as_str).unwrap_or(crate::database::scopes::AGENTS);
+            let app = super::request_app(input.get("app").and_then(Value::as_str));
             let r = node.post("/v1/vault/request", json!({ "scope": scope, "app": app, "need": input.get("need"), "title": input.get("title"), "fields": input.get("fields"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;
             Ok(json!(format!("Asked. Give the person this link: {}\nIt's also waiting in their Settings, under Requests. Tell them; check vault_status with id {} when they say they've done it.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))))
         }
@@ -152,7 +151,7 @@ pub fn set(node: &Client, scope: &str, item: &str, field: &str, value: &str, sec
     let agents = found.as_ref().is_some_and(|it| it["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == crate::database::scopes::AGENTS))) || app == Some(crate::database::scopes::AGENTS);
     Ok(match (agents, app) {
         (true, _) => format!("{done} Agents use it with vault_fetch, as {{{{{id}:{field}}}}}."),
-        (false, None) => format!("{done} Agents may not use it yet: vault_request, leaving out app, asks the person to let you, and they pick it."),
+        (false, None) => format!("{done} Agents may not use it yet: {} asks the person to let you, and they pick it.", super::ASK_FOR_AGENTS),
         (false, Some(_)) => done,
     })
 }

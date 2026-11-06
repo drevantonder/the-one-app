@@ -427,7 +427,7 @@ async fn refuse(req: axum::extract::Request, mut refusal: Response) -> Response 
     refusal
 }
 
-/// What a program that didn't show the token is told, as JSON: an older client shows it as it shows any error. One
+/// What a program that didn't show the token is told, as JSON. One
 /// started before the node updated (an agent's MCP server, most often) is this machine's, and starting it again mends it.
 fn not_this_machine() -> String {
     let name = crate::config::NAME;
