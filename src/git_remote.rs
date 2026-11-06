@@ -1,4 +1,4 @@
-//! Git and your One App's repos, at one address on every computer, `<address>/repos/<owner>/<repo>.git`. Git is told
+//! Git and your One App network's repos, at one address on every computer, `<address>/repos/<owner>/<repo>.git`. Git is told
 //! (`url.<CLI>::<address>/repos/.insteadOf`) to reach it as `<CLI>::<address>/repos/…`, so it runs this program as
 //! `git-remote-<CLI>`, its remote helper. That runs git's own HTTP transport (`git remote-http`) for the address, with
 //! this program as its proxy while it runs: what git asks goes where every command's request goes, to this machine's

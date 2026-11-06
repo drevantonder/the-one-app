@@ -29,7 +29,7 @@ pub(super) struct Session {
 pub(super) struct Sessions {
     /// By a hash of the token.
     pub kept: Mutex<HashMap<[u8; 32], Session>>,
-    /// Sign-in at the install's address, whose keys check the tokens calls come with.
+    /// Sign-in at the network's address, whose keys check the tokens calls come with.
     issuer: Mutex<Option<Arc<crate::cloudflare::Issuer>>>,
     /// The databases opened with keys a caller handed (or app schedules'), each kept open for calls handed
     /// exactly those keys, and forgotten with them: once their last session or app schedules end, or no live session holds
@@ -131,7 +131,7 @@ pub(super) fn passed(token: &str) -> bool {
     token.starts_with(PASSED)
 }
 
-/// Whether `token` is an access token the install's sign-in service signed, which another device can check: not a
+/// Whether `token` is an access token the network's sign-in service signed, which another device can check: not a
 /// client device's, one another node passed on, or a scheduled run's.
 pub(super) fn is_sign_in(token: &str) -> bool {
     !token.starts_with(CLIENT) && !token.starts_with(PASSED) && !token.starts_with("run.")
@@ -143,7 +143,7 @@ fn hash(token: &str) -> [u8; 32] {
 }
 
 impl Node {
-    /// Sign-in at the install's address, as this device checks the tokens it's given.
+    /// Sign-in at the network's address, as this device checks the tokens it's given.
     pub fn issuer(&self) -> Result<Arc<crate::cloudflare::Issuer>> {
         let address = self.address()?;
         let iss = crate::cloudflare::Issuer::new(&address).iss;
@@ -154,7 +154,7 @@ impl Node {
         })
     }
 
-    /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the install's sign-in
+    /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the network's sign-in
     /// service signed for them, not yet expired.
     pub(super) async fn token_of(&self, token: &str, user: &str) -> Option<String> {
         let issuer = self.issuer().ok()?;
@@ -163,7 +163,7 @@ impl Node {
         (claims.sub == user).then(|| token.to_string())
     }
 
-    /// Whose client device `key` is, and its name: none if it isn't a device of the install, or was removed.
+    /// Whose client device `key` is, and its name: none if it isn't a device of the network, or was removed.
     pub fn client(&self, key: &Key) -> Option<(String, String)> {
         self.with(|i| Ok(i.r.db().client(key).map(|m| (m.user.clone(), m.name.clone())))).ok().flatten()
     }
@@ -242,7 +242,7 @@ impl Node {
         Ok(())
     }
 
-    /// When an access token expires, if the install's sign-in signed it: milliseconds.
+    /// When an access token expires, if the network's sign-in signed it: milliseconds.
     fn token_expiry(&self, token: &str) -> Option<u64> {
         let claims = self.issuer().ok()?.verify(token, now_ms()).ok()?;
         Some(claims.exp.saturating_mul(1000))
@@ -529,7 +529,7 @@ impl Node {
         }
     }
 
-    /// Forgets the keys handed by client devices the install no longer lists.
+    /// Forgets the keys handed by client devices the network no longer lists.
     pub(super) fn forget_removed_clients(&self) {
         let clients: Vec<Key> = self.0.sessions.kept.lock().unwrap().values().filter_map(|s| s.client).collect();
         let gone: Vec<Key> = clients.into_iter().filter(|k| self.client(k).is_none()).collect();

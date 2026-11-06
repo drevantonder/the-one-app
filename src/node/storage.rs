@@ -1,4 +1,4 @@
-//! Where the install keeps its data: its bucket. It starts as a folder on the device that made the install, which no
+//! Where the network keeps its data: its bucket. It starts as a folder on the device that made the network, which no
 //! other machine reaches; an admin moves it to S3-compatible storage, whose credentials only the URL signer
 //! holds, with the `storage` setting (an entry only an admin's device writes) that says only where it is, and each
 //! device follows: it reaches it through the URL signer, copies there what it reaches of the old one, and keeps its
@@ -7,10 +7,10 @@
 use crate::config::YOURS;
 use super::*;
 
-/// The setting that says where the install keeps its data: S3's `endpoint`, `bucket` and `region`, as JSON.
+/// The setting that says where the network keeps its data: S3's `endpoint`, `bucket` and `region`, as JSON.
 pub const STORAGE: &str = "storage";
 
-/// The install's bucket as its `storage` setting says, if it has one: S3's address alone, never a folder's path.
+/// The network's bucket as its `storage` setting says, if it has one: S3's address alone, never a folder's path.
 fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {
     let Some(value) = m.setting(STORAGE) else { return Ok(None) };
     let fields: BTreeMap<String, String> = serde_json::from_str(&value).context("the storage setting isn't an S3 address")?;
@@ -20,7 +20,7 @@ fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {
 }
 
 impl Node {
-    /// Where this device keeps the install's data, as a person sees it.
+    /// Where this device keeps the network's data, as a person sees it.
     pub fn storage(&self) -> Result<Value> {
         self.with(|i| {
             Ok(match &i.bucket {
@@ -31,51 +31,51 @@ impl Node {
         })
     }
 
-    /// The install's bucket from the fields this device keeps of it: a folder here, or S3 through the URL signer at the
-    /// install's address, signing with this device's key.
-    /// A device that joined keeps the address it joined at with them (`address`), until it has read the install's.
-    pub(super) fn install_place(&self, fields: &BTreeMap<String, String>) -> Result<Place> {
+    /// The network's bucket from the fields this device keeps of it: a folder here, or S3 through the URL signer at the
+    /// network's address, signing with this device's key.
+    /// A device that joined keeps the address it joined at with them (`address`), until it has read the network's.
+    pub(super) fn network_place(&self, fields: &BTreeMap<String, String>) -> Result<Place> {
         let node = Arc::downgrade(&self.0);
         let joined = fields.get("address").cloned();
         let address: crate::bucket::Address = Arc::new(move || {
             let node = Node(node.upgrade().context("this device stopped")?);
             node.with(|i| Ok(i.r.db().setting("address")))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets one with cloudflare use"))
         });
-        Place::install(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
+        Place::network(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
     }
 
-    /// Moves the install's data, for an admin, to S3-compatible storage (`endpoint`, `bucket`, `region`), whose key the
-    /// URL signer holds: reaches it through the signer first, and makes it the install's `storage` setting if
+    /// Moves the network's data, for an admin, to S3-compatible storage (`endpoint`, `bucket`, `region`), whose key the
+    /// URL signer holds: reaches it through the signer first, and makes it the network's `storage` setting if
     /// it can.
     pub async fn set_storage(&self, caller: &Caller, body: &Value) -> Result<Value> {
         self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "change-settings", scopes::INSTALL), "only admins move the install's data");
+            ensure!(i.r.db().may(&caller.user, "change-settings", scopes::NETWORK), "only admins move the network's data");
             Ok(())
         })?;
         let fields: BTreeMap<String, String> = ["endpoint", "bucket", "region"]
             .into_iter()
             .filter_map(|k| Some((k.to_string(), body[k].as_str().map(str::trim).filter(|v| !v.is_empty())?.to_string())))
             .collect();
-        let place = self.install_place(&fields)?;
-        let Place::S3(_) = &place else { bail!("the install's data moves to S3-compatible storage, given its endpoint") };
-        place.can_hold_an_install()?;
+        let place = self.network_place(&fields)?;
+        let Place::S3(_) = &place else { bail!("the network's data moves to S3-compatible storage, given its endpoint") };
+        place.can_hold_a_network()?;
         let reached = {
             let place = place.clone();
-            tokio::task::spawn_blocking(move || place.get(INSTALL_OBJECT)).await?
+            tokio::task::spawn_blocking(move || place.get(NETWORK_OBJECT)).await?
         };
         let steps = vec![json!({ "step": "Reached it through the URL signer", "error": reached.as_ref().err().map(|e| format!("{e:#}")) })];
         if reached.is_err() {
             return Ok(json!({ "tried": steps }));
         }
         let setting = serde_json::to_string(&fields)?;
-        // A device of an install made before its data was in a bucket keeps it there now, with its entries, which
+        // A device of a network made before its data was in a bucket keeps it there now, with its entries, which
         // takes a while: it runs no calls until it's done.
         if self.bucket().is_err() {
             let (node, caller) = (self.clone(), caller.clone());
             tokio::spawn(async move {
                 let adopted = node.adopt(fields).await;
                 if let Err(err) = adopted.and(node.set_setting(&caller, STORAGE, Some(&setting)).await) {
-                    tracing::warn!("moving the install's data: {err:#}");
+                    tracing::warn!("moving the network's data: {err:#}");
                 }
             });
             return Ok(json!({ "tried": steps, "moving": true }));
@@ -84,7 +84,7 @@ impl Node {
         Ok(json!({ "tried": steps, "kept": true }))
     }
 
-    /// Follows the install's `storage` setting, when this device keeps its data anywhere else: in the background.
+    /// Follows the network's `storage` setting, when this device keeps its data anywhere else: in the background.
     pub(super) fn follow_storage(&self) {
         let wanted = self.with(|i| Ok(storage_setting(i.r.db())?.filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now.iter().filter(|(k, _)| k.as_str() != "address").ne(f.iter())))));
         let fields = match wanted {
@@ -98,23 +98,23 @@ impl Node {
         let node = self.clone();
         tokio::spawn(async move {
             if let Err(err) = node.move_to(fields).await {
-                tracing::warn!("moving the install's data: {err:#}");
+                tracing::warn!("moving the network's data: {err:#}");
             }
             *node.0.moving.lock().unwrap() = false;
         });
     }
 
     /// Moves this device to the bucket `fields` says, once it reaches it: copies there each object of the bucket it had
-    /// that the new one lacks, then keeps the install's data there.
+    /// that the new one lacks, then keeps the network's data there.
     async fn move_to(&self, fields: BTreeMap<String, String>) -> Result<()> {
-        let to = self.install_place(&fields)?;
+        let to = self.network_place(&fields)?;
         let from = self.bucket().ok().map(|b| b.place);
-        let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no install"))?;
+        let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no network"))?;
         let (place, theirs) = (to.clone(), root.clone());
         tokio::task::spawn_blocking(move || -> Result<()> {
-            place.can_hold_an_install()?;
-            if let Some(other) = place.get(INSTALL_OBJECT)?.filter(|r| r != theirs.as_bytes()) {
-                bail!("that bucket holds another install's data ({})", String::from_utf8_lossy(&other));
+            place.can_hold_a_network()?;
+            if let Some(other) = place.get(NETWORK_OBJECT)?.filter(|r| r != theirs.as_bytes()) {
+                bail!("that bucket holds another network's data ({})", String::from_utf8_lossy(&other));
             }
             Ok(())
         })
@@ -132,14 +132,14 @@ impl Node {
                     }
                 }
             }
-            place.create(INSTALL_OBJECT, theirs.as_bytes())?;
+            place.create(NETWORK_OBJECT, theirs.as_bytes())?;
             Ok(())
         })
         .await??;
-        let dir = self.install_dir();
-        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let dir = self.network_dir();
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
         file.bucket = Some(fields.clone());
-        self.save_install(&file)?;
+        self.save_network(&file)?;
         self.with(|i| {
             i.bucket = Some((to.clone(), fields));
             Ok(())
@@ -148,22 +148,22 @@ impl Node {
         drop(moved);
         // What it read of the old bucket stays true, but is read again from the new one.
         self.close_dbs(|_, _| true);
-        tracing::info!("the install's data is kept in {} now", self.storage()?["where"].as_str().unwrap_or(""));
+        tracing::info!("the network's data is kept in {} now", self.storage()?["where"].as_str().unwrap_or(""));
         self.emit(Event::Changed { apps: Vec::new() });
         Ok(())
     }
 
-    /// Takes the bucket `fields` say as this device's own, for an install whose devices had none: puts every entry
+    /// Takes the bucket `fields` say as this device's own, for a network whose devices had none: puts every entry
     /// it holds there (another device may have put some already), so every device reads them from then on.
     async fn adopt(&self, fields: BTreeMap<String, String>) -> Result<()> {
-        let place = self.install_place(&fields)?;
-        let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no install"))?;
+        let place = self.network_place(&fields)?;
+        let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no network"))?;
         let (p, theirs) = (place.clone(), root.clone());
         tokio::task::spawn_blocking(move || -> Result<()> {
-            if let Some(other) = p.get(INSTALL_OBJECT)?.filter(|r| r != theirs.as_bytes()) {
-                bail!("that bucket holds another install's data ({})", String::from_utf8_lossy(&other));
+            if let Some(other) = p.get(NETWORK_OBJECT)?.filter(|r| r != theirs.as_bytes()) {
+                bail!("that bucket holds another network's data ({})", String::from_utf8_lossy(&other));
             }
-            p.create(INSTALL_OBJECT, theirs.as_bytes())?;
+            p.create(NETWORK_OBJECT, theirs.as_bytes())?;
             Ok(())
         })
         .await??;
@@ -195,10 +195,10 @@ impl Node {
         }
         // Kept as this device's bucket only once its entries are there: stopped before, it starts with none again, and
         // moving again puts what's missing.
-        let dir = self.install_dir();
-        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let dir = self.network_dir();
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
         file.bucket = Some(fields);
-        self.save_install(&file)?;
+        self.save_network(&file)?;
         self.with(|i| {
             i.read = true;
             Ok(())

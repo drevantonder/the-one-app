@@ -26,7 +26,7 @@ n0-future = "0.3"
 httparse = "1"
 data-encoding = "2"
 tokio = { version = "1", default-features = false, features = ["sync"] }
-# A client checks the install's signed entries itself with the nodes' own Rust (src/members.rs): who's who as they say
+# A client checks the network's signed entries itself with the nodes' own Rust (src/members.rs): who's who as they say
 # it, never as a node does, asked of the scope database they build (`one`'s `db`, SQLite) and its permissions; and a
 # new device's sign-in, before letting it in (`sign-in-proof`).
 one = { path = "..", default-features = false, features = ["db", "sign-in-proof"] }
@@ -39,7 +39,7 @@ n0-watcher = { version = "1", optional = true }
 noq-udp = { version = "1.4", optional = true }
 
 # Natively, the app is a device of its person (src/device.rs), with the node's own formats and rules (entries, members,
-# logs, keys); ureq, which that crate's node uses too, to ask sign-in, the relay and the URL signer at the install's
+# logs, keys); ureq, which that crate's node uses too, to ask sign-in, the relay and the URL signer at the network's
 # address.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ed25519-dalek = "3"

@@ -18,7 +18,7 @@ const BURST = 500;
 const title = (r) => (r.what === "call" ? `${r.app}.${r.op}` : r.what === "page" ? "Page code" : r.path || "");
 const mine = (r) => (p.app ? r.app === p.app : true) && r.at >= (p.since || 0) - 1000;
 
-// The device names the traces know, by key: the nodes say theirs, and the install's others.
+// The device names the traces know, by key: the nodes say theirs, and the network's others.
 function names(rs) {
   const out = {};
   const add = (t) => {

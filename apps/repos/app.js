@@ -5,7 +5,7 @@
 // As on GitHub, a repo is <owner>/<name>, its owner a person or a group, by their handle (ctx.handles), so a handle's
 // change moves its repos' addresses. Everyone reads and forks every repo. Its owner pushes, and its collaborators: a
 // person's repo is theirs, and they add and remove collaborators; a group's is its admins', its members are its
-// collaborators, and its admins add others. Who's which is the install's permissions (`types`, and the rows of
+// collaborators, and its admins add others. Who's which is the network's permissions (`types`, and the rows of
 // `relations`, which ctx.global.may reads). Owners delete a repo, as apps are: it waits in Recently Deleted, read by no
 // one, until they restore it or erase it, and its packs, for good. Rows name a repo by its id (an older repo's is the
 // name it had before owners had handles) and its owner by user:<id> or group:<id>, never by handle.
@@ -154,7 +154,7 @@ async function rights(g, r) {
   return { yours, push };
 }
 
-/// Where git reaches a repo, the same on every computer: <the install's address>/repos/<owner>/<name>.git; null on a
+/// Where git reaches a repo, the same on every computer: <the network's address>/repos/<owner>/<name>.git; null on a
 /// node from before it was given the address.
 const address = (ctx, path) => (ctx.address ? `${ctx.address}/repos/${path}.git` : null);
 
@@ -172,7 +172,7 @@ const forksOf = async (ctx, g, r) => (await g.query(`select owner, name from rep
 /// A person's or group's handle and name, for what a tool gives.
 const who = (ctx, id) => ({ handle: byId(ctx, id)?.handle ?? null, name: ownerName(ctx, id) });
 
-/// The install's own repos, as repos_list gives them.
+/// The network's own repos, as repos_list gives them.
 async function ownList(ctx) {
   const g = global(ctx);
   const repos = await g.query(
@@ -216,7 +216,7 @@ const app = {
       // Each pack's name (its checksum) and index file, which git fetches beside it.
       `create table indexes (pack text primary key, name text not null, idx text not null, size integer not null);`,
       // Repos as <owner>/<name>: each its own id (an older one's, its name), so two owners may each have one of a name.
-      // One the install's admins owned is now its maker's.
+      // One the network's admins owned is now its maker's.
       `create table repos_owned (id text primary key, owner text not null, name text not null, "from" text, created integer not null,
                                  user text not null, deleted integer, deleted_by text, unique (owner, name));
       insert into repos_owned select name, case when owner = 'admins' then 'user:' || user else owner end, name, "from", created, user, deleted, deleted_by from repos;
@@ -239,7 +239,7 @@ const app = {
       insert into labels select r.id, d.column1, d.column2, d.column3 from repos r, (values ${issues.LABELS.map((l) => `(${l.map(sql).join(", ")})`).join(", ")}) d;`,
       // GitHub organizations connected for groups (github.js), and what a connection started waits with.
       github.SCHEMA,
-      // Who holds a role on a repo, as the install's permissions' rows (subject, relation, object, until), and who gave
+      // Who holds a role on a repo, as the network's permissions' rows (subject, relation, object, until), and who gave
       // it when: its owner (a person, or a group's admins), a group's members as its collaborators, and the
       // collaborators its owners added.
       `create table relations (subject text not null, relation text not null, object text not null, until integer, by text, time integer,
@@ -264,7 +264,7 @@ const app = {
     list: {
       reads: true,
       description: "Every repo, the latest moved first: its <owner>/<name>, its owner's handle and name, where it was forked from, its default branch (main, or else its first), how many branches it has, when it last moved, how many open issues it has, and whether you push to it. Deleted ones say when, and wait in Recently Deleted for repos_restore. Then GitHub's that you see, as github.com/<owner>/<name>, with github: { url, private, fork }; source github lists only those, and says what GitHub refused.",
-      input: { type: "object", properties: { source: { type: "string", enum: ["one", "github"], description: "one: only this install's own repos; github: only GitHub's; omit for both" } } },
+      input: { type: "object", properties: { source: { type: "string", enum: ["one", "github"], description: "one: only this network's own repos; github: only GitHub's; omit for both" } } },
       async run(ctx, { source } = {}) {
         if (source === "github") return github.list(ctx);
         const own = await ownList(ctx);
@@ -348,7 +348,7 @@ const app = {
         const added = (await g.query("select subject, by, time from relations where object = ? and relation = 'collaborator' and subject like 'person:%' order by time", [object(r)]))
           .map((c) => ({ ...who(ctx, `user:${c.subject.slice(7)}`), by: ownerName(ctx, `user:${c.by}`), time: c.time }));
         const yours = await g.may("manage", object(r));
-        // Whom its owners could add: everyone else in the install.
+        // Whom its owners could add: everyone else in the network.
         const taken = new Set([r.owner.slice(5), ...Object.keys(group?.members || {}), ...added.map((c) => byHandle(ctx, c.handle)?.id.slice(5))]);
         const people = yours ? handles(ctx).filter((h) => h.id.startsWith("user:") && !h.removed && !taken.has(h.id.slice(5))).map((h) => ({ handle: h.handle, name: h.name })) : [];
         return iso({ repo: r.path, owner: who(ctx, r.owner), group: !!group, members, collaborators: added, yours, people });
@@ -490,7 +490,7 @@ const app = {
     labels: { title: "Labels", html: labelsScreen },
     repo_settings: { title: "Settings", html: repoSettingsScreen },
     settings: { title: "Settings", html: settingsScreen },
-    // Where GitHub sends an admin back once the install's GitHub App is made: Settings, finishing that.
+    // Where GitHub sends an admin back once the network's GitHub App is made: Settings, finishing that.
     github_app: { title: "Settings", html: settingsScreen },
   },
 
@@ -546,7 +546,7 @@ const app = {
 
 export default app;
 
-// A GitHub repo's tools ask GitHub (github.js); what only the install's own repos do says where to do it.
+// A GitHub repo's tools ask GitHub (github.js); what only the network's own repos do says where to do it.
 for (const [name, tool] of Object.entries(app.tools)) {
   const own = tool.run;
   if (github.run[name]) tool.run = (ctx, input = {}) => (github.isGithub(input.repo) ? github.run[name](ctx, input) : own(ctx, input));

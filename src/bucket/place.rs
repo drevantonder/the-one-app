@@ -43,7 +43,7 @@ pub struct S3 {
 }
 
 /// How an S3 request is signed: here, with the bucket's keys (a backup place's), or by the URL signer, which alone
-/// holds the install's bucket's.
+/// holds the network's bucket's.
 #[derive(Clone)]
 pub enum Auth {
     Keys { key_id: String, secret: String },
@@ -68,7 +68,7 @@ impl std::fmt::Debug for S3 {
     }
 }
 
-/// S3-compatible services that can't write only-if-absent, which an install's own bucket needs, by their hosts.
+/// S3-compatible services that can't write only-if-absent, which a network's own bucket needs, by their hosts.
 const UNCONDITIONAL: &[(&str, &str)] = &[("backblazeb2.com", "Backblaze B2"), ("your-objectstorage.com", "Hetzner"), ("digitaloceanspaces.com", "DigitalOcean Spaces")];
 
 impl Place {
@@ -88,16 +88,16 @@ impl Place {
         }))
     }
 
-    /// The install's bucket, from the fields a device keeps of it: a folder's `path`, or S3's address (`endpoint`,
-    /// `bucket`, `region`), reached through the URL signer at the install's address, signing with `key`. A device
+    /// The network's bucket, from the fields a device keeps of it: a folder's `path`, or S3's address (`endpoint`,
+    /// `bucket`, `region`), reached through the URL signer at the network's address, signing with `key`. A device
     /// never keeps the bucket's credentials.
-    pub fn install(fields: &BTreeMap<String, String>, address: super::signed::Address, key: ed25519_dalek::SigningKey) -> Result<Place> {
+    pub fn network(fields: &BTreeMap<String, String>, address: super::signed::Address, key: ed25519_dalek::SigningKey) -> Result<Place> {
         ensure!(!fields.contains_key("key_id") && !fields.contains_key("secret"), "a device keeps only the bucket's address: the URL signer holds its key");
         let get = |k: &str| fields.get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         if let Some(path) = get("path") {
             return Ok(Place::Folder(path.into()));
         }
-        let endpoint = get("endpoint").context("the install's bucket is a folder's path, or S3's endpoint")?.trim_end_matches('/').to_string();
+        let endpoint = get("endpoint").context("the network's bucket is a folder's path, or S3's endpoint")?.trim_end_matches('/').to_string();
         ensure!(endpoint.starts_with("https://") || endpoint.starts_with("http://"), "an endpoint is a URL, like https://s3.example.com");
         let bucket = get("bucket").context("which bucket?")?;
         let signer = super::Signer::new(address, key, format!("{endpoint}/{bucket}"));
@@ -116,11 +116,11 @@ impl Place {
         objects.iter().map(|(name, tag)| Ok((name.to_string(), self.get_object(name)?.is_some_and(|o| bare(&o.tag) == bare(tag))))).collect()
     }
 
-    /// Refuses a place that can't be an install's own bucket: S3-compatible storage known to write unconditionally.
-    pub fn can_hold_an_install(&self) -> Result<()> {
+    /// Refuses a place that can't be a network's own bucket: S3-compatible storage known to write unconditionally.
+    pub fn can_hold_a_network(&self) -> Result<()> {
         if let Place::S3(s3) = self {
             if let Some((_, name)) = UNCONDITIONAL.iter().find(|(host, _)| s3.host().ends_with(host)) {
-                bail!("{name} can't write a file only if it isn't there yet, which an install's bucket needs: use Cloudflare R2, AWS S3, Google Cloud Storage or MinIO");
+                bail!("{name} can't write a file only if it isn't there yet, which a network's bucket needs: use Cloudflare R2, AWS S3, Google Cloud Storage or MinIO");
             }
         }
         Ok(())
@@ -283,13 +283,13 @@ impl Place {
         }
     }
 
-    /// Writes a test file, reads it back and deletes it: each step, and what went wrong if it did. For an install's
+    /// Writes a test file, reads it back and deletes it: each step, and what went wrong if it did. For a network's
     /// own bucket, `conditional` also checks that it refuses to write over a file, and to replace a changed one.
     pub fn try_it(&self, conditional: bool) -> Vec<(&'static str, Option<String>)> {
         let name = format!("test-{}", hex(&rand::random::<[u8; 32]>()));
         let bytes = format!("{} tried this place", crate::config::NAME).into_bytes();
         let wrote = match conditional {
-            true => self.can_hold_an_install().and_then(|()| self.create(&name, &bytes)).and_then(|new| if new { Ok(()) } else { bail!("a file had its name") }),
+            true => self.can_hold_a_network().and_then(|()| self.create(&name, &bytes)).and_then(|new| if new { Ok(()) } else { bail!("a file had its name") }),
             false => self.put(&name, &bytes),
         };
         let not_written = || anyhow!("Skipped, since writing failed.");
@@ -301,7 +301,7 @@ impl Place {
         let mut steps = vec![("Wrote a test file", wrote.as_ref().err().map(|e| format!("{e:#}"))), ("Read it back", read.as_ref().err().map(|e| format!("{e:#}")))];
         if conditional {
             let refused = read.as_ref().map_err(|_| not_written()).and_then(|o| {
-                ensure!(!self.create(&name, b"again")?, "it wrote over the file: it can't write only if a file isn't there, which an install's bucket needs");
+                ensure!(!self.create(&name, b"again")?, "it wrote over the file: it can't write only if a file isn't there, which a network's bucket needs");
                 ensure!(!self.replace(&name, b"again", Some("\"stale\""))?, "it replaced a file that had changed: it can't write only if a file is unchanged");
                 ensure!(self.replace(&name, b"again", Some(&o.tag))?, "it wouldn't replace an unchanged file");
                 Ok(())

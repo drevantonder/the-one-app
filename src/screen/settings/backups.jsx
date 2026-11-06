@@ -33,15 +33,15 @@ function size(bytes) {
 const placeApp = (kind) => ({ name: kind, icon: kind === "folder" ? "hard-drive" : "cloud", color: "#8e8e93" })
 
 // Whose data a snapshot holds, by name: Everyone, a person, a group.
-const whose = (install, scope) => scope === "global" ? "Everyone"
-  : scope.startsWith("user:") ? (install.users || []).find((u) => `user:${u.id}` === scope)?.name || "Someone"
-  : scope.startsWith("group:") ? (install.groups || []).find((g) => `group:${g.id}` === scope)?.name || "A group"
+const whose = (network, scope) => scope === "global" ? "Everyone"
+  : scope.startsWith("user:") ? (network.users || []).find((u) => `user:${u.id}` === scope)?.name || "Someone"
+  : scope.startsWith("group:") ? (network.groups || []).find((g) => `group:${g.id}` === scope)?.name || "A group"
   : scope
 
 function Backups() {
   const [backups, setBackups] = useState(null)
   const [admin, setAdmin] = useState(false)
-  const [install, setInstall] = useState({})
+  const [network, setNetwork] = useState({})
   const [problem, setProblem] = useState(null)
   const [error, setError] = useState("")
   // Backing up, from the tap until the places say how it went.
@@ -56,7 +56,7 @@ function Backups() {
       const [got, state] = await Promise.all([api("GET", "/v1/backups"), api("GET", "/v1/state")])
       setBackups(got)
       setAdmin(state.user?.role === "admin")
-      setInstall(state.install || {})
+      setNetwork(state.install || {})
       setProblem(null)
     } catch (e) {
       setProblem(one.plain(e))
@@ -170,7 +170,7 @@ function Backups() {
           </div>
         }
         detail={place ? <Place key={place.id} place={place} admin={admin} stopped={() => (setOpen(null), load())} />
-          : snapshot && <Snapshot snapshot={snapshot} install={install} />}
+          : snapshot && <Snapshot snapshot={snapshot} network={network} />}
       />
       {adding && <AddPlace backups={backups} open={adding} setOpen={setAdding} done={load} />}
     </>
@@ -245,12 +245,12 @@ function Place({ place: p, admin, stopped }) {
 }
 
 // A snapshot: when, where it went, whose data it holds, and which devices wrote it.
-function Snapshot({ snapshot: s, install }) {
+function Snapshot({ snapshot: s, network }) {
   const taken = new Date(s.time).toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" })
   return (
     <div className="flex flex-col gap-6">
       <h2 className="pr-8 text-xl font-semibold">{when(s.time, true)}</h2>
-      <Info rows={[["Taken", taken], ["Kept in", list(s.places)], ["Holds", list(s.scopes.map((x) => whose(install, x)))], ["Written by", list(s.devices.map(name))]]} />
+      <Info rows={[["Taken", taken], ["Kept in", list(s.places)], ["Holds", list(s.scopes.map((x) => whose(network, x)))], ["Written by", list(s.devices.map(name))]]} />
     </div>
   )
 }

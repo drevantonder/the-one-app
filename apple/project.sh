@@ -2,7 +2,7 @@
 # and images, and generates Shells.xcodeproj.
 root=$(cd .. && pwd)
 config=$(cd "$(dirname "${CONFIG:-$root/config.toml}")" && pwd)/$(basename "${CONFIG:-config.toml}")
-# A top-level field: the [settings] after them are the install's, not the build's.
+# A top-level field: the [settings] after them are the network's, not the build's.
 field() { sed -n "/^\[/q; s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
 art() { echo "$(dirname "$config")/$(field "$1")"; }
 # The commit the shells are built from, which Settings shows at its foot.
@@ -10,9 +10,9 @@ export BUILD_COMMIT=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || ec
 # The build number, the commits up to it, so devicectl tells which commit an iPhone has.
 export BUILD_NUMBER=$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)
 export CONFIG_NAME=$(field name) CONFIG_CLI=$(field cli) CONFIG_PORT=$(field port)
-# What a person calls the install where they read: a workplace's custom build, which its people join with their work
-# email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".
-if [ -n "$(field join_domain)" ]; then CONFIG_YOURS=${CONFIG_NAME/#The /the }; else CONFIG_YOURS="your ${CONFIG_NAME#The }"; fi
+# What a person calls the network where they read: a workplace's custom build, which its people join with their work
+# email (join_domain), is shared, "the PTC App network"; anyone else's is "your One App network".
+if [ -n "$(field join_domain)" ]; then CONFIG_YOURS="${CONFIG_NAME/#The /the } network"; else CONFIG_YOURS="your ${CONFIG_NAME#The } network"; fi
 export CONFIG_YOURS
 # The iPhone app signs with the team of this Mac's Apple Development certificate, unless APPLE_TEAM names one.
 export APPLE_TEAM=${APPLE_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p')}
@@ -94,7 +94,7 @@ xcodebuild -create-xcframework "${libraries[@]}" -output "$client/Client.xcframe
 # Push needs the Push Notifications capability on each app's App ID, and App IDs for their notification extensions,
 # which only the team's account holder sets up (developer.apple.com); signing fails without them. So builds leave push
 # out until the config says `push = true`, or PUSH=1: then they have push.yml's too, and each app registers this device
-# with the install's push Worker, and its extension opens what's pushed to it.
+# with the network's push Worker, and its extension opens what's pushed to it.
 if [ "${PUSH:-}" = 1 ] || [ "$(field push)" = true ]; then export PUSH=YES; else export PUSH=; fi
 
 xcodegen generate --quiet

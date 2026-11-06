@@ -186,7 +186,7 @@ function model(x, again) {
   }
 
   /// Their own devices that can run something, and Cloudflare, each with what it can run: Cloudflare always runs
-  /// apps, and runs the services built for it that an admin switches on, for the apps in the install.
+  /// apps, and runs the services built for it that an admin switches on, for the apps in the network.
   function gridColumns() {
     const cols = drawn.cards.filter((c) => c.user === me && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, parts: partsOf(c) }))
     const s = state.install?.serverless
@@ -321,7 +321,7 @@ function Devices() {
   const m = data && model(data, (part, on, retried) => () => act(() => setPart(part, on, retried)))
 
   /// Puts a device (or Cloudflare) in a column (its index, "new" or "last"), and numbers the columns again from 1, so
-  /// one emptied closes up: written into the install's `priority` setting, each of a device's endpoints alike.
+  /// one emptied closes up: written into the network's `priority` setting, each of a device's endpoints alike.
   function place(id, to) {
     const { cols, last } = m.board()
     const e = [...cols.flat(), ...last].find((x) => x.id === id)
@@ -332,28 +332,28 @@ function Devices() {
     else if (to === "new") order.push([e])
     else order[Number(to)]?.push(e)
     order = order.filter((c) => c.length)
-    const { install } = data.state
+    const network = data.state.install
     let set = {}
     try {
-      set = JSON.parse(install.settings?.priority || "{}") || {}
+      set = JSON.parse(network.settings?.priority || "{}") || {}
     } catch {}
-    // Only what's still a device of the install, or Cloudflare.
-    const known = new Set([...(install.devices || []).map((d) => d.key), "cloudflare"])
+    // Only what's still a device of the network, or Cloudflare.
+    const known = new Set([...(network.devices || []).map((d) => d.key), "cloudflare"])
     set = Object.fromEntries(Object.entries(set).filter(([k]) => known.has(k)))
     order.forEach((c, i) => c.forEach((x) => x.keys.forEach((k) => (set[k] = i + 1))))
     end.forEach((x) => x.keys.forEach((k) => (set[k] = "last")))
     const value = JSON.stringify(set)
-    if (value === install.settings?.priority) return
+    if (value === network.settings?.priority) return
     // Shown at once, as it will be.
     setData({
       ...data,
       state: {
         ...data.state,
         install: {
-          ...install,
-          devices: (install.devices || []).map((d) => (d.key in set ? { ...d, priority: set[d.key] } : d)),
-          serverless: install.serverless && "cloudflare" in set ? { ...install.serverless, priority: set.cloudflare } : install.serverless,
-          settings: { ...install.settings, priority: value },
+          ...network,
+          devices: (network.devices || []).map((d) => (d.key in set ? { ...d, priority: set[d.key] } : d)),
+          serverless: network.serverless && "cloudflare" in set ? { ...network.serverless, priority: set.cloudflare } : network.serverless,
+          settings: { ...network.settings, priority: value },
         },
       },
     })

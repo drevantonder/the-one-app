@@ -1,14 +1,14 @@
 //! Backups: each scope's signed entries and the blobs they name, encrypted with the key of the scope's newest epoch and
 //! sent to a place that can't read them: a folder on one device's disk, or S3-compatible storage; a restore is an
-//! import. Each epoch's key is sealed to the install's recovery key (`keys::epoch_name`'s `recovery`), and the place
+//! import. Each epoch's key is sealed to the network's recovery key (`keys::epoch_name`'s `recovery`), and the place
 //! keeps that copy, so a backup and that key are all a recovery needs.
 //!
-//! A place holds a folder for each install, named by its genesis, so installs can share a bucket:
+//! A place holds a folder for each network, named by its genesis, so networks can share a bucket:
 //!
 //! ```text
-//! <install>/keys/<scope>/<key id>              an epoch's key, sealed to the recovery key
-//! <install>/objects/<name>                     a pack of entries, or a blob, encrypted
-//! <install>/snapshots/<scope>/<time>-<device>  what the scope's backup held then
+//! <network>/keys/<scope>/<key id>              an epoch's key, sealed to the recovery key
+//! <network>/objects/<name>                     a pack of entries, or a blob, encrypted
+//! <network>/snapshots/<scope>/<time>-<device>  what the scope's backup held then
 //! ```
 //!
 //! A scope's folder names write `user:<id>` as `user-<id>`, which every disk takes.
@@ -121,8 +121,8 @@ fn open_snapshot(keys: &[[u8; 32]], bytes: &[u8]) -> Result<Option<(Snapshot, [u
 /// One scope's backup to one place, as a device does it.
 pub struct Job<'a> {
     pub place: &'a Place,
-    /// The install's folder in the place.
-    pub install: &'a str,
+    /// The network's folder in the place.
+    pub network: &'a str,
     pub scope: &'a str,
     /// The key of the scope's newest epoch, and that key sealed to the recovery key, as the bucket keeps it.
     pub key: [u8; 32],
@@ -137,9 +137,9 @@ pub struct Job<'a> {
     pub entries: Vec<Entry>,
     /// The blobs the scope's entries name, which the backup keeps.
     pub blobs: BTreeSet<String>,
-    /// The install's bucket, whose scope's folder the place keeps a copy of.
+    /// The network's bucket, whose scope's folder the place keeps a copy of.
     pub bucket: Option<&'a Place>,
-    /// Whether the device knows the install's log is frozen, so phase 2 checks the copies it chooses
+    /// Whether the device knows the network's log is frozen, so phase 2 checks the copies it chooses
     /// (`db::sealed_copy_holds`).
     pub frozen: bool,
 }
@@ -147,10 +147,10 @@ pub struct Job<'a> {
 /// Sends a scope what its backup lacks: its key, sealed, the first time; a pack of its new entries, its new blobs,
 /// and a snapshot. Returns the snapshot, or None when nothing new would be in it. `blob` reads a blob here.
 pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Option<Snapshot>> {
-    let Job { place, install, scope, key, epochs, sealed, device, now, previous, entries, blobs, bucket, frozen } = job;
+    let Job { place, network, scope, key, epochs, sealed, device, now, previous, entries, blobs, bucket, frozen } = job;
     let mut snap = previous.clone().unwrap_or_else(|| Snapshot { scope: scope.to_string(), ..Default::default() });
     if let Some(bucket) = bucket {
-        copy_bucket(bucket, place, install, scope, &epochs, frozen, &mut snap)?;
+        copy_bucket(bucket, place, network, scope, &epochs, frozen, &mut snap)?;
     }
     let new: Vec<&Entry> = entries.iter().filter(|e| e.seq() >= snap.frontier.get(&hex(&e.author())).copied().unwrap_or(0)).collect();
     // Blobs the scope no longer keeps (a release that's been superseded, a blob its scope forgot) leave the snapshot,
@@ -160,7 +160,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
     if previous.as_ref().is_some_and(|p| p.blobs.len() == snap.blobs.len() && p.databases == snap.databases) && new.is_empty() && new_blobs.is_empty() {
         return Ok(None);
     }
-    let keys = format!("{install}/keys/{}/{}", folder(scope), key_id(&key));
+    let keys = format!("{network}/keys/{}/{}", folder(scope), key_id(&key));
     if previous.is_none() && place.get(&keys)?.is_none() {
         place.put(&keys, &sealed)?;
     }
@@ -168,7 +168,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
         let bytes = pack(&new);
         let name = name_of(&key, &bytes);
         let locked = lock_object(&key, &name, &bytes);
-        place.put(&format!("{install}/objects/{name}"), &locked)?;
+        place.put(&format!("{network}/objects/{name}"), &locked)?;
         snap.bytes += locked.len() as u64;
         snap.packs.push(name);
         snap.entries += new.len() as u64;
@@ -183,7 +183,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
         let Some(bytes) = blob(hash) else { continue };
         let name = name_of(&key, &bytes);
         let locked = lock_object(&key, &name, &bytes);
-        place.put(&format!("{install}/objects/{name}"), &locked)?;
+        place.put(&format!("{network}/objects/{name}"), &locked)?;
         snap.bytes += locked.len() as u64;
         snap.blobs.insert(hash.clone(), name);
     }
@@ -191,24 +191,24 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
         return Ok(None);
     }
     snap.time = now;
-    place.put(&format!("{install}/snapshots/{}/{}", folder(scope), snapshot_name(now, &device)), &lock_snapshot(&key, &snap))?;
+    place.put(&format!("{network}/snapshots/{}/{}", folder(scope), snapshot_name(now, &device)), &lock_snapshot(&key, &snap))?;
     Ok(Some(snap))
 }
 
-/// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
+/// Copies what a scope's folder in the network's bucket has that the place lacks, into `<network>/bucket/`, laid out
 /// as the bucket is: each epoch's key and Vault key sealed to the recovery key, each app's key in each epoch (sealed under it), and
 /// each database's new steps, the signatures beside them (and those of the last few steps it copied before, which may
 /// have come just after their steps), and newest copy that holds (sealed as they are), past what `snap` says it has.
-fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, epochs: &crate::db::Keys, frozen: bool, snap: &mut Snapshot) -> Result<()> {
+fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs: &crate::db::Keys, frozen: bool, snap: &mut Snapshot) -> Result<()> {
     /// How many of the last steps a run copied the next looks for signatures of again.
     const SIGNED_LATE: u64 = 4;
     let folder = folder(scope);
     let mut copy = |name: &str, known: bool| -> Result<bool> {
-        if known && place.get(&format!("{install}/bucket/{name}"))?.is_some() {
+        if known && place.get(&format!("{network}/bucket/{name}"))?.is_some() {
             return Ok(true);
         }
         let Some(bytes) = bucket.get(name)? else { return Ok(false) };
-        place.put(&format!("{install}/bucket/{name}"), &bytes)?;
+        place.put(&format!("{network}/bucket/{name}"), &bytes)?;
         snap.bytes += bytes.len() as u64;
         Ok(true)
     };
@@ -236,7 +236,7 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, epochs
             // The steps before the copy aren't kept here, so a reader of a restored bucket goes on from it.
             let tidied = crate::db::tidied_name(&prefix);
             if copied > 0 && !copy(&tidied, true)? {
-                place.put(&format!("{install}/bucket/{tidied}"), b"{}")?;
+                place.put(&format!("{network}/bucket/{tidied}"), b"{}")?;
             }
             let signed = crate::db::signed_beside(&prefix);
             // And the step at the copy's position, without which a reader doesn't start from it (`db::start`), with the
@@ -257,7 +257,7 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, epochs
                 }
                 at += 1;
             }
-            place.put(&format!("{install}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == hinted { epoch } else { 0 } }))?)?;
+            place.put(&format!("{network}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == hinted { epoch } else { 0 } }))?)?;
             snap.databases.insert(format!("{app}/{database}"), (at, copied));
         }
     }
@@ -304,8 +304,8 @@ fn snapshot_name(time: u64, device: &Key) -> String {
 }
 
 /// The newest snapshot of a scope in a place that one of `keys` opens, with its key.
-pub fn latest(place: &Place, install: &str, scope: &str, keys: &[[u8; 32]]) -> Result<Option<(Snapshot, [u8; 32])>> {
-    let dir = format!("{install}/snapshots/{}", folder(scope));
+pub fn latest(place: &Place, network: &str, scope: &str, keys: &[[u8; 32]]) -> Result<Option<(Snapshot, [u8; 32])>> {
+    let dir = format!("{network}/snapshots/{}", folder(scope));
     for name in place.list(&dir)?.iter().rev() {
         let Some(bytes) = place.get(&format!("{dir}/{name}"))? else { continue };
         if let Some(found) = open_snapshot(keys, &bytes)? {
@@ -316,8 +316,8 @@ pub fn latest(place: &Place, install: &str, scope: &str, keys: &[[u8; 32]]) -> R
 }
 
 /// The snapshots of a scope in a place, newest first, by their times and devices' short keys, without opening them.
-pub fn snapshots(place: &Place, install: &str, scope: &str) -> Result<Vec<(u64, String)>> {
-    let names = place.list(&format!("{install}/snapshots/{}", folder(scope)))?;
+pub fn snapshots(place: &Place, network: &str, scope: &str) -> Result<Vec<(u64, String)>> {
+    let names = place.list(&format!("{network}/snapshots/{}", folder(scope)))?;
     Ok(names.iter().rev().filter_map(|n| n.split_once('-').and_then(|(t, s)| Some((t.parse().ok()?, s.to_string())))).collect())
 }
 
@@ -367,7 +367,7 @@ pub struct Pruned {
     pub bytes: u64,
 }
 
-/// Prunes an install's backup in a place: drops the snapshots `kept` doesn't keep of each scope in `scopes` (by its
+/// Prunes a network's backup in a place: drops the snapshots `kept` doesn't keep of each scope in `scopes` (by its
 /// key), takes the blobs in `fetchable` (releases, which can be fetched again from where they're published) out of
 /// every snapshot but each scope's newest, then deletes the objects no snapshot kept still names.
 ///
@@ -375,15 +375,15 @@ pub struct Pruned {
 /// run that sends it again has rewritten it), and the newest snapshot, which a run builds on, is never touched. When
 /// `scopes` opens every snapshot in the place, objects no snapshot names at all (from a run that failed partway)
 /// go too, once they've waited `STRAY`.
-pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, fetchable: &BTreeSet<String>, now: u64) -> Result<Pruned> {
+pub fn prune(place: &Place, network: &str, scopes: &BTreeMap<String, [u8; 32]>, fetchable: &BTreeSet<String>, now: u64) -> Result<Pruned> {
     let mut out = Pruned::default();
     let mut keep: BTreeSet<String> = BTreeSet::new();
     let mut drop: BTreeSet<String> = BTreeSet::new();
     let mut opened_all = true;
     let names = |s: &Snapshot| s.packs.iter().chain(s.blobs.values()).cloned().collect::<Vec<_>>();
     // A release leaves a snapshot only once its object has settled, so it leaves the place in the same prune.
-    let unsettled: BTreeSet<String> = place.objects(&format!("{install}/objects"))?.into_iter().filter(|o| o.1 + SETTLE > now).map(|o| o.0).collect();
-    let folders = place.list(&format!("{install}/snapshots"))?;
+    let unsettled: BTreeSet<String> = place.objects(&format!("{network}/objects"))?.into_iter().filter(|o| o.1 + SETTLE > now).map(|o| o.0).collect();
+    let folders = place.list(&format!("{network}/snapshots"))?;
     for dir in &folders {
         let scope = scope_of(dir);
         let Some(key) = scopes.get(&scope) else {
@@ -392,8 +392,8 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
         };
         let mut snaps: Vec<(String, Snapshot)> = Vec::new();
         let mut opened = true;
-        for name in place.list(&format!("{install}/snapshots/{dir}"))? {
-            let path = format!("{install}/snapshots/{dir}/{name}");
+        for name in place.list(&format!("{network}/snapshots/{dir}"))? {
+            let path = format!("{network}/snapshots/{dir}/{name}");
             let Some(bytes) = place.get(&path)? else { continue };
             match open_snapshot(&[*key], &bytes)? {
                 Some((s, _)) => snaps.push((path, s)),
@@ -438,7 +438,7 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
             continue;
         }
         for (database, floor) in floors.into_iter().filter(|(_, f)| *f > 0) {
-            let prefix = format!("{install}/bucket/{dir}/{database}");
+            let prefix = format!("{network}/bucket/{dir}/{database}");
             // The step at the copy's position stays with it, and its signature: a reader starts from a copy only beside
             // its step. The rest go with the signatures beside them.
             let position = |name: &str| name.strip_suffix(".sig").unwrap_or(name).parse::<u64>().ok();
@@ -452,12 +452,12 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
         }
     }
     // Listed again: an object a run sent since the first listing has just been written.
-    for (name, written, size) in place.objects(&format!("{install}/objects"))? {
+    for (name, written, size) in place.objects(&format!("{network}/objects"))? {
         let settled = |wait: u64| written + wait <= now;
         if keep.contains(&name) || !(drop.contains(&name) && settled(SETTLE) || opened_all && settled(STRAY)) {
             continue;
         }
-        place.delete(&format!("{install}/objects/{name}"))?;
+        place.delete(&format!("{network}/objects/{name}"))?;
         out.bytes += size;
         out.objects += 1;
     }
@@ -473,27 +473,27 @@ pub fn tools() -> Vec<serde_json::Value> {
         json!({ "name": "backups_now", "description": "Back up now, without waiting for the hour: each device backs up what it holds to each place.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(false, false) }),
         json!({ "name": "backups_add_place", "description": "Add S3-compatible storage (Cloudflare R2, Backblaze B2, MinIO…) to back up to. You give the endpoint; the person gets a link to a sheet on their own device where they type the bucket, access key ID and secret key, so you never see the key. backups_status then shows its first backup, or what went wrong.", "inputSchema": { "type": "object", "required": ["endpoint"], "properties": { "endpoint": { "type": "string", "description": "like https://<account id>.r2.cloudflarestorage.com" }, "title": { "type": "string", "description": "what the person calls it, like Cloudflare R2" } } }, "annotations": hints(false, false) }),
         json!({ "name": "backups_remove_place", "description": "Stop backing up to a place. What's already there stays.", "inputSchema": { "type": "object", "required": ["place"], "properties": { "place": { "type": "string", "description": "its title or id, as backups_status lists it" }, "confirm": confirm_input() } }, "annotations": hints(false, true) }),
-        json!({ "name": "backups_check", "description": "Restore each place's newest backup into a throwaway copy now, as the weekly check does: every entry's signature and order, that they replay to the same people and apps, every database to its newest step as the install has it, and every blob's hash. Says what came back, and what's wrong.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
+        json!({ "name": "backups_check", "description": "Restore each place's newest backup into a throwaway copy now, as the weekly check does: every entry's signature and order, that they replay to the same people and apps, every database to its newest step as the network has it, and every blob's hash. Says what came back, and what's wrong.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
     ]
 }
 
 // Restoring.
 
 /// The installs a place holds backups of, by their folders.
-pub fn installs(place: &Place) -> Result<Vec<String>> {
+pub fn networks(place: &Place) -> Result<Vec<String>> {
     Ok(place.list("")?.into_iter().filter(|n| n.len() == 16 && n.bytes().all(|b| b.is_ascii_hexdigit())).collect())
 }
 
-/// Every scope's epoch keys in an install's backup, opened with the recovery key's secret.
-pub fn open_keys(place: &Place, install: &str, recovery_secret: &[u8; 32]) -> Result<BTreeMap<String, Vec<[u8; 32]>>> {
+/// Every scope's epoch keys in a network's backup, opened with the recovery key's secret.
+pub fn open_keys(place: &Place, network: &str, recovery_secret: &[u8; 32]) -> Result<BTreeMap<String, Vec<[u8; 32]>>> {
     let mut out = BTreeMap::new();
-    for dir in place.list(&format!("{install}/keys"))? {
-        for id in place.list(&format!("{install}/keys/{dir}"))? {
-            let sealed = place.get(&format!("{install}/keys/{dir}/{id}"))?.context("a key went missing")?;
+    for dir in place.list(&format!("{network}/keys"))? {
+        for id in place.list(&format!("{network}/keys/{dir}"))? {
+            let sealed = place.get(&format!("{network}/keys/{dir}/{id}"))?.context("a key went missing")?;
             out.entry(scope_of(&dir)).or_insert_with(Vec::new).push(unseal(recovery_secret, &sealed)?);
         }
     }
-    ensure!(!out.is_empty(), "no backup of this install here");
+    ensure!(!out.is_empty(), "no backup of this network here");
     Ok(out)
 }
 
@@ -505,17 +505,17 @@ pub struct Restored {
 }
 
 /// Restores a scope from its newest snapshot that one of `keys` opens.
-pub fn restore(place: &Place, install: &str, scope: &str, keys: &[[u8; 32]]) -> Result<Restored> {
-    let (snapshot, key) = latest(place, install, scope, keys)?.with_context(|| format!("no snapshot of {scope} opens with its keys"))?;
+pub fn restore(place: &Place, network: &str, scope: &str, keys: &[[u8; 32]]) -> Result<Restored> {
+    let (snapshot, key) = latest(place, network, scope, keys)?.with_context(|| format!("no snapshot of {scope} opens with its keys"))?;
     let mut entries = Vec::new();
     for name in &snapshot.packs {
-        let bytes = place.get(&format!("{install}/objects/{name}"))?.with_context(|| format!("pack {} is missing", &name[..12]))?;
+        let bytes = place.get(&format!("{network}/objects/{name}"))?.with_context(|| format!("pack {} is missing", &name[..12]))?;
         entries.extend(unpack(&open_object(&key, name, &bytes)?)?);
     }
     ensure!(entries.iter().all(|e| e.log() == scope), "a pack of {scope} holds another scope's entries");
     let mut blobs = Vec::new();
     for (hash, name) in &snapshot.blobs {
-        let bytes = place.get(&format!("{install}/objects/{name}"))?.with_context(|| format!("blob {} is missing", &hash[..12]))?;
+        let bytes = place.get(&format!("{network}/objects/{name}"))?.with_context(|| format!("blob {} is missing", &hash[..12]))?;
         let bytes = open_object(&key, name, &bytes)?;
         ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "blob {} isn't what its hash says", &hash[..12]);
         blobs.push((hash.clone(), bytes));
@@ -531,8 +531,8 @@ pub fn import(store: &crate::store::Store, entries: &[Entry]) -> Result<usize> {
 /// A restore check, as a device runs one: what it restores, and what it compares that with.
 pub struct Check<'a> {
     pub place: &'a Place,
-    /// The install's folder in the place.
-    pub install: &'a str,
+    /// The network's folder in the place.
+    pub network: &'a str,
     /// The keys that may open each scope's snapshots: its epochs' keys.
     pub keys: &'a BTreeMap<String, Vec<[u8; 32]>>,
     pub root: Option<crate::entry::Hash>,
@@ -543,26 +543,26 @@ pub struct Check<'a> {
 /// Restores each scope's newest snapshot from a place into a throwaway store, checking every signature, chain and
 /// blob; with `live`, that it holds every entry this device had then, and that its entries replay to the same people,
 /// devices, groups, apps and settings. Says what came back: each scope's entries, blobs and databases, and by name the
-/// people and apps; how much the install's backup takes there; what's wrong (`problems`), and the scopes whose snapshots
+/// people and apps; how much the network's backup takes there; what's wrong (`problems`), and the scopes whose snapshots
 /// none of `keys` opens (`unchecked`); no scopes at all if nothing's there yet. Databases are `check_databases`'.
 pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
-    let (place, install) = (c.place, c.install);
+    let (place, network) = (c.place, c.network);
     let store = crate::store::Store::memory()?;
     let mut scopes = Vec::new();
     let mut problems: Vec<String> = Vec::new();
     let mut unchecked = Vec::new();
     let mut restored = Vec::new();
     let mut expected: Vec<Entry> = Vec::new();
-    for dir in place.list(&format!("{install}/snapshots"))? {
+    for dir in place.list(&format!("{network}/snapshots"))? {
         let scope = scope_of(&dir);
-        if snapshots(place, install, &scope)?.is_empty() {
+        if snapshots(place, network, &scope)?.is_empty() {
             continue;
         }
         let Some(keys) = c.keys.get(&scope).filter(|k| !k.is_empty()) else {
             unchecked.push(scope);
             continue;
         };
-        let r = match restore(place, install, &scope, keys) {
+        let r = match restore(place, network, &scope, keys) {
             Ok(r) => r,
             Err(err) => {
                 problems.push(format!("{scope}: {err:#}"));
@@ -587,17 +587,18 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
     }
     let root = c.root.or_else(|| store.ordered().ok()?.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
     let global_keys = c.keys.get("global").map(Vec::as_slice).unwrap_or(&[]);
-    let m = steps_of(&store, root, place, install, global_keys)?;
+    let m = steps_of(&store, root, place, network, global_keys)?;
     // The same entries say the same on every device: the backup's, replayed, are who's who as this device had it.
     if c.live.is_some() && problems.is_empty() {
         let here = crate::store::Store::memory()?;
         here.take(expected)?;
-        if said(&steps_of(&here, root, place, install, global_keys)?) != said(&m) {
+        if said(&steps_of(&here, root, place, network, global_keys)?) != said(&m) {
             problems.push("its entries don't replay to the people, devices and apps this device had then".into());
         }
     }
-    let bytes: u64 = place.objects(&format!("{install}/objects"))?.iter().map(|o| o.2).sum();
+    let bytes: u64 = place.objects(&format!("{network}/objects"))?.iter().map(|o| o.2).sum();
     let report = json!({
+        // `install`, as older command lines print it.
         "install": m.name(),
         "bytes": bytes,
         "scopes": scopes,
@@ -611,20 +612,20 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
 
 /// Who's who once `global`'s log is frozen, as its scope database's steps the place's copy of the bucket holds say it
 /// (`database::steps`), opened with `keys`, its epochs' keys; as `store`'s entries say it, before.
-fn steps_of(store: &crate::store::Store, root: Option<crate::entry::Hash>, place: &Place, install: &str, keys: &[[u8; 32]]) -> Result<ScopeDb> {
+fn steps_of(store: &crate::store::Store, root: Option<crate::entry::Hash>, place: &Place, network: &str, keys: &[[u8; 32]]) -> Result<ScopeDb> {
     let replayed = members_of(store, root)?;
     let recovery = crate::database::steps::recovery_keys(root, &store.scope("global")?);
     // The log's key in each epoch: the node's app key there, opened with whichever of the epochs' keys does.
     let mut log_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
     for n in 1..=(keys.len() as u32 + 8) {
-        let Some(sealed) = place.get(&format!("{install}/bucket/{}", crate::keys::app_key_name("global", crate::members::APP, n)))? else { continue };
+        let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::keys::app_key_name("global", crate::members::APP, n)))? else { continue };
         if let Some(app) = keys.iter().find_map(|k| crate::cloudflare::open_app_key(k, crate::members::APP, &sealed).ok()) {
             log_keys.insert(n, crate::cloudflare::database_key(&app, crate::log::NAME));
         }
     }
     let prefix = crate::database::steps::prefix("global");
     let now = crate::node::now_ms();
-    let get = |name: &str| place.get(&format!("{install}/bucket/{name}"));
+    let get = |name: &str| place.get(&format!("{network}/bucket/{name}"));
     // `global`'s log as far as its freezes need, from the place's copy of its steps (`steps::log_to`).
     let made = replayed.epoch(&crate::entry::Scope::Global);
     let log_to = |end: u64| -> Result<crate::database::steps::Log> {
@@ -675,7 +676,7 @@ fn members_of(store: &crate::store::Store, root: Option<crate::entry::Hash>) -> 
     ScopeDb::build(&m, &crate::entry::Scope::Global, &Default::default(), crate::node::now_ms())
 }
 
-/// What a restore must bring back the same: the install's name, its people, devices, groups, apps and settings, and
+/// What a restore must bring back the same: the network's name, its people, devices, groups, apps and settings, and
 /// each scope's epochs.
 fn said(m: &ScopeDb) -> Value {
     let epochs = m.epochs().into_keys().flat_map(|s| m.epoch_hashes(&s).into_iter().map(move |(n, h)| format!("{s} {n} {h}"))).collect::<Vec<_>>();
@@ -690,7 +691,7 @@ fn said(m: &ScopeDb) -> Value {
     })
 }
 
-/// A place's copy of the install's bucket (`<install>/bucket/`), read as the bucket is, so a database restores from it
+/// A place's copy of the network's bucket (`<network>/bucket/`), read as the bucket is, so a database restores from it
 /// as from the bucket itself. Nothing writes to it.
 struct Copy<'a> {
     place: &'a Place,
@@ -713,13 +714,13 @@ impl crate::bucket::Bucket for Copy<'_> {
 }
 
 /// Checks each of a scope's databases as its snapshot holds them: its copy, the step beside it and every step after,
-/// to the snapshot's last, are in the place, and are the same bytes as the install's bucket has (`live`), or without
+/// to the snapshot's last, are in the place, and are the same bytes as the network's bucket has (`live`), or without
 /// it, open with their epoch's key; then it restores from them into a throwaway database, which must reach that step.
 /// `epochs` are the scope's epoch keys. → what's wrong, one line each; nothing when all is well.
-pub async fn check_databases(place: &Place, install: &str, snapshot: &Snapshot, epochs: &crate::db::Keys, live: Option<&impl crate::bucket::Bucket>) -> Vec<String> {
+pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, epochs: &crate::db::Keys, live: Option<&impl crate::bucket::Bucket>) -> Vec<String> {
     use crate::bucket::Bucket;
     let (scope, folder) = (&snapshot.scope, folder(&snapshot.scope));
-    let copy = Copy { place, root: format!("{install}/bucket/") };
+    let copy = Copy { place, root: format!("{network}/bucket/") };
     let mut out = Vec::new();
     for (database, (at, copied)) in &snapshot.databases {
         let Some((app, db)) = database.split_once('/') else { continue };
@@ -817,7 +818,7 @@ mod tests {
     async fn a_restore_check_passes_a_whole_backup_and_catches_one_corrupted_or_missing() {
         let dir = std::env::temp_dir().join(format!("backups-check-{}", hex(&rand::random())));
         let (place, bucket) = (Place::Folder(dir.join("place")), Place::Folder(dir.join("bucket")));
-        let install = "0123456789abcdef";
+        let network = "0123456789abcdef";
         let (recovery, device) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()));
         let epoch: [u8; 32] = rand::random();
         let blob = b"a deploy's bundle".to_vec();
@@ -850,7 +851,7 @@ mod tests {
 
         let job = |previous: Option<Snapshot>, now: u64| Job {
             place: &place,
-            install,
+            network,
             scope: "global",
             key: epoch,
             epochs: crate::db::Keys::from([(1, epoch)]),
@@ -864,7 +865,7 @@ mod tests {
             frozen: false,
         };
         let first = back_up(job(None, 1_000_000), |h| (h == hash).then(|| blob.clone())).unwrap().unwrap();
-        let backed_up = format!("{install}/bucket/{late}");
+        let backed_up = format!("{network}/bucket/{late}");
         assert!(place.get(&backed_up).unwrap().is_none());
         bucket.put(&late, &sig).unwrap();
         assert_eq!(back_up(job(Some(first), 1_500_000), |h| (h == hash).then(|| blob.clone())).unwrap(), None, "nothing new for a snapshot");
@@ -874,33 +875,33 @@ mod tests {
         let live: BTreeMap<String, Vec<Entry>> = [("global".to_string(), all.clone())].into();
         let epochs = crate::db::Keys::from([(1, epoch)]);
         let checked = |live: Option<&BTreeMap<String, Vec<Entry>>>| {
-            let (report, restored) = check(&Check { place: &place, install, keys: &keys, root: None, live }).unwrap();
+            let (report, restored) = check(&Check { place: &place, network, keys: &keys, root: None, live }).unwrap();
             (report["problems"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect::<Vec<_>>(), restored)
         };
         let (problems, restored) = checked(Some(&live));
         assert_eq!(problems, Vec::<String>::new());
         let snapshot = restored[0].snapshot.clone();
         assert_eq!(snapshot.databases["tally/main"], (at, copy));
-        assert_eq!(check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await, Vec::<String>::new(), "every database restores from the backup");
-        assert_eq!(check_databases(&place, install, &snapshot, &epochs, None::<&Place>).await, Vec::<String>::new(), "and opens without the install's bucket");
+        assert_eq!(check_databases(&place, network, &snapshot, &epochs, Some(&bucket)).await, Vec::<String>::new(), "every database restores from the backup");
+        assert_eq!(check_databases(&place, network, &snapshot, &epochs, None::<&Place>).await, Vec::<String>::new(), "and opens without the network's bucket");
 
         // A step that's changed in the backup, then one that's gone: the one its copy starts beside.
-        let name = |n: u64| format!("{install}/bucket/{}", crate::db::step_name(prefix, n));
+        let name = |n: u64| format!("{network}/bucket/{}", crate::db::step_name(prefix, n));
         let good = place.get(&name(at)).unwrap().unwrap();
         let mut bad = good.clone();
         *bad.last_mut().unwrap() ^= 1;
         place.put(&name(at), &bad).unwrap();
-        let wrong = check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await;
+        let wrong = check_databases(&place, network, &snapshot, &epochs, Some(&bucket)).await;
         assert!(wrong.len() == 1 && wrong[0].contains(&format!("global tally: step {at} isn't what your devices have")), "{wrong:?}");
-        let wrong = check_databases(&place, install, &snapshot, &epochs, None::<&Place>).await;
+        let wrong = check_databases(&place, network, &snapshot, &epochs, None::<&Place>).await;
         assert!(wrong.len() == 1 && wrong[0].contains("doesn't open"), "{wrong:?}");
         place.put(&name(at), &good).unwrap();
         place.delete(&name(copy)).unwrap();
-        let wrong = check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await;
+        let wrong = check_databases(&place, network, &snapshot, &epochs, Some(&bucket)).await;
         assert!(wrong.len() == 1 && wrong[0].contains(&format!("global tally: step {copy} isn't there")), "{wrong:?}");
 
         // A blob that's gone, then a pack that's corrupted.
-        let object = |name: &str| format!("{install}/objects/{name}");
+        let object = |name: &str| format!("{network}/objects/{name}");
         let blob_object = place.get(&object(&snapshot.blobs[&hash])).unwrap().unwrap();
         place.delete(&object(&snapshot.blobs[&hash])).unwrap();
         let (problems, _) = checked(Some(&live));
@@ -918,7 +919,7 @@ mod tests {
         let more: BTreeMap<String, Vec<Entry>> = [("global".to_string(), entries(&device, "global", 4, Some(&hash)))].into();
         let mut said_more = snapshot.clone();
         said_more.frontier.insert(hex(device.verifying_key().as_bytes()), 4);
-        place.put(&format!("{install}/snapshots/global/{}", snapshot_name(2_000_000, device.verifying_key().as_bytes())), &lock_snapshot(&epoch, &said_more)).unwrap();
+        place.put(&format!("{network}/snapshots/global/{}", snapshot_name(2_000_000, device.verifying_key().as_bytes())), &lock_snapshot(&epoch, &said_more)).unwrap();
         let (problems, _) = checked(Some(&more));
         assert!(problems.len() == 1 && problems[0].contains("lacks 1 of the entries"), "{problems:?}");
         std::fs::remove_dir_all(dir).unwrap();

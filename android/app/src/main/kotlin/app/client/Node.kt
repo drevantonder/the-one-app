@@ -31,7 +31,7 @@ data class Config(
     val cli: String,
 )
 
-/** `GET /v1/state`: who this is, and the install. */
+/** `GET /v1/state`: who this is, and the network. */
 @Serializable
 data class NodeState(
     val config: Config,

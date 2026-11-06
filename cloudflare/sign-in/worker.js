@@ -1,14 +1,14 @@
 // Sign-in keeps its old name, auth, where machines depend on it: its Worker on Cloudflare (`<cli>-auth`), its
 // Durable Object (`Auth`), the paths under /api/auth and `one/auth` (src/cloudflare/workers.rs says why).
-// Sign-in: who you are, and nothing more. Better Auth, in a Durable Object: sign-in by passkey, or, on an
-// install whose people sign in with their work Google account (`SIGN_IN`), by Google at the install's domain
+// Sign-in: who you are, and nothing more. Better Auth, in a Durable Object: sign-in by passkey, or, on a
+// network whose people sign in with their work Google account (`SIGN_IN`), by Google at the network's domain
 // (`JOIN_DOMAIN`) too, though never for an admin (`passkey_only`), who signs in with a passkey; and an OAuth server (per
 // MCP's authorization spec) that every client signs in through: the iPhone and Mac apps, and MCP clients like Claude
 // Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at /api/auth/jwks, so nodes check them
 // offline. It opens nothing: keys are only on people's devices, so faking a sign-in opens nothing either. A passkey's
 // PRF output stays in the browser (pages.js).
 //
-// Nobody signs up uninvited, the install's first person too: an admin's device makes a secret, and tells sign-in its hash,
+// Nobody signs up uninvited, the network's first person too: an admin's device makes a secret, and tells sign-in its hash,
 // who it's for and until when, signed with its endpoint key (`POST /api/auth/invites`); opening `<address>/invite#
 // <secret>` lets that person sign up once, as the id and name the invite gives them. At a workplace too: signing in
 // with Google makes someone only with an invite for that Google account's email.
@@ -16,7 +16,7 @@
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
 // its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
-// `&genesis=`, the install's first entry's hash as the approving device holds it: the only install the new device then
+// `&genesis=`, the network's first entry's hash as the approving device holds it: the only install the new device then
 // takes, so no node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
 // where the approving device read them to, which the new device starts from (src/database/steps.rs `Welcome`). Set
 // once, with the approval. A service asks nothing here:
@@ -24,8 +24,8 @@
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
 // hex), so a device of the person's can check it themselves (src/sign_in_proof.rs) and let the device in with no one
-// tapping: with Google, sign-in asks for an ID token whose `nonce` names it in this install (`joinNonce`, with `GENESIS`),
-// and keeps the token Google gave; with a passkey, the prompt's challenge names it, the install and when
+// tapping: with Google, sign-in asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `GENESIS`),
+// and keeps the token Google gave; with a passkey, the prompt's challenge names it, the network and when
 // (`joinChallenge`), and sign-in keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
 // request to join (`sign_in`), never checked here: only the person's devices count it, and only for an account their
 // own devices recorded. Refusing a request forgets its proof too. A throwaway network's sign-in signs its own ID token, with
@@ -38,15 +38,15 @@
 // any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
 // which the person's devices approve only by a tap, and older ones read as nothing.
 //
-// It pushes (`PUSH`, the push Worker's entrypoint for the install's own Workers) to the person's devices, never the one asking: "<device>
+// It pushes (`PUSH`, the push Worker's entrypoint for the network's own Workers) to the person's devices, never the one asking: "<device>
 // wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`; and
 // "<device> joined · <place>" once one is approved, opening Settings › Devices. It knows a person's devices as those that
 // asked to join as them here, or said they're theirs as they asked which wait (`devices`), and those that registered
 // with the push Worker as theirs, by a request each signed (`PUSH.theirs`): only for whom to push to, since a device
-// opens a note, and acts on its code, only as the install's signed entries say.
+// opens a note, and acts on its code, only as the network's signed entries say.
 //
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
-// /api/auth/invites"`), is taken once, and counts only from one of the install's endpoints, as the relay's list says
+// /api/auth/invites"`), is taken once, and counts only from one of the network's endpoints, as the relay's list says
 // (`RELAY.allowed(key)`), an admin's for what only admins do. A POST's body is the signed request; a GET's or DELETE's
 // is in `x-one-request`, as base64url of its JSON.
 //
@@ -54,7 +54,7 @@
 // no Google: its sign-in page goes straight on. Someone it invites joins by opening their link, again with no passkey,
 // and is then who that browser signs in as. It's for testing clients without a person: only `one throwaway` turns it on
 // (cloudflare::Settings::throwaway_person), on Workers that listen only on their own machine, and `cloudflare deploy` refuses it,
-// so no real install's sign-in ever does this.
+// so no real network's sign-in ever does this.
 
 import { DurableObject } from "cloudflare:workers";
 import { oauthProvider } from "@better-auth/oauth-provider";
@@ -131,7 +131,7 @@ function joinOf(query) {
 /// A device's key and seal key, from what `join` names.
 const endpointOf = (join) => [hex.decode(join.slice(0, 64)), hex.decode(join.slice(64))];
 
-/// The install's first entry's hash (`GENESIS`, hex, as the device deploying to Cloudflare holds it), which a sign-in for
+/// The network's first entry's hash (`GENESIS`, hex, as the device deploying to Cloudflare holds it), which a sign-in for
 /// a device names beside it: without it, a sign-in names no device, and its device is approved by its code.
 const genesisOf = (env) => (/^[0-9a-f]{64}$/.test(env.GENESIS || "") ? hex.decode(env.GENESIS) : null);
 
@@ -176,7 +176,7 @@ export class Auth extends DurableObject {
     // device its person joined with.
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
     // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`;
-    // `approved`, when a device said it let it in, `genesis`, the install it said it let it into, and `welcome`, where
+    // `approved`, when a device said it let it in, `genesis`, the network it said it let it into, and `welcome`, where
     // it said to start reading who's who from; `place`, the city it asked from.
     sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, genesis text)");
     const columns = sql.exec("pragma table_info(requests)").toArray().map((c) => c.name);
@@ -235,7 +235,7 @@ export class Auth extends DurableObject {
       databaseHooks: {
         user: {
           create: {
-            // Only someone invited signs up, as who the invite says they are in the install, so devices know them by
+            // Only someone invited signs up, as who the invite says they are in the network, so devices know them by
             // the same id: with a passkey, as it's registered, or a throwaway network's link (`admit`); with Google, as
             // Google says the email is theirs, with the invite this browser opened to join.
             async before(user, ctx) {
@@ -274,7 +274,7 @@ export class Auth extends DurableObject {
       },
       plugins: [
         jwt({ jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } }, jwt: { issuer: `${url.origin}/api/auth`, expirationTime: "1h" } }),
-        ...(throwaway ? [throwawayInstall(self, env.THROWAWAY_USER, env.THROWAWAY_NAME)] : [passkey({
+        ...(throwaway ? [throwawayNetwork(self, env.THROWAWAY_USER, env.THROWAWAY_NAME)] : [passkey({
           rpID: url.hostname,
           rpName: env.NAME || "The One App",
           origin: url.origin,
@@ -342,7 +342,7 @@ export class Auth extends DurableObject {
         return new Response(meta.body, { status: meta.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
       }
       const name = this.auth.options.appName;
-      // What its pages say: the custom build's name, and what a person joins ("your One App").
+      // What its pages say: the custom build's name, and what a person joins ("your One App network").
       const look = { name, yours: this.env.YOURS };
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const throwaway = this.env.SIGN_IN === "throwaway";
@@ -384,7 +384,7 @@ export class Auth extends DurableObject {
   }
 
   /// What an endpoint signed for this request's route, if it brought one (its body, or `x-one-request`), checked:
-  /// fresh, taken once, and from one of the install's endpoints. → `{ by, fields, admin }`, or null.
+  /// fresh, taken once, and from one of the network's endpoints. → `{ by, fields, admin }`, or null.
   async signed(request, body) {
     const route = `${request.method} ${new URL(request.url).pathname}`;
     let asked = body;
@@ -398,9 +398,9 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * 60_000);
     this.taken(asked.sig);
-    if (!this.env.RELAY) refuse(503, "The install has no relay to say which devices are its own.");
+    if (!this.env.RELAY) refuse(503, "The network has no relay to say which devices are its own.");
     const allowed = await this.env.RELAY.allowed(by);
-    if (!allowed) refuse(403, "That device isn't one of the install's.");
+    if (!allowed) refuse(403, "That device isn't one of the network's.");
     return { by, fields, admin: allowed.admin === true };
   }
 
@@ -433,7 +433,7 @@ export class Auth extends DurableObject {
   }
 
   /// An invite, made by an admin's device: `{ id, name, user, email?, until }`, `id` the sha256 (hex) of the secret
-  /// its link carries, `user` the id they'll have. On an install whose people sign in with Google, `email` is the
+  /// its link carries, `user` the id they'll have. On a network whose people sign in with Google, `email` is the
   /// Google account they sign up with. Another invite for the same person, not yet used, replaces it.
   async invite(request) {
     const signed = await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")));
@@ -630,7 +630,7 @@ export class Auth extends DurableObject {
     });
   }
 
-  /// Requests waiting: the signed-in person's own devices', or, for a signed request from one of the install's
+  /// Requests waiting: the signed-in person's own devices', or, for a signed request from one of the network's
   /// devices, every one: a device approves only its own person's, or a newcomer's whose invite its person keeps, as
   /// the entries it writes count only then. Signed in and signed both, it's their device asking: kept as theirs, for
   /// pushes, and shown their own.
@@ -647,7 +647,7 @@ export class Auth extends DurableObject {
     return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", theirs).toArray()) };
   }
 
-  /// A request by its device's key, if the asker may see it: its person, or one of the install's devices.
+  /// A request by its device's key, if the asker may see it: its person, or one of the network's devices.
   async mayTouch(request, key) {
     this.expire();
     const sql = this.ctx.storage.sql;
@@ -665,7 +665,7 @@ export class Auth extends DurableObject {
   }
 
   /// Forgets a request, refused; or one `approved`, marked so until it would have expired, for its device to see, with
-  /// the install's `genesis` (hex) it was let into and its `welcome`, if the approving device said.
+  /// the network's `genesis` (hex) it was let into and its `welcome`, if the approving device said.
   async unask(request, key, approved, genesis, welcome) {
     const row = await this.mayTouch(request, key);
     // Approved again (a retry, or a second approving device): marked once, never forgotten by it.
@@ -692,7 +692,7 @@ export class Auth extends DurableObject {
     return session;
   }
 
-  /// What a client's tokens are for, whatever it asks: the install's address (a sign-in at its nodes, through the
+  /// What a client's tokens are for, whatever it asks: the network's address (a sign-in at its nodes, through the
   /// gateway) only for its own apps, each a client whose every redirect comes back to one of them (`firstParty`);
   /// any other, a remote MCP client, gets `<address>/mcp`, the remote MCP server's, where it's a device of its person's,
   /// which nodes refuse.
@@ -702,18 +702,18 @@ export class Auth extends DurableObject {
     return client && this.firstParty(client) ? address : `${address}/mcp`;
   }
 
-  /// Whether a client's every sign-in comes back to the device it was made on: the web client's page at the install's
+  /// Whether a client's every sign-in comes back to the device it was made on: the web client's page at the network's
   /// address (in the browser that signed in), an app's own link scheme or loopback. Not the sign-in code's page, where
   /// a sign-in finished in any browser is taken by whichever device made the code, nor any site.
   signsInHere(client) {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const origin = new URL(this.env.ADDRESS).origin;
-    // The install's own address is on loopback too where it's tried (`one throwaway`), so its pages are told apart first.
+    // The network's own address is on loopback too where it's tried (`one throwaway`), so its pages are told apart first.
     const here = (u) => (URL.canParse(u) && new URL(u).origin === origin ? u === `${origin}/callback` : goesTo(u, origin) === ON_DEVICE);
     return uris.length > 0 && uris.every(here);
   }
 
-  /// Whether a client is one of the install's own apps, by where its sign-ins come back: the web client's page, the
+  /// Whether a client is one of the network's own apps, by where its sign-ins come back: the web client's page, the
   /// page a machine's sign-in code is shown on, the native apps' `<cli>://signed-in/`, or Windows' loopback.
   firstParty(client) {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
@@ -728,7 +728,7 @@ export class Auth extends DurableObject {
     return client;
   }
 
-  /// A client names itself, so none may take the install's name, as signing in to it would read as signing in here;
+  /// A client names itself, so none may take the network's name, as signing in to it would read as signing in here;
   /// nor its apps' ("<install> on <device>"), unless it comes back to the device, as they do.
   notNamedAsUs(body) {
     const plain = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/^the/, "");
@@ -738,7 +738,7 @@ export class Auth extends DurableObject {
     if (name === ours || (name.startsWith(ours) && toSites)) refuse(400, `a client can't be called ${body.client_name}: that's the name of what it signs in to`);
   }
 
-  /// What signing in to a client (its authorization's `query`) says: its name (the install's, for the web client, which
+  /// What signing in to a client (its authorization's `query`) says: its name (the network's, for the web client, which
   /// is at its address), where its sign-in goes (its redirect_uri, if it's one of the client's, else its first), since
   /// the name is only what it calls itself, the person's, if they're signed in here already, and whether they're back
   /// from the Google sign-in this browser started for it, which goes straight on.
@@ -865,7 +865,7 @@ export class Auth extends DurableObject {
     this.ctx.storage.sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
   }
 
-  /// What an invite page shows: whose it is, and on an install whose people sign in with Google, the email it's for.
+  /// What an invite page shows: whose it is, and on a network whose people sign in with Google, the email it's for.
   async inviteAbout({ secret }) {
     const invite = await this.openInvite(secret);
     return { person: invite.name, until: invite.until, email: invite.email };
@@ -912,7 +912,7 @@ export class Auth extends DurableObject {
 /// A throwaway network's sign-in, with no passkey: whoever is signed in here already (someone who joined in this browser),
 /// or `person` by name (someone who joined), or else its first person, made the first time; and joining with an
 /// invite link, which signs its person in here.
-function throwawayInstall(auth, id, name) {
+function throwawayNetwork(auth, id, name) {
   const signIn = async (ctx, user) => {
     await setSessionCookie(ctx, { session: await ctx.context.internalAdapter.createSession(user.id), user });
     await tryProof(ctx, user);

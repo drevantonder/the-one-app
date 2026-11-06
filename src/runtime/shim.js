@@ -65,7 +65,7 @@ function describe() {
   };
 }
 
-/// Asks the node something for the call with `token`: other apps' tools and its own service's functions, blobs, the install's apps.
+/// Asks the node something for the call with `token`: other apps' tools and its own service's functions, blobs, the network's apps.
 async function askNode(token, path, init = {}) {
   const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": token } }));
   if (!r.ok) throw new Error(await r.text());
@@ -175,11 +175,11 @@ function context(ask, body, appends, later) {
     /// The port this node's local API answers on at 127.0.0.1, the custom build's (config.toml) unless it was started
     /// on another: where a sign-in sends the person's browser back. Null on a node with none (the Cloudflare node).
     port: body.port ?? null,
-    /// The install's address (`https://…`, no last `/`), or null on a node from before it was given: a sign-in at
+    /// The network's address (`https://…`, no last `/`), or null on a node from before it was given: a sign-in at
     /// another site sends the person back to `<address>/back?state=<app>/<screen>&…`, which opens that screen of this
     /// app with `params.back`, that whole address.
     address: body.address ?? null,
-    /// Everyone's and every group's handle in the install, what apps call them by in addresses and lists:
+    /// Everyone's and every group's handle in the network, what apps call them by in addresses and lists:
     /// [{ handle, id: "user:<id>" | "group:<id>", name }], a removed person's with removed: true, a group's with its
     /// members: { <user id>: "admin" | "member" }; null on a node from before handles. `me.handle` is the caller's.
     handles: body.handles ?? null,
@@ -241,12 +241,12 @@ function context(ask, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it can't push");
       return (await (await ask("notify", { method: "POST", body: JSON.stringify(push) })).json()).ok;
     },
-    /// Every app in the install, as `GET /v1/apps` gives them to the caller.
+    /// Every app in the network, as `GET /v1/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
     /// The schedules the caller may switch, of the apps they may use, that are on and failed their last run, each as
     /// `catalog` gives an app's `schedules`, with its `app`.
     failing: async () => (await ask("failing")).json(),
-    /// The install's devices, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
+    /// The network's devices, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
     /// Run priority (src/rank.rs): `{ order, admin }`, every device and the Cloudflare node (key "cloudflare") in the
     /// order things go to them, each with its `kind` and its `priority` (a number from 1, or "last"), and whether the

@@ -1,5 +1,5 @@
-//! The install's bucket as a device reaches it holding no credentials: each request goes to a URL the URL signer
-//! (`cloudflare/signer`) presigned, asked at the install's address with a request signed by the device's own key
+//! The network's bucket as a device reaches it holding no credentials: each request goes to a URL the URL signer
+//! (`cloudflare/signer`) presigned, asked at the network's address with a request signed by the device's own key
 //! (`keys::signed_request`, `one/urls`). URLs are kept until a minute before they stop working, and reading or
 //! creating a database's step asks for the next positions too, and the signatures beside them, so a device catching up
 //! or writing on asks once.
@@ -18,7 +18,7 @@ use super::{Failed, Trouble};
 const READ_AHEAD: u64 = 15;
 const CREATE_AHEAD: u64 = 3;
 
-/// Where the install's address is, as the device knows it now.
+/// Where the network's address is, as the device knows it now.
 pub type Address = Arc<dyn Fn() -> Result<String> + Send + Sync>;
 
 /// Asks the URL signer for a device.
@@ -117,13 +117,13 @@ impl Signer {
                 kept.insert(format!("{kind} {name}"), (url.to_string(), until));
             }
         }
-        kept.get(&id).map(|(url, _)| url.clone()).context("the URL signer didn't sign that, for the install's bucket")
+        kept.get(&id).map(|(url, _)| url.clone()).context("the URL signer didn't sign that, for the network's bucket")
     }
 
     /// One URL of a kind that's asked for each time.
     fn only(&self, kind: &str, fields: Value, name: &str) -> Result<String> {
         let given = self.ask(fields)?;
-        given[kind][name].as_str().filter(|u| self.ours(u)).map(str::to_string).context("the URL signer didn't sign that, for the install's bucket")
+        given[kind][name].as_str().filter(|u| self.ours(u)).map(str::to_string).context("the URL signer didn't sign that, for the network's bucket")
     }
 
     /// A page of a list: its prefix, delimiter and continuation token from the query, as S3 takes them.
@@ -140,10 +140,10 @@ impl Signer {
         }
         page.entry("prefix").or_insert(json!(""));
         let given = self.ask(json!({ "list": [page] }))?;
-        given["list"][0].as_str().filter(|u| self.ours(u)).map(str::to_string).context("the URL signer didn't sign that, for the install's bucket")
+        given["list"][0].as_str().filter(|u| self.ours(u)).map(str::to_string).context("the URL signer didn't sign that, for the network's bucket")
     }
 
-    /// Whether a URL is the install's bucket's, so a signer elsewhere can't send this device anywhere else.
+    /// Whether a URL is the network's bucket's, so a signer elsewhere can't send this device anywhere else.
     fn ours(&self, url: &str) -> bool {
         url.strip_prefix(&self.base).is_some_and(|rest| rest.starts_with('/') || rest.starts_with('?'))
     }

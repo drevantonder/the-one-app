@@ -1,4 +1,4 @@
-//! The install's bucket as a device on a machine reads it: every database step and copy it reads or writes is kept on
+//! The network's bucket as a device on a machine reads it: every database step and copy it reads or writes is kept on
 //! its own disk too, sealed as it is in the bucket, so it reads each from the bucket once. Each is written once, at a
 //! name its seal binds it to, so what's kept here can only be behind the bucket, never different from it; holding it
 //! opens nothing without the key. Everything else (keys, hints, leases) is read from the bucket each time.
@@ -18,13 +18,13 @@ use super::{Bucket, Object, Place};
 
 #[derive(Clone, Debug)]
 pub struct Copied<B = Place> {
-    /// The install's bucket.
+    /// The network's bucket.
     pub place: B,
     /// This device's copy: a folder of the same names.
     here: Place,
     /// Whether a name this device's copy lacks is looked for in the bucket.
     reach: bool,
-    /// Where the install's data went, if it moved since `place` was taken: held to write, and taken whole while it
+    /// Where the network's data went, if it moved since `place` was taken: held to write, and taken whole while it
     /// moves, so a write waits for the move and then goes where the data is, never only to where it was.
     moved: Arc<tokio::sync::RwLock<Option<B>>>,
 }
@@ -34,7 +34,7 @@ impl<B: Bucket + Clone> Copied<B> {
         Copied::moving(place, dir, Arc::default())
     }
 
-    /// The bucket `place` and this device's copy in `dir`, following each move of the install's data in `moved`.
+    /// The bucket `place` and this device's copy in `dir`, following each move of the network's data in `moved`.
     pub fn moving(place: B, dir: PathBuf, moved: Arc<tokio::sync::RwLock<Option<B>>>) -> Copied<B> {
         Copied { place, here: Place::Folder(dir), reach: true, moved }
     }

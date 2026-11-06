@@ -1,4 +1,4 @@
-//! `GET /v1/state`: the install as one person sees it, from `global`'s scope database, the same from a node on a
+//! `GET /v1/state`: the network as one person sees it, from `global`'s scope database, the same from a node on a
 //! machine and from the Cloudflare node. What only the node answering knows (which devices are online and how loaded,
 //! who is looking) it says in `Here`.
 
@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 
-use crate::database::scopes::{INSTALL, ScopeDb, object};
+use crate::database::scopes::{NETWORK, ScopeDb, object};
 use crate::entry::hex;
 use crate::members::{self, Kind, Machine};
 use crate::rank;
@@ -19,7 +19,7 @@ pub struct Here<'a> {
     pub client: Option<Value>,
     /// The node answering: `{ key, name, ready, guide }`.
     pub device: Value,
-    /// Whether that node is one of the install's devices.
+    /// Whether that node is one of the network's devices.
     pub member: bool,
     /// How many entries it holds.
     pub entries: u64,
@@ -29,9 +29,9 @@ pub struct Here<'a> {
     pub arrangements: Value,
     /// What's wrong with backups, for an admin.
     pub backups: Option<Value>,
-    /// Where an agent reads how to connect itself, when the install has no address.
+    /// Where an agent reads how to connect itself, when the network has no address.
     pub guide: Option<String>,
-    /// Whether people manage passkeys at the install's address: not in a throwaway network, whose sign-in lets its person in
+    /// Whether people manage passkeys at the network's address: not in a throwaway network, whose sign-in lets its person in
     /// with none.
     pub passkeys: bool,
     /// What it knows of each device now: `kind` (as it last said), and whatever else it says of it.
@@ -40,10 +40,10 @@ pub struct Here<'a> {
     pub client_now: &'a dyn Fn(&Machine) -> Map<String, Value>,
 }
 
-/// The install as `user` sees it, with `here` from the node answering; None for `install` if it has none.
+/// The network as `user` sees it, with `here` from the node answering; None for `network` if it has none.
 pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
     let settings = settings(&m.map(ScopeDb::settings).unwrap_or_default());
-    let install = m.map(|m| install(m, user, &settings, &here));
+    let network = m.map(|m| network(m, user, &settings, &here));
     let address = settings.get("address").and_then(|a| a.as_str()).filter(|a| !a.is_empty());
     let passkeys = address.filter(|_| here.passkeys).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
     let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""), passkeys.as_deref())).unwrap_or_default();
@@ -54,7 +54,8 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
         "me": here.me,
         "device": here.device,
         "user": m.and_then(|m| m.user(user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role })),
-        "install": install,
+        // Still `install`, as every client and service of every age reads it.
+        "install": network,
         // Requests for an item waiting for this user to answer (see GET /v1/vault/requests).
         "vault_requests": here.waiting,
         // How this user arranged each of their pages (see `arrange`).
@@ -72,7 +73,7 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
     state
 }
 
-fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
+fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
     let set = rank::set(&m.settings());
     let switches = m.switches();
     // Service endpoints are listed as devices too, offering their service.
@@ -143,9 +144,9 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         }).collect::<Map<String, Value>>(),
         // Where the viewer's own things run, as their own device chose: the machines' keys, or null if it hasn't yet.
         "runs": m.runs(me).map(|on| on.iter().map(hex).collect::<Vec<_>>()),
-        // When the install's recovery key last let a device in, and whose.
+        // When the network's recovery key last let a device in, and whose.
         "recovery_used": m.recovery_used().map(|(time, user)| json!({ "time": time, "user": user })),
-        // When the install's recovery key was set.
+        // When the network's recovery key was set.
         "recovery_set": m.recovery_set(),
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at(), "clients": clients,
@@ -165,7 +166,7 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
     })
 }
 
-/// The install's settings: the custom build's defaults (config.toml's `[settings]`), and what its admins set over them
+/// The network's settings: the custom build's defaults (config.toml's `[settings]`), and what its admins set over them
 /// (`ScopeDb::settings`).
 pub fn settings(set: &BTreeMap<String, String>) -> Map<String, Value> {
     let mut out: Map<String, Value> = crate::config::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
@@ -180,7 +181,7 @@ pub fn install_line() -> Option<String> {
     (!repo.is_empty()).then(|| format!("curl -fsSL https://github.com/{repo}/releases/latest/download/install.sh | sh"))
 }
 
-/// What to paste into an AI so it connects itself, for Connect Your AI: the guide at the install's address, where it
+/// What to paste into an AI so it connects itself, for Connect Your AI: the guide at the network's address, where it
 /// has one; else the one a device serves on its tailnet (`guide`), or, where it serves none, the command line's guide.
 pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
     let (yours, cli) = (crate::config::YOURS, crate::config::CLI);
@@ -217,7 +218,7 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, st
         item("vault", "Vault", "lock", "#5856d6"),
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
-    if m.may(&me.id, "change-settings", INSTALL) {
+    if m.may(&me.id, "change-settings", NETWORK) {
         let backed = item("backups", "Backups", "hard-drives", "#ff9500");
         out.push(if backups { with(backed, "badge", json!(1)) } else { backed });
         out.push(item("labs", "Labs", "flask", "#af52de"));

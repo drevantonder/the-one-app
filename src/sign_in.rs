@@ -1,4 +1,4 @@
-//! This machine's CLI and MCP signed in at the install's address, as every other client is: an OAuth client of its sign-in
+//! This machine's CLI and MCP signed in at the network's address, as every other client is: an OAuth client of its sign-in
 //! service, registered the first time it signs in. The person approves a short code by signing in on any device
 //! (`cloudflare/auth`'s `/sign-in/code`), here in the browser if this machine has a screen. The refresh token is kept in a
 //! file only this machine's user reads, outside the node's data: the node is only ever sent access tokens.
@@ -15,7 +15,7 @@ use sha2::Digest;
 
 use crate::config::{CLI, NAME};
 
-/// What's kept: the install's address, this machine's client there, and its tokens.
+/// What's kept: the network's address, this machine's client there, and its tokens.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Kept {
     pub address: String,
@@ -113,7 +113,7 @@ pub struct Started {
     meta: Value,
 }
 
-/// Starts signing in to the install at `address`, for the device `join` names (its key ‖ seal key, hex), if it's one
+/// Starts signing in to the network at `address`, for the device `join` names (its key ‖ seal key, hex), if it's one
 /// that then asks to be let in: → the code the person approves, and its link.
 pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
     let address = address.trim_end_matches('/').to_string();
@@ -146,7 +146,7 @@ pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
 
 /// Approves a sign-in as a throwaway network's first person would in a browser, with no passkey: a code's link (the CLI's) or
 /// an authorization (an app's, which then comes back to it). Only a throwaway network's sign-in signs anyone in this way
-/// (`cloudflare/auth`'s `throwawayInstall`). `person`, someone who joined it, signs in as them instead.
+/// (`cloudflare/auth`'s `throwawayNetwork`). `person`, someone who joined it, signs in as them instead.
 pub fn approve_on_throwaway(address: &str, url: &str, person: Option<&str>) -> Result<()> {
     let address = address.trim_end_matches('/');
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();

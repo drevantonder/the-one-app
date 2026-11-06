@@ -192,8 +192,7 @@ Check: on the Mac, `apple/build.sh`, then from another device: `imessage_read`, 
 Check: `one throwaway`, WhatsApp still links and sends; `one throwaway shell run` still works (`person: true`).
 
 Done for Linux and the Mac (2026-11-05), `src/sandbox.rs`, its test `tests/sandbox.rs`. Unlike the above: a fixed
-template unit (`<cli>-service@.service`, written with polkit's rule by `<cli> services sandbox | sudo sh`, which
-install.sh runs), not transient units, since starting a transient unit lets its starter set `User=root`; and the
+template unit (`<cli>-service@.service`, written with polkit's rule by `<cli> services sandbox | sudo sh`, which install.sh runs), not transient units, since starting a transient unit lets its starter set `User=root`; and the
 network cut by our launcher inside it (an unprivileged user and network namespace, a port forwarded to the endpoint's
 socket, `HTTPS_PROXY` to its proxy), since LXC containers (personal, ptc) switch `PrivateNetwork=` off. A service
 whose app declares `"*"` and `person: true` (Shell, Agent Devices) runs as before. A unit's data is systemd's

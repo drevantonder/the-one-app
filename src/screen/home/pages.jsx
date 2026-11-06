@@ -117,7 +117,7 @@ function pageView(p) {
 
 /// Settings, as a page: its items' icons.
 const settingsView = () => ({
-  scope: SETTINGS, title: "Settings", subtitle: home.install()?.name || "",
+  scope: SETTINGS, title: "Settings", subtitle: home.network()?.name || "",
   list: (home.data.state.settings_items || []).map((item) => tile(`settings:${item.name}`, {
     name: item.title, icon: { name: item.name, title: item.title, icon: item.icon, color: item.color }, badge: item.badge || 0,
     // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.

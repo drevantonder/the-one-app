@@ -1,15 +1,15 @@
-//! Labs: features still being built, which an install's admins switch on for everyone in Settings › Labs. The core
+//! Labs: features still being built, which a network's admins switch on for everyone in Settings › Labs. The core
 //! declares its own (`CORE`); an app declares its own in its module, and a service in what it describes, as
 //! `labs: { <name>: { title, description } }`. Each is off until its setting says "on": `lab.<name>` for the core's,
 //! `lab.app.<app>.<name>` for an app's, `lab.service.<service>.<name>` for a service's, which a service reads from
-//! the install's settings as any other. A lab that's done leaves its declaration, and its setting goes with it.
+//! the network's settings as any other. A lab that's done leaves its declaration, and its setting goes with it.
 
 use std::collections::BTreeMap;
 
 /// The core's own labs: (name, title, description).
 pub const CORE: &[(&str, &str, &str)] = &[];
 
-/// Whether `name` may be one of the install's settings: lowercase words joined by _, or a lab's, whose parts are an
+/// Whether `name` may be one of the network's settings: lowercase words joined by _, or a lab's, whose parts are an
 /// app's or service's name and a lab's. An older device ignores a lab's setting, so to it the lab is off.
 pub fn valid_setting(name: &str) -> bool {
     let word = |w: &str| !w.is_empty() && w.len() <= 40 && w.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
@@ -31,12 +31,12 @@ pub fn app_key(app: &str, lab: &str) -> String {
     format!("lab.app.{app}.{lab}")
 }
 
-/// Whether the lab whose setting is `key` is on, by the install's `settings`.
+/// Whether the lab whose setting is `key` is on, by the network's `settings`.
 pub fn on(settings: &BTreeMap<String, String>, key: &str) -> bool {
     settings.get(key).is_some_and(|v| v == "on")
 }
 
-/// The settings of every lab that's on, of the install's `settings`.
+/// The settings of every lab that's on, of the network's `settings`.
 pub fn on_keys(settings: &BTreeMap<String, String>) -> Vec<String> {
     settings.iter().filter(|(k, v)| k.starts_with("lab.") && *v == "on").map(|(k, _)| k.clone()).collect()
 }

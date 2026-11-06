@@ -1,11 +1,11 @@
-//! Push: how an app, an agent or the install reaches someone who isn't looking, on every device of theirs that can get
-//! notifications. Every push is a note sealed to the one device it's for, which the install's push Worker
+//! Push: how an app, an agent or the network reaches someone who isn't looking, on every device of theirs that can get
+//! notifications. Every push is a note sealed to the one device it's for, which the network's push Worker
 //! (`cloudflare/push/`) carries to Apple's, Google's, Microsoft's or a browser's push service; only that device opens it.
 //!
 //! A note is JSON (`Note`): what to show, the app screen a tap opens, and maybe an action its device checks itself,
 //! signed by the device that sent it (`keys::signed_request`, domain `one/note`, so its receiver can tell which of the
-//! install's devices it's from; a note the install's own Workers send is unsigned), then sealed to the receiving device's
-//! seal key (`cloudflare::seal_to`), the key the install's signed entries list for it, never one a node or a Worker says.
+//! network's devices it's from; a note the network's own Workers send is unsigned), then sealed to the receiving device's
+//! seal key (`cloudflare::seal_to`), the key the network's signed entries list for it, never one a node or a Worker says.
 //!
 //! Each device that gets pushes registers its address with the Worker itself (`register_request`). A node answers the
 //! `push` tools for any caller (`node::push`): `send` seals a note to each of the caller's devices and hands them to the
@@ -73,7 +73,7 @@ pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result
 }
 
 /// Opens a note sealed to the device whose seal secret is `secret`: → the note, and the key that signed it (hex), or
-/// none for a note from the install's Workers. A signature that's wrong is refused.
+/// none for a note from the network's Workers. A signature that's wrong is refused.
 pub fn open_note(secret: &[u8; 32], sealed: &[u8]) -> Result<(Note, Option<String>)> {
     let plain = crate::cloudflare::open_sealed(secret, sealed)?;
     let mut v: Value = serde_json::from_slice(&plain).map_err(|_| anyhow!("not a note"))?;
@@ -108,7 +108,7 @@ pub struct Address {
 }
 
 /// What a device sends the push Worker to register `address` (`POST <address>/push/register`): signed with its key,
-/// naming its seal key `seal`, which only the install's own Workers seal to, and its person `user`, as its own entries
+/// naming its seal key `seal`, which only the network's own Workers seal to, and its person `user`, as its own entries
 /// list it, whom sign-in pushes about their devices joining.
 pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, user: Option<&str>, at: u64) -> Result<Value> {
     let mut fields = serde_json::to_value(address)?;

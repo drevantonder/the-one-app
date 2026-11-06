@@ -191,7 +191,7 @@ final class Mac {
 }
 
 /// Signed in, the person's nodes over iroh, as this window's own device (which this Mac's own node approves at once, if
-/// it's theirs); signed out, this Mac's own node, asked only what it is, and to join an install with a pairing code.
+/// it's theirs); signed out, this Mac's own node, asked only what it is, and to join a network with a pairing code.
 struct MacNode: NodeTransport {
     private static let base = URL(string: "http://127.0.0.1:\(Bundle.main.object(forInfoDictionaryKey: "NodePort") as! String)")!
     private static let signedOut: Set = ["v1/state", "v1/join"]

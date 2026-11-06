@@ -52,14 +52,14 @@ impl Node {
         m.switch(device, name).is_some_and(|s| !s.on)
     }
 
-    /// The install this device's parts are in, and those switched on here, each with when it was: switched on again
+    /// The network this device's parts are in, and those switched on here, each with when it was: switched on again
     /// while it's on, it starts afresh.
-    pub fn parts_on(&self) -> Result<(crate::service::Install, BTreeMap<String, u64>)> {
+    pub fn parts_on(&self) -> Result<(crate::service::Network, BTreeMap<String, u64>)> {
         let address = self.address()?;
         self.with(|i| {
             let root = i.r.root.with_context(|| format!("this device isn't in {YOURS} yet"))?.to_hex();
             let on = i.r.db().switches().into_iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name, s.time)).collect();
-            Ok((crate::service::Install { address: address.clone(), root, user: i.user.clone() }, on))
+            Ok((crate::service::Network { address: address.clone(), root, user: i.user.clone() }, on))
         })
     }
 
@@ -123,7 +123,7 @@ impl Node {
 
     /// The services serving on this device, whom each serves, and what each says it is. One its person switched off
     /// here isn't served.
-    pub(super) fn services_here(&self, i: &Install) -> Vec<Service> {
+    pub(super) fn services_here(&self, i: &Network) -> Vec<Service> {
         let m = i.r.db();
         let everyone: Vec<String> = m.users().into_iter().map(|u| u.id).filter(|u| m.serves(&self.0.id, u)).collect();
         let removed = |name: &str| Self::off(m, &self.0.id, name);
@@ -139,7 +139,7 @@ impl Node {
     /// its processes, its own or fetched from a release when switched on), with whether it's switched on and, while
     /// it isn't simply on or off, what it's doing (`doing`) or what went wrong (`problem`), and its title if it gives
     /// one. Devices that don't say this run only what they list as serving.
-    pub(super) fn parts_here(&self, i: &Install) -> Vec<Value> {
+    pub(super) fn parts_here(&self, i: &Network) -> Vec<Value> {
         let m = i.r.db();
         let on = |name: &str| !Self::off(m, &self.0.id, name);
         let mut out: BTreeMap<String, Value> = BTreeMap::new();

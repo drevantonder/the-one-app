@@ -5,16 +5,16 @@
 //! entries arrive.
 //!
 //! Every scope's database has the same tables, `permissions`' among them with its defaults. What `global`'s entries
-//! say of the whole install (people, groups, invites, devices, relations, epochs and app schedules of every scope, apps,
-//! services, settings, Vault keys, recovery) is filled in only in `global`'s, which everyone in the install reads; a
+//! say of the whole network (people, groups, invites, devices, relations, epochs and app schedules of every scope, apps,
+//! services, settings, Vault keys, recovery) is filled in only in `global`'s, which everyone in the network reads; a
 //! person's or group's has only its own state (installs, schedules, Vault requests, pages, forgotten blobs), which
 //! only those who use it may read.
 //!
 //! Who may do what is `permissions::may` over `relations`, whose objects are `object(scope)`, `device(key)`,
 //! `service(key)` and `app(name)`. Whether an object exists (a device still listed, a group made) is the tables' to
-//! say, not `may`'s: the install's admins may remove every device, listed or not.
+//! say, not `may`'s: the network's admins may remove every device, listed or not.
 //!
-//! People and groups are named as `person:<id>` and `group:<id>`; an app owned by the install's admins as `admins`.
+//! People and groups are named as `person:<id>` and `group:<id>`; an app owned by the network's admins as `admins`.
 //! Keys and hashes are lowercase hex, times milliseconds, flags 0 or 1, and lists and arrangements JSON.
 //!
 //! Its state hash is any database's (`db::state_hash`): its rows', whatever order they were written in, and whatever
@@ -30,7 +30,7 @@ use crate::permissions;
 
 /// The tables, the same in every scope's database, besides the permissions' (`permissions::SCHEMA`). STRICT, so a
 /// value is stored as the type it was given, and every table has a primary key, which changesets need. App schedules
-/// are `keeps` and `keep_keys`, the names older devices read.
+/// are `keeps` and `keep_keys`, and the network's row `install`: the names older devices read.
 pub const SCHEMA: &str = "
 CREATE TABLE install (
   id INTEGER PRIMARY KEY CHECK (id = 0),
@@ -235,16 +235,16 @@ pub fn app(name: &str) -> String {
     format!("app:{name}")
 }
 
-/// A scope, as an object of permissions: the install, a group, or a person's own.
+/// A scope, as an object of permissions: the network, a group, or a person's own.
 pub fn object(scope: &Scope) -> String {
     match scope {
-        Scope::Global => permissions::INSTALL.into(),
+        Scope::Global => permissions::NETWORK.into(),
         Scope::Group(g) => group(g),
         Scope::User(u) => person(u),
     }
 }
 
-/// A role in the install or a group, as `permissions` names it.
+/// A role in the network or a group, as `permissions` names it.
 pub fn role(r: Role) -> &'static str {
     match r {
         Role::Admin => "admin",
@@ -267,7 +267,7 @@ fn int(n: u64) -> i64 {
 }
 
 /// A scope's database, as replay says it is: `members` from `global`'s entries, and `state` from the scope's own.
-/// What `global`'s entries say of the whole install is filled in only for `global`.
+/// What `global`'s entries say of the whole network is filled in only for `global`.
 pub fn build(members: &Members, scope: &Scope, state: &ScopeState) -> Result<Connection> {
     let db = Connection::open_in_memory()?;
     db.execute_batch(SCHEMA)?;
@@ -275,7 +275,7 @@ pub fn build(members: &Members, scope: &Scope, state: &ScopeState) -> Result<Con
     let tx = db.unchecked_transaction()?;
     permissions::defaults(&tx)?;
     if *scope == Scope::Global {
-        install(&tx, members)?;
+        network(&tx, members)?;
         relations(&tx, members)?;
     }
     own(&tx, state)?;
@@ -284,8 +284,8 @@ pub fn build(members: &Members, scope: &Scope, state: &ScopeState) -> Result<Con
     Ok(db)
 }
 
-/// What `global`'s entries say of the whole install.
-fn install(db: &Connection, m: &Members) -> Result<()> {
+/// What `global`'s entries say of the whole network.
+fn network(db: &Connection, m: &Members) -> Result<()> {
     let used = m.recovery_used.as_ref();
     db.execute(
         "INSERT INTO install VALUES (0, ?, ?, ?, ?, ?)",
@@ -369,7 +369,7 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
             db.execute("INSERT OR IGNORE INTO vault_opens VALUES (?, ?)", params![scope.to_string(), hex(key)])?;
         }
     }
-    // The recovery keys in the order they were set: the last is the install's, and only its time is known.
+    // The recovery keys in the order they were set: the last is the network's, and only its time is known.
     let keys: Vec<&Key> = m.recovery_was.iter().chain(&m.recovery).collect();
     for (n, key) in (0i64..).zip(&keys) {
         let current = n as usize + 1 == keys.len() && m.recovery.is_some();
@@ -381,11 +381,11 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
 /// Who holds which role on what, in `permissions`' words, as replay says now: only people still in, and devices
 /// still listed, hold any. Which devices run a scope's calls is a `runner` row for each, as `Members::runs_for`
 /// says: for a group or `global` that follows from its admins, so it's worked out here rather than kept as a rule.
-/// The Cloudflare node, which an admin's setting names, is the install's admins' device.
+/// The Cloudflare node, which an admin's setting names, is the network's admins' device.
 fn relations(db: &Connection, m: &Members) -> Result<()> {
     let add = |subject: &str, relation: &str, object: &str| db.execute("INSERT OR IGNORE INTO relations VALUES (?, ?, ?, NULL)", params![subject, relation, object]);
     for u in m.users.values().filter(|u| !u.removed) {
-        add(&person(&u.id), role(u.role), permissions::INSTALL)?;
+        add(&person(&u.id), role(u.role), permissions::NETWORK)?;
         add(&person(&u.id), "owner", &person(&u.id))?;
     }
     for g in m.groups.values() {
@@ -396,12 +396,12 @@ fn relations(db: &Connection, m: &Members) -> Result<()> {
     for d in m.machines.values().filter(|d| m.machine(&d.key).is_some()) {
         add(&person(&d.user), "owner", &device(&d.key))?;
         if m.service(&d.key).is_some() {
-            let users = if d.shared { format!("{}#member", permissions::INSTALL) } else { person(&d.user) };
+            let users = if d.shared { format!("{}#member", permissions::NETWORK) } else { person(&d.user) };
             add(&users, "user", &service(&d.key))?;
         }
     }
     if let Some(key) = m.cloudflare_node() {
-        add(&format!("{}#admin", permissions::INSTALL), "admin", &device(&key))?;
+        add(&format!("{}#admin", permissions::NETWORK), "admin", &device(&key))?;
     }
     let runners = m.computes().map(|c| c.key).chain(m.cloudflare_node());
     for key in runners {
@@ -414,7 +414,7 @@ fn relations(db: &Connection, m: &Members) -> Result<()> {
             Principal::User(u) if m.user(u).is_some() => person(u),
             Principal::User(_) => continue,
             Principal::Group(g) => format!("{}#admin", group(g)),
-            Principal::Admins => format!("{}#admin", permissions::INSTALL),
+            Principal::Admins => format!("{}#admin", permissions::NETWORK),
         };
         add(&owners, "owner", &app(&a.name))?;
     }
@@ -473,7 +473,7 @@ pub(crate) mod tests {
         let scopes = m.scopes();
         for u in m.users.values().filter(|u| !u.removed).map(|u| u.id.as_str()) {
             let p = person(u);
-            assert_eq!(may(&p, "change-settings", permissions::INSTALL), m.is_admin(u), "{u} is an admin");
+            assert_eq!(may(&p, "change-settings", permissions::NETWORK), m.is_admin(u), "{u} is an admin");
             for s in &scopes {
                 let o = object(s);
                 assert_eq!(may(&p, "use", &o), m.may_use(u, s), "{u} uses {s}");

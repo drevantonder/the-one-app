@@ -44,7 +44,7 @@ impl Node {
         self.route(req, me).await
     }
 
-    /// A call from someone signed in at the install's address, which is its person's in every way but one: the node's own network messages are its
+    /// A call from someone signed in at the network's address, which is its person's in every way but one: the node's own network messages are its
     /// devices' to send, and a sign-in's caller has this device's key.
     pub fn for_sign_in(&self, req: CallRequest) -> Result<CallRequest> {
         let req = self.resolve(req);
@@ -125,7 +125,7 @@ impl Node {
     /// or says to go elsewhere.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let req = self.identified(req)?;
-        // Push runs on whichever node is asked, for anyone: it goes through the install's push Worker.
+        // Push runs on whichever node is asked, for anyone: it goes through the network's push Worker.
         if req.service.as_deref() == Some(crate::push::NAME) {
             return self.push(&req.tool, &req.input, &me, req.from.as_deref()).await;
         }
@@ -214,7 +214,7 @@ impl Node {
     }
 
     /// The devices that might run a call, in the order it tries them: those that are up with room first; then the
-    /// near before the far (FAR); then by the install's order (src/rank.rs); this device before another as good; then
+    /// near before the far (FAR); then by the network's order (src/rank.rs); this device before another as good; then
     /// the nearest. A service about its own machine runs here first.
     pub(super) fn candidates(&self, req: &CallRequest, me: &Caller) -> Result<Vec<Key>> {
         let passed = passed(me);
@@ -236,7 +236,7 @@ impl Node {
         // on the caller's first.
         let about_here = |d: &Value| d["prefer"] == "here" || d["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == req.tool.as_str() && o["prefer"] == "here"));
         // This device: its node, or a part of it (a service endpoint of oned's own).
-        let ours = |i: &Install, k: &Key| *k == self.0.id || i.r.db().machine(k).is_some_and(|m| m.device == Some(self.0.id));
+        let ours = |i: &Network, k: &Key| *k == self.0.id || i.r.db().machine(k).is_some_and(|m| m.device == Some(self.0.id));
         let here_first = req.service.is_some()
             && self.with(|i| {
                 let part = i.peers.iter().any(|(k, p)| ours(i, k) && i.online(k) && p.services.iter().any(|d| d.0 == req.app && about_here(&d.2)));
@@ -627,7 +627,7 @@ impl Node {
     }
 
     /// Writes a call's appends as its caller. Every one is checked before any is written: a call that fails writes
-    /// nothing. Installs come last, since installing a built-in app the install doesn't have yet adds it first.
+    /// nothing. Installs come last, since installing a built-in app the network doesn't have yet adds it first.
     pub(super) async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller, from: Option<&str>) -> Result<()> {
         // What it spent on AI counts against the app that called it, if one did.
         let (costs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Cost { .. }));
@@ -755,7 +755,7 @@ impl Node {
     /// The network messages other nodes send this one over iroh: `hello` and `changed`.
     pub(super) async fn network_message(&self, message: &str, input: &Value, me: &Caller) -> Result<Value> {
         match message {
-            // Another node's, which only a device of the install sends.
+            // Another node's, which only a device of the network sends.
             "hello" | "changed" if self.with(|i| Ok(i.r.db().compute(&me.key).is_some()))? => {
                 if message == "hello" {
                     let mut services: Vec<Service> = serde_json::from_value(input["services"].clone()).unwrap_or_default();
@@ -941,7 +941,7 @@ impl Node {
 
     /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs a
     /// tool of an app the calling app uses, or a function of its own service, as its caller; `POST /blob` keeps a blob, `GET
-    /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps, `GET /devices` its devices.
+    /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the network's apps, `GET /devices` its devices.
     pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
         use axum::response::IntoResponse;
         let grant = &self.grant_of(token).context("only a running call asks the node")?;
@@ -1042,7 +1042,7 @@ impl Node {
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
             ("GET", "/failing") => ok(json!(self.failing_schedules(&grant.caller).await?)),
-            // A push to the caller's devices, from this app, through the install's push Worker.
+            // A push to the caller's devices, from this app, through the network's push Worker.
             ("POST", "/notify") => {
                 ensure!(!grant.read_only, "this call only reads: it can't push");
                 let input: Value = serde_json::from_slice(&body)?;
@@ -1051,14 +1051,14 @@ impl Node {
             ("GET", "/devices") => ok(self.state_for(&grant.caller)["install"]["devices"].take()),
             // Run priority's order, as the person the call is for: only an admin changes it.
             ("GET", "/order") => {
-                let install = self.state_for(&grant.caller)["install"].take();
-                let mut order: Vec<Value> = install["devices"].as_array().cloned().unwrap_or_default().into_iter().filter(|s| s["service"].is_null()).map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "priority": s["priority"], "online": s["online"], "here": s["me"] })).collect();
-                if let Some(priority) = install["serverless"].get("priority") {
+                let network = self.state_for(&grant.caller)["install"].take();
+                let mut order: Vec<Value> = network["devices"].as_array().cloned().unwrap_or_default().into_iter().filter(|s| s["service"].is_null()).map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "priority": s["priority"], "online": s["online"], "here": s["me"] })).collect();
+                if let Some(priority) = network["serverless"].get("priority") {
                     order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": priority, "online": true, "here": false }));
                 }
                 let set = self.with(|i| Ok(rank::set(&i.r.db().settings())))?;
                 order.sort_by_cached_key(|s| (rank::priority(&set, s["key"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
-                ok(json!({ "order": order, "admin": install["role"] == "admin" }))
+                ok(json!({ "order": order, "admin": network["role"] == "admin" }))
             }
             ("POST", "/priority") => {
                 ensure!(!grant.read_only, "this call only reads: it can't change run priority");
@@ -1092,7 +1092,7 @@ impl Node {
         }
     }
 
-    /// Runs a call one of the install's services asked for, as its person, wherever it runs: a service writes nothing
+    /// Runs a call one of the network's services asked for, as its person, wherever it runs: a service writes nothing
     /// itself, and asks for the calls the program it offers makes (`/v1/call` where it's hosted).
     pub(super) async fn accept_service_call(&self, remote: Key, request: &Value) -> Reply {
         match self.accept_service(remote, request) {
@@ -1112,7 +1112,7 @@ impl Node {
     fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let me = self.check_caller(remote, request)?;
         ensure!(request["me"]["token"].is_null(), "a service asks with no sign-in");
-        let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote).map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this install")?;
+        let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote).map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this network")?;
         ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own person's node");
         let mut req: CallRequest = serde_json::from_value(crate::service::limited(&name, request)?)?;
         let resolved = self.resolve(req.clone());
@@ -1181,7 +1181,7 @@ impl Node {
 
     /// Who a call another device passed on is for: with a sign-in's token, someone that device's node serves or whose
     /// client it is; with none, only the person whose client device `remote` is, asking itself. The node's own network messages
-    /// (`hello`, `changed`) come from any compute endpoint of the install, as itself; a person's service asks as them, as itself.
+    /// (`hello`, `changed`) come from any compute endpoint of the network, as itself; a person's service asks as them, as itself.
     pub(super) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
@@ -1207,7 +1207,7 @@ impl Node {
     }
 }
 
-/// The install's address, without a last `/`, if it has one yet.
+/// The network's address, without a last `/`, if it has one yet.
 pub(super) fn address(m: &ScopeDb) -> Option<String> {
     m.setting("address").map(|a| a.trim_end_matches('/').to_string())
 }
@@ -1219,7 +1219,7 @@ fn passed(me: &Caller) -> bool {
 
 /// The scopes a call reaches for `user`: those it names, or every one its app reaches; a service's, those it names or
 /// its person's own.
-fn call_scopes(i: &Install, req: &CallRequest, user: &str) -> Result<Vec<Scope>> {
+fn call_scopes(i: &Network, req: &CallRequest, user: &str) -> Result<Vec<Scope>> {
     let named = |s: &String| if s == "user" { Ok(Scope::User(user.to_string())) } else { Scope::parse(s) };
     match (&req.scopes, &req.service) {
         (Some(named_), _) => named_.iter().map(named).collect(),
@@ -1229,7 +1229,7 @@ fn call_scopes(i: &Install, req: &CallRequest, user: &str) -> Result<Vec<Scope>>
 }
 
 /// Checks a call may run here, and makes its context; or says why it should run elsewhere.
-fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller, title: &str) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
+fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
     let m = i.r.db();
     let here = node.0.id;
     if !m.serves(&here, &me.user) {

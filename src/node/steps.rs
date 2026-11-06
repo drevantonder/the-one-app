@@ -1,5 +1,5 @@
 //! `global`'s scope database once its log is frozen (`database::switch`, `database::steps`): freezing the log in the
-//! ceremony an admin runs with the install's recovery key, or a new install runs as it's made (`switch`), reading the steps others wrote in the bucket, and writing this device's own and
+//! ceremony an admin runs with the network's recovery key, or a new network runs as it's made (`switch`), reading the steps others wrote in the bucket, and writing this device's own and
 //! those its people's other devices sign. What this device has read of each it keeps in its folder, checked against
 //! its hash when it starts again (`scope-kept/`).
 
@@ -18,7 +18,7 @@ impl Node {
         self.with(|i| Ok(i.r.frozen.is_some())).unwrap_or(false)
     }
 
-    /// The ceremony that freezes `global`'s log, run once by an admin on their own machine with the install's recovery
+    /// The ceremony that freezes `global`'s log, run once by an admin on their own machine with the network's recovery
     /// key (`one switch`), which signs everything it writes and is never kept, if it isn't frozen yet: on a network made
     /// before this release, or as a new one is made. It waits for no device: one that reads less than `switch::GATE` is
     /// told to update once it's frozen. A `FREEZING` step first, so
@@ -37,7 +37,7 @@ impl Node {
         let gate = self.with(|i| {
             let db = i.r.db();
             ensure!(db.recovery() == Some(recovery.verifying_key().to_bytes()), "that isn't {YOURS}'s recovery key");
-            ensure!(db.may(&user, "change-settings", scopes::INSTALL), "only an admin of {YOURS} freezes its log");
+            ensure!(db.may(&user, "change-settings", scopes::NETWORK), "only an admin of {YOURS} freezes its log");
             Ok(i.r.members.gate())
         })?;
         // That the gate is open, from this admin's own device, in the log: a freeze counts only if the log it names
@@ -389,7 +389,7 @@ impl Node {
     pub async fn global_steps(&self, caller: &Caller, from: u64, welcome: Option<steps::Welcome>) -> Result<Value> {
         self.read_steps().await?;
         let read = self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "use", scopes::INSTALL), "you aren't one of this install's people");
+            ensure!(i.r.db().may(&caller.user, "use", scopes::NETWORK), "you aren't one of this network's people");
             Ok(i.r.at())
         })?;
         let read = read.context("global's log isn't frozen")?;

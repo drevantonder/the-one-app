@@ -55,7 +55,7 @@ targets:
         NSContactsUsageDescription: Your agents and other devices look up your contacts through this Mac.
         NSAppleEventsUsageDescription: Your agents send iMessages you ask them to through Messages on this Mac.
 
-  # The iPhone and iPad sign in at the install's address, as the web client does, and ask its nodes there.
+  # The iPhone and iPad sign in at the network's address, as the web client does, and ask its nodes there.
   Phone:
     type: application
     platform: iOS

@@ -1,4 +1,4 @@
-//! The `push` tools (`crate::push`), which every node answers itself for any caller, through the install's push Worker:
+//! The `push` tools (`crate::push`), which every node answers itself for any caller, through the network's push Worker:
 //! never a service a device runs.
 
 use crate::config::YOURS;
@@ -67,7 +67,7 @@ impl Node {
         Ok(out)
     }
 
-    /// A person's own devices that might get pushes, as the install's signed entries list them: (key, seal key, name).
+    /// A person's own devices that might get pushes, as the network's signed entries list them: (key, seal key, name).
     fn devices_of(&self, user: &str) -> Result<Vec<(Key, Key, String)>> {
         self.with(|i| Ok(i.r.db().clients().into_iter().filter(|m| m.user == user && !m.removed && m.passkey.is_none()).map(|m| (m.key, m.seal, m.name)).collect()))
     }

@@ -1,4 +1,4 @@
-//! Pairing: a code that lets a new device join the install, and admitting it.
+//! Pairing: a code that lets a new device join the network, and admitting it.
 
 use crate::config::YOURS;
 use super::*;
@@ -56,37 +56,37 @@ impl Node {
         Ok(())
     }
 
-    /// Joins the install a pairing code is for, as a device.
+    /// Joins the network a pairing code is for, as a device.
     pub async fn join(&self, code: &str) -> Result<()> {
         let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
-        self.ensure_no_install()?;
+        self.ensure_no_network()?;
         let request = JoinRequest { secret: code.secret, name: self.device_name(), as_: "device".into() };
         let reply = self.ask_to_join(&code.address, &net::pairing_ticket(&code.secret), code.from, serde_json::to_value(&request)?).await.context("couldn't reach the device that made the pairing code")?;
         if let Some(err) = reply.get("error") {
             bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
         }
         let reply: JoinReply = serde_json::from_value(reply)?;
-        // A folder on another machine isn't here: it's this install's bucket only if it says so. S3 is reached through
-        // the URL signer, which this device can ask once it knows the install's address.
-        let here = |f: &BTreeMap<String, String>| Place::from_fields(f).ok().and_then(|p| p.get(INSTALL_OBJECT).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes());
+        // A folder on another machine isn't here: it's this network's bucket only if it says so. S3 is reached through
+        // the URL signer, which this device can ask once it knows the network's address.
+        let here = |f: &BTreeMap<String, String>| Place::from_fields(f).ok().and_then(|p| p.get(NETWORK_OBJECT).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes());
         let mut bucket = reply.bucket.filter(|f| f.contains_key("endpoint") || here(f));
         // Its address is in the log, read from the bucket through it: until then, it's the one the code names.
         if let Some(f) = bucket.as_mut().filter(|f| f.contains_key("endpoint")) {
             f.insert("address".into(), code.address.clone());
         }
         if bucket.is_none() {
-            tracing::warn!("this device can't reach the install's bucket: it keeps no app's data until the install moves to S3-compatible storage");
+            tracing::warn!("this device can't reach the network's bucket: it keeps no app's data until the network moves to S3-compatible storage");
         }
-        self.save_install(&InstallFile { root: reply.root, user: reply.user, bucket, folders: BTreeMap::new() })?;
-        self.open_install()?;
+        self.save_network(&NetworkFile { root: reply.root, user: reply.user, bucket, folders: BTreeMap::new() })?;
+        self.open_network()?;
         let node = self.clone();
         tokio::spawn(async move {
             if let Err(err) = node.read_logs().await {
                 tracing::debug!("reading the bucket after joining: {err:#}");
             }
         });
-        self.emit(Event::Install);
+        self.emit(Event::Network);
         Ok(())
     }
 
@@ -116,10 +116,10 @@ impl Node {
     }
 
     async fn admit_with(&self, key: Key, request: &JoinRequest, pairing: &Pairing) -> Result<JoinReply> {
-        // Phones joined as clients before they signed in at your One App's address: only devices join now.
+        // Phones joined as clients before they signed in at your One App network's address: only devices join now.
         ensure!(request.as_ == "device", "only computers join with a pairing code: sign in at {YOURS}'s address instead");
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
-        let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no install")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
+        let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no network")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let endpoint = crate::keys::Endpoint { key, seal: crate::cloudflare::twin_public(&key)? };
         // A machine of the person's own is their device too. An admin lists another person's as compute, which runs
@@ -133,7 +133,7 @@ impl Node {
         }
         // Waited for: until the relay lets it in, the machine that joined reaches nothing.
         if self.address().is_ok() {
-            let admin = self.with(|i| Ok(i.r.db().may(&user, "invite", scopes::INSTALL)))?;
+            let admin = self.with(|i| Ok(i.r.db().may(&user, "invite", scopes::NETWORK)))?;
             self.tell_relay_now(json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.with_context(|| format!("{YOURS}'s network didn't take this machine: try again with the same code"))?;
         }
         Ok(JoinReply { root, user, bucket })

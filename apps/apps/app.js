@@ -1,7 +1,7 @@
-// The App Store: the apps built into the release, whether or not the install has added them, and the apps made in the
-// install; who owns each, where it's installed, its forks and its code; and "Add to…" each place the person has a
+// The App Store: the apps built into the release, whether or not the network has added them, and the apps made in the
+// network; who owns each, where it's installed, its forks and its code; and "Add to…" each place the person has a
 // page: themselves, their groups and everyone, saying who can add it where they can't.
-// An ordinary app: it installs with ctx.install, with the caller's own rights. Installing a built-in app the install
+// An ordinary app: it installs with ctx.install, with the caller's own rights. Installing a built-in app the network
 // hasn't added yet adds it (admins only). Its screens are React, in screens/ and lib/, built into dist/ when it's
 // deployed (`one deploy apps/apps`), which is committed because a release ships the app as it is.
 import mainHtml from "./dist/main.html" with { type: "text" };
@@ -36,7 +36,7 @@ function placeOf(ctx, given) {
 const placeInput = { type: "string", description: "user (you), global (everyone) or a group's name" };
 
 /// Whether the caller acts for an owner (an app's, a device's): it's theirs, a group's they're an admin of, or admins'
-/// or the install's and they're an admin.
+/// or the network's and they're an admin.
 function mine(ctx, owner) {
   if (owner === `user:${ctx.me.user}`) return true;
   if (owner === "admins" || owner === "install") return ctx.me.role === "admin";
@@ -70,7 +70,7 @@ function untar(bytes) {
   return files;
 }
 
-/// What a built-in app the install hasn't added says about itself: nothing runs it yet, so its code says (the first
+/// What a built-in app the network hasn't added says about itself: nothing runs it yet, so its code says (the first
 /// `title`, `icon`, `color`, `tagline` and `description` after the line starting `export default` given as plain strings, as the built-in
 /// apps give them before their tools; `advanced: true` too, which the store lists after the rest).
 async function described(ctx, bundle) {
@@ -162,7 +162,7 @@ export default {
   icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
-  instructions: "The App Store lists every app in this install, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
+  instructions: "The App Store lists every app in this network, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
 
   // The apps whose schedule, where you may switch it, failed its last run.
   async badge(ctx) {
@@ -243,12 +243,12 @@ export default {
     },
     source: {
       reads: false,
-      description: "Set where an app you own keeps its code, shown on its page as Source: a web address: GitHub, any git host or page, or a repo's address in Repos (<your One App's address>/repos/<owner>/<repo>.git). An empty link clears it. Built-in apps start with their folder in the open-source repo; forks start with none.",
+      description: "Set where an app you own keeps its code, shown on its page as Source: a web address: GitHub, any git host or page, or a repo's address in Repos (<your One App network's address>/repos/<owner>/<repo>.git). An empty link clears it. Built-in apps start with their folder in the open-source repo; forks start with none.",
       input: { type: "object", required: ["app", "link"], properties: { app: APP, link: { type: "string", description: "https://…, or a repo's address in Repos; empty for none" } } },
       async run(ctx, { app, link }) {
         const a = await find(ctx, app);
         if (!mine(ctx, a.owner)) throw new Error(`only ${app}'s owners set its source link`);
-        if (!a.deploys && a.built_in) throw new Error(`${app} isn't added to this install yet: add it first`);
+        if (!a.deploys && a.built_in) throw new Error(`${app} isn't added to this network yet: add it first`);
         ctx.source(app, (link || "").trim());
         return link?.trim() ? `${app}'s source is ${link.trim()}.` : `${app} has no source link now.`;
       },

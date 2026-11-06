@@ -1,4 +1,4 @@
-//! Apps: the install's, every one people may add, and adding, installing, deploying, forking and retiring them.
+//! Apps: the network's, every one people may add, and adding, installing, deploying, forking and retiring them.
 
 use super::*;
 
@@ -37,7 +37,7 @@ impl Node {
         Ok(())
     }
 
-    /// Every app in the install, with what each does for `viewer` where it's installed for them; and the services
+    /// Every app in the network, with what each does for `viewer` where it's installed for them; and the services
     /// that serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let mut out = self.catalog(viewer, false).await?;
@@ -72,12 +72,12 @@ impl Node {
         Ok(out)
     }
 
-    /// Every lab in the install, for an admin's Settings › Labs (`src/labs.rs`): the core's, then each app's, then each
+    /// Every lab in the network, for an admin's Settings › Labs (`src/labs.rs`): the core's, then each app's, then each
     /// service's, each `{ setting, title, description, on }`, an app's or service's with `app` or `service`, its
     /// `name`, `title`, `icon` and `color`.
     pub async fn labs(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let on = self.with(|i| {
-            ensure!(i.r.db().may(&viewer.user, "change-settings", scopes::INSTALL), "Only admins change Labs.");
+            ensure!(i.r.db().may(&viewer.user, "change-settings", scopes::NETWORK), "Only admins change Labs.");
             Ok(crate::labs::on_keys(&i.r.db().settings()))
         })?;
         let lab = |setting: String, name: &str, l: &Value| json!({ "title": l["title"].as_str().unwrap_or(name), "description": l["description"].as_str().unwrap_or(""), "on": on.contains(&setting), "setting": setting });
@@ -162,9 +162,9 @@ impl Node {
         Some((kind.to_string(), data_encoding::BASE64.decode(data.as_bytes()).ok()?))
     }
 
-    /// Every app in the install: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
+    /// Every app in the network: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
     /// title and icon, and for one built in, the bundle this release has of it; for those installed for them, what it
-    /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the install hasn't
+    /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the network hasn't
     /// added yet, with no deploys.
     pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
@@ -213,7 +213,7 @@ impl Node {
         for (name, mut info, mine) in listed {
             if self.0.apps.has(&name) {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
-                    // A fork's module may still give its first name; the install's name for it is the one that counts.
+                    // A fork's module may still give its first name; the network's name for it is the one that counts.
                     let declared = Schedule::all(&Value::Object(d.clone()));
                     for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "connector" | "needs" | "advanced" | "labs"))) {
                         info[k] = v;
@@ -291,10 +291,10 @@ impl Node {
         self.0.built_in.get(&app.name).filter(|_| app.owner == Principal::Admins && app.from.is_none())
     }
 
-    /// Adds a built-in app the install doesn't have yet, owned by admins, as this release has it. Admins only.
+    /// Adds a built-in app the network doesn't have yet, owned by admins, as this release has it. Admins only.
     pub(super) async fn bring_in(&self, caller: &Caller, app: &str) -> Result<()> {
         let Some(bundle) = self.0.built_in.get(app) else { return Ok(()) };
-        let (present, admin) = self.with(|i| Ok((i.r.db().app(app).is_some(), i.r.db().may(&caller.user, "add-apps", scopes::INSTALL))))?;
+        let (present, admin) = self.with(|i| Ok((i.r.db().app(app).is_some(), i.r.db().may(&caller.user, "add-apps", scopes::NETWORK))))?;
         if present {
             return Ok(());
         }
@@ -331,7 +331,7 @@ impl Node {
         (list("apps"), list("services"))
     }
 
-    /// The entries that install (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing
+    /// The entries that network (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing
     /// also installs each app it uses, and each they use, that isn't installed there yet.
     pub(super) async fn install_entries(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<Vec<(Scope, Content)>> {
         let mut wanted = vec![app.to_string()];

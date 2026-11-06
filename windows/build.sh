@@ -11,13 +11,13 @@ if [ "${1:-}" = --ssh ]; then target=${2:?--ssh needs the machine, as ssh names 
 cd "$(dirname "$0")"
 root=$(cd .. && pwd)
 config=$(cd "$(dirname "${CONFIG:-$root/config.toml}")" && pwd)/$(basename "${CONFIG:-config.toml}")
-# A top-level field: the [settings] after them are the install's, not the build's.
+# A top-level field: the [settings] after them are the network's, not the build's.
 field() { sed -n "/^\[/q; s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
 art() { echo "$(dirname "$config")/$(field "$1")"; }
 name=$(field name) cli=$(field cli)
-# What a person calls the install where they read: a workplace's custom build, which its people join with their work
-# email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".
-if [ -n "$(field join_domain)" ]; then yours=${name/#The /the }; else yours="your ${name#The }"; fi
+# What a person calls the network where they read: a workplace's custom build, which its people join with their work
+# email (join_domain), is shared, "the PTC App network"; anyone else's is "your One App network".
+if [ -n "$(field join_domain)" ]; then yours="${name/#The /the } network"; else yours="your ${name#The } network"; fi
 
 stage=$(mktemp -d)/$cli
 # Where it builds, from the user's home there (the same under either shell ssh gives): the VM's own folder, kept for the
@@ -67,9 +67,9 @@ public static class CustomBuild
 {
     public const string Name = $(quote "$name");
     public const string Cli = $(quote "$cli");
-    /// What a person calls the install: "your One App", or a workplace's, "the PTC App".
+    /// What a person calls the network: "your One App network", or a workplace's, "the PTC App network".
     public const string Yours = $(quote "$yours");
-    /// The install's address, for a custom build with one install; empty, the person gives it.
+    /// The network's address, for a custom build with one network; empty, the person gives it.
     public const string Address = $(quote "$(field address)");
     /// The COM class the Widgets board starts this program as, for its widgets (Package.appxmanifest).
     public const string WidgetClass = "$widgets";

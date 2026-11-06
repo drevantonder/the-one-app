@@ -8,7 +8,7 @@ const GEMINI = "generativelanguage.googleapis.com";
 const kinds = ["user", "global"];
 const schema = "create table settings (key text primary key, value text);";
 
-/// The settings that apply: the user's own over the install's, over the defaults.
+/// The settings that apply: the user's own over the network's, over the defaults.
 async function settings(ctx) {
   const out = { ...DEFAULTS };
   for (const s of [ctx.global, ctx.user]) {

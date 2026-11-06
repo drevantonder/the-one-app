@@ -1,4 +1,4 @@
-//! The install's Workers on Cloudflare (`cloudflare/`: sign-in, the relay, the URL signer) as nodes meet them: the formats they agree on
+//! The network's Workers on Cloudflare (`cloudflare/`: sign-in, the relay, the URL signer) as nodes meet them: the formats they agree on
 //! (`cloudflare/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
 //! and building and running the Workers in workerd.
 
@@ -165,7 +165,7 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
     Ok(claims)
 }
 
-/// Sign-in at an install's address, as nodes check its tokens: its keys fetched and kept five minutes, or
+/// Sign-in at a network's address, as nodes check its tokens: its keys fetched and kept five minutes, or
 /// until a token names a key that isn't among them (as `cloudflare/shared/token.js`'s `Issuer` does).
 #[cfg(feature = "node")]
 pub struct Issuer {

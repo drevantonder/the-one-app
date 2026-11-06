@@ -1,4 +1,4 @@
-//! `throwaway`: a throwaway network, an install of its own, made as `create` makes every new one, by a node beside this machine's own with its own
+//! `throwaway`: a throwaway network, a network of its own, made as `create` makes every new one, by a node beside this machine's own with its own
 //! home and ports, so it touches nothing of the person's (src/agents.rs leaves the harnesses alone for a node given a
 //! home). There's one for each checkout it's run in, from any folder in it, so threads working in different ones each have their
 //! own. Its Workers run beside it, and its sign-in lets its first person in with no passkey (cloudflare::Settings::throwaway_person), so a
@@ -147,7 +147,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
     let address = state["install"]["settings"]["address"].as_str().unwrap_or("");
     println!(
-        "This checkout's throwaway network is running on this machine: a new install, Throwaway, with only what every new install
+        "This checkout's throwaway network is running on this machine: a new network, Throwaway, with only what every new network
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
 recovery key; its Workers' settings are in {}.
 
@@ -159,8 +159,8 @@ recovery key; its Workers' settings are in {}.
 }
 
 /// `git`, told that the throwaway network's repos (`<its address>/repos/…`) are reached through this build's remote helper, as
-/// git is on a computer signed in to any install: this build's helper is linked in a folder of the throwaway network's, put
-/// first on git's PATH (the one the real install's CLI links is another build, reaching another node).
+/// git is on a computer signed in to any network: this build's helper is linked in a folder of the throwaway network's, put
+/// first on git's PATH (the one the real network's CLI links is another build, reaching another node).
 fn git(dir: &Path, args: &[String]) -> Result<()> {
     let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
@@ -276,7 +276,7 @@ fn start(dir: &Path) -> Result<String> {
     let free = std::net::TcpListener::bind(&was).is_ok();
     let addr = if free { was } else { std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string() };
     // Its Workers first, so its node's relay finds them the first time it asks: found later, it waits out a backoff of
-    // about half a minute, while the Cloudflare node says none of the install's devices is on.
+    // about half a minute, while the Cloudflare node says none of the network's devices is on.
     spawn_cloudflare(dir, &load_cloudflare(dir)?, &addr)?;
     spawn_node(dir, Some(&addr))
 }
@@ -285,7 +285,7 @@ fn start(dir: &Path) -> Result<String> {
 fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new throwaway network for this checkout…");
     stop(dir, true)?;
-    // Called what the person is called in their own install, if this machine is in one.
+    // Called what the person is called in their own network, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
     let mine = quick.get(format!("http://{}/v1/state", crate::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
     let me = mine.and_then(|s| s["user"]["name"].as_str().or(s["me"]["name"].as_str()).map(String::from));
@@ -323,7 +323,7 @@ fn start_new(dir: &Path) -> Result<String> {
 }
 
 /// Starts a program of the throwaway network's in a process group of its own, which stopping it stops (`pids`), logging to
-/// `log` in its folder. A client's browser is `client`: starting the install again leaves it running.
+/// `log` in its folder. A client's browser is `client`: starting the network again leaves it running.
 fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, client: bool) -> Result<u32> {
     use std::os::unix::process::CommandExt;
     let log = std::fs::File::create(dir.join(log))?;
@@ -383,7 +383,7 @@ fn spawn_cloudflare(dir: &Path, settings: &one::cloudflare::Settings, node: &str
             let _ = std::fs::remove_file(one::sign_in::path());
         }
     });
-    // Beside its node, which it asks for the install's devices, for its relay to take only them.
+    // Beside its node, which it asks for the network's devices, for its relay to take only them.
     spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["cloudflare", "serve"]).env(addr_var(), node), "cloudflare.log", false)?;
     wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("cloudflare.log"))
 }
@@ -425,7 +425,7 @@ pub fn stop(dir: &Path, delete: bool) -> Result<()> {
     stop_some(dir, delete, true)
 }
 
-/// `stop`, and with `clients` false, leaving the clients' browsers running, as starting the install again does.
+/// `stop`, and with `clients` false, leaving the clients' browsers running, as starting the network again does.
 fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
     let pids = programs(dir, clients);
     for pid in &pids {
@@ -478,7 +478,7 @@ pub fn stop_others(home: &Path) {
     let _ = std::fs::remove_file(home.join("pids"));
 }
 
-/// The throwaway network's bucket, at `bucket-addr` in its folder: the folder its node made the install in, served S3's way
+/// The throwaway network's bucket, at `bucket-addr` in its folder: the folder its node made the network in, served S3's way
 /// for the URLs its URL signer presigns (read, HEAD, list, create only if absent, replace while unchanged,
 /// delete), signatures unchecked, as it's only this machine's and only a throwaway network's.
 pub async fn bucket(home: PathBuf) -> Result<()> {
@@ -596,7 +596,7 @@ fn devices(dir: &Path) -> serde_json::Map<String, Value> {
     std::fs::read(dir.join("devices.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// One of this machine's install's Agent Devices tools (not the throwaway network's, which has none). When the node
+/// One of this machine's network's Agent Devices tools (not the throwaway network's, which has none). When the node
 /// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
 fn agent_devices(tool: &str, input: Value) -> Result<Value> {
     Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": tool, "input": input, "client": "one throwaway" })))?["ok"].clone())
@@ -1065,7 +1065,7 @@ fn build(checkout: &Path, script: &str, envs: &[(&str, &str)]) -> Result<String>
 /// The Android app: built, installed over the one there, started, and signed in at `address` as a person would:
 /// typing it and tapping Sign In, then the throwaway network's sign-in going straight on, as the throwaway network's first person
 /// or `person`, whom the phone's browser signs in as first. Once signed in on a device as them (a file in the throwaway
-/// install's folder says so), a new build keeps that sign-in.
+/// network's folder says so), a new build keeps that sign-in.
 fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
     let apk = build(checkout, "android/build.sh", &[])?;

@@ -2,8 +2,8 @@
 //! its own (`oned <name>`). It's an endpoint of its own key, kept in its folder, and gets in when its device's oned lists
 //! it as its person's, a part of that device (`Node::list_part`), which tells the relay to let it in. It holds no keys
 //! and reads no bucket: the nodes that call it bring it `global`'s entries, whose member entries it replays from the
-//! install's first entry (given by oned, so nothing on the way can make it another install's) and checks each caller by
-//! itself: a compute endpoint of the install that runs the calls of a person it serves. The program offering it, its
+//! network's first entry (given by oned, so nothing on the way can make it another network's) and checks each caller by
+//! itself: a compute endpoint of the network that runs the calls of a person it serves. The program offering it, its
 //! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
 //! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
 
@@ -35,7 +35,7 @@ use crate::services::Services;
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// The most a computer this service doesn't know of yet may send it: `global`'s entries.
 const STRANGER_LIMIT: usize = 16 << 20;
-/// How many messages a computer this service doesn't know of may send on a connection: a hello, the install's
+/// How many messages a computer this service doesn't know of may send on a connection: a hello, the network's
 /// entries, and a hello again.
 const STRANGER_MESSAGES: usize = 3;
 /// How many computers it doesn't know of may be connected at once.
@@ -45,27 +45,27 @@ const STREAMS: u32 = 32;
 /// How long reaching a node may take.
 const CONNECT: Duration = Duration::from_secs(10);
 
-/// The install a service is in, as its device's oned gives it: its address, where its relay and sign-in are, the hash
+/// The network a service is in, as its device's oned gives it: its address, where its relay and sign-in are, the hash
 /// of its first entry, which its member entries are replayed from, and the person whose service it is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Install {
+pub struct Network {
     pub address: String,
     pub root: String,
     pub user: String,
 }
 
-impl Install {
-    /// Where oned keeps it, in the service's folder.
+impl Network {
+    /// Where oned keeps it, in the service's folder: still `install.json`, which services of older builds read.
     pub fn path(dir: &Path) -> PathBuf {
         dir.join("install.json")
     }
 
-    /// Gives it to the service kept in `dir`, the first time: a service is another install's or person's only once
+    /// Gives it to the service kept in `dir`, the first time: a service is another network's or person's only once
     /// its folder goes.
     pub fn give(&self, dir: &Path) -> Result<()> {
         std::fs::create_dir_all(dir)?;
-        match std::fs::read(Self::path(dir)).ok().map(|b| serde_json::from_slice::<Install>(&b)).transpose()? {
-            Some(kept) => ensure!(kept == *self, "{} is someone else's, or in another One App ({}): remove it to move it", dir.display(), kept.address),
+        match std::fs::read(Self::path(dir)).ok().map(|b| serde_json::from_slice::<Network>(&b)).transpose()? {
+            Some(kept) => ensure!(kept == *self, "{} is someone else's, or in another network ({}): remove it to move it", dir.display(), kept.address),
             None => write_private(&Self::path(dir), &serde_json::to_vec_pretty(self)?)?,
         }
         Ok(())
@@ -80,7 +80,7 @@ struct Inner {
     name: String,
     dir: PathBuf,
     key: SigningKey,
-    install: Install,
+    network: Network,
     /// `global`'s entries, as the nodes brought them, and what its member entries add up to.
     known: Mutex<(Vec<Entry>, ScopeDb)>,
     /// Once `global`'s log is frozen, its scope database's steps nodes brought, by position from the first
@@ -97,7 +97,7 @@ struct Inner {
     /// A connection to each node it asks for calls.
     conns: Mutex<HashMap<Key, Connection>>,
     strangers: AtomicUsize,
-    /// The install's sign-in service, whose keys check a sign-in a node passes on to a service that serves everyone.
+    /// The network's sign-in service, whose keys check a sign-in a node passes on to a service that serves everyone.
     issuer: crate::cloudflare::Issuer,
     /// What its app declares its program may reach, as oned gave it (`declared.json`), if it did.
     declared: Option<crate::sandbox::Declared>,
@@ -107,7 +107,7 @@ struct Inner {
 pub const DECLARED: &str = "declared.json";
 
 
-/// Where a service keeps its key, its install and what it knows of it.
+/// Where a service keeps its key, its network and what it knows of it.
 pub fn folder(name: &str) -> PathBuf {
     crate::home().join("services").join(name)
 }
@@ -122,7 +122,7 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 impl Service {
-    /// The service `name` kept in `dir`: its key (made the first time), and the install oned gave it.
+    /// The service `name` kept in `dir`: its key (made the first time), and the network oned gave it.
     pub fn open(dir: &Path, name: &str) -> Result<Service> {
         use std::os::unix::fs::PermissionsExt;
         ensure!(members::valid_app_name(name), "a service's name is lowercase words joined by -");
@@ -137,7 +137,7 @@ impl Service {
                 key
             }
         };
-        let install: Install = serde_json::from_slice(&std::fs::read(Install::path(dir)).with_context(|| format!("{name} is started by its device's oned, which says which One App it's in"))?)?;
+        let network: Network = serde_json::from_slice(&std::fs::read(Network::path(dir)).with_context(|| format!("{name} is started by its device's oned, which says which network it's in"))?)?;
         let token = match std::fs::read_to_string(dir.join(crate::api::LOCAL_TOKEN)) {
             Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
             _ => {
@@ -146,8 +146,8 @@ impl Service {
                 t
             }
         };
-        let root = Hash::from_hex(&install.root)?;
-        let install_address = install.address.clone();
+        let root = Hash::from_hex(&network.root)?;
+        let network_address = network.address.clone();
         let entries = std::fs::read(dir.join("entries")).ok().and_then(|b| crate::entry::unpack(&b).ok()).unwrap_or_default();
         let depths: HashMap<Hash, u64> = std::fs::read(dir.join("depths")).ok().and_then(|b| serde_json::from_slice::<HashMap<String, u64>>(&b).ok()).map(|m| m.into_iter().filter_map(|(h, d)| Some((Hash::from_hex(&h).ok()?, d))).collect()).unwrap_or_default();
         let steps = read_steps(&dir.join("steps"));
@@ -156,7 +156,7 @@ impl Service {
             name: name.to_string(),
             dir: dir.to_path_buf(),
             key,
-            install,
+            network,
             known: Mutex::new((entries, members)),
             steps: Mutex::new(steps),
             depths: Mutex::new(depths),
@@ -165,7 +165,7 @@ impl Service {
             endpoint: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
             strangers: AtomicUsize::new(0),
-            issuer: crate::cloudflare::Issuer::new(&install_address),
+            issuer: crate::cloudflare::Issuer::new(&network_address),
             declared: std::fs::read(dir.join(DECLARED)).ok().and_then(|b| serde_json::from_slice(&b).ok()),
         })))
     }
@@ -199,10 +199,10 @@ impl Service {
 
     fn owner_in(&self, m: &ScopeDb) -> Option<String> {
         // Only a listing as the person whose link it was given counts: nobody else can make it theirs.
-        m.service(&self.key()).filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.install.user).map(|s| s.user)
+        m.service(&self.key()).filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.network.user).map(|s| s.user)
     }
 
-    /// Starts it: its endpoint, through the install's relay (which lets it in once it's approved), asking to be
+    /// Starts it: its endpoint, through the network's relay (which lets it in once it's approved), asking to be
     /// approved until it is, and the loopback the program offering it registers at. → that loopback's address.
     pub async fn start(&self) -> Result<std::net::SocketAddr> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -274,7 +274,7 @@ impl Service {
     }
 
     async fn bind(&self) -> Result<Endpoint> {
-        let (_, map) = crate::node::relay(&self.0.install.address, None)?;
+        let (_, map) = crate::node::relay(&self.0.network.address, None)?;
         let transport = QuicTransportConfig::builder().max_concurrent_bidi_streams(STREAMS.into()).max_concurrent_uni_streams(0u32.into()).build();
         Ok(Endpoint::builder(presets::Minimal)
             .secret_key(SecretKey::from_bytes(&self.0.key.to_bytes()))
@@ -306,15 +306,15 @@ impl Service {
         }
     }
 
-    /// Answers what a computer asks on a connection it opened: a node of the install anything a node asks a service;
-    /// one it doesn't know of only a hello and the install's entries, a few messages, a few at once, since anyone who
+    /// Answers what a computer asks on a connection it opened: a node of the network anything a node asks a service;
+    /// one it doesn't know of only a hello and the network's entries, a few messages, a few at once, since anyone who
     /// reaches it directly can connect.
     async fn take(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         let known = self.is_node(&remote);
         if !known && self.0.strangers.fetch_add(1, SeqCst) >= STRANGERS {
             self.0.strangers.fetch_sub(1, SeqCst);
-            return conn.close(1u32.into(), b"not a device of this install");
+            return conn.close(1u32.into(), b"not a device of this network");
         }
         let mut messages = 0;
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
@@ -344,7 +344,7 @@ impl Service {
         }
         if !known {
             self.0.strangers.fetch_sub(1, SeqCst);
-            conn.close(1u32.into(), b"not a device of this install");
+            conn.close(1u32.into(), b"not a device of this network");
         }
     }
 
@@ -366,7 +366,7 @@ impl Service {
     }
 
     /// A node's hello, with how many of `global`'s entries it has: → what this service offers and whom it
-    /// serves, to a node of the install that may call it; that it's behind, if the node has more entries than it.
+    /// serves, to a node of the network that may call it; that it's behind, if the node has more entries than it.
     fn hello(&self, remote: Key, entries: usize, steps: usize) -> Value {
         let (count, may) = {
             let known = self.0.known.lock().unwrap();
@@ -389,13 +389,13 @@ impl Service {
         json!({ "describe": describe, "users": users })
     }
 
-    /// Takes `global`'s member entries a node of the install brought (anyone's, while it knows of no node yet, since
-    /// they must replay from the install's first entry): added to those it has, never in place of any, each signed,
-    /// replayed from the first entry; those signed by no endpoint the install ever listed are passed over.
+    /// Takes `global`'s member entries a node of the network brought (anyone's, while it knows of no node yet, since
+    /// they must replay from the network's first entry): added to those it has, never in place of any, each signed,
+    /// replayed from the first entry; those signed by no endpoint the network ever listed are passed over.
     fn take_entries(&self, remote: &Key, pack: &str, depths: &Value) -> Result<()> {
         let bytes = data_encoding::BASE64.decode(pack.as_bytes()).map_err(|_| anyhow!("the entries aren't base64"))?;
         let given = crate::entry::unpack(&bytes)?;
-        let root = Hash::from_hex(&self.0.install.root)?;
+        let root = Hash::from_hex(&self.0.network.root)?;
         let mut known = self.0.known.lock().unwrap();
         ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its entries");
         let mut depths_known = self.0.depths.lock().unwrap();
@@ -422,11 +422,11 @@ impl Service {
         Ok(())
     }
 
-    /// Takes `global`'s scope database's steps a node of the install brought (`{ at, step }` each, as
+    /// Takes `global`'s scope database's steps a node of the network brought (`{ at, step }` each, as
     /// `GET /v1/steps/global` gives them): those after the ones it has, each checked as from anyone, then who's who
     /// from them, once its log is frozen.
     fn take_steps(&self, remote: &Key, given: &Value) -> Result<()> {
-        let root = Hash::from_hex(&self.0.install.root)?;
+        let root = Hash::from_hex(&self.0.network.root)?;
         let mut known = self.0.known.lock().unwrap();
         ensure!(known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its steps");
         let mut steps = self.0.steps.lock().unwrap();
@@ -444,7 +444,7 @@ impl Service {
         Ok(())
     }
 
-    /// Whether `key` is a node of the install, as this service knows it.
+    /// Whether `key` is a node of the network, as this service knows it.
     fn is_node(&self, key: &Key) -> bool {
         self.0.known.lock().unwrap().1.compute(key).is_some()
     }
@@ -488,7 +488,7 @@ impl Service {
         }
     }
 
-    /// Whether `token` is an access token the install's sign-in service signed for `user`, unexpired.
+    /// Whether `token` is an access token the network's sign-in service signed for `user`, unexpired.
     async fn signed_in(&self, token: &str, user: &str) -> bool {
         let (service, token) = (self.clone(), token.to_string());
         let claims = tokio::task::spawn_blocking(move || service.0.issuer.verify(&token, now_ms())).await;
@@ -523,7 +523,7 @@ impl Service {
         let conn = match held {
             Some(conn) => conn,
             None => {
-                let (url, _) = crate::node::relay(&self.0.install.address, None)?;
+                let (url, _) = crate::node::relay(&self.0.network.address, None)?;
                 let addr = EndpointAddr::new(PublicKey::from_bytes(&to)?).with_relay_url(url);
                 let conn = tokio::time::timeout(CONNECT, endpoint.connect(addr, &crate::node::alpn())).await.context("it isn't connected")??;
                 self.0.conns.lock().unwrap().insert(to, conn.clone());
@@ -567,7 +567,7 @@ impl Service {
             "device": { "key": hex(&self.key()), "name": name, "runs_for": runs_for },
             "me": { "key": hex(&self.key()), "name": name },
             "user": self.owner_in(m).map(|u| json!({ "id": u, "name": m.user(&u).map(|p| p.name) })),
-            "install": { "name": m.name(), "root": self.0.install.root, "devices": devices, "settings": crate::state::settings(&m.settings()) },
+            "install": { "name": m.name(), "root": self.0.network.root, "devices": devices, "settings": crate::state::settings(&m.settings()) },
         })
     }
 }
@@ -604,7 +604,7 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
     Ok(asked)
 }
 
-/// `known` with `given`'s member entries added, if any are new: → them, replayed from the install's first entry, with
+/// `known` with `given`'s member entries added, if any are new: → them, replayed from the network's first entry, with
 /// those signed by no endpoint it ever listed passed over (junk anyone could sign counts for nothing, and isn't kept).
 /// `depths` are those of the entries they follow that nodes don't bring.
 fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<crate::database::steps::Given>]) -> Option<(Vec<Entry>, ScopeDb)> {
@@ -619,12 +619,12 @@ fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash,
     Some(placed(root, all.into_values().collect(), depths, steps))
 }
 
-/// `entries` in the nodes' replay order, those that can be placed in it and are signed by an endpoint the install
+/// `entries` in the nodes' replay order, those that can be placed in it and are signed by an endpoint the network
 /// listed, and the scope database they add up to.
 fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<crate::database::steps::Given>]) -> (Vec<Entry>, ScopeDb) {
     let ordered = crate::entry::causal(entries, depths);
     // Once the log is frozen, who's who is the scope database its freeze anchors, and the steps after: the freeze the
-    // install's recovery key signed, as the entries say it, since it holds no keys to read the log with.
+    // network's recovery key signed, as the entries say it, since it holds no keys to read the log with.
     let built = crate::database::steps::view(Some(root), &ordered, now_ms()).and_then(|view| Ok(crate::database::steps::Truth::read_given(steps, view.recovery(), now_ms())?.map_or(view, |t| t.db)));
     let db = built.unwrap_or_else(|err| {
         tracing::warn!("building the scope database: {err:#}");

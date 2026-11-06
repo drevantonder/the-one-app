@@ -4,7 +4,7 @@ export const home = (() => {
   // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can.
   const h = { state: null, apps: [], widgets: {}, badges: {}, failed: new Set() };
   const me = () => h.state?.user;
-  const install = () => h.state?.install;
+  const network = () => h.state?.install;
   const isAdmin = () => me()?.role === "admin";
   const label = (a) => a?.title || a?.name || "";
   const app = (name) => h.apps.find((a) => a.name === name);
@@ -12,7 +12,7 @@ export const home = (() => {
   const hasScreens = (a) => has(a, "main");
   const keepsAccounts = (a) => !!a?.ops?.some((o) => o.name === "accounts");
   const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
-  const userName = (id) => (id === me()?.id ? "You" : install()?.users.find((u) => u.id === id)?.name || "Someone");
+  const userName = (id) => (id === me()?.id ? "You" : network()?.users.find((u) => u.id === id)?.name || "Someone");
   // People by name, you last, as "you".
   const named = (ids) => ids.slice().sort((a, b) => (a === me()?.id) - (b === me()?.id) || userName(a).localeCompare(userName(b)))
     .map((id) => (id === me()?.id ? "you" : userName(id)));
@@ -31,7 +31,7 @@ export const home = (() => {
 
   /// Every page this person can read: theirs, their groups', then everyone's.
   function allPages() {
-    const i = install(), u = me();
+    const i = network(), u = me();
     if (!i || !u) return [];
     const out = [{ scope: "user", title: "You", subtitle: "" }];
     for (const g of i.groups.filter((g) => g.members.some((m) => m.user === u.id)).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -61,7 +61,7 @@ export const home = (() => {
   function canArrange(scope) {
     if (scope === "user") return true;
     if (scope === "global") return isAdmin();
-    const g = install()?.groups.find((g) => `group:${g.id}` === scope);
+    const g = network()?.groups.find((g) => `group:${g.id}` === scope);
     return g?.members.some((m) => m.user === me()?.id && m.role === "admin") || false;
   }
 
@@ -70,7 +70,7 @@ export const home = (() => {
     if (!owner || !u) return false;
     if (owner === "admins") return isAdmin();
     if (owner === `user:${u.id}`) return true;
-    const g = owner.startsWith("group:") && install()?.groups.find((g) => g.id === owner.slice(6));
+    const g = owner.startsWith("group:") && network()?.groups.find((g) => g.id === owner.slice(6));
     return !!g && g.members.some((m) => m.user === u.id && m.role === "admin");
   }
 
@@ -130,7 +130,7 @@ export const home = (() => {
 
   // MARK: Where things open
 
-  /// The install's App Store, if it's on a page this sign-in opens.
+  /// The network's App Store, if it's on a page this sign-in opens.
   function store() {
     const s = app(h.state?.config?.store);
     return s && hasScreens(s) && pages().some((p) => scopes(s).includes(p.scope)) ? s : null;
@@ -259,7 +259,7 @@ export const home = (() => {
   }
 
   return {
-    data: h, me, install, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, accountsOn, badge, widgetsOn, waiting, items,
+    data: h, me, network, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, accountsOn, badge, widgetsOn, waiting, items,
     supported, tree, store, open, settings, inStore, addAccountApp, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
   };
 })();

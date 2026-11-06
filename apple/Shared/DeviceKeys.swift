@@ -73,7 +73,7 @@ enum DeviceKeys {
         return secret
     }
 
-    /// `id`'s key goes: a key the install removed can't be let in again, so the next sign-in makes a new one.
+    /// `id`'s key goes: a key the network removed can't be let in again, so the next sign-in makes a new one.
     static func forget(_ id: String) {
         SecItemDelete(query(id) as CFDictionary)
         if group != nil { SecItemDelete(query(id, shared: false) as CFDictionary) }

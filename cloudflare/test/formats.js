@@ -48,7 +48,7 @@ const ops = {
       twin: hex.encode(twinPublic(hex.decode(pair.key))),
       joinCode: await joinCode(hex.decode(pair.key), hex.decode(pair.seal)),
       proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key), hex.decode(pair.seal)),
-      // The install's genesis as the seal key's bytes, any 32 will do.
+      // The network's genesis as the seal key's bytes, any 32 will do.
       nonce: await joinNonce(hex.decode(pair.seal), hex.decode(pair.key), hex.decode(pair.seal)),
       challenge: b64u.encode(joinChallenge(hex.decode(pair.seal), hex.decode(pair.key), hex.decode(pair.seal), 1_800_000_000_123)),
       passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal), sealPublic: hex.encode(await x25519Public(pk.seal)) },

@@ -801,7 +801,7 @@ fn may_choose(caller: &str, owner: &str, machine: &str) -> Result<()> {
     Ok(())
 }
 
-/// One of the install's devices, as its node's /v1/state says.
+/// One of the network's devices, as its node's /v1/state says.
 #[derive(Clone, Default)]
 struct Machine {
     name: String,
@@ -820,7 +820,7 @@ impl Machine {
     }
 }
 
-/// This machine and the install's devices, as a `/v1/state` says.
+/// This machine and the network's devices, as a `/v1/state` says.
 fn machines_in(st: &Value) -> (Machine, Vec<Machine>) {
     let all: Vec<&Value> = st["install"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
     let mut here = all.iter().find(|d| d["here"] == true).map(|d| Machine::of(d)).unwrap_or_default();
@@ -840,7 +840,7 @@ impl Devices {
         serde_json::from_slice::<Value>(&b).ok()?["allowed"].as_bool()
     }
 
-    /// This machine and the install's devices, as its node says.
+    /// This machine and the network's devices, as its node says.
     fn machines(&self) -> Result<(Machine, Vec<Machine>)> {
         Ok(machines_in(&self.host.get("/v1/state")?))
     }

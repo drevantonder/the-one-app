@@ -10,7 +10,7 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-// Links to the install's address, which Android opens here (App Links: the build's manifest names the addresses, and
+// Links to the network's address, which Android opens here (App Links: the build's manifest names the addresses, and
 // each lists this app). They go where the web client would take them (cloudflare/web/web.js's route()): an invite to the
 // welcome, which opens it in a Custom Tab to make a passkey; the rest, once signed in at that address, to the page,
 // screen, Settings or Vault request they name. Anything else opens in a Custom Tab, as it would have without the app.

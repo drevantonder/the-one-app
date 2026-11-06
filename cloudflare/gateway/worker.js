@@ -1,8 +1,8 @@
-// The gateway: the install's address, the one people use. It holds no keys and runs no app code; it only sends each
+// The gateway: the network's address, the one people use. It holds no keys and runs no app code; it only sends each
 // request where its path says: signing in to sign-in (with the gateway's host kept, since passkeys belong to
 // it), `/urls` to the URL signer, `/push/…` to the push Worker, `/mcp` and what MCP clients read to sign in to the remote MCP server, `/relay` (and iroh's
 // `/ping` and `/generate_204`) to the relay, and everything else to the web client's files. Devices reach the
-// install's nodes over iroh, never through here, and so does git: `/repos/…` here is git on a computer without the CLI,
+// network's nodes over iroh, never through here, and so does git: `/repos/…` here is git on a computer without the CLI,
 // told how to get it.
 
 /// Paths the sign-in answers: exactly these, or under the ones ending in `/`.
@@ -99,7 +99,7 @@ async function toWeb(request, env, url) {
 function gitWithoutCli(env, url) {
   const name = env.NAME || "The One App", cli = env.CLI || "one";
   const said = [
-    `${url.origin}${url.pathname.replace(/\/(info\/refs|git-[a-z-]+|HEAD|objects\/.*)$/, "")} is a repo in ${env.YOURS || "your One App"}, which git reaches through ${name}'s CLI, ${cli}.`,
+    `${url.origin}${url.pathname.replace(/\/(info\/refs|git-[a-z-]+|HEAD|objects\/.*)$/, "")} is a repo in ${env.YOURS || "your One App network"}, which git reaches through ${name}'s CLI, ${cli}.`,
     `Install it on this computer, then run`,
     `  ${cli} sign-in --address ${url.origin}`,
     `and try again.`,
@@ -116,7 +116,7 @@ export default {
     if (url.pathname.startsWith("/push/")) return env.PUSH.fetch(request);
     if (url.pathname.startsWith("/repos/")) return gitWithoutCli(env, url);
     switch (where(url.pathname)) {
-      case "mcp": return env.MCP ? env.MCP.fetch(request) : refuse(503, "this install's MCP isn't set up yet");
+      case "mcp": return env.MCP ? env.MCP.fetch(request) : refuse(503, "this network's MCP isn't set up yet");
       case "auth": return env.AUTH.fetch(request);
       default: return toWeb(request, env, url);
     }

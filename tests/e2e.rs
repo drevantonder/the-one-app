@@ -1,4 +1,4 @@
-//! Real nodes on this machine, reaching each other through the relay at a real install's gateway.
+//! Real nodes on this machine, reaching each other through the relay at a real network's gateway.
 
 use std::time::{Duration, Instant};
 
@@ -13,8 +13,8 @@ async fn start(name: &str) -> Node {
     Node::start(&dir).await.unwrap()
 }
 
-/// Workers whose relay the devices of `a`'s install reach each other through, taking only `a` and those it
-/// admits: `a` says it's the install's.
+/// Workers whose relay the devices of `a`'s network reach each other through, taking only `a` and those it
+/// admits: `a` says it's the network's.
 async fn relay(a: &Node) -> crate::cloudflare::Workers {
     let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![one::entry::hex(&a.id())]));
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
@@ -90,20 +90,20 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
 
     // From nothing but the disk and the recovery key.
     let place = one::bucket::Place::Folder(dir.clone());
-    let install = one::backups::installs(&place).unwrap().remove(0);
-    let keys = one::backups::open_keys(&place, &install, &one::entry::unhex(&recovery).unwrap()).unwrap();
+    let network = one::backups::networks(&place).unwrap().remove(0);
+    let keys = one::backups::open_keys(&place, &network, &one::entry::unhex(&recovery).unwrap()).unwrap();
     assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
-    let checked = one::backups::check(&one::backups::Check { place: &place, install: &install, keys: &keys, root: None, live: None }).unwrap().0;
+    let checked = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None, live: None }).unwrap().0;
     assert_eq!(checked["problems"], json!([]), "{checked}");
     assert_eq!(checked["install"], "Home");
     assert_eq!(checked["people"], json!(["Andre"]));
     assert!(checked["apps"].as_array().unwrap().contains(&json!("notes")), "{checked}");
     let mine = format!("user:{}", me.user);
-    let items = backed_up(&dir, &install, &one::entry::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
+    let items = backed_up(&dir, &network, &one::entry::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
     assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
-    let restored = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
+    let restored = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert!(restored.entries.iter().any(|e| e.content.kind == "genesis"));
-    assert_eq!(backed_up_posts(&dir, &install, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup"]);
+    assert_eq!(backed_up_posts(&dir, &network, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup"]);
     let steps_then = restored.snapshot.databases["notes/main"].0;
     let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();
     assert!(!files.iter().any(|f| f.windows(12).any(|w| w == b"s3cret-value") || f.windows(17).any(|w| w == b"before the backup")), "nothing is readable on the disk");
@@ -114,19 +114,19 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     // A run is done once it says when it last backed up, not once its copy of the bucket has the post: it copies the
     // bucket before writing the snapshot that names the copy, and backs up every scope.
     eventually("the second backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
-    let again = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
+    let again = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert!(again.snapshot.databases["notes/main"].0 > steps_then);
-    assert_eq!(backed_up_posts(&dir, &install, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
+    assert_eq!(backed_up_posts(&dir, &network, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
     let checked = a.check_backups().await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
     assert!(checked[0]["error"].is_null(), "{checked}");
     let shown = a.backups().unwrap();
     let moment = &shown["snapshots"][0];
-    assert!(moment["scopes"].as_array().unwrap().contains(&json!("Everyone")) && moment["places"] == json!(["T7 Shield"]), "one snapshot of the install: {shown}");
+    assert!(moment["scopes"].as_array().unwrap().contains(&json!("Everyone")) && moment["places"] == json!(["T7 Shield"]), "one snapshot of the network: {shown}");
     assert!(a.state()["backups"].is_null(), "no badge while backups work");
 
     // A disk that breaks: admins see what's wrong and its fix, on Settings, until a run works again.
-    let copy = dir.join(&install).join("bucket");
+    let copy = dir.join(&network).join("bucket");
     std::fs::rename(&copy, dir.join("bucket-aside")).unwrap();
     std::fs::write(&copy, b"not a folder").unwrap();
     // Its failure shows once it's done: nothing writes to the disk until the next run.
@@ -179,9 +179,9 @@ async fn a_node_signs_in_its_steps_only_once_it_knows_the_log_is_frozen() {
     let dir = temp("frozen-disk").join("One Backups");
     a.add_place(&me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
     eventually("the first backup", async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
-    let install = one::backups::installs(&one::bucket::Place::Folder(dir.clone())).unwrap().remove(0);
+    let network = one::backups::networks(&one::bucket::Place::Folder(dir.clone())).unwrap().remove(0);
     let notes_db = async || {
-        let (copy, keys) = backed_up_keys(&dir, &install, &recovery, "global", "notes", "main");
+        let (copy, keys) = backed_up_keys(&dir, &network, &recovery, "global", "notes", "main");
         one::db::Db::open_switched(&copy, &format!("{}/notes/main", one::bucket::folder("global")), keys).await.unwrap()
     };
     assert!(!a.frozen());
@@ -198,29 +198,29 @@ async fn a_node_signs_in_its_steps_only_once_it_knows_the_log_is_frozen() {
     let after = notes_db().await;
     assert_eq!(after.signed_from(), Some(written + 1), "the first step after the freeze is signed in it, and says so");
     assert_eq!(after.checks().refused, 0);
-    assert_eq!(backed_up_posts(&dir, &install, &recovery).await, ["before the freeze", "and another", "after the freeze"]);
+    assert_eq!(backed_up_posts(&dir, &network, &recovery).await, ["before the freeze", "and another", "after the freeze"]);
 }
 
-/// The notes' lines in `global` as a place's copy of the install's bucket holds them, opened with the recovery key
+/// The notes' lines in `global` as a place's copy of the network's bucket holds them, opened with the recovery key
 /// alone: each epoch's key sealed to it, each app's key in the epoch sealed under that.
-async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 32]) -> Vec<String> {
-    backed_up(dir, install, recovery, "global", "notes", "main", "select text from posts order by n").await
+async fn backed_up_posts(dir: &std::path::Path, network: &str, recovery: &[u8; 32]) -> Vec<String> {
+    backed_up(dir, network, recovery, "global", "notes", "main", "select text from posts order by n").await
 }
 
 /// The first column of what `sql` reads from `app`'s `database` in `scope`, as the backup's copy of the bucket has it,
 /// opened with the recovery key alone.
-async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str, sql: &str) -> Vec<String> {
-    let (copy, keys) = backed_up_keys(dir, install, recovery, scope, app, database);
+async fn backed_up(dir: &std::path::Path, network: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str, sql: &str) -> Vec<String> {
+    let (copy, keys) = backed_up_keys(dir, network, recovery, scope, app, database);
     match one::db::Db::open(&copy, &format!("{}/{app}/{database}", one::bucket::folder(scope)), keys).await {
         Ok(db) => db.query(sql, &[]).unwrap().into_iter().filter_map(|r| r.values().next().and_then(|v| v.as_str()).map(str::to_string)).collect(),
         Err(_) => Vec::new(),
     }
 }
 
-/// The backup's copy of the install's bucket, and the keys of `app`'s `database` in `scope` there, opened with the
+/// The backup's copy of the network's bucket, and the keys of `app`'s `database` in `scope` there, opened with the
 /// recovery key alone.
-fn backed_up_keys(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (one::bucket::Place, one::db::Keys) {
-    let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
+fn backed_up_keys(dir: &std::path::Path, network: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (one::bucket::Place, one::db::Keys) {
+    let copy = one::bucket::Place::Folder(dir.join(network).join("bucket"));
     let folder = one::bucket::folder(scope);
     let mut keys = one::db::Keys::new();
     for n in copy.list(&format!("{folder}/_epochs")).unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {
@@ -376,7 +376,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
     assert_eq!(branches("andre/home").await, [("main".to_string(), head.clone())]);
 
-    // Sam, a person of the install, with a device of his.
+    // Sam, a person of the network, with a device of his.
     let secret = "the-invites-secret";
     let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -575,7 +575,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let base = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, github).await.unwrap() });
 
-    // The install's GitHub App in Everyone's Vault, its key opened on this machine, and Andre's own GitHub sign-in in his.
+    // The network's GitHub App in Everyone's Vault, its key opened on this machine, and Andre's own GitHub sign-in in his.
     let pem = String::from_utf8(std::process::Command::new("openssl").args(["genrsa", "-traditional", "2048"]).output().unwrap().stdout).unwrap();
     let global = one::entry::Scope::Global;
     a.vault_grant(&me, &global, &a.device_name(), true).await.unwrap();
@@ -592,7 +592,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let names = |list: Value| list.as_array().unwrap().iter().map(|r| r["repo"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     assert_eq!(names(a.call(repos("list", json!({ "source": "github" }))).await.unwrap()), ["github.com/andre-gh/mine", "github.com/org/site"]);
 
-    // Sam, a person of the install but not in Team, with a device of his that hands its keys with his calls: Repos'
+    // Sam, a person of the network but not in Team, with a device of his that hands its keys with his calls: Repos'
     // and the Vault's in global.
     let secret = "the-invites-secret";
     let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };

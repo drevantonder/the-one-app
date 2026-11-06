@@ -228,7 +228,7 @@ var j = (() => {
 	return {
 		data: e,
 		me: t,
-		install: n,
+		network: n,
 		label: i,
 		app: a,
 		has: o,
@@ -409,7 +409,7 @@ function ie(e) {
 var ae = () => ({
 	scope: P,
 	title: "Settings",
-	subtitle: j.install()?.name || "",
+	subtitle: j.network()?.name || "",
 	list: (j.data.state.settings_items || []).map((e) => Q(`settings:${e.name}`, {
 		name: e.title,
 		icon: {

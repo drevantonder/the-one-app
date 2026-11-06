@@ -323,7 +323,7 @@ function ee() {
 		if (!o) return;
 		let s = r.map((e) => e.filter((e) => e.id !== t)), c = a.filter((e) => e.id !== t);
 		n === "last" ? c.push(o) : n === "new" ? s.push([o]) : s[Number(n)]?.push(o), s = s.filter((e) => e.length);
-		let { install: l } = e.state, u = {};
+		let l = e.state.install, u = {};
 		try {
 			u = JSON.parse(l.settings?.priority || "{}") || {};
 		} catch {}

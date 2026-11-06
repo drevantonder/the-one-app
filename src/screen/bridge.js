@@ -142,14 +142,14 @@
   // Errors and statuses are written for people and agents at once: what happened and what to do, in people's words,
   // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
   // those is for agents only.
-  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|install's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
+  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|network's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
 
   // Whether a screen has asked for a large title (`largeTitle`): it sets up the bar's title once.
   let titled = false;
 
   window.one = {
     app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
-    // The product: its `name` and `cli`, and `made_here`, what an App Store calls the apps made in the install.
+    // The product: its `name` and `cli`, and `made_here`, what an App Store calls the apps made in the network.
     config: ctx.config,
     // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,
@@ -264,7 +264,7 @@
     tap: (style = "selection") => shell?.postMessage({ type: "haptic", style }).catch(() => {}),
     on: (event, fn) => (handlers[event] ||= []).push(fn),
     // The shell calls this with node events: an app screen's "changed" is its app's data changing; a Settings
-    // screen's, any event, since what it shows is the install's.
+    // screen's, any event, since what it shows is the network's.
     __event(e) {
       if (!ctx.app || (e.type === "changed" && (e.apps || []).includes(ctx.app))) landed.clear(), handlers.changed.forEach((f) => f(e));
     },

@@ -6,7 +6,7 @@ import { AppIcon, Button, Empty, Icon, Input, List, ListRow, Problem, Split, use
 import { AppPage, onAPage } from "../lib/app-page.jsx"
 import { Failed, Section, said, useList } from "../lib/store.jsx"
 
-// The sections: the apps built into the release, and those made in this install (each install words that its own way,
+// The sections: the apps built into the release, and those made in this network (each network words that its own way,
 // in its settings).
 const MADE_HERE = one.config?.made_here || "Made here"
 // How wide the list's room is when an app's page opens beside it, rather than over it.

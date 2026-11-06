@@ -407,13 +407,13 @@ export async function inviteProof(secret, key, seal) {
   return hex.encode(await hkdf(secret, concat(text.encode("one/invite\0"), bytes(key), bytes(seal))));
 }
 
-/// The OIDC nonce a sign-in for a device in the install whose first entry's hash is `genesis` asks its provider for
+/// The OIDC nonce a sign-in for a device in the network whose first entry's hash is `genesis` asks its provider for
 /// (`sign_in_proof::nonce`): base64url(sha256("one/join\0" ‖ genesis ‖ key ‖ seal)).
 export async function joinNonce(genesis, key, seal) {
   return b64u.encode(await sha256(concat(text.encode("one/join\0"), bytes(genesis), bytes(key), bytes(seal))));
 }
 
-/// The challenge a passkey signs for a device in the install `genesis` at `at` (ms) (`sign_in_proof::challenge`):
+/// The challenge a passkey signs for a device in the network `genesis` at `at` (ms) (`sign_in_proof::challenge`):
 /// "one/join\0" ‖ genesis ‖ key ‖ seal ‖ `at`, 8 bytes big-endian.
 export function joinChallenge(genesis, key, seal, at) {
   const time = new Uint8Array(8);
@@ -440,7 +440,7 @@ export function appOf(route) {
 /// why.
 export function mayHand(route, need) {
   const node = (of) => need.app === "node" && of.includes(need.database);
-  // Apps' deployed code, which everyone in the install may read.
+  // Apps' deployed code, which everyone in the network may read.
   const code = need.scope === "global" && node(["blobs"]);
   const app = appOf(route);
   if (app) return need.app === app || node(["vault", "log"]) || code;

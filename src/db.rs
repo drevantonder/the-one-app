@@ -247,7 +247,7 @@ pub fn sealed_copy_holds(prefix: &str, keys: &Keys, at: u64, copy: &[u8], step: 
 }
 
 /// The keys a node uses, of those a caller handed it, for a database of a scope whose current epoch is `current`, as
-/// the install's signed `epoch` entries say: none above it (one a member made up would leave the database where nobody
+/// the network's signed `epoch` entries say: none above it (one a member made up would leave the database where nobody
 /// else can follow), and `current`'s among them, the one it writes under. A key with the right number but the wrong
 /// bytes only fails to open what's under its epoch, so a database opened with handed keys is shared only with calls
 /// handed the same keys.
@@ -1991,7 +1991,7 @@ mod tests {
         }
     }
 
-    /// A device of the install without the key can write `tidied`, and steps and copies far ahead under an epoch
+    /// A device of the network without the key can write `tidied`, and steps and copies far ahead under an epoch
     /// nobody was given: before the switch, readers and writers never look for either, and read and write as before;
     /// with it, a copy that doesn't open stops nobody.
     #[test]

@@ -4,8 +4,8 @@
 //! - **Types.** Each object type names its permissions, its verbs (`types`). An object is `<type>:<id>`
 //!   (`group:0123456789abcdef`); `<type>:*` is every object of that type, for rules.
 //! - **Roles.** A role is a name and a set of its type's permissions (`roles`). `builtin` marks the ones the release
-//!   ships; an install adds its own. A role of the release's may also give others of its type that its holders don't
-//!   hold (`gives`): the install's admins add people to every group without opening any.
+//!   ships; a network adds its own. A role of the release's may also give others of its type that its holders don't
+//!   hold (`gives`): the network's admins add people to every group without opening any.
 //! - **Relations.** A row of `relations` says its subject holds a role (its `relation`) on its object, until a time
 //!   (milliseconds; NULL for good). A subject is a principal (`person:<id>`, `device:<key in hex>`), everyone who
 //!   holds a role on an object (`group:<id>#member`), or a rule: `#<role>`, everyone who holds that role on the row's
@@ -14,9 +14,9 @@
 //!   each object of that type, for usersets and rules too. A role reached through others lasts only as long as each.
 //! - **Rules are the release's**: a row whose subject is `#…` or `@`, or that names `*`, is written by `DEFAULTS` and
 //!   by nothing else, and nobody gives or takes one.
-//! - **Principals are people in the install, and their devices.** A person holds nothing while they hold no role on
-//!   the install, so removing them is taking that; a device holds nothing unless a person in the install, or the
-//!   install (`install:global#…`), holds a role on it by a row of its own, so removing it is taking its owner's row.
+//! - **Principals are people in the network, and their devices.** A person holds nothing while they hold no role on
+//!   the network, so removing them is taking that; a device holds nothing unless a person in the network, or the
+//!   network (`install:global#…`), holds a role on it by a row of its own, so removing it is taking its owner's row.
 //!
 //! Unknown means no: a type, role or permission this release doesn't know grants nothing, nor anything reached
 //! through it, so a row written by a newer one is ignored here, never misread.
@@ -29,10 +29,10 @@
 //! - `may`: whether a principal holds a permission on an object, now.
 //! - `may_give`: no escalation. You give a role only where you may `invite`, only one you hold there yourself (or
 //!   that a role of yours gives), and for no longer than you hold both.
-//! - `may_take`: taking a role takes `remove`, or `leave` for your own; and the install's last admin stays.
+//! - `may_take`: taking a role takes `remove`, or `leave` for your own; and the network's last admin stays.
 //! - `may_make`: the first row of a new object (a device, a Vault item, a service, an app), which nobody holds a role
 //!   on yet to give: by whoever the verb that makes it lets, to themselves, its container, or a role on the container.
-//! - `may_change_role`: an install's own role is changed by whoever has `change-roles`, and widened only by someone
+//! - `may_change_role`: a network's own role is changed by whoever has `change-roles`, and widened only by someone
 //!   who already holds what it adds wherever it's held. The release's own roles change only with the release.
 //!
 //! Which object a call or a step is about, and who signed it, is the caller's to say: this only answers. So is moving
@@ -71,15 +71,16 @@ create table if not exists relations (
 create index if not exists relations_by_object on relations (object, relation);
 ";
 
-/// The install, as an object.
-pub const INSTALL: &str = "install:global";
-/// The install's role that must always have someone.
+/// The network, as an object. Its type keeps its old name, `install`: it's in every signed role and relation, and older
+/// devices check by it.
+pub const NETWORK: &str = "install:global";
+/// The network's role that must always have someone.
 const ADMIN: &str = "admin";
 /// For good, as an until.
 const FOREVER: i64 = i64::MAX;
 
 /// The core's types and roles, and the rules between them: run on a database `SCHEMA` made, after it. Each release
-/// writes its own; an install's roles and rows are left as they are.
+/// writes its own; a network's roles and rows are left as they are.
 pub const DEFAULTS: &str = r#"
 -- Verbs, each for what a person does:
 --   use: open its data and its apps
@@ -90,7 +91,7 @@ pub const DEFAULTS: &str = r#"
 --   add-apps: make, add and remove its apps, switch their schedules, and ask for Vault items for them
 --   keep: choose which devices keep its apps running, run its calls and open its Vault
 --   run: run its calls (a machine whose person holds it, or a device that does)
---   make-groups, change-settings, change-roles: what they say, in the install
+--   make-groups, change-settings, change-roles: what they say, in the network
 --   add-devices: list their phones, computers and services; add-machines: list machines that run things for them
 --   switch: turn a device's services on and off
 --   change: set or clear a Vault item
@@ -110,7 +111,7 @@ insert or replace into roles (type, name, permissions, builtin) values
     ('install', 'admin', '["use","invite","remove","add-apps","keep","run","make-groups","change-settings","change-roles"]', 1),
     ('install', 'member', '["use","make-groups"]', 1),
     ('install', 'runner', '["run"]', 1),
-    -- a person's own scope is theirs; the install's admins only rename them and add machines for them
+    -- a person's own scope is theirs; the network's admins only rename them and add machines for them
     ('person', 'owner', '["use","remove","rename","add-apps","keep","run","add-devices","add-machines"]', 1),
     ('person', 'admin', '["rename","add-machines"]', 1),
     ('person', 'runner', '["run"]', 1),
@@ -124,7 +125,7 @@ insert or replace into roles (type, name, permissions, builtin) values
     ('vault', 'owner', '["use","change","invite","remove"]', 1),
     ('vault', 'user', '["use","leave"]', 1),
     ('app', 'owner', '["deploy","delete"]', 1);
--- the install's admins, who manage every group as replay lets them (members.rs `manages`) and add people to it, but
+-- the network's admins, who manage every group as replay lets them (members.rs `manages`) and add people to it, but
 -- open none
 insert or replace into roles (type, name, permissions, gives, builtin) values
     ('group', 'manager', '["invite","remove","rename","run"]', '["member"]', 1);
@@ -141,16 +142,16 @@ insert into relations (subject, relation, object, until) values
     ('install:global#admin', 'admin', 'device:*', null);
 "#;
 
-/// Whether the install's admins make someone a group's admin, as replay always let them (`members.rs` `manages`), so
+/// Whether the network's admins make someone a group's admin, as replay always let them (`members.rs` `manages`), so
 /// a group whose admins have all gone gets a new one: their `manager` role then gives a group's `admin` as well as its
 /// `member`. Not decided yet (the plan's open question on default roles): flip it here, and nowhere else.
-pub const INSTALL_ADMINS_MAKE_GROUP_ADMINS: bool = true;
+pub const NETWORK_ADMINS_MAKE_GROUP_ADMINS: bool = true;
 
-/// The release's types, roles and rules (`DEFAULTS`), with `INSTALL_ADMINS_MAKE_GROUP_ADMINS`'s rule: run on a database
+/// The release's types, roles and rules (`DEFAULTS`), with `NETWORK_ADMINS_MAKE_GROUP_ADMINS`'s rule: run on a database
 /// `SCHEMA` made, after it.
 pub fn defaults(conn: &Connection) -> Result<()> {
     conn.execute_batch(DEFAULTS)?;
-    if INSTALL_ADMINS_MAKE_GROUP_ADMINS {
+    if NETWORK_ADMINS_MAKE_GROUP_ADMINS {
         conn.execute("update roles set gives = '[\"member\",\"admin\"]' where type = 'group' and name = 'manager' and builtin = 1", [])?;
     }
     Ok(())
@@ -263,22 +264,22 @@ pub fn close(conn: &Connection, only: Option<&str>) -> Result<()> {
         [only],
     )?;
     conn.execute_batch(&format!(
-        "-- a person counts while they hold a role on the install
+        "-- a person counts while they hold a role on the network
         insert into temp.counting select principal, max(until) from temp.held
-        where substr(principal, 1, 7) = 'person:' and object in ('{INSTALL}', 'install:*') group by principal;
-        -- a device, while the install's holders of a role, or a person who counts, hold one on it by a row of its own
+        where substr(principal, 1, 7) = 'person:' and object in ('{NETWORK}', 'install:*') group by principal;
+        -- a device, while the network's holders of a role, or a person who counts, hold one on it by a row of its own
         insert into temp.counting
-        select r.object, max(min(coalesce(r.until, {FOREVER}), iif(substr(r.subject, 1, {n}) = '{INSTALL}#', {FOREVER}, c.until)))
+        select r.object, max(min(coalesce(r.until, {FOREVER}), iif(substr(r.subject, 1, {n}) = '{NETWORK}#', {FOREVER}, c.until)))
         from relations r join roles ro on ro.type = 'device' and ro.name = r.relation join types t on t.name = ro.type
             left join temp.counting c on c.principal = r.subject
         where substr(r.object, 1, 7) = 'device:' and length(r.object) > 7 and instr(r.object, '#') = 0 and instr(r.object, '*') = 0
-            and (substr(r.subject, 1, {n}) = '{INSTALL}#' or c.until is not null)
+            and (substr(r.subject, 1, {n}) = '{NETWORK}#' or c.until is not null)
         group by r.object;
         insert into temp.allowed
         select h.principal, p.value, h.object, min(max(h.until), c.until)
         from temp.held h join temp.counting c on c.principal = h.principal, json_each(h.permissions) p
         group by h.principal, p.value, h.object;",
-        n = INSTALL.len() + 1
+        n = NETWORK.len() + 1
     ))?;
     Ok(())
 }
@@ -309,8 +310,8 @@ fn holds(conn: &Connection, who: &str, object: &str, now: u64) -> Result<Vec<Hel
     .collect()
 }
 
-/// Whether `principal` counts now: a person who holds a role on the install, or a device that such a person, or the
-/// install, holds a role on by a row of its own.
+/// Whether `principal` counts now: a person who holds a role on the network, or a device that such a person, or the
+/// network, holds a role on by a row of its own.
 fn counts(conn: &Connection, principal: &str, now: u64) -> Result<bool> {
     let mut q = conn.prepare_cached("select exists (select 1 from temp.counting where principal = ?1 and until > ?2)")?;
     Ok(q.query_row(params![principal, ms(now)], |r| r.get(0))?)
@@ -355,13 +356,13 @@ fn role(conn: &Connection, ty: &str, name: &str) -> Result<Option<(Vec<String>, 
     })
 }
 
-/// Whether `subject` is the install's last lasting admin: no other person is one for good.
+/// Whether `subject` is the network's last lasting admin: no other person is one for good.
 pub fn last_admin(conn: &Connection, subject: &str) -> Result<bool> {
     Ok(conn.query_row(
         "select exists (select 1 from relations where subject = ?1 and relation = ?2 and object = ?3 and until is null)
             and not exists (select 1 from relations where subject != ?1 and substr(subject, 1, 7) = 'person:'
                 and relation = ?2 and object = ?3 and until is null)",
-        params![subject, ADMIN, INSTALL],
+        params![subject, ADMIN, NETWORK],
         |r| r.get(0),
     )?)
 }
@@ -383,17 +384,17 @@ pub fn may_give(conn: &Connection, giver: &str, subject: &str, relation: &str, o
     let (Some(invite), Some(from)) = (invite, from) else {
         return Ok(false);
     };
-    Ok(until.map_or(FOREVER, ms) <= invite.min(from) && !(until.is_some() && relation == ADMIN && object == INSTALL && last_admin(conn, subject)?))
+    Ok(until.map_or(FOREVER, ms) <= invite.min(from) && !(until.is_some() && relation == ADMIN && object == NETWORK && last_admin(conn, subject)?))
 }
 
 /// Whether `taker` may take the role `relation` on `object` from `subject`: it isn't a rule, they may `remove`
-/// there, or `leave` if it's their own; and it isn't the install's last admin.
+/// there, or `leave` if it's their own; and it isn't the network's last admin.
 pub fn may_take(conn: &Connection, taker: &str, subject: &str, relation: &str, object: &str, now: u64) -> Result<bool> {
     if rule(subject, object) {
         return Ok(false);
     }
     let allowed = may(conn, taker, "remove", object, now)? || (subject == taker && may(conn, taker, "leave", object, now)?);
-    Ok(allowed && !(relation == ADMIN && object == INSTALL && last_admin(conn, subject)?))
+    Ok(allowed && !(relation == ADMIN && object == NETWORK && last_admin(conn, subject)?))
 }
 
 /// Whether `maker` may make `object`, new (no row of `relations` names it; whether it was once is the tables' to say),
@@ -415,9 +416,9 @@ pub fn may_make(conn: &Connection, maker: &str, verb: &str, container: &str, sub
     Ok(ours && !named && role(conn, ty, relation)?.is_some() && may(conn, maker, verb, container, now)?)
 }
 
-/// Whether `who` may make the install's own role `name` on `ty` have `permissions`: they may `change-roles`, each is
+/// Whether `who` may make the network's own role `name` on `ty` have `permissions`: they may `change-roles`, each is
 /// one of the type's, it isn't one the release ships, and they hold whatever it adds on every object it's held on.
-/// An install's own role gives no other (`gives` counts only on the release's).
+/// A network's own role gives no other (`gives` counts only on the release's).
 pub fn may_change_role(conn: &Connection, who: &str, ty: &str, name: &str, permissions: &[&str], now: u64) -> Result<bool> {
     let known: Option<String> = conn.query_row("select permissions from types where name = ?1", [ty], |r| r.get(0)).optional()?;
     let Some(known) = known.map(|k| serde_json::from_str::<Vec<String>>(&k)).transpose()? else {
@@ -428,7 +429,7 @@ pub fn may_change_role(conn: &Connection, who: &str, ty: &str, name: &str, permi
         Some((perms, false)) => perms,
         None => Vec::new(),
     };
-    if !permissions.iter().all(|p| known.iter().any(|k| k == p)) || !may(conn, who, "change-roles", INSTALL, now)? {
+    if !permissions.iter().all(|p| known.iter().any(|k| k == p)) || !may(conn, who, "change-roles", NETWORK, now)? {
         return Ok(false);
     }
     let mut held = conn.prepare("select distinct object from relations where relation = ?1 and substr(object, 1, instr(object, ':') - 1) = ?2")?;
@@ -447,9 +448,9 @@ pub fn may_change_role(conn: &Connection, who: &str, ty: &str, name: &str, permi
 mod tests {
     use super::*;
 
-    /// Who may do what in a small install: Alice its admin, Bob, Carol, Gina and Hana members, Carol the admin of
-    /// group g and Bob in it, Gina its host (an install's own role), Hana group h's admin until 2000, Erin a member
-    /// until 1000 and Frank until 2000, Dave holding a role nobody knows, Ivan out of the install; asked at 1500.
+    /// Who may do what in a small network: Alice its admin, Bob, Carol, Gina and Hana members, Carol the admin of
+    /// group g and Bob in it, Gina its host (a network's own role), Hana group h's admin until 2000, Erin a member
+    /// until 1000 and Frank until 2000, Dave holding a role nobody knows, Ivan out of the network; asked at 1500.
     #[test]
     #[allow(clippy::type_complexity)]
     fn who_may_do_what() {
@@ -522,10 +523,10 @@ mod tests {
             ("person:bob", "change", "vault:group:g/token", false),
             ("person:carol", "deploy", "app:notes", true),
             ("person:bob", "deploy", "app:notes", false),
-            // an install's own role reaches only what it says, not what members get
+            // a network's own role reaches only what it says, not what members get
             ("person:gina", "use", "group:g", true),
             ("person:gina", "use", "vault:group:g/token", false),
-            // the install's admins manage every group, rename every person and look after every device, and open none
+            // the network's admins manage every group, rename every person and look after every device, and open none
             ("person:alice", "invite", "group:g", true),
             ("person:alice", "use", "group:g", false),
             ("person:alice", "use", "vault:group:g/token", false),
@@ -544,7 +545,7 @@ mod tests {
             // a role held on every group reaches what's written for one group's holders of it
             ("person:alice", "use", "vault:group:g/wifi", true),
             ("person:carol", "use", "vault:group:g/wifi", false),
-            // someone out of the install holds nothing, nor do their devices; a device nobody in it holds holds nothing
+            // someone out of the network holds nothing, nor do their devices; a device nobody in it holds holds nothing
             ("person:ivan", "use", "person:ivan", false),
             ("device:ii", "run", "group:g", false),
             ("device:sl", "run", "install:global", true),
@@ -564,7 +565,7 @@ mod tests {
         }
 
         // No escalation: only a role you hold (or one of yours gives), for no longer than you hold it; nothing on a
-        // device or an app, and no rule; and the install's last admin stays.
+        // device or an app, and no rule; and the network's last admin stays.
         let give_cases: &[(&str, &str, &str, &str, Option<u64>, bool)] = &[
             ("person:carol", "person:erin", "member", "group:g", None, true),
             ("person:carol", "person:erin", "admin", "group:g", None, true),
@@ -572,9 +573,9 @@ mod tests {
             ("person:gina", "person:erin", "host", "group:g", None, true),
             ("person:gina", "person:gina", "member", "group:g", None, false),
             ("person:gina", "person:erin", "member", "group:g", None, false),
-            // the install's admins add people to every group, and make someone its admin only as the release says
+            // the network's admins add people to every group, and make someone its admin only as the release says
             ("person:alice", "person:erin", "member", "group:g", None, true),
-            ("person:alice", "person:erin", "admin", "group:g", None, INSTALL_ADMINS_MAKE_GROUP_ADMINS),
+            ("person:alice", "person:erin", "admin", "group:g", None, NETWORK_ADMINS_MAKE_GROUP_ADMINS),
             ("person:alice", "person:erin", "member", "group:h", None, true),
             ("person:hana", "person:erin", "member", "group:h", None, false),
             ("person:hana", "person:erin", "member", "group:h", Some(2000), true),
@@ -647,7 +648,7 @@ mod tests {
             assert_eq!(may_make(&conn, maker, verb, container, subject, role, object, now).unwrap(), *expected, "may_make({maker}, {verb}, {container}, {subject}, {object})");
         }
 
-        // An install's own roles: made by its admins, widened only by someone who holds what it adds where it's held.
+        // A network's own roles: made by its admins, widened only by someone who holds what it adds where it's held.
         assert!(may_change_role(&conn, "person:alice", "group", "editor", &["use"], now).unwrap());
         assert!(!may_change_role(&conn, "person:carol", "group", "editor", &["use"], now).unwrap());
         assert!(!may_change_role(&conn, "person:alice", "group", "editor", &["fly"], now).unwrap());

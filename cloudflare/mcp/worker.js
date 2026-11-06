@@ -1,5 +1,5 @@
 // The remote MCP server: remote MCP clients' device. ChatGPT, Claude.ai and the like can't run our code, so each one a person
-// signs in with is a device of theirs here, a client of the install like any app, which the person approves like any
+// signs in with is a device of theirs here, a client of the network like any app, which the person approves like any
 // device. It speaks MCP to them over HTTPS at `<address>/mcp`, and asks a node's own `/mcp` as that device, over iroh
 // (`<cli>/http/1`, one-client in cloudflare/node/src/clients.rs), handing it the keys a call needs, sealed to that node and
 // bound to the device's key; it sends nodes no token.
@@ -17,14 +17,14 @@
 // nodes kept warm between calls, and the keys it opened, all while it's asked; once nobody has asked for `IDLE`, it
 // closes its endpoint, forgets its keys and ends itself.
 //
-// It trusts no node for who's who or for keys: it reads the install's signed entries from the bucket itself, through
+// It trusts no node for who's who or for keys: it reads the network's signed entries from the bucket itself, through
 // the URL signer, replays them as nodes do, and asks the scope database it builds from them, with the same Rust as
 // every node (cloudflare/node/src/clients.rs). It asks only the compute endpoints that lists as running its person's
 // calls, hands each only the keys of the scopes it runs, of databases an MCP request uses (`mayHand`) and epochs from
 // each one's newest copy, and takes a 428 only from the node that answered, for its own listed seal key. What a tool needed is kept per tool, so a call hands only its own.
 //
 // Bindings: AUTH (the sign-in), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), CLIENT
-// (this Worker's `Client`), ADDRESS (the install's), NAME (its name), LOCATION (where objects are made), IDLE (ms,
+// (this Worker's `Client`), ADDRESS (the network's), NAME (its name), LOCATION (where objects are made), IDLE (ms,
 // optional).
 
 import { DurableObject } from "cloudflare:workers";
@@ -143,7 +143,7 @@ async function mcp(request, env) {
   } catch (err) {
     return signInFirst(env, `that sign-in won't do: ${err.message}`);
   }
-  // An MCP client's sign-in is for this, `<address>/mcp`; the install's own apps' (`<address>`) open no device here.
+  // An MCP client's sign-in is for this, `<address>/mcp`; the network's own apps' (`<address>`) open no device here.
   if (![claims.aud].flat().includes(`${origin(env)}/mcp`)) return signInFirst(env, `that sign-in isn't for ${origin(env)}/mcp`);
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
   const body = await bodyOf(request);
@@ -219,7 +219,7 @@ function needOf(n) {
 const sameNeed = (a, b) => a.scope === b.scope && a.app === b.app && a.database === b.database;
 
 /// The bucket as the device's Rust reads it (cloudflare/node/src/lib.rs `Js`), through the URL signer, signed with the
-/// device's key: it gives URLs only to the install's endpoints. The steps after one are signed with it, as they're read
+/// device's key: it gives URLs only to the network's endpoints. The steps after one are signed with it, as they're read
 /// next.
 class Bucket {
   constructor(env, me) {
@@ -360,7 +360,7 @@ export class Client extends DurableObject {
       } catch (err) {
         // Taken out since it was approved: the relay no longer lets its key in, nor the entries list it.
         this.isApproved = false;
-        return answerAll(body, /isn't one of the install's|not listed|no keys of your/.test(err.message) ? approve : `${device.name} couldn't start: ${err.message}`);
+        return answerAll(body, /isn't one of the network's|not listed|no keys of your/.test(err.message) ? approve : `${device.name} couldn't start: ${err.message}`);
       }
       if (!nodes.length) nodes = await this.reorder(me);
       if (!nodes.length) return answerAll(body, "None of your devices is on right now.");
@@ -474,7 +474,7 @@ export class Client extends DurableObject {
     return this.order;
   }
 
-  /// Reads run priority's order from the install's state, for the nodes it asks: only nodes the entries list are
+  /// Reads run priority's order from the network's state, for the nodes it asks: only nodes the entries list are
   /// ever in it, whatever the state says.
   async learnOrder(me) {
     if (!this.run || this.run.learned) return;

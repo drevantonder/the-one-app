@@ -68,7 +68,7 @@ export function server(version) {
   glue.catch(() => {});
   // Imported here, not above, so the WebAssembly is fetched first.
   const code = Promise.all([import("/shared/crypto.js"), import("/kept.js")]);
-  /// Of `keys`, the nodes the install's signed entries, as this browser last checked them (`global`), list as running
+  /// Of `keys`, the nodes the network's signed entries, as this browser last checked them (`global`), list as running
   /// something of `user`'s: all of them before it's checked any. A node the relay or a node names besides isn't asked.
   async function theirs(user, keys, kept) {
     const k = (kept === undefined ? await (await code)[1].get(`global:${user}`) : kept)?.members;
@@ -78,7 +78,7 @@ export function server(version) {
   }
 
   /// `user`'s members from `global`'s entries kept and those `given` (a pack), checked and replayed by the client
-  /// (src/members.rs), then kept: the entries, the install's first, what to ask for next, and the members. The first
+  /// (src/members.rs), then kept: the entries, the network's first, what to ask for next, and the members. The first
   /// time, of the install its approval named (`genesis:<user>`), if it named one.
   async function global(user, given, steps) {
     const [, { get, put }] = await code;
@@ -147,7 +147,7 @@ export function server(version) {
     const computes = ask(certificate).then(async (asked) => {
       // Not let in: this browser isn't one of its person's devices (yet, or any more).
       if (asked.status === 403) return null;
-      if (!asked.ok) throw new Error("Your One App's network isn't answering.");
+      if (!asked.ok) throw new Error("Your One App network isn't answering.");
       const said = await asked.json();
       return { all: await theirs(user, said.computes), online: said.online };
     });

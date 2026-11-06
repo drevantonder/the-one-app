@@ -59,7 +59,7 @@ let send = () => {};
 function lost() {
   for (const [id, w] of waiting) {
     waiting.delete(id);
-    const err = new Error("Your One App's network restarted. Try again.");
+    const err = new Error("Your One App network restarted. Try again.");
     if (w.body) w.body.error(err);
     else w.reject(err);
   }
@@ -193,18 +193,18 @@ export const net = {
   },
 
   /// `user`'s members as `global`'s entries say them, checked here: those kept and those `given` (a pack a node sent,
-  /// or none), replayed by the client's WebAssembly, and kept. Throws if one doesn't check, or they're another install's
+  /// or none), replayed by the client's WebAssembly, and kept. Throws if one doesn't check, or they're another network's
   /// than the one first kept.
   /// `steps` are its scope database's this browser read from the bucket (`Device.bucketSteps`), with its log's to
   /// where a freeze says it ends once it says so (`wants_log`), applied the same way.
   async global(user, given, steps) {
-    if (!net.has) throw new Error("This device can't check who's who in your One App.");
+    if (!net.has) throw new Error("This device can't check who's who in your One App network.");
     const buffer = given && given.buffer.slice(given.byteOffset, given.byteOffset + given.byteLength);
     return (await ask({ op: "global", user, given: buffer, steps }, buffer ? [buffer] : [])).members;
   },
 
   /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as sign-in passed it on) shows, checked
-  /// by the client at the install's `address`, whose first entry's hash is `genesis` (hex) and whose people sign in
+  /// by the client at the network's `address`, whose first entry's hash is `genesis` (hex) and whose people sign in
   /// with `clients` (its `sign_in_clients` setting, as its entries say): against `accounts`, its person's, for one let in
   /// by it, or with none, for one approved by its code. → the account; throws why it doesn't check out.
   async signedInWith(proof, key, seal, address, { genesis, clients }, accounts) {

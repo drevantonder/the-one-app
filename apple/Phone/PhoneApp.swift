@@ -84,7 +84,7 @@ final class Phone {
         #endif
     }
 
-    /// Signs in to the install at `typed` (an address, or an invite link, whose page makes the person's passkey
+    /// Signs in to the network at `typed` (an address, or an invite link, whose page makes the person's passkey
     /// first), with their passkey in the system's sign-in sheet.
     func signIn(_ typed: String, session: WebAuthenticationSession) async -> URL? {
         guard !signingIn else { return nil }
@@ -107,14 +107,14 @@ final class Phone {
     }
 
     /// Signs out: back to the first screen, with nothing of the person's left on the phone, and no more of their pushes
-    /// (the push Worker forgets a device the install no longer has).
+    /// (the push Worker forgets a device the network no longer has).
     func signOut() async {
         await DeviceClient.shared.signOut()
         await Auth.shared.signOut()
         signedOut(nil)
     }
 
-    /// The install no longer takes this phone's sign-in. A call that fails once the person signed out says nothing.
+    /// The network no longer takes this phone's sign-in. A call that fails once the person signed out says nothing.
     func signedOut(_ why: String?) {
         if stage == .welcome, why != nil { return }
         running?.cancel()

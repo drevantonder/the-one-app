@@ -1,4 +1,4 @@
-//! Devices joining and leaving: the keys sealed to each (`GET`/`POST /v1/keys`, which any of the install's devices may
+//! Devices joining and leaving: the keys sealed to each (`GET`/`POST /v1/keys`, which any of the network's devices may
 //! read, sealed as they are), approving a device's request to join (its own person's, or a newcomer's by invite), invites,
 //! and removing a device.
 
@@ -37,7 +37,7 @@ pub(super) struct Owed {
 }
 
 /// Whether `who` may list a device of `user`'s that does `kinds`, as replay counts a `device` entry: only of someone in
-/// the install now (one removed, or not in it yet, is added with their first device, by an invite's approval); a
+/// the network now (one removed, or not in it yet, is added with their first device, by an invite's approval); a
 /// client or a service only from their own devices (`add-devices`), a machine that runs calls also by an admin
 /// (`add-machines`), which runs only what that admin's listing may, never their own scope. The rows give the verbs;
 /// which kind of device takes which is replay's rule.
@@ -68,11 +68,11 @@ fn starts_epochs(db: &ScopeDb, user: &str, scope: &Scope) -> bool {
 }
 
 impl Node {
-    /// What's sealed of a scope's keys, for any person of the install, since it opens only with keys they may hold:
+    /// What's sealed of a scope's keys, for any person of the network, since it opens only with keys they may hold:
     /// with `to`, each of its epochs sealed to that endpoint, `{ epoch, sealed: { n: base64url } }`, `epoch` the newest
     /// made; with `app`, the app's key in each epoch, sealed under that epoch's, `{ sealed: { n: base64url } }`.
     pub async fn sealed_keys(&self, caller: &Caller, scope: &Scope, to: Option<&str>, app: Option<&str>) -> Result<Value> {
-        ensure!(self.is_user(&caller.user), "only the install's people read its keys");
+        ensure!(self.is_user(&caller.user), "only the network's people read its keys");
         let bucket = self.bucket()?;
         let newest = self.newest_epoch(scope).await?;
         let name = scope.to_string();
@@ -115,7 +115,7 @@ impl Node {
     /// as someone's who may use the scope (or the recovery key, or a new epoch, only by one who may start it), only if
     /// it isn't there (→ `{}`); an app's key in epoch `n`, if it isn't there (→ `{ sealed }`, whichever is there
     /// now, which every device then uses); or with both, an app's key in epoch `n` sealed to `to`, an endpoint of the
-    /// install that will run the app's schedules there (`keys::app_schedules_key_name`), by one who may set them (→ `{}`,
+    /// network that will run the app's schedules there (`keys::app_schedules_key_name`), by one who may set them (→ `{}`,
     /// there already or not: the app schedules name the hash of the one they mean).
     pub async fn seal_key(&self, caller: &Caller, scope: &Scope, n: u32, to: Option<&str>, app: Option<&str>, sealed: &str) -> Result<Value> {
         let sealed = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("sealed is base64url"))?;
@@ -164,7 +164,7 @@ impl Node {
                 self.with(|i| {
                     let db = i.r.db();
                     ensure!(db.may(&caller.user, "keep", &scopes::object(scope)), "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
-                    ensure!(db.machine(&key).is_some(), "that endpoint isn't one of the install's");
+                    ensure!(db.machine(&key).is_some(), "that endpoint isn't one of the network's");
                     Ok(())
                 })?;
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
@@ -259,12 +259,12 @@ fn code_of(typed: &str) -> String {
 }
 
 impl Node {
-    /// The install's address, where people sign in.
+    /// The network's address, where people sign in.
     pub fn address(&self) -> Result<String> {
         self.with(|i| Ok(super::calls::address(i.r.db())))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
     }
 
-    /// Asks the install's sign-in something as this device, signed with its key (`one/auth`): a POST's body is
+    /// Asks the network's sign-in something as this device, signed with its key (`one/auth`): a POST's body is
     /// the signed request, a GET's or DELETE's is in `x-one-request`; it's signed for `path` without its query. → its
     /// answer.
     async fn ask_sign_in(&self, method: &'static str, path: &str, fields: Value) -> Result<Value> {
@@ -288,12 +288,12 @@ impl Node {
         .await?
     }
 
-    /// Once the install's recovery key changed, an admin's device tells the relay to let the old one in no more and the
+    /// Once the network's recovery key changed, an admin's device tells the relay to let the old one in no more and the
     /// new one in as a client: once each since this device started.
     pub(super) fn follow_recovery(&self) {
         let told = self.with(|i| {
             let db = i.r.db();
-            let admins = db.machine(&self.0.id).is_some_and(|d| db.may(&d.user, "invite", scopes::INSTALL));
+            let admins = db.machine(&self.0.id).is_some_and(|d| db.may(&d.user, "invite", scopes::NETWORK));
             let was = db.recovery_was();
             Ok(db.recovery().filter(|_| admins && !was.is_empty()).map(|now| (now, was)))
         });
@@ -312,7 +312,7 @@ impl Node {
         self.tell_relay_as(self.signing_key(), fields).await
     }
 
-    /// Tells the relay something now, signed by `key`: this device's, or the install's recovery key.
+    /// Tells the relay something now, signed by `key`: this device's, or the network's recovery key.
     async fn tell_relay_as(&self, key: ed25519_dalek::SigningKey, fields: Value) -> Result<()> {
         let address = self.address()?;
         tokio::task::spawn_blocking(move || {
@@ -374,7 +374,7 @@ impl Node {
     /// devices to approve the newcomer's first device. → (the link, until when).
     pub async fn invite_someone(&self, caller: &Caller, name: &str, role: Role) -> Result<(String, u64)> {
         ensure!(caller.user == self.user()?, "invite from one of your own devices: {} keeps your invites with you", self.device_name());
-        ensure!(self.with(|i| Ok(i.r.db().may(&caller.user, "invite", scopes::INSTALL)))?, "only admins invite someone");
+        ensure!(self.with(|i| Ok(i.r.db().may(&caller.user, "invite", scopes::NETWORK)))?, "only admins invite someone");
         let (address, key, name_) = (self.address()?, self.signing_key(), name.to_string());
         let user = new_id();
         let made = {
@@ -449,7 +449,7 @@ impl Node {
         Ok(json!({ "device": r.name }))
     }
 
-    /// Lets back in someone who lost every device, with the install's recovery key, on this machine (never one asked
+    /// Lets back in someone who lost every device, with the network's recovery key, on this machine (never one asked
     /// over the network): the device whose join code is `code`, theirs, is listed by an entry the recovery key signs
     /// (which counts as an admin's approval, and is listed as its use), sealed each epoch of each scope they may open
     /// (opened through the recovery key's copy), and let onto the network by the recovery key. Without `confirm`, says
@@ -489,14 +489,14 @@ impl Node {
                 Err(err) => not.push(json!({ "scope": scope.to_string(), "why": format!("{err:#}") })),
             }
         }
-        // Marked approved, for the device waiting on it to see, with the install it's in.
+        // Marked approved, for the device waiting on it to see, with the network it's in.
         if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
             tracing::warn!("marking a request approved at sign-in: {err:#}");
         }
         Ok(json!({ "device": r.name, "person": person, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
     }
 
-    /// Where a device's request is marked approved at sign-in, saying the install it was let into (its first entry's hash),
+    /// Where a device's request is marked approved at sign-in, saying the network it was let into (its first entry's hash),
     /// the only one that device then takes, and once `global`'s log is frozen, where this device read its scope database
     /// to, which that device starts from (`steps::Welcome`).
     fn approved_path(&self, key: &str) -> Result<String> {
@@ -552,7 +552,7 @@ impl Node {
             return Ok(json!({ "device": r.name, "person": who, "new": invite.is_some() }));
         }
         let approved = self.approve_request(caller, &r, invite.as_ref()).await?;
-        // Marked approved, for the device waiting on it to see, with the install it's in.
+        // Marked approved, for the device waiting on it to see, with the network it's in.
         if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
             tracing::warn!("marking a request approved at sign-in: {err:#}");
         }
@@ -611,7 +611,7 @@ impl Node {
                 self.member_as(caller, "remove", json!({ "key": hex(&old), "seq": seq })).await?;
             }
         }
-        let admin = self.with(|i| Ok(i.r.db().may(&r.user, "invite", scopes::INSTALL)))?;
+        let admin = self.with(|i| Ok(i.r.db().may(&r.user, "invite", scopes::NETWORK)))?;
         if invite.is_some_and(|i| i.role == Role::Admin)
             && let Err(err) = self.ask_sign_in("POST", "/api/auth/people/admin", json!({ "user": r.user, "admin": true })).await
         {
@@ -628,7 +628,7 @@ impl Node {
                 Err(err) => not.push(json!({ "scope": scope.to_string(), "why": format!("{err:#}") })),
             }
         }
-        // Last, and waited for where there's a relay (at the install's address): until it lets the device in, the device
+        // Last, and waited for where there's a relay (at the network's address): until it lets the device in, the device
         // reaches nothing and keeps waiting. Approving it again finishes this, as it's listed already.
         if self.address().is_ok() {
             let told = self.tell_relay_now(json!({ "add": r.key, "admin": admin, "role": "client" })).await;
@@ -641,8 +641,8 @@ impl Node {
     /// record them) for one let in by it, else for one approved by its code. None if it shows nothing that checks out.
     async fn signed_in_with(&self, r: &DeviceRequest, accounts: Option<&[crate::sign_in_proof::Account]>) -> Option<crate::sign_in_proof::Account> {
         let proof = r.proof()?;
-        let (endpoint, install) = (r.endpoint().ok()?, self.sign_in_install().ok()?);
-        let jwks = match proof.issuer().and_then(|i| crate::sign_in_proof::keys_at(&i, &install.address)) {
+        let (endpoint, network) = (r.endpoint().ok()?, self.sign_in_network().ok()?);
+        let jwks = match proof.issuer().and_then(|i| crate::sign_in_proof::keys_at(&i, &network.address)) {
             Some(at) => match self.issuer_keys(&at).await {
                 Ok(keys) => Some(keys),
                 Err(err) => {
@@ -653,18 +653,18 @@ impl Node {
             None => None,
         };
         let checked = match accounts {
-            Some(theirs) => crate::sign_in_proof::vouches(&proof, &endpoint, &install, jwks.as_ref(), theirs, now_ms()),
-            None => crate::sign_in_proof::check(&proof, &endpoint, &install, jwks.as_ref(), now_ms()),
+            Some(theirs) => crate::sign_in_proof::vouches(&proof, &endpoint, &network, jwks.as_ref(), theirs, now_ms()),
+            None => crate::sign_in_proof::check(&proof, &endpoint, &network, jwks.as_ref(), now_ms()),
         };
         checked.map_err(|err| tracing::info!("{}'s sign-in doesn't let it in by itself: {err:#}", r.name)).ok()
     }
 
-    /// The install a new device's sign-in must be for, as this device's signed entries say.
-    fn sign_in_install(&self) -> Result<crate::sign_in_proof::Install> {
+    /// The network a new device's sign-in must be for, as this device's signed entries say.
+    fn sign_in_network(&self) -> Result<crate::sign_in_proof::Network> {
         let address = self.address()?;
         self.with(|i| {
             let root = i.r.root.with_context(|| format!("this device isn't in {YOURS} yet"))?;
-            Ok(crate::sign_in_proof::Install::new(&address, *root.as_bytes(), i.r.db().setting(crate::sign_in_proof::CLIENTS).as_deref()))
+            Ok(crate::sign_in_proof::Network::new(&address, *root.as_bytes(), i.r.db().setting(crate::sign_in_proof::CLIENTS).as_deref()))
         })
     }
 
@@ -756,7 +756,7 @@ impl Node {
 
     /// Lists one of this device's parts, the service `service`, as its person's, a part of this device (oned turned it
     /// on, and it asked with its endpoint and whether it serves everyone), and tells the relay to let it in. It holds no
-    /// keys: the nodes that call it bring it the install's entries, which say who may. A part listed before it named its
+    /// keys: the nodes that call it bring it the network's entries, which say who may. A part listed before it named its
     /// device is listed again, naming it.
     pub async fn list_part(&self, endpoint: &crate::keys::Endpoint, service: &str, shared: bool) -> Result<()> {
         let user = self.user()?;
@@ -804,7 +804,7 @@ impl Node {
 
     /// Erases what this device keeps (by name or key), for its person or an admin asking from one of their own devices,
     /// directly: asked of another device, it says to ask that one, if it's on. Once it has answered, its oned stops its
-    /// parts and deletes its home (its copies of the install's data, the pages it kept, and each service's folder and
+    /// parts and deletes its home (its copies of the network's data, the pages it kept, and each service's folder and
     /// data, WhatsApp's link among them), then stops. Removing it next takes it out. → what's erasing.
     pub async fn erase(&self, caller: &Caller, device: &str) -> Result<Value> {
         let key = self.find_machine(device)?;
@@ -878,7 +878,7 @@ impl Node {
         let user = self.find_user(user)?;
         let (name, keys, scopes) = self.with(|i| {
             let db = i.r.db();
-            ensure!(db.may(&caller.user, "remove", scopes::INSTALL), "only admins remove someone");
+            ensure!(db.may(&caller.user, "remove", scopes::NETWORK), "only admins remove someone");
             ensure!(user != caller.user, "you can't remove yourself: another admin can");
             let name = db.user(&user).context("no such person")?.name;
             let keys: Vec<Key> = db.machines().into_iter().filter(|d| d.user == user && !d.removed).map(|d| d.key).collect();
@@ -984,7 +984,7 @@ impl Node {
     }
 
     /// What a person's first device does once it's in, here for a machine (cloudflare/web/device.js for a browser): where
-    /// their own things run besides their own machines, if their devices never said (the install's machines that run
+    /// their own things run besides their own machines, if their devices never said (the network's machines that run
     /// everyone's, chosen without asking), and their own scope's first epoch, if it isn't made.
     pub(super) fn settle_own(&self) {
         let node = self.clone();

@@ -32,10 +32,10 @@ pub(super) struct Given<'a> {
 }
 
 impl Node {
-    /// The install's bucket, as this device reaches it, with its copy of the databases' steps.
+    /// The network's bucket, as this device reaches it, with its copy of the databases' steps.
     pub(super) fn bucket(&self) -> Result<Copied> {
-        let place = self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this device can't reach the install's bucket, where apps keep their data: use another device"))?;
-        Ok(Copied::moving(place, self.install_dir().join("copy"), self.0.moved.clone()))
+        let place = self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this device can't reach the network's bucket, where apps keep their data: use another device"))?;
+        Ok(Copied::moving(place, self.network_dir().join("copy"), self.0.moved.clone()))
     }
 
     /// This device as an endpoint: the key it signs with, and the key what's for it is sealed to.
@@ -138,7 +138,7 @@ impl Node {
 
     /// `global`'s epochs, for a device that has read none of its entries yet, so knows no epoch's hash: those sealed to
     /// it in the bucket, each kept only once the entries it opens say it's theirs (the genesis, whose hash is the
-    /// install's, names the first's hash, and each `epoch` entry the next's). → (the keys, what was read with them).
+    /// network's, names the first's hash, and each `epoch` entry the next's). → (the keys, what was read with them).
     pub(super) async fn first_global_read(&self) -> Result<(crate::db::Keys, crate::log::Read)> {
         let (bucket, me, secret, root) = (self.bucket()?, hex(&self.0.id), self.seal_secret(), self.with(|i| Ok(i.r.root))?);
         let mut candidates = crate::db::Keys::new();
@@ -209,7 +209,7 @@ impl Node {
         // A scope's first keys are its admins' to make, as they choose where its apps' schedules run.
         let (may, recovery) = self.with(|i| Ok((i.r.db().may(&i.user, "keep", &scopes::object(scope)), i.r.db().recovery())))?;
         ensure!(may, NotGiven(scope.clone(), self.device_name()));
-        let recovery = recovery.context("the install has no recovery key to seal its keys to")?;
+        let recovery = recovery.context("the network has no recovery key to seal its keys to")?;
         let key: [u8; 32] = rand::random();
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let sealed = crate::cloudflare::seal_to(&crate::cloudflare::twin_public(&recovery)?, &key)?;

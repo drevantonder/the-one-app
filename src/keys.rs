@@ -7,18 +7,18 @@
 //! machine's. A new device gets in only when one of its person's devices approves it, from a code or QR that shows
 //! which device it is, which seals it the keys of the scopes it may open. A person who lost a device is let back in by
 //! another, by a copy sealed under a passkey's PRF (optional for most, kept because synced passkeys make it
-//! self-service), or by the install's recovery key, kept offline by an admin, each use of it an entry in the log.
+//! self-service), or by the network's recovery key, kept offline by an admin, each use of it an entry in the log.
 //! A scope gets a new epoch when a person, or a device that didn't sign itself out (lost or stolen), loses the right
 //! to open it, never on sign-out, where the device deletes its own key: the keys are sealed to everyone who still
 //! belongs. Epochs never go down along a database's positions (`src/db.rs`).
 //!
 //! ```text
 //! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`cloudflare::seal_to`)
-//! <folder>/_epochs/<n>/recovery             and to the install's recovery key
+//! <folder>/_epochs/<n>/recovery             and to the network's recovery key
 //! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`cloudflare::seal_app_key`)
 //! <folder>/<app>/_grants/<endpoint>/<n>      and sealed to an endpoint that runs its app schedules (`cloudflare::seal_to`)
 //! <folder>/_vault/<n>/<endpoint key hex>     the scope's Vault secret key n, sealed to a machine its `vault` entry grants
-//! <folder>/_vault/<n>/recovery               and to the install's recovery key
+//! <folder>/_vault/<n>/recovery               and to the network's recovery key
 //! ```
 //!
 //! An endpoint is known by its Ed25519 key, which signs, and things are sealed to its X25519 key: for one in Rust, its
@@ -46,7 +46,7 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-/// An endpoint as the install lists it: the key it signs with (its id) and the key things are sealed to.
+/// An endpoint as the network lists it: the key it signs with (its id) and the key things are sealed to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Endpoint {
     #[serde(with = "hex32")]
@@ -175,7 +175,7 @@ pub struct Session {
 }
 
 /// Checks a certificate (`certify`'s) at `now`: signed, not yet expired, for no longer than `SESSION` from when it was
-/// signed or from `now`, whichever is sooner, and not signed in the future. Who signed it is for the caller to check: it counts only if they're a device of the install.
+/// signed or from `now`, whichever is sooner, and not signed in the future. Who signed it is for the caller to check: it counts only if they're a device of the network.
 pub fn check_certificate(certificate: &str, now: u64) -> Result<Session> {
     let request: Value = B64U.decode(certificate.trim().as_bytes()).ok().and_then(|b| serde_json::from_slice(&b).ok()).context("a certificate is base64url JSON")?;
     let (by, fields, at) = check_signed(ENDPOINT, &request)?;
@@ -331,7 +331,7 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// apps, which says what each does from its code, the log and that code. The Vault's routes, its Vault and log; any
 /// other, the log alone. `cloudflare/shared/crypto.js`'s `mayHand` is the same.
 ///
-/// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the install
+/// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the network
 /// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
 /// never go with a request.
 pub fn may_hand(route: &str, need: &Need) -> bool {
@@ -373,7 +373,7 @@ pub const MOST_NEEDED: usize = 64;
 /// What a node's 428 (`answer`) asks a request of `route` to hand: taken only from the node that answered (`node`, hex,
 /// as its connection proved), naming itself; one or more keys, MOST_NEEDED at most, each of a database that kind of
 /// request uses (`may_hand`). None if it asks for anything else. The seal key it names isn't read: what's handed is
-/// sealed to the one the install's entries list for that node. `cloudflare/shared/crypto.js`'s `askedFor` is the same.
+/// sealed to the one the network's entries list for that node. `cloudflare/shared/crypto.js`'s `askedFor` is the same.
 pub fn asked_for(route: &str, node: &str, answer: &Value) -> Option<Vec<Need>> {
     if answer["to"].as_str() != Some(node) {
         return None;
@@ -394,7 +394,7 @@ pub const BEHIND: [u64; 2] = [2_000, 4_000];
 pub enum Waited {
     /// Its sign-in is no more: it signs in again.
     SignedOut,
-    /// Approved, in the install whose first entry (hex) the device that approved it named, if it named one: the only
+    /// Approved, in the network whose first entry (hex) the device that approved it named, if it named one: the only
     /// one it then takes; and once who's who is written as steps, where that device read them to, which this one
     /// starts from (`database::steps::Welcome`), if it said. It's in once the relay lets it.
     Approved { genesis: Option<String>, welcome: Option<String> },

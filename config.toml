@@ -3,7 +3,7 @@
 name = "The One App"
 cli = "one"
 port = 4747
-# What the App Store calls the apps made in the install, beside the ones built in.
+# What the App Store calls the apps made in the network, beside the ones built in.
 made_here = "Made here"
 # Where `one update` and `one release` get the code, and the installer the releases.
 repo = "drevantonder/the-one-app"
@@ -11,8 +11,8 @@ repo = "drevantonder/the-one-app"
 # publisher: `one update` and `one release` run release_signer to get it, and keep it only in memory.
 release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"
 release_signer = "op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'"
-# Every folder in apps/ ships built into each release, and a new install has them all, for anyone to add to their own
-# page. These are the ones it also installs in global; each `one update` deploys the release's version of every one an install has.
+# Every folder in apps/ ships built into each release, and a new network has them all, for anyone to add to their own
+# page. These are the ones it also installs in global; each `one update` deploys the release's version of every one a network has.
 apps = ["repos", "apps"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.
@@ -23,7 +23,7 @@ always_on = []
 # at join_domain, joining with an invite for its email; admins still sign in with a passkey.
 sign_in = "passkey"
 join_domain = ""
-# Where the install's relay is made (a Cloudflare location hint: wnam, enam, sam, weur, eeur, apac, oc, afr or me), near
+# Where the network's relay is made (a Cloudflare location hint: wnam, enam, sam, weur, eeur, apac, oc, afr or me), near
 # its people, since every packet between devices that can't reach each other directly goes through it; empty for
 # wherever its first request came from.
 relay_location = "oc"
@@ -41,7 +41,7 @@ firebase = ""
 wns_app = ""
 wns_object = ""
 
-# An install's settings until its admins change them in Settings (`setting` entries). Every install has store, the app
+# A network's settings until its admins change them in Settings (`setting` entries). Every network has store, the app
 # the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install).
 [settings]
 store = "apps"

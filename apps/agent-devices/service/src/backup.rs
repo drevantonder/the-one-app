@@ -1,4 +1,4 @@
-//! Backups: a copy of a Linux device's home folder, without caches, as a blob in the install: any of the person's
+//! Backups: a copy of a Linux device's home folder, without caches, as a blob in the network: any of the person's
 //! devices can fetch it, so an agent device can be restored on another (move). Each keeps an index of its own backups
 //! in backups.json. These aren't kept off-site: a blob lives on the devices that have fetched it, and a backup to a
 //! bucket isn't built yet.

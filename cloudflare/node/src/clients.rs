@@ -1,4 +1,4 @@
-//! The remote MCP server's devices (cloudflare/mcp/), each a client of the install as any app is (one-client, over `<cli>/http/1`),
+//! The remote MCP server's devices (cloudflare/mcp/), each a client of the network as any app is (one-client, over `<cli>/http/1`),
 //! with no socket: one per remote MCP client, in its own Durable Object, which may share this isolate with others'.
 //! What one sends goes to its object's `send(dst, segment size, contents)`, and the relay hands it what's sent to its
 //! key, by RPC, which comes in at `device_deliver`. It lives while its object does, and holds its key only while it
@@ -8,7 +8,7 @@
 //! the URL signer, with the epochs sealed to it that those entries made, replays them as every client device does
 //! (one-client's `members::Global`, the nodes' own replay), and asks who's who and who may of `global`'s scope
 //! database built from that (`one::database::scopes`) (`device_view`); it opens the keys a call needs from the bucket
-//! too, each epoch checked against its entry's hash (`device_keys`). So it asks only the compute endpoints the install
+//! too, each epoch checked against its entry's hash (`device_keys`). So it asks only the compute endpoints the network
 //! lists as running its person's calls, and hands each only the keys of scopes it runs.
 
 use std::cell::RefCell;
@@ -204,7 +204,7 @@ impl View {
             }
         }
         loop {
-            ensure!(!candidates.is_empty(), "no keys of your One App are sealed to this device yet");
+            ensure!(!candidates.is_empty(), "no keys of your One App network are sealed to this device yet");
             let mut log_keys = one::db::Keys::new();
             for (n, epoch) in &candidates {
                 if let Ok(Some(app)) = one::db::app_key(bucket, epoch, "global", members::APP, *n, false).await {
@@ -265,7 +265,7 @@ impl View {
         Ok(keys)
     }
 
-    /// The compute endpoints the install lists as running some of its person's calls: `{ key, seal, scopes }` each,
+    /// The compute endpoints the network lists as running some of its person's calls: `{ key, seal, scopes }` each,
     /// hex, `scopes` the ones of theirs it runs.
     fn nodes(&self) -> Vec<Value> {
         let m = &self.db;

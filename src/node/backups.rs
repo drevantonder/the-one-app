@@ -47,7 +47,7 @@ impl Problem {
 /// Each place's problem, as this device sees it: its runs failing (worth a push from the second failure in a row),
 /// or a scope this device holds with changes that have waited a day for it, whoever should have backed them up.
 /// Both end by themselves once a run works.
-fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
+fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
     let m = i.r.db();
     let status = i.status.get("global").cloned().unwrap_or_default();
     let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
@@ -152,7 +152,7 @@ struct PlaceItem {
     made: u64,
 }
 
-/// The setting that names the S3 places the install backs up to: each item's id, and the hash of its fields
+/// The setting that names the S3 places the network backs up to: each item's id, and the hash of its fields
 /// (`place_hash`), as an admin's device wrote it. A Vault item is anyone's to write; this is only admins'.
 const PINNED: &str = "backups";
 
@@ -168,9 +168,9 @@ fn pinned(m: &ScopeDb) -> BTreeMap<String, String> {
 }
 
 /// What a place's item says, read from global's items. A folder's item names only its device: where the folder is
-/// comes from that device's own file (`Install::folders`), never from an item, which anyone may write. An S3 place
+/// comes from that device's own file (`NetworkFile::folders`), never from an item, which anyone may write. An S3 place
 /// counts only as `PINNED` names it.
-fn places(i: &Install) -> Vec<PlaceItem> {
+fn places(i: &Network) -> Vec<PlaceItem> {
     let pinned = pinned(i.r.db());
     i.vault
         .iter()
@@ -233,7 +233,7 @@ impl Node {
                 _ = self.0.backup_now.notified() => {}
             }
             let force = std::mem::take(&mut *self.0.backup_forced.lock().unwrap());
-            if self.has_install() && self.ready() {
+            if self.has_network() && self.ready() {
                 if let Err(err) = self.back_up(force).await {
                     tracing::warn!("backups: {err:#}");
                 }
@@ -247,7 +247,7 @@ impl Node {
         }
     }
 
-    /// Pushes a place's problem to the install's admins once it's worth it, through the install's push. Every device
+    /// Pushes a place's problem to the network's admins once it's worth it, through the network's push. Every device
     /// watches, so a device that's gone is noticed too; the first in line tells them, each after it only once the
     /// ones before have had time to, and the `backup-alert` it writes keeps the rest quiet until the next problem.
     async fn tell_admins(&self) -> Result<()> {
@@ -263,7 +263,7 @@ impl Node {
                 .into_iter()
                 .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && i.status.get("global").and_then(|s| s.alerted.get(&p.place)).is_none_or(|t| *t < p.since))
                 .collect();
-            let admins: Vec<String> = m.users().into_iter().filter(|u| !u.removed && m.may(&u.id, "change-settings", scopes::INSTALL)).map(|u| u.id).collect();
+            let admins: Vec<String> = m.users().into_iter().filter(|u| !u.removed && m.may(&u.id, "change-settings", scopes::NETWORK)).map(|u| u.id).collect();
             Ok((due, admins))
         })?;
         for p in due {
@@ -293,8 +293,8 @@ impl Node {
     }
 
     /// The first of the backups' problems, for the badge on Settings: only an admin's to see.
-    pub(super) fn backup_problem(&self, i: &Install, user: &str) -> Option<Value> {
-        if !i.r.db().may(user, "change-settings", scopes::INSTALL) {
+    pub(super) fn backup_problem(&self, i: &Network, user: &str) -> Option<Value> {
+        if !i.r.db().may(user, "change-settings", scopes::NETWORK) {
             return None;
         }
         problems(i, now_ms()).ok()?.into_iter().min_by_key(|p| p.since).map(|p| p.json())
@@ -312,13 +312,13 @@ impl Node {
         let now = now_ms();
         let me = self.0.id;
         let keys = self.held_keys().await;
-        let (install, plan) = self.with(|i| {
+        let (network, plan) = self.with(|i| {
             let m = i.r.db();
             if !i.views.contains_key("global") {
                 return Ok((String::new(), Vec::new()));
             }
-            let install = i.r.root.map(|r| r.to_hex()[..16].to_string()).context("no install")?;
-            m.recovery().context("the install has no recovery key")?;
+            let network = i.r.root.map(|r| r.to_hex()[..16].to_string()).context("no network")?;
+            m.recovery().context("the network has no recovery key")?;
             let frontier = i.r.store.frontier()?;
             let cache = self.0.backed.lock().unwrap();
             let failed = self.0.backup_failed.lock().unwrap();
@@ -384,7 +384,7 @@ impl Node {
                     plan.push((p, due, prune));
                 }
             }
-            Ok((install, plan))
+            Ok((network, plan))
         })?;
         for (p, due, prune) in plan {
             let place = match p.place {
@@ -403,7 +403,7 @@ impl Node {
             let mut snapshots = Vec::new();
             let mut error = None;
             for d in due {
-                match self.back_up_scope(&place, &p.id, &install, &d, now, force).await {
+                match self.back_up_scope(&place, &p.id, &network, &d, now, force).await {
                     Ok(Some(s)) => snapshots.push(s),
                     Ok(None) => {}
                     Err(err) => {
@@ -422,8 +422,8 @@ impl Node {
             }
             if let (Some((scopes, fetchable)), false) = (prune, failed) {
                 self.0.pruned.lock().unwrap().insert(p.id.clone(), now);
-                let (place, install, title) = (place.clone(), install.clone(), p.title.clone());
-                match tokio::task::spawn_blocking(move || b::prune(&place, &install, &scopes, &fetchable, now_ms())).await? {
+                let (place, network, title) = (place.clone(), network.clone(), p.title.clone());
+                match tokio::task::spawn_blocking(move || b::prune(&place, &network, &scopes, &fetchable, now_ms())).await? {
                     Ok(pruned) if pruned != b::Pruned::default() => tracing::info!("pruned {title}: {} snapshots, {} objects, {} bytes", pruned.snapshots, pruned.objects, pruned.bytes),
                     Ok(_) => {}
                     Err(err) => tracing::warn!("pruning {title}: {err:#}"),
@@ -453,7 +453,7 @@ impl Node {
 
     /// Backs up one scope to one place, with its newest epoch's key: sends what the place lacks, unless (but for `force`) the
     /// place has a snapshot of it from within the hour, which a device that just started doesn't know of yet.
-    async fn back_up_scope(&self, place: &Place, place_id: &str, install: &str, d: &Due, now: u64, force: bool) -> Result<Option<Snapshot>> {
+    async fn back_up_scope(&self, place: &Place, place_id: &str, network: &str, d: &Due, now: u64, force: bool) -> Result<Option<Snapshot>> {
         let scope = Scope::parse(&d.scope)?;
         let epochs = self.epoch_keys(&scope, false).await?;
         let (n, key) = epochs.last_key_value().map(|(n, k)| (*n, *k)).context("no epoch")?;
@@ -475,19 +475,19 @@ impl Node {
         })?;
         let (node, runtime) = (self.clone(), tokio::runtime::Handle::current());
         let bucket = self.bucket().ok().map(|b| b.place);
-        let (place, install, scope_name, device, frozen) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id, self.frozen());
+        let (place, network, scope_name, device, frozen) = (place.clone(), network.to_string(), d.scope.clone(), self.0.id, self.frozen());
         let snap = tokio::task::spawn_blocking(move || -> Result<(Option<Snapshot>, Option<Snapshot>)> {
             // What the place holds: the newest snapshot there, which another device may have written since.
-            let newest = b::snapshots(&place, &install, &scope_name)?.into_iter().next();
+            let newest = b::snapshots(&place, &network, &scope_name)?.into_iter().next();
             let previous = match (cached, newest) {
                 (Some(c), Some((t, _))) if c.time >= t => Some(c),
                 (_, None) => None,
-                _ => b::latest(&place, &install, &scope_name, &[key])?.map(|(s, _)| s),
+                _ => b::latest(&place, &network, &scope_name, &[key])?.map(|(s, _)| s),
             };
             if !force && previous.as_ref().is_some_and(|p| p.time + b::EVERY > now) {
                 return Ok((None, previous));
             }
-            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, epochs, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref(), frozen };
+            let job = b::Job { place: &place, network: &network, scope: &scope_name, key, epochs, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref(), frozen };
             // A blob this device doesn't keep is read from the bucket, where the device that wrote it put it.
             let written = b::back_up(job, |hash| runtime.block_on(node.blob(hash)).inspect_err(|err| tracing::debug!("backing up blob {hash}: {err:#}")).ok())?;
             Ok((written.clone(), written.or(previous)))
@@ -543,7 +543,7 @@ impl Node {
                 }));
             }
             let titles: BTreeMap<String, String> = places(i).into_iter().map(|p| (p.id, p.title)).collect();
-            // The install's snapshots, newest first: the runs of each minute, whichever devices and places, as one.
+            // The network's snapshots, newest first: the runs of each minute, whichever devices and places, as one.
             let mut moments: Vec<(u64, BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> = Vec::new();
             for r in runs.iter().rev().filter(|r| !r.snapshots.is_empty() && titles.contains_key(&r.place)) {
                 let minute = r.time / 60_000;
@@ -562,7 +562,7 @@ impl Node {
                 .into_iter()
                 .map(|(time, devices, places, scopes)| {
                     let (devices, places): (Vec<String>, Vec<String>) = (devices.into_iter().collect(), places.into_iter().collect());
-                    // `device` and `place`, one each, for apps built before a snapshot was the install's.
+                    // `device` and `place`, one each, for apps built before a snapshot was the network's.
                     json!({ "time": time, "device": devices.join(", "), "place": places.join(", "), "devices": devices, "places": places, "scopes": scopes })
                 })
                 .collect();
@@ -574,7 +574,7 @@ impl Node {
     /// Everyone and backs up to it now. → each step tried, and the item's id if it was kept.
     pub async fn add_place(&self, caller: &Caller, body: &Value) -> Result<Value> {
         self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "change-settings", scopes::INSTALL), "only admins add places to back up to");
+            ensure!(i.r.db().may(&caller.user, "change-settings", scopes::NETWORK), "only admins add places to back up to");
             Ok(())
         })?;
         let text = |k: &str| body[k].as_str().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
@@ -644,13 +644,13 @@ impl Node {
         Ok(())
     }
 
-    /// An item in Everyone just saved by `caller`: when they're an admin and it's an S3 place the install backs up to,
+    /// An item in Everyone just saved by `caller`: when they're an admin and it's an S3 place the network backs up to,
     /// its details as they are now are the ones it names, so changing its key in the Vault keeps backups going.
     pub(super) async fn repin_place(&self, caller: &Caller, id: &str) -> Result<()> {
         let fields = self.with(|i| {
             let m = i.r.db();
             let pinned = pinned(m);
-            let stale = pinned.get(id).zip(i.vault.get(id)).filter(|(h, it)| m.may(&caller.user, "change-settings", scopes::INSTALL) && !it.fields.contains_key("device") && **h != item_hash(it));
+            let stale = pinned.get(id).zip(i.vault.get(id)).filter(|(h, it)| m.may(&caller.user, "change-settings", scopes::NETWORK) && !it.fields.contains_key("device") && **h != item_hash(it));
             Ok(stale.map(|(_, it)| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect::<BTreeMap<_, _>>()))
         })?;
         match fields {
@@ -659,7 +659,7 @@ impl Node {
         }
     }
 
-    /// Names an S3 place the install backs up to in `PINNED` (or with `None`, stops naming it), for an admin.
+    /// Names an S3 place the network backs up to in `PINNED` (or with `None`, stops naming it), for an admin.
     pub(super) async fn pin_place(&self, caller: &Caller, id: &str, fields: Option<&BTreeMap<String, String>>) -> Result<()> {
         let mut now = self.with(|i| Ok(pinned(i.r.db())))?;
         match fields {
@@ -710,8 +710,8 @@ impl Node {
     /// Checks the places `only` names, or every one this device reaches, and writes how each went in `global`.
     async fn check_places(&self, only: Option<&[String]>) -> Result<Value> {
         let epochs = self.held_epochs().await;
-        let (install, places, root, live) = self.with(|i| {
-            ensure!(i.views.contains_key("global"), "no install");
+        let (network, places, root, live) = self.with(|i| {
+            ensure!(i.views.contains_key("global"), "no network");
             let places: Vec<(String, String, Place)> = places(i).into_iter().filter(|p| only.is_none_or(|o| o.contains(&p.id))).filter_map(|p| Some((p.id, p.title, p.place.ok()?))).filter(|(_, _, p)| p.present()).collect();
             let mut live = BTreeMap::new();
             for scope in epochs.keys() {
@@ -725,15 +725,15 @@ impl Node {
             let now = now_ms();
             let checked = {
                 let keys: BTreeMap<String, Vec<[u8; 32]>> = epochs.iter().map(|(s, k)| (s.clone(), k.values().copied().collect())).collect();
-                let (place, install, live) = (place.clone(), install.clone(), live.clone());
-                tokio::task::spawn_blocking(move || b::check(&b::Check { place: &place, install: &install, keys: &keys, root, live: Some(&live) })).await?
+                let (place, network, live) = (place.clone(), network.clone(), live.clone());
+                tokio::task::spawn_blocking(move || b::check(&b::Check { place: &place, network: &network, keys: &keys, root, live: Some(&live) })).await?
             };
             let (mut report, error) = match checked {
                 Ok((mut report, restored)) => {
                     let mut problems: Vec<Value> = report["problems"].as_array().cloned().unwrap_or_default();
                     for r in &restored {
                         let Some(keys) = epochs.get(&r.snapshot.scope) else { continue };
-                        problems.extend(b::check_databases(&place, &install, &r.snapshot, keys, bucket.as_ref()).await.into_iter().map(Value::from));
+                        problems.extend(b::check_databases(&place, &network, &r.snapshot, keys, bucket.as_ref()).await.into_iter().map(Value::from));
                     }
                     // Each says whose data it's about by its scope; people read their names.
                     let named: Vec<(String, String)> = self.with(|i| Ok(epochs.keys().map(|s| (s.clone(), scope_name(i, s))).collect()))?;

@@ -11,7 +11,7 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me/";
 const UPLOAD = "https://gmail.googleapis.com/upload/gmail/v1/users/me/";
 const APP = "gmail";
 const TITLE = "Gmail";
-// Where Google sends the browser back: the install's address, which opens this app's settings screen to finish. The
+// Where Google sends the browser back: the network's address, which opens this app's settings screen to finish. The
 // Google sign-in (a Web application client) lists it as an authorized redirect URI.
 function redirect(ctx) {
   if (!ctx.address) throw new Error("This device is out of date: update it, then sign in again");
@@ -44,7 +44,7 @@ const wrapped = (bytes) => toB64(bytes).replace(/.{76}(?=.)/g, "$&\r\n");
 // The Vault keeps what signing in needs, the same for every Google app: one "Google sign-in" item, the OAuth client
 // (its id, and its secret), and a "Google account" item for each account (its address, its refresh token and the
 // scopes it allowed), sent only to Google's token address. Signing in to an account another Google app already uses
-// adds this app's scopes to it (incremental consent). Google sends the browser back to the install's address,
+// adds this app's scopes to it (incremental consent). Google sends the browser back to the network's address,
 // which opens this app's settings screen to finish; the verifier waits for it in this app's own data.
 
 const VAULT = {
@@ -131,7 +131,7 @@ async function startSignIn(ctx, hint) {
   ctx.user.exec("insert into pending values (?, ?, ?, ?)", [state, verifier, client.id ?? null, Date.now()]);
   const q = new URLSearchParams({
     client_id: client.fields.client_id.value, redirect_uri: redirect(ctx), response_type: "code", scope: SCOPES, access_type: "offline",
-    // `<app>/<screen>/<state>`: the install's address opens this app's settings screen, which finishes this sign-in.
+    // `<app>/<screen>/<state>`: the network's address opens this app's settings screen, which finishes this sign-in.
     prompt: "consent", include_granted_scopes: "true", state: `${APP}/settings/${state}`, code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;

@@ -52,7 +52,7 @@ public static class Program
     [System.Runtime.InteropServices.DllImport("Microsoft.ui.xaml.dll")] static extern void XamlCheckProcessRequirements();
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint process);
 
-    /// The link a start opens (`<cli>://open?…`, or a page at your One App's address), if it's one: Windows gives an
+    /// The link a start opens (`<cli>://open?…`, or a page at your One App network's address), if it's one: Windows gives an
     /// address it opens here as a link, or as the start's argument; a toast, as its `open`.
     static Uri? Link(AppActivationArguments e) => e.Data switch
     {

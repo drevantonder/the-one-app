@@ -1,4 +1,4 @@
-// Repos: this install's repos, GitHub's beside them (connected, not copied), and Recently Deleted; searchable.
+// Repos: this network's repos, GitHub's beside them (connected, not copied), and Recently Deleted; searchable.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { Button, Empty, Icon, Input, List, ListRow, Problem, Spinner } from "@one/ui"
@@ -28,7 +28,7 @@ function Row({ r, restoring, restore }) {
 function Main() {
   const { address, mine } = useAddress()
   const own = useCall("list", { source: "one" })
-  // GitHub's come as GitHub answers, after the install's own: its problem is its own, not the whole list's.
+  // GitHub's come as GitHub answers, after the network's own: its problem is its own, not the whole list's.
   const github = useCall("list", { source: "github" })
   const [query, setQuery] = useState("")
   // Restored here and maybe not yet on the device, so a redraw meanwhile doesn't put them back under Recently Deleted.

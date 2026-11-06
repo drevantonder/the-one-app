@@ -134,7 +134,7 @@ pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Re
 
 /// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as a node
 /// on a machine says it (src/node/sessions.rs): every epoch from the one the database's newest copy is under to the
-/// scope's current one, as the install's signed entries say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
+/// scope's current one, as the network's signed entries say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
 /// holds, where any endpoint can put a name. → `[{ scope, epoch, app, database }]`.
 #[wasm_bindgen]
 pub async fn needs(bucket: JsValue, wants: String, epochs: String) -> Result<String, JsError> {
@@ -175,12 +175,12 @@ thread_local! {
     static OPEN: RefCell<(u32, HashMap<u32, (String, Db)>)> = RefCell::new((0, HashMap::new()));
     /// When each person's object last used what this isolate keeps for it, to forget the least lately used.
     static OWNERS: RefCell<(u64, HashMap<String, u64>)> = RefCell::new((0, HashMap::new()));
-    /// The people's objects whose install's log this isolate found frozen, as it read `global`'s steps: phase 2 is on
+    /// The people's objects whose network's log this isolate found frozen, as it read `global`'s steps: phase 2 is on
     /// for the databases each opens (`one::db::Db::switched`).
     static FROZEN: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
 }
 
-/// Whether `owner`'s install's log is frozen, as this isolate last read `global`'s steps for it.
+/// Whether `owner`'s network's log is frozen, as this isolate last read `global`'s steps for it.
 fn frozen(owner: &str) -> bool {
     FROZEN.with(|f| f.borrow().contains(owner))
 }
@@ -229,7 +229,7 @@ pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
 }
 
 /// A session's certificate (`x-one-endpoint`, `keys::certify`'s), checked at `now` (milliseconds): `{ by, endpoint,
-/// until }`, `by` the device that vouched for `endpoint` (hex). Whether `by` is a device of the install is the caller's
+/// until }`, `by` the device that vouched for `endpoint` (hex). Whether `by` is a device of the network is the caller's
 /// to check.
 #[wasm_bindgen]
 pub fn check_certificate(certificate: &str, now: f64) -> Result<String, JsError> {
@@ -265,7 +265,7 @@ pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, 
 /// Whether an open database was opened with exactly the keys a call was handed (`usable`): only then may the call use
 /// it, since a key it holds that the call wasn't handed may open what the call mustn't read, and one the call was
 /// handed that it lacks may be a wrong key, which mustn't change what others read. False once it's been closed, and
-/// for one opened before this isolate found its install's log frozen, so it's opened again with phase 2 on for it.
+/// for one opened before this isolate found its network's log frozen, so it's opened again with phase 2 on for it.
 #[wasm_bindgen]
 pub fn opens(handle: u32, keys: &str, current: u32) -> bool {
     let Ok(keys) = usable(keys, current) else { return false };
@@ -504,7 +504,7 @@ impl Log {
         one::database::steps::Truth::judged(&self.steps, root(&self.entries), self.frozen.as_ref(), &self.recovery(), now())
     }
 
-    /// Of `global`'s: every key its entries say was ever the install's recovery key (`steps::recovery_keys`).
+    /// Of `global`'s: every key its entries say was ever the network's recovery key (`steps::recovery_keys`).
     fn recovery(&self) -> one::database::steps::Recovery {
         one::database::steps::recovery_keys(root(&self.entries), &self.entries)
     }
@@ -525,7 +525,7 @@ struct Replayed {
     db: ScopeDb,
 }
 
-/// Each scope's database `replayed` read, `global`'s among them, which says who's who in the whole install.
+/// Each scope's database `replayed` read, `global`'s among them, which says who's who in the whole network.
 struct Replays<'a>(BTreeMap<String, &'a ScopeDb>);
 
 impl Replays<'_> {
@@ -700,11 +700,11 @@ pub fn reads() -> u32 {
 }
 
 thread_local! {
-    /// The install's genesis, as the device that deployed this node holds it (`GENESIS`, `pin_genesis`).
+    /// The network's genesis, as the device that deployed this node holds it (`GENESIS`, `pin_genesis`).
     static GENESIS: RefCell<Option<Hash>> = const { RefCell::new(None) };
 }
 
-/// Pins the install's genesis to `genesis` (hex, the Worker's `GENESIS`), as sign-in pins it: an entry shaped like a
+/// Pins the network's genesis to `genesis` (hex, the Worker's `GENESIS`), as sign-in pins it: an entry shaped like a
 /// genesis that any device writes into a step of its log is never taken for it.
 #[wasm_bindgen]
 pub fn pin_genesis(genesis: &str) -> Result<(), JsError> {
@@ -713,7 +713,7 @@ pub fn pin_genesis(genesis: &str) -> Result<(), JsError> {
     Ok(())
 }
 
-/// The install's genesis, which its members are replayed from: the one pinned (`pin_genesis`, `steps::genesis_of`).
+/// The network's genesis, which its members are replayed from: the one pinned (`pin_genesis`, `steps::genesis_of`).
 fn root(global: &[Entry]) -> Option<Hash> {
     one::database::steps::genesis_of(GENESIS.with(|g| *g.borrow()), global)
 }
@@ -729,9 +729,9 @@ pub fn global_entries(owner: &str, user: &str, have: &str) -> Result<Vec<u8>, Js
         let (key, seq) = h.split_once('.').ok_or_else(|| JsError::new("have is <key>.<seq>, each"))?;
         held.insert(one::entry::unhex(key).map_err(thrown)?, seq.parse::<u32>()?);
     }
-    let people = replayed(owner, &[], |r| r.global().may(user, "use", one::database::scopes::INSTALL)).map_err(thrown)?;
+    let people = replayed(owner, &[], |r| r.global().may(user, "use", one::database::scopes::NETWORK)).map_err(thrown)?;
     if !people {
-        return Err(JsError::new("you aren't one of this install's people"));
+        return Err(JsError::new("you aren't one of this network's people"));
     }
     LOGS.with(|l| {
         let logs = l.borrow();
@@ -754,9 +754,9 @@ pub fn global_entries(owner: &str, user: &str, have: &str) -> Result<Vec<u8>, Js
 pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
     use one::database::steps;
     let bucket = Js(bucket);
-    let people = replayed(&owner, &[], |r| r.global().may(&user, "use", one::database::scopes::INSTALL)).map_err(failed)?;
+    let people = replayed(&owner, &[], |r| r.global().may(&user, "use", one::database::scopes::NETWORK)).map_err(failed)?;
     if !people {
-        return Err(failed(anyhow!("you aren't one of this install's people")));
+        return Err(failed(anyhow!("you aren't one of this network's people")));
     }
     let read = LOGS.with(|l| l.borrow().get(&(owner.clone(), "global".to_string())).map(|g| g.truth().map(|t| t.map(|t| t.at)))).transpose().map_err(failed)?.flatten();
     let read = read.ok_or_else(|| failed(anyhow!("global's log isn't frozen")))?;
@@ -846,7 +846,7 @@ pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
     Ok(json!(groups).to_string())
 }
 
-/// The scopes `user` may use, as the install's log says, whether they're a person of it, whether they were removed
+/// The scopes `user` may use, as the network's log says, whether they're a person of it, whether they were removed
 /// from it, the name of `device` (hex) if it's a client device of theirs, else null, and the scopes of theirs this node
 /// runs (a person's own only as their own device chose): `{ scopes, joined, removed, device, runs }`.
 #[wasm_bindgen]
@@ -865,7 +865,7 @@ pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsErro
     Ok(out.to_string())
 }
 
-/// Each of `scopes`' (JSON) current epoch, as the install's signed `epoch` entries say, 1 for one with none yet:
+/// Each of `scopes`' (JSON) current epoch, as the network's signed `epoch` entries say, 1 for one with none yet:
 /// `{ <scope>: n }`, all a node writes under.
 #[wasm_bindgen]
 pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
@@ -900,13 +900,13 @@ pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, unt
     Ok(asked.to_string())
 }
 
-/// The install as `user` sees it, from the entries of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.
+/// The network as `user` sees it, from the entries of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.
 /// `state` is `GET /v1/state`'s, for a node that knows of no device being on; `apps` is `GET /v1/apps`'s from the
 /// members alone, each with `reach`, the scopes it reaches for `user` (what its widgets and calls are given), for
 /// `worker.js` to add what each app says it does; `me` is what an app is told of who it runs for; `erased`, the apps
 /// erased, whose copies it forgets. `client` names the sign-in's client.
 #[wasm_bindgen]
-pub fn install(owner: &str, user: &str, client: &str, scopes: &str, now: f64) -> Result<String, JsError> {
+pub fn network(owner: &str, user: &str, client: &str, scopes: &str, now: f64) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;
     let out = replayed(owner, &scopes, |r| view(r, user, client, now as u64)).map_err(thrown)?;
     Ok(out.to_string())

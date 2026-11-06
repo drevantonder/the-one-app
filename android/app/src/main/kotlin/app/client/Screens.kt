@@ -131,9 +131,9 @@ import kotlin.coroutines.resume
 // around them: the pages as the home, what they open pushed over them with Back or in a sheet, and the bridge each
 // page talks through (src/screen/bridge.js), answered natively wherever a person touches: menus, alerts, sheets, files,
 // scanning, links. Screens are untrusted: a page gets an origin of its own that's nowhere (ORIGIN), never this app's or
-// the install's; it reaches nothing but the bridge, a message listener only that origin's main frame is given; an
+// the network's; it reaches nothing but the bridge, a message listener only that origin's main frame is given; an
 // app's screen acts only as its app, and only the client's own (a route this app chose, never the page) as the person;
-// it never navigates, and its links open in the browser, the install's own in a Custom Tab.
+// it never navigates, and its links open in the browser, the network's own in a Custom Tab.
 
 private const val ORIGIN = "https://screen.invalid"
 
@@ -670,7 +670,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
 
     private fun str(m: JsonObject, k: String) = (m[k] as? JsonPrimitive)?.contentOrNull
 
-    /** A web address: the install's own in a Custom Tab, signed in as the browser is; anything else where the phone
+    /** A web address: the network's own in a Custom Tab, signed in as the browser is; anything else where the phone
      *  opens it. */
     private fun follow(url: Uri) {
         val address = store.signIn.address?.let(Uri::parse)

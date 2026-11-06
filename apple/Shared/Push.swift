@@ -7,7 +7,7 @@ import AppKit
 #endif
 
 /// Pushes, in a build with them (`Push` in its Info.plist: apple/project.sh adds it, with the entitlement, once the
-/// App ID has push): this device asks to notify, registers its APNs token with the install's push Worker each launch
+/// App ID has push): this device asks to notify, registers its APNs token with the network's push Worker each launch
 /// (a token can change), and acts on what's tapped. Its notification extension opens and shows each note (`Notes`).
 @MainActor
 enum Push {
@@ -15,7 +15,7 @@ enum Push {
     /// Whether the push Worker took this launch's token.
     private static var registered = false
 
-    /// Registers for this device's token, once it's let in, as the push Worker takes only the install's devices; and
+    /// Registers for this device's token, once it's let in, as the push Worker takes only the network's devices; and
     /// asks to notify, the first time. A token comes whatever the person answers, for pushes that only wake the app.
     static func setUp() async {
         guard built, !registered else { return }

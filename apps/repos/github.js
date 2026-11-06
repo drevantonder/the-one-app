@@ -1,7 +1,7 @@
 // GitHub's repos in Repos, connected rather than copied: every repo a person's GitHub can see is
 // github.com/<owner>/<repo>, and each tool on one asks GitHub's API at once, in the shapes Repos' own give.
 //
-// The install's GitHub App, which an admin makes once from Repos' Settings with GitHub's App Manifest flow, is a
+// The network's GitHub App, which an admin makes once from Repos' Settings with GitHub's App Manifest flow, is a
 // "GitHub App" item in Everyone's Vault: its id, client id, client secret and private key, the secrets sent only to
 // GitHub. Each person signs in to their own GitHub accounts with it (user tokens, which it refreshes), each a "GitHub
 // account" item in their own Vault. A group's admins connect an organization by installing the App on it: its repos
@@ -41,14 +41,14 @@ function fullOf(repo) {
 
 // ---- where GitHub is, and its App ----
 
-/// The install's GitHub App: an admin made it, in Everyone's Vault (or the caller's own, for one of theirs).
+/// The network's GitHub App: an admin made it, in Everyone's Vault (or the caller's own, for one of theirs).
 async function appItem(ctx) {
   const all = (await ctx.vault.items()).filter((i) => i.type === "GitHub App" && i.fields.client_id?.value);
   return all.find((i) => i.scope.startsWith("user:")) || all[0] || null;
 }
 const noApp = (ctx) => new Error(ctx.me.role === "admin"
-  ? "GitHub isn't connected yet: Repos › Settings › Create GitHub App makes the install's GitHub App, once, for everyone (repos_create_github_app)"
-  : "GitHub isn't connected yet: an admin makes the install's GitHub App once, in Repos › Settings; ask them");
+  ? "GitHub isn't connected yet: Repos › Settings › Create GitHub App makes the network's GitHub App, once, for everyone (repos_create_github_app)"
+  : "GitHub isn't connected yet: an admin makes the network's GitHub App once, in Repos › Settings; ask them");
 /// GitHub's site and API for an App: github.com's unless it was made on another (GitHub Enterprise, or a stand-in).
 const webOf = (app) => app?.fields.web?.value || "https://github.com";
 const apiOf = (app) => app?.fields.api?.value || (webOf(app) === "https://github.com" ? "https://api.github.com" : `${webOf(app)}/api/v3`);
@@ -295,7 +295,7 @@ const issueShape = (i) => ({
   created: i.created_at, updated: i.updated_at, closed: i.closed_at, closed_by: person(i.closed_by),
 });
 
-/// What a person filed through an organization's installation says, so the issue shows who in the install filed it.
+/// What a person filed through an organization's installation says, so the issue shows who in the network filed it.
 const signed = (ctx, o, text, verb) => (o.c.kind === "installation" ? `${text || ""}\n\n<sub>${verb} by ${ctx.me.user_name || ctx.me.name} through ${ctx.address ? new URL(ctx.address).host : "Repos"}</sub>`.replace(/^\n\n/, "") : text);
 const quote = (s) => (/\s/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
 const ON_GITHUB = (o, what) => new Error(`${o.name} is on GitHub: ${what} there, at ${o.r.html_url}`);
@@ -574,7 +574,7 @@ export function tools({ global }) {
     },
     sign_in: {
       reads: false,
-      description: "Start signing a GitHub account in to Repos, so its repos show beside the install's own: gives { url, then }. The person opens url, lets the install's GitHub App act for them, and GitHub sends them back to finish.",
+      description: "Start signing a GitHub account in to Repos, so its repos show beside the network's own: gives { url, then }. The person opens url, lets the network's GitHub App act for them, and GitHub sends them back to finish.",
       input: { type: "object", properties: { account: { type: "string", description: "a GitHub username to suggest to GitHub, like one that needs signing in again" } } },
       async run(ctx, { account }) {
         if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
@@ -627,13 +627,13 @@ export function tools({ global }) {
     },
     create_github_app: {
       reads: false,
-      description: "For an admin, once for everyone: start making the install's GitHub App, with which people sign in to GitHub and groups connect organizations. Gives { url }: the admin opens it and confirms on GitHub, which sends them back to Repos' Settings to finish.",
+      description: "For an admin, once for everyone: start making the network's GitHub App, with which people sign in to GitHub and groups connect organizations. Gives { url }: the admin opens it and confirms on GitHub, which sends them back to Repos' Settings to finish.",
       input: { type: "object", properties: {
         org: { type: "string", description: "a GitHub organization to own the App, by its login; omit for the admin's own account" },
         github: { type: "string", description: "GitHub's address if it isn't https://github.com (GitHub Enterprise)" },
       } },
       async run(ctx, { org, github = "https://github.com" }) {
-        if (ctx.me.role !== "admin") throw new Error("only an admin makes the install's GitHub App: ask them");
+        if (ctx.me.role !== "admin") throw new Error("only an admin makes the network's GitHub App: ask them");
         const web = String(github).replace(/\/+$/, "");
         const back = redirect(ctx);
         const host = new URL(ctx.address).host;
@@ -649,10 +649,10 @@ export function tools({ global }) {
     },
     finish_github_app: {
       reads: false,
-      description: "Finish making the install's GitHub App with the address GitHub sent the admin back to (Repos' Settings does it by itself).",
+      description: "Finish making the network's GitHub App with the address GitHub sent the admin back to (Repos' Settings does it by itself).",
       input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address GitHub sent the browser back to, or its code" } } },
       async run(ctx, { code: given }) {
-        if (ctx.me.role !== "admin") throw new Error("only an admin makes the install's GitHub App");
+        if (ctx.me.role !== "admin") throw new Error("only an admin makes the network's GitHub App");
         const s = String(given || "");
         const code = s.includes("code=") ? new URL(s).searchParams.get("code") : s;
         const web = JSON.parse((await pending(ctx, "app")) || "{}").web || "https://github.com";
@@ -675,7 +675,7 @@ export function tools({ global }) {
     },
     connect_org: {
       reads: false,
-      description: "For a group's admins: connect a GitHub organization, so its repos show for everyone in the group, read and written as the install's GitHub App. Gives { url }, where they install the App on the organization; GitHub sends them back to Repos' Settings to finish.",
+      description: "For a group's admins: connect a GitHub organization, so its repos show for everyone in the group, read and written as the network's GitHub App. Gives { url }, where they install the App on the organization; GitHub sends them back to Repos' Settings to finish.",
       input: { type: "object", required: ["group"], properties: { group: { type: "string", description: "the group, by handle, from groups_list" } } },
       async run(ctx, { group }) {
         const g = (ctx.handles || []).find((h) => h.id.startsWith("group:") && h.handle === String(group || "").replace(/^@/, ""));
@@ -726,7 +726,7 @@ export function tools({ global }) {
     },
     github: {
       reads: true,
-      description: "How GitHub is connected: the install's GitHub App (null until an admin makes it), your GitHub accounts, the organizations connected for groups you're in (and for each whether you're its group's admin), and the groups you may connect one for.",
+      description: "How GitHub is connected: the network's GitHub App (null until an admin makes it), your GitHub accounts, the organizations connected for groups you're in (and for each whether you're its group's admin), and the groups you may connect one for.",
       input: { type: "object", properties: {} },
       async run(ctx) {
         const app = await appItem(ctx);

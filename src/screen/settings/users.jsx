@@ -1,4 +1,4 @@
-// Everyone in the install, each with their handle, theirs first, which opens a dialog to change it. For admins, each
+// Everyone in the network, each with their handle, theirs first, which opens a dialog to change it. For admins, each
 // other one's role a menu on their row, with Remove there too, and adding someone new, with an invite link (or, where
 // people sign in with Google, how they join). The last admin's role can't change.
 //

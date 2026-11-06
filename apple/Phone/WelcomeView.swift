@@ -1,7 +1,7 @@
 import SwiftUI
 import AuthenticationServices
 
-/// The first run: your One App's address, or an invite link to it, then your passkey.
+/// The first run: your One App network's address, or an invite link to it, then your passkey.
 struct WelcomeView: View {
     @Environment(Phone.self) private var phone
     @Environment(\.webAuthenticationSession) private var session
@@ -12,7 +12,7 @@ struct WelcomeView: View {
 
     private var given: String { address.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// "Your One App", or a workplace's, "The PTC App" (project.sh).
+    /// "Your One App network", or a workplace's, "The PTC App" (project.sh).
     private var whose: String {
         let yours = Bundle.main.object(forInfoDictionaryKey: "Yours") as? String ?? ""
         return yours.prefix(1).uppercased() + yours.dropFirst()

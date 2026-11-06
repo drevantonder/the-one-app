@@ -44,7 +44,7 @@ pub fn join_of(secret: [u8; 32]) -> String {
 }
 
 /// A note pushed to the device whose key is `secret`, as its push carried it (base64url): → the note, and the key of
-/// the device that sent it (hex), or none for one from the install's Workers. Opened here alone: nothing connects or starts.
+/// the device that sent it (hex), or none for one from the network's Workers. Opened here alone: nothing connects or starts.
 pub fn open_note(secret: [u8; 32], pushed: &str) -> Result<(one::push::Note, Option<String>), Error> {
     let sealed = B64U.decode(pushed.trim().trim_end_matches('=').as_bytes()).map_err(|_| failed("That push isn't a note."))?;
     one::push::open_note(&keys::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
@@ -63,26 +63,26 @@ fn failed(message: impl std::fmt::Display) -> Error {
     unsent(message)
 }
 
-/// What a request says when this device isn't one of the install's (yet, or any more).
+/// What a request says when this device isn't one of the network's (yet, or any more).
 fn refused() -> Error {
     not_let_in("This device hasn't been let in yet.")
 }
 
-/// The install as this device read and checked it itself.
+/// The network as this device read and checked it itself.
 struct Known {
     who: ScopeDb,
     /// Its person.
     user: String,
-    /// The nodes it may ask, by key: their seal keys; and the Cloudflare node, asked last, if the install has one.
+    /// The nodes it may ask, by key: their seal keys; and the Cloudflare node, asked last, if the network has one.
     nodes: HashMap<[u8; 32], [u8; 32]>,
     cloudflare_node: Option<[u8; 32]>,
-    /// Each node's run priority, as the install's admins set it (src/rank.rs): the Cloudflare node's too.
+    /// Each node's run priority, as the network's admins set it (src/rank.rs): the Cloudflare node's too.
     ranks: HashMap<[u8; 32], u32>,
     /// When it was read.
     at: u64,
 }
 
-/// Where a device is with its install, from its sign-in to its sign-out, as a browser goes the same way (cloudflare/web/web.js:
+/// Where a device is with its network, from its sign-in to its sign-out, as a browser goes the same way (cloudflare/web/web.js:
 /// `join`, `start`, `takenOut` and `signOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
 /// outlives the program: `removed` asks it.
 enum Stage {
@@ -96,12 +96,12 @@ enum Stage {
     Out,
 }
 
-/// A device's way in: its keys, the install it's in, and what it has opened.
+/// A device's way in: its keys, the network it's in, and what it has opened.
 pub struct Device {
     key: SigningKey,
     me: Endpoint,
     address: String,
-    /// Where it keeps the install's genesis, once it first read it, and what each kind of request needed.
+    /// Where it keeps the network's genesis, once it first read it, and what each kind of request needed.
     dir: PathBuf,
     /// Held while it connects, so it connects once.
     stage: tokio::sync::Mutex<Stage>,
@@ -159,7 +159,7 @@ async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32,
 
 /// Read-only, before the switch, as the device whose key is `key` at the network's `address` (`one switch check`),
 /// whatever build its node runs: which of the first positions of `global`'s scope database the bucket holds (none,
-/// before the ceremony), and every step of `global`'s log, of the install whose genesis is `root`, that opens to a
+/// before the ceremony), and every step of `global`'s log, of the network whose genesis is `root`, that opens to a
 /// step rather than entries (a freeze's mark is one). → `{ database: [names], log: n, steps: [{ at, kind, by }] }`.
 pub async fn switch_check(address: String, key: &SigningKey, root: Option<one::entry::Hash>) -> Result<Value, Error> {
     let bucket = Signed::new(address, key.to_bytes());
@@ -178,7 +178,7 @@ pub async fn switch_check(address: String, key: &SigningKey, root: Option<one::e
 }
 
 impl Device {
-    /// The device whose key is `secret`, of the install at `address`, keeping what it needs to in `dir`.
+    /// The device whose key is `secret`, of the network at `address`, keeping what it needs to in `dir`.
     pub fn new(secret: [u8; 32], address: &str, dir: &str) -> Device {
         let needs = std::fs::read(PathBuf::from(dir).join("needs.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let key = SigningKey::from_bytes(&secret);
@@ -323,7 +323,7 @@ impl Device {
         Ok(false)
     }
 
-    /// Reaches its install's nodes, if it's been let in: false if not yet. Then, each time, as each start of a browser
+    /// Reaches its network's nodes, if it's been let in: false if not yet. Then, each time, as each start of a browser
     /// does, it settles its person's own things (`settle_own`), if they aren't: what fails is tried again at the next.
     pub async fn connect(&self) -> Result<bool, Error> {
         if !self.reach().await? {
@@ -333,7 +333,7 @@ impl Device {
         Ok(true)
     }
 
-    /// Reaches its install's nodes, if it's let in: false if it isn't (yet, or any more).
+    /// Reaches its network's nodes, if it's let in: false if it isn't (yet, or any more).
     async fn reach(&self) -> Result<bool, Error> {
         let mut stage = self.stage.lock().await;
         match &*stage {
@@ -395,7 +395,7 @@ impl Device {
             return Ok(None);
         }
         if status != 200 {
-            return Err(failed(error(&out).unwrap_or_else(|| format!("Your One App's network answered {status}."))));
+            return Err(failed(error(&out).unwrap_or_else(|| format!("Your One App network answered {status}."))));
         }
         let keys = |v: &Value| v.as_array().into_iter().flatten().filter_map(|c| keys::unhex(c.as_str().unwrap_or("")).ok()).collect::<Vec<_>>();
         Ok(Some((keys(&out["computes"]), out.get("online").map(keys))))
@@ -417,13 +417,13 @@ impl Device {
     }
 
     /// `global`'s entries, read from the bucket and opened with the epochs sealed to this device, checked and replayed:
-    /// → the nodes it may ask, with their seal keys. The install's genesis is kept the first time, and must be the same
+    /// → the nodes it may ask, with their seal keys. The network's genesis is kept the first time, and must be the same
     /// after.
     async fn read_members(&self) -> Result<HashMap<[u8; 32], [u8; 32]>, Error> {
         let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
         let (epochs, log_keys) = global_keys(&bucket, &self.key).await?;
         let read = one::log::open(&bucket, &log_keys, &one::log::prefix("global"), "global").await.map_err(failed)?;
-        // Replayed as every client device replays them (crate::members), of the install whose genesis it kept.
+        // Replayed as every client device replays them (crate::members), of the network whose genesis it kept.
         let pinned = self.dir.join("genesis");
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut global = crate::members::Global::new(kept);
@@ -548,7 +548,7 @@ impl Device {
 
     /// Out: as the relay said, or signed out. Its connections close, and what it kept as this device goes with them,
     /// as a browser's does (web.js `forgetDevice` and `signOut`): what each kind of request needed, its calls' answers
-    /// and the install it was let into, which the next approval names again. Whether this key was in stays, for
+    /// and the network it was let into, which the next approval names again. Whether this key was in stays, for
     /// `removed` to say.
     async fn out(&self) {
         if let Stage::In(client) = std::mem::replace(&mut *self.stage.lock().await, Stage::Out) {
@@ -581,22 +581,22 @@ impl Device {
         self.out().await;
     }
 
-    /// Registers where a push service reaches it (`one::push::Address`) with the install's push Worker
+    /// Registers where a push service reaches it (`one::push::Address`) with the network's push Worker
     /// (`<address>/push/register`), signed with its key and naming its seal key, which each note pushed to it is sealed
     /// to, and its person as its entries list it, so sign-in pushes it when another device of theirs asks to join. Once
-    /// it's out of the install, the Worker forgets it.
+    /// it's out of the network, the Worker forgets it.
     pub async fn register_push(&self, address: &one::push::Address) -> Result<(), Error> {
         let user = self.known.lock().unwrap().as_ref().map(|k| k.user.clone());
         let body = one::push::register_request(&self.key, &self.me.seal, address, user.as_deref(), now()).map_err(failed)?;
         let (status, out) = http("POST", &format!("{}/push/register", self.address), None, Some(body)).await?;
         if status != 200 {
-            return Err(failed(error(&out).unwrap_or_else(|| format!("Your One App's push service didn't take this device ({status})."))));
+            return Err(failed(error(&out).unwrap_or_else(|| format!("Your One App network's push service didn't take this device ({status})."))));
         }
         Ok(())
     }
 
-    /// Whether the install took this device out: this key was in, and the relay, which alone says who's on the
-    /// install's network, lets it in no more. Never a node's word, which may only not have read its approval yet, nor a
+    /// Whether the network took this device out: this key was in, and the relay, which alone says who's on the
+    /// network, lets it in no more. Never a node's word, which may only not have read its approval yet, nor a
     /// relay that didn't answer: a key taken for out is forgotten, and can't be let in again. Once out, it's `out`.
     pub async fn removed(&self) -> bool {
         let removed = self.was_in() && matches!(self.computes().await, Ok(None));
@@ -613,7 +613,7 @@ impl Device {
 
     // Requests.
 
-    /// A request to its install's nodes as its person, with the keys it needed last time; one a node needs others for
+    /// A request to its network's nodes as its person, with the keys it needed last time; one a node needs others for
     /// (428) is sent again with them, a few times, as a node may find what it needs as it goes (the Cloudflare node,
     /// its logs' keys first, then a call's). `/v1/state` is read for the order things run in.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
@@ -1156,7 +1156,7 @@ fn error(out: &Value) -> Option<String> {
     out["error"].as_str().or(out["message"].as_str()).map(str::to_string)
 }
 
-/// A request to the install's address (sign-in, the relay), JSON in and out: → its status and JSON.
+/// A request to the network's address (sign-in, the relay), JSON in and out: → its status and JSON.
 async fn http(method: &str, url: &str, token: Option<&str>, body: Option<Value>) -> Result<(u16, Value), Error> {
     let (method, url, token) = (method.to_string(), url.to_string(), token.map(str::to_string));
     tokio::task::spawn_blocking(move || {

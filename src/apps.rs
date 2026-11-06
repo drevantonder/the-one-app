@@ -73,11 +73,11 @@ pub struct Context {
     pub token: String,
     /// The app whose `ctx.apps` made the call, if one did.
     pub from: Option<String>,
-    /// The install's address, where a sign-in elsewhere sends the person back (`<address>/back`).
+    /// The network's address, where a sign-in elsewhere sends the person back (`<address>/back`).
     pub address: Option<String>,
     /// Everyone's and every group's handle (`Members::handles`).
     pub handles: Value,
-    /// The settings of the install's labs that are on (`labs::on_keys`); each app sees its own, as `ctx.labs`.
+    /// The settings of the network's labs that are on (`labs::on_keys`); each app sees its own, as `ctx.labs`.
     #[serde(skip)]
     pub labs: Vec<String>,
 }

@@ -46,7 +46,7 @@ fn main() {
     let out = format!("{out}pub const CONFIG_FILE: &str = {:?};\npub const CONFIG_REPO: &str = {repo:?};\n", file.to_string_lossy());
     let out = format!("{out}pub const MADE_HERE: &str = {:?};\n", config.get("made_here").and_then(|v| v.as_str()).unwrap_or("Made here"));
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
-    // How people sign in: with a passkey, or with Google at the install's domain.
+    // How people sign in: with a passkey, or with Google at the network's domain.
     let sign_in = config.get("sign_in").and_then(|v| v.as_str()).unwrap_or("passkey");
     assert!(["passkey", "google"].contains(&sign_in), "sign_in is passkey or google");
     assert!(sign_in != "google" || !optional("join_domain").is_empty(), "signing in with Google needs join_domain");
@@ -54,19 +54,19 @@ fn main() {
     let relay_location = optional("relay_location");
     assert!(["", "wnam", "enam", "sam", "weur", "eeur", "apac", "oc", "afr", "me"].contains(&relay_location.as_str()), "relay_location is one of Cloudflare's location hints");
     let out = format!("{out}pub const RELAY_LOCATION: &str = {relay_location:?};\n");
-    // What a person joins, in their words: "your One App"; a workplace's (one with a join_domain) is shared, "the PTC App".
+    // What a person joins, in their words: "your One App network"; a workplace's (one with a join_domain) is shared, "the PTC App network".
     // apple/project.sh, android/app/build.gradle.kts and windows/build.sh say the same.
     let name = get("name").as_str().unwrap().to_string();
-    let yours = if optional("join_domain").is_empty() { format!("your {}", name.trim_start_matches("The ")) } else { name.replacen("The ", "the ", 1) };
+    let yours = if optional("join_domain").is_empty() { format!("your {} network", name.trim_start_matches("The ")) } else { format!("{} network", name.replacen("The ", "the ", 1)) };
     let out = format!("{out}pub const YOURS: &str = {yours:?};\n");
-    // The install settings an install has until its admins set them (`setting` entries).
+    // The network settings a network has until its admins set them (`setting` entries).
     let mut settings = String::new();
     for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {
         settings.push_str(&format!("({name:?}, {:?}),", value.as_str().unwrap_or_else(|| panic!("the setting {name} isn't text"))));
     }
     let out = format!("{out}pub const SETTINGS: &[(&str, &str)] = &[{settings}];\n");
     // Every app in this repo's apps/ folder ships built in: each folder's files. The config's `apps` are the ones a new
-    // install deploys and installs in `global`, by folder name.
+    // network deploys and installs in `global`, by folder name.
     let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("apps");
     println!("cargo:rerun-if-changed={}", root.display());
     let mut dirs: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.path()).filter(|p| p.join("app.js").is_file()).collect();

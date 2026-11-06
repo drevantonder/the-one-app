@@ -97,7 +97,7 @@ export default {
 
 /// A browser reads a database's steps from the bucket itself, through the URL signer's `get`, as the bucket holds them
 /// (sealed: it opens nothing), each by its name and null past the last: never as a node passes them on, which could
-/// hand it junk for a real step. Only a device of the install's reaches it.
+/// hand it junk for a real step. Only a device of the network's reaches it.
 async function browsersReadStepsFromTheBucket() {
   const objects = new Map([["global/node/scope/000000000001", new Uint8Array([1, 2, 3])], ["global/node/scope/000000000002", new Uint8Array([4])]]);
   const R2 = { get: async (name) => (objects.has(name) ? { arrayBuffer: async () => objects.get(name).buffer } : null) };
@@ -114,7 +114,7 @@ async function browsersReadStepsFromTheBucket() {
   equal(Object.keys(got), ["global/node/scope/000000000001", "global/node/scope/000000000002", "global/node/scope/000000000003"], "a range's names");
   equal([b64u.decode(got["global/node/scope/000000000001"]).join(), b64u.decode(got["global/node/scope/000000000002"]).join(), got["global/node/scope/000000000003"]], ["1,2,3", "4", null], "each step's bytes as the bucket holds them, and null past the last");
   equal((await ask({ get: [{ steps: "global/node/scope", from: 1, to: 33 }] })).status, 400, "at most 32 at once");
-  equal((await ask({ get: ["global/node/scope/000000000001"] }, { ...env, RELAY: { allowed: async () => null } }, random(32))).status, 403, "only the install's devices");
+  equal((await ask({ get: ["global/node/scope/000000000001"] }, { ...env, RELAY: { allowed: async () => null } }, random(32))).status, 403, "only the network's devices");
 }
 
 /// The URL signer lets a device whose build reads less of who's who (an older one says nothing) create, replace or

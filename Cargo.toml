@@ -68,7 +68,7 @@ axum = { version = "0.8", optional = true }
 # build it.
 futures-util = { version = "0.3", default-features = false, optional = true }
 # Devices reach each other over iroh (src/node/net.rs): QUIC between their device keys, direct where a path opens and
-# otherwise through the install's relay, which speaks iroh's relay protocol. Only ring's TLS and the router port mapping
+# otherwise through the network's relay, which speaks iroh's relay protocol. Only ring's TLS and the router port mapping
 # (UPnP, NAT-PMP, PCP), with no n0 discovery or metrics. Pinned, since the relay runs iroh-relay's own code of this
 # version.
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "portmapper"], optional = true }

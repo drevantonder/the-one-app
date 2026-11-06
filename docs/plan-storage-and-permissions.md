@@ -4,7 +4,7 @@ Decided by Andre on 2026-11-05. This file goes once phase 3 is done: from then o
 
 ## Why
 
-The install keeps three kinds of storage:
+The network keeps three kinds of storage:
 - app databases, which are SQLite changesets at numbered positions in the bucket;
 - the node's database of how things went;
 - the log, which is signed entries kept forever and replayed by every device in causal order.
@@ -42,8 +42,8 @@ Who holds what:
 
 **Permissions** (`src/permissions/`, used by the core and by apps):
 - **Principals hold roles on objects.** Principals are people, groups and, later, system users. Agents aren't principals: an agent acts as its principal.
-- **Each object type defines its permissions, its verbs.** The core's types are the install, a person's scope, a group's scope, devices, apps in a scope, Vault items and services. Apps declare their own, such as `repo`.
-- **A role is data:** a name and a set of permissions on a type. Each type ships simple default roles, and an install adds its own as a signed change.
+- **Each object type defines its permissions, its verbs.** The core's types are the network, a person's scope, a group's scope, devices, apps in a scope, Vault items and services. Apps declare their own, such as `repo`.
+- **A role is data:** a name and a set of permissions on a type. Each type ships simple default roles, and a network adds its own as a signed change.
 - **Assigning a role is a relation row.** Rules such as "admin implies member" are rows too.
 - **One check, `may(principal, permission, object)`**, as a query over those rows.
 - **Unknown means no:** a relation or rule a device doesn't know never grants anything.
@@ -54,7 +54,7 @@ Who holds what:
 - **Grants become app schedules**, a device running an app's schedules for a principal. They're a property of the device, not a permission.
 
 **The protocol left in code is three rules:**
-1. the install's first step and its recovery key;
+1. the network's first step and its recovery key;
 2. epochs never go down;
 3. each step's signer holds the permission that change needs.
 
@@ -112,8 +112,8 @@ This phase has one owner. It's a cut-over while we're pre-production (Andre, 202
 
 1. **The cut-over.**
    - The first copy of the scope database is the one built from the log at a final position.
-   - Every R1 device checks that copy once by building it itself, from the entries it has already checked, in its own release's form, and keeps it. That's the anchor for existing installs.
-   - The scope database's first step marks the log frozen: the install's **recovery key** signs it, once, in a ceremony Andre runs when he gives his go (`one switch --recovery-key <file>`; `one throwaway switch` uses the throwaway's own). No admin device signs one (Andre, 2026-11-05). The ceremony runs only on an admin's own machine, and waits for no device; it writes a `gate` entry to the log from the admin's own device first, unless one by someone still an admin is there, then `FREEZING`, then the freeze with the copy and the final position (the last step of `global`'s log, and of each other scope's), read just before. A freeze counts only if the log it names ends after a `gate` entry an admin's own device wrote, by someone still an admin where it ends, so none signed before this release, by a recovery key replaced since, ever does; and the ceremony refuses, saying so, when a freeze it didn't write already counts, and says why when its own doesn't. `one switch check` (read only) says whether the bucket holds any of the scope database's steps yet, or any step of `global`'s log that opens to a step rather than entries.
+   - Every R1 device checks that copy once by building it itself, from the entries it has already checked, in its own release's form, and keeps it. That's the anchor for existing networks.
+   - The scope database's first step marks the log frozen: the network's **recovery key** signs it, once, in a ceremony Andre runs when he gives his go (`one switch --recovery-key <file>`; `one throwaway switch` uses the throwaway's own). No admin device signs one (Andre, 2026-11-05). The ceremony runs only on an admin's own machine, and waits for no device; it writes a `gate` entry to the log from the admin's own device first, unless one by someone still an admin is there, then `FREEZING`, then the freeze with the copy and the final position (the last step of `global`'s log, and of each other scope's), read just before. A freeze counts only if the log it names ends after a `gate` entry an admin's own device wrote, by someone still an admin where it ends, so none signed before this release, by a recovery key replaced since, ever does; and the ceremony refuses, saying so, when a freeze it didn't write already counts, and says why when its own doesn't. `one switch check` (read only) says whether the bucket holds any of the scope database's steps yet, or any step of `global`'s log that opens to a step rather than entries.
    - The same freeze goes first as the log's step after that end, its mark, so the end it names is the log's real one: a recovery key replaced since can't name an end from before it was.
    - A recovery key that forked `global` is no recovery key, wherever it handed over to: replay cuts it at the fork, so it could otherwise fork away its own replacement. While there's none, an admin's own device names the next with a `recovery` entry (or step), and only then (Andre, 2026-11-05): in the log, only once replay has passed every entry the forked key wrote before its fork, its handover among them, so an admin's device that hadn't read that handover can't replace the key it handed over to. Epochs made meanwhile are sealed to no recovery key. A known limit of the log: a retired recovery key that leaks can still fork at or before its handover's seq and so undo the handover; neither network's log has a handover, so it can't happen before the freeze, and after it who's who is ordered steps, which can't fork.
    - Every reader (nodes, clients, browsers, the Cloudflare node) looks only at a freeze a key it knows was ever the recovery key signed (the genesis's, or one a `recovery` entry by such a key names); anything else shaped like a freeze is passed over without reading any log end it names. Before it judges a step shaped like a freeze, a reader reads `global`'s log from the bucket to its end, so a client whose entries are behind still knows every key that was ever the recovery key. It replays exactly `global`'s log's steps up to the end the freeze names, forks among those only, and counts it only if the recovery key there signed it, so every reader takes the same one whenever it reads it. One the recovery key signed that doesn't check out stops the reader, never passed over.
@@ -153,7 +153,7 @@ Every row change is in a signed step, so "who did what" for seven years is the s
 
 - **The browser's download** grows with SQLite in WebAssembly. Measure it in phase 1. The fallback is the browser building changesets itself in JavaScript.
 - **The scope database's step signer:** a person's device, by default. Nodes sign app databases' steps. Under rule 3, their steps to the scope database are those the scope's permissions allow nodes, such as a node's status.
-- **The default roles:** the core's are `permissions::DEFAULTS`; a repo's (owner, collaborator) are G's; a viewer role only once something needs it. The install's admins keep adding people to any group (their `manager` role gives a group's `member`), but, unlike replay's `manages`, make no one its admin: decide before phase 2 who makes a new admin of a group whose admins have all gone.
+- **The default roles:** the core's are `permissions::DEFAULTS`; a repo's (owner, collaborator) are G's; a viewer role only once something needs it. The network's admins keep adding people to any group (their `manager` role gives a group's `member`), but, unlike replay's `manages`, make no one its admin: decide before phase 2 who makes a new admin of a group whose admins have all gone.
 - **Retention:** 7 years for the scope database, by default. Andre decides app data's.
 - **Busy app databases** that collide often: measure before changing anything (batching, then a lease).
 

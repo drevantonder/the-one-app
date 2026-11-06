@@ -4,7 +4,7 @@
 //! endpoint that runs that scope's calls did. Pure: entries in, members out.
 //!
 //! Where a scope's calls run is who its devices are: a node runs (and holds) a person's own scope if it's listed as one
-//! of their devices, a group's if it's a device of the group's admins or the install's, and `global` if it's an admin's.
+//! of their devices, a group's if it's a device of the group's admins or the network's, and `global` if it's an admin's.
 //! No one reads another person's data. Each person and group has a handle, unique among them, that every app calls
 //! them by (`ctx.handles`): picked as they're replayed, from the name they joined or were made with, so no entry
 //! carries it, and changed only by a `rename` that gives one. An entry, once appended, is never lost.
@@ -38,7 +38,7 @@ pub enum Role {
 pub enum Principal {
     User(String),
     Group(String),
-    /// The install's admins.
+    /// The network's admins.
     Admins,
 }
 
@@ -83,7 +83,7 @@ pub enum Kind {
     Service,
 }
 
-/// An endpoint of the install, listed by a `device` entry (or the genesis): its key, the key things are sealed to,
+/// An endpoint of the network, listed by a `device` entry (or the genesis): its key, the key things are sealed to,
 /// whose it is, and what it does.
 #[derive(Clone, Debug)]
 pub struct Machine {
@@ -166,12 +166,12 @@ pub struct Members {
     pub users: BTreeMap<String, User>,
     pub machines: BTreeMap<Key, Machine>,
     pub groups: BTreeMap<String, Group>,
-    /// The install's settings its admins set: each name's latest value. The rest are the custom build's defaults.
+    /// The network's settings its admins set: each name's latest value. The rest are the custom build's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
     /// The latest `service` entry of each part on each device: (device, part).
     pub services: BTreeMap<(Key, String), Switch>,
-    /// When the install's devices last changed, by the newest genesis, device or remove: the relay's list is as of then.
+    /// When the network's devices last changed, by the newest genesis, device or remove: the relay's list is as of then.
     pub devices_at: u64,
     /// Each scope's current epoch, by its newest `epoch` entry that counts (src/keys.rs).
     pub epochs: BTreeMap<Scope, Epoch>,
@@ -193,13 +193,13 @@ pub struct Members {
     /// epoch failed, or whose device went off first, still gets one. A device signing itself out owes none.
     pub owed: BTreeSet<Scope>,
     /// Where each person's own things run besides their own machines, as their latest `runs` said from one of their
-    /// own devices: the install's other compute endpoints that run their own scope (`runs_for`).
+    /// own devices: the network's other compute endpoints that run their own scope (`runs_for`).
     pub runs: BTreeMap<String, BTreeSet<Key>>,
-    /// When the install's recovery key last let a device in (a `device` entry it signed), and whose.
+    /// When the network's recovery key last let a device in (a `device` entry it signed), and whose.
     pub recovery_used: Option<(u64, String)>,
-    /// When the install's recovery key was set: by the genesis, or by a `recovery` entry the one before it signed.
+    /// When the network's recovery key was set: by the genesis, or by a `recovery` entry the one before it signed.
     pub recovery_set: u64,
-    /// The install's recovery keys before this one, which the relay lets in no more.
+    /// The network's recovery keys before this one, which the relay lets in no more.
     pub recovery_was: Vec<Key>,
     /// Who opened the gate to the scope database, each from an admin's own device as it sorts (`gate`).
     gates: BTreeSet<String>,
@@ -341,7 +341,7 @@ impl Members {
         self.gates.iter().any(|u| self.is_admin(u))
     }
 
-    /// Whether the install has no recovery key, or one that forked `global` whose every entry from before its fork
+    /// Whether the network has no recovery key, or one that forked `global` whose every entry from before its fork
     /// replay has passed: only then does an admin's own device name the next, and once replayed, `end` takes it away.
     /// Only those entries of a forked key's count, its handover to the next among them, so no admin's naming that
     /// sorts before that handover, from a device that hadn't seen it, ever replaces the key it handed over to. Not
@@ -402,7 +402,7 @@ impl Members {
         self.scopes().into_iter().filter(opens).chain(scheduled).filter(|s| Some(s) != except).collect()
     }
 
-    /// The key things are sealed to for an endpoint of the install, as it's listed.
+    /// The key things are sealed to for an endpoint of the network, as it's listed.
     pub fn seal_key(&self, key: &Key) -> Option<[u8; 32]> {
         self.machine(key).map(|m| m.seal)
     }
@@ -419,7 +419,7 @@ impl Members {
     }
 
     /// Whether `user` is a scope's admin, who sets its app schedules and Vault: their own, a group's they're an admin of, or `global` as an
-    /// admin of the install.
+    /// admin of the network.
     pub fn is_scope_admin(&self, user: &str, scope: &Scope) -> bool {
         match scope {
             Scope::User(u) => u == user && self.user(user).is_some(),
@@ -434,7 +434,7 @@ impl Members {
         self.users.get(id).filter(|u| !u.removed)
     }
 
-    /// Whether `id` was a person of the install, and was removed.
+    /// Whether `id` was a person of the network, and was removed.
     pub fn removed_user(&self, id: &str) -> bool {
         self.users.get(id).is_some_and(|u| u.removed)
     }
@@ -474,7 +474,7 @@ impl Members {
         self.user(user).is_some_and(|u| u.role == Role::Admin)
     }
 
-    /// An endpoint of the install: listed, not removed, and its person not removed.
+    /// An endpoint of the network: listed, not removed, and its person not removed.
     pub fn machine(&self, key: &Key) -> Option<&Machine> {
         self.machines.get(key).filter(|m| !m.removed && self.user(&m.user).is_some())
     }
@@ -502,7 +502,7 @@ impl Members {
         self.machine(key).filter(|m| m.is(Kind::Service) && m.service.is_some())
     }
 
-    /// Whom a service endpoint serves, as its listing says: its own person, or everyone of the install if it's shared.
+    /// Whom a service endpoint serves, as its listing says: its own person, or everyone of the network if it's shared.
     pub fn service_serves(&self, key: &Key, user: &str) -> bool {
         self.service(key).is_some_and(|s| s.user == user || (s.shared && self.user(user).is_some()))
     }
@@ -522,7 +522,7 @@ impl Members {
         self.groups.values().filter_map(|g| Some((g.id.clone(), self.group_role(user, &g.id)?))).collect()
     }
 
-    /// A user's role in a scope: in the install for `global`, in the group, and admin in their own.
+    /// A user's role in a scope: in the network for `global`, in the group, and admin in their own.
     pub fn role_in(&self, user: &str, scope: &Scope) -> Option<Role> {
         match scope {
             Scope::Global => self.user(user).map(|u| u.role),
@@ -554,7 +554,7 @@ impl Members {
         out
     }
 
-    /// Whether `user` acts for `owner`: a user for themselves, a group's admins for the group, the install's
+    /// Whether `user` acts for `owner`: a user for themselves, a group's admins for the group, the network's
     /// admins for `admins`.
     pub fn acts_for(&self, user: &str, owner: &Principal) -> bool {
         match owner {
@@ -564,7 +564,7 @@ impl Members {
         }
     }
 
-    /// Whether `user` manages `group`: its admins, and the install's (so a group whose last admin left isn't stuck).
+    /// Whether `user` manages `group`: its admins, and the network's (so a group whose last admin left isn't stuck).
     pub fn manages(&self, user: &str, group: &str) -> bool {
         self.groups.contains_key(group) && (self.group_role(user, group) == Some(Role::Admin) || self.is_admin(user))
     }
@@ -578,8 +578,8 @@ impl Members {
 
     /// Whether a scope's calls run on `endpoint`: a compute endpoint its owners trust, which for a user's own scope is
     /// one of their own machines they listed themselves (one an admin listed for them runs only what that admin's
-    /// could), or another of the install's their own device chose (`runs`); of an admin of the group or of the install, for a group's; of an admin of
-    /// the install, for `global`.
+    /// could), or another of the network's their own device chose (`runs`); of an admin of the group or of the network, for a group's; of an admin of
+    /// the network, for `global`.
     pub fn runs_for(&self, endpoint: &Key, scope: &Scope) -> bool {
         let Some(m) = self.compute(endpoint) else {
             // The Cloudflare node, as an admin's setting names it: `global` and groups as any admin's machine, and a
@@ -634,7 +634,7 @@ impl Members {
             return false;
         }
         let author = e.author();
-        // The install's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would,
+        // The network's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would,
         // and hands over to the next recovery key.
         if self.recovery == Some(author) {
             return is_member_entry(e) && ["device", "recovery"].contains(&e.content.kind.as_str());
@@ -658,7 +658,7 @@ impl Members {
         let role_of = |key: &str| -> Result<Role> { Ok(serde_json::from_value(data[key].clone())?) };
         match e.content.kind.as_str() {
             "genesis" => {
-                ensure!(self.root == Some(e.hash()) && self.users.is_empty(), "not this install's genesis");
+                ensure!(self.root == Some(e.hash()) && self.users.is_empty(), "not this network's genesis");
                 let user = id_of("user")?;
                 ensure!(user == w, "genesis is written as its first user");
                 let device = &data["device"];
@@ -673,7 +673,7 @@ impl Members {
                 self.users.insert(user.clone(), User { id: user.clone(), name, handle, role: Role::Admin, removed: false });
                 self.machines.insert(author, machine);
                 self.devices_at = e.time();
-                // `global`'s first epoch, made with the install, before anything is sealed under it.
+                // `global`'s first epoch, made with the network, before anything is sealed under it.
                 self.epoch_hashes.insert((Scope::Global, 1), hash.clone());
                 self.epochs.insert(Scope::Global, Epoch { n: 1, to: vec![author], hash });
             }
@@ -724,7 +724,7 @@ impl Members {
                 // no device of theirs lets it in, by its sign-in or its code, and nothing it writes counts. An older
                 // device skips this, and goes on as before.
                 let key = key_of("key")?;
-                ensure!(self.user(&w).is_some(), "only someone in the install turns down a device of theirs");
+                ensure!(self.user(&w).is_some(), "only someone in the network turns down a device of theirs");
                 ensure!(!self.machines.contains_key(&key), "that key is listed already: take it out instead");
                 let mut machine = listed(&json!({ "key": data["key"], "seal": data["seal"], "name": data["name"], "roles": [Kind::Client] }), &w, e.time())?;
                 machine.by = w.clone();
@@ -794,7 +794,7 @@ impl Members {
                 let n = data["n"].as_u64().context("no n")?;
                 ensure!(n == self.epoch(&scope) as u64 + 1, "an epoch follows the one before it");
                 let to = data["to"].as_array().context("no to")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<Vec<_>>>()?;
-                ensure!(to.iter().all(|k| self.machine(k).is_some()), "an epoch is sealed only to the install's endpoints");
+                ensure!(to.iter().all(|k| self.machine(k).is_some()), "an epoch is sealed only to the network's endpoints");
                 let hash = epoch_hash_of(&data["hash"])?;
                 self.epoch_hashes.insert((scope.clone(), n as u32), hash.clone());
                 self.owed.remove(&scope);
@@ -803,7 +803,7 @@ impl Members {
             "runs" => {
                 // Only from the person's own device (`counts`), for their own scope: an admin can't say where it runs.
                 let on = data["on"].as_array().context("on is a list of endpoints' keys")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<BTreeSet<_>>>()?;
-                ensure!(on.iter().all(|k| self.compute(k).is_some() || self.cloudflare_node() == Some(*k)), "only the install's machines that run things, and its Cloudflare node, run someone's own");
+                ensure!(on.iter().all(|k| self.compute(k).is_some() || self.cloudflare_node() == Some(*k)), "only the network's machines that run things, and its Cloudflare node, run someone's own");
                 self.runs.insert(w, on);
             }
             // App schedules, by the name older devices replay.
@@ -837,7 +837,7 @@ impl Members {
                 ensure!(n == self.vaults.get(&scope).map_or(0, |v| v.n) as u64 + 1, "a Vault key follows the one before it");
                 let public = key_of("public")?;
                 let to = data["to"].as_array().context("no to")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<Vec<_>>>()?;
-                ensure!(to.iter().all(|k| self.compute(k).is_some() || self.cloudflare_node() == Some(*k)), "a Vault opens only on the install's machines that run things");
+                ensure!(to.iter().all(|k| self.compute(k).is_some() || self.cloudflare_node() == Some(*k)), "a Vault opens only on the network's machines that run things");
                 self.vault_publics.insert((scope.clone(), n as u32), public);
                 self.vaults.insert(scope, VaultKey { n: n as u32, public, to });
             }
@@ -935,7 +935,7 @@ impl Members {
                 // sealed to it, own scopes too. Unless there's none, since the one there was forked `global`: then an
                 // admin's own device names the next.
                 let named = self.recovery_lost() && self.is_admin(&w) && self.client(&author).is_some_and(|c| c.user == w);
-                ensure!(self.recovery == Some(author) || named, "only the install's recovery key changes it");
+                ensure!(self.recovery == Some(author) || named, "only the network's recovery key changes it");
                 let key = key_of("key")?;
                 ensure!(Some(key) != self.recovery && !self.recovery_was.contains(&key) && !self.machines.contains_key(&key), "a new recovery key is a key of its own");
                 self.recovery_was.extend(self.recovery.replace(key));
@@ -992,7 +992,7 @@ impl Members {
                 let device = key_of("device")?;
                 let name = text("name")?;
                 ensure!(valid_app_name(&name), "service names are lowercase words joined by -");
-                // The Cloudflare node is a node of the install's, not a person's device: its admins switch its parts.
+                // The Cloudflare node is a node of the network's, not a person's device: its admins switch its parts.
                 if self.cloudflare_node() == Some(device) {
                     ensure!(self.is_admin(&w), "only an admin switches what the Cloudflare node runs");
                 } else {
@@ -1118,9 +1118,9 @@ pub fn manages_scope(m: &Members, user: &str, scope: &Scope) -> bool {
     }
 }
 
-/// How people's roles changed from `before` to `after` (`Members::roles`), as the install's vault hears it: (user,
+/// How people's roles changed from `before` to `after` (`Members::roles`), as the network's vault hears it: (user,
 /// role, invited, scopes) each. None, in every scope they may no longer use or were invited to; otherwise their role
-/// in each they're newly in, invited to, or an admin of no longer or now. Not someone joining the install (their
+/// in each they're newly in, invited to, or an admin of no longer or now. Not someone joining the network (their
 /// invite link opens Everyone's to them), their own scope, nor a group just made (the vault made its key with it).
 pub fn roles_changed(before: &BTreeMap<(String, Scope), (Role, bool)>, after: &BTreeMap<(String, Scope), (Role, bool)>) -> Vec<(String, Option<Role>, bool, Vec<Scope>)> {
     let mut out: BTreeMap<(String, Option<Role>, bool), Vec<Scope>> = BTreeMap::new();
@@ -1299,7 +1299,7 @@ pub fn node(kind: &str, data: Value) -> Content {
     Content::new(APP, kind, data)
 }
 
-/// The install's first entry: its name, its first person, the first device (signing it), the recovery key, and the
+/// The network's first entry: its name, its first person, the first device (signing it), the recovery key, and the
 /// hash of `global`'s first epoch (`keys::epoch_hash`), made with it.
 pub fn genesis(name: &str, user: &str, user_name: &str, device: &crate::keys::Endpoint, device_name: &str, roles: &[Kind], recovery: &Key, epoch: &str) -> Content {
     let device = json!({ "key": hex(&device.key), "seal": hex(&device.seal), "name": device_name, "roles": roles });
@@ -1344,7 +1344,7 @@ pub fn remove_device(key: &Key, seq: Option<u32>) -> Content {
     node("remove", json!({ "key": hex(key), "seq": seq }))
 }
 
-/// One of the install's settings; `None` puts back the custom build's default.
+/// One of the network's settings; `None` puts back the custom build's default.
 pub fn setting(name: &str, value: Option<&str>) -> Content {
     node("setting", json!({ "name": name, "value": value }))
 }
@@ -1411,7 +1411,7 @@ pub fn service(device: &Key, name: &str, on: bool) -> Content {
     node("service", json!({ "device": hex(device), "name": name, "on": on }))
 }
 
-/// Where its writer's own things run besides their own machines: the install's others that run their own scope.
+/// Where its writer's own things run besides their own machines: the network's others that run their own scope.
 pub fn runs(on: &[Key]) -> Content {
     node("runs", json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
 }
@@ -1585,7 +1585,7 @@ mod tests {
     }
 
     #[test]
-    fn only_this_installs_genesis_counts() {
+    fn only_this_networks_genesis_counts() {
         let mut other = Dev::new(2);
         let fake = other.write("global", ANDRE, genesis("Home", ANDRE, "x", &other.endpoint(), "y", BOTH, &[7; 32], &H.repeat(64)), &[]);
         let (_, entries) = setup();
@@ -1645,7 +1645,7 @@ mod tests {
         let m = members(&entries);
         assert_eq!(m.users[BOB].name, "Bobby");
         assert!(m.machine(&Dev::new(5).id()).is_none() && m.machine(&Dev::new(6).id()).is_none());
-        // The compute endpoint runs Andre's scope and the install's, not Bob's.
+        // The compute endpoint runs Andre's scope and the network's, not Bob's.
         assert!(m.runs_for(&linux.id(), &Scope::User(ANDRE.into())) && m.runs_for(&linux.id(), &Scope::Global));
         assert!(!m.runs_for(&linux.id(), &Scope::User(BOB.into())) && !m.runs_for(&bobs.id(), &Scope::User(BOB.into())));
         // A machine an admin lists as Bob's runs what Bob may run elsewhere, never Bob's own scope, until Bob's own
@@ -1742,7 +1742,7 @@ mod tests {
         assert_eq!(m.epoch(&Scope::User(ANDRE.into())), 0);
     }
 
-    /// An install whose recovery key is `recovery`'s, with Andre's mac and linux (compute), and Bob in with his phone.
+    /// A network whose recovery key is `recovery`'s, with Andre's mac and linux (compute), and Bob in with his phone.
     fn with_bob(recovery: &Dev) -> (Dev, Dev, Dev, Vec<Entry>) {
         let (mut mac, mut linux, bobs) = (Dev::new(1), Dev::new(4), Dev::new(3));
         let g = mac.write("global", ANDRE, genesis("Home", ANDRE, "Andre", &mac.endpoint(), "mac", BOTH, &recovery.id(), &H.repeat(64)), &[]);
@@ -1759,7 +1759,7 @@ mod tests {
         let (mut mac, linux, mut bobs, mut entries) = with_bob(&recovery);
         let bob = Scope::User(BOB.into());
         let (mac_id, bob_id) = (mac.id(), bobs.id());
-        // Nothing runs Bob's own things until his device says: then the install's machine he chose does.
+        // Nothing runs Bob's own things until his device says: then the network's machine he chose does.
         assert!(!members(&entries).runs_for(&linux.id(), &bob));
         add(&mut entries, &mut mac, ANDRE, runs(&[linux.id()]));
         add(&mut entries, &mut mac, BOB, runs(&[linux.id()]));
@@ -1869,7 +1869,7 @@ mod tests {
         add(&mut entries, &mut mac, ANDRE, remove_device(&linux_id, None));
         assert_eq!(owed(&entries), vec![bob.clone()], "a machine holds no epoch, only the keys of the app schedules it runs");
         add(&mut entries, &mut bobs, BOB, epoch(&bob, 5, &[bob_id], &H.repeat(64)));
-        // Taken out of a group, then out of the install: their own scope is kept as it is.
+        // Taken out of a group, then out of the network: their own scope is kept as it is.
         add(&mut entries, &mut mac, ANDRE, member("c000000000000003", BOB, None));
         assert_eq!(owed(&entries), vec![work.clone()]);
         add(&mut entries, &mut mac, ANDRE, epoch(&work, 4, &[mac_id], &H.repeat(64)));
@@ -1928,7 +1928,7 @@ mod tests {
         let m = members(&entries);
         assert!(m.machine(&Dev::new(6).id()).is_none() && m.machine(&Dev::new(7).id()).is_none());
         assert!(m.settings.is_empty() && m.users[BOB].role == Role::Member && m.user("c000000000000003").is_none());
-        // A key that isn't the install's recovery key lets nobody in.
+        // A key that isn't the network's recovery key lets nobody in.
         let mut other = Dev::new(8);
         entries.push(other.write("global", BOB, device(&Dev::new(10).endpoint(), BOB, "x", &[Kind::Client], None), &entries));
         assert!(members(&entries).machine(&Dev::new(10).id()).is_none());

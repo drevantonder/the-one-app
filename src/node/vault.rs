@@ -67,7 +67,7 @@ impl Node {
     }
 
     /// Says which machines open `scope`'s Vault: `device` added to them (`on`) or taken off, as this device's person,
-    /// who must be the scope's admin. Always a new key pair, sealed to each machine and the install's recovery key,
+    /// who must be the scope's admin. Always a new key pair, sealed to each machine and the network's recovery key,
     /// its public half in a `vault` entry; what's sealed to the old one is sealed to the new by a machine granted both,
     /// at its next write there. → what it did, in words.
     pub async fn vault_grant(&self, me: &Caller, scope: &Scope, device: &str, on: bool) -> Result<Value> {
@@ -83,7 +83,7 @@ impl Node {
         if on {
             to.push(endpoint);
         }
-        self.new_vault_key(scope, current.n + 1, &to, &recovery.context("the install has no recovery key to seal its Vault to")?).await?;
+        self.new_vault_key(scope, current.n + 1, &to, &recovery.context("the network has no recovery key to seal its Vault to")?).await?;
         // Sealed to the new key here, if this machine opens it: a write that changes nothing else.
         if to.contains(&self.0.id) && self.vault_secrets(scope).await?.is_some_and(|k| k.len() > 1) {
             if let Err(err) = self.write_item(me, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await {
@@ -507,7 +507,7 @@ impl Node {
                 }
                 let fields: serde_json::Map<String, Value> = d["fields"].as_object().into_iter().flatten().map(|(n, f)| (n.clone(), json!({ "secret": f["secret"] == true }))).collect();
                 // Where to find it, as the app says, when the asker gave no reason of their own; `{address}` in it is
-                // the install's.
+                // the network's.
                 let why = match why.is_empty() {
                     true => d["why"].as_str().unwrap_or("").replace("{address}", &self.address().unwrap_or_default()),
                     false => why.to_string(),
@@ -529,8 +529,8 @@ impl Node {
             Ok(())
         })?;
         self.append_as(scope, &caller.user, members::node("vault-request", data)).await?;
-        // At the install's address (where people sign in) the web client opens it in any browser; an
-        // install without one has only its apps to.
+        // At the network's address (where people sign in) the web client opens it in any browser; a
+        // network without one has only its apps to.
         let web = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()).remove("address")))?;
         let link = match web.as_ref().and_then(Value::as_str).filter(|w| w.starts_with("https://") || w.starts_with("http://")) {
             Some(web) => format!("{}/vault?id={id}&scope={scope}", web.trim_end_matches('/')),
@@ -539,9 +539,9 @@ impl Node {
         Ok(json!({ "id": id, "scope": scope.to_string(), "link": link }))
     }
 
-    /// The install's admins' names, as someone asks them: "Andre", "Andre or Sam", "Andre, Sam or Kim".
+    /// The network's admins' names, as someone asks them: "Andre", "Andre or Sam", "Andre, Sam or Kim".
     fn admin_names(&self) -> Result<String> {
-        let mut names = self.with(|i| Ok(i.r.db().users().into_iter().filter(|u| !u.removed && i.r.db().may(&u.id, "change-settings", scopes::INSTALL)).map(|u| u.name).collect::<Vec<_>>()))?;
+        let mut names = self.with(|i| Ok(i.r.db().users().into_iter().filter(|u| !u.removed && i.r.db().may(&u.id, "change-settings", scopes::NETWORK)).map(|u| u.name).collect::<Vec<_>>()))?;
         names.sort();
         Ok(match names.split_last() {
             None => "an admin".to_string(),
@@ -617,7 +617,7 @@ impl Node {
                     }
                     let title = answer["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or(&r.title);
                     let mut data = json!({ "id": made, "title": title, "fields": fields, "hosts": r.hosts, "apps": sharing });
-                    // What the node asked for itself (the install's storage) is an item of that type; what an app
+                    // What the node asked for itself (the network's storage) is an item of that type; what an app
                     // declared, of the type it declared.
                     if let Some(need) = r.need.as_ref().filter(|_| r.app == members::APP) {
                         data["type"] = json!(need);

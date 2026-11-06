@@ -7,7 +7,7 @@
 //! but where its writer meant it: one that loses its position to another is signed again for the next. A node only
 //! carries a client's step to the bucket: it can hold one back, but change none.
 //!
-//! The cut-over is `global`'s first step that is a freeze the install's recovery key signed (`FREEZE`, `claimed`), in
+//! The cut-over is `global`'s first step that is a freeze the network's recovery key signed (`FREEZE`, `claimed`), in
 //! the one ceremony an admin runs with it (`one switch`, `Node::switch`): it names the step of `global`'s log where the
 //! log ends (and of every other scope's log its last step in order), and carries the database there, its first copy.
 //! The same freeze is written first as the step of the log after that end, its mark: the bucket takes a position once,
@@ -26,7 +26,7 @@
 //!
 //! Every reader applies each step after to the database as the steps before it left it, and counts it only if all
 //! three of the protocol's rules hold there:
-//! 1. the install's first step and its recovery key: the freeze's copy, checked as above; and only the recovery key
+//! 1. the network's first step and its recovery key: the freeze's copy, checked as above; and only the recovery key
 //!    lets a device in by itself;
 //! 2. epochs never go down: a step names its scope's epoch its writer knew, never one above the database's;
 //! 3. its signer holds the permission the change needs, at that step (`allowed`): `may`, `may_give`, `may_take` and
@@ -114,7 +114,7 @@ fn shaped(bytes: &[u8]) -> Option<Entry> {
     }
 }
 
-/// A step a device of the install's own passed on opened (`encode`'s bytes): none if it isn't one. Only a service
+/// A step a device of the network's own passed on opened (`encode`'s bytes): none if it isn't one. Only a service
 /// endpoint takes them so, from its own device's node, holding no keys of its own.
 pub fn given(scope: &Scope, at: u64, opened: Option<&[u8]>) -> Option<Given> {
     opened.and_then(|b| decode(scope, at, b).ok())
@@ -280,14 +280,14 @@ pub struct Log {
     shaped: BTreeMap<u64, Entry>,
     /// Whether the bucket held nothing after its last step when it was read.
     pub ended: bool,
-    /// The install's genesis, which the entries before each step are replayed from (`take`).
+    /// The network's genesis, which the entries before each step are replayed from (`take`).
     root: Option<Hash>,
     /// The newest epoch of `global` the entries in its steps so far make, as last worked out (`made`).
     made: u32,
 }
 
 impl Log {
-    /// Of the install whose genesis is `root`, before its first step; with none, the one its first step holds.
+    /// Of the network whose genesis is `root`, before its first step; with none, the one its first step holds.
     pub fn new(root: Option<Hash>) -> Log {
         Log { root, ..Default::default() }
     }
@@ -318,7 +318,7 @@ impl Log {
             }
             self.shaped.insert(at, step);
         }
-        // Read by a device that doesn't know the install yet: its genesis, as its first step holds it, so the epochs
+        // Read by a device that doesn't know the network yet: its genesis, as its first step holds it, so the epochs
         // its entries make are worked out from it, not passed over. Never one a later step holds.
         if at == 1 && self.root.is_none() {
             self.root = self.read.entries.iter().find(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash);
@@ -335,7 +335,7 @@ impl Log {
 
     /// The newest epoch of `global` the entries in its steps so far make, for `sealed`, its next step: worked out again
     /// only for a step under a newer epoch than it was last time, as every reader of the same steps does. The first is
-    /// the genesis's, made with the install and sealed under, in the step that holds it, before anything else.
+    /// the genesis's, made with the network and sealed under, in the step that holds it, before anything else.
     fn made(&mut self, sealed: &[u8]) -> u32 {
         if crate::keys::epoch_of(sealed).is_ok_and(|e| e > self.made.max(1)) {
             self.made = made_by(self.root, &self.read.entries, &Scope::Global);
@@ -367,7 +367,7 @@ impl Log {
     }
 }
 
-/// `global`'s log of the install at `root` from the bucket to the step after `to` (or its end, if it ends before)
+/// `global`'s log of the network at `root` from the bucket to the step after `to` (or its end, if it ends before)
 /// (`Log`).
 pub async fn log_to(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, root: Option<Hash>, to: u64) -> Result<Log> {
     let prefix = crate::log::prefix("global");
@@ -405,13 +405,13 @@ pub async fn log_for(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys
     Ok(log)
 }
 
-/// Every key that was ever the install's recovery key, as far as a reader knows: the one the genesis names (the entry
+/// Every key that was ever the network's recovery key, as far as a reader knows: the one the genesis names (the entry
 /// whose hash is `root`), each a `recovery` entry signed by one of those names, and each one replay made the recovery
 /// key (one an admin's own device named while there was none, `Members::recovery_lost`). Only a freeze one of them
 /// signed is looked at, and its log read; which of them counts is judged at the end of the log it names (`claimed`).
 pub type Recovery = BTreeSet<Key>;
 
-/// `Recovery` from `entries`, `global`'s, in any order, of the install at `root`.
+/// `Recovery` from `entries`, `global`'s, in any order, of the network at `root`.
 pub fn recovery_keys<'a>(root: Option<Hash>, entries: impl IntoIterator<Item = &'a Entry>) -> Recovery {
     let entries: Vec<&Entry> = entries.into_iter().filter(|e| e.content.app == members::APP && e.log() == "global").collect();
     let named = |e: &Entry, field: &str| e.content.data[field].as_str().and_then(|k| unhex(k).ok());
@@ -439,10 +439,10 @@ pub fn recovery_keys<'a>(root: Option<Hash>, entries: impl IntoIterator<Item = &
     keys
 }
 
-/// The install's genesis, for a reader that holds no genesis of its own and reads `global`'s `entries` as the bucket
+/// The network's genesis, for a reader that holds no genesis of its own and reads `global`'s `entries` as the bucket
 /// has them (the Cloudflare node): `pinned`, as the device that deployed it holds it, whatever genesis a device writes
-/// into a step of the log; or, unpinned (deployed before its install was), the one genesis among them, and none
-/// while there are two, until it's deployed again beside its install.
+/// into a step of the log; or, unpinned (deployed before its network was), the one genesis among them, and none
+/// while there are two, until it's deployed again beside its network.
 pub fn genesis_of(pinned: Option<Hash>, entries: &[Entry]) -> Option<Hash> {
     if pinned.is_some() {
         return pinned;
@@ -452,12 +452,12 @@ pub fn genesis_of(pinned: Option<Hash>, entries: &[Entry]) -> Option<Hash> {
     found.next().is_none().then_some(first)
 }
 
-/// The newest epoch of `scope` that `entries` of `global`'s make, of the install at `root`, with the forks among them.
+/// The newest epoch of `scope` that `entries` of `global`'s make, of the network at `root`, with the forks among them.
 fn made_by(root: Option<Hash>, entries: &[Entry], scope: &Scope) -> u32 {
     members_of(root, entries).epoch(scope)
 }
 
-/// What `entries` of `global`'s (in any order) replay to, of the install at `root`, with the forks among them.
+/// What `entries` of `global`'s (in any order) replay to, of the network at `root`, with the forks among them.
 fn members_of(root: Option<Hash>, entries: &[Entry]) -> Members {
     let ordered = crate::entry::causal(entries.to_vec(), &Default::default());
     let member_entries: Vec<Entry> = ordered.into_iter().filter(members::is_member_entry).collect();
@@ -480,7 +480,7 @@ pub fn forks(entries: &[Entry]) -> Cuts {
     cuts
 }
 
-/// What `entries` of `global`'s (in any order) replay to, of the install at `root`: in causal order, with only the forks
+/// What `entries` of `global`'s (in any order) replay to, of the network at `root`: in causal order, with only the forks
 /// among them.
 fn replay_all(root: Option<Hash>, entries: &[Entry]) -> Replayed {
     let ordered = crate::entry::causal(entries.to_vec(), &Default::default());
@@ -501,14 +501,14 @@ struct Replayed {
 }
 
 /// Who's who before the freeze, as a reader that keeps nothing of its own works it out from `ordered`, `global`'s
-/// entries it holds in replay order, of the install at `root`: with the forks among them, as a node replays them.
+/// entries it holds in replay order, of the network at `root`: with the forks among them, as a node replays them.
 pub fn view(root: Option<Hash>, ordered: &[Entry], now: u64) -> Result<ScopeDb> {
     let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
     ScopeDb::build(&Members::replay(root, &member_entries, &forks(ordered)), &Scope::Global, &ScopeState::default(), now)
 }
 
 /// Who's who as a reader that keeps nothing of its own works it out from `ordered`, `global`'s entries it holds in
-/// replay order, of the install at `root`, its scope database's steps by position from the first, and `global`'s log
+/// replay order, of the network at `root`, its scope database's steps by position from the first, and `global`'s log
 /// far enough to judge the freezes among them (`log_for`, with `recovery_keys` of `ordered`): the steps' once its log is
 /// frozen (`Truth::read`), replay's before.
 pub fn who(steps: &[Option<Given>], root: Option<Hash>, ordered: &[Entry], log: Option<&Log>, now: u64) -> Result<ScopeDb> {
@@ -541,7 +541,7 @@ impl std::fmt::Display for Unmarked {
 
 impl std::error::Error for Unmarked {}
 
-/// Whether `given`, step `at` of `global`'s database before its freeze, is a freeze the install's recovery key signed:
+/// Whether `given`, step `at` of `global`'s database before its freeze, is a freeze the network's recovery key signed:
 /// the freeze it says. Only one a key in `recovery` signed is looked at (`candidate`). Judged only at the end of
 /// `global`'s log it names, from `log`, its steps up to there, replayed with the forks among them only, so every
 /// reader judges it the same whenever it reads it: its signer is the recovery key the genesis or a `recovery` entry up
@@ -645,7 +645,7 @@ fn says(copy: &Connection, own: &Connection) -> Result<bool> {
 }
 
 /// The freeze `given` is, at position `at`, as checked here against `log`, `global`'s log read past the end it names
-/// (`log_to`), of the install whose genesis is `root`: its copy comes to the hash it names; the recovery key the
+/// (`log_to`), of the network whose genesis is `root`: its copy comes to the hash it names; the recovery key the
 /// entries up to there name signed it; and they add up to what the copy says (`says`). → the database it anchors, this
 /// release's form of its copy. Everyone replays exactly those entries, forks among them only, so later entries, forks
 /// or releases change nothing.
@@ -666,7 +666,7 @@ pub fn anchor(given: &Given, at: u64, root: Option<Hash>, log: &Log, now: u64) -
 }
 
 /// The freeze the ceremony writes, at `logs`' ends (every scope's log but `global`'s, by its last step in the bucket)
-/// and `to`, the end of `global`'s log, whose steps hold `entries`, of the install at `root`: its content, and its
+/// and `to`, the end of `global`'s log, whose steps hold `entries`, of the network at `root`: its content, and its
 /// copy. It's written as the step of the log after `to` first, its mark (`claimed`).
 pub fn freeze(root: Option<Hash>, entries: &[Entry], to: u64, mut logs: BTreeMap<String, u64>, now: u64) -> Result<(Content, Vec<u8>)> {
     logs.insert("global".into(), to);
@@ -679,7 +679,7 @@ pub fn freeze(root: Option<Hash>, entries: &[Entry], to: u64, mut logs: BTreeMap
 
 /// A scope's database before its first step (not `global`'s): what its log's entries up to the freeze's position there
 /// (`entries`, read from its steps up to `Freeze::logs`') add up to with `global`'s at the freeze (`global`, its log up
-/// to the freeze's end of it, of the install at `root`). Every reader works it out itself.
+/// to the freeze's end of it, of the network at `root`). Every reader works it out itself.
 pub fn scope_anchor(freeze: &Freeze, root: Option<Hash>, global: &Log, scope: &Scope, entries: &[Entry], now: u64) -> Result<ScopeDb> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
     ensure!(global.last() >= freeze.global(), "global's log was read to {}, not to the freeze's {}", global.last(), freeze.global());
@@ -691,7 +691,7 @@ pub fn scope_anchor(freeze: &Freeze, root: Option<Hash>, global: &Log, scope: &S
 
 /// The entries `scope_anchor` starts `scope`'s database from (not `global`'s): those in its log's steps up to the
 /// freeze's end of it, read from the bucket with `keys`, its log's keys by epoch. A step under an epoch above the newest
-/// of `scope` made at the freeze, as `global`, `global`'s log to the freeze's end of it (of the install at `root`), says,
+/// of `scope` made at the freeze, as `global`, `global`'s log to the freeze's end of it (of the network at `root`), says,
 /// is junk, never one made since: every reader reads them the same whenever it reads them.
 pub async fn anchor_entries(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, freeze: &Freeze, root: Option<Hash>, global: &Log, scope: &Scope) -> Result<Vec<Entry>> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
@@ -740,7 +740,7 @@ impl Truth {
     }
 
     /// `read`, for a service endpoint, which holds no keys and takes its steps from its own device's node: the first
-    /// freeze `recovery`, the install's recovery key as the entries it holds say, signed, its copy checked against the
+    /// freeze `recovery`, the network's recovery key as the entries it holds say, signed, its copy checked against the
     /// hash it names, unchecked against the log, which it can't read. The recovery key vouches for it; anything else
     /// shaped like a freeze is nothing. One it signed that doesn't check out stops it, as it stops every reader.
     pub fn read_given(steps: &[Option<Given>], recovery: Option<Key>, now: u64) -> Result<Option<Truth>> {
@@ -867,7 +867,7 @@ impl Truth {
 
     /// Who's who as `welcome` says it: from `freeze`, the step at its freeze's position, which must be a freeze the
     /// recovery key signed that checks out (`first`, with `log`, `global`'s log read past the end it names, of the
-    /// install at `root`, whose entries say which keys were ever the recovery key), and `start`, the copy at `Welcome::copy` (its bytes, opened), or none to start from the
+    /// network at `root`, whose entries say which keys were ever the recovery key), and `start`, the copy at `Welcome::copy` (its bytes, opened), or none to start from the
     /// freeze's own, then `after`, the steps after that one up to the Welcome's, each taken as any reader takes it.
     /// Fails unless it comes to the Welcome's hash, in this release's form: a freeze, copy or step a node or another
     /// device swapped is never used.
@@ -891,7 +891,7 @@ impl Truth {
     }
 }
 
-/// Who's who as `welcome` says it, read from the bucket with `keys`, `global`'s log's keys by epoch, of the install at
+/// Who's who as `welcome` says it, read from the bucket with `keys`, `global`'s log's keys by epoch, of the network at
 /// `root`, with `global`'s log read past the end its freeze names (`Truth::welcomed`): from the copy before the
 /// Welcome's step, or, if that one isn't there or doesn't come to its hash, from its freeze's.
 pub async fn welcomed(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, root: Option<Hash>, welcome: &Welcome, now: u64) -> Result<Truth> {
@@ -1070,11 +1070,11 @@ pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
 const RULE: &str = "(substr(subject, 1, 1) IN ('#', '@') OR instr(subject, '*') > 0 OR instr(object, '*') > 0)";
 
 /// A `DEFAULTS` step: by an admin's device, the release's types, roles and rules as it says them, in place of those
-/// the database had; the install's own roles stay.
+/// the database had; the network's own roles stay.
 fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<Applied> {
     // Whose it is first: one that doesn't count is passed over, whatever release it names.
     ensure!(who.client(&step.author()).is_some_and(|c| c.user == step.user()), "only a person's own device writes for them");
-    ensure!(who.may(step.user(), "change-roles", scopes::INSTALL), "only the install's admins say the release's roles");
+    ensure!(who.may(step.user(), "change-roles", scopes::NETWORK), "only the network's admins say the release's roles");
     let reads = u32::try_from(step.content.data["reads"].as_u64().context("a release's roles name its version")?)?;
     ensure!(reads <= READS, Newer);
     ensure!(reads > version(db.conn())?, "a release's roles only ever move on");
@@ -1174,8 +1174,8 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
             let theirs = kinds.iter().any(|k| matches!(k, members::Kind::Client | members::Kind::Service));
             let verb = if theirs { "add-devices" } else { "add-machines" };
             match (db.user_ever(&user), db.machine_ever(&key)) {
-                // Someone new, with their first device: given a role in the install by someone who may give it.
-                (None, None) => db.may_give(w, &user, super::scope::role(role("role")?), scopes::INSTALL),
+                // Someone new, with their first device: given a role in the network by someone who may give it.
+                (None, None) => db.may_give(w, &user, super::scope::role(role("role")?), scopes::NETWORK),
                 (Some(_), None) => db.user(&user).is_some() && maker(db, w, verb, &scopes::person(&user), &scopes::person(&user), "owner", &scopes::device(&key)),
                 // Listed again by its person's own device, to name the device it's part of.
                 (Some(_), Some(_)) => may("add-devices", &scopes::person(&user)),
@@ -1186,10 +1186,10 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
             let user = text("user")?;
             let was = db.user(&user).context("no such person")?.role;
             let to = role("role")?;
-            to == was || (db.may_give(w, &user, super::scope::role(to), scopes::INSTALL) && db.may_take(w, &user, super::scope::role(was), scopes::INSTALL))
+            to == was || (db.may_give(w, &user, super::scope::role(to), scopes::NETWORK) && db.may_take(w, &user, super::scope::role(was), scopes::NETWORK))
         }
         (members::APP, "remove") => match text("user") {
-            Ok(user) => db.user(&user).is_some_and(|u| db.may_take(w, &user, super::scope::role(u.role), scopes::INSTALL)),
+            Ok(user) => db.user(&user).is_some_and(|u| db.may_take(w, &user, super::scope::role(u.role), scopes::NETWORK)),
             Err(_) => may("remove", &scopes::device(&unhex(&text("key")?)?)),
         },
         // A person's own say over their devices: turning one down before it's listed, and forgetting what one of
@@ -1201,7 +1201,7 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
         }
         (members::APP, "runs") => may("keep", &scopes::person(w)),
         (members::APP, "grant") | (members::APP, "vault") => may("keep", &scopes::object(&Scope::parse(&text("scope")?)?)),
-        (members::APP, "group") => may("make-groups", scopes::INSTALL),
+        (members::APP, "group") => may("make-groups", scopes::NETWORK),
         (members::APP, "invite") => db.may_give(w, &text("user")?, super::scope::role(role("role")?), &scopes::group(&text("group")?)),
         // Taking up an invite: the role the invite gave, which was checked as it was given.
         (members::APP, "accept") => db.roles().get(&(w.to_string(), Scope::Group(text("group")?))).is_some_and(|(_, invited)| *invited),
@@ -1222,9 +1222,9 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
                 may("rename", &scopes::group(&text("group")?))
             }
         }
-        (members::APP, "setting") => may("change-settings", scopes::INSTALL),
+        (members::APP, "setting") => may("change-settings", scopes::NETWORK),
         // Only while there's no recovery key (the one there was forked `global`): an admin names the next.
-        (members::APP, "recovery") => db.recovery().is_none() && may("change-settings", scopes::INSTALL),
+        (members::APP, "recovery") => db.recovery().is_none() && may("change-settings", scopes::NETWORK),
         (members::APP, "app") => {
             let name = text("name")?;
             let owner = Principal::parse(&text("owner")?)?;
@@ -1234,7 +1234,7 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
                     let holders = match &owner {
                         Principal::User(u) => scopes::person(u),
                         Principal::Group(g) => format!("{}#admin", scopes::group(g)),
-                        Principal::Admins => format!("{}#admin", scopes::INSTALL),
+                        Principal::Admins => format!("{}#admin", scopes::NETWORK),
                     };
                     maker(db, w, "add-apps", &to, &holders, "owner", &scopes::app(&name))
                 }
@@ -1248,7 +1248,7 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
         }
         (members::APP, "deploy") => may("deploy", &scopes::app(&text("app")?)),
         (members::APP, "service") => match unhex(&text("device")?)? {
-            k if db.cloudflare_node() == Some(k) => may("change-settings", scopes::INSTALL),
+            k if db.cloudflare_node() == Some(k) => may("change-settings", scopes::NETWORK),
             k => may("switch", &scopes::device(&k)),
         },
         (members::APP, "install" | "uninstall" | "schedule" | "vault-request") => may("add-apps", &scopes::object(scope)) || runs_it(db, scope, step),
@@ -1408,7 +1408,7 @@ pub(crate) mod tests {
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";
 
-    /// Andre's Mac starts the install, its recovery key kept offline, and lists Bob's laptop, Bob an admin too.
+    /// Andre's Mac starts the network, its recovery key kept offline, and lists Bob's laptop, Bob an admin too.
     fn two_admins() -> (History, SigningKey, SigningKey, SigningKey) {
         use crate::keys::Endpoint;
         use crate::members::{Kind, device, genesis};
@@ -1591,10 +1591,10 @@ pub(crate) mod tests {
         assert!(h.read(&[f]).unwrap().is_none());
     }
 
-    /// A genesis a device writes into the log is never the install's for a reader that holds none of its own (the
+    /// A genesis a device writes into the log is never the network's for a reader that holds none of its own (the
     /// Cloudflare node): the one pinned is, and unpinned, none while there are two.
     #[test]
-    fn a_planted_genesis_is_never_the_install_s() {
+    fn a_planted_genesis_is_never_the_networks() {
         use crate::keys::Endpoint;
         use crate::members::{Kind, genesis};
         let (h, _, laptop, _) = two_admins();
@@ -1796,7 +1796,7 @@ pub(crate) mod tests {
             let whole = log_to(&bucket, &after, Some(h.root()), 10).await.unwrap();
             assert_eq!(names(&whole, whole.last()), vec!["Ours", "After"], "and one under epoch 2 once it's made");
             let new = log_to(&bucket, &after, None, 10).await.unwrap();
-            assert_eq!(names(&new, new.last()), names(&whole, whole.last()), "by a device that doesn't know the install yet too");
+            assert_eq!(names(&new, new.last()), names(&whole, whole.last()), "by a device that doesn't know the network yet too");
             let freeze = Freeze { at: 1, hash: String::new(), logs: [("global".to_string(), 5), (user.to_string(), 3)].into() };
             let ns = |entries: Vec<Entry>| entries.iter().map(|e| e.content.data["n"].as_u64().unwrap()).collect::<Vec<_>>();
             let early = anchor_entries(&bucket, &[(1, kx1)].into(), &freeze, Some(h.root()), &whole, &user).await.unwrap();

@@ -1,4 +1,4 @@
-//! A node: this device's install (a custom build holds one), its replica and views, its socket to the relay, and where
+//! A node: this device's network (a custom build holds one), its replica and views, its socket to the relay, and where
 //! calls run.
 
 use crate::config::YOURS;
@@ -91,8 +91,9 @@ const FAILURES_KEPT: u32 = 30;
 const REQUEST_LIFE: u64 = 86_400_000;
 /// How long an app's page says a deploy changed or removed one of its schedules.
 const CHANGED_SHOWN: u64 = 14 * 86_400_000;
-/// The object in an install's bucket that says whose it is: the install's genesis.
-const INSTALL_OBJECT: &str = "install";
+/// The object in a network's bucket that says whose it is: the network's genesis. Still `install`, the name every older
+/// device looks for in a bucket.
+const NETWORK_OBJECT: &str = "install";
 /// How often a device says hello to the others: which services serve there, and how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 /// How soon an app's deploy that couldn't be fetched is tried again.
@@ -111,12 +112,12 @@ struct DeviceFile {
 }
 
 #[derive(Serialize, Deserialize)]
-struct InstallFile {
-    /// The hash of the install's genesis.
+struct NetworkFile {
+    /// The hash of the network's genesis.
     root: String,
     /// This device's local user.
     user: String,
-    /// The install's bucket, as a place's fields: a folder's `path`, or S3's. None if this device can't reach it.
+    /// The network's bucket, as a place's fields: a folder's `path`, or S3's. None if this device can't reach it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bucket: Option<BTreeMap<String, String>>,
     /// The folders on this device it backs up to, by their place's id: a folder is only ever this device's own choice.
@@ -137,10 +138,10 @@ struct Peer {
     seen: Instant,
 }
 
-struct Install {
+struct Network {
     r: Replica,
     user: String,
-    /// The install's bucket, and its fields, which a device joining is given.
+    /// The network's bucket, and its fields, which a device joining is given.
     bucket: Option<(Place, BTreeMap<String, String>)>,
     /// Each other device, as it last said hello.
     peers: HashMap<Key, Peer>,
@@ -155,7 +156,7 @@ struct Install {
     views: HashMap<String, (Order, ScopeState)>,
     /// `global`'s Vault items, as this device last read them with its own keys: what the node itself keeps there.
     vault: crate::vault::Items,
-    /// The folders on this device it backs up to, by their place's id (`InstallFile::folders`).
+    /// The folders on this device it backs up to, by their place's id (`NetworkFile::folders`).
     folders: BTreeMap<String, String>,
     /// How long each device took to answer a call lately.
     nearest: HashMap<Key, Duration>,
@@ -165,7 +166,7 @@ struct Install {
     read: bool,
 }
 
-impl Install {
+impl Network {
     /// Whether another device said hello lately.
     fn online(&self, device: &Key) -> bool {
         self.peers.get(device).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
@@ -177,8 +178,10 @@ impl Install {
 pub enum Event {
     Changed { apps: Vec<String> },
     Devices,
-    /// This device created or joined an install.
-    Install,
+    /// This device created or joined a network.
+    /// `install` on the wire, the name older clients wait for.
+    #[serde(rename = "install")]
+    Network,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -205,7 +208,7 @@ const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
 #[derive(Serialize, Deserialize)]
 struct PairingCode {
-    /// The install's address, whose relay reaches the device that made it.
+    /// The network's address, whose relay reaches the device that made it.
     address: String,
     from: Key,
     secret: [u8; 16],
@@ -223,7 +226,7 @@ struct JoinRequest {
 struct JoinReply {
     root: String,
     user: String,
-    /// For a device: the install's bucket, as a place's fields.
+    /// For a device: the network's bucket, as a place's fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bucket: Option<BTreeMap<String, String>>,
 }
@@ -338,8 +341,8 @@ impl<T> Exclusive<T> {
         let me = self as *const Self as usize;
         if HOLDING.with_borrow(|h| h.contains(&me)) {
             let at = std::backtrace::Backtrace::force_capture();
-            tracing::error!("the install was asked for on a thread that holds it, which would stop this node answering: {at}");
-            debug_assert!(false, "the install asked for on a thread that holds it: {at}");
+            tracing::error!("the network was asked for on a thread that holds it, which would stop this node answering: {at}");
+            debug_assert!(false, "the network asked for on a thread that holds it: {at}");
             bail!("this device couldn't answer that: a bug in it, which its log shows");
         }
         let held = Held(self.0.lock().unwrap(), me);
@@ -376,7 +379,7 @@ pub struct Inner {
     name: Mutex<String>,
     apps: Apps,
     pub services: crate::services::Services,
-    install: Exclusive<Option<Install>>,
+    network: Exclusive<Option<Network>>,
     pairings: Mutex<HashMap<[u8; 16], Pairing>>,
     events: broadcast::Sender<Event>,
     /// Held while writing or replaying, so views replay in order.
@@ -387,7 +390,7 @@ pub struct Inner {
     released: tokio::sync::Notify,
     /// The bundle each app runs here.
     bundles: Mutex<BTreeMap<String, String>>,
-    /// The bundle of each app this release has built in, kept as a blob: any install may add them.
+    /// The bundle of each app this release has built in, kept as a blob: any network may add them.
     built_in: BTreeMap<String, String>,
     /// Each bundle's `icon.png`, its finished app icon, as a data URL, once read, or none.
     images: Mutex<HashMap<String, Option<String>>>,
@@ -435,14 +438,14 @@ pub struct Inner {
     database_keys: Mutex<HashMap<(Scope, String), (u32, crate::db::Keys)>>,
     /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
     sent: Mutex<Option<Vec<logs::Sent>>>,
-    /// Whether this device is moving to the install's new storage now.
+    /// Whether this device is moving to the network's new storage now.
     moving: Mutex<bool>,
-    /// The install's recovery keys this device told the relay about since it started: the old ones taken out, the
+    /// The network's recovery keys this device told the relay about since it started: the old ones taken out, the
     /// current one let in as a client (`follow_recovery`).
     recovery_told: Mutex<std::collections::BTreeSet<Key>>,
     /// When it last read `global` for a client device it didn't list (`Node::catch_up`).
     caught_up: tokio::sync::Mutex<Option<std::time::Instant>>,
-    /// Where the install's data went: every bucket this device has used writes there, after a move (`Copied`).
+    /// Where the network's data went: every bucket this device has used writes there, after a move (`Copied`).
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
     /// Held while this device makes a scope's first epoch.
     making_keys: tokio::sync::Mutex<()>,
@@ -560,7 +563,7 @@ impl Node {
             name: Mutex::new(device.name),
             apps,
             services: Default::default(),
-            install: Exclusive::new(None),
+            network: Exclusive::new(None),
             pairings: Mutex::new(load_pairings(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
@@ -623,7 +626,7 @@ impl Node {
             }
         });
         if dir.join("install").join("install.json").exists() {
-            node.open_install().context("open the install")?;
+            node.open_network().context("open the network")?;
             if let Err(err) = node.bucket().and_then(|b| b.forget_sent()) {
                 tracing::warn!("forgetting steps other devices sent: {err:#}");
             }
@@ -659,7 +662,7 @@ impl Node {
                 }
             }
         });
-        if node.has_install() {
+        if node.has_network() {
             tokio::task::spawn_blocking(crate::harnesses::set_up);
         }
         Ok(node)
@@ -718,14 +721,14 @@ impl Node {
         &self.0.local_token
     }
 
-    /// Runs `f` on this device's install.
-    fn with<R>(&self, f: impl FnOnce(&mut Install) -> Result<R>) -> Result<R> {
-        let mut install = self.0.install.lock()?;
-        f(install.as_mut().context("this device is in no install yet: create one, or join with a pairing code")?)
+    /// Runs `f` on this device's network.
+    fn with<R>(&self, f: impl FnOnce(&mut Network) -> Result<R>) -> Result<R> {
+        let mut network = self.0.network.lock()?;
+        f(network.as_mut().context("this device is in no network yet: create one, or join with a pairing code")?)
     }
 
-    pub fn has_install(&self) -> bool {
-        self.0.install.lock().is_ok_and(|i| i.is_some())
+    pub fn has_network(&self) -> bool {
+        self.0.network.lock().is_ok_and(|i| i.is_some())
     }
 
     /// This device's local user.
@@ -733,10 +736,10 @@ impl Node {
         self.with(|i| Ok(i.user.clone()))
     }
 
-    /// Refuses a second install: a custom build holds one install, and another context is another custom build.
-    fn ensure_no_install(&self) -> Result<()> {
-        if self.has_install() {
-            bail!("this device already belongs to an install, and {} holds one; for another, install that context's own app", crate::config::NAME);
+    /// Refuses a second network: a custom build holds one network, and another context is another custom build.
+    fn ensure_no_network(&self) -> Result<()> {
+        if self.has_network() {
+            bail!("this device already belongs to a network, and {} holds one; for another, network that context's own app", crate::config::NAME);
         }
         Ok(())
     }
@@ -760,36 +763,38 @@ impl Node {
         let _ = self.0.events.send(event);
     }
 
-    fn install_dir(&self) -> PathBuf {
+    /// Where this device keeps its network: still `install/` (and its `install.json`), since the paths of what's in it
+    /// are written in its own files and the network's `storage` setting.
+    fn network_dir(&self) -> PathBuf {
         self.0.dir.join("install")
     }
 
-    fn open_install(&self) -> Result<()> {
-        let dir = self.install_dir();
-        let file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+    fn open_network(&self) -> Result<()> {
+        let dir = self.network_dir();
+        let file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
         let store = Store::open(&dir.join("entries.db"))?;
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), now_ms())?;
-        let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.install_place(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), scope_dbs: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
-        *self.0.install.lock()? = Some(install);
+        let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.network_place(&f)?, f))).transpose()?;
+        let network = Network { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), scope_dbs: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
+        *self.0.network.lock()? = Some(network);
         self.start_kept();
         Ok(())
     }
 
-    /// An install made before it kept its data in a bucket, with no device but this one: it keeps it in a folder here.
+    /// A network made before it kept its data in a bucket, with no device but this one: it keeps it in a folder here.
     fn keep_alone_here(&self) -> Result<()> {
         let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.db().computes().iter().all(|s| s.key == self.0.id)))?;
         if !alone {
             return Ok(());
         }
-        let dir = self.install_dir();
-        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let dir = self.network_dir();
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
         let fields: BTreeMap<String, String> = [("path".to_string(), dir.join("bucket").display().to_string())].into();
         let place = Place::from_fields(&fields)?;
-        place.create(INSTALL_OBJECT, file.root.as_bytes())?;
+        place.create(NETWORK_OBJECT, file.root.as_bytes())?;
         file.bucket = Some(fields.clone());
-        self.save_install(&file)?;
+        self.save_network(&file)?;
         self.with(|i| {
             i.bucket = Some((place, fields));
             Ok(())
@@ -798,31 +803,31 @@ impl Node {
 
     /// Keeps (or with `None` forgets) the folder on this device that the backup place `id` is.
     fn keep_folder(&self, id: &str, path: Option<&std::path::Path>) -> Result<()> {
-        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(self.install_dir().join("install.json"))?)?;
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(self.network_dir().join("install.json"))?)?;
         match path {
             Some(path) => drop(file.folders.insert(id.to_string(), path.display().to_string())),
             None => drop(file.folders.remove(id)),
         }
-        self.save_install(&file)?;
+        self.save_network(&file)?;
         self.with(|i| {
             i.folders = file.folders;
             Ok(())
         })
     }
 
-    fn save_install(&self, file: &InstallFile) -> Result<()> {
-        let dir = self.install_dir();
+    fn save_network(&self, file: &NetworkFile) -> Result<()> {
+        let dir = self.network_dir();
         std::fs::create_dir_all(&dir)?;
         write_private(&dir.join("install.json"), &serde_json::to_vec_pretty(file)?)?;
         Ok(())
     }
 
-    /// This device's name: as the install lists it, which another of its person's devices may have changed, when the
-    /// install isn't being read (never waiting on it, so it's asked for anywhere); else as it last was.
+    /// This device's name: as the network lists it, which another of its person's devices may have changed, when the
+    /// network isn't being read (never waiting on it, so it's asked for anywhere); else as it last was.
     pub fn device_name(&self) -> String {
-        let install = self.0.install.0.try_lock().ok();
-        let listed = install.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.db().machine(&self.0.id).map(|m| m.name));
-        drop(install);
+        let network = self.0.network.0.try_lock().ok();
+        let listed = network.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.db().machine(&self.0.id).map(|m| m.name));
+        drop(network);
         let mut name = self.0.name.lock().unwrap();
         if let Some(listed) = listed {
             *name = listed;
@@ -830,29 +835,29 @@ impl Node {
         name.clone()
     }
 
-    /// Creates this device's install, with its local user as the first admin, and installs the config's apps in
+    /// Creates this device's network, with its local user as the first admin, and installs the config's apps in
     /// `global`. Returns the recovery key's secret, given only this once.
     pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
         self.create_with(name, user_name, None, crate::config::STARTERS).await
     }
 
-    /// Creates the install, with every built-in app added (owned by admins), so anyone may add one to their own page,
-    /// and these installed in `global`. Its first person is `user` if given (who they were in an install this one
+    /// Creates the network, with every built-in app added (owned by admins), so anyone may add one to their own page,
+    /// and these installed in `global`. Its first person is `user` if given (who they were in a network this one
     /// replaces, so their account at its sign-in is still theirs), else someone new. Its log is frozen as it starts, by
     /// the ceremony with its new recovery key (`Node::switch`): who's who is its scope database from its genesis on.
     pub async fn create_with(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str]) -> Result<String> {
         self.create_frozen(name, user_name, user, apps, true).await
     }
 
-    /// An install as one made before its log could be frozen, whose admin runs the ceremony later: for tests of it.
+    /// A network as one made before its log could be frozen, whose admin runs the ceremony later: for tests of it.
     #[doc(hidden)]
     pub async fn create_before_the_switch(&self, name: &str, user_name: &str) -> Result<String> {
         self.create_frozen(name, user_name, None, crate::config::STARTERS, false).await
     }
 
     async fn create_frozen(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str], frozen: bool) -> Result<String> {
-        self.ensure_no_install()?;
-        ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
+        self.ensure_no_network()?;
+        ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the network a name, and yourself one");
         ensure!(user.is_none_or(|u| u.len() == 16 && u.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))), "a person's id is 16 hex digits, like 976091fe8c23a057");
         let user = user.map_or_else(new_id, str::to_string);
         let recovery = SigningKey::from_bytes(&rand::random());
@@ -862,12 +867,12 @@ impl Node {
         let genesis = members::genesis(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&global));
         let ext = crate::entry::Ext { log: "global".into(), time: now_ms(), user: user.clone(), epoch: 0, previous: Vec::new() };
         let entry = Entry::create(&self.0.key, ext, None, genesis);
-        // Until it's moved to S3-compatible storage, the install's bucket is a folder here.
-        let bucket: BTreeMap<String, String> = [("path".to_string(), self.install_dir().join("bucket").display().to_string())].into();
-        Place::from_fields(&bucket)?.create(INSTALL_OBJECT, entry.hash().to_hex().as_bytes())?;
-        self.save_install(&InstallFile { root: entry.hash().to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
-        Store::open(&self.install_dir().join("entries.db"))?.insert_own(&entry, None)?;
-        self.open_install()?;
+        // Until it's moved to S3-compatible storage, the network's bucket is a folder here.
+        let bucket: BTreeMap<String, String> = [("path".to_string(), self.network_dir().join("bucket").display().to_string())].into();
+        Place::from_fields(&bucket)?.create(NETWORK_OBJECT, entry.hash().to_hex().as_bytes())?;
+        self.save_network(&NetworkFile { root: entry.hash().to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
+        Store::open(&self.network_dir().join("entries.db"))?.insert_own(&entry, None)?;
+        self.open_network()?;
         self.replay_all().await?;
         let bucket = self.bucket()?;
         let recovery_seal = crate::cloudflare::twin_public(recovery.verifying_key().as_bytes())?;
@@ -882,9 +887,9 @@ impl Node {
         })?;
         let me = Caller { key: self.0.id, user, agent: None, token: None };
         if frozen {
-            self.switch(&me, &recovery).await.context("freezing the new install's log")?;
+            self.switch(&me, &recovery).await.context("freezing the new network's log")?;
         }
-        // Its Vault and its first person's own open on this machine, so a new install fills items with no other step.
+        // Its Vault and its first person's own open on this machine, so a new network fills items with no other step.
         for scope in [Scope::Global, Scope::User(me.user.clone())] {
             self.new_vault_key(&scope, 1, &[self.0.id], recovery.verifying_key().as_bytes()).await?;
         }
@@ -896,7 +901,7 @@ impl Node {
             self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
         }
         self.settle().await?;
-        self.emit(Event::Install);
+        self.emit(Event::Network);
         Ok(hex(&recovery.to_bytes()))
     }
 
@@ -1001,7 +1006,7 @@ impl Node {
             return Err(err);
         }
         self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "use", scopes::INSTALL), "you aren't one of this install's people");
+            ensure!(i.r.db().may(&caller.user, "use", scopes::NETWORK), "you aren't one of this network's people");
             let new: Vec<Entry> = i.r.store.scope("global")?.into_iter().filter(|e| have.get(&e.author()).is_none_or(|n| e.seq() >= *n)).collect();
             if new.is_empty() {
                 return Ok(None);
@@ -1183,7 +1188,7 @@ impl Node {
         Ok(())
     }
 
-    /// Whether this device is ready to run calls: it's a device of the install, and has read every scope it holds
+    /// Whether this device is ready to run calls: it's a device of the network, and has read every scope it holds
     /// from the bucket since it woke.
     pub fn ready(&self) -> bool {
         self.with(|i| {
@@ -1198,7 +1203,7 @@ impl Node {
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
             // What other devices wrote and said, every tick; and the harnesses, every minute.
-            if self.has_install() {
+            if self.has_network() {
                 if let Err(err) = self.read_logs().await {
                     tracing::debug!("reading the bucket: {err:#}");
                 }
@@ -1207,7 +1212,7 @@ impl Node {
                 self.read_all_status();
                 self.read_own_items();
             }
-            if tick % 6 == 0 && self.has_install() {
+            if tick % 6 == 0 && self.has_network() {
                 self.share_unshared().await;
                 self.take_forgotten().await;
                 self.tidy_databases().await;
@@ -1223,7 +1228,7 @@ impl Node {
 /// Only `apps`' stores are replayed.
 /// Brings each scope's state up to date with new entries: from the ones after what it has, or from the start when one
 /// sorts before them or the members changed earlier.
-fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
+fn update_views(i: &mut Network, new: &[Entry]) -> Result<()> {
     let earliest_member = new.iter().filter(|e| members::is_member_entry(e)).map(Entry::order).min();
     let mut logs: Vec<String> = new.iter().map(|e| e.log().to_string()).collect();
     if let Some(m) = &earliest_member {
@@ -1268,7 +1273,7 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
 /// The scopes a call of `app` as `user` may reach: their own if it's installed for them at all, each of their groups
 /// it's installed for (in the group or in `global`; a group whose installs this device can't see counts), and `global`
 /// if it's installed there.
-fn reachable(i: &Install, app: &str, user: &str) -> Vec<Scope> {
+fn reachable(i: &Network, app: &str, user: &str) -> Vec<Scope> {
     let db = i.r.db();
     let installed = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|(_, st)| st.installed.contains(app));
     let global = installed(&Scope::Global);
@@ -1293,7 +1298,7 @@ fn handles(db: &ScopeDb, scopes: &[Scope], user: &str) -> Vec<ScopeHandle> {
     scopes.iter().map(|s| ScopeHandle { id: s.to_string(), name: whose(db, s), role: db.role_in(user, s) }).collect()
 }
 
-/// A scope's name: the install's, a group's, or a person's, removed people's too.
+/// A scope's name: the network's, a group's, or a person's, removed people's too.
 fn whose(db: &ScopeDb, scope: &Scope) -> String {
     match scope {
         Scope::Global => db.name(),
@@ -1318,7 +1323,7 @@ fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Me {
 
 /// Checks one of a call's appends: into a scope it named, which the caller may write. `title` is what people call
 /// the app a switch, retire or source names.
-fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, title: &str) -> Result<(Scope, Content)> {
+fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, title: &str) -> Result<(Scope, Content)> {
     Ok(match append {
         Append::Switch { app, schedule, scope, on } => {
             let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
@@ -1361,7 +1366,7 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, titl
 fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool) -> Result<Content> {
     // The Cloudflare node, by its name in run priority or its key: its admins switch its parts.
     if let Some(k) = db.cloudflare_node().filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
-        ensure!(db.may(user, "change-settings", scopes::INSTALL), "only an admin switches what the Cloudflare node runs");
+        ensure!(db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
         // It always runs apps; what else it can run is the services built for it that it carries.
         ensure!(crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
         return Ok(members::service(&k, name, on));
@@ -1377,7 +1382,7 @@ fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool) -
 }
 
 /// A scope as people call it: Everyone, a person's name, or a group's.
-fn scope_name(i: &Install, scope: &str) -> String {
+fn scope_name(i: &Network, scope: &str) -> String {
     let db = i.r.db();
     match Scope::parse(scope) {
         Ok(Scope::Global) => "Everyone".to_string(),
@@ -1388,7 +1393,7 @@ fn scope_name(i: &Install, scope: &str) -> String {
 }
 
 /// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
-fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
+fn switch_entry(i: &Network, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
     let name = scope_name(i, &scope.to_string());
     ensure!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
     ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{title} isn't on {name}.");

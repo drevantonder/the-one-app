@@ -1,4 +1,4 @@
-//! What one device holds and knows: the entries of each scope it holds, as the install's bucket has them, the
+//! What one device holds and knows: the entries of each scope it holds, as the network's bucket has them, the
 //! members `global`'s add up to, and `global`'s scope database built from them, which is what everything else asks.
 //! No clock or I/O: `node.rs` reads and writes the bucket, and says the time.
 
@@ -17,7 +17,7 @@ pub struct Replica {
     pub key: SigningKey,
     pub id: Key,
     pub store: Store,
-    /// The install's genesis, once this device created or joined it.
+    /// The network's genesis, once this device created or joined it.
     pub root: Option<Hash>,
     pub members: Members,
     /// `global`'s scope database, built again whenever the members change: what everything but replay asks. While the
@@ -83,7 +83,7 @@ impl Replica {
     }
 
     /// Step `at` of `global`'s scope database before its log is frozen, the next this device looks at: if it's a freeze
-    /// the install's recovery key signed (`steps::claimed`, looked at only if a key its entries say was ever the
+    /// the network's recovery key signed (`steps::claimed`, looked at only if a key its entries say was ever the
     /// recovery key signed it: `recovery`), and it checks out against `log`, `global`'s log past the end it names
     /// (`steps::anchor`), the database it anchors is who's who from here. One that doesn't check out, or comes without
     /// its log, fails, so this device looks at it again and never past it.
@@ -108,7 +108,7 @@ impl Replica {
         Ok(handled)
     }
 
-    /// Every key `global`'s entries here say was ever the install's recovery key (`steps::recovery_keys`).
+    /// Every key `global`'s entries here say was ever the network's recovery key (`steps::recovery_keys`).
     pub fn recovery(&self) -> crate::database::steps::Recovery {
         crate::database::steps::recovery_keys(self.root, &self.member_entries)
     }
@@ -390,9 +390,9 @@ mod tests {
     use crate::database::steps::{self, Given};
     use crate::members::{Kind, Role, device, genesis, setting};
 
-    /// The log's freeze is a step, and exactly one counts: the first that the install's recovery key signed, whose
+    /// The log's freeze is a step, and exactly one counts: the first that the network's recovery key signed, whose
     /// copy says what the log's entries up to where it says the log ends add up to, so a freezer whose release had
-    /// other rules (as one that flips `INSTALL_ADMINS_MAKE_GROUP_ADMINS`) still anchors it, its rules kept. One it
+    /// other rules (as one that flips `NETWORK_ADMINS_MAKE_GROUP_ADMINS`) still anchors it, its rules kept. One it
     /// signed whose copy says otherwise, or whose log isn't given, stops the device there, never passed over; anyone
     /// else's is nothing, an admin's own device's too. Once frozen, an older device's entries change nothing, a step does, and who's who is kept
     /// and started again from, never the entries.

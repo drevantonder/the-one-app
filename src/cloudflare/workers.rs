@@ -1,4 +1,4 @@
-//! The install's Workers, built with the pinned Bun and run in workerd here, or deployed to Cloudflare.
+//! The network's Workers, built with the pinned Bun and run in workerd here, or deployed to Cloudflare.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -12,13 +12,13 @@ use super::*;
 
 // Building and running.
 
-/// The install's Workers: each one's name, its module, and its Durable Object's class, if it keeps anything. Each
+/// The network's Workers: each one's name, its module, and its Durable Object's class, if it keeps anything. Each
 /// one's WebAssembly is the `.wasm` files in its module's folder, modules of its own (Workers can't compile it).
 ///
 /// Sign-in's Worker is still called `auth` on Cloudflare (`<cli>-auth`, its address's host, its `AUTH` bindings) and
 /// its Durable Object `Auth`, which holds every person's passkeys and accounts, as are the paths under `/api/auth` that
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer name, and `one/auth`, what devices sign
-/// their requests to it under: renaming them would move every install's sign-in, and older devices would stop reaching it.
+/// their requests to it under: renaming them would move every network's sign-in, and older devices would stop reaching it.
 pub const WORKERS: &[(&str, &str, Option<&str>)] = &[
     ("auth", "sign-in/worker.js", Some("Auth")),
     ("relay", "relay/worker.js", Some("Relay")),
@@ -57,32 +57,32 @@ pub fn modules_of(service: &str, entry: &str, cloudflare_node: Option<&Modules>)
     Some(out)
 }
 
-/// How an install's Workers are set up, wherever they run: kept in `<home>/cloudflare/settings.json`, with its secrets in
+/// How a network's Workers are set up, wherever they run: kept in `<home>/cloudflare/settings.json`, with its secrets in
 /// `.env.local` beside it, which Varlock reads (see `SCHEMA`): their values, for Workers tried here, or
 /// `op(op://…)` references to 1Password, for one people use, so no file here holds them.
 #[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct Settings {
-    /// The install's name, as sign-in screens say it.
+    /// The network's name, as sign-in screens say it.
     pub name: String,
-    /// The install's address, the one people use: the gateway's, which sends sign-in to the sign-in, MCP to the MCP
+    /// The network's address, the one people use: the gateway's, which sends sign-in to the sign-in, MCP to the MCP
     /// Worker, the relay's paths to the relay and the rest to the web client. Passkeys belong to its host name, so it
     /// doesn't change.
     pub address: String,
     /// Where the CLI's Cloudflare commands reach sign-in; people reach it at the address.
     pub sign_in_url: String,
-    /// Whether the install has a Cloudflare node (`cloudflare node deploy`), which the relay wakes.
+    /// Whether the network has a Cloudflare node (`cloudflare node deploy`), which the relay wakes.
     #[serde(default)]
     pub cloudflare_node: bool,
     /// The local ports the sign-in and the gateway listen on, when this machine runs them. The other services
     /// have none: other Workers reach them by binding.
     pub ports: [u16; 2],
-    /// The install's devices (`{ key, role, admin }`: key in hex, roles joined by spaces), and its recovery key as a
+    /// The network's devices (`{ key, role, admin }`: key in hex, roles joined by spaces), and its recovery key as a
     /// client, from the node on this machine when the Workers are deployed or served: the relay starts its list with
     /// them when it has none yet.
     #[serde(skip)]
     pub devices: Vec<serde_json::Value>,
-    /// The install's first entry's hash (hex), from the node on this machine as `devices` is: what a sign-in for a
-    /// device names beside it (`sign_in_proof`). None for Workers made before their install.
+    /// The network's first entry's hash (hex), from the node on this machine as `devices` is: what a sign-in for a
+    /// device names beside it (`sign_in_proof`). None for Workers made before their network.
     #[serde(skip)]
     pub genesis: Option<String>,
     /// The Cloudflare node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
@@ -91,10 +91,10 @@ pub struct Settings {
     /// Better Auth's own secret, for its cookies and the keys it keeps.
     #[serde(default, skip_serializing)]
     pub auth_secret: String,
-    /// Nodes' own addresses MCP clients sign in for (each a resource, in OAuth's words), besides the install's.
+    /// Nodes' own addresses MCP clients sign in for (each a resource, in OAuth's words), besides the network's.
     #[serde(default)]
     pub resources: Vec<String>,
-    /// The install's bucket: `{ endpoint, bucket, region, key_id, secret }`, the URL signer's only secret: nothing else
+    /// The network's bucket: `{ endpoint, bucket, region, key_id, secret }`, the URL signer's only secret: nothing else
     /// holds its credentials.
     #[serde(default, skip_serializing)]
     pub bucket: Option<Value>,
@@ -102,7 +102,7 @@ pub struct Settings {
     /// in the app (App Links) only if the address lists the app's package and one of them.
     #[serde(default)]
     pub android: Vec<String>,
-    /// For an install whose people sign in with Google (`config::SIGN_IN`): the Google OAuth client they sign in
+    /// For a network whose people sign in with Google (`config::SIGN_IN`): the Google OAuth client they sign in
     /// with, `(id, secret)`.
     #[serde(default, skip_serializing)]
     pub google: Option<(String, String)>,
@@ -110,7 +110,7 @@ pub struct Settings {
     /// CLOUDFLARE_API_TOKEN isn't set.
     #[serde(default, skip_serializing)]
     pub cloudflare_token: Option<String>,
-    /// The push Worker's secrets, by their names in `SCHEMA` (`PUSH_SECRETS`): the install's VAPID key, which is made
+    /// The push Worker's secrets, by their names in `SCHEMA` (`PUSH_SECRETS`): the network's VAPID key, which is made
     /// with the Workers, and the custom build's APNs, FCM and WNS credentials, as its admin adds them.
     #[serde(default, skip)]
     pub push: std::collections::BTreeMap<String, String>,
@@ -139,10 +139,10 @@ const SCHEMA: &str = "\
 # @defaultRequired=true
 # ---
 AUTH_SECRET=
-# The install's bucket's credentials, which only the URL signer holds.
+# The network's bucket's credentials, which only the URL signer holds.
 # @optional
 BUCKET=
-# For an install whose people sign in with Google: their Google OAuth client.
+# For a network whose people sign in with Google: their Google OAuth client.
 # @optional
 GOOGLE_CLIENT_ID=
 # @optional
@@ -153,7 +153,7 @@ CLOUDFLARE_API_TOKEN=
 # The Cloudflare node's endpoint key, made by cloudflare node deploy.
 # @optional
 CLOUDFLARE_NODE_KEY=
-# The push Worker's: the install's VAPID key (base64url PKCS#8, P-256), made with the Workers, which browsers' pushes
+# The push Worker's: the network's VAPID key (base64url PKCS#8, P-256), made with the Workers, which browsers' pushes
 # are signed with.
 # @optional
 VAPID_KEY=
@@ -329,7 +329,7 @@ impl Settings {
         match &self.home {
             Some((home, _)) if *home != key => {
                 let name = &self.home.as_ref().unwrap().1;
-                return Err(NotHome(format!("this install's Cloudflare Workers are deployed from {name}, where their secrets are: run this there")).into());
+                return Err(NotHome(format!("this network's Cloudflare Workers are deployed from {name}, where their secrets are: run this there")).into());
             }
             Some((_, was)) if *was == name => return Ok(()),
             _ => {}
@@ -447,7 +447,7 @@ impl Settings {
             let bound = [("AUTH", "auth"), ("IROH", "relay"), ("SIGNER", "signer"), ("MCP", "mcp"), ("PUSH", "push")].map(|(n, s)| (n.into(), format!("service:{s}"), false));
             return bound.into_iter().chain(named).collect();
         }
-        // The push Worker: the install's push credentials, and the relay, which says which devices are the install's.
+        // The push Worker: the network's push credentials, and the relay, which says which devices are the network's.
         if service == "push" {
             let cli = crate::config::CLI;
             let mut out = vec![
@@ -461,7 +461,7 @@ impl Settings {
             return out;
         }
         let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
-        // Nor does the relay: only the keys of the install's first devices, which it starts its list with, and the
+        // Nor does the relay: only the keys of the network's first devices, which it starts its list with, and the
         // Cloudflare node's, whose datagrams it hands its Durable Object.
         if service == "relay" {
             let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
@@ -498,7 +498,7 @@ impl Settings {
                 ("NODE_KEY".into(), self.cloudflare_node_key.clone(), true),
                 ("RELAY".into(), "service:relay:ServerlessNode".into(), false),
             ];
-            // The install's genesis, as sign-in's: its members are replayed from no other.
+            // The network's genesis, as sign-in's: its members are replayed from no other.
             out.extend(self.genesis.clone().map(|g| ("GENESIS".into(), g, false)));
             out.extend(location);
             return out;
@@ -520,9 +520,9 @@ impl Settings {
         let mut plain = |name: &str, value: String| out.push((name.into(), value, false));
         match service {
             "auth" => {
-                // Whether a request's signer is one of the install's endpoints, and an admin's.
+                // Whether a request's signer is one of the network's endpoints, and an admin's.
                 plain("RELAY", "service:relay".into());
-                // Pushes to a person's devices, by the push Worker's entrypoint for the install's own Workers.
+                // Pushes to a person's devices, by the push Worker's entrypoint for the network's own Workers.
                 plain("PUSH", "service:push:Sender".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
@@ -540,7 +540,7 @@ impl Settings {
                 if let Some(genesis) = &self.genesis {
                     plain("GENESIS", genesis.clone());
                 }
-                // Tokens are for the install's address unless a client asks for a node's own.
+                // Tokens are for the network's address unless a client asks for a node's own.
                 let resources: Vec<&String> = std::iter::once(&self.address).chain(&self.resources).collect();
                 plain("RESOURCES", json!(resources).to_string());
             }
@@ -563,8 +563,8 @@ impl Settings {
     }
 }
 
-/// The install's Workers as one workerd runs them, with `modules` in `WORKERS`' order, and the gateway serving the
-/// web client's files from `web`; and the Cloudflare node, if the install has one and this build carries it.
+/// The network's Workers as one workerd runs them, with `modules` in `WORKERS`' order, and the gateway serving the
+/// web client's files from `web`; and the Cloudflare node, if the network has one and this build carries it.
 pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Served> {
     served_with(settings, modules, web, crate::cloudflare::node::modules().ok())
 }
@@ -633,7 +633,7 @@ impl Settings {
             files.push((".well-known/assetlinks.json".into(), links.to_string().into_bytes()));
         }
         files.push((".well-known/windows-app-web-link".into(), windows_links()));
-        // How an AI connects itself, for anyone who has the address: never what apps the install has.
+        // How an AI connects itself, for anyone who has the address: never what apps the network has.
         files.push(("llms.txt".into(), crate::skills::guide(Some(&self.address)).into_bytes()));
         files
     }
@@ -660,7 +660,7 @@ fn windows_links() -> Vec<u8> {
     json!([{ "packageFamilyName": windows_package(), "paths": paths }]).to_string().into_bytes()
 }
 
-/// Runs the install's Workers on this machine, in the pinned workerd, until it stops: their modules built from this
+/// Runs the network's Workers on this machine, in the pinned workerd, until it stops: their modules built from this
 /// release, the web client's files in `<home>/cloudflare/web`, and their storage in `<home>/cloudflare/data`.
 pub fn serve(settings: &Settings) -> Result<()> {
     let dir = Settings::path().parent().unwrap().to_path_buf();
@@ -1082,7 +1082,7 @@ impl Cloudflare {
 /// An invite link: opening it lets its person sign up, once, as who it says.
 pub struct Invite {
     pub link: String,
-    /// The id they'll have in the install.
+    /// The id they'll have in the network.
     pub user: String,
     /// Until when it works, in milliseconds since 1970.
     pub until: u64,
@@ -1091,7 +1091,7 @@ pub struct Invite {
 /// How long an invite works.
 pub const INVITE_DAYS: u64 = 3;
 
-/// Invites someone to join the install at `address`, `name` only a label, as `user` (who they'll be in the install; a
+/// Invites someone to join the network at `address`, `name` only a label, as `user` (who they'll be in the network; a
 /// new id if not given), and where people sign in with Google, as the Google account `email`. The link's secret is
 /// made here and never leaves but in the link: sign-in is told only its hash, in a request signed with
 /// `key`, an admin's device's.
@@ -1179,7 +1179,7 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrati
     (meta, complete)
 }
 
-/// Deploys the install's Workers to Cloudflare, each with its Durable Object, built from this release, the
+/// Deploys the network's Workers to Cloudflare, each with its Durable Object, built from this release, the
 /// gateway with the web client's files (`web`) as its static assets, which it serves itself. A service whose binding
 /// names one not deployed yet goes up without it, and again once that one is.
 pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)]) -> Result<()> {
@@ -1252,7 +1252,7 @@ pub struct Script {
     pub migration: Option<String>,
 }
 
-/// What this machine last uploaded to each of the install's Workers: a hash of everything it sent (the secrets in its
+/// What this machine last uploaded to each of the network's Workers: a hash of everything it sent (the secrets in its
 /// bindings too), and the version Cloudflare made of it. A Worker that would get the same, and still runs that
 /// version (no other upload, edit or rollback since), isn't uploaded again: an update deploys the Workers each time the node changes, and most of
 /// its changes leave every Worker as it was.

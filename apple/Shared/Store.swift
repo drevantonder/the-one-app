@@ -357,7 +357,7 @@ final class Store {
             try await refreshState()
             return true
         } catch is NotLetIn {
-            // Not an unreachable node: the device was taken out of, or isn't yet in, the install, so it joins again.
+            // Not an unreachable node: the device was taken out of, or isn't yet in, the network, so it joins again.
             return false
         } catch is CancellationError {
             // Its person signed out meanwhile.
@@ -429,7 +429,7 @@ final class Store {
             try current(began)
             self.developer = developer
             await renameIfHostname()
-            // Its pushes, now it's one of the install's devices, which alone the push Worker takes.
+            // Its pushes, now it's one of the network's devices, which alone the push Worker takes.
             Task { await Push.setUp() }
         }
         if first || arrived || apps.isEmpty || regrouped {

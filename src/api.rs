@@ -1,11 +1,11 @@
 //! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; how a client device
-//! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in at the install's address
+//! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in at the network's address
 //! (this machine's CLI and MCP, after `sign-in`) reaches it, as themselves, for what their sign-in opens.
 //!
-//! A request with an access token from sign-in for the install's address (never a remote MCP client's, which is for
-//! `<address>/mcp`) is its person's, and so is its call's; someone it's for who isn't a person of the install yet is
+//! A request with an access token from sign-in for the network's address (never a remote MCP client's, which is for
+//! `<address>/mcp`) is its person's, and so is its call's; someone it's for who isn't a person of the network yet is
 //! let in as a member by a device whose own person is an admin, since sign-in lets in only those an admin invited
-//! or people at the install's domain. A request without one is this machine's own programs', over its loopback with the
+//! or people at the network's domain. A request without one is this machine's own programs', over its loopback with the
 //! token in the node's home (`local-token`, which only its user reads), or refused, but for a picture a window's app
 //! list names by its content (`/v1/images/<name>`), anyone's who has that name. A file put from elsewhere is read back
 //! only by whoever put it or may use a scope that names it, up to 512 MiB each and 2 GiB per person that nothing keeps
@@ -40,7 +40,7 @@ pub fn router(node: Node) -> Router {
 /// MCP over HTTP, at `/mcp` (the CLI's `mcp_http`), which this crate can't name: set once, before the node serves.
 static MCP: std::sync::OnceLock<axum::routing::MethodRouter<Node>> = std::sync::OnceLock::new();
 
-/// Serves MCP at `/mcp`, for this machine's own programs and the install's client devices over iroh: the remote MCP server,
+/// Serves MCP at `/mcp`, for this machine's own programs and the network's client devices over iroh: the remote MCP server,
 /// remote MCP clients' device, among them (cloudflare/mcp/).
 pub fn serve_mcp(handler: axum::routing::MethodRouter<Node>) {
     let _ = MCP.set(handler);
@@ -259,7 +259,7 @@ pub fn app_route(path: &str) -> bool {
 /// The most this machine's own programs put in one file.
 const LOCAL_PUT: u64 = 1 << 30;
 
-/// Routes as only this machine's own programs, and people signed in at the install's address for what `SIGNED_IN` lists, may
+/// Routes as only this machine's own programs, and people signed in at the network's address for what `SIGNED_IN` lists, may
 /// use them.
 pub fn guarded(routes: Router<Node>, node: Node) -> Router {
     routes
@@ -290,7 +290,7 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
 /// Headers that say a request was passed on from elsewhere, as proxies add them.
 pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
 
-/// What someone signed in at the install's address may ask; the rest is for this machine's own programs.
+/// What someone signed in at the network's address may ask; the rest is for this machine's own programs.
 pub const SIGNED_IN: &[&str] = &[
     "/v1/state",
     "/v1/endpoint",
@@ -480,7 +480,7 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
 }
 
 /// A client device's request over iroh is its person's, as a sign-in's is, for what `SIGNED_IN` lists and MCP: the
-/// device must still be one of the install's, and the keys it hands are for its key, kept no longer than `until`.
+/// device must still be one of the network's, and the keys it hands are for its key, kept no longer than `until`.
 async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     if !(SIGNED_IN.contains(&path) || path == "/mcp") {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
@@ -597,7 +597,7 @@ fn local(node: &Node) -> Result<Caller, Error> {
     Ok(Caller { key: node.id(), user: node.user()?, agent: None, token: None })
 }
 
-/// Who asked: this machine's own user, or someone signed in at the install's address, whom this device acts for.
+/// Who asked: this machine's own user, or someone signed in at the network's address, whom this device acts for.
 #[derive(Clone)]
 struct Me {
     caller: Caller,
@@ -616,7 +616,7 @@ impl axum::extract::FromRequestParts<Node> for Me {
     }
 }
 
-/// Someone signed in who isn't a person of the install yet: they are once one of their devices, or the admin who
+/// Someone signed in who isn't a person of the network yet: they are once one of their devices, or the admin who
 /// invited them, approves one of theirs.
 #[derive(Debug)]
 struct NotJoined;
@@ -632,8 +632,8 @@ impl std::error::Error for NotJoined {}
 /// Sign-ins checked lately, by their token's hash, until they expire.
 static SIGNED_INS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>> = std::sync::LazyLock::new(Default::default);
 
-/// Whom an access token from sign-in is for: one sign-in at the install's address signed for it, for a person of
-/// the install.
+/// Whom an access token from sign-in is for: one sign-in at the network's address signed for it, for a person of
+/// the network.
 async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;
     let now = crate::node::now_ms();
@@ -652,7 +652,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     let asked = token.clone();
     let claims = tokio::task::spawn_blocking(move || {
         let claims = issuer.verify(&asked, now)?;
-        // Only the install's own apps sign in for its address; a remote MCP client's token is for `<address>/mcp`, the
+        // Only the network's own apps sign in for its address; a remote MCP client's token is for `<address>/mcp`, the
         // remote MCP server, whose device it is, and never a sign-in here.
         let address = address.trim_end_matches('/');
         anyhow::ensure!(claims.for_resource(address), "that sign-in isn't for {address}");
@@ -758,7 +758,7 @@ async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
     done()
 }
 
-/// `{ device, app, scope?, days? }`: runs an app's schedules in a scope (`user` by default) on a device of the install,
+/// `{ device, app, scope?, days? }`: runs an app's schedules in a scope (`user` by default) on a device of the network,
 /// for `days` (30 by default; 0 stops them), as this machine's person (`Node::set_app_schedules`).
 async fn app_schedules(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     only(&body, &["device", "app", "scope", "days"])?;
@@ -874,7 +874,7 @@ async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Repl
     done()
 }
 
-/// `{ name, value }`: one of the install's settings, for admins; `value: null` puts back the custom build's default.
+/// `{ name, value }`: one of the network's settings, for admins; `value: null` puts back the custom build's default.
 async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     node.member_as(&me.caller, "setting", json!({ "name": text(&body, "name")?, "value": body["value"] })).await?;
     done()
@@ -882,7 +882,7 @@ async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
 
 
 /// `{ recovery }`: the ceremony that freezes `global`'s log, so its scope database is the truth (`Node::switch`), signed
-/// by `recovery`, the install's recovery key (hex), read from a file here by the CLI and never kept: only on this
+/// by `recovery`, the network's recovery key (hex), read from a file here by the CLI and never kept: only on this
 /// machine, by an admin. → `{ frozen }`.
 async fn switch(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["recovery"])?;
@@ -940,7 +940,7 @@ async fn entries(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
     done()
 }
 
-/// `{ on: [device] }` (names or keys): the install's machines that run the caller's own things besides their own, as
+/// `{ on: [device] }` (names or keys): the network's machines that run the caller's own things besides their own, as
 /// their own device says.
 async fn runs(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["on"])?;
@@ -989,7 +989,7 @@ async fn forget_sign_in(State(node): State<Node>, me: Me, Json(body): Json<Value
 }
 
 /// `{ code, confirm?, recovery? }`: lets in the device showing `code`, as whoever asked, or with `recovery`,
-/// the install's recovery key (hex), read from a file here by the CLI and never kept.
+/// the network's recovery key (hex), read from a file here by the CLI and never kept.
 async fn approve(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["code", "confirm", "recovery"])?;
     let (code, confirm) = (text(&body, "code")?, body["confirm"] == true);
@@ -1093,7 +1093,7 @@ async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-/// Where the install keeps its data, `/v1/storage…`.
+/// Where the network keeps its data, `/v1/storage…`.
 async fn storage_get(State(node): State<Node>, uri: axum::http::Uri) -> Reply {
     Ok(Json(node.storage_route(&local(&node)?, "GET", uri.path(), &json!({})).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }

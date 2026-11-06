@@ -424,7 +424,7 @@ pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
         false => go_build(&source, &os.to_lowercase(), arch, &format!("{commit}{dirty}"), &out)?,
     }
     // Put in place in one step, so oned never starts half of it. Here, where oned looks for it (`oned::fetched`: a throwaway
-    // network's own, never the real install's); on another device, in its `~/.local/bin`.
+    // network's own, never the real network's); on another device, in its `~/.local/bin`.
     let program = format!("{CLI}-{name}");
     let copied = match device {
         Some(device) => quiet(Command::new("scp").arg("-q").arg(&out).arg(format!("{device}:.local/bin/{program}.new"))),
@@ -510,9 +510,9 @@ pub fn run_quiet(cmd: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// Deletes the built-in apps whose folder is gone from `src`, renamed or removed, where the install still has them:
+/// Deletes the built-in apps whose folder is gone from `src`, renamed or removed, where the network still has them:
 /// they'd stay as apps no release ships. `built_in` is the bundle the running release ships under a name, which says
-/// it whatever the update sends; `deploys` 0 is one it offers but the install never added. Only one still running the
+/// it whatever the update sends; `deploys` 0 is one it offers but the network never added. Only one still running the
 /// release's own code goes: one an admin deployed their own code to (from its own repo, say) is theirs now, and stays.
 /// They wait in Recently Deleted, where an admin could restore one. Gives each renamed one's new name, with where the old one was installed.
 fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Vec<(String, Vec<String>)>> {
@@ -548,7 +548,7 @@ fn add_where(moved: &[(String, Vec<String>)]) {
     }
 }
 
-/// Deploys the built-in apps named, as they are in `src`, where the install has them.
+/// Deploys the built-in apps named, as they are in `src`, where the network has them.
 fn deploy_apps(src: &Path, names: &[String]) -> Result<()> {
     if names.is_empty() {
         return Ok(());
@@ -618,7 +618,7 @@ fn turn() -> Result<std::fs::File> {
 /// Deploys to Cloudflare, with the build being sent out (`commit`), from the one of `linux` that is the Workers' home
 /// (`Settings::at_home`; another refuses, which says so and is passed over): only there are its secrets
 /// (`cloudflare deploy` in its home's cloudflare/). It waits for each to run that build, so it never
-/// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every install
+/// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every network
 /// has its Workers on Cloudflare, so it fails if no device deployed them. True if it failed.
 fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
     let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
@@ -732,7 +732,7 @@ fn finish(after: Option<After>) -> Result<()> {
     Ok(())
 }
 
-/// Deploys this device's release's version of each built-in app the install has, where it runs another.
+/// Deploys this device's release's version of each built-in app the network has, where it runs another.
 fn deploy_built_in() -> Result<()> {
     for app in get("/v1/apps")?.as_array().into_iter().flatten() {
         let (Some(name), Some(bundle)) = (app["name"].as_str(), app["built_in"].as_str()) else { continue };
@@ -992,7 +992,7 @@ cat > phone.sh <<'JOB'
 set -e
 c="$HOME/Library/Caches/{CLI}"
 {checkout}
-# Only what the iPhone app is made of: the node isn't in it, and each install closes the app on the phone.
+# Only what the iPhone app is made of: the node isn't in it, and each network closes the app on the phone.
 last=$(cat "$c/phone.built" 2>/dev/null || true)
 if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- apple ':!apple/Mac' vendor/phosphor {CONFIG_FILE} 2>/dev/null; then exit 3; fi
 CONFIG="$config" apple/disk.sh retry apple/build-phone.sh device "$c/phone"

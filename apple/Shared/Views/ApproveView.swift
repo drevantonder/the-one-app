@@ -34,7 +34,7 @@ struct ApproveView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Approve in the web client at the install's address, with this code (`/approve#CODE`).
+    /// Approve in the web client at the network's address, with this code (`/approve#CODE`).
     private var link: URL? {
         guard let address = Auth.address?.absoluteString else { return nil }
         let base = address.hasSuffix("/") ? String(address.dropLast()) : address

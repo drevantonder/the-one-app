@@ -3,18 +3,18 @@ import Foundation
 struct Config: Codable, Sendable, Equatable {
     var name: String
     var cli: String
-    /// The app the App Store opens: the install's `store` setting.
+    /// The app the App Store opens: the network's `store` setting.
     var store: String?
 }
 
-/// `GET /v1/state`: this machine, its user and the install.
+/// `GET /v1/state`: this machine, its user and the network.
 struct NodeState: Decodable, Sendable, Equatable {
     var config: Config
     /// The machine this shell runs on: this device, or a phone.
     var machine: Machine
     /// The device that answered: this one, or for a phone, the device acting for it.
     var host: Machine?
-    /// The user this machine was admitted for, once it is in an install.
+    /// The user this machine was admitted for, once it is in a network.
     var user: Person?
     var install: Install?
     /// How many requests for a Vault item wait for this user.
@@ -45,7 +45,7 @@ struct SettingsItem: Decodable, Sendable, Equatable, Identifiable {
     var color: String
     var badge: Int?
     var app: String?
-    /// Where it's opened in a browser, in place of a screen (Passkeys, at the install's address).
+    /// Where it's opened in a browser, in place of a screen (Passkeys, at the network's address).
     var url: URL?
 
     var id: String { name }
@@ -89,9 +89,9 @@ struct Install: Codable, Sendable, Equatable {
     var groups: [GroupInfo]
     var devices: [Device]
     var clients: [ClientInfo]
-    /// Whether the device that answered is in the install yet: a new one isn't until its admit reaches it.
+    /// Whether the device that answered is in the network yet: a new one isn't until its admit reaches it.
     var member: Bool?
-    /// The install's settings, as its admins set them over the custom build's defaults.
+    /// The network's settings, as its admins set them over the custom build's defaults.
     var settings: [String: String]?
 
     var joining: Bool { member == false }
@@ -206,7 +206,7 @@ struct NodeError: LocalizedError, Sendable {
 
 }
 
-/// How a shell reaches a node: the Mac's own, or the install's address from a phone.
+/// How a shell reaches a node: the Mac's own, or the network's address from a phone.
 protocol NodeTransport: Sendable {
     /// Sends a request and returns the local API's JSON reply, or throws its error.
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
@@ -273,7 +273,7 @@ enum Retry {
     }
 }
 
-/// The node's HTTP API: this machine's own node, or the install's address; with `auth`, as the person signed in.
+/// The node's HTTP API: this machine's own node, or the network's address; with `auth`, as the person signed in.
 struct HTTPNode: NodeTransport {
     var base: URL
     var auth: Auth?
@@ -429,7 +429,7 @@ struct VaultRequest: Decodable, Sendable, Hashable, Identifiable {
     }
     var id: String
     var scope: String
-    /// The scope's owner: a user's name, a group's, or the install's.
+    /// The scope's owner: a user's name, a group's, or the network's.
     var scope_name: String
     var app: String
     var title: String?
@@ -542,7 +542,7 @@ struct NodeClient: Sendable {
 
     func events() -> AsyncThrowingStream<NodeEvent, Error> { transport.events() }
 
-    // MARK: The install
+    // MARK: The network
 
     /// A pairing code for another of this user's computers.
     func pair() async throws -> String {

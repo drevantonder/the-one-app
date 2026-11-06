@@ -1,17 +1,17 @@
-// The Cloudflare node: a node of the install on Cloudflare Workers, which client devices ask over iroh as they ask
+// The Cloudflare node: a node of the network on Cloudflare Workers, which client devices ask over iroh as they ask
 // any node, last in run priority's order: when none of their person's machines answers. It holds no keys. Each
 // request is from the device its connection proved (or the device that vouched for that session's key, as nodes take
-// one: `x-one-endpoint`), says whose it is (`x-one-user`), which the install's entries must list that device as, and
+// one: `x-one-endpoint`), says whose it is (`x-one-user`), which the network's entries must list that device as, and
 // brings the keys of the databases its call reaches, sealed to this node for that device (`x-one-keys`); one that lacks
-// some is answered 428 with what it needs, as a node on a machine answers. Who can do what it reads from the install's
+// some is answered 428 with what it needs, as a node on a machine answers. Who can do what it reads from the network's
 // log in the bucket and asks of the scope database it builds from it (src/lib.rs, the machine node's own Rust), and
 // each app's latest deploy from the bucket too, through the URL signer's URLs, keeping what it read sealed in its
 // Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, src/runtime/shim.js as its `ctx`) and writes
 // what a call wrote as one step (src/db.rs). An app's requests go out from here, filled in with the Vault's items it's
 // switched on for, read as any node reads them: each scope's `vault` database, opened with the keys handed for it.
 //
-// It answers what it can itself (the install's state, apps, widgets, badges, screens, and the calls of apps that keep
-// to their own data). A call of an app that needs a machine goes on to the install's nodes on machines over iroh, from
+// It answers what it can itself (the network's state, apps, widgets, badges, screens, and the calls of apps that keep
+// to their own data). A call of an app that needs a machine goes on to the network's nodes on machines over iroh, from
 // this node's own endpoint, to a node that runs every scope the call reaches for its person, with only that call's
 // keys, sealed to it; with none answering, and for anything else only a machine has, it says plainly that it needs a
 // device that's off.
@@ -26,11 +26,11 @@
 //
 // Bindings: SIGNER (the URL signer), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its endpoint's
 // key, a secret), RELAY (the relay's `ServerlessNode` entrypoint), LOCATION (where objects are made), ADDRESS (the
-// install's), NAME (its name) and AI (Workers AI). `built.js`, made when it's deployed, is the shim, and the services built
+// network's), NAME (its name) and AI (Workers AI). `built.js`, made when it's deployed, is the shim, and the services built
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, global_entries, sealed_global_steps, reads } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, global_entries, sealed_global_steps, reads } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 
@@ -76,7 +76,7 @@ const DATABASES_MOST = 512;
 /// Who a client's request is from, as the endpoint object proved it and passes it to a person's object: `{ device,
 /// until }`. Only the endpoint object sets it: nothing else reaches a person's object.
 const FROM = "x-one-from";
-/// Whose a request says it is: the person's object it goes to, which checks the install lists its device as theirs.
+/// Whose a request says it is: the person's object it goes to, which checks the network lists its device as theirs.
 const USER = "x-one-user";
 /// How long the keys a request hands are kept, at most: they come again with the next.
 const HANDED_FOR = 3_600_000;
@@ -191,7 +191,7 @@ class Bucket {
     Object.assign(this, { env, sealed, urls: new Map(), fetched: new Map(), wanted: null });
   }
 
-  /// Asks the URL signer, signed by this node's endpoint key: it gives URLs to the install's endpoints alone. With what
+  /// Asks the URL signer, signed by this node's endpoint key: it gives URLs to the network's endpoints alone. With what
   /// this build reads of who's who (`reads`), which a write must.
   async sign(fields) {
     const request = signed(this.env.NODE_KEY, "one/urls", JSON.stringify({ ...fields, reads: reads() }), Date.now());
@@ -354,8 +354,8 @@ class Person {
   }
 
   /// Whom a request is from: the device the endpoint object proved, for this object's person, until when its word
-  /// lasts (a session's certificate's). Whether the install lists it as theirs is checked as soon as the install's
-  /// entries are read (`installFor`), before anything else of theirs is: until then the keys it hands only read those
+  /// lasts (a session's certificate's). Whether the network lists it as theirs is checked as soon as the network's
+  /// entries are read (`networkFor`), before anything else of theirs is: until then the keys it hands only read those
   /// entries, and are kept, and what they open fetched, only once it's checked (`forgetLost`). Keys sealed to another
   /// node, or for another device, are left.
   whom(request) {
@@ -400,7 +400,7 @@ class Person {
   }
 
   /// A sign-in's keys of `app`'s `database` in `scope`, by epoch, or null. Before its device is checked, of the
-  /// install's own entries, those it hands now too, which check it.
+  /// network's own entries, those it hands now too, which check it.
   keysOf(who, scope, app, database) {
     const kept = this.handed.get(who.hash);
     const found = (kept && kept.until > Date.now() && kept.keys.get(`${scope}/${app}/${database}`)) || null;
@@ -411,7 +411,7 @@ class Person {
     return keys;
   }
 
-  /// Each of `scopes`' current epoch, as the install's signed entries say: `{ <scope>: n }`.
+  /// Each of `scopes`' current epoch, as the network's signed entries say: `{ <scope>: n }`.
   epochs(scopes) {
     return JSON.parse(epochsOf(this.owner, JSON.stringify(scopes)));
   }
@@ -466,7 +466,7 @@ class Person {
     })));
   }
 
-  /// Refuses a device the install's log doesn't list as its person's, forgetting what it handed, and forgets what a
+  /// Refuses a device the network's log doesn't list as its person's, forgetting what it handed, and forgets what a
   /// device was handed for scopes its person may no longer use, as soon as the log says so.
   forgetLost(who) {
     const { scopes, joined, removed, device, runs } = JSON.parse(scopes_of(this.owner, who.user, who.device));
@@ -485,9 +485,9 @@ class Person {
     return runs;
   }
 
-  /// The install as a request's person sees it (src/lib.rs: `install`): `{ state, apps, me, epochs }`, from the
+  /// The network as a request's person sees it (src/lib.rs: `network`): `{ state, apps, me, epochs }`, from the
   /// entries of Everyone's, their own and the groups' they handed the keys of. Their device is checked first.
-  async installFor(who) {
+  async networkFor(who) {
     await this.readLogs(who, ["global"]);
     const runs = this.forgetLost(who);
     // Their own log's keys are asked for only if they chose this node to run their own things; it and their groups'
@@ -497,7 +497,7 @@ class Person {
     const handed = (s) => this.handed.get(who.hash)?.keys.has(`${s}/node/log`);
     const theirs = [own, ...JSON.parse(groups(this.owner, who.user))].filter(handed).map((s) => this.readLogs(who, [s]).then(() => s, () => null));
     const read = ["global", ...(await Promise.all(theirs)).filter(Boolean)];
-    const view = JSON.parse(install(this.owner, who.user, who.clientName, JSON.stringify(read), Date.now()));
+    const view = JSON.parse(network(this.owner, who.user, who.clientName, JSON.stringify(read), Date.now()));
     this.bucket.sealed.forgetErased(view.erased || []);
     view.epochs = this.epochs(read);
     return view;
@@ -589,7 +589,7 @@ class Person {
     return out;
   }
 
-  /// Asks the install's nodes on machines that run every scope `call` reaches for its person (`runners`), in Where
+  /// Asks the network's nodes on machines that run every scope `call` reaches for its person (`runners`), in Where
   /// Things Run's order until one is reached, to run it as them, with only the keys of those scopes they handed this
   /// node, sealed to that node: → its answer, `{ ok }` or what failed as `/v1/call` says it; or null
   /// if none was reached. Keys it says it needs that this node holds go with the call again; the rest are its caller's
@@ -709,7 +709,7 @@ class Run {
     Object.assign(this, { person, who, view, env: person.env, ctx: person.ctx });
   }
 
-  /// The scope handles an app reaches for this person (src/lib.rs: `install`'s `reach`), or those of `named` (`user`,
+  /// The scope handles an app reaches for this person (src/lib.rs: `network`'s `reach`), or those of `named` (`user`,
   /// `global`, a group's id or `group:<id>`) it reaches: no other.
   scopes(app, named) {
     if (!named) return app.reach;
@@ -817,7 +817,7 @@ class Run {
     return out;
   }
 
-  /// Every app in the install, with what each does for this person where it's installed for them (src/node.rs:
+  /// Every app in the network, with what each does for this person where it's installed for them (src/node.rs:
   /// `catalog`). What it says of itself comes from its latest deploy.
   /// `light`, as a window draws them (src/node/apps.rs: `apps_drawn`): what shows each one and where.
   async apps({ light = false } = {}) {
@@ -833,7 +833,7 @@ class Run {
   }
 }
 
-/// An app in the install with a deploy, as `view` has it; or null.
+/// An app in the network with a deploy, as `view` has it; or null.
 const deployed = (view, name) => view.apps.find((a) => a.name === name && a.bundle && !a.deleted) || null;
 
 /// A describe that failed: for keys the device didn't hand, said (428), so it hands them with the next; else none.
@@ -993,7 +993,7 @@ async function route(p, request) {
     const who = p.whom(request);
     const req = await bodyOf(request);
     if (typeof req !== "object" || req === null || Array.isArray(req)) refuse(400, "a call is an object");
-    const run = new Run(p, who, await p.installFor(who));
+    const run = new Run(p, who, await p.networkFor(who));
     const app = !req.service && !req.device && deployed(run.view, req.app);
     const d = app && (await p.describe(who, app));
     // An app that keeps to its own data runs here; the rest on a machine, when one answers.
@@ -1006,7 +1006,7 @@ async function route(p, request) {
   const screenAt = path.match(/^\/v1\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);
   if (request.method === "GET" && screenAt) {
     const who = p.whom(request);
-    const view = await p.installFor(who);
+    const view = await p.networkFor(who);
     const app = deployed(view, screenAt[1]);
     const d = app && (await p.describe(who, app));
     if (!d || !servedHere(view, d)) refuse(503, needsDevice(d, screenAt[1]));
@@ -1030,7 +1030,7 @@ async function route(p, request) {
   const own = request.method === "GET" && path.startsWith("/v1/client-screens/");
   if (own || (request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path))) {
     const who = p.whom(request);
-    const run = new Run(p, who, await p.installFor(who));
+    const run = new Run(p, who, await p.networkFor(who));
     // Nothing here changes but what devices write, which they'll say once one is on: no events, so the client asks again
     // in a while, and this node sleeps meanwhile.
     if (path === "/v1/events") return new Response(null, { status: 204 });
@@ -1049,7 +1049,7 @@ async function route(p, request) {
   // Anything else only a machine does: to a client that asks one itself (`x-one-elsewhere`), the machines of its
   // person's that are on, as a node on a machine names those that run a call it can't (421).
   if (request.headers.get("x-one-elsewhere")) {
-    const view = await p.installFor(p.whom(request));
+    const view = await p.networkFor(p.whom(request));
     const theirs = view.state.install.devices.filter((d) => d.serves_me && !d.service).sort((a, b) => a.order - b.order).map((d) => d.key);
     const on = new Set(await p.env.RELAY.connected(theirs));
     const elsewhere = theirs.filter((k) => on.has(k));
@@ -1112,7 +1112,7 @@ export default {
 export class Node extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    // The install's genesis, as sign-in pins it: a genesis any device writes into the log is never taken for it.
+    // The network's genesis, as sign-in pins it: a genesis any device writes into the log is never taken for it.
     if (env.GENESIS) pin_genesis(env.GENESIS);
     this.isEndpoint = ctx.id.equals(env.NODE.idFromName("node"));
     /// Datagrams it sent this turn, for the relay; asks running now, and when the last one began or ended.

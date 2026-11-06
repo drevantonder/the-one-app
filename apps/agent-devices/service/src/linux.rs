@@ -3,9 +3,9 @@
 //! labels on the container, where the old app kept them too, so its devices carry on here. The container runtime is
 //! Podman on Linux and Apple's container on a Mac.
 //!
-//! The runtime is the machine's, shared by every install on it (a `one throwaway` beside the real one), so each container
-//! carries its install's data folder as a label (`one.home`), and an install lists and touches only its own. Those made
-//! before the label are claimed once, by an install whose folder was already there when it first ran with it
+//! The runtime is the machine's, shared by every network on it (a `one throwaway` beside the real one), so each container
+//! carries its network's data folder as a label (`one.home`), and a network lists and touches only its own. Those made
+//! before the label are claimed once, by a network whose folder was already there when it first ran with it
 //! (`claimed.json`): the real one, never a new `one throwaway`.
 
 use std::collections::{BTreeSet, HashMap};
@@ -39,19 +39,19 @@ pub struct Device {
     pub image: String,
     pub port: u16,
     pub token: String,
-    /// The data folder of the install it's of, or "" if it was made before that was kept.
+    /// The data folder of the network it's of, or "" if it was made before that was kept.
     pub home: String,
 }
 
-/// This install's data folder, and the containers made before `one.home` that it claimed.
+/// This network's data folder, and the containers made before `one.home` that it claimed.
 static OWNER: OnceLock<(String, BTreeSet<String>)> = OnceLock::new();
 
-/// Whether a container listed is this install's.
+/// Whether a container listed is this network's.
 fn ours(d: &Device) -> bool {
     OWNER.get().is_some_and(|(home, claimed)| if d.home.is_empty() { claimed.contains(&d.name) } else { &d.home == home })
 }
 
-/// Learns which containers are this install's, claiming those without `one.home` the first time if `fresh` is false.
+/// Learns which containers are this network's, claiming those without `one.home` the first time if `fresh` is false.
 fn own(rt: &dyn Containers, dir: &Path, fresh: bool) -> Result<()> {
     let file = dir.join("claimed.json");
     let claimed: BTreeSet<String> = match std::fs::read(&file) {
@@ -60,7 +60,7 @@ fn own(rt: &dyn Containers, dir: &Path, fresh: bool) -> Result<()> {
             let claimed = if fresh { BTreeSet::new() } else { rt.all()?.into_iter().filter(|d| d.home.is_empty()).map(|d| d.name).collect() };
             std::fs::write(&file, serde_json::to_vec(&claimed)?)?;
             if !claimed.is_empty() {
-                tracing::info!("claimed the devices made before installs were told apart: {claimed:?}");
+                tracing::info!("claimed the devices made before networks were told apart: {claimed:?}");
             }
             claimed
         }
@@ -251,10 +251,10 @@ pub fn exec_with(mut command: Command, stdin: Option<&mut (dyn Read + Send)>, st
 
 /// What runs devices' containers.
 pub trait Containers: Send + Sync {
-    /// Every device container on this machine, any install's.
+    /// Every device container on this machine, any network's.
     fn all(&self) -> Result<Vec<Device>>;
 
-    /// This install's devices.
+    /// This network's devices.
     fn list(&self) -> Result<Vec<Device>> {
         Ok(self.all()?.into_iter().filter(ours).collect())
     }
@@ -286,7 +286,7 @@ pub trait Containers: Send + Sync {
 }
 
 /// This machine's runtime for Linux devices, or why it has none.
-/// Deletes the containers of the install whose data folder is `dir`, as when a `one throwaway` is deleted.
+/// Deletes the containers of the network whose data folder is `dir`, as when a `one throwaway` is deleted.
 pub fn delete_all(dir: &Path) -> Result<()> {
     let rt: Box<dyn Containers> = if cfg!(target_os = "macos") { Box::new(Apple::new(dir)?) } else { Box::new(Podman::new()?) };
     let home = dir.to_string_lossy();

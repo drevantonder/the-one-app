@@ -11,7 +11,7 @@ import java.security.MessageDigest
 
 // This phone as a device of its person (client/ffi, the same library every native app uses): its own key, made here
 // and kept sealed by a key in the phone's keystore (SignIn), one for each person at each address. It gets in when a
-// device of theirs approves the code it shows; then every request reaches their install's nodes over iroh, as this
+// device of theirs approves the code it shows; then every request reaches their network's nodes over iroh, as this
 // device, with the keys each needs. Signing in only says who's asking.
 
 class Client(private val context: Context, private val signIn: SignIn) {
@@ -88,7 +88,7 @@ class Client(private val context: Context, private val signIn: SignIn) {
     /** In developer mode, its latest requests' traces, as JSON, for a screen's `traces`; null out of it. */
     suspend fun traces(): String? = device().let { d -> io { d.traces() } }
 
-    /** What it means that this phone isn't one of the install's: [NotLetIn], `removed` if it was and was taken out, which
+    /** What it means that this phone isn't one of the network's: [NotLetIn], `removed` if it was and was taken out, which
      *  ends its sign-in (its key goes with it). */
     suspend fun lost(): NotLetIn {
         val d = device()
@@ -139,7 +139,7 @@ suspend fun <T> io(work: () -> T): T = withContext(Dispatchers.IO) {
     }
 }
 
-/** This phone isn't one of the install's: not yet (`removed` false) or no more. Not an app's problem: the app shows its
+/** This phone isn't one of the network's: not yet (`removed` false) or no more. Not an app's problem: the app shows its
  *  own approval screen (`Store.Phase.Joining`), or, once removed, the sign-in. */
 class NotLetIn(val removed: Boolean) : Exception("This phone hasn’t been let in yet.")
 

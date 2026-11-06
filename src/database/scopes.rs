@@ -19,8 +19,8 @@ use crate::permissions;
 
 pub use super::scope::{app, device, group, object, person, service};
 
-/// The install, as an object of permissions.
-pub const INSTALL: &str = permissions::INSTALL;
+/// The network, as an object of permissions.
+pub const NETWORK: &str = permissions::NETWORK;
 
 /// One scope database, and the time it was built at, which `may` asks as of. Nothing in it lasts until a time yet but
 /// app schedules, which are asked with the time they're asked at (`app_schedules_at`).
@@ -66,7 +66,7 @@ pub fn owner_object(p: &Principal) -> String {
     match p {
         Principal::User(u) => person(u),
         Principal::Group(g) => group(g),
-        Principal::Admins => INSTALL.into(),
+        Principal::Admins => NETWORK.into(),
     }
 }
 
@@ -285,17 +285,17 @@ impl ScopeDb {
 
     // Who's who.
 
-    /// The install's name.
+    /// The network's name.
     pub fn name(&self) -> String {
         self.row("SELECT name FROM install", [], |r| r.get(0)).unwrap_or_default()
     }
 
-    /// The install's genesis.
+    /// The network's genesis.
     pub fn root(&self) -> Option<Hash> {
         self.row("SELECT root FROM install", [], |r| r.get::<_, Option<String>>(0)).flatten().and_then(|h| Hash::from_hex(&h).ok())
     }
 
-    /// When the install's devices last changed.
+    /// When the network's devices last changed.
     pub fn devices_at(&self) -> u64 {
         self.row("SELECT devices_at FROM install", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as u64
     }
@@ -307,7 +307,7 @@ impl ScopeDb {
             .map(|(t, u)| (t as u64, id(&u)))
     }
 
-    /// The install's recovery key, and when it was set.
+    /// The network's recovery key, and when it was set.
     pub fn recovery(&self) -> Option<Key> {
         self.row("SELECT key FROM recovery WHERE set_at IS NOT NULL ORDER BY n DESC LIMIT 1", [], |r| r.get::<_, String>(0)).map(|k| key(&k))
     }
@@ -316,32 +316,32 @@ impl ScopeDb {
         self.row("SELECT set_at FROM recovery WHERE set_at IS NOT NULL ORDER BY n DESC LIMIT 1", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as u64
     }
 
-    /// The recovery keys before the install's, which the relay lets in no more.
+    /// The recovery keys before the network's, which the relay lets in no more.
     pub fn recovery_was(&self) -> Vec<Key> {
         self.rows("SELECT key FROM recovery WHERE set_at IS NULL ORDER BY n", [], |r| r.get::<_, String>(0)).iter().map(|k| key(k)).collect()
     }
 
-    /// Everyone who's been in the install, removed people too, by id.
+    /// Everyone who's been in the network, removed people too, by id.
     pub fn users(&self) -> Vec<User> {
         self.rows(
             "SELECT p.id, p.name, p.handle, p.removed, coalesce((SELECT min(relation) FROM relations WHERE subject = p.id AND object = ?1), 'member')
              FROM principals p WHERE p.kind = 'person' ORDER BY p.id",
-            [INSTALL],
+            [NETWORK],
             |r| Ok(User { id: id(&r.get::<_, String>(0)?), name: r.get(1)?, handle: r.get(2)?, removed: r.get(3)?, role: role_of(&r.get::<_, String>(4)?) }),
         )
     }
 
-    /// A person of the install, not removed.
+    /// A person of the network, not removed.
     pub fn user(&self, user: &str) -> Option<User> {
         self.row(
             "SELECT p.name, p.handle, coalesce((SELECT min(relation) FROM relations WHERE subject = p.id AND object = ?2), 'member')
              FROM principals p WHERE p.id = ?1 AND p.removed = 0",
-            params![person(user), INSTALL],
+            params![person(user), NETWORK],
             |r| Ok(User { id: user.to_string(), name: r.get(0)?, handle: r.get(1)?, removed: false, role: role_of(&r.get::<_, String>(2)?) }),
         )
     }
 
-    /// A person as they were last in the install, removed or not.
+    /// A person as they were last in the network, removed or not.
     pub fn user_ever(&self, user: &str) -> Option<User> {
         self.user(user).or_else(|| {
             self.row("SELECT name, handle FROM principals WHERE id = ?1 AND kind = 'person'", [person(user)], |r| {
@@ -391,7 +391,7 @@ impl ScopeDb {
         .collect()
     }
 
-    /// A person's role in a scope: in the install, in a group, and admin of their own.
+    /// A person's role in a scope: in the network, in a group, and admin of their own.
     pub fn role_in(&self, user: &str, scope: &Scope) -> Option<Role> {
         match scope {
             Scope::Global => self.user(user).map(|u| u.role),
@@ -460,7 +460,7 @@ impl ScopeDb {
         self.rows(&format!("{MACHINE} ORDER BY d.key"), [], machine)
     }
 
-    /// A device of the install: listed, not removed, and its person not removed.
+    /// A device of the network: listed, not removed, and its person not removed.
     pub fn machine(&self, k: &Key) -> Option<Machine> {
         self.machine_ever(k).filter(|m| !m.removed)
     }
@@ -470,7 +470,7 @@ impl ScopeDb {
         self.row(&format!("{MACHINE} WHERE d.key = ?1"), [hex(k)], machine)
     }
 
-    /// Every device of the install that does `kind`, by key.
+    /// Every device of the network that does `kind`, by key.
     fn listed(&self, kind: Kind) -> Vec<Machine> {
         self.machines().into_iter().filter(|m| !m.removed && m.is(kind)).collect()
     }
@@ -511,7 +511,7 @@ impl ScopeDb {
         self.listed(Kind::Service).into_iter().filter(|m| m.service.as_deref() == Some(name)).collect()
     }
 
-    /// The key things are sealed to for a device of the install.
+    /// The key things are sealed to for a device of the network.
     pub fn seal_key(&self, k: &Key) -> Option<Key> {
         self.machine(k).map(|m| m.seal)
     }
@@ -653,7 +653,7 @@ impl ScopeDb {
         Some(app)
     }
 
-    /// The install's settings its admins set: each name's latest value.
+    /// The network's settings its admins set: each name's latest value.
     pub fn settings(&self) -> BTreeMap<String, String> {
         self.rows("SELECT name, value FROM settings", [], |r| Ok((r.get(0)?, r.get(1)?))).into_iter().collect()
     }
@@ -881,7 +881,7 @@ pub(crate) mod tests {
     }
 
     /// An app's own types and rows answer only for its own objects: Alice is group g's admin, Bob its member, Dave a
-    /// collaborator, Carol owns repo 2, and Erin is out of the install. Rows that would give a core role, make a rule,
+    /// collaborator, Carol owns repo 2, and Erin is out of the network. Rows that would give a core role, make a rule,
     /// or that a type of the core's name declares, count for nothing, and nothing stays in the database.
     #[test]
     fn app_may() {
@@ -889,10 +889,10 @@ pub(crate) mod tests {
         db.execute_batch(permissions::SCHEMA).unwrap();
         permissions::defaults(&db).unwrap();
         for (s, r, o) in [
-            ("person:alice", "member", INSTALL),
-            ("person:bob", "member", INSTALL),
-            ("person:carol", "member", INSTALL),
-            ("person:dave", "member", INSTALL),
+            ("person:alice", "member", NETWORK),
+            ("person:bob", "member", NETWORK),
+            ("person:carol", "member", NETWORK),
+            ("person:dave", "member", NETWORK),
             ("person:alice", "admin", "group:g"),
             ("person:bob", "member", "group:g"),
         ] {
@@ -909,7 +909,7 @@ pub(crate) mod tests {
             ("person:dave", "collaborator", "repo:1"),
             ("person:carol", "owner", "repo:2"),
             ("person:erin", "owner", "repo:1"),
-            ("person:carol", "admin", INSTALL),
+            ("person:carol", "admin", NETWORK),
             ("person:carol", "fan", "group:g"),
             ("#collaborator", "owner", "repo:1"),
             ("@", "owner", "repo:*"),
@@ -925,7 +925,7 @@ pub(crate) mod tests {
         assert!(may("dave", "push", "repo:1") && !may("dave", "manage", "repo:1"));
         assert!(may("carol", "manage", "repo:2") && !may("carol", "push", "repo:1"));
         assert!(!may("erin", "push", "repo:1"));
-        assert!(!may("carol", "change-roles", INSTALL) && !may("carol", "use", "group:g"));
+        assert!(!may("carol", "change-roles", NETWORK) && !may("carol", "use", "group:g"));
         assert!(may("alice", "use", "group:g") && !may("dave", "push", "repo:2"));
         let asks = [("push", "repo:1"), ("manage", "repo:1"), ("push", "repo:2")].map(|(v, o)| (v.to_string(), o.to_string()));
         assert_eq!(db.app_may("bob", &asks, &types, &rows, 0), [true, false, false]);

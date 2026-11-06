@@ -300,7 +300,7 @@ function NewGroup({ open, setOpen, made }) {
   )
 }
 
-// Inviting someone already in the install: find them by name, tap one (or Return for the first) to invite.
+// Inviting someone already in the network: find them by name, tap one (or Return for the first) to invite.
 function Invite({ g, state, sent, open, setOpen, send }) {
   const [role, setRole] = useState("member")
   const [query, setQuery] = useState("")

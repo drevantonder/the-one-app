@@ -1,4 +1,4 @@
-//! The install's Workers (`cloudflare/`) running in the pinned workerd, as nodes and the sign-in use them.
+//! The network's Workers (`cloudflare/`) running in the pinned workerd, as nodes and the sign-in use them.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -233,7 +233,7 @@ impl Passkey {
     }
 }
 
-/// The real Workers, as an install runs them: people reach them at its address, the gateway's.
+/// The real Workers, as a network runs them: people reach them at its address, the gateway's.
 pub(crate) struct Workers {
     _running: Running,
     pub(crate) address: String,
@@ -247,7 +247,7 @@ impl Workers {
         Workers::start_as(false, devices)
     }
 
-    /// As `for_devices`, for an install whose people sign in with Google at test.example, the stand-in sites as
+    /// As `for_devices`, for a network whose people sign in with Google at test.example, the stand-in sites as
     /// Google.
     fn google(devices: Vec<String>) -> Workers {
         Workers::start_as(true, devices)
@@ -258,7 +258,7 @@ impl Workers {
         let mut settings = cloudflare::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
         settings.sign_in_url = format!("http://127.0.0.1:{}", settings.ports[0]);
-        // The install's first devices, its admin's machines that run its calls.
+        // The network's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
         settings.genesis = Some(data_encoding::HEXLOWER.encode(&GENESIS));
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
@@ -284,7 +284,7 @@ impl Workers {
         Browser { origin: self.address.clone(), cookies: Default::default() }
     }
 
-    /// A passkey for the install's address, as passkeys belong to it.
+    /// A passkey for the network's address, as passkeys belong to it.
     fn passkey(&self) -> Passkey {
         let rp = self.address.split("://").nth(1).unwrap().split([':', '/']).next().unwrap().to_string();
         Passkey { key: ed25519_dalek::SigningKey::from_bytes(&rand::random()), id: rand::random::<[u8; 16]>().to_vec(), rp, origin: self.address.clone() }
@@ -401,7 +401,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     let (status, options, _) = new.get(&format!("/api/auth/passkey/generate-authenticate-options?join={join}"));
     assert_eq!(status, 200, "{options}");
     let challenge = B64U.decode(options["challenge"].as_str().unwrap().as_bytes()).unwrap();
-    assert_eq!(challenge[..challenge.len() - 8], sign_in_proof::challenge(&GENESIS, &device, 0)[..challenge.len() - 8], "the challenge names the device in this install");
+    assert_eq!(challenge[..challenge.len() - 8], sign_in_proof::challenge(&GENESIS, &device, 0)[..challenge.len() - 8], "the challenge names the device in this network");
     assert_eq!(new.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
     assert_eq!(signed_in_as(&mut new).as_deref(), Some(andre.as_str()));
     let asked = |b: &mut Browser, d: &one::keys::Endpoint| {
@@ -411,13 +411,13 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
         out["sign_in"].clone()
     };
     let proof: Proof = serde_json::from_value(asked(&mut new, &device)).expect("its request carries the assertion");
-    let install = sign_in_proof::Install::new(&k.address, GENESIS, None);
-    let account = sign_in_proof::check(&proof, &device, &install, None, now()).expect("the person's devices check it");
+    let network = sign_in_proof::Network::new(&k.address, GENESIS, None);
+    let account = sign_in_proof::check(&proof, &device, &network, None, now()).expect("the person's devices check it");
     let Account::Passkey { public_key, .. } = &account else { panic!("{account:?}") };
-    let checked = sign_in_proof::vouches(&proof, &device, &install, None, std::slice::from_ref(&account), now());
+    let checked = sign_in_proof::vouches(&proof, &device, &network, None, std::slice::from_ref(&account), now());
     assert!(checked.is_ok() && !public_key.is_empty(), "and let it in by it, once it's recorded: {checked:?}");
-    let elsewhere = sign_in_proof::Install::new(&k.address, [6; 32], None);
-    assert!(sign_in_proof::vouches(&proof, &device, &elsewhere, None, std::slice::from_ref(&account), now()).is_err(), "but not in another install");
+    let elsewhere = sign_in_proof::Network::new(&k.address, [6; 32], None);
+    assert!(sign_in_proof::vouches(&proof, &device, &elsewhere, None, std::slice::from_ref(&account), now()).is_err(), "but not in another network");
     // Turned down, its request goes, and what its sign-in showed with it: asking again, it carries nothing.
     let key = data_encoding::HEXLOWER.encode(&device.key);
     assert_eq!(new.delete(&format!("/api/auth/devices/requests/{key}")).0, 200);
@@ -437,7 +437,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(browser.post("/sign-in/google", json!({ "oauth_query": query })).0, 200);
     let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": "/", "errorCallbackURL": "/" }));
     assert_eq!(status, 200, "{out}");
-    assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&GENESIS, &device)), "Google is asked for an ID token naming the device in this install");
+    assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&GENESIS, &device)), "Google is asked for an ID token naming the device in this network");
 }
 
 /// A device is let in by its sign-in only when it signed in itself: one whose sign-in was finished from a link opened
@@ -455,7 +455,7 @@ fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
     let mut first = k.browser();
     let (_, options, _) = first.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
     assert_eq!(first.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
-    let install = sign_in_proof::Install::new(&k.address, GENESIS, None);
+    let network = sign_in_proof::Network::new(&k.address, GENESIS, None);
     let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
     // Signs in with the passkey for a new device, through a client coming back to `back`, and asks to join with the
     // token it gave: → what its request carries.
@@ -487,8 +487,8 @@ fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
         let sign_in = resp.body_mut().read_json::<Value>().unwrap()["sign_in"].clone();
         // What the person's devices then do with it, with the passkey recorded as theirs.
         let proof: Proof = serde_json::from_value(sign_in.clone()).expect("a proof");
-        let account = sign_in_proof::check(&proof, &device, &install, None, now()).expect("it checks, to be recorded as it's approved by a tap");
-        let vouched = sign_in_proof::vouches(&proof, &device, &install, None, &[account], now());
+        let account = sign_in_proof::check(&proof, &device, &network, None, now()).expect("it checks, to be recorded as it's approved by a tap");
+        let vouched = sign_in_proof::vouches(&proof, &device, &network, None, &[account], now());
         json!({ "sign_in": sign_in, "lets_in": vouched.is_ok() })
     };
     // The web client signs in in the browser that asks, and is let in by it.
@@ -578,7 +578,7 @@ fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
             got.as_array().unwrap().iter().filter(|p| p["url"] == endpoint).map(|p| {
                 let text = sub.take().expect("one push to the device").open(&BASE64.decode(p["body"].as_str().unwrap().as_bytes()).unwrap());
                 let (note, by) = one::push::open_note(&one::keys::seal_secret(key), &B64U.decode(&text).unwrap()).unwrap();
-                assert_eq!(by, None, "from the install's Workers");
+                assert_eq!(by, None, "from the network's Workers");
                 note
             }).collect()
         }).collect()
@@ -610,10 +610,10 @@ fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
     assert_eq!(notes.iter().map(|n| (n.title.as_str(), n.screen.as_str(), n.action.is_none())).collect::<Vec<_>>(), [("MacBook Pro joined", "devices", true)]);
 }
 
-/// The install the tests' Workers are for: its first entry's hash, as the device deploying them holds it.
+/// The network the tests' Workers are for: its first entry's hash, as the device deploying them holds it.
 const GENESIS: [u8; 32] = [5; 32];
 
-/// iroh endpoints, as nodes are, through the relay at an install's address and nothing else: its relay protocol is
+/// iroh endpoints, as nodes are, through the relay at a network's address and nothing else: its relay protocol is
 /// iroh-relay's Rust as WebAssembly in a Durable Object (cloudflare/relay/), which must agree with iroh's own.
 mod relay {
     use std::time::Duration;
@@ -798,14 +798,14 @@ mod relay {
     }
 
     #[test]
-    fn the_relay_carries_only_the_installs_endpoints() {
+    fn the_relay_carries_only_the_networks_endpoints() {
         let first = SecretKey::generate();
         let k = super::Workers::for_devices(vec![hex(&first)]);
         let address = k.address.replace("localhost", "127.0.0.1");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            // The install's first device is on the list, an admin's, and a stranger isn't.
-            let a = online(&address, &first, None).await.expect("the install's first device isn't let in");
+            // The network's first device is on the list, an admin's, and a stranger isn't.
+            let a = online(&address, &first, None).await.expect("the network's first device isn't let in");
             let stranger = SecretKey::generate();
             assert!(shut_out(&address, &stranger, None).await, "a stranger's key reached the relay");
 
@@ -813,7 +813,7 @@ mod relay {
             let phone = SecretKey::generate();
             assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
             let b = online(&address, &phone, None).await.expect("a key the first device added isn't let in");
-            assert!(reaches(&address, &a, &b).await, "two of the install's devices don't reach each other");
+            assert!(reaches(&address, &a, &b).await, "two of the network's devices don't reach each other");
 
             // Only an admin's device adds an admin's, changes a key that's in, or takes out a key another let in; the
             // last admin stays; a device takes itself out.
@@ -1008,14 +1008,14 @@ mod relay {
         let ask = |session: &SecretKey, cert: &str| one::keys::signed_request(&signer(session), "one/relay", json!({ "computes": true, "certificate": cert }), at());
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let a = online(&address, &first, None).await.expect("the install's first device isn't let in");
+            let a = online(&address, &first, None).await.expect("the network's first device isn't let in");
             assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
             assert_eq!(tell(&address, &first, json!({ "add": hex(&SecretKey::generate()) })), 403, "an add that doesn't say its role");
 
             let session = SecretKey::generate();
             let cert = certify(&phone, &session, super::now() + 60_000);
             let s = online(&address, &session, Some(&cert)).await.expect("a session its device vouched for isn't let in");
-            assert!(reaches(&address, &s, &a).await, "a session's endpoint doesn't reach the install's devices");
+            assert!(reaches(&address, &s, &a).await, "a session's endpoint doesn't reach the network's devices");
             // Its first nodes to ask: the computes, for it or a device on the list, and no one else.
             let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true, "reads": one::database::READS }), at());
             let by_session = ask(&session, &cert);
@@ -1035,7 +1035,7 @@ mod relay {
             assert_eq!(computes(late).0, 400);
             let stranger = SecretKey::generate();
             assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true, "reads": one::database::READS }), at())).0, 403, "a stranger was told the computes");
-            // When each was last here, a session's as the device that vouched for it: told the install's own devices
+            // When each was last here, a session's as the device that vouched for it: told the network's own devices
             // and their sessions, as the computes are, and no one else.
             let seen = |by: &SecretKey| super::post(&format!("{address}/relay/seen"), &[], one::keys::signed_request(&signer(by), "one/relay", json!({ "seen": true }), at()));
             let (status, said) = seen(&phone);
@@ -1076,7 +1076,7 @@ mod relay {
             let fresh = SecretKey::generate();
             let shown = format!("{}.{}", certify(&phone, &fresh, super::now() + 60_000), proof(&fresh, super::now()));
             let proved = online(&address, &fresh, Some(&shown)).await.expect("a session with its proof isn't let in");
-            assert!(reaches(&address, &proved, &a).await, "a session taken in with its proof doesn't reach the install's devices");
+            assert!(reaches(&address, &proved, &a).await, "a session taken in with its proof doesn't reach the network's devices");
             proved.close().await;
 
             // Nothing for another endpoint, by a key not on the list, or once it has ended.

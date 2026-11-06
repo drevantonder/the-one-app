@@ -1,12 +1,12 @@
-// The relay: how the install's endpoints reach each other when they can't directly, speaking iroh's relay protocol at
-// the install's address (`/relay`, `/ping`, `/generate_204`, which the gateway sends here). One Durable Object per
-// install keeps every endpoint's WebSocket, with Hibernation, so it sleeps between packets; iroh-relay's own code
+// The relay: how the network's endpoints reach each other when they can't directly, speaking iroh's relay protocol at
+// the network's address (`/relay`, `/ping`, `/generate_204`, which the gateway sends here). One Durable Object per
+// network keeps every endpoint's WebSocket, with Hibernation, so it sleeps between packets; iroh-relay's own code
 // (relay_protos_bg.wasm, built from protos/ by build.sh) checks each endpoint's handshake and reads and writes its
 // frames. It's blind: what endpoints send each other is QUIC, sealed end to end, so it can only drop it.
 //
-// It admits only the install's endpoints, on its one list of them: `{ by, admin, role }` per key, `by` the key that let
-// it in, `role` what it is (`client`, `compute` or `service`, or a machine's several, with spaces). The install's first
-// devices, and its recovery key as a client, are put in when the install is made (`DEVICES`, `{ key, role, admin }`
+// It admits only the network's endpoints, on its one list of them: `{ by, admin, role }` per key, `by` the key that let
+// it in, `role` what it is (`client`, `compute` or `service`, or a machine's several, with spaces). The network's first
+// devices, and its recovery key as a client, are put in when the network is made (`DEVICES`, `{ key, role, admin }`
 // each, from the Workers'
 // deploy, taken only while the list is empty, which it never is again: the last admin can't be taken out); after that,
 // devices tell it, and nothing else changes it. A computer joining with a pairing code a device made gets in too, by
@@ -47,7 +47,7 @@
 // One endpoint isn't a socket: the Cloudflare node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
 // comes back by RPC (`fromNode`, on the `ServerlessNode` entrypoint, which only its Worker binds) and goes out as from
-// it. It's one of the install's endpoints, as compute.
+// it. It's one of the network's endpoints, as compute.
 //
 // Nor are the remote MCP server's devices (cloudflare/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
 // (`MCP`) while it runs: one binds its key (`bind`, a request signed by that key, which must be on the list) to its
@@ -132,7 +132,7 @@ export default class extends WorkerEntrypoint {
     return refuse(404, "not the relay's");
   }
 
-  /// A tell's signature is checked here first, where a forged one costs the install's one relay nothing; the relay
+  /// A tell's signature is checked here first, where a forged one costs the network's one relay nothing; the relay
   /// checks it again, and the rest.
   async tell(request) {
     try {
@@ -149,7 +149,7 @@ export default class extends WorkerEntrypoint {
     }
   }
 
-  /// What the relay tells the install's endpoints (`computes`, or when each was last `seen`), for a request signed by a
+  /// What the relay tells the network's endpoints (`computes`, or when each was last `seen`), for a request signed by a
   /// key on the list or a session's endpoint.
   async ask(request, what) {
     let asked;
@@ -176,7 +176,7 @@ export default class extends WorkerEntrypoint {
     return said === null ? refuse(403, `the relay takes only ${this.env.YOURS}'s devices`) : refuse(400, said);
   }
 
-  /// Whether `key` (hex) is one of the install's endpoints: `{ admin }` if it is, for the URL signer, by its binding.
+  /// Whether `key` (hex) is one of the network's endpoints: `{ admin }` if it is, for the URL signer, by its binding.
   async allowed(key) {
     return isKey(key) ? this.relay().allowed(key) : null;
   }
@@ -186,7 +186,7 @@ export default class extends WorkerEntrypoint {
   }
 }
 
-/// The install's one relay, made near its people (`LOCATION`, a location hint) rather than wherever its first request
+/// The network's one relay, made near its people (`LOCATION`, a location hint) rather than wherever its first request
 /// came from.
 const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
@@ -281,7 +281,7 @@ export class Relay extends DurableObject {
     return this.sql.exec("SELECT count(*) AS n FROM keys WHERE admin = 1").one().n;
   }
 
-  /// `{ admin, role }` if `key` is one of the install's endpoints; a computer let in by a pairing code isn't, until it's
+  /// `{ admin, role }` if `key` is one of the network's endpoints; a computer let in by a pairing code isn't, until it's
   /// added.
   allowed(key) {
     if (key === this.env.BOUND) return { admin: false, role: "compute" };
@@ -289,7 +289,7 @@ export class Relay extends DurableObject {
     return it ? { admin: it.admin === 1, role: it.role } : null;
   }
 
-  /// Whether `by` may be told what the install's endpoints are told: it's on the list, or is a session's a client on it
+  /// Whether `by` may be told what the network's endpoints are told: it's on the list, or is a session's a client on it
   /// vouched for (`session`); null if neither. A request's (`at`) is taken once: → why not, if it was taken already.
   asks(by, { at, session } = {}) {
     // Who's asking first, as `tell` does, so a stranger's requests are never kept.
@@ -485,7 +485,7 @@ export class Relay extends DurableObject {
       return { error: String(e.message || e) };
     }
     if (fields.bind !== true || typeof name !== "string" || !name || name.length > 256) return { error: "a binding is a key's signed bind, to an object's name" };
-    if (!this.key(fields.by)) return { error: "that key isn't one of the install's: a device of its person approves it" };
+    if (!this.key(fields.by)) return { error: "that key isn't one of the network's: a device of its person approves it" };
     if (this.sockets.has(fields.by)) return { error: "that key is connected here itself" };
     const until = Date.now() + 3_600_000;
     const ticket = hex(crypto.getRandomValues(new Uint8Array(32)));
@@ -674,7 +674,7 @@ export class Relay extends DurableObject {
         if (told.role !== "client" && !admin && !is(by, "compute")) return "only an admin's device or a compute adds a compute or a service";
         this.sql.exec("INSERT INTO keys VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
       }
-      // A pairing code's computer, added, is one of the install's: it reaches every endpoint now.
+      // A pairing code's computer, added, is one of the network's: it reaches every endpoint now.
       this.sql.exec("DELETE FROM pairings WHERE key = ?", told.add);
       const ws = this.sockets.get(told.add);
       if (ws?.deserializeAttachment()?.pairing) ws.serializeAttachment({ id: told.add });

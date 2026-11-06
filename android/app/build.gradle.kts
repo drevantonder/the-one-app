@@ -15,7 +15,7 @@ plugins {
 val repo = rootDir.parentFile
 val config = file(System.getenv("CONFIG") ?: repo.resolve("config.toml").path).absoluteFile
 
-/** A top-level field: the [settings] after them are the install's, not the build's. */
+/** A top-level field: the [settings] after them are the network's, not the build's. */
 fun field(name: String): String = config.readLines().takeWhile { !it.startsWith("[") }
     .firstNotNullOfOrNull { Regex("""^$name\s*=\s*"?([^"]*)"?\s*$""").find(it)?.groupValues?.get(1) } ?: ""
 
@@ -25,9 +25,9 @@ fun quoted(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "
 val commit = providers.exec { commandLine("git", "-C", repo.path, "rev-parse", "--short=12", "HEAD"); isIgnoreExitValue = true }
     .standardOutput.asText.get().trim().ifEmpty { "unknown" }
 val cli = field("cli")
-// What a person calls the install where they read: a workplace's custom build, which its people join with their work
-// email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".
-val yours = field("name").let { if (field("join_domain").isNotEmpty()) it.replaceFirst(Regex("^The "), "the ") else "your " + it.removePrefix("The ") }
+// What a person calls the network where they read: a workplace's custom build, which its people join with their work
+// email (join_domain), is shared, "the PTC App network"; anyone else's is "your One App network".
+val yours = field("name").let { if (field("join_domain").isNotEmpty()) it.replaceFirst(Regex("^The "), "the ") else "your " + it.removePrefix("The ") } + " network"
 
 // The launcher icon from the config's, and the logo the app shows; and Phosphor's icons, which apps name, as every
 // device draws them.
@@ -98,7 +98,7 @@ val customBuild = tasks.register("customBuild") {
     }
 }
 
-// Links to the install's address open the app (App Links), at the addresses it's built for: the custom build's own, and
+// Links to the network's address open the app (App Links), at the addresses it's built for: the custom build's own, and
 // $LINKS's (comma-separated), for one that asks where. Android takes them only from the manifest, and opens the app
 // only where the address lists it (cloudflare set android), so they're in a manifest of their own, merged into the app's.
 val links = (listOf(field("address")) + (System.getenv("LINKS") ?: "").split(","))
@@ -141,7 +141,7 @@ android {
         buildConfigField("String", "NAME", quoted(field("name")))
         buildConfigField("String", "CLI", quoted(cli))
         buildConfigField("String", "YOURS", quoted(yours))
-        // A custom build with one install signs in there; otherwise the first screen asks where.
+        // A custom build with one network signs in there; otherwise the first screen asks where.
         buildConfigField("String", "ADDRESS", quoted(field("address")))
         manifestPlaceholders["scheme"] = cli
         resValue("string", "app_name", field("name"))

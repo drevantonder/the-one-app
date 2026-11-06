@@ -15,7 +15,7 @@ namespace One;
 
 public sealed class NodeException(string message) : Exception(message);
 
-/// This computer isn't one of the install's, yet or any more: not an app's problem, so the window shows its approval
+/// This computer isn't one of the network's, yet or any more: not an app's problem, so the window shows its approval
 /// screen, or its sign-in.
 public sealed class NotLetInException() : Exception("This computer hasn’t been let in yet.");
 
@@ -91,7 +91,7 @@ public static class Node
     /// client: from those built into the app (client/ffi), never a node's, since they act as its person.
     public static Task<string> ClientScreen(string name, string parameters) => Task.FromResult(OneClientFfiMethods.ClientScreen(name, parameters));
 
-    /// An own screen's `one.api`: the node's /v1 at your One App's address, as this person; nothing else there. A call
+    /// An own screen's `one.api`: the node's /v1 at your One App network's address, as this person; nothing else there. A call
     /// says it's this app's, as Call does.
     public static Task<JsonNode?> Api(string method, string path, JsonNode? body)
     {

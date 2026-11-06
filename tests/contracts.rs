@@ -102,7 +102,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&cloudflare::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
         assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
         let asking = keys::Endpoint { key: device, seal: device_seal };
-        assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its install");
+        assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
         assert_eq!(b(&out["challenge"]), one::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
         let (passkey, seal_secret) = keys::passkey_keys(&prf);
         assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
@@ -455,7 +455,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             };
             assert_eq!(js, &rust, "{status} {body}");
         }
-        assert_eq!(waited(200, &said[2].1), Waited::Approved { genesis: Some(genesis.clone()), welcome: None }, "an approval names the install it's in");
+        assert_eq!(waited(200, &said[2].1), Waited::Approved { genesis: Some(genesis.clone()), welcome: None }, "an approval names the network it's in");
         let welcomed = waited(200, &said[6].1);
         assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if one::database::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copy()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");
         assert_eq!(said.iter().filter(|(s, b)| matches!(waited(*s, b), Waited::Approved { welcome: Some(_), .. })).count(), 3, "only a welcome that's one is taken");
@@ -468,11 +468,11 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A client device (one-client: native apps, and browsers as WebAssembly) knows who's who only from the install's own
+/// A client device (one-client: native apps, and browsers as WebAssembly) knows who's who only from the network's own
 /// signed entries, replayed as nodes replay them: a device a node lists that no entry of the person's own devices does,
-/// a seal key changed on the way, or entries of another install than the one it joined, never reach what it seals to.
+/// a seal key changed on the way, or entries of another network than the one it joined, never reach what it seals to.
 #[test]
-fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
+fn a_client_takes_whos_who_only_from_the_networks_signed_entries() {
     use ed25519_dalek::SigningKey;
     use one::entry::{Entry, Ext, Head, hex, pack};
     use one::keys::Endpoint;
@@ -487,7 +487,7 @@ fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
     let runs = write(&mac, Some(listed.head()), members::device(&Endpoint::of(&node), ANDRE, "box", &[Kind::Compute], None));
     let entries = [&genesis, &listed, &runs];
 
-    // The first time, the install's genesis is the one its entries start with, kept from then on.
+    // The first time, the network's genesis is the one its entries start with, kept from then on.
     let mut client = Global::new(None);
     client.add(&pack(&entries)).unwrap();
     assert_eq!(client.root(), Some(genesis.hash()));
@@ -513,7 +513,7 @@ fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
     };
     assert!(Global::new(Some(genesis.hash())).add(&as_packed([header, signature, body])).is_err());
 
-    // Another install's entries: refused once one is kept, and when one's first seen beside another.
+    // Another network's entries: refused once one is kept, and when one's first seen beside another.
     let other = write(&node, None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&node), "box", &[Kind::Client], &[7; 32], &"e".repeat(64)));
     assert!(client.add(&pack(&[&other])).is_err());
     assert!(Global::new(None).add(&pack(&[&genesis, &other])).is_err());
@@ -569,7 +569,7 @@ async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
 /// Push (src/push.rs, cloudflare/push/): a device registers its address with the push Worker as Rust signs it, a node's
 /// send of a note sealed to that device goes out from the Worker as the browser's push service takes it (RFC 8291,
 /// VAPID with the key the Workers made, the note as base64url text), and what arrives opens, only with the device's key, as the note the node
-/// sealed. Only the install's devices register or send, each request once.
+/// sealed. Only the network's devices register or send, each request once.
 #[test]
 fn a_note_reaches_only_the_device_it_was_sealed_to() {
     use data_encoding::{BASE64, BASE64URL_NOPAD as B64U, HEXLOWER};
@@ -588,10 +588,10 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let address = subscription.address(endpoint);
     let phone_seal = one::keys::Endpoint::of(&phone).seal;
     let register = push::register_request(&phone, &phone_seal, &address, None, now()).unwrap();
-    assert_eq!(post("/push/register", register.clone()), (200, json!({ "registered": true })), "the install's device registers");
+    assert_eq!(post("/push/register", register.clone()), (200, json!({ "registered": true })), "the network's device registers");
     assert_eq!(post("/push/register", register).0, 403, "a request is taken once");
     let stranger = SigningKey::from_bytes(&rand::random());
-    assert_eq!(post("/push/register", push::register_request(&stranger, &phone_seal, &address, None, now()).unwrap()).0, 403, "only the install's devices register");
+    assert_eq!(post("/push/register", push::register_request(&stranger, &phone_seal, &address, None, now()).unwrap()).0, 403, "only the network's devices register");
 
     // The node seals a note to the phone and sends it.
     let note = Note { id: "0123456789abcdef".into(), title: "Tally".into(), body: "Sam counted".into(), app: "tally".into(), screen: "main".into(), ..Default::default() };
@@ -602,14 +602,14 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let (status, said) = post("/push/send", one::keys::signed_request(&node, push::DOMAIN, fields, now()));
     assert_eq!((status, &said["to"][&to], &said["to"][&unregistered]), (200, &json!({ "sent": true }), &json!({ "none": true })), "it went to the device that registered: {said}");
 
-    // What the browser's push service got: VAPID with the install's key, and the note, encrypted to the subscription.
+    // What the browser's push service got: VAPID with the network's key, and the note, encrypted to the subscription.
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
     let pushes: serde_json::Value = agent.get(format!("{}/pushes", k.sites)).call().unwrap().body_mut().read_json().unwrap();
     assert_eq!(pushes.as_array().unwrap().len(), 1);
     let got = &pushes[0];
     assert_eq!((got["url"].as_str(), got["headers"]["content-encoding"].as_str()), (Some(endpoint), Some("aes128gcm")));
     let vapid: serde_json::Value = agent.get(format!("{}/push/key", k.address)).call().unwrap().body_mut().read_json().unwrap();
-    assert!(got["headers"]["authorization"].as_str().unwrap().ends_with(&format!(", k={}", vapid["vapid"].as_str().unwrap())), "signed with the install's VAPID key");
+    assert!(got["headers"]["authorization"].as_str().unwrap().ends_with(&format!(", k={}", vapid["vapid"].as_str().unwrap())), "signed with the network's VAPID key");
     let plain = subscription.open(&BASE64.decode(got["body"].as_str().unwrap().as_bytes()).unwrap());
     let plain = B64U.decode(&plain).expect("Web Push carries the note as base64url text");
     assert_eq!(plain, sealed, "the Worker carried the sealed note as it was");

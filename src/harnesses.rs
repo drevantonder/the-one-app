@@ -136,7 +136,7 @@ fn mcp_args(harness: &str) -> &'static [&'static str] {
     }
 }
 
-/// Gives each harness installed here the node's prompt hook and this install's MCP server, leaving everything else
+/// Gives each harness installed here the node's prompt hook and this network's MCP server, leaving everything else
 /// in its settings as it was.
 fn harnesses(home: &Path, written: &mut Written) {
     let dir = |var: &str, default: PathBuf| std::env::var_os(var).map(PathBuf::from).unwrap_or(default);

@@ -202,7 +202,7 @@ public sealed class MainWindow : Window
     }
 
     /// Where a link opens, once the window shows the pages: a widget's (`<cli>://open?app=…&screen=…&params=…&scope=…`),
-    /// or a page at your One App's address, as the web client has them (cloudflare/web/web.js): `/`, `/page/<scope>`,
+    /// or a page at your One App network's address, as the web client has them (cloudflare/web/web.js): `/`, `/page/<scope>`,
     /// `/accounts/<scope>`, `/app/<app>/<screen>?params=&scope=`, `/settings`, `/settings/<item>?params=`, and
     /// `/vault?id=&scope=` (or `<cli>://vault?…`), a request for an item, in the Vault's sheet; `<cli>://page` and
     /// `<cli>://settings` as below. An invite link
@@ -302,7 +302,7 @@ public sealed class MainWindow : Window
 
     // MARK: Starting
 
-    /// This computer isn't one of the install's: taken out, it's the sign-in; not yet in, it starts again at its approval
+    /// This computer isn't one of the network's: taken out, it's the sign-in; not yet in, it starts again at its approval
     /// screen, whatever the window showed, and comes back to the person's own page once approved.
     void Lost(bool removed)
     {
@@ -436,7 +436,7 @@ public sealed class MainWindow : Window
         return el;
     }
 
-    /// Welcome: the install's address (or an invite link) the first time, then Sign In, in the person's browser:
+    /// Welcome: the network's address (or an invite link) the first time, then Sign In, in the person's browser:
     /// at once when `signIn` is true, as it is after Continue.
     void Welcome(string? error, bool invited = false, bool signIn = false)
     {

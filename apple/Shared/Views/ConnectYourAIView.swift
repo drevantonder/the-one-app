@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// What to paste into an AI so it connects itself, before there's a node to ask (`agent_prompt` in its state, from
-/// src/state.rs, says it once there is): the guide at your One App's `address`, or the command line's guide.
+/// src/state.rs, says it once there is): the guide at your One App network's `address`, or the command line's guide.
 func agentPrompt(address: String?) -> String {
     let yours = Bundle.main.object(forInfoDictionaryKey: "Yours") as? String ?? "", cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? ""
     if let url = address.flatMap({ URL(string: $0.contains("://") ? $0 : "https://\($0)") }), let host = url.host() {

@@ -1,19 +1,19 @@
-// The push Worker: how a device reaches another that isn't looking, in every install from its start. It carries notes,
+// The push Worker: how a device reaches another that isn't looking, in every network from its start. It carries notes,
 // each sealed to the one device it's for (that device's seal key, as everything is sealed to devices), to Apple's,
 // Google's, Microsoft's or a browser's push service, which wake that device; the device opens the note and shows it.
 // The Worker, and every push service on the way, carry locked bytes: none of them reads a note.
 //
 // A device that can get pushes registers its address here, by a request signed with its key (`signedRequest` in
 // shared/crypto.js, domain `one/push`, route `POST /push/register`, taken once), only if the relay lists it as one of
-// the install's endpoints: `{ via, address, env?, topic?, keys?, seal }`, `via` one of apns (address: the APNs token,
+// the network's endpoints: `{ via, address, env?, topic?, keys?, seal }`, `via` one of apns (address: the APNs token,
 // hex; topic: the app's bundle id, one of `APNS_TOPICS`; env: sandbox or production), fcm (its FCM token), wns (its
 // channel URI) or webpush (its subscription's endpoint, with `keys: { p256dh, auth }`), and `seal`, its seal key (hex),
-// which only the install's own Workers seal to (below); and `user`, its person, as its own entries list it, which an
+// which only the network's own Workers seal to (below); and `user`, its person, as its own entries list it, which an
 // older device doesn't say. `POST /push/unregister` forgets it.
 //
-// One of the install's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }],
+// One of the network's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }],
 // legacy? }`, each `note` base64url bytes sealed to `to`'s seal key by the sender, which takes that key from the
-// install's signed entries, never from here. It says, of each `to`, `sent`, `none` (it registered no address), `gone`
+// network's signed entries, never from here. It says, of each `to`, `sent`, `none` (it registered no address), `gone`
 // (its address stopped working, or the relay no longer lists it, so it's forgotten) or `failed`. `quiet` wakes the
 // device without a visible alert, where the platform can (APNs' background push); a browser always shows one.
 //
@@ -22,14 +22,14 @@
 // badge }` reaches them as the plain alert they understand, until each registers itself with the same token, which
 // replaces it.
 //
-// The install's own Workers send through the `Sender` entrypoint, by binding: sign-in, for a device asking to join, whose
+// The network's own Workers send through the `Sender` entrypoint, by binding: sign-in, for a device asking to join, whose
 // note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`); and asks
 // which devices registered as a person's (`theirs`), whom it pushes about their devices joining. That is only where to
 // send: a device names its person unchecked, so one that lies gets notes sealed to itself, which let no one in.
 //
 // Sends are limited: each sender `SENDS` requests a minute, each device `NOTES` notes a minute.
 //
-// What it holds is the install's push credentials (`APNS_*`, `FCM_ACCOUNT`, `WNS_*`, `VAPID_KEY`), Workers' secrets, and
+// What it holds is the network's push credentials (`APNS_*`, `FCM_ACCOUNT`, `WNS_*`, `VAPID_KEY`), Workers' secrets, and
 // each device's address, in its Durable Object.
 
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
@@ -58,7 +58,7 @@ export default class extends WorkerEntrypoint {
   async fetch(request) {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "content-type" } });
-    // What a browser subscribes with: the install's VAPID public key. And which services this install can push through.
+    // What a browser subscribes with: the network's VAPID public key. And which services this network can push through.
     if (url.pathname === "/push/key" && request.method === "GET") {
       const vapid = this.env.VAPID_KEY ? b64u.encode((await vapidKey(this.env.VAPID_KEY)).public) : null;
       return json({ vapid, via: senders(this.env) });
@@ -73,7 +73,7 @@ export default class extends WorkerEntrypoint {
   }
 }
 
-/// What the install's own Workers send by, by binding.
+/// What the network's own Workers send by, by binding.
 export class Sender extends WorkerEntrypoint {
   /// `notes`: `[{ to, note }]` sealed already, or `[{ to, plain }]`, sealed here to the seal key `to` registered; each
   /// may be `quiet`. → what happened to each, by key.
@@ -87,7 +87,7 @@ export class Sender extends WorkerEntrypoint {
   }
 }
 
-/// Which push services this install has what it needs for.
+/// Which push services this network has what it needs for.
 function senders(env) {
   return VIAS.filter((via) => ({ apns: env.APNS_KEY, fcm: env.FCM_ACCOUNT, wns: env.WNS_CLIENT_SECRET, webpush: env.VAPID_KEY })[via]);
 }
@@ -105,7 +105,7 @@ export class Push extends DurableObject {
     this.counted = new Map();
   }
 
-  /// A signed request to `route`: checked fresh, taken once, from one of the install's endpoints. → `{ status, said }`.
+  /// A signed request to `route`: checked fresh, taken once, from one of the network's endpoints. → `{ status, said }`.
   async asked(what, route, body) {
     try {
       return { status: 200, said: await this.answer(what, route, body) };
@@ -122,7 +122,7 @@ export class Push extends DurableObject {
     if (sql.exec("select 1 from signed where sig = ?", body.sig).toArray().length) fail(403, "That request was sent already.");
     sql.exec("insert into signed (sig, at) values (?, ?)", body.sig, Date.now());
     const allowed = await this.env.RELAY.allowed(by);
-    if (!allowed) fail(403, "That device isn't one of the install's.");
+    if (!allowed) fail(403, "That device isn't one of the network's.");
     const node = String(allowed.role || "").split(" ").includes("compute");
     if (what === "register") return fields.legacy ? this.registerLegacy(by, node, fields.legacy) : this.register(by, fields);
     if (what === "unregister") return fields.legacy ? this.unregisterLegacy(node, fields.legacy) : this.unregister(by);
@@ -220,7 +220,7 @@ export class Push extends DurableObject {
         if (!this.count(`to:${to}`, NOTES)) return void (out[to] = { failed: "too many to that device this minute" });
         const device = sql.exec("select * from devices where key = ?", to).toArray()[0];
         if (!device) return void (out[to] = { none: true });
-        // Only to the install's devices: one the relay no longer lists is forgotten.
+        // Only to the network's devices: one the relay no longer lists is forgotten.
         if (!(await this.env.RELAY.allowed(to))) {
           sql.exec("delete from devices where key = ?", to);
           return void (out[to] = { gone: true });

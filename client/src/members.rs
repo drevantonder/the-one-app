@@ -1,10 +1,10 @@
-//! Who's who as the install's own signed entries say it, checked on the device with the nodes' own Rust (`one`'s
+//! Who's who as the network's own signed entries say it, checked on the device with the nodes' own Rust (`one`'s
 //! entry checks and member replay), never as a node says it: a node holds no keys, and a hacked one could list a seal
 //! key of its own as someone's device, or itself as where their things run, to be sealed or handed keys. What a device
 //! seals, and to whom it hands keys, it takes only from here.
 //!
-//! A device keeps `global`'s entries it has checked and the install's root, the genesis it saw when it joined, and
-//! refuses entries of an install with another; then it asks a node only for entries it doesn't have
+//! A device keeps `global`'s entries it has checked and the network's root, the genesis it saw when it joined, and
+//! refuses entries of an network with another; then it asks a node only for entries it doesn't have
 //! (`GET /v1/entries/global?have=`, `have`).
 //!
 //! What it asks of them it asks `global`'s scope database, built from that replay, and `may` over it
@@ -19,11 +19,11 @@ use serde_json::{Map, Value, json};
 
 pub use one::database::scopes::ScopeDb;
 use one::database::steps;
-use one::database::scopes::{INSTALL, device, object, person};
+use one::database::scopes::{NETWORK, device, object, person};
 use one::entry::{Entry, Hash, Key, Scope, causal, hex, pack, unpack};
 use one::members::{Cuts, Kind, Members, Role, ScopeState, is_member_entry};
 
-/// `global`'s entries a device holds, checked, and the install they're of; and its scope database's steps
+/// `global`'s entries a device holds, checked, and the network they're of; and its scope database's steps
 /// (`one::database::steps`) as far as it read them: once its log is frozen, the database its freeze anchors, checked
 /// here once against the entries, and the steps after, each opened here with the device's own keys and applied only
 /// if it counts. Never what a node says of a step: a node passes them on sealed.
@@ -39,7 +39,7 @@ pub struct Global {
 }
 
 impl Global {
-    /// For the install whose genesis is `root`, or, for a device that's only now joined, whichever one genesis the
+    /// For the network whose genesis is `root`, or, for a device that's only now joined, whichever one genesis the
     /// first entries it's given hold.
     pub fn new(root: Option<Hash>) -> Global {
         Global { root, entries: BTreeMap::new(), truth: None, looked: 0, log: None }
@@ -61,7 +61,7 @@ impl Global {
     }
 
     /// Takes step `at`, the next, as this device opened it (none for one that will never be a step): before the log is
-    /// frozen, the freeze if the install's recovery key signed it (`steps::claimed`), judged and checked against
+    /// frozen, the freeze if the network's recovery key signed it (`steps::claimed`), judged and checked against
     /// `global`'s log past the end it names (`with_log`); after, applied if it counts. Anything else shaped like a
     /// freeze is passed over, its log never read. Fails at a freeze the recovery key signed that doesn't check out or
     /// whose log isn't here, so it's never passed over.
@@ -107,7 +107,7 @@ impl Global {
     }
 
     /// Every key the entries this device holds, and those in `global`'s log as read from its steps, say was ever the
-    /// install's recovery key (`steps::recovery_keys`): only a freeze one of them signed is looked at.
+    /// network's recovery key (`steps::recovery_keys`): only a freeze one of them signed is looked at.
     fn recovery(&self) -> steps::Recovery {
         let read = self.log.iter().flat_map(|l| l.entries(l.last()));
         steps::recovery_keys(self.root, self.entries.values().chain(read))
@@ -339,7 +339,7 @@ impl Global {
         steps::forks(&self.entries.values().cloned().collect::<Vec<_>>())
     }
 
-    /// The install's genesis, once known.
+    /// The network's genesis, once known.
     pub fn root(&self) -> Option<Hash> {
         self.root
     }
@@ -350,7 +350,7 @@ impl Global {
     }
 
     /// Adds entries already checked as from anyone (`Entry::decode`): refused, all of them, if one isn't of `global`,
-    /// or starts another install than this one.
+    /// or starts another network than this one.
     pub fn add_entries(&mut self, entries: Vec<Entry>) -> Result<()> {
         for e in &entries {
             ensure!(e.scope() == Scope::Global, "a node gave an entry of {} as one of everyone's", e.log());
@@ -360,11 +360,11 @@ impl Global {
             Some(root) => root,
             None => match geneses.as_slice() {
                 [only, rest @ ..] if rest.iter().all(|g| g == only) => *only,
-                [] => bail!("those aren't any install's entries: none starts it"),
-                _ => bail!("those entries start more than one install"),
+                [] => bail!("those aren't any network's entries: none starts it"),
+                _ => bail!("those entries start more than one network"),
             },
         };
-        ensure!(geneses.iter().all(|g| *g == root), "those entries are another install's, not {YOURS}'s");
+        ensure!(geneses.iter().all(|g| *g == root), "those entries are another network's, not {YOURS}'s");
         self.root = Some(root);
         for e in entries {
             self.entries.entry(e.hash()).or_insert(e);
@@ -389,7 +389,7 @@ impl Global {
 
     /// The members, replayed as a node replays them: in causal order, each entry counting only as `one::members`
     /// says, a device that signed two entries at one seq cut from there and removed. Refused if they aren't the
-    /// install's, or its genesis isn't among them.
+    /// network's, or its genesis isn't among them.
     pub fn members(&self) -> Result<Members> {
         let Some(root) = self.root else { bail!("no entries of {YOURS} yet") };
         let forks = self.forks();
@@ -429,7 +429,7 @@ fn now() -> u64 {
 /// - `devices`: each listed now, `{ key, seal, user, name, roles, passkey, device }`, and the Cloudflare node as
 ///   `{ key, seal, roles: ["compute"] }`
 /// - `removed`: the keys taken out, or turned down before they were listed, which are never sealed anything again
-/// - `sign_in_clients`: the OIDC clients the install's people sign in with, its setting (`sign_in_proof::CLIENTS`)
+/// - `sign_in_clients`: the OIDC clients the network's people sign in with, its setting (`sign_in_proof::CLIENTS`)
 /// - `openers`: each scope's `{ key, seal }` its epochs are sealed to
 /// - `runs_for`: each node's scopes whose calls it runs: the only nodes handed a scope's keys
 /// - `epochs`: each scope's newest epoch `n` and every epoch's hash
@@ -482,8 +482,8 @@ pub fn view_of(db: &ScopeDb) -> Result<Value> {
                 "nodes": nodes.iter().filter(|(k, _)| db.serves(k, u)).map(|(k, _)| hex(k)).collect::<Vec<_>>(),
                 "runs_until_chosen": db.runs_until_chosen(u).iter().map(hex).collect::<Vec<_>>(),
                 "approves": people.iter().filter(|of| db.may(u, "add-devices", &person(of))).collect::<Vec<_>>(),
-                "invites": db.may(u, "invite", INSTALL),
-                "removes_people": db.may(u, "remove", INSTALL),
+                "invites": db.may(u, "invite", NETWORK),
+                "removes_people": db.may(u, "remove", NETWORK),
                 "removes": listed.iter().filter(|d| db.may(u, "remove", &device(&d.key))).map(|d| hex(&d.key)).collect::<Vec<_>>(),
                 "keeps": keeps,
                 "sign_ins": db.sign_ins(u),
@@ -513,12 +513,12 @@ mod tests {
 
     /// Signs entries of `global`, each after every entry before it.
     #[derive(Default)]
-    struct Install {
+    struct Network {
         entries: Vec<Entry>,
         heads: HashMap<Key, Head>,
     }
 
-    impl Install {
+    impl Network {
         fn write(&mut self, key: &SigningKey, user: &str, content: Content) {
             let me = key.verifying_key().to_bytes();
             let previous = self.entries.iter().filter(|e| e.author() != me).map(Entry::hash).collect();
@@ -537,7 +537,7 @@ mod tests {
         let (mac, phone, boxed, laptop, bobs_box, carols, cloudflare_node) = (key(1), key(2), key(3), key(4), key(5), key(6), key(7));
         let at = |k: &SigningKey| Endpoint::of(k);
         let hash = |c: char| c.to_string().repeat(64);
-        let mut i = Install::default();
+        let mut i = Network::default();
         i.write(&mac, ANDRE, members::genesis("Home", ANDRE, "Andre", &at(&mac), "mac", &[Kind::Client], &[9; 32], &hash('e')));
         i.write(&mac, ANDRE, members::device(&at(&phone), ANDRE, "phone", &[Kind::Client], None));
         i.write(&mac, ANDRE, members::device(&at(&boxed), ANDRE, "box", &[Kind::Compute], None));
@@ -558,7 +558,7 @@ mod tests {
         let mut g = Global::new(None);
         g.add_entries(i.entries.clone()).unwrap();
         let m = g.members().unwrap();
-        assert!(m.user(BOB).is_some() && m.removed_user(CAROL) && m.machine(&phone.verifying_key().to_bytes()).is_none(), "the install is as written");
+        assert!(m.user(BOB).is_some() && m.removed_user(CAROL) && m.machine(&phone.verifying_key().to_bytes()).is_none(), "the network is as written");
         let nodes_: Vec<Key> = m.computes().map(|c| c.key).chain(m.cloudflare_node()).collect();
 
         // What a browser looks up is what replay says.
@@ -600,7 +600,7 @@ mod tests {
     fn a_device_behind_the_log_still_takes_the_recovery_key_s_freeze() {
         let key = |n: u8| SigningKey::from_bytes(&[n; 32]);
         let (mac, r1, r2) = (key(1), key(9), key(8));
-        let mut i = Install::default();
+        let mut i = Network::default();
         i.write(&mac, ANDRE, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &r1.verifying_key().to_bytes(), &"e".repeat(64)));
         i.write(&mac, ANDRE, members::gate());
         let held = i.entries.clone();
@@ -631,7 +631,7 @@ mod tests {
         let key = |n: u8| SigningKey::from_bytes(&[n; 32]);
         let (mac, laptop) = (key(1), key(2));
         let (epoch, app): ([u8; 32], [u8; 32]) = ([4; 32], [5; 32]);
-        let mut i = Install::default();
+        let mut i = Network::default();
         i.write(&mac, ANDRE, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[9; 32], &one::keys::epoch_hash(&epoch)));
         i.write(&mac, ANDRE, members::device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Member))));
         let root = i.entries[0].hash();
@@ -647,14 +647,14 @@ mod tests {
         assert!(g.members().unwrap().user(BOB).is_some(), "who's who from the bucket");
         // Another epoch key, and the node's key sealed under it, opening a log of the node's own.
         let (other, mal) = ([6; 32], key(3));
-        let mut theirs = Install::default();
+        let mut theirs = Network::default();
         theirs.write(&mal, ANDRE, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mal), "mac", &[Kind::Client], &[9; 32], &one::keys::epoch_hash(&other)));
         let keys: one::db::Keys = [(1, one::cloudflare::database_key(&app, one::log::NAME))].into();
         let name = one::db::step_name(&one::log::prefix("global"), 1);
         let forged = json!({ "entries": { "steps": [{ "at": 1, "sealed": data_encoding::BASE64URL_NOPAD.encode(&one::log::seal(&keys, &name, &pack(&[&theirs.entries[0]])).unwrap()) }] } });
         let apps = BTreeMap::from([(1, one::cloudflare::seal_app_key(&other, one::members::APP, &app))]);
         let mut g = Global::new(Some(root));
-        assert!(g.add_sealed(&forged, &BTreeMap::from([(1, other)]), &apps).is_err(), "not a log of another install's");
+        assert!(g.add_sealed(&forged, &BTreeMap::from([(1, other)]), &apps).is_err(), "not a log of another network's");
         // The log's own steps, opened, but with an epoch key that isn't the one the genesis made.
         let mut g = Global::new(Some(root));
         assert!(g.add_sealed(&given, &BTreeMap::from([(1, other)]), &apps).is_err(), "nor with a key the entries didn't make");
@@ -671,7 +671,7 @@ mod tests {
         let pk = |k: &SigningKey| k.verifying_key().to_bytes();
         let (bobs, soon) = (Scope::User(BOB.into()), u64::MAX / 2);
         let keys = BTreeMap::from([(1, "b".repeat(64))]);
-        let mut i = Install::default();
+        let mut i = Network::default();
         i.write(&mac, ANDRE, members::genesis("Home", ANDRE, "Andre", &at(&mac), "mac", &[Kind::Client], &[9; 32], &"e".repeat(64)));
         i.write(&mac, ANDRE, members::device(&at(&hacked), ANDRE, "box", &[Kind::Compute], None));
         i.write(&mac, ANDRE, members::device(&at(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Member))));

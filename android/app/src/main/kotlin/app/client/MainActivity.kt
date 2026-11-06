@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /** `<cli>://signed-in/?code=…`: back from signing in; `<cli>://open/…`: a home-screen widget, tapped; a link to the
-     *  install's address (Links), or the same as `<cli>://<path>`. */
+     *  network's address (Links), or the same as `<cli>://<path>`. */
     private fun open(uri: Uri) {
         if (uri.scheme == "https" || uri.scheme == "http") return Links.open(this, store, uri)
         if (uri.scheme != BuildConfig.CLI) return
@@ -136,7 +136,7 @@ private fun Root(store: Store) {
     }
 }
 
-/** Signing in: where the install is (unless this build knows), or an invite link to it, then the passkey. */
+/** Signing in: where the network is (unless this build knows), or an invite link to it, then the passkey. */
 @Composable
 private fun Welcome(store: Store) {
     val p = LocalPalette.current

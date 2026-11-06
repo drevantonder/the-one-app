@@ -28,13 +28,13 @@ fn every_command() -> String {
                                        your passkey in a browser, and they approve this computer's code
   {CLI} sign-out                       sign this machine out, and take it out of your devices if it's one
   {CLI} create <name> --as <your name> [--user <id>]
-                                       create an install, with you as its first admin (--user: who you were in one
+                                       create a network, with you as its first admin (--user: who you were in one
                                        it replaces, so your sign-in is still yours)
   {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
   {CLI} join <code>                    join {YOURS} with a pairing code
   {CLI} rename <name>                  rename this device
   {CLI} role <user> admin|member       (admins)
-  {CLI} settings [<name> <value>|--default]   the install's settings (admins set them)
+  {CLI} settings [<name> <value>|--default]   the network's settings (admins set them)
   {CLI} switch check                   before the switch to the scope database: whether the bucket holds any of
                                        its steps yet, or a freeze in everyone's log (reads only)
   {CLI} groups                         who's in {YOURS}, then every group: who's in it, as admin or member,
@@ -81,33 +81,32 @@ fn every_command() -> String {
                                        <id> says how it went
   {CLI} vault requests                 the requests waiting for you; vault answer <id> [--item <id> | --decline]
                                        answers one, a new item's values on stdin (one line, or a JSON object)
-  {CLI} cloudflare                     the install's Workers on Cloudflare, as this machine has them: their addresses and settings
+  {CLI} cloudflare                     the network's Workers on Cloudflare, as this machine has them: their addresses and settings
   {CLI} cloudflare serve [--address <url>]
-                                       run the install's Workers in workerd (sign-in, the relay, the URL signer, and the gateway people reach
-                                       at the install's address) on this machine; the first time, with that address
+                                       run the network's Workers in workerd (sign-in, the relay, the URL signer, and the gateway people reach
+                                       at the network's address) on this machine; the first time, with that address
   {CLI} cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]
-                                       deploy the install's Workers to Cloudflare, with an API token that
+                                       deploy the network's Workers to Cloudflare, with an API token that
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
-                                       domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
+                                       domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless
                                        --address says, for good: passkeys belong to it), or at its workers.dev address;
                                        and the Cloudflare node with it, once cloudflare node deploy put it there; beside a
-                                       node of the install, whose devices its relay takes, unless --new
+                                       node of the network, whose devices its relay takes, unless --new
   {CLI} cloudflare invite <name> [--admin] [--user <id>] [--email <email>]
-                                       a link that lets someone join, once and for a few days, as who they'll be in the
-                                       install (--user, or this machine's person if they're called that; else someone
+                                       a link that lets someone join, once and for a few days, as who they'll be in the network (--user, or this machine's person if they're called that; else someone
                                        new, as devices invite does), signed with this machine's key, an admin's
                                        device's; where people sign in with Google, --email is the account they sign up
                                        with. Nobody joins uninvited, the first person too
   {CLI} cloudflare node deploy [--account <id>]
-                                       put the install's Cloudflare node in its Workers' Cloudflare account (a node as
+                                       put the network's Cloudflare node in its Workers' Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over
                                        iroh when none of your machines answers
   {CLI} cloudflare set <setting> <value>  change one: sign-in-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
                                        android (the SHA-256 fingerprints of the certificates the Android app is signed
                                        with, comma-separated, or -: links to the address open the app)
   {CLI} cloudflare use <address>
-                                       point this install at its Workers: its nodes take sign-ins made at the address
-  {CLI} storage                        where the install's data is kept
+                                       point this network at its Workers: its nodes take sign-ins made at the address
+  {CLI} storage                        where the network's data is kept
   {CLI} storage move --endpoint <url> --bucket <name> [--region <r>]
                                        move it to S3-compatible storage (R2, S3, GCS, MinIO), whose key is the
                                        Workers' BUCKET: every device reaches it through the URL signer, and moves there
@@ -123,7 +122,7 @@ fn every_command() -> String {
   {CLI} backups check [--folder <path>]
                                        restore each place's newest backup into a throwaway copy, check every entry and
                                        blob, and say what came back; with --folder, any backup on a disk, opened with
-                                       the recovery key on stdin, with or without an install here
+                                       the recovery key on stdin, with or without a network here
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
   {CLI} services                       what each of your devices can run, each on or off, and what it's doing
@@ -159,7 +158,7 @@ fn every_command() -> String {
   {CLI} update                         build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
   {CLI} publish [binary]               sign and publish a build you made; every device on its platform updates
-  {CLI} file put <file>                keep a file in the install, for apps and agents; prints its hash
+  {CLI} file put <file>                keep a file in the network, for apps and agents; prints its hash
   {CLI} file get <hash> <file>         get a kept file from this device or another
   {CLI} version                        this build
   {CLI} skills [<name> [<file>]]       the skills agents load: {NAME}'s own (how to connect, the rules, which MCP to
@@ -170,7 +169,7 @@ fn every_command() -> String {
   {CLI} mcp [--code]                   the local MCP server, over stdio, for agents: every tool, or with --code, search and execute
   {CLI} help [all]                     what to start with; with all, this
 
-{NAME} holds one install. For another context, run that context's own app."
+{NAME} holds one network. For another context, run that context's own app."
     )
 }
 
@@ -214,26 +213,26 @@ else. Data goes to stdout, messages to stderr.
     )
 }
 
-/// `settings` with the install's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
+/// `settings` with the network's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
 /// node on this machine knows them, for the relay to take only them; none when no node answers here, which `needed`
 /// refuses, since that relay would take no one.
 fn devices_here(settings: one::cloudflare::Settings, needed: bool) -> Result<one::cloudflare::Settings> {
     let state = get("/v1/state").unwrap_or_default();
-    let install = &state["install"];
-    let admin = |user: &Value| install["users"].as_array().into_iter().flatten().any(|u| u["id"] == *user && u["role"] == "admin");
+    let network = &state["install"];
+    let admin = |user: &Value| network["users"].as_array().into_iter().flatten().any(|u| u["id"] == *user && u["role"] == "admin");
     let mut devices: Vec<Value> = ["devices", "clients"]
         .iter()
-        .flat_map(|list| install[*list].as_array().into_iter().flatten())
+        .flat_map(|list| network[*list].as_array().into_iter().flatten())
         .filter(|d| d["key"].as_str().is_some_and(|k| k.len() == 64))
         .map(|d| {
             let roles: Vec<&str> = d["roles"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             json!({ "key": d["key"], "role": roles.join(" "), "admin": admin(&d["user"]) })
         })
         .collect();
-    anyhow::ensure!(!needed || !devices.is_empty(), "no node of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new install, whose relay takes devices once this runs again beside one");
-    // The install's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
-    devices.extend(install["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
-    let genesis = install["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
+    anyhow::ensure!(!needed || !devices.is_empty(), "no node of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new network, whose relay takes devices once this runs again beside one");
+    // The network's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
+    devices.extend(network["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
+    let genesis = network["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
     Ok(one::cloudflare::Settings { devices, genesis, ..settings })
 }
 
@@ -391,7 +390,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["settings"] => {
             let state = get("/v1/state")?;
-            for (name, value) in state["install"]["settings"].as_object().context("not in an install yet")? {
+            for (name, value) in state["install"]["settings"].as_object().context("not in a network yet")? {
                 println!("{name} = {value}");
             }
         }
@@ -429,7 +428,7 @@ fn run(args: Vec<String>) -> Result<()> {
             // The ceremony that freezes the log, so the scope database is the truth, signed by the recovery key read
             // from a file here and never printed (`Node::switch`): devices not updated yet are told to from then on.
             takes_only(&flags, &["recovery-key"])?;
-            let at = flags.get("recovery-key").and_then(Value::as_str).context("give --recovery-key <file> (or - to read it from stdin): the file the install's recovery key is in")?;
+            let at = flags.get("recovery-key").and_then(Value::as_str).context("give --recovery-key <file> (or - to read it from stdin): the file the network's recovery key is in")?;
             post("/v1/switch", json!({ "recovery": recovery_key_from(at, "cli")? }))?;
             println!("Who's who is the scope database now. A device not updated yet is told to update.");
         }
@@ -507,7 +506,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 Ok(settings) => settings,
                 Err(err) => {
                     one::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
-                    let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the install, with --address https://…")?;
+                    let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the network, with --address https://…")?;
                     let settings = one::cloudflare::Settings::new(NAME, url);
                     settings.save()?;
                     settings
@@ -526,7 +525,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     one::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
                     // Workers already in the account were made elsewhere: new settings here would replace their secrets.
                     let made = cf.scripts()?.contains_key(&one::cloudflare::worker_name("auth"));
-                    anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has this install's Workers already, made on another machine: deploy them there, where their settings are, or bring them here ({} and .env.local). --new replaces them, and everything they hold can't be read again", one::cloudflare::Settings::path().display());
+                    anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has this network's Workers already, made on another machine: deploy them there, where their settings are, or bring them here ({} and .env.local). --new replaces them, and everything they hold can't be read again", one::cloudflare::Settings::path().display());
                     let domain = flags.get("domain").and_then(Value::as_str).map(|d| d.trim_matches('.').to_string());
                     let (domain, address) = match domain {
                         Some(domain) => (domain.clone(), format!("https://{CLI}.{domain}")),
@@ -581,7 +580,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 settings.cloudflare_node_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
                 settings.set_secret("CLOUDFLARE_NODE_KEY", &settings.cloudflare_node_key)?;
             }
-            // The relay it deploys again binds the Cloudflare node's endpoint only for an install that has one.
+            // The relay it deploys again binds the Cloudflare node's endpoint only for a network that has one.
             let was = std::mem::replace(&mut settings.cloudflare_node, true);
             one::cloudflare::node::deploy(&cf, &settings)?;
             if !was {
@@ -594,7 +593,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["cloudflare", "invite", name] => {
             let settings = one::cloudflare::Settings::load()?;
-            // This machine's person, inviting themselves to their own install, is who they are in it.
+            // This machine's person, inviting themselves to their own network, is who they are in it.
             let user = match flags.get("user").and_then(Value::as_str) {
                 Some(user) => Some(user.to_string()),
                 None => get("/v1/state").ok().filter(|s| s["user"]["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
@@ -645,14 +644,14 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["cloudflare", "use", address] => {
             post("/v1/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
-            println!("This install is at {address}: its nodes take sign-ins made there.");
+            println!("This network is at {address}: its nodes take sign-ins made there.");
         }
         ["storage"] => {
             let s = get("/v1/storage")?;
             match s["kind"].as_str() {
-                Some("folder") => println!("The install's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url> --bucket <name>.", s["device"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
-                Some(_) => println!("The install's data is kept in {} at {}.", s["where"].as_str().unwrap_or(""), s["endpoint"].as_str().unwrap_or("")),
-                None => println!("This device can't reach the install's data: an admin moves it to S3-compatible storage with {CLI} storage move."),
+                Some("folder") => println!("The network's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url> --bucket <name>.", s["device"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
+                Some(_) => println!("The network's data is kept in {} at {}.", s["where"].as_str().unwrap_or(""), s["endpoint"].as_str().unwrap_or("")),
+                None => println!("This device can't reach the network's data: an admin moves it to S3-compatible storage with {CLI} storage move."),
             }
         }
         ["storage", "move"] => {
@@ -662,10 +661,10 @@ fn run(args: Vec<String>) -> Result<()> {
             let r = post("/v1/storage", json!({ "endpoint": endpoint, "bucket": bucket, "region": get("region") }))?;
             print!("{}", tried_said(&r));
             if r["kept"] == true {
-                println!("Every device moves the install's data there now.");
+                println!("Every device moves the network's data there now.");
             }
             if r["moving"] == true {
-                println!("This device is putting what it holds there, and keeps the install's data there from now on. Do the same on each of your other devices.");
+                println!("This device is putting what it holds there, and keeps the network's data there from now on. Do the same on each of your other devices.");
             }
         }
         ["backups"] => {
@@ -994,7 +993,7 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
     Ok(())
 }
 
-/// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the install hasn't one by that
+/// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the network hasn't one by that
 /// name, and deploys it, saying whether this device runs it yet.
 fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     anyhow::ensure!(dir.is_dir(), "no folder {} in {}: give the app's folder", dir.display(), std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default());
@@ -1143,10 +1142,10 @@ fn connection() -> String {
     if i.is_null() {
         return format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it, or {CLI} create <name> --as <your name> starts a new one.");
     }
-    let install = i["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| format!("{YOURS} (still joining)"));
+    let network = i["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| format!("{YOURS} (still joining)"));
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("");
     let ready = if state["device"]["ready"] == true { "" } else { ", catching up" };
-    format!("Connected to {install} as {me}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
+    format!("Connected to {network} as {me}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
 }
 
 /// An HTTP client for this machine's node, as one of its own programs; or, where none runs and this computer is a
@@ -1219,7 +1218,7 @@ fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
     }
 }
 
-/// `sign-in`: this machine signs in at the install's address, as the person who approves its code with their passkey.
+/// `sign-in`: this machine signs in at the network's address, as the person who approves its code with their passkey.
 fn sign_in(flags: &Map<String, Value>) -> Result<()> {
     // Someone new's invite: its link (`<address>/invite#<secret>`), or its secret with --address.
     let invite = flags.get("invite").and_then(Value::as_str).map(|i| match i.split_once("/invite#") {
@@ -1235,7 +1234,7 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         None if !client_device::node_here() => one::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
         None => {
             let state = request(agent().get(format!("http://{}/v1/state", addr())).call())?;
-            state["install"]["settings"]["address"].as_str().context(format!("this install has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
+            state["install"]["settings"]["address"].as_str().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
         }
     };
     let join = (!client_device::node_here()).then(|| client_device::signing_in_for(&address)).transpose()?;
@@ -1283,8 +1282,8 @@ fn post(path: &str, body: Value) -> Result<Value> {
     request(to_node(agent().post(format!("http://{}{path}", addr()))).send_json(&body))
 }
 
-/// For a node in no install yet, which no one is signed in to: a sign-in this CLI kept for its address was another
-/// node's there before, so it isn't sent, and once the node is in an install it's let go.
+/// For a node in no network yet, which no one is signed in to: a sign-in this CLI kept for its address was another
+/// node's there before, so it isn't sent, and once the node is in a network it's let go.
 fn unsigned_post(path: &str, body: Value) -> Result<Value> {
     let r = request(agent().post(format!("http://{}{path}", addr())).send_json(&body))?;
     let _ = one::sign_in::sign_out();
@@ -1509,7 +1508,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         std::process::exit(0)
     });
     let dir = one::home();
-    // A new install's first start makes its home.
+    // A new network's first start makes its home.
     std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
     // Taking over from the node before, an update's, with its socket: it answers until this one is warm.
     let handed = one::handoff::handed(args)?;
@@ -1522,7 +1521,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     let node = Node::start(&dir).await?;
     // Its parts that run as processes of their own, as its entries switch them.
     one::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
-    // Git here reaches the install's repos at their address, as on every computer of its person's.
+    // Git here reaches the network's repos at their address, as on every computer of its person's.
     if !is_try && let Ok(address) = node.address() {
         std::thread::spawn(move || {
             if let Err(err) = git_remote::wire(&address) {
@@ -1648,7 +1647,7 @@ fn stopped() -> Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 
     }))
 }
 
-/// The node's address, listened on. A node of this install already there (one left running outside launchd or systemd
+/// The node's address, listened on. A node of this network already there (one left running outside launchd or systemd
 /// by an earlier build, or started by hand) is stopped first: the one starting is the one to keep, so its supervisor's
 /// node never waits on a stray, and an update's node replaces whatever ran before it.
 async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
@@ -1674,7 +1673,7 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
     pids.retain(|&pid| pid as u32 != std::process::id() && ours(pid));
     anyhow::ensure!(!pids.is_empty(), "{} is taken, and not by {NAME}'s node", addr());
     for &pid in &pids {
-        tracing::warn!("a node of this install was already running (pid {pid}): stopping it, to run this one");
+        tracing::warn!("a node of this network was already running (pid {pid}): stopping it, to run this one");
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
     for tries in 0..100 {
@@ -2086,7 +2085,7 @@ fn cloudflare(flags: &Map<String, Value>, settings: Option<&one::cloudflare::Set
     Ok(one::cloudflare::Cloudflare { api, token, account })
 }
 
-/// Where an install's Workers are, and what they're set to, without their secrets.
+/// Where a network's Workers are, and what they're set to, without their secrets.
 fn cloudflare_said(s: &one::cloudflare::Settings) -> String {
     let mut out = format!("{} on Cloudflare\n  address   {}\n", s.name, s.address);
     if s.sign_in_url.starts_with("http://127.0.0.1") {
@@ -2161,7 +2160,7 @@ fn checked_said(r: &Value) -> String {
         scopes.join("; "),
     );
     if r["databases"] == true {
-        out.push_str("  ✓ every database restores to its newest step, as the install has it\n");
+        out.push_str("  ✓ every database restores to its newest step, as the network has it\n");
     }
     out.push_str(&format!("  ✓ people: {}\n  ✓ apps: {}\n", list("people"), list("apps")));
     if !list("unchecked").is_empty() {
@@ -2170,16 +2169,16 @@ fn checked_said(r: &Value) -> String {
     out
 }
 
-/// Checks a backup on a disk with the recovery key alone, here, without a device: every install it holds.
+/// Checks a backup on a disk with the recovery key alone, here, without a device: every network it holds.
 fn check_folder(folder: &str) -> Result<Value> {
     let mut key = String::new();
     std::io::stdin().read_line(&mut key)?;
     let secret = one::entry::unhex(key.trim()).context("give the recovery key on stdin: 64 hex characters")?;
     let place = one::bucket::Place::Folder(folder.into());
     let mut out = Vec::new();
-    for install in one::backups::installs(&place)? {
-        let keys = one::backups::open_keys(&place, &install, &secret)?;
-        let mut r = one::backups::check(&one::backups::Check { place: &place, install: &install, keys: &keys, root: None, live: None })?.0;
+    for network in one::backups::networks(&place)? {
+        let keys = one::backups::open_keys(&place, &network, &secret)?;
+        let mut r = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None, live: None })?.0;
         r["place"] = json!(folder);
         out.push(r);
     }
@@ -2249,7 +2248,7 @@ fn devices_tool(tool: &str, input: &Map<String, Value>, client: &str) -> Result<
     }
 }
 
-/// The install's recovery key, from the file at `at` on this machine, or stdin for `-` on the command line: never
+/// The network's recovery key, from the file at `at` on this machine, or stdin for `-` on the command line: never
 /// typed into a chat, and never printed.
 fn recovery_key_from(at: &str, client: &str) -> Result<String> {
     let looks_like_key = |t: &str| t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit());

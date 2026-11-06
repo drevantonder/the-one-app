@@ -9,7 +9,7 @@ const HAND_OVER_AGAIN: Duration = Duration::from_secs(150);
 
 impl Node {
     /// Publishes `binary` (a build of this node for `target`, or of `service`'s program, with the release key's
-    /// `signature` over it) as the install's newest release of it.
+    /// `signature` over it) as the network's newest release of it.
     pub async fn publish(&self, binary: &Path, service: Option<&str>, commit: &str, target: &str, committed: u64, signature: &str) -> Result<Release> {
         ensure!(service.is_none_or(crate::members::valid_app_name), "a service's name is lowercase words joined by -");
         let bytes = std::fs::read(binary).with_context(|| format!("read {}", binary.display()))?;

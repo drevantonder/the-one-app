@@ -49,7 +49,7 @@ pub fn page(context: &serde_json::Value, body: &str, own: bool, linked: bool) ->
 fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, linked: bool) -> String {
     let body = if body.is_empty() { MISSING } else { body };
     let mut context = context.clone();
-    // What a person joins, in their words: "your One App", or a workplace's, "the PTC App".
+    // What a person joins, in their words: "your One App network", or a workplace's, "the PTC App network".
     context["config"]["yours"] = crate::config::YOURS.into();
     // The domain whose people join by signing in with Google, for Users to say so.
     if crate::config::SIGN_IN == "google" {

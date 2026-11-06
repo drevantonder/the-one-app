@@ -199,7 +199,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
      *  their devices (or, for someone new, their inviter's) to approve it. */
     private suspend fun join() {
         if (client.connect()) return
-        // Taken out of the install, it's signed out; never in, it asks, and the app is its approval screen, not a page
+        // Taken out of the network, it's signed out; never in, it asks, and the app is its approval screen, not a page
         // or an app's screen, which would only say it can't reach anything, until one of their devices approves it.
         if (client.lost().removed) throw NodeError(REMOVED, signedOut = true)
         code = client.ask()
@@ -213,7 +213,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         phase = Phase.Starting
     }
 
-    /** This phone isn't one of the install's: it starts again at joining. */
+    /** This phone isn't one of the network's: it starts again at joining. */
     private fun lostAccess(removed: Boolean) {
         if (removed) return signedOut(REMOVED)
         if (phase == Phase.Joining) return
@@ -284,7 +284,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         if (state == null && phase != Phase.Joining && (misses >= 2 || System.currentTimeMillis() - started >= 3000)) phase = Phase.Unreachable
     }
 
-    /** Back to the first screen, saying `why` when the install turned this phone away rather than the person signing out. */
+    /** Back to the first screen, saying `why` when the network turned this phone away rather than the person signing out. */
     fun signedOut(why: String? = null) {
         // Already signed out: what was still on its way as it did, which finds itself signed out, says nothing.
         if (phase == Phase.SignedOut && why != null) return

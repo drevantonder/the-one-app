@@ -1,6 +1,6 @@
 //! The client as the native apps call it (Swift, Kotlin, C#): the app keeps its device's key in the Keychain, the
 //! keystore or the Credential Locker, and hands it here at start (`ThisDevice::new`); while it isn't let in yet, it shows
-//! `code()` and asks `wait` every few seconds; then every request to its install's nodes is `fetch`, over iroh. Each
+//! `code()` and asks `wait` every few seconds; then every request to its network's nodes is `fetch`, over iroh. Each
 //! call waits for its answer, so apps call from a thread of their own, never their main one.
 
 use std::sync::{Arc, LazyLock, Mutex};
@@ -18,7 +18,7 @@ fn run<T>(work: impl Future<Output = T>) -> T {
 #[derive(Debug, uniffi::Error)]
 pub enum OneError {
     Failed { reason: String, sent: bool },
-    /// The install doesn't list this device, yet or any more: the app shows its own screen to approve it, or its sign-in.
+    /// The network doesn't list this device, yet or any more: the app shows its own screen to approve it, or its sign-in.
     NotLetIn,
 }
 
@@ -62,7 +62,7 @@ pub fn device_join(secret: Vec<u8>) -> Result<String, OneError> {
 
 /// A note pushed to this device, opened: what to show, what a tap opens (`app`, `screen`, its `params` as JSON), the
 /// number for the app's icon, and an `action` (JSON) its device checks itself, like a device asking to join; `by` is
-/// the key (hex) of the install's device that sent it, none for the install's Workers.
+/// the key (hex) of the network's device that sent it, none for the network's Workers.
 #[derive(uniffi::Record)]
 pub struct Note {
     pub id: String,
@@ -116,13 +116,13 @@ pub struct KeptAnswer {
     pub at: i64,
 }
 
-/// This app as a device of its person: `ThisDevice`, as apps list the install's other devices as `Device`.
+/// This app as a device of its person: `ThisDevice`, as apps list the network's other devices as `Device`.
 #[derive(uniffi::Object)]
 pub struct ThisDevice(one_client::Device);
 
 #[uniffi::export]
 impl ThisDevice {
-    /// The device whose key is `secret`, of the install at `address`, keeping what it learns in the folder `dir`.
+    /// The device whose key is `secret`, of the network at `address`, keeping what it learns in the folder `dir`.
     #[uniffi::constructor]
     pub fn new(secret: Vec<u8>, address: String, dir: String) -> Result<Arc<ThisDevice>, OneError> {
         let secret: [u8; 32] = secret.try_into().map_err(|_| failed("a device's key is 32 bytes"))?;
@@ -156,7 +156,7 @@ impl ThisDevice {
         Ok(run(self.0.wait(&token))?)
     }
 
-    /// Whether the install took this device out: this key was in, and the install's relay lets it in no more. A node
+    /// Whether the network took this device out: this key was in, and the network's relay lets it in no more. A node
     /// that doesn't list it, or a relay that doesn't answer, says nothing of it.
     pub fn removed(&self) -> bool {
         run(self.0.removed())
@@ -167,7 +167,7 @@ impl ThisDevice {
         Ok(run(self.0.connect())?)
     }
 
-    /// A request to its install's nodes' local API (`/v1/…`), as its person, with the keys it needs.
+    /// A request to its network's nodes' local API (`/v1/…`), as its person, with the keys it needs.
     pub fn fetch(&self, method: String, path: String, headers: Vec<Header>, body: Vec<u8>) -> Result<Arc<Response>, OneError> {
         let headers = headers.into_iter().map(|h| (h.name, h.value)).collect();
         let response = run(self.0.fetch(&method, &path, headers, body))?;
@@ -175,7 +175,7 @@ impl ThisDevice {
         Ok(Arc::new(Response { status: response.status, headers, body: Mutex::new(Some(response.body)) }))
     }
 
-    /// Registers where a push service reaches this device with the install's push Worker: `via` apns, fcm, wns or
+    /// Registers where a push service reaches this device with the network's push Worker: `via` apns, fcm, wns or
     /// webpush, `address` its token or channel, and for APNs `env` (sandbox or production) and `topic` (the app's bundle
     /// id). Each launch, since a token can change.
     pub fn register_push(&self, via: String, address: String, env: String, topic: String) -> Result<(), OneError> {

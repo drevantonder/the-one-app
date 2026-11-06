@@ -4,7 +4,7 @@ import Security
 
 /// This app as a device of its person (client/ffi, the library every native app shares): its own key, made here and
 /// kept in the Keychain (`DeviceKeys`), one for each person at each address. It gets in when one of their devices approves the code it
-/// shows; then every request reaches their install's nodes over iroh, as this device, with the keys each needs.
+/// shows; then every request reaches their network's nodes over iroh, as this device, with the keys each needs.
 /// Signing in only says who's asking.
 actor DeviceClient {
     static let shared = DeviceClient()
@@ -66,7 +66,7 @@ actor DeviceClient {
         return try await off { try device.wait(token: token) }
     }
 
-    /// A request to the person's nodes' API (`/v1/…`). Once this device isn't one of the install's, `lost`.
+    /// A request to the person's nodes' API (`/v1/…`). Once this device isn't one of the network's, `lost`.
     func fetch(_ method: String, _ path: String, body: Data?, accept: String? = nil) async throws -> Response {
         let device = try await current()
         let headers = [body.map { _ in Header(name: "content-type", value: "application/json") }, accept.map { Header(name: "accept", value: $0) }].compactMap { $0 }
@@ -77,7 +77,7 @@ actor DeviceClient {
         }
     }
 
-    /// Registers this device's APNs token with the install's push Worker, which carries each note sealed to this device
+    /// Registers this device's APNs token with the network's push Worker, which carries each note sealed to this device
     /// through Apple's service for `env` (sandbox or production) to this app (`topic`, its bundle id).
     func registerPush(token: String, env: String) async throws {
         let device = try await current()
@@ -100,7 +100,7 @@ actor DeviceClient {
         return try await off { device.traces() }
     }
 
-    /// What it means that this device isn't one of the install's: if it was, it's been taken out, which is the sign-in's
+    /// What it means that this device isn't one of the network's: if it was, it's been taken out, which is the sign-in's
     /// to say, as it signs out; if it never was, it's waiting to be approved, which its approval screen says.
     func lost(_ known: ThisDevice? = nil) async -> Error {
         let device: ThisDevice
@@ -145,7 +145,7 @@ actor DeviceClient {
     }
 }
 
-/// This device isn't one of the install's: not yet, or no more. Not an app's problem: the window shows its own
+/// This device isn't one of the network's: not yet, or no more. Not an app's problem: the window shows its own
 /// approval screen (`Store.Phase.joining`), or the sign-in.
 struct NotLetIn: LocalizedError {
     var errorDescription: String? { String(localized: "This device hasn’t been let in yet.") }

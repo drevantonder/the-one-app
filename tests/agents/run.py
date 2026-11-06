@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """How a fresh agent gets on with the app: every prompt in prompts.json, each in a new OpenCode session, in three
-setups (mcp: the MCP server only; cli: the CLI only; both), against throwaway installs beside the real one.
+setups (mcp: the MCP server only; cli: the CLI only; both), against throwaway networks beside the real one.
 
     python3 tests/agents/run.py [--setups mcp,cli,both] [--prompts id,...] [--repeat N] [--model M] [--one PATH] [--out DIR]
 
-Each setup gets its own install: a node run with HOME set to a sandbox and its own port (ONE_ADDR), and the node itself
+Each setup gets its own network: a node run with HOME set to a sandbox and its own port (ONE_ADDR), and the node itself
 writes the harness's AGENTS.md, skills, board plugin and MCP entry there, exactly as on a real device (src/agents.rs).
 The setups differ only in what the agent can reach: mcp takes the CLI off PATH, cli switches the MCP entry off. Seeded
-with the real install's AGENTS.md and skills (read only), made-up board posts, two repos and a group; no Google,
+with the real network's AGENTS.md and skills (read only), made-up board posts, two repos and a group; no Google,
 WhatsApp or Messenger account, so nothing reaches a real person.
 
 It all runs inside a network and mount namespace of its own (pasta, unshare): the internet and Ollama, but not the
 tailnet, the LAN or the real node, and the real home read-only. Agents asked about "my servers" otherwise go and ssh
-into them, through the test install's shell or their own. Everything is deleted at the end but the transcripts.
+into them, through the test network's shell or their own. Everything is deleted at the end but the transcripts.
 
 Writes <out>/<setup>/<prompt>.jsonl (OpenCode's events), .md (readable) and <out>/summary.json (metrics and checks).
 Not part of `cargo test`: it needs OpenCode, pasta, Ollama or the network.
@@ -46,7 +46,7 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-class Install:
+class Network:
     """A throwaway node and its sandbox: HOME, the agent's harness folders, a port of its own."""
 
     def __init__(self, setup, port, root, one):
@@ -110,7 +110,7 @@ class Install:
         self.run("group", "create", "Family")
         self.run("install", "board", "--scope", "Family")
         t = now_ms()
-        # The posts name only this install's own device, so what agents find on the board matches what they can reach.
+        # The posts name only this network's own device, so what agents find on the board matches what they can reach.
         here = next(l.split("●", 1)[1].split("(this one)")[0].strip() for l in self.run("status").splitlines() if "(this one)" in l)
         topics = [
             {"path": "the-one-app", "description": "The One App: Andre's hub of apps and agents across his devices"},
@@ -174,7 +174,7 @@ class Install:
         cfg.write_text(json.dumps(data, indent=2) + "\n")
 
     def checks(self, check, forbidden, events):
-        """What the install says after a run, against what the prompt should have done."""
+        """What the network says after a run, against what the prompt should have done."""
         out = {}
         if "board_recall" in check:
             r = self.run("board", "recall", check["board_recall"], check=False)
@@ -204,7 +204,7 @@ class Install:
 
 
 def real_agents():
-    """The real install's AGENTS.md and skills, as its Agents app syncs them: read only."""
+    """The real network's AGENTS.md and skills, as its Agents app syncs them: read only."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(f"{CLI.upper()}_")}
     get = lambda *a: json.loads(subprocess.run([CLI, *a], env=env, capture_output=True, text=True, check=True).stdout or "null")
     text = subprocess.run([CLI, "agents", "get"], env=env, capture_output=True, text=True, check=True).stdout
@@ -362,7 +362,7 @@ def sandbox(root):
 
 
 def outer(args, root):
-    """Reads what only the real install has, then runs the suite again inside pasta's namespaces, and keeps its results."""
+    """Reads what only the real network has, then runs the suite again inside pasta's namespaces, and keeps its results."""
     if shutil.which("pasta") is None:
         sys.exit("needs pasta (passt), for a network of its own: apt install passt")
     if root.exists():
@@ -405,7 +405,7 @@ def main():
     ap.add_argument("--model", default="ollama/gemma4:12b")
     ap.add_argument("--one", default=shutil.which(CLI, path=str(REAL_HOME / ".local/bin")) or shutil.which(CLI),
                     help="the build under test (default: the installed one, which the real MCP entry runs)")
-    ap.add_argument("--agents-md", type=pathlib.Path, help="seed this AGENTS.md rather than the real install's, to compare with an earlier run")
+    ap.add_argument("--agents-md", type=pathlib.Path, help="seed this AGENTS.md rather than the real network's, to compare with an earlier run")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--repeat", type=int, default=1, help="run each prompt this many times per setup (pass^k)")
     ap.add_argument("--keep", action="store_true", help="leave the sandboxes on disk")
@@ -423,19 +423,19 @@ def main():
     one = root / "bin" / CLI
     print(subprocess.run([one, "version"], capture_output=True, text=True).stdout.strip(), "with", args.model, flush=True)
     real = json.loads((root / "agents.json").read_text())
-    installs = [Install(s, SETUPS[s], root, str(one)) for s in args.setups.split(",")]
+    networks = [Network(s, SETUPS[s], root, str(one)) for s in args.setups.split(",")]
     out = args.out
     args.out = root / "out"
     results = []
     try:
-        with concurrent.futures.ThreadPoolExecutor(len(installs)) as pool:
-            list(pool.map(lambda i: (i.up(), i.seed(real["text"], real["skills"], args.model)), installs))
-            print(f"installs up: {', '.join(f'{i.setup} on {i.addr}' for i in installs)}", flush=True)
+        with concurrent.futures.ThreadPoolExecutor(len(networks)) as pool:
+            list(pool.map(lambda i: (i.up(), i.seed(real["text"], real["skills"], args.model)), networks))
+            print(f"networks up: {', '.join(f'{i.setup} on {i.addr}' for i in networks)}", flush=True)
             # Each setup runs its prompts one after another, in order, the setups side by side.
-            for rs in pool.map(lambda i: [run_one(i, p, args, n) for p in prompts for n in range(args.repeat)], installs):
+            for rs in pool.map(lambda i: [run_one(i, p, args, n) for p in prompts for n in range(args.repeat)], networks):
                 results += [r for r in rs if r]
     finally:
-        for i in installs:
+        for i in networks:
             i.down()
         root.chmod(0o755)
     args.out.mkdir(parents=True, exist_ok=True)

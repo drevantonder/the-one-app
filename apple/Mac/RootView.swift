@@ -89,8 +89,8 @@ private struct MainView: View {
     }
 }
 
-/// Signed out: your One App's address, or an invite link to it, then your passkey, as on the iPhone. A Mac whose node
-/// is in no install yet joins one first, with a pairing code from another of your computers.
+/// Signed out: your One App network's address, or an invite link to it, then your passkey, as on the iPhone. A Mac whose node
+/// is in no network yet joins one first, with a pairing code from another of your computers.
 private struct WelcomeView: View {
     @Environment(Mac.self) private var mac
     @Environment(Store.self) private var store
@@ -101,7 +101,7 @@ private struct WelcomeView: View {
 
     private var given: String { address.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// "your One App", or a workplace's, "the PTC App" (project.sh).
+    /// "your One App network", or a workplace's, "the PTC App network" (project.sh).
     private var yours: String { Bundle.main.object(forInfoDictionaryKey: "Yours") as? String ?? "" }
     private var whose: String { yours.prefix(1).uppercased() + yours.dropFirst() }
 

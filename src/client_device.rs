@@ -43,7 +43,7 @@ pub fn node_here() -> bool {
 
 static KEPT: Mutex<Option<Arc<Device>>> = Mutex::new(None);
 
-/// This computer's device, if it was signed in as one, for the install it was signed in at.
+/// This computer's device, if it was signed in as one, for the network it was signed in at.
 fn kept() -> Option<Arc<Device>> {
     let mut kept = KEPT.lock().unwrap();
     if kept.is_none() {
@@ -82,11 +82,11 @@ fn needs_node(path: &str) -> String {
     format!("this computer is one of your devices, not one that runs {NAME} ({path} is for {NAME} running here, as {CLI}d): do it on a computer that runs it")
 }
 
-/// Makes this computer one of its person's devices, at the install at `address`, where it's signed in: at once if it
+/// Makes this computer one of its person's devices, at the network at `address`, where it's signed in: at once if it
 /// already is, else it asks, shows its code, and waits for a device of theirs to approve it.
 pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
     let address = address.trim_end_matches('/');
-    // One kept for another install starts over, with a new key.
+    // One kept for another network starts over, with a new key.
     if std::fs::read_to_string(dir().join("address")).ok().as_deref().map(str::trim) != Some(address) {
         forget();
     }
@@ -128,7 +128,7 @@ pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
 }
 
 /// The device this computer signs in at `address` for, its key ‖ seal key (hex), which its sign-in names: the one it
-/// has for that install, or a new one.
+/// has for that network, or a new one.
 pub fn signing_in_for(address: &str) -> Result<String> {
     let address = address.trim_end_matches('/');
     if std::fs::read_to_string(dir().join("address")).ok().as_deref().map(str::trim) != Some(address) {
@@ -137,7 +137,7 @@ pub fn signing_in_for(address: &str) -> Result<String> {
     Ok(kept_or_new(address)?.join())
 }
 
-/// This computer's device for the install at `address`, made with a new key if it has none: signed in or not yet, as its
+/// This computer's device for the network at `address`, made with a new key if it has none: signed in or not yet, as its
 /// sign-in names it before it's signed in.
 fn kept_or_new(address: &str) -> Result<Arc<Device>> {
     if let Some(device) = kept() {
@@ -154,7 +154,7 @@ fn kept_or_new(address: &str) -> Result<Arc<Device>> {
     Ok(Arc::new(Device::new(secret, address, &dir.to_string_lossy())))
 }
 
-/// A new key for this computer, readable only by its user, for the install at `address`.
+/// A new key for this computer, readable only by its user, for the network at `address`.
 fn keep(dir: &std::path::Path, address: &str) -> Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -223,7 +223,7 @@ pub fn end() {
     TURN.lock().unwrap().take();
 }
 
-/// What a refused request says: the install doesn't list this computer, yet or any more.
+/// What a refused request says: the network doesn't list this computer, yet or any more.
 fn not_let_in() -> String {
     let removed = kept().is_some_and(|d| run(move || async move { d.removed().await }));
     match removed {
@@ -373,11 +373,11 @@ impl Read for Streamed {
     }
 }
 
-/// How this computer reaches its install, for the bare command and `status`: as a device, through the node that answered.
+/// How this computer reaches its network, for the bare command and `status`: as a device, through the node that answered.
 pub fn said(state: &serde_json::Value) -> Option<String> {
     let (name, key) = me()?;
     let through = state["device"]["name"].as_str().unwrap_or("your devices");
     let me = state["user"]["name"].as_str().unwrap_or("you");
-    let install = state["install"]["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| YOURS.to_string());
-    Some(format!("{name} ({}), one of {me}'s devices in {install}, asking {through}", &key[..8.min(key.len())]))
+    let network = state["install"]["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| YOURS.to_string());
+    Some(format!("{name} ({}), one of {me}'s devices in {network}, asking {through}", &key[..8.min(key.len())]))
 }

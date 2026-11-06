@@ -1,4 +1,4 @@
-// The web client: the Mac app's window, in a browser. It signs in as an OAuth client of the install's sign-in
+// The web client: the Mac app's window, in a browser. It signs in as an OAuth client of the network's sign-in
 // (PKCE, and the person's passkey at its sign-in page), keeps its refresh token in this browser, and asks the person's nodes over iroh (`net.js`). App screens are untrusted: each runs in a sandboxed
 // frame, and this page answers its bridge as the Mac app's web view does, making each call itself. It draws at once
 // what it showed last (the sidebar, and a still of the screen) and then what the node says now.
@@ -367,7 +367,7 @@ const h = OneUI.react.createElement;
   }
 
   /// This browser's key goes: a removed key can't be let in again, so signing in makes a new one. With it, what it kept
-  /// as that device: the nodes it asks, and the install it was let into and its entries, which the next approval names
+  /// as that device: the nodes it asks, and the network it was let into and its entries, which the next approval names
   /// again. As a native app's device forgets (one-client's `Device::sign_out`).
   async function forgetDevice() {
     events?.abort();
@@ -461,8 +461,8 @@ const h = OneUI.react.createElement;
   const store = { state: null, apps: [], badges: {} };
 
   const me = () => store.state?.user;
-  const install = () => store.state?.install;
-  // The custom build's name, as the gateway's index.html says it, until the install's state does.
+  const network = () => store.state?.install;
+  // The custom build's name, as the gateway's index.html says it, until the network's state does.
   const customBuild = { name: document.querySelector('meta[name="application-name"]')?.content || "", cli: document.querySelector('meta[name="one-cli"]')?.content || "" };
   const config = () => store.state?.config || customBuild;
   const app = (name) => store.apps.find((a) => a.name === name);
@@ -475,7 +475,7 @@ const h = OneUI.react.createElement;
 
   /// Every page this person can read, as the sidebar lists them: theirs, their groups', then everyone's.
   function pages() {
-    const i = install(), u = me();
+    const i = network(), u = me();
     if (!i || !u) return [];
     const groups = i.groups.filter((g) => g.members.some((m) => m.user === u.id)).sort((a, b) => a.name.localeCompare(b.name));
     return [{ scope: "user", title: "You", whose: "For you only" }, ...groups.map((g) => ({ scope: `group:${g.id}`, title: g.name, whose: `For ${g.name}` })), { scope: "global", title: "Everyone", whose: "For everyone" }];
@@ -521,14 +521,14 @@ const h = OneUI.react.createElement;
     // While it's being let in, its apps wait: they need the keys it's about to get.
     if (joining) return;
     if (list) store.apps = list;
-    if (!list && (regrouped || !store.apps.length) && install()) return refreshApps();
+    if (!list && (regrouped || !store.apps.length) && network()) return refreshApps();
     render();
     keepWindow();
     badges();
   }
 
   async function refreshApps() {
-    if (!install()) return render();
+    if (!network()) return render();
     store.apps = await shared("/v1/apps");
     render();
     keepWindow();
@@ -679,7 +679,7 @@ const h = OneUI.react.createElement;
 
   function render() {
     if (!store.state || joining) return;
-    if (!install()) return void ((windowShown = false), show(message("Not Set Up Yet", "Set it up on one of your computers first.")));
+    if (!network()) return void ((windowShown = false), show(message("Not Set Up Yet", "Set it up on one of your computers first.")));
     const r = route(), key = JSON.stringify(r);
     // The screen where the window is, kept as it is while the rest redraws around it.
     const fresh = !(shown === key && frames.some((f) => !f.sheet && f.into.isConnected));
@@ -1253,7 +1253,7 @@ const h = OneUI.react.createElement;
     // As a machine's node answers it: `device` by its key; `scope` user (theirs), global or group:<id>; `days`, 0 to stop.
     "POST /v1/app-schedules": (b) => device.setAppSchedules({ endpoint: String(b.device || ""), app: String(b.app || ""), scope: !b.scope || b.scope === "user" ? `user:${me().id}` : String(b.scope), days: b.days ?? undefined }),
     "GET /v1/devices/passkey": async () => ({ passkey: !!passkeyToList() }),
-    // `{ key: ms }`: when each device was last let onto the install's network.
+    // `{ key: ms }`: when each device was last let onto the network.
     "GET /v1/devices/seen": () => device.seen(),
     // As a machine's node answers it, each with its code, which the device asking shows too, to compare, and what
     // approving it records as what they sign in with.
@@ -1371,7 +1371,7 @@ const h = OneUI.react.createElement;
   /// The passkey this tab signed in with, if it isn't listed yet: its PRF output stays in this tab only.
   function passkeyToList() {
     const prf = sessionStorage.getItem("one.prf"), credential = sessionStorage.getItem("one.prf.credential");
-    if (!prf || !credential || install()?.clients.some((c) => c.passkey === credential)) return null;
+    if (!prf || !credential || network()?.clients.some((c) => c.passkey === credential)) return null;
     return { prf: Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)), credential };
   }
 
@@ -1449,7 +1449,7 @@ const h = OneUI.react.createElement;
       const r = await bearer(`/api/auth/devices/requests/${keys.key}`).catch(() => null);
       const said = waited(r?.status || 0, r?.ok ? await r.json().catch(() => ({})) : {});
       if (said.signedOut) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
-      // The install it was let into, as the device that approved it said: the only one it then takes; and where that
+      // The network it was let into, as the device that approved it said: the only one it then takes; and where that
       // device read who's who to, which it starts from.
       if (said.genesis) await put(`genesis:${user}`, said.genesis);
       if (said.welcome) await put(`welcome:${user}`, said.welcome);
@@ -1622,7 +1622,7 @@ const h = OneUI.react.createElement;
       }
     }
     clearTimeout(away);
-    if (!native && install() && me()) await settle();
+    if (!native && network() && me()) await settle();
     joining = false;
     joined.done();
     await refreshApps().catch(() => {});
@@ -1634,7 +1634,7 @@ const h = OneUI.react.createElement;
 
   // MARK: Notifications
 
-  /// What was last registered for pushes here: the subscription's endpoint, the device's key and the install's VAPID
+  /// What was last registered for pushes here: the subscription's endpoint, the device's key and the network's VAPID
   /// key, and when.
   const PUSHED = "one.pushed";
   /// Whether the app may show notifications, as it last said.

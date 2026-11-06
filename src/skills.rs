@@ -41,7 +41,7 @@ pub fn finding() -> String {
     )
 }
 
-/// The name harnesses give this install's MCP server: the product's name in kebab case, like the-one-app.
+/// The name harnesses give this network's MCP server: the product's name in kebab case, like the-one-app.
 pub fn server_name() -> String {
     let name: String = NAME.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
     name.split('-').filter(|w| !w.is_empty()).collect::<Vec<_>>().join("-")
@@ -64,7 +64,7 @@ fn install() -> String {
     }
 }
 
-/// Connecting for a person, at the install's `address` where it's known: a shell takes the command line, anything
+/// Connecting for a person, at the network's `address` where it's known: a shell takes the command line, anything
 /// else adds the MCP server at the address.
 pub fn connecting(address: Option<&str>) -> String {
     let mcp = match address {
@@ -83,8 +83,8 @@ fn web(address: &str) -> String {
     if address.contains("://") { address.to_string() } else { format!("https://{address}") }
 }
 
-/// The guide to connecting, the root skill's body without its list of skills: what anyone may read at the install's
-/// `address` (`/llms.txt`), since it says nothing of what apps an install has.
+/// The guide to connecting, the root skill's body without its list of skills: what anyone may read at the network's
+/// `address` (`/llms.txt`), since it says nothing of what apps a network has.
 pub fn guide(address: Option<&str>) -> String {
     format!(
         "# {NAME}\n\n{}\n\n## Rules\n\n{}\n\n## Connecting for a person\n\n{}\n\n## Adding MCP\n\n{}\n\n## Finding your way\n\n{}\n",

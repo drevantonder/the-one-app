@@ -4,7 +4,7 @@
 // a call needs, which it hands the node with the call (`x-one-keys`). What it opens stays in this page's memory, as keys
 // that can't be read back, and goes with it. What changes who can do what it signs itself (members.js).
 //
-// Who's who it takes only from the install's own signed entries, checked by its client's WebAssembly (`checked`), never
+// Who's who it takes only from the network's own signed entries, checked by its client's WebAssembly (`checked`), never
 // from what a node says (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must
 // have, which nodes may be handed a scope's keys, and who may approve or remove what. Each is answered there, from the
 // scope database and its permissions (client/src/members.rs, `Who`), and only looked up here. A hacked node holds no
@@ -65,7 +65,7 @@ export async function joinAsk(keys, name, invite) {
 /// The code this browser shows to be approved: its key's, as 4 and 4.
 export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
 
-// MARK: Who opens what, as the install's signed entries say (`k`, one-client's `members::view`)
+// MARK: Who opens what, as the network's signed entries say (`k`, one-client's `members::view`)
 
 /// What a scope's epochs are sealed to: the client devices of the people who may use it, and nothing that only runs
 /// calls.
@@ -115,9 +115,9 @@ export class Device {
     return this.fetching.get(id);
   }
 
-  /// The members as the install's signed entries say them, checked here: as last checked, or with what's new from a
-  /// node if `fresh` (before it changes who opens what) or never. The first time, the install's first entry is kept,
-  /// and an install that starts with any other refused. While no node gives the entries (the Cloudflare node doesn't),
+  /// The members as the network's signed entries say them, checked here: as last checked, or with what's new from a
+  /// node if `fresh` (before it changes who opens what) or never. The first time, the network's first entry is kept,
+  /// and a network that starts with any other refused. While no node gives the entries (the Cloudflare node doesn't),
   /// it goes on with those it checked last, unless it's `fresh`.
   async checked(fresh = false) {
     if (fresh || !this.known) {
@@ -153,7 +153,7 @@ export class Device {
       }
       // One that didn't check out is read from the freeze on, the next time.
       if (welcome && !(await get(`global:${this.user}`))?.steps?.truth) await del(`welcome:${this.user}`).catch(() => {});
-      if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
+      if (!k.people[this.user]) throw new Error("Your One App network doesn't list you yet, so this device didn't use it.");
       this.known = k;
     }
     return this.known;
@@ -273,7 +273,7 @@ export class Device {
 
   // App schedules.
 
-  /// Runs `app`'s schedules in `scope` on one of the install's devices (`endpoint`) for `days`, 30 at most (0 stops
+  /// Runs `app`'s schedules in `scope` on one of the network's devices (`endpoint`) for `days`, 30 at most (0 stops
   /// them): the app's key in each epoch of the scope, sealed to it first, then the app schedules naming each one's
   /// hash. Stopping them starts a new epoch of the scope, which the device isn't sealed, so the keys it held open
   /// nothing written after.
@@ -300,7 +300,7 @@ export class Device {
 
   /// Renews, in the background, this person's app schedules of `app` as they use it: once a day at most, and at once
   /// when the scope has an epoch their keys don't reach. One of theirs that ran out is stopped, as Stop does. Only those
-  /// the install's entries hold, as checked here (`keeps`, their name for older clients), never those a node lists: a hacked one could list itself.
+  /// the network's entries hold, as checked here (`keeps`, their name for older clients), never those a node lists: a hacked one could list itself.
   async renewAppSchedules(app) {
     // Checked again first, at most once an hour, so it renews what its person's other devices set too.
     if (!(this.renewChecked > Date.now() - HOUR)) {
@@ -368,7 +368,7 @@ export class Device {
   }
 
   /// The `x-one-keys` a request goes with, to `node`, the one it's sent to: what its kind of request needed the last
-  /// time, of the scopes the install's entries say that node runs, sealed to the seal key they list for it, for this
+  /// time, of the scopes the network's entries say that node runs, sealed to the seal key they list for it, for this
   /// browser's key, until `until`. No other node can open it; null if it runs none of them.
   /// A request sent while another of its kind learns what it needs waits for that first, and goes with it.
   async handoff(route, until, node, note = noting) {
@@ -382,7 +382,7 @@ export class Device {
   }
 
   /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must ask only what
-  /// `askedFor` lets it, be listed by the install's entries, and run every scope it needs keys of, as they say. Of each, only epochs from the one its newest copy is under are
+  /// `askedFor` lets it, be listed by the network's entries, and run every scope it needs keys of, as they say. Of each, only epochs from the one its newest copy is under are
   /// handed (`oldestNeeded`): older ones open only its history. What it needed is all this kind of request hands next
   /// time, to whichever node it's sent to, of the scopes that one runs. Throws if it asks for more, or this browser can't
   /// open it. Requests of a kind that get the
@@ -427,12 +427,12 @@ export class Device {
     for (let at = from + 1; at <= to; at += 32) {
       const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { get: [{ steps: prefix, from: at, to: Math.min(at + 31, to) }], reads: READS })) });
       const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || "Your One App's storage didn't answer. Try again.");
+      if (!r.ok) throw new Error(body.error || "Your One App network's storage didn't answer. Try again.");
       // A URL signer older than its `get`, which only Workers deployed before the switch are.
       if (!body.get) return out;
       const sealed = Object.keys(body.get).sort().map((name) => body.get[name]);
       const end = sealed.indexOf(null);
-      if (end >= 0 && at + end <= must) throw new Error("Part of who's who is missing from your One App's storage, so this device read no further.");
+      if (end >= 0 && at + end <= must) throw new Error("Part of who's who is missing from your One App network's storage, so this device read no further.");
       out.push(...sealed.slice(0, end >= 0 ? end : sealed.length).map((b, i) => ({ at: at + i, sealed: b })));
       if (end >= 0) {
         if (sealed[end + 1]) out.push({ at: at + end + 1, sealed: sealed[end + 1] });
@@ -448,7 +448,7 @@ export class Device {
     const newest = [...new Set(needs.map(prefixOf))];
     const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { newest, reads: READS })) });
     const out = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(out.error || "Your One App's storage didn't answer. Try again.");
+    if (!r.ok) throw new Error(out.error || "Your One App network's storage didn't answer. Try again.");
     return out.newest || null;
   }
 
@@ -501,19 +501,19 @@ export class Device {
   async registerPush({ endpoint, keys }) {
     const body = await this.signed("one/push", { route: "POST /push/register", via: "webpush", address: endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, seal: this.me.seal, user: this.user });
     const r = await fetch("/push/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Your One App's push service didn't take this browser.");
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Your One App network's push service didn't take this browser.");
   }
 
   /// Tells the relay to let a key in (`{ add, admin? }`) or take one out (`{ remove }`), signed by `as`.
   async tell(fields, as = this.me) {
     const said = await untilTaken(async (at) => {
       const r = await fetch("/relay/tell", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await signedRequest(as.sign, hex.decode(as.key), "one/relay", fields, at)) });
-      return r.ok ? "" : (await r.json().catch(() => null))?.error || "Your One App's network didn't take that.";
+      return r.ok ? "" : (await r.json().catch(() => null))?.error || "Your One App network didn't take that.";
     });
     if (said) throw new Error(said);
   }
 
-  /// When each of the install's devices was last let onto its network, as the relay says: `{ key: ms }`, or none from a
+  /// When each of the network's devices was last let onto its network, as the relay says: `{ key: ms }`, or none from a
   /// relay that doesn't say.
   async seen() {
     const r = await fetch("/relay/seen", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/relay", { seen: true })) });
@@ -588,7 +588,7 @@ export class Device {
       const next = (await get(`global:${this.user}`))?.have.split(",").find((h) => h.startsWith(`${old.key}.`))?.split(".")[1];
       await this.write("global", members.removeDevice({ key: old.key, seq: next ? Number(next) - 1 : null }), as);
     }
-    // Marked approved, for the device waiting on it to see, with the install it's in: the only one it then takes; and
+    // Marked approved, for the device waiting on it to see, with the network it's in: the only one it then takes; and
     // once who's who is written as steps, where this browser read them to, which it starts from (src/database/steps.rs
     // `Welcome`).
     const held = await get(`global:${this.user}`);
@@ -630,7 +630,7 @@ export class Device {
   }
 
   /// Takes this browser out of its person's devices, as it signs out, so signing in again makes a new one that
-  /// replaces it, never a second. Itself it may (the install lets a device take out its person's, itself among them),
+  /// replaces it, never a second. Itself it may (the network lets a device take out its person's, itself among them),
   /// but nothing it writes after counts, so it goes in this order: its `remove` entry, whose seq is its own, so that one
   /// counts and none after; then off the network, which ends its connection, so nothing is asked after. Its scopes keep
   /// their keys, as it forgets its own (ARCHITECTURE.md): a device in doubt is removed from another, which makes new ones.

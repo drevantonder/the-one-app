@@ -1,5 +1,5 @@
-// The URL signer: the only holder of the install's bucket's credentials (`BUCKET`, `{ endpoint, bucket, region,
-// key_id, secret }`). It gives presigned URLs to endpoints of the install, which the relay keeps the list of (`RELAY`,
+// The URL signer: the only holder of the network's bucket's credentials (`BUCKET`, `{ endpoint, bucket, region,
+// key_id, secret }`). It gives presigned URLs to endpoints of the network, which the relay keeps the list of (`RELAY`,
 // asked `allowed(key)`), for a request each signs with its own key (src/keys.rs `signed_request`, domain `one/urls`):
 //
 //   POST /urls { read, head, create: [item], replace: [{ name, etag }], remove: [name],
@@ -9,7 +9,7 @@
 //       newest: { prefix: text | null }, get: { name: base64url | null }, until }
 //
 // An item is a name, or a database's steps from one position to another (`{ steps: prefix, from, to }`), so a node
-// asks for the positions it reads or writes next in one trip. Any endpoint of the install may read, list and create
+// asks for the positions it reads or writes next in one trip. Any endpoint of the network may read, list and create
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
 // admin's endpoint removes. A step at position n of a database or log (`<prefix>/<n>`, n > 1) is created only once the
 // one before it is there, or the copy of the steps up to it (`<prefix>/copy/<n-1>`), and a copy only once its step

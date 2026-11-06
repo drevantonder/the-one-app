@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 /// A request for an item an app may use: who asks and why, then the person's items that have the fields it wants, to
 /// pick one, or a new one, whose values go to the node and nowhere else. The asker never sees a secret.
-/// With `ask`, the shell's own request for something of the install's that isn't an app (push), made here rather than
+/// With `ask`, the shell's own request for something of the network's that isn't an app (push), made here rather than
 /// as an entry: the item picked or made is switched on for `ask.app` directly.
 struct VaultRequestSheet: View {
     @Environment(Store.self) private var store

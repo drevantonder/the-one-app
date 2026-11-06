@@ -1,6 +1,6 @@
-//! The Cloudflare node (`cloudflare/node/`) on Cloudflare: a node of the install as a Worker in the account of its other Workers, with
+//! The Cloudflare node (`cloudflare/node/`) on Cloudflare: a node of the network as a Worker in the account of its other Workers, with
 //! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
-//! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the install's
+//! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the network's
 //! bucket, each at its latest deploy.
 
 use anyhow::{Context, Result};
@@ -39,7 +39,7 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
     out
 }
 
-/// It as the workerd that runs the install's Workers here runs it, from `modules`, beside them.
+/// It as the workerd that runs the network's Workers here runs it, from `modules`, beside them.
 pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u8>)>) -> crate::cloudflare::Served {
     let (_, _, main) = modules.remove(0);
     crate::cloudflare::Served {
@@ -64,7 +64,7 @@ pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&s
     meta
 }
 
-/// Puts the Cloudflare node in the Cloudflare account of the install's Workers, with no address, and
+/// Puts the Cloudflare node in the Cloudflare account of the network's Workers, with no address, and
 /// the relay again, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     anyhow::ensure!(settings.throwaway_person.is_none(), "a throwaway network's Workers run only beside its throwaway network");

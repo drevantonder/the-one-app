@@ -1,14 +1,14 @@
-//! The install's members and settings, as people and their clients see them and change them, and finding them by name.
+//! The network's members and settings, as people and their clients see them and change them, and finding them by name.
 
 use super::*;
 
 impl Node {
-    /// Whether `user` is a person of the install.
+    /// Whether `user` is a person of the network.
     pub fn is_user(&self, user: &str) -> bool {
         self.with(|i| Ok(i.r.db().user(user).is_some())).unwrap_or(false)
     }
 
-    /// Sets one of the install's settings, for an admin; `None` puts back the custom build's default.
+    /// Sets one of the network's settings, for an admin; `None` puts back the custom build's default.
     pub async fn set_setting(&self, caller: &Caller, name: &str, value: Option<&str>) -> Result<()> {
         self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
     }
@@ -30,7 +30,7 @@ impl Node {
         self.set_setting(caller, rank::SETTING, Some(&value)).await
     }
 
-    /// Everything a shell needs to draw this device and its install, for this device's local user.
+    /// Everything a shell needs to draw this device and its network, for this device's local user.
     pub fn state(&self) -> Value {
         let user = self.user().unwrap_or_default();
         self.state_for(&Caller { key: self.0.id, user, agent: None, token: None })
@@ -41,7 +41,7 @@ impl Node {
         self.state_as(viewer, None)
     }
 
-    /// The same for someone signed in at the install's address through `client` (its name), which is no device: not the
+    /// The same for someone signed in at the network's address through `client` (its name), which is no device: not the
     /// device it reached, as the Cloudflare node says too.
     pub fn state_for_sign_in(&self, viewer: &Caller, client: &str) -> Value {
         self.state_as(viewer, Some(client))
@@ -53,19 +53,19 @@ impl Node {
         let ready = self.ready();
         let waiting = self.waiting_requests(viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
-        let Ok(install) = self.0.install.lock() else { return json!({ "error": "this device couldn't answer that: a bug in it, which its log shows" }) };
-        let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.db().machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
-        let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
-        let here_services = install.as_ref().map(|i| self.services_here(i)).unwrap_or_default();
-        let here_parts = install.as_ref().map(|i| json!(self.parts_here(i))).unwrap_or(Value::Null);
+        let Ok(network) = self.0.network.lock() else { return json!({ "error": "this device couldn't answer that: a bug in it, which its log shows" }) };
+        let viewer_name = if viewer.key == self.0.id { self.device_name() } else { network.as_ref().and_then(|i| i.r.db().machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
+        let backups = network.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
+        let here_services = network.as_ref().map(|i| self.services_here(i)).unwrap_or_default();
+        let here_parts = network.as_ref().map(|i| json!(self.parts_here(i))).unwrap_or(Value::Null);
         // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
         let looking = device.or_else(|| {
-            let m = install.as_ref()?.r.db();
+            let m = network.as_ref()?.r.db();
             m.machine(&viewer.key).filter(|d| viewer.key != self.0.id && d.user == viewer.user && d.is(members::Kind::Client)).map(|_| viewer.key)
         });
         let me = &viewer.user;
         let device_now = |s: &members::Machine| {
-            let Some(i) = install.as_ref() else { return serde_json::Map::new() };
+            let Some(i) = network.as_ref() else { return serde_json::Map::new() };
             let m = i.r.db();
             let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
             // The containers on a device are its person's business.
@@ -104,9 +104,9 @@ impl Node {
             },
             client: (sign_in.is_none() && viewer.key != self.0.id).then(|| json!({ "key": hex(&viewer.key), "name": viewer_name })),
             device: json!({ "key": hex(&self.0.id), "name": self.device_name(), "ready": ready, "guide": crate::skills::address() }),
-            member: install.as_ref().is_some_and(|i| i.r.db().compute(&self.0.id).is_some()),
+            member: network.as_ref().is_some_and(|i| i.r.db().compute(&self.0.id).is_some()),
             // Its log's entries, and once it's frozen, `global`'s steps since.
-            entries: install.as_ref().map(|i| i.r.store.count().unwrap_or(0) as u64 + i.r.at().unwrap_or(0)).unwrap_or(0),
+            entries: network.as_ref().map(|i| i.r.store.count().unwrap_or(0) as u64 + i.r.at().unwrap_or(0)).unwrap_or(0),
             waiting,
             arrangements: json!(arrangements),
             backups,
@@ -115,9 +115,9 @@ impl Node {
             device_now: &device_now,
             client_now: &client_now,
         };
-        let mut state = crate::state::state(install.as_ref().map(|i| i.r.db()), me, here);
+        let mut state = crate::state::state(network.as_ref().map(|i| i.r.db()), me, here);
         // Whether who's who is the scope database's steps now (`database::switch`), which a client reads them from.
-        if let Some(i) = install.as_ref().filter(|_| state["install"].is_object()) {
+        if let Some(i) = network.as_ref().filter(|_| state["install"].is_object()) {
             state["install"]["frozen"] = json!(i.r.frozen.is_some());
         }
         state
@@ -158,7 +158,7 @@ impl Node {
         let mut file: DeviceFile = serde_json::from_slice(&std::fs::read(&path)?)?;
         file.name = name.to_string();
         write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
-        if self.has_install() {
+        if self.has_network() {
             self.member("rename", json!({ "key": hex(&self.0.id), "name": name })).await?;
         }
         Ok(())
@@ -182,7 +182,7 @@ impl Node {
         self.member_as(caller, "rename", json!({ "key": hex(&key), "name": name })).await
     }
 
-    /// Finds a device of the install by name or key prefix.
+    /// Finds a device of the network by name or key prefix.
     pub fn find_device(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| Ok(i.r.db().computes().into_iter().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
         let names = || self.with(|i| Ok(i.r.db().computes().into_iter().map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
@@ -209,7 +209,7 @@ impl Node {
         }
     }
 
-    /// Finds a device or client of the install by name or key prefix.
+    /// Finds a device or client of the network by name or key prefix.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| {
             let m = i.r.db();
@@ -258,7 +258,7 @@ impl Node {
         self.with(|i| Ok(i.r.db().machine_ever(key).map(|m| m.name.clone()))).ok().flatten().unwrap_or_else(|| short(key))
     }
 
-    /// The install's compute devices' names by key (hex), and the Cloudflare node's: what a trace's reader calls the
+    /// The network's compute devices' names by key (hex), and the Cloudflare node's: what a trace's reader calls the
     /// nodes a client tried.
     pub fn compute_names(&self) -> Value {
         self.with(|i| {
@@ -276,7 +276,7 @@ impl Node {
 
 /// What a device says of each service serving there, as `GET /v1/state` lists it: what it is, its version (a
 /// service's own), whom it serves, and who installed it.
-/// Whether this node's install is a throwaway network (`one throwaway`), whose Workers beside it sign its person in with no passkey.
+/// Whether this node's network is a throwaway network (`one throwaway`), whose Workers beside it sign its person in with no passkey.
 fn throwaway() -> bool {
     let settings = std::fs::read_to_string(crate::cloudflare::Settings::path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
     settings.is_some_and(|s| !s["throwaway_person"].is_null())

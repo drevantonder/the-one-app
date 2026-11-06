@@ -1,4 +1,4 @@
-//! Signing in, as every client does: an OAuth client of the install's sign-in,
+//! Signing in, as every client does: an OAuth client of the network's sign-in,
 //! registered the first time, with sign-in and consent in a browser that comes back to a port on this machine (RFC
 //! 8252's loopback redirect). The refresh token is kept in the OS's secret store; access tokens only in memory. It names
 //! the device it's for (`join`), so the person's devices can let it in by this sign-in.

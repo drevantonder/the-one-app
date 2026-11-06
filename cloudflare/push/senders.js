@@ -6,13 +6,13 @@
 // - APNs (iPhone, iPad, Mac): token-based provider sign-in, an ES256 JWT of the team's .p8 key, kept 50 minutes (Apple
 //   refuses one older than an hour, or made more often than every 20). A note goes as a visible alert with
 //   `mutable-content`, so the app's Notification Service Extension opens it before it shows; what Apple sees is only
-//   the install's name and a fixed line. A quiet one is a background push that wakes the app.
+//   the network's name and a fixed line. A quiet one is a background push that wakes the app.
 // - FCM HTTP v1 (Android): an OAuth token from the service account's RS256 JWT, a data message only (FCM shows
 //   nothing itself), high priority unless quiet.
 // - WNS (Windows): an OAuth token for the app's Microsoft Entra registration (client credentials, scope
 //   https://wns.windows.com/.default), a raw notification, its body the sealed bytes as they are.
 // - Web Push (browsers): RFC 8291's aes128gcm to the browser's p256dh and auth, and RFC 8292's VAPID, an ES256 JWT of
-//   the install's VAPID key for the push service's origin, good for 12 hours (push services refuse more than 24). The
+//   the network's VAPID key for the push service's origin, good for 12 hours (push services refuse more than 24). The
 //   note goes as base64url text: Edge's push service drops a payload that isn't text.
 
 import { b64u } from "../shared/crypto.js";
@@ -62,7 +62,7 @@ export const APNS_FALLBACK = "You have a new notification.";
 /// `config`: `{ team, key_id, key }` (the .p8's text). `device`: `{ address, env, topic }`. `note`: the sealed bytes.
 /// `legacy`: a plain alert's payload, for a phone that registered the old way and can't open notes.
 export async function apns(fetch, config, device, { note, quiet, name, payload }) {
-  if (!config?.key) return { failed: "APNs isn't set up for this install" };
+  if (!config?.key) return { failed: "APNs isn't set up for this network" };
   const whose = `apns:${config.team}/${config.key_id}`;
   const token = await kept(whose, 50 * 60_000, async () => {
     const key = await crypto.subtle.importKey("pkcs8", pem(config.key), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
@@ -97,7 +97,7 @@ export async function apns(fetch, config, device, { note, quiet, name, payload }
 
 /// `account`: the Firebase service account's JSON key (`{ project_id, client_email, private_key, token_uri }`).
 export async function fcm(fetch, account, device, { note, quiet }) {
-  if (!account?.private_key) return { failed: "FCM isn't set up for this install" };
+  if (!account?.private_key) return { failed: "FCM isn't set up for this network" };
   const whose = `fcm:${account.client_email}`;
   const token = await kept(whose, 50 * 60_000, async () => {
     const key = await crypto.subtle.importKey("pkcs8", pem(account.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
@@ -127,7 +127,7 @@ export async function fcm(fetch, account, device, { note, quiet }) {
 
 /// `app`: `{ tenant, client_id, client_secret }`, the Windows app's Entra registration. `device.address`: its channel URI.
 export async function wns(fetch, app, device, { note }) {
-  if (!app?.client_secret) return { failed: "WNS isn't set up for this install" };
+  if (!app?.client_secret) return { failed: "WNS isn't set up for this network" };
   if (!isWnsChannel(device.address)) return { gone: true };
   const whose = `wns:${app.tenant}/${app.client_id}`;
   const token = await kept(whose, 50 * 60_000, async () => {
@@ -204,10 +204,10 @@ export async function encrypt(plain, p256dh, auth, { ephemeral, salt = crypto.ge
   return concat(salt, rs, new Uint8Array([asPublic.length]), asPublic, sealed);
 }
 
-/// `vapid`: `{ key, public, subject }`, the install's VAPID key and who it is (its address). `device`: `{ address,
+/// `vapid`: `{ key, public, subject }`, the network's VAPID key and who it is (its address). `device`: `{ address,
 /// keys: { p256dh, auth } }`, the subscription. `note`: the bytes to carry.
 export async function webPush(fetch, vapid, device, { note, quiet }) {
-  if (!vapid?.key) return { failed: "Web Push has no VAPID key in this install" };
+  if (!vapid?.key) return { failed: "Web Push has no VAPID key in this network" };
   if (!isWebPushEndpoint(device.address)) return { gone: true };
   const audience = new URL(device.address).origin;
   const token = await kept(`vapid:${audience}`, 6 * 3_600_000, () =>

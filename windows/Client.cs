@@ -1,6 +1,6 @@
 // This computer as a device of its person (client/ffi, the library every native app shares): its own key, made here
 // and kept in Windows' Credential Locker, one for each person at each address. It gets in when one of their devices
-// approves the code it shows; then every request reaches their install's nodes over iroh, as this device, with the
+// approves the code it shows; then every request reaches their network's nodes over iroh, as this device, with the
 // keys each needs. Signing in only says who's asking.
 using System;
 using System.IO;
@@ -144,11 +144,11 @@ public static class Client
 
     public const string Removed = "This computer was removed. Sign in again.";
 
-    /// This computer isn't one of the install's: taken out (true), or not yet in (false). The window starts again at its
+    /// This computer isn't one of the network's: taken out (true), or not yet in (false). The window starts again at its
     /// sign-in, or its approval screen.
     public static event Action<bool>? Lost;
 
-    /// Its key goes with its sign-in: a key the install removed can't be let in again, so the next sign-in makes a new one.
+    /// Its key goes with its sign-in: a key the network removed can't be let in again, so the next sign-in makes a new one.
     static async Task TakenOut()
     {
         if (deviceName is { } name)
@@ -158,7 +158,7 @@ public static class Client
         await Close();
     }
 
-    /// Whether it was in, and the install took it out, which ends its sign-in too.
+    /// Whether it was in, and the network took it out, which ends its sign-in too.
     public static async Task<bool> RemovedNow()
     {
         var d = await Current();

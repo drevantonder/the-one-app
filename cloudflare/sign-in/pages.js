@@ -1,5 +1,5 @@
-// Sign-in's screens: signing in, to the install or to a client, joining with an invite link, and a person's
-// passkeys. Plain HTML with a little script, served from sign-in at the install's address, so passkeys
+// Sign-in's screens: signing in, to the network or to a client, joining with an invite link, and a person's
+// passkeys. Plain HTML with a little script, served from sign-in at the network's address, so passkeys
 // belong to its name.
 
 import css from "../web/screen/ui/sign-in.css" with { type: "text" };
@@ -118,11 +118,11 @@ const webauthn = `
 `;
 
 /// What a client other than the web client is told: what it will do, and where it goes, since its name is only what it
-/// calls itself. Uses the page's install.
+/// calls itself. Uses the page's network.
 const acts = `
   function acts(about) {
     const what = document.getElementById("what");
-    what.textContent = about.client + " will act as you, with everything you can use in " + install + ", until you sign it out.";
+    what.textContent = about.client + " will act as you, with everything you can use in " + network + ", until you sign it out.";
     const where = document.createElement("p");
     where.className = ${JSON.stringify(CALLOUT)};
     where.textContent = about.goes === "an app on this device" ? "It's an app on this device." : about.goes === "where you got your code" ? "It's where you got your code. Only go on if you got it yourself, on your own device." : "It goes to " + about.goes + ". Only go on if that's who you meant to sign in to.";
@@ -141,8 +141,8 @@ const page = (title, body, script) => `<!doctype html><html><head><meta charset=
 /// Which passkeys work, in plain words, for the pages that make or ask for one.
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
 
-/// Signing in, to the install or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
-/// is the person, with everything they can use, so it's asked each time. With Google (\`google\`, the install's
+/// Signing in, to the network or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
+/// is the person, with everything they can use, so it's asked each time. With Google (\`google\`, the network's
 /// domain), it's signing in with Google, or with a passkey for an admin.
 export function signInPage(look) {
   const { name, google } = look;
@@ -155,7 +155,7 @@ export function signInPage(look) {
   const script = `${acts}
     const oauth_query = location.search.slice(1);
     const client_id = new URLSearchParams(oauth_query).get("client_id");
-    const install = ${JSON.stringify(name).replaceAll("<", "\\u003c")};
+    const network = ${JSON.stringify(name).replaceAll("<", "\\u003c")};
     if (client_id) (async () => {
       try {
         const about = await api("/sign-in/about?" + oauth_query);
@@ -195,7 +195,7 @@ function googlePage(look) {
     const failed = /(^|&)error=/.test(raw);
     const oauth_query = raw.replace(/(^|&)error(_description)?=[^&]*/g, "").replace(/^&/, "");
     const client_id = new URLSearchParams(oauth_query).get("client_id");
-    const install = ${JSON.stringify(name).replaceAll("<", "\\u003c")};
+    const network = ${JSON.stringify(name).replaceAll("<", "\\u003c")};
     const domain = ${JSON.stringify(google).replaceAll("<", "\\u003c")};
     const back = client_id ? "/sign-in?" + oauth_query : "/";
     if (failed) say("That didn't sign you in. Use your Google account at " + domain + ".");

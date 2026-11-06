@@ -13,7 +13,7 @@ export function GitHubMark({ className }) {
   )
 }
 
-/// A repo's symbol: GitHub's mark for GitHub's, a book for the install's own.
+/// A repo's symbol: GitHub's mark for GitHub's, a book for the network's own.
 export const RepoIcon = ({ repo, github = isGithub(repo), className }) =>
   github ? <GitHubMark className={className} /> : <Icon name="book" className={className} />
 

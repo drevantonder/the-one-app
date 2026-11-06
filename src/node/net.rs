@@ -1,8 +1,8 @@
 //! iroh, how devices reach each other: each is an endpoint whose id is its device key, reached directly where a path
-//! opens (a LAN, a tailnet, a port its router maps) and otherwise through the relay at the install's address
-//! (cloudflare/relay/), its only relay, which lets in only the install's endpoints. iroh's QUIC is end to end and proves
+//! opens (a LAN, a tailnet, a port its router maps) and otherwise through the relay at the network's address
+//! (cloudflare/relay/), its only relay, which lets in only the network's endpoints. iroh's QUIC is end to end and proves
 //! both ends' keys, so what devices say needs no sealing of its own: an ask is one stream, its answer the same stream
-//! back. Devices are found by the install's list of them, never n0's discovery.
+//! back. Devices are found by the network's list of them, never n0's discovery.
 
 use crate::config::YOURS;
 use iroh::endpoint::{Connection, QuicTransportConfig, presets};
@@ -16,11 +16,11 @@ const CONNECT: Duration = Duration::from_secs(10);
 const NOTICE_WAIT: Duration = Duration::from_millis(500);
 /// The most an ask or its answer may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
-/// The most a computer that isn't the install's yet may send: one ask to join.
+/// The most a computer that isn't the network's yet may send: one ask to join.
 const JOIN_LIMIT: usize = 4 << 10;
 /// How many streams another device may have open on a connection at once.
 const STREAMS: u32 = 32;
-/// How many computers that aren't the install's yet may be connected at once, each asking to join.
+/// How many computers that aren't the network's yet may be connected at once, each asking to join.
 const JOINING: usize = 4;
 /// How long a client device may take to send a request's head on a stream.
 const REQUEST_HEAD: Duration = Duration::from_secs(30);
@@ -32,7 +32,7 @@ const CLIENT_BODY: usize = 4 << 20;
 const CLIENT_BODY_TIME: Duration = Duration::from_secs(60);
 /// How long a client device's connection stays open with nothing asked on it.
 const CLIENT_IDLE: Duration = Duration::from_secs(10 * 60);
-/// How many connections of keys the install doesn't list (a session's endpoint, until its device's certificate is
+/// How many connections of keys the network doesn't list (a session's endpoint, until its device's certificate is
 /// checked; or a stranger) may be waiting at once, and how long one may take to show that certificate.
 const UNLISTED: usize = 32;
 const UNLISTED_WITHIN: Duration = Duration::from_secs(10);
@@ -40,20 +40,20 @@ const UNLISTED_WITHIN: Duration = Duration::from_secs(10);
 /// This device's endpoint, and its connections to other devices.
 #[derive(Default)]
 pub(super) struct Net {
-    /// The endpoint, with the install's address its relay is at.
+    /// The endpoint, with the network's address its relay is at.
     endpoint: Mutex<Option<(String, Endpoint)>>,
     /// The task binding the endpoint and taking what others open, with the address it's for.
     task: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
     /// A connection to each device, opened by either end; each held while it's being opened.
     conns: Mutex<HashMap<Key, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
-    /// How many computers that aren't the install's are connected, asking to join.
+    /// How many computers that aren't the network's are connected, asking to join.
     joining: std::sync::atomic::AtomicUsize,
     /// The removed devices this device told the relay to take out.
     removed: Mutex<std::collections::HashSet<Key>>,
     /// The connections each client device has open to this one's local API, oldest first, each with how many of its
     /// requests are still being answered.
     clients: Mutex<HashMap<Key, Vec<(Connection, Arc<std::sync::atomic::AtomicUsize>)>>>,
-    /// How many connections of keys the install doesn't list are waiting to show a certificate.
+    /// How many connections of keys the network doesn't list are waiting to show a certificate.
     unlisted: std::sync::atomic::AtomicUsize,
 }
 
@@ -105,10 +105,10 @@ pub fn service_alpn() -> Vec<u8> {
     format!("{}/service/1", crate::config::CLI).into_bytes()
 }
 
-/// The relay at the install's address, which serves no QUIC address discovery, a Worker having no UDP; with `ticket`,
+/// The relay at the network's address, which serves no QUIC address discovery, a Worker having no UDP; with `ticket`,
 /// a pairing code's, which lets a computer joining in.
 pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)> {
-    let url: RelayUrl = address.trim_end_matches('/').parse().context("the install's address isn't a URL")?;
+    let url: RelayUrl = address.trim_end_matches('/').parse().context("the network's address isn't a URL")?;
     let mut config = RelayConfig::from(url.clone());
     config.quic = None;
     if let Some(ticket) = ticket {
@@ -118,7 +118,7 @@ pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)
 }
 
 impl Node {
-    /// Keeps this device's endpoint, once it's a device of an install with an address.
+    /// Keeps this device's endpoint, once it's a device of a network with an address.
     pub(super) fn follow_net(&self) {
         if super::HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst) {
             return;
@@ -198,7 +198,7 @@ impl Node {
         Ok(endpoint)
     }
 
-    /// Answers what another device asks on a connection it opened. One that isn't the install's yet is let ask only to
+    /// Answers what another device asks on a connection it opened. One that isn't the network's yet is let ask only to
     /// join it, once, a few at a time, and only while this device has a pairing code out: anyone who reaches this
     /// device directly (its LAN, its tailnet, a port its router maps) can connect, which the relay never sees.
     async fn take_conn(&self, conn: Connection) {
@@ -232,7 +232,7 @@ impl Node {
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
             // A device removed while connected is answered no more.
             if !self.is_device(&remote) {
-                return conn.close(1u32.into(), b"not a device of this install");
+                return conn.close(1u32.into(), b"not a device of this network");
             }
             let node = self.clone();
             tokio::spawn(async move {
@@ -261,13 +261,13 @@ impl Node {
         }
     }
 
-    /// The install's Cloudflare node, which asks only for calls, each its person's, with the keys they handed it for
+    /// The network's Cloudflare node, which asks only for calls, each its person's, with the keys they handed it for
     /// them, sealed to this device: as a client device's call over iroh is taken.
     async fn take_cloudflare_node(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
             if !self.is_cloudflare_node(&remote) {
-                return conn.close(1u32.into(), b"not this install's Cloudflare node");
+                return conn.close(1u32.into(), b"not this network's Cloudflare node");
             }
             let node = self.clone();
             tokio::spawn(async move {
@@ -287,14 +287,14 @@ impl Node {
     }
 
     /// Answers a client device's requests to the local API, as its person's (`api::FromClient`), each stream one
-    /// request and its response. A key the install lists as a client is who its connection proves; any other only as
+    /// request and its response. A key the network lists as a client is who its connection proves; any other only as
     /// a session's endpoint its device vouches for, by the certificate each request carries (`x-one-endpoint`), and is
     /// closed at the first that doesn't.
     async fn take_client(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         let busy = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let listed = self.client(&remote).is_some();
-        // One the install doesn't list waits its turn among a few, and shows its device's certificate soon, or is found
+        // One the network doesn't list waits its turn among a few, and shows its device's certificate soon, or is found
         // listed once this device reads `global` again, or is let go.
         let found = Arc::new(std::sync::atomic::AtomicBool::new(false));
         if !listed {
@@ -334,7 +334,7 @@ impl Node {
                 tokio::time::sleep(UNLISTED_WITHIN).await;
                 node.0.net.unlisted.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 if shown.lock().unwrap().is_none() && !found.load(std::sync::atomic::Ordering::SeqCst) {
-                    waiting.close(1u32.into(), b"not a device of this install");
+                    waiting.close(1u32.into(), b"not a device of this network");
                 }
             });
         }
@@ -382,7 +382,7 @@ impl Node {
                     }
                     Err(err) => {
                         tracing::debug!("{}: {err:#}", short(&remote));
-                        closing.close(1u32.into(), b"not a device of this install");
+                        closing.close(1u32.into(), b"not a device of this network");
                         axum::response::IntoResponse::into_response(axum::http::StatusCode::FORBIDDEN)
                     }
                 }
@@ -400,7 +400,7 @@ impl Node {
             };
             // A device removed while connected is answered no more (a session's, at its next request).
             if listed && self.client(&remote).is_none() {
-                return conn.close(1u32.into(), b"not a device of this install");
+                return conn.close(1u32.into(), b"not a device of this network");
             }
             let http = hyper::server::conn::http1::Builder::new()
                 .keep_alive(false)
@@ -420,13 +420,13 @@ impl Node {
         }
     }
 
-    /// A service endpoint of the install, which asks only for calls, as its own person: a service doesn't write
+    /// A service endpoint of the network, which asks only for calls, as its own person: a service doesn't write
     /// itself, it asks a node to.
     async fn take_service(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
             if !self.is_service(&remote) {
-                return conn.close(1u32.into(), b"not a service of this install");
+                return conn.close(1u32.into(), b"not a service of this network");
             }
             let node = self.clone();
             tokio::spawn(async move {
@@ -446,7 +446,7 @@ impl Node {
     }
 
     /// The device a session's endpoint `remote` asks as: the one its certificate names, if it's for `remote`, unexpired,
-    /// and by a client device the install still lists, with its `until`. `kept` is the last checked, so a connection
+    /// and by a client device the network still lists, with its `until`. `kept` is the last checked, so a connection
     /// checks one signature.
     fn vouched(&self, remote: &Key, certificate: Option<&str>, kept: &Mutex<Option<(String, crate::keys::Session)>>) -> Result<(Key, u64)> {
         let certificate = certificate.with_context(|| format!("that key isn't one of {YOURS}'s devices, and no device vouched for it"))?;
@@ -466,7 +466,7 @@ impl Node {
         Ok((session.by, session.until))
     }
 
-    /// A computer that isn't the install's: → its one ask to join answered, then the connection closed.
+    /// A computer that isn't the network's: → its one ask to join answered, then the connection closed.
     async fn take_joining(&self, conn: Connection) {
         use std::sync::atomic::Ordering::SeqCst;
         let remote = *conn.remote_id().as_bytes();
@@ -476,7 +476,7 @@ impl Node {
                 self.0.net.joining.fetch_sub(1, SeqCst);
             }
             tracing::debug!("{} isn't a device of {YOURS}", short(&remote));
-            return conn.close(1u32.into(), b"not a device of this install");
+            return conn.close(1u32.into(), b"not a device of this network");
         }
         let answered = tokio::time::timeout(Duration::from_secs(30), async {
             let (mut send, mut recv) = conn.accept_bi().await?;
@@ -525,12 +525,12 @@ impl Node {
         self.with(|i| Ok(i.r.db().service(key).is_some())).unwrap_or(false)
     }
 
-    /// Whether `key` is the install's Cloudflare node's endpoint, as `cloudflare node deploy` set it.
+    /// Whether `key` is the network's Cloudflare node's endpoint, as `cloudflare node deploy` set it.
     fn is_cloudflare_node(&self, key: &Key) -> bool {
         self.with(|i| Ok(i.r.db().setting("serverless").is_some_and(|k| k == hex(key)))).unwrap_or(false)
     }
 
-    /// Closes the connections of devices the install no longer lists: client devices' to the local API, and those
+    /// Closes the connections of devices the network no longer lists: client devices' to the local API, and those
     /// held to devices and services.
     pub(super) fn close_removed(&self) {
         let (clients, held): (Vec<Key>, Vec<Key>) = (self.0.net.clients.lock().unwrap().keys().copied().collect(), self.0.net.conns.lock().unwrap().keys().copied().collect());
@@ -543,7 +543,7 @@ impl Node {
             .unwrap_or_default();
         for key in gone_clients {
             for (conn, _) in self.0.net.clients.lock().unwrap().remove(&key).unwrap_or_default() {
-                conn.close(1u32.into(), b"removed from this install");
+                conn.close(1u32.into(), b"removed from this network");
             }
         }
         for key in gone_held {
@@ -551,7 +551,7 @@ impl Node {
                 && let Ok(held) = slot.try_lock()
                 && let Some(conn) = held.as_ref()
             {
-                conn.close(1u32.into(), b"removed from this install");
+                conn.close(1u32.into(), b"removed from this network");
             }
         }
     }
@@ -648,7 +648,7 @@ impl Node {
     /// which it checks itself. → what it offers, and whom it serves.
     pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
         // Only the member entries: a service needs who's who, not what anyone's apps wrote.
-        // And only those by an endpoint the install listed: a service passes over the rest, so counting them would leave it
+        // And only those by an endpoint the network listed: a service passes over the rest, so counting them would leave it
         // behind for good.
         let (entries, depths): (Vec<Entry>, Value) = self.with(|i| {
             let all = i.r.store.scope("global")?;
@@ -684,7 +684,7 @@ impl Node {
             let pack = data_encoding::BASE64.encode(&crate::entry::pack(&entries.iter().collect::<Vec<_>>()));
             let taken = self.send(&to, "entries", &json!({ "pack": pack, "depths": depths }), true, CONNECT).await?;
             if let Some(err) = taken["error"].as_str() {
-                bail!("{} didn't take the install's entries: {err}", short(&to));
+                bail!("{} didn't take the network's entries: {err}", short(&to));
             }
             answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         }
@@ -750,12 +750,12 @@ impl Node {
         answer
     }
 
-    /// Tells the relay to take out the devices removed from the install, if this device is an admin's: the relay lets
-    /// in only its list, which nothing on it can read the install's log for.
+    /// Tells the relay to take out the devices removed from the network, if this device is an admin's: the relay lets
+    /// in only its list, which nothing on it can read the network's log for.
     fn tell_removed(&self) {
         let Ok(removed) = self.with(|i| {
             let m = i.r.db();
-            let mine = m.machine(&self.0.id).is_some_and(|me| m.may(&me.user, "invite", scopes::INSTALL));
+            let mine = m.machine(&self.0.id).is_some_and(|me| m.may(&me.user, "invite", scopes::NETWORK));
             Ok(if mine { m.machines().into_iter().filter(|d| d.removed).map(|d| d.key).collect::<Vec<Key>>() } else { Vec::new() })
         }) else {
             return;
@@ -768,7 +768,7 @@ impl Node {
         }
     }
 
-    /// Tells the relay at the install's address something, signed by this device: a device it admitted (`add`), or a
+    /// Tells the relay at the network's address something, signed by this device: a device it admitted (`add`), or a
     /// pairing code it made (`pairing`, the hash of its ticket, and `until`). Tried a few times, in the background.
     pub(super) fn tell_relay(&self, fields: Value) {
         let Some(address) = self.with(|i| Ok(i.r.db().setting("address"))).ok().flatten() else {

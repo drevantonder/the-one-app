@@ -1,4 +1,4 @@
-// Repos' Settings: GitHub, connected. An admin makes the install's GitHub App once; each person signs in to their own
+// Repos' Settings: GitHub, connected. An admin makes the network's GitHub App once; each person signs in to their own
 // GitHub accounts; a group's admins connect an organization for the group. GitHub sends the browser back here with
 // { back: the address it came back to } to finish (to github_app, this screen too, after making the App). Opened with
 // { add: true } (a shell's Add Account), it starts signing in at once.
@@ -42,7 +42,7 @@ function Settings() {
 
   const createApp = async () => {
     try {
-      setOffer({ url: (await one.call("create_github_app")).url, title: "Create GitHub App", sub: "and create the install's App" })
+      setOffer({ url: (await one.call("create_github_app")).url, title: "Create GitHub App", sub: "and create the network's App" })
     } catch (err) {
       fail(err)
     }

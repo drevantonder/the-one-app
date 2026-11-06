@@ -286,7 +286,7 @@ impl Node {
     /// Tells every other device which services serve its local user here and how loaded it is, now and then.
     pub(super) async fn presence_loop(self) {
         loop {
-            if self.has_install() {
+            if self.has_network() {
                 self.say_hello();
                 self.end_expired_app_schedules();
                 self.start_owed_keys();
@@ -319,7 +319,7 @@ impl Node {
         self.hello_services();
     }
 
-    /// Says hello to each service endpoint of the install, which says what it offers and whom it serves: it's listed
+    /// Says hello to each service endpoint of the network, which says what it offers and whom it serves: it's listed
     /// as a device offering that service, as another device's hello lists those there.
     pub(super) fn hello_services(&self) {
         let Ok(services) = self.with(|i| Ok(i.r.db().machines().into_iter().filter(|m| i.r.db().service(&m.key).is_some()).map(|m| (m.key, m.service.clone().unwrap_or_default())).collect::<Vec<_>>())) else {
@@ -389,7 +389,7 @@ mod tests {
     use super::*;
 
     /// A node whose who's who stops building answers nobody, yet still reads `global`, so the entry after builds it
-    /// again: one that couldn't read it would answer nobody for good. In an install whose log isn't frozen yet.
+    /// again: one that couldn't read it would answer nobody for good. In a network whose log isn't frozen yet.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_node_whose_whos_who_stops_building_answers_nobody_until_it_reads_global_and_builds_again() {
         let dir = std::env::temp_dir().join(format!("one-whos-who-{}", rand::random::<u64>()));
@@ -398,7 +398,7 @@ mod tests {
         let a = Node::start(&dir).await.unwrap();
         a.create_before_the_switch("Home", "Andre").await.unwrap();
         let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
-        let may = || a.with(|i| Ok(i.r.db().may(&me.user, "use", scopes::INSTALL))).unwrap();
+        let may = || a.with(|i| Ok(i.r.db().may(&me.user, "use", scopes::NETWORK))).unwrap();
         assert!(may());
 
         // A setting is written, but who's who doesn't build with it: no one may do anything.

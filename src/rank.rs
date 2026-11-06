@@ -1,4 +1,4 @@
-//! Run priority. Each device, and the Cloudflare node, has a number, 1 first, or is always last: what the install's
+//! Run priority. Each device, and the Cloudflare node, has a number, 1 first, or is always last: what the network's
 //! admins set (the `priority` setting, a JSON object of each device's key, or `cloudflare`, to its number or "last"),
 //! or by default 1, and the Cloudflare node always last. Calls, services' functions and new agent devices go to the
 //! lowest number that can run them, is up and has room; devices on the same number are equal, and the quickest
@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-/// The install setting that holds them.
+/// The network setting that holds them.
 pub const SETTING: &str = "priority";
 /// The Cloudflare node's name in it.
 pub const CLOUDFLARE: &str = "cloudflare";

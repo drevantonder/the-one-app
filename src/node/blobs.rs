@@ -50,7 +50,7 @@ impl Node {
 
     /// Notes in `install/shared` a blob put in the bucket, `<scope> <hash>`, or with `- ` before it, one taken out.
     fn note_shared(&self, line: &str) -> Result<()> {
-        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(self.install_dir().join("shared"))?;
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(self.network_dir().join("shared"))?;
         std::io::Write::write_all(&mut file, format!("{line}\n").as_bytes())?;
         Ok(())
     }
@@ -69,7 +69,7 @@ impl Node {
     /// Puts in the bucket each blob this device has that an entry it holds names, and it hasn't put there yet: those
     /// from before blobs were kept in the bucket.
     pub(super) async fn share_blobs(self) {
-        let noted = std::fs::read_to_string(self.install_dir().join("shared")).unwrap_or_default();
+        let noted = std::fs::read_to_string(self.network_dir().join("shared")).unwrap_or_default();
         {
             let mut shared = self.0.shared.lock().unwrap();
             for line in noted.lines() {
@@ -262,7 +262,7 @@ impl Node {
     /// take is tried again next time.
     pub(super) async fn take_forgotten(&self) {
         let now = now_ms();
-        let noted = std::fs::read_to_string(self.install_dir().join("forgotten")).unwrap_or_default();
+        let noted = std::fs::read_to_string(self.network_dir().join("forgotten")).unwrap_or_default();
         let mut done = Vec::new();
         for line in noted.lines() {
             let mut parts = line.splitn(3, ' ');
@@ -302,7 +302,7 @@ impl Node {
     /// Adds lines to `install/forgotten`, `<due> <scope> <hash>`, and takes out the ones `done`.
     fn note_forgotten(&self, add: &[String], done: &[String]) -> Result<()> {
         let _file = self.0.forgotten.lock().unwrap();
-        let path = self.install_dir().join("forgotten");
+        let path = self.network_dir().join("forgotten");
         let was = std::fs::read_to_string(&path).unwrap_or_default();
         let lines: String = was.lines().filter(|l| !done.iter().any(|d| d == l)).chain(add.iter().map(String::as_str)).map(|l| format!("{l}\n")).collect();
         let tmp = path.with_extension("new");
@@ -348,7 +348,7 @@ impl std::error::Error for Full {}
 
 /// The scopes whose steps name a blob the scope still needs (`ScopeDb::names_blob`), once `global`'s log is frozen:
 /// `global`'s, and each other scope's database this device reads.
-fn steps_naming<'a>(i: &'a Install, hash: &'a str) -> impl Iterator<Item = Scope> + 'a {
+fn steps_naming<'a>(i: &'a Network, hash: &'a str) -> impl Iterator<Item = Scope> + 'a {
     let global = (i.r.frozen.is_some() && i.r.db().names_blob(hash)).then_some(Scope::Global);
     global.into_iter().chain(i.scope_dbs.iter().filter(|(_, (_, db))| db.names_blob(hash)).map(|(s, _)| s.clone()))
 }

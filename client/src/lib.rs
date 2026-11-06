@@ -1,5 +1,5 @@
-//! How a client device reaches its install's nodes: an iroh endpoint of the device's own key, through the relay at
-//! the install's address (and natively, directly where a path opens), connections raced to the nodes the relay says
+//! How a client device reaches its network's nodes: an iroh endpoint of the device's own key, through the relay at
+//! the network's address (and natively, directly where a path opens), connections raced to the nodes the relay says
 //! are on, in the order things run on them, the first up asked and each kept open, and each request to one node alone,
 //! HTTP/1.1 on a stream of its own, which the node answers with its local API as the device's person
 //! (src/node/net.rs). The same natively, for the CLI and the apps, and in browsers as WebAssembly (src/wasm.rs).
@@ -86,7 +86,7 @@ fn alpn() -> Vec<u8> {
 #[derive(Debug)]
 pub struct Error {
     pub sent: bool,
-    /// The install doesn't list this device (yet, or any more): what an app shows is its own screen to approve it.
+    /// The network doesn't list this device (yet, or any more): what an app shows is its own screen to approve it.
     pub not_let_in: bool,
     message: String,
     /// The nodes it tried, for a request that asked for a trace.
@@ -188,7 +188,7 @@ pub struct Response {
     pub trace: Option<serde_json::Value>,
 }
 
-/// A client device's way to its install's nodes. Clones share it.
+/// A client device's way to its network's nodes. Clones share it.
 #[derive(Clone)]
 pub struct Client(Arc<Inner>);
 
@@ -201,7 +201,7 @@ struct Inner {
     nodes: Mutex<Vec<PublicKey>>,
     /// The nodes the relay last said are on its network now, if it said: raced first, in that order.
     online: Mutex<Option<HashSet<PublicKey>>>,
-    /// Each node's run priority, where the install's state said it: nodes on the same one are raced at once.
+    /// Each node's run priority, where the network's state said it: nodes on the same one are raced at once.
     ranks: Mutex<HashMap<PublicKey, u32>>,
     /// The node that wakes when asked, the Cloudflare node, which the relay never says is on: raced first only once an
     /// admin gave it a number in run priority, else after the rest.
@@ -221,11 +221,11 @@ struct Down {
 }
 
 impl Client {
-    /// The client of the device whose key is `secret`, in the install at `address`, asking `nodes` (in the order things
+    /// The client of the device whose key is `secret`, in the network at `address`, asking `nodes` (in the order things
     /// run on them); or of a session's endpoint whose key is `secret`, with its device's `certificate`. It starts
     /// connecting to the first node at once.
     pub async fn start(secret: [u8; 32], certificate: Option<String>, address: &str, nodes: &[[u8; 32]]) -> Result<Client, Error> {
-        let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the install's address isn't a URL"))?;
+        let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the network's address isn't a URL"))?;
         // A Worker has no UDP, so the relay serves no QUIC address discovery.
         let mut config = RelayConfig::from(url.clone());
         config.quic = None;
@@ -272,7 +272,7 @@ impl Client {
         self.reconnect().await;
     }
 
-    /// The nodes to ask, in the order things run on them, as the install's state says; connecting to them starts now.
+    /// The nodes to ask, in the order things run on them, as the network's state says; connecting to them starts now.
     pub fn set_nodes(&self, nodes: &[[u8; 32]]) -> Result<(), Error> {
         let nodes = keys(nodes)?;
         *self.0.nodes.lock().unwrap() = nodes;
@@ -280,13 +280,13 @@ impl Client {
         Ok(())
     }
 
-    /// The node that wakes when asked (the Cloudflare node), if the install has one.
+    /// The node that wakes when asked (the Cloudflare node), if the network has one.
     pub fn set_wakes(&self, node: Option<[u8; 32]>) -> Result<(), Error> {
         *self.0.wakes.lock().unwrap() = node.map(|n| keys(&[n])).transpose()?.and_then(|k| k.into_iter().next());
         Ok(())
     }
 
-    /// Each node's run priority (a number, the lowest first, as the install's state says it): those on the same one
+    /// Each node's run priority (a number, the lowest first, as the network's state says it): those on the same one
     /// are equal, so they're raced at once, and the quickest is asked.
     pub fn set_ranks(&self, ranks: &[([u8; 32], u32)]) -> Result<(), Error> {
         let keys = keys(&ranks.iter().map(|r| r.0).collect::<Vec<_>>())?;
@@ -675,7 +675,7 @@ fn failure(err: &Error) -> &'static str {
     }
 }
 
-/// How a client reaches nodes: through the relay at the install's address, or (in a Worker) a transport that passes
+/// How a client reaches nodes: through the relay at the network's address, or (in a Worker) a transport that passes
 /// its datagrams to that relay by RPC.
 enum Way {
     Relay(RelayUrl, RelayConfig),

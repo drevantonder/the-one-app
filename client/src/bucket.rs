@@ -1,4 +1,4 @@
-//! The install's bucket as a client device reads it: through the URL signer at the install's address, which signs read
+//! The network's bucket as a client device reads it: through the URL signer at the network's address, which signs read
 //! URLs for a request this device signs (`one/urls`). It only reads: what's there is sealed and signed, and is checked
 //! by what opens it, so whoever passes it on can withhold it but not change it.
 //!

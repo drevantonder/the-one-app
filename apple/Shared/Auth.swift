@@ -3,7 +3,7 @@ import AuthenticationServices
 import CryptoKit
 import Security
 
-/// Signing in, as every client of the install's sign-in does (cloudflare/web/web.js is the same in a browser): this
+/// Signing in, as every client of the network's sign-in does (cloudflare/web/web.js is the same in a browser): this
 /// app registers itself as an OAuth client, the person signs in with their passkey, and it comes back with a code that
 /// PKCE turns into tokens. On the iPhone that's the system's sign-in sheet, back at `<cli>://signed-in/`; on the Mac,
 /// the person's own default browser, where their passkey is, back at a port on this Mac (`Loopback`). The refresh
@@ -37,7 +37,7 @@ actor Auth {
     private enum State { case idle, refreshing(Task<String, Error>), signedOut }
     private var state = State.idle
 
-    /// Where the install is: the one the person gave.
+    /// Where the network is: the one the person gave.
     nonisolated static var address: URL? {
         get { defaults.string(forKey: "address").flatMap(URL.init(string:)) }
         set {

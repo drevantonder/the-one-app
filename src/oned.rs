@@ -54,7 +54,7 @@ pub fn program(name: &str) -> PathBuf {
 
 /// Where oned puts a service's program it fetched, and `<cli> services try` puts yours: in `~/.local/bin`, but for a
 /// throwaway network's node (it has a home and an address of its own, `one throwaway`), in its home's `bin`, so what it
-/// fetches never replaces the real install's program, which shares the user's home.
+/// fetches never replaces the real network's program, which shares the user's home.
 pub fn fetched(name: &str) -> PathBuf {
     let var = |v: &str| std::env::var_os(format!("{}_{v}", CLI.to_uppercase()));
     if let (Some(home), Some(_)) = (var("HOME"), var("ADDR")) {
@@ -295,7 +295,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                 looked = Some(Instant::now());
             }
             match node.parts_on() {
-                Ok((install, on)) => {
+                Ok((network, on)) => {
                     let names = offered(&released.iter().filter(|(_, b)| **b != Build::None).map(|(n, _)| n.clone()).collect(), &on);
                     NOW.lock().unwrap().1 = names.clone();
                     for name in &names {
@@ -388,7 +388,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                         }
                         if wanted && named && !declaring && !running.contains_key(name) && here.exists() && !fetching.lock().unwrap().contains(name) {
                             started_with.insert(name.clone(), said.clone());
-                            match start(&install, name, said.as_ref()) {
+                            match start(&network, name, said.as_ref()) {
                                 Ok(child) => {
                                     tracing::info!("oned started {name}");
                                     let held = Held { sandbox: crate::sandbox::unsandboxed(said.as_ref(), &device), person: said.as_ref().is_some_and(|d| d.person) };
@@ -504,10 +504,10 @@ fn keep_runtime(node: &Node, runtime: &tokio::runtime::Handle, apps: &mut Option
     }
 }
 
-/// Starts a part, given the install it's in and what its app declares it may reach.
-fn start(install: &crate::service::Install, name: &str, declared: Option<&crate::sandbox::Declared>) -> anyhow::Result<std::process::Child> {
+/// Starts a part, given the network it's in and what its app declares it may reach.
+fn start(network: &crate::service::Network, name: &str, declared: Option<&crate::sandbox::Declared>) -> anyhow::Result<std::process::Child> {
     let folder = crate::service::folder(name);
-    install.give(&folder)?;
+    network.give(&folder)?;
     let _ = std::fs::remove_file(folder.join(crate::service::PROBLEM));
     match declared {
         Some(d) => std::fs::write(folder.join(crate::service::DECLARED), serde_json::to_vec(d)?)?,

@@ -1,4 +1,4 @@
-// Signing in, as the web client does (cloudflare/web/web.js): this app is an OAuth client of the install's sign-in,
+// Signing in, as the web client does (cloudflare/web/web.js): this app is an OAuth client of the network's sign-in,
 // registered the first time it signs in. Sign-in and consent happen in the person's own browser, where their passkey
 // works, and come back to a port on this machine (RFC 8252's loopback redirect), any port, since sign-in matches loopback
 // redirects without theirs. The refresh token is kept in Windows' Credential Locker; access tokens only in memory.
@@ -26,7 +26,7 @@ public sealed class Auth
     public static readonly Auth Shared = new();
 
     static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(30) };
-    /// Where this app keeps what isn't secret: the install's address and its client id there.
+    /// Where this app keeps what isn't secret: the network's address and its client id there.
     static string Kept => Path.Combine(CustomBuild.Folder, "sign-in.json");
     /// The Credential Locker's name for this app's refresh token.
     static string Locker => $"{CustomBuild.Name} sign-in";
@@ -40,7 +40,7 @@ public sealed class Auth
     string? access;
     DateTime until;
 
-    /// The install's address: the config's, or the one the person gave.
+    /// The network's address: the config's, or the one the person gave.
     public string? Address { get; private set; }
     /// The secret of the invite link this person opened here, for their first device's request to be let in.
     public string? Invite
@@ -98,7 +98,7 @@ public sealed class Auth
         return url;
     }
 
-    /// Forgets the install, to sign in to another.
+    /// Forgets the network, to sign in to another.
     public void Leave()
     {
         Forget();

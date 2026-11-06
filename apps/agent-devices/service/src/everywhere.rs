@@ -91,7 +91,7 @@ impl Devices {
     }
 
     /// This device's name and every online device that runs agent devices, this one too, in where things run first
-    /// (the install's order).
+    /// (the network's order).
     pub(super) fn ordered(&self) -> Result<(String, Vec<String>)> {
         let st = self.host.get("/v1/state")?;
         let mut devices: Vec<&Value> = st["install"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();

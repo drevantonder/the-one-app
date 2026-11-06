@@ -21,7 +21,7 @@ pub struct Client(crate::Client);
 impl Client {
     /// `secret`: the 32 bytes of this session's key, kept in WebAssembly's memory while it runs (the device's own key
     /// stays in WebCrypto). `certificate`: the device's word for it (`certify` in cloudflare/shared/crypto.js).
-    /// `address`: the install's, where its relay is. `nodes`: the nodes to ask, hex, in the order things run on them.
+    /// `address`: the network's, where its relay is. `nodes`: the nodes to ask, hex, in the order things run on them.
     pub async fn start(secret: Vec<u8>, certificate: String, address: String, nodes: Vec<String>) -> Result<Client, JsError> {
         let secret: [u8; 32] = secret.try_into().map_err(|_| js("a session's key is 32 bytes"))?;
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
@@ -38,7 +38,7 @@ impl Client {
         data_encoding::HEXLOWER.encode(&self.0.id())
     }
 
-    /// The nodes to ask, as the install's state lists them.
+    /// The nodes to ask, as the network's state lists them.
     pub fn nodes(&self, nodes: Vec<String>) -> Result<(), JsError> {
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
         self.0.set_nodes(&nodes).map_err(js)
@@ -50,7 +50,7 @@ impl Client {
         self.0.set_ranks(&keys.into_iter().zip(ranks).collect::<Vec<_>>()).map_err(js)
     }
 
-    /// The node that wakes when asked (the Cloudflare node), hex, if the install has one.
+    /// The node that wakes when asked (the Cloudflare node), hex, if the network has one.
     pub fn wakes(&self, node: Option<String>) -> Result<(), JsError> {
         self.0.set_wakes(node.map(|n| key(&n)).transpose()?).map_err(js)
     }
@@ -166,8 +166,8 @@ impl Response {
 }
 
 /// `global`'s entries this browser holds, checked, and who's who as they make it (src/members.rs): from what it kept
-/// (`kept`, a pack, of the install whose genesis is `root`, hex, or none the first time) and what a node just gave
-/// (`given`, a pack). Throws if any entry doesn't check, or they're another install's.
+/// (`kept`, a pack, of the network whose genesis is `root`, hex, or none the first time) and what a node just gave
+/// (`given`, a pack). Throws if any entry doesn't check, or they're another network's.
 #[wasm_bindgen]
 pub struct Global {
     root: String,
@@ -231,7 +231,7 @@ impl Global {
         self.at as f64
     }
 
-    /// The install's genesis, hex: to keep, and give again.
+    /// The network's genesis, hex: to keep, and give again.
     #[wasm_bindgen(getter)]
     pub fn root(&self) -> String {
         self.root.clone()
@@ -257,7 +257,7 @@ impl Global {
 }
 
 /// Where the issuer of a new device's sign-in (`proof`, as sign-in passed it on, JSON) publishes its keys, for the issuers
-/// devices of the install at `address` take: "" for a passkey's, or any other issuer.
+/// devices of the network at `address` take: "" for a passkey's, or any other issuer.
 #[wasm_bindgen(js_name = issuerKeysAt)]
 pub fn issuer_keys_at(proof: String, address: String) -> String {
     let proof: Option<one::sign_in_proof::Proof> = serde_json::from_str(&proof).ok();
@@ -265,7 +265,7 @@ pub fn issuer_keys_at(proof: String, address: String) -> String {
 }
 
 /// What a new device (`key`, `seal`, hex) signed in with, as its sign-in (`proof`, JSON) shows, checked here
-/// (`one::sign_in_proof`): with its issuer's `keys` (JSON, or "" for a passkey's), for the install at `address` whose
+/// (`one::sign_in_proof`): with its issuer's `keys` (JSON, or "" for a passkey's), for the network at `address` whose
 /// first entry's hash is `genesis` (hex) and whose people sign in with `clients` (its `sign_in_clients` setting, as
 /// its entries say, or ""); against `accounts` (its person's, as their devices record them, JSON), for one let in by
 /// it, or with none, for one approved by its code. → the account, as JSON, to record with it; throws why it doesn't
@@ -275,15 +275,15 @@ pub fn issuer_keys_at(proof: String, address: String) -> String {
 pub fn signed_in_with(proof: String, key: String, seal: String, address: String, genesis: String, clients: String, keys: String, accounts: Option<String>, now: f64) -> Result<String, JsError> {
     let proof: one::sign_in_proof::Proof = serde_json::from_str(&proof).map_err(js)?;
     let device = one::keys::Endpoint { key: self::key(&key)?, seal: self::key(&seal)? };
-    let install = one::sign_in_proof::Install::new(&address, self::key(&genesis)?, Some(&clients));
+    let network = one::sign_in_proof::Network::new(&address, self::key(&genesis)?, Some(&clients));
     let keys: Option<serde_json::Value> = (!keys.is_empty()).then(|| serde_json::from_str(&keys)).transpose().map_err(js)?;
     let now = now as u64;
     let account = match accounts {
         Some(theirs) => {
             let theirs: Vec<one::sign_in_proof::Account> = serde_json::from_str(&theirs).map_err(js)?;
-            one::sign_in_proof::vouches(&proof, &device, &install, keys.as_ref(), &theirs, now)
+            one::sign_in_proof::vouches(&proof, &device, &network, keys.as_ref(), &theirs, now)
         }
-        None => one::sign_in_proof::check(&proof, &device, &install, keys.as_ref(), now),
+        None => one::sign_in_proof::check(&proof, &device, &network, keys.as_ref(), now),
     };
     Ok(serde_json::to_string(&account.map_err(js)?).map_err(js)?)
 }
