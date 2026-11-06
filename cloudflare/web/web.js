@@ -8,7 +8,6 @@
 // ui.js, loaded before this, keeps it on `OneUI`.
 // This browser is a device of its person (device.js, and one-client's keyring in net-worker.js): it signs what changes
 // who can do what, and hands each call the keys it needs.
-import * as answers from "./answers.js";
 import { del, put } from "./kept.js";
 import { waited } from "../shared/crypto.js";
 import { answer, browserKeys, browserName, codeOf, joinAsk, passkeyKeysOf, signingInFor } from "./device.js";
@@ -39,14 +38,15 @@ const h = OneUI.react.createElement;
 
   const KEPT = "one.signin";
   // What the client's own screens keep between visits (one.cache), the window as it was last (LAST), the screens it
-  // showed (KEPT_SCREENS, `kept`) and what their calls answered (answers.js): all forgotten with the sign-in.
+  // showed (KEPT_SCREENS, `kept`) and what their calls answered (the device's, one-client's `answers`): all forgotten
+  // with the sign-in.
   const SCREENS = "one.screens.";
   const LAST = "one.last.window";
   const KEPT_SCREENS = "one.screens";
   const forgetScreens = () => {
     Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k.startsWith(LAST)).forEach((k) => localStorage.removeItem(k));
     window.caches?.delete(KEPT_SCREENS).catch(() => {});
-    return answers.forget();
+    return native ? undefined : net.forget(auth.user());
   };
   const CLIENT = "one.client";
 
@@ -1127,7 +1127,7 @@ const h = OneUI.react.createElement;
     // What a call answered last time, if it only reads: from this browser, at once, while the window still starts.
     if (m.type === "kept") {
       const tool = String(m.tool || "");
-      const got = !mine && reads(r.app, tool) ? await answers.kept(auth.user(), r.app, tool, m.input ?? {}).catch(() => null) : null;
+      const got = mine ? null : await (native || net).kept(auth.user(), r.app, tool, m.input ?? {}).catch(() => null);
       return void f.frame.contentWindow?.postMessage({ oneReply: id, ok: got }, "*");
     }
     f.busy++;
@@ -1141,9 +1141,7 @@ const h = OneUI.react.createElement;
         frame: f.frame,
         call: async (tool, input) => {
           if (mine) throw new Error("Settings has no app to call.");
-          const out = await call(r.app, tool, input);
-          if (reads(r.app, tool)) answers.keep(auth.user(), r.app, tool, input, out).catch(() => {});
-          return out;
+          return call(r.app, tool, input);
         },
         open: (m) => {
           const params = JSON.stringify(m.params || {});

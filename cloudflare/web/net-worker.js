@@ -13,7 +13,8 @@
 // A tab says `start` with its person; then each `fetch` is answered with its status and headers, its body's parts as
 // they come, and `done` (or `error`); `cancel` stops one. What changes who can do what is a `fetch` too, of the path a
 // node's route has, which the keyring answers itself, signing it (one-client's `settings`). `settle`, `renew` and `push`
-// are the rest a device does as itself. `nodes` gives the order to ask nodes in, which is remembered; `reconnect`
+// are the rest a device does as itself. `kept` gives what a call that only reads answered last (one-client's
+// `answers`), and `forget` forgets what this device kept, as it signs out. `nodes` gives the order to ask nodes in, which is remembered; `reconnect`
 // starts a fresh endpoint, after the network came back.
 
 /// How long before a session's certificate ends it's renewed, and how long after a renewal that failed it's tried again.
@@ -124,6 +125,77 @@ export function server(version) {
     };
   }
 
+  /// Where this browser keeps its calls' answers for `user` (one-client's `answers::Shelf`): IndexedDB's `one.answers`,
+  /// each sealed (AES-GCM) under a key of its own that WebCrypto never lets out, made for one person: another's
+  /// sign-in finds only what it can't open, which goes.
+  function shelf(user) {
+    const done = (req) => new Promise((ok, fail) => ((req.onsuccess = () => ok(req.result)), (req.onerror = () => fail(req.error))));
+    const finished = (tx) => new Promise((ok, fail) => ((tx.oncomplete = () => ok()), (tx.onerror = tx.onabort = () => fail(tx.error))));
+    let ready = null;
+    const open = () =>
+      (ready ||= (async () => {
+        const opened = indexedDB.open("one.answers", 1);
+        opened.onupgradeneeded = () => {
+          opened.result.createObjectStore("key");
+          opened.result.createObjectStore("answers").createIndex("at", "at");
+        };
+        const db = await done(opened);
+        // Another tab forgetting them closes this one's hold, so they go at once.
+        db.onversionchange = () => (db.close(), (ready = null));
+        let kept = await done(db.transaction("key").objectStore("key").get("key"));
+        if (kept?.user !== user || !(kept.key instanceof CryptoKey)) {
+          kept = { user, key: await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]) };
+          const tx = db.transaction(["key", "answers"], "readwrite");
+          tx.objectStore("answers").clear();
+          tx.objectStore("key").put(kept, "key");
+          await finished(tx);
+        }
+        return { db, key: kept.key };
+      })().catch((err) => ((ready = null), Promise.reject(err))));
+    const aad = (name) => new TextEncoder().encode(`${user}\n${name}`);
+    return {
+      async get(name) {
+        const { db, key } = await open();
+        const got = await done(db.transaction("answers").objectStore("answers").get(name));
+        if (!got) return null;
+        return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: got.iv, additionalData: aad(name) }, key, got.sealed)).slice();
+      },
+      async put(name, plain, most) {
+        const { db, key } = await open();
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad(name) }, key, plain);
+        const tx = db.transaction("answers", "readwrite");
+        const answers = tx.objectStore("answers");
+        answers.put({ at: Date.now(), iv, sealed }, name);
+        const n = await done(answers.count());
+        if (n > most) {
+          let over = n - most;
+          answers.index("at").openKeyCursor().onsuccess = (e) => {
+            const c = e.target.result;
+            if (!c || over-- <= 0) return;
+            answers.delete(c.primaryKey);
+            c.continue();
+          };
+        }
+        await finished(tx);
+      },
+      async forget() {
+        const was = ready;
+        ready = null;
+        await was?.then((o) => o.db.close(), () => {});
+        await done(indexedDB.deleteDatabase("one.answers")).catch(() => {});
+      },
+    };
+  }
+
+  /// Each person's answers kept in this browser (`Answers`), made the first time they're asked for.
+  const answering = new Map();
+  const answersOf = async (user) => {
+    const { Answers } = await glue;
+    if (!answering.has(user)) answering.set(user, new Answers(shelf(user)));
+    return answering.get(user);
+  };
+
   /// The session: none until a tab starts it (this worker, or this tab leading the others, is new); then its person, and
   /// `ready`, its client once it's started, or null if this browser isn't a device of theirs.
   let session = null;
@@ -156,6 +228,7 @@ export function server(version) {
     let made = null;
     const making = glue.then(async ({ Keyring }) => {
       const k = new Keyring(device.key, device.sealKey, await reaches(user, device, () => made?.still() ?? true, as ? new Map() : null));
+      if (!as) k.keeping(await answersOf(user));
       await k.restore();
       return k;
     });
@@ -291,6 +364,18 @@ export function server(version) {
             if (ranks.length) s?.client.ranks(ranks, ranks.map((k) => m.ranks[k]));
             if (m.wakes && nodes.includes(m.wakes)) s?.client.wakes(m.wakes);
             return s?.client.nodes(nodes);
+          }
+          // What a call that only reads answered last, kept here: at once, whether or not a session started.
+          case "kept": {
+            const got = await (await answersOf(m.user)).kept(m.app, m.tool, JSON.stringify(m.input ?? {}));
+            return post({ id, kept: got ? JSON.parse(got) : null });
+          }
+          // Signed out: what this device kept as its person's goes.
+          case "forget": {
+            const s = await session?.ready.catch(() => null);
+            await s?.keyring.forget();
+            await (await answersOf(m.user || "")).forget();
+            return post({ id });
           }
           // As each start of a client does: its person's own things, settled if they aren't.
           case "settle": {

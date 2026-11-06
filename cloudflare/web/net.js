@@ -188,6 +188,16 @@ export const net = {
     if (net.has) await ask({ op: "settle" });
   },
 
+  /// What `app`'s `tool` answered last for `input` here, if it only reads: `{ answer, at }`, or null.
+  async kept(user, app, tool, input) {
+    return net.has ? (await ask({ op: "kept", user, app, tool, input })).kept : null;
+  },
+
+  /// What this device kept as `user`'s goes, as it signs out.
+  async forget(user) {
+    if (net.has) await ask({ op: "forget", user });
+  },
+
   /// This person's app schedules of `app`, renewed by this device as they use it.
   async renew(app) {
     if (net.has) await ask({ op: "renew", app });

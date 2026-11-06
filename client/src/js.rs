@@ -152,3 +152,22 @@ impl one::keys::Opens for Seal {
         Uint8Array::new(&got).to_vec().try_into().map_err(|_| anyhow!("a shared secret is 32 bytes"))
     }
 }
+
+/// Where a browser keeps answers (`answers::Shelf`), as JavaScript reaches it: `{ get(name), put(name, plain, most),
+/// forget() }`, each a promise; `get` gives the bytes opened, or null.
+pub struct Shelf(pub Js);
+
+impl crate::answers::Shelf for Shelf {
+    async fn get(&self, name: &str) -> Option<Vec<u8>> {
+        let got = self.0.ask("get", &[name.into()]).await.ok()?;
+        (!got.is_null() && !got.is_undefined()).then(|| Uint8Array::new(&got).to_vec())
+    }
+
+    async fn put(&self, name: &str, plain: &[u8], most: usize) {
+        let _ = self.0.ask("put", &[name.into(), Uint8Array::from(plain).into(), (most as f64).into()]).await;
+    }
+
+    async fn forget(&self) {
+        let _ = self.0.ask("forget", &[]).await;
+    }
+}

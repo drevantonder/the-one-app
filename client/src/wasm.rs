@@ -98,6 +98,33 @@ pub struct Keyring {
     keyring: crate::keyring::Keyring<crate::js::Seal>,
     on: crate::js::On,
     client: std::cell::RefCell<Option<std::rc::Rc<crate::Client>>>,
+    answers: std::cell::RefCell<Option<std::rc::Rc<crate::answers::Answers<crate::js::Shelf>>>>,
+}
+
+/// The last answer of each call screens make that only reads, kept in this browser for its person (`answers`), through
+/// `shelf` (`js::Shelf`): what's kept is read at once, before the session starts; what's kept comes from its device's
+/// requests (`Keyring::keeping`).
+#[wasm_bindgen]
+pub struct Answers(std::rc::Rc<crate::answers::Answers<crate::js::Shelf>>);
+
+#[wasm_bindgen]
+impl Answers {
+    #[wasm_bindgen(constructor)]
+    pub fn new(shelf: JsValue) -> Answers {
+        Answers(std::rc::Rc::new(crate::answers::Answers::new(crate::js::Shelf(crate::js::Js(shelf)))))
+    }
+
+    /// What `app`'s `tool` answered last for `input` (JSON), if it only reads: `{ answer, at }` as JSON, or "".
+    pub async fn kept(&self, app: String, tool: String, input: String) -> String {
+        match self.0.kept(&app, &tool, input.as_bytes()).await {
+            Some((answer, at)) => format!(r#"{{"answer":{},"at":{at}}}"#, String::from_utf8_lossy(&answer)),
+            None => String::new(),
+        }
+    }
+
+    pub async fn forget(&self) {
+        self.0.forget().await
+    }
 }
 
 #[wasm_bindgen]
@@ -105,7 +132,12 @@ impl Keyring {
     #[wasm_bindgen(constructor)]
     pub fn new(key: String, seal: String, on: JsValue) -> Result<Keyring, JsError> {
         let opens = crate::js::Seal { public: self::key(&seal)?, js: crate::js::Js(on.clone()) };
-        Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), on: crate::js::On::of(on, self::key(&key)?), client: Default::default() })
+        Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), on: crate::js::On::of(on, self::key(&key)?), client: Default::default(), answers: Default::default() })
+    }
+
+    /// Keeps, in `answers`, what its requests' calls that only read answered.
+    pub fn keeping(&self, answers: &Answers) {
+        *self.answers.borrow_mut() = Some(answers.0.clone());
     }
 
     /// The session's client, which its requests go through.
@@ -157,7 +189,13 @@ impl Keyring {
         let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
         let mut fetches = trace.then(Vec::new);
         let client = self.client.borrow().clone().ok_or_else(|| Failed::of(crate::keyring::refused()))?;
-        let sent = self.keyring.request(&client, &self.on, crate::Request { method, path, headers, body: body.into() }, until as u64, fetches.as_mut()).await;
+        let request = crate::Request { method: method.clone(), path: path.clone(), headers, body: body.clone().into() };
+        let sent = self.keyring.request(&client, &self.on, request, until as u64, fetches.as_mut()).await;
+        let answers = self.answers.borrow().clone();
+        let sent = match (answers, sent) {
+            (Some(answers), Ok(response)) => answers.passing(&method, path.split('?').next().unwrap_or(&path), &body, response).await,
+            (_, sent) => sent,
+        };
         let traced = fetches.map(|f| serde_json::Value::from(f).to_string()).unwrap_or_default();
         let response = sent.map_err(|e| Failed { trace: traced.clone(), ..Failed::of(e) })?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
@@ -187,9 +225,13 @@ impl Keyring {
         self.keyring.register_push(&self.on, &address).await.map_err(Failed::of)
     }
 
-    /// Forgets all it knew and kept but the network's root, as a device that's out does.
+    /// Forgets all it knew and kept but the network's root, and its calls' answers, as a device that's out does.
     pub async fn forget(&self) {
-        self.keyring.forget(&self.on).await
+        self.keyring.forget(&self.on).await;
+        let answers = self.answers.borrow().clone();
+        if let Some(answers) = answers {
+            answers.forget().await;
+        }
     }
 }
 

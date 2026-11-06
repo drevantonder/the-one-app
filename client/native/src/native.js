@@ -50,6 +50,8 @@
     /// Something changed on the person's devices: the app's own widgets are drawn again.
     changed: () => invoke("changed").catch(() => {}),
     signOut: () => invoke("sign_out"),
+    /// What a call that only reads answered last on this device (`user` is the app's own) → `{ answer, at }`, or null.
+    kept: (user, app, tool, input) => invoke("kept", { app, tool, input }),
     /// A phone's haptic: "selection", "medium", "success" or "error".
     haptic: (style) => invoke("haptic", { style }).catch(() => {}),
     /// The document camera, where there's one (`about().scan`) → its pages as files.

@@ -443,6 +443,13 @@ fn cancel(id: u64) {
     }
 }
 
+/// What `app`'s `tool` answered last for `input` here, if it only reads (`Device::kept`): `{ answer, at }`, or null.
+#[tauri::command]
+async fn kept(app: String, tool: String, input: Value) -> Option<Value> {
+    let (answer, at) = self::app().device().ok()?.kept(&app, &tool, input.to_string().as_bytes()).await?;
+    Some(json!({ "answer": serde_json::from_slice::<Value>(&answer).ok()?, "at": at }))
+}
+
 /// Whether this device was taken out of its person's devices, as the relay says.
 #[tauri::command]
 async fn removed() -> bool {

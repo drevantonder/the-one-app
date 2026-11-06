@@ -28,14 +28,11 @@ pub mod js;
 #[cfg(target_family = "wasm")]
 mod wasm;
 
-#[cfg(not(target_family = "wasm"))]
 mod answers;
 #[cfg(not(target_family = "wasm"))]
 mod bucket;
 #[cfg(not(target_family = "wasm"))]
 mod device;
-#[cfg(not(target_family = "wasm"))]
-pub use answers::Answers;
 #[cfg(not(target_family = "wasm"))]
 pub use device::{Device, join_of, new_secret, open_note};
 #[cfg(not(target_family = "wasm"))]

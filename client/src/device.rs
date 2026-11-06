@@ -14,7 +14,7 @@ use one::config::YOURS;
 use one::keys::{self, Endpoint, Waited, hex};
 use serde_json::{Value, json};
 
-use crate::answers::Answers;
+use crate::answers::{Answers, Files};
 use crate::bucket::Signed;
 pub(crate) use crate::keyring::now;
 use crate::keyring::{Address, HANDED_FOR, Keep, Keyring, error, refused};
@@ -74,7 +74,7 @@ pub struct Device {
     traces: Mutex<std::collections::VecDeque<Value>>,
     /// The last answer of each call that only reads, for its app's screens (`kept`): a native app's keeps them
     /// (`keeping`), the CLI's doesn't.
-    answers: Option<Answers>,
+    answers: Option<Answers<Files>>,
 }
 
 impl Device {
@@ -106,7 +106,7 @@ impl Device {
     }
 
     pub fn keeping(mut self) -> Device {
-        self.answers = Some(Answers::new(&self.dir, &self.key));
+        self.answers = Some(Answers::new(Files::new(&self.dir, &self.key)));
         self
     }
 
@@ -329,7 +329,9 @@ impl Device {
             client.close().await;
         }
         self.keyring.forget(self).await;
-        self.forget_answers();
+        if let Some(answers) = &self.answers {
+            answers.forget().await;
+        }
     }
 
     /// Signs out: this device takes itself out of its person's devices first (`leave`), reaching the network first if
@@ -440,19 +442,10 @@ impl Device {
             return Ok(Response { body: Body::whole(bytes), ..response });
         }
         // What a screen's call answered, kept if it only reads, as the whole list of apps says which do.
-        if let Some(answers) = &self.answers
-            && response.status == 200
-            && ((method == "GET" && path == "/v1/apps") || (method == "POST" && path == "/v1/call"))
-        {
-            let bytes = response.body.bytes().await?;
-            if path == "/v1/apps" {
-                answers.learn(&bytes);
-            } else {
-                answers.keep(body.bytes(), &bytes);
-            }
-            return Ok(Response { body: Body::whole(bytes), ..response });
+        match &self.answers {
+            Some(answers) => answers.passing(method, path, body.bytes(), response).await,
+            None => Ok(response),
         }
-        Ok(response)
     }
 
     /// The order things run in, from the node's `/v1/state`; a node it lists that this device didn't know of has it
@@ -479,14 +472,8 @@ impl Device {
 
     /// What `app`'s `tool` answered last for `input` (JSON), if it only reads: its answer's JSON, and when (ms). For a
     /// screen to show at once while it asks again (bridge.js's `kept`).
-    pub fn kept(&self, app: &str, tool: &str, input: &[u8]) -> Option<(Vec<u8>, u64)> {
-        self.answers.as_ref()?.kept(app, tool, input)
-    }
-
-    fn forget_answers(&self) {
-        if let Some(answers) = &self.answers {
-            answers.forget();
-        }
+    pub async fn kept(&self, app: &str, tool: &str, input: &[u8]) -> Option<(Vec<u8>, u64)> {
+        self.answers.as_ref()?.kept(app, tool, input).await
     }
 }
 
