@@ -266,7 +266,7 @@ impl Node {
     /// app's databases', and the scopes' log and Vault, never another app's.
     pub(super) fn passing_on(&self, token: &str, scopes: &[Scope], app: &str) -> (Vec<crate::keys::Handed>, u64) {
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
-        let its = |a: &str, database: &str| a == app || (a == members::APP && (database == crate::database::steps::KEY_NAME || database == crate::vault::DATABASE));
+        let its = |a: &str, database: &str| a == app || (a == scopes::APP && (database == crate::database::steps::KEY_NAME || database == crate::vault::DATABASE));
         let kept = self.0.sessions.kept.lock().unwrap();
         let Some(session) = kept.get(&hash(token)).filter(|s| s.live(now_ms())) else { return (Vec::new(), 0) };
         let keys = session.keys.iter().filter(|((scope, a, database), _)| named.contains(scope) && its(a, database)).flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| crate::keys::Handed { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone(), key: *key })).collect();
@@ -296,7 +296,7 @@ impl Node {
     /// nobody's key has this device pass over the real steps or write any it can't be read by (`opens_steps`).
     pub(super) async fn handed_step_keys(&self, scope: &Scope) -> Result<Keys> {
         let (now, newest) = (now_ms(), self.with(|i| Ok(i.r.db().epoch(scope)))?);
-        let id = (scope.to_string(), members::APP.to_string(), crate::database::steps::KEY_NAME.to_string());
+        let id = (scope.to_string(), scopes::APP.to_string(), crate::database::steps::KEY_NAME.to_string());
         let handed: Vec<(String, Keys)> = self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)).filter_map(|s| s.keys.get(&id).map(|k| (s.user.clone(), k.clone()))).collect();
         let mut offered: BTreeMap<u32, Vec<[u8; 32]>> = BTreeMap::new();
         self.with(|i| {
@@ -384,7 +384,7 @@ impl Node {
         }
         let want: Vec<(Scope, &str, &str)> = self.with(|i| {
             let m = i.r.db();
-            Ok(m.scopes().into_iter().filter(|s| *s != Scope::Global && i.r.holds(s) && m.may(&me.user, "use", &scopes::object(s)) && m.epoch(s) > 0 && !self.opens(m, s)).map(|s| (s, members::APP, crate::database::steps::KEY_NAME)).collect())
+            Ok(m.scopes().into_iter().filter(|s| *s != Scope::Global && i.r.holds(s) && m.may(&me.user, "use", &scopes::object(s)) && m.epoch(s) > 0 && !self.opens(m, s)).map(|s| (s, scopes::APP, crate::database::steps::KEY_NAME)).collect())
         })?;
         self.needs(me, &want).await?;
         for (scope, ..) in &want {

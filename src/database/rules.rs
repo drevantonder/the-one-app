@@ -15,7 +15,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
 use crate::entry::{Entry, Key, Scope, hex, is_id, unhex};
-use crate::members::{self, AGENTS, APP, APP_SCHEDULES, Kind, Machine, Principal, Role, handle_from, source_link, valid_app_name, valid_handle, valid_host, valid_page, valid_secret_name};
+use crate::database::scopes;
+use crate::database::scopes::{AGENTS, APP, APP_SCHEDULES, Kind, Machine, Principal, Role, handle_from, source_link, valid_app_name, valid_handle, valid_host, valid_page, valid_secret_name};
 
 use super::scope::{group, int, owner, person, role};
 use super::scopes::{NETWORK, ScopeDb, object, owner_object};
@@ -76,7 +77,7 @@ pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Entry) -> Re
         "deploy" => c.deploy(),
         "service" => c.service(),
         "install" | "uninstall" => own(who, out, scope, step),
-        k if members::RELEASES.contains(&k) => Ok(()),
+        k if scopes::RELEASES.contains(&k) => Ok(()),
         other => bail!("unknown kind {other}"),
     }
 }
@@ -717,4 +718,401 @@ fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
         place: data["place"].as_str().map(|p| p.chars().take(64).collect()),
         removed: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use ed25519_dalek::SigningKey;
+    use serde_json::{Value, json};
+
+    use crate::entry::{Content, Entry, Ext, Key, Scope, hex};
+    use crate::keys::Endpoint;
+    use crate::database::content::*;
+    use crate::database::scopes::{APPS_PART, Kind, Role};
+
+    use super::super::scopes::ScopeDb;
+    use super::super::steps;
+
+    const ANDRE: &str = "a000000000000001";
+    const BOB: &str = "b000000000000002";
+    const BOTH: &[Kind] = &[Kind::Client, Kind::Compute];
+    const H: &str = "e";
+
+    /// A device, writing steps.
+    struct Dev(SigningKey);
+
+    impl Dev {
+        fn new(seed: u8) -> Self {
+            Dev(SigningKey::from_bytes(&[seed; 32]))
+        }
+        fn id(&self) -> Key {
+            self.0.verifying_key().to_bytes()
+        }
+        fn endpoint(&self) -> Endpoint {
+            Endpoint::of(&self.0)
+        }
+    }
+
+    /// `global`'s scope database, each step applied as its readers apply it: those that don't count are passed over.
+    struct Net {
+        db: ScopeDb,
+        at: u64,
+    }
+
+    impl Net {
+        /// A network whose genesis `mac` signs, listing itself as Andre's `kinds`, its recovery key `recovery`.
+        fn new(mac: &Dev, kinds: &[Kind], recovery: &Key) -> Net {
+            let g = Entry::create(&mac.0, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &mac.endpoint(), "mac", kinds, recovery, &H.repeat(64)));
+            Net { db: steps::first(&g, 0).unwrap(), at: 1 }
+        }
+
+        /// Writes `content` as `user` from `dev`: whether it counted.
+        fn step(&mut self, dev: &Dev, user: &str, content: Content) -> bool {
+            self.at += 1;
+            let s = steps::sign(&dev.0, &Scope::Global, self.at, user, 1, self.at, content).unwrap();
+            match steps::apply(&self.db, None, &Scope::Global, &s) {
+                Ok(a) => {
+                    self.db = ScopeDb::open(a.db, 0).unwrap();
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+
+        fn owed(&self) -> Vec<Scope> {
+            let mut owed = self.db.owed();
+            owed.sort();
+            owed
+        }
+    }
+
+    /// Andre's network, his mac a client and node.
+    fn setup() -> (Dev, Net) {
+        let mac = Dev::new(1);
+        let net = Net::new(&mac, BOTH, &[7; 32]);
+        (mac, net)
+    }
+
+    /// What a device signed in with is recorded with its listing, for its person's next device to be checked against;
+    /// a device taken out takes its record with it, and a shape this release doesn't know records nothing.
+    #[test]
+    fn a_devices_sign_in_is_its_persons_while_it_is_listed() {
+        let (mac, mut net) = setup();
+        let google = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
+        let listed = |d: &Dev, sign_in: Value| {
+            let mut c = device(&d.endpoint(), ANDRE, "phone", &[Kind::Client], None);
+            c.data["sign_in"] = sign_in;
+            c
+        };
+        let (phone, laptop) = (Dev::new(3), Dev::new(4));
+        net.step(&mac, ANDRE, listed(&phone, google.clone()));
+        net.step(&mac, ANDRE, listed(&laptop, json!({ "password": "hunter2" })));
+        assert_eq!(net.db.machine(&phone.id()).unwrap().sign_in, serde_json::from_value(google.clone()).ok());
+        assert_eq!(net.db.machine(&laptop.id()).unwrap().sign_in, None);
+        assert_eq!(net.db.sign_ins(ANDRE), vec![serde_json::from_value(google).unwrap()]);
+        net.step(&mac, ANDRE, remove_device(&phone.id()));
+        assert!(net.db.machine(&phone.id()).is_none() && net.db.sign_ins(ANDRE).is_empty(), "taken out, with what it signed in with");
+    }
+
+    /// What a device signed in with is forgotten only by its person's own device; and a device they said isn't theirs
+    /// ("Not Me") is never listed after, by them or anyone, and nothing it writes counts.
+    #[test]
+    fn a_sign_in_is_forgotten_and_a_device_turned_down_stays_out() {
+        let (mac, mut net) = setup();
+        let google = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
+        let (phone, bobs) = (Dev::new(3), Dev::new(5));
+        let mut c = device(&phone.endpoint(), ANDRE, "phone", &[Kind::Client], None);
+        c.data["sign_in"] = google;
+        net.step(&mac, ANDRE, c);
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        assert!(!net.step(&bobs, BOB, forget_sign_in(&phone.id())), "only its person forgets it");
+        assert!(net.step(&phone, ANDRE, forget_sign_in(&phone.id())));
+        assert_eq!(net.db.machine(&phone.id()).unwrap().sign_in, None);
+
+        let stranger = Dev::new(9);
+        assert!(net.step(&mac, ANDRE, refuse(&stranger.endpoint(), "MacBook Pro")));
+        assert!(!net.step(&phone, ANDRE, device(&stranger.endpoint(), ANDRE, "MacBook Pro", &[Kind::Client], None)), "turned down, it's never listed");
+        assert!(!net.step(&stranger, ANDRE, setting("sneaky", Some("1"))), "and what it writes doesn't count");
+        assert!(net.db.machine(&stranger.id()).is_none() && net.db.machine_ever(&stranger.id()).unwrap().removed);
+        // One listed already is taken out instead, as Remove does.
+        assert!(!net.step(&mac, ANDRE, refuse(&phone.endpoint(), "phone")));
+    }
+
+    /// A new device's sign-in is checked only against what a person's own devices recorded of their own clients: not a
+    /// machine an admin listed for them, nor their first device, which the inviting admin let in.
+    #[test]
+    fn only_a_persons_own_clients_say_what_they_sign_in_with() {
+        let (mac, mut net) = setup();
+        let account = |s: &str| json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": s } });
+        let with = |mut c: Content, s: &str| {
+            c.data["sign_in"] = account(s);
+            c
+        };
+        let (bobs, box_, laptop) = (Dev::new(5), Dev::new(6), Dev::new(7));
+        net.step(&mac, ANDRE, with(device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))), "by-admin"));
+        assert!(net.step(&mac, ANDRE, with(device(&box_.endpoint(), BOB, "box", &[Kind::Compute], None), "admins-machine")), "the admin lists it");
+        net.step(&bobs, BOB, with(device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None), "bobs-own"));
+        assert_eq!(net.db.sign_ins(BOB), vec![serde_json::from_value(account("bobs-own")).unwrap()]);
+        assert_eq!(net.db.seal_key(&mac.id()), Some(mac.endpoint().seal), "the seal key it was listed with");
+    }
+
+    #[test]
+    fn a_service_runs_for_a_scope_its_adder_may_add_to_and_its_scopes_admins_may_stop_it() {
+        let (mac, mut net) = setup();
+        let (bobs, linux) = (Dev::new(3), Dev::new(4));
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's computer", BOTH, Some(("Bob", Role::Member))));
+        net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
+        let (linux_id, bobs_id) = (linux.id(), bobs.id());
+        let whatsapp = |db: &ScopeDb, k: &Key| db.switch(k, "whatsapp").map(|s| (s.on, s.scope));
+        // Bob runs it on his own node for himself, not for everyone; Andre runs it on his for everyone.
+        assert!(!net.step(&bobs, BOB, service(&bobs_id, "whatsapp", true, Some(&Scope::Global))));
+        net.step(&bobs, BOB, service(&bobs_id, "whatsapp", true, Some(&Scope::User(BOB.into()))));
+        net.step(&linux, ANDRE, service(&linux_id, "whatsapp", true, Some(&Scope::Global)));
+        // Bob may not stop everyone's on Andre's node, nor Andre Bob's own on Bob's.
+        assert!(!net.step(&bobs, BOB, service(&linux_id, "whatsapp", false, None)));
+        assert!(!net.step(&mac, ANDRE, service(&bobs_id, "whatsapp", false, None)));
+        assert_eq!(whatsapp(&net.db, &linux_id), Some((true, Some("global".into()))));
+        assert_eq!(whatsapp(&net.db, &bobs_id), Some((true, Some(format!("user:{BOB}")))));
+        // Once Bob is an admin, he stops everyone's on Andre's node (moving it, or removing the app), and it stays named.
+        net.step(&mac, ANDRE, role(BOB, Role::Admin));
+        assert!(net.step(&bobs, BOB, service(&linux_id, "whatsapp", false, None)));
+        assert_eq!(whatsapp(&net.db, &linux_id), Some((false, Some("global".into()))));
+    }
+
+    #[test]
+    fn only_a_devices_person_switches_its_parts_and_lists_them_as_its_own() {
+        let (mac, mut net) = setup();
+        let (bobs, linux) = (Dev::new(3), Dev::new(4));
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
+        // Bob, even with Andre's listing, switches nothing on Andre's linux; Andre's own linux does.
+        let (linux_id, bobs_id, mac_id) = (linux.id(), bobs.id(), mac.id());
+        assert!(!net.step(&bobs, BOB, service(&linux_id, "whatsapp", true, None)));
+        assert!(net.db.switches().is_empty());
+        net.step(&linux, ANDRE, service(&linux_id, "whatsapp", true, None));
+        net.step(&mac, ANDRE, service(&linux_id, APPS_PART, false, None));
+        assert!(net.db.switch(&linux_id, "whatsapp").unwrap().on && !net.db.switch(&linux_id, APPS_PART).unwrap().on);
+        // linux lists its part; it lists it again naming itself, which an old listing lacked; Bob's device can't.
+        let part = Dev::new(8);
+        let listed = |device: &Key| service_endpoint(&part.endpoint(), ANDRE, "linux", "whatsapp", false, device);
+        net.step(&linux, ANDRE, listed(&mac_id));
+        assert!(net.step(&linux, ANDRE, listed(&linux_id)));
+        assert!(!net.step(&bobs, BOB, service_endpoint(&part.endpoint(), BOB, "linux", "whatsapp", false, &bobs_id)));
+        let p = net.db.machine(&part.id()).unwrap();
+        assert_eq!((p.user.as_str(), p.device), (ANDRE, Some(linux_id)));
+        // Nor is anything but a service listed again by its person.
+        assert!(!net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None)));
+        assert_eq!(net.db.machine(&linux_id).unwrap().roles.len(), 2);
+    }
+
+    #[test]
+    fn a_step_counts_only_when_signed_by_a_device_of_its_person() {
+        let (mac, mut net) = setup();
+        let (bobs, linux) = (Dev::new(3), Dev::new(4));
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        // Andre's device can't sign as Bob, Bob's can't as Andre, and a node signs no change to who's who.
+        assert!(!net.step(&mac, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
+        assert!(!net.step(&bobs, ANDRE, node("setting", json!({ "name": "a", "value": "1" }))));
+        assert!(!net.step(&linux, ANDRE, node("setting", json!({ "name": "b", "value": "1" }))));
+        assert_eq!(net.db.user(BOB).unwrap().name, "Bob");
+        assert!(net.db.settings().is_empty());
+        // Bob's own device renames him; it can't list a device for Andre, nor Andre's list a client for Bob.
+        assert!(net.step(&bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
+        assert!(!net.step(&bobs, BOB, device(&Dev::new(5).endpoint(), ANDRE, "x", &[Kind::Client], None)));
+        assert!(!net.step(&mac, ANDRE, device(&Dev::new(6).endpoint(), BOB, "y", &[Kind::Client], None)));
+        assert_eq!(net.db.user(BOB).unwrap().name, "Bobby");
+        // The node runs Andre's scope and the network's, not Bob's.
+        assert!(net.db.runs_for(&linux.id(), &Scope::User(ANDRE.into())) && net.db.runs_for(&linux.id(), &Scope::Global));
+        assert!(!net.db.runs_for(&linux.id(), &Scope::User(BOB.into())) && !net.db.runs_for(&bobs.id(), &Scope::User(BOB.into())));
+        // A machine an admin lists as Bob's runs what Bob may run elsewhere, never Bob's own scope, until Bob's own
+        // device lists it.
+        let server = Dev::new(7);
+        net.step(&mac, ANDRE, device(&server.endpoint(), BOB, "bob's server", &[Kind::Compute], None));
+        assert!(!net.db.runs_for(&server.id(), &Scope::User(BOB.into())), "not by an admin's say");
+        net.step(&bobs, BOB, device(&server.endpoint(), BOB, "bob's server", &[Kind::Compute], None));
+        assert!(net.db.runs_for(&server.id(), &Scope::User(BOB.into())));
+        assert!(!net.step(&mac, ANDRE, device(&server.endpoint(), ANDRE, "mine now", &[Kind::Compute], None)), "an admin can't take it back");
+    }
+
+    #[test]
+    fn a_new_epoch_counts_only_from_the_scopes_admins_and_names_its_key() {
+        let (mac, mut net) = setup();
+        let bobs = Dev::new(3);
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        assert_eq!((net.db.epoch(&Scope::Global), net.db.sealed_to(&Scope::Global)), (1, vec![mac.id()]), "global's first is the genesis's");
+        let to = json!([hex(&mac.id())]);
+        let epoch = |scope: &str, n: u32, hash: Option<String>| node("epoch", json!({ "scope": scope, "n": n, "to": to, "hash": hash }));
+        assert!(!net.step(&bobs, BOB, epoch("global", 2, Some(H.repeat(64)))), "not Bob's to start");
+        assert!(!net.step(&bobs, BOB, epoch(&format!("user:{ANDRE}"), 1, Some(H.repeat(64)))));
+        assert!(!net.step(&mac, ANDRE, epoch("global", 3, Some(H.repeat(64)))), "epochs go one at a time");
+        assert!(!net.step(&mac, ANDRE, epoch("global", 2, None)), "each naming its key");
+        assert!(net.step(&mac, ANDRE, epoch("global", 2, Some("f".repeat(64)))));
+        let bob = hex(&bobs.id());
+        assert!(net.step(&bobs, BOB, node("epoch", json!({ "scope": format!("user:{BOB}"), "n": 1, "to": [bob], "hash": H.repeat(64) }))), "a person's own scope is theirs");
+        assert_eq!(net.db.epoch_hash(&Scope::Global, 2), Some("f".repeat(64)));
+        assert_eq!(net.db.epoch_hash(&Scope::Global, 1), Some(H.repeat(64)), "each epoch's hash is kept");
+        assert_eq!((net.db.epoch(&Scope::User(BOB.into())), net.db.epoch(&Scope::User(ANDRE.into()))), (1, 0));
+    }
+
+    /// A network whose recovery key is `recovery`'s, with Andre's mac and linux (a node), and Bob in with his phone.
+    fn with_bob(recovery: &Dev) -> (Dev, Dev, Dev, Net) {
+        let (mac, linux, bobs) = (Dev::new(1), Dev::new(4), Dev::new(3));
+        let mut net = Net::new(&mac, BOTH, &recovery.id());
+        net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        (mac, linux, bobs, net)
+    }
+
+    #[test]
+    fn only_a_persons_own_device_makes_their_scopes_keys_and_says_where_it_runs() {
+        let (mac, linux, bobs, mut net) = with_bob(&Dev::new(9));
+        let bob = Scope::User(BOB.into());
+        let (mac_id, bob_id) = (mac.id(), bobs.id());
+        // Nothing runs Bob's own things until his device says: then the network's machine he chose does.
+        assert!(!net.db.runs_for(&linux.id(), &bob));
+        net.step(&mac, ANDRE, runs(&[linux.id()]));
+        assert!(!net.step(&mac, BOB, runs(&[linux.id()])), "an admin's device can't say where Bob's things run");
+        assert!(net.step(&bobs, BOB, runs(&[linux.id()])));
+        assert!(net.db.runs_for(&linux.id(), &bob) && net.db.serves(&linux.id(), BOB));
+        assert!(net.db.runs_for(&linux.id(), &Scope::User(ANDRE.into())), "Andre's says nothing of his own: his machines run it");
+        // Only machines that run things: his phone isn't one.
+        assert!(!net.step(&bobs, BOB, runs(&[linux.id(), bob_id])), "a list naming what can't run things doesn't count");
+        assert!(net.step(&bobs, BOB, runs(&[])));
+        assert!(!net.db.runs_for(&linux.id(), &bob), "nothing runs them now");
+        // His scope's keys: an admin's device can't make them, his own can, sealed only to his devices.
+        assert!(!net.step(&mac, ANDRE, epoch(&bob, 1, &[mac_id], &H.repeat(64))));
+        assert!(!net.step(&mac, BOB, epoch(&bob, 1, &[mac_id], &H.repeat(64))));
+        assert!(net.step(&bobs, BOB, epoch(&bob, 1, &[bob_id], &"b".repeat(64))));
+        assert_eq!(net.db.epoch_hash(&bob, 1), Some("b".repeat(64)));
+        assert_eq!(net.db.openers(&bob).iter().map(|d| d.key).collect::<Vec<_>>(), vec![bobs.id()], "only Bob's own devices open it");
+    }
+
+    #[test]
+    fn a_removed_persons_devices_get_no_new_epoch_and_their_steps_stop() {
+        let (mac, _, bobs, mut net) = with_bob(&Dev::new(9));
+        let (mac_id, bob_id) = (mac.id(), bobs.id());
+        assert!(net.step(&mac, ANDRE, remove_user(BOB)));
+        // A new epoch of everyone's can't be sealed to Bob's phone, and what his phone writes after doesn't count.
+        assert!(!net.step(&mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id, bob_id], &"c".repeat(64))), "an epoch sealed to a removed person's device doesn't count");
+        assert!(!net.step(&bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
+        assert!(net.db.client(&bobs.id()).is_none() && net.db.clients().iter().all(|c| c.user != BOB));
+        assert_eq!(net.db.user_ever(BOB).unwrap().name, "Bob");
+        assert!(net.step(&mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id], &"c".repeat(64))), "sealed to those left, it does");
+        assert!(net.db.scopes().contains(&Scope::User(BOB.into())), "their own scope is kept");
+    }
+
+    /// The network's last admin can't be taken out or step down, nor be made a member by another; once there's
+    /// another, they can.
+    #[test]
+    fn the_last_admin_stays() {
+        let (mac, _, bobs, mut net) = with_bob(&Dev::new(9));
+        assert!(!net.step(&mac, ANDRE, role(ANDRE, Role::Member)), "the last admin doesn't step down");
+        assert!(!net.step(&mac, ANDRE, remove_user(ANDRE)), "nor take themselves out");
+        assert!(!net.step(&bobs, BOB, remove_user(ANDRE)) && !net.step(&bobs, BOB, role(ANDRE, Role::Member)), "nor does a member");
+        assert!(!net.step(&bobs, BOB, role(BOB, Role::Admin)), "and no one gives themselves more");
+        assert!(net.step(&mac, ANDRE, role(BOB, Role::Admin)));
+        assert!(net.step(&bobs, BOB, role(ANDRE, Role::Member)), "once there's another, they can");
+        assert!(!net.step(&bobs, BOB, remove_user(BOB)), "and the last again stays");
+        assert_eq!(net.db.user(ANDRE).unwrap().role, Role::Member);
+    }
+
+    #[test]
+    fn a_scope_owes_a_new_epoch_once_someone_holding_its_keys_loses_the_right_until_one_counts() {
+        let (mac, linux, bobs, mut net) = with_bob(&Dev::new(9));
+        let (mac_id, bob_id, linux_id) = (mac.id(), bobs.id(), linux.id());
+        let (bob, work) = (Scope::User(BOB.into()), Scope::Group("c000000000000003".into()));
+        net.step(&bobs, BOB, epoch(&bob, 1, &[bob_id], &H.repeat(64)));
+        net.step(&mac, ANDRE, group("c000000000000003", "Work"));
+        net.step(&mac, ANDRE, epoch(&work, 1, &[mac_id], &H.repeat(64)));
+        net.step(&mac, ANDRE, invite("c000000000000003", BOB, Role::Member));
+        net.step(&bobs, BOB, accept("c000000000000003"));
+        // Apps of the group's, the admins' and Bob's, and a Cloudflare node, which change nothing owed.
+        net.step(&mac, ANDRE, node("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
+        net.step(&mac, ANDRE, node("app", json!({ "name": "tally", "owner": "admins" })));
+        net.step(&bobs, BOB, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
+        net.step(&mac, ANDRE, setting("serverless", Some(&hex(&Dev::new(14).id()))));
+        let (laptop, tablet) = (Dev::new(5), Dev::new(6));
+        net.step(&bobs, BOB, device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None));
+        net.step(&bobs, BOB, device(&tablet.endpoint(), BOB, "tablet", &[Kind::Client], None));
+        assert!(net.owed().is_empty());
+        // Signing itself out, a device deletes its own keys: nothing's owed.
+        assert!(net.step(&laptop, BOB, remove_device(&laptop.id())));
+        assert!(net.owed().is_empty() && net.db.machine(&laptop.id()).is_none(), "signing out owes nothing");
+        // Nor one a node of its person's wrote for it, saying it signed itself out; an admin's saying so for another's
+        // device is taken as removing it.
+        let (asked, said) = (Dev::new(12), Dev::new(13));
+        net.step(&bobs, BOB, device(&asked.endpoint(), BOB, "app", &[Kind::Client], None));
+        net.step(&bobs, BOB, device(&said.endpoint(), BOB, "app", &[Kind::Client], None));
+        let gone = |k: &Dev| node("remove", json!({ "key": hex(&k.id()), "seq": null, "itself": true }));
+        assert!(net.step(&bobs, BOB, gone(&asked)));
+        assert!(net.owed().is_empty() && net.db.machine(&asked.id()).is_none(), "its own node signing it out owes nothing");
+        assert!(net.step(&mac, ANDRE, gone(&said)));
+        assert_eq!(net.owed().len(), 3, "an admin's saying it signed itself out is a removal");
+        net.step(&bobs, BOB, epoch(&bob, 2, &[bob_id], &H.repeat(64)));
+        net.step(&mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id, bob_id], &H.repeat(64)));
+        net.step(&mac, ANDRE, epoch(&work, 2, &[mac_id, bob_id], &H.repeat(64)));
+        // Nor does a sign-in before on a device signed in again, which goes as signing out would have taken it.
+        let on = |d: &Dev| {
+            let mut c = device(&d.endpoint(), BOB, "phone app", &[Kind::Client], None);
+            c.data["device"] = json!(hex(&[8; 32]));
+            c
+        };
+        let (before, again) = (Dev::new(10), Dev::new(11));
+        net.step(&bobs, BOB, on(&before));
+        net.step(&bobs, BOB, on(&again));
+        assert!(net.step(&bobs, BOB, remove_device(&before.id())));
+        assert!(net.owed().is_empty(), "signing in again owes nothing");
+        // Taken out by another, it may still hold every key it opened, until each scope's next epoch counts.
+        net.step(&mac, ANDRE, remove_device(&tablet.id()));
+        assert_eq!(net.owed(), vec![Scope::Global, work.clone(), bob.clone()]);
+        net.step(&bobs, BOB, epoch(&bob, 3, &[bob_id], &H.repeat(64)));
+        assert!(!net.step(&mac, ANDRE, epoch(&Scope::Global, 3, &[tablet.id()], &H.repeat(64))), "one sealed to the device taken out doesn't count");
+        assert_eq!(net.owed(), vec![Scope::Global, work.clone()]);
+        net.step(&mac, ANDRE, epoch(&Scope::Global, 3, &[mac_id, bob_id], &H.repeat(64)));
+        net.step(&mac, ANDRE, epoch(&work, 3, &[mac_id, bob_id], &H.repeat(64)));
+        assert!(net.owed().is_empty());
+        // App schedules stopped, and a machine running them taken out.
+        net.step(&bobs, BOB, app_schedules(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
+        net.step(&bobs, BOB, app_schedules(&linux_id, &bob, "notes", 0, &BTreeMap::new()));
+        assert_eq!(net.owed(), vec![bob.clone()]);
+        net.step(&bobs, BOB, epoch(&bob, 4, &[bob_id], &H.repeat(64)));
+        net.step(&bobs, BOB, app_schedules(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
+        net.step(&mac, ANDRE, remove_device(&linux_id));
+        assert_eq!(net.owed(), vec![bob.clone()], "a machine holds no epoch, only the keys of the app schedules it runs");
+        net.step(&bobs, BOB, epoch(&bob, 5, &[bob_id], &H.repeat(64)));
+        // Taken out of a group, then out of the network: their own scope is kept as it is.
+        net.step(&mac, ANDRE, member("c000000000000003", BOB, None));
+        assert_eq!(net.owed(), vec![work.clone()]);
+        net.step(&mac, ANDRE, epoch(&work, 4, &[mac_id], &H.repeat(64)));
+        net.step(&mac, ANDRE, remove_user(BOB));
+        assert_eq!(net.owed(), vec![Scope::Global]);
+    }
+
+    #[test]
+    fn the_recovery_key_lets_someones_device_in_as_an_admins_approval_and_is_listed() {
+        let recovery = Dev::new(9);
+        let (mac, _, _, mut net) = with_bob(&recovery);
+        let laptop = Dev::new(5);
+        assert!(net.db.recovery_used().is_none());
+        assert!(net.step(&recovery, BOB, device(&laptop.endpoint(), BOB, "bob's laptop", &[Kind::Client], None)));
+        assert_eq!(net.db.client(&laptop.id()).map(|c| c.user), Some(BOB.to_string()), "it counts as an admin's approval");
+        assert_eq!(net.db.recovery_used(), Some((net.at, BOB.to_string())), "and it's listed");
+        // Only a device people use, of someone already in; and nothing else.
+        assert!(!net.step(&recovery, BOB, device(&Dev::new(6).endpoint(), BOB, "box", &[Kind::Compute], None)));
+        assert!(!net.step(&recovery, "c000000000000003", device(&Dev::new(7).endpoint(), "c000000000000003", "new", &[Kind::Client], Some(("Cy", Role::Admin)))));
+        assert!(!net.step(&recovery, ANDRE, node("setting", json!({ "name": "a", "value": "1" }))));
+        assert!(!net.step(&recovery, ANDRE, role(BOB, Role::Admin)));
+        assert!(net.db.user("c000000000000003").is_none() && net.db.user(BOB).unwrap().role == Role::Member);
+        // A key that isn't the network's recovery key lets nobody in.
+        let other = Dev::new(8);
+        assert!(!net.step(&other, BOB, device(&Dev::new(10).endpoint(), BOB, "x", &[Kind::Client], None)));
+        // Only the recovery key hands over to a new one: an admin's device can't, and the old key counts no more.
+        assert!(!net.step(&mac, ANDRE, node("recovery", json!({ "key": hex(&other.id()) }))), "not by an admin's device");
+        assert!(net.step(&recovery, ANDRE, node("recovery", json!({ "key": hex(&other.id()) }))));
+        assert_eq!((net.db.recovery(), net.db.recovery_set(), net.db.recovery_was()), (Some(other.id()), net.at, vec![recovery.id()]));
+        assert!(!net.step(&recovery, BOB, device(&Dev::new(11).endpoint(), BOB, "y", &[Kind::Client], None)), "the old recovery key lets nobody in");
+    }
 }

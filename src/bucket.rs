@@ -102,7 +102,7 @@ pub fn folder(scope: &str) -> String {
 /// Where a blob named in `scope` is kept in the bucket, by its hash: under the scope's node folder, sealed with the key
 /// of the node's database `blobs` there. A deploy's bundle and a release's binary are `global`'s.
 pub fn blob_name(scope: &str, hash: &str) -> String {
-    format!("{}/{}/{BLOBS}/{hash}", folder(scope), crate::members::APP)
+    format!("{}/{}/{BLOBS}/{hash}", folder(scope), crate::database::scopes::APP)
 }
 
 pub const BLOBS: &str = "blobs";

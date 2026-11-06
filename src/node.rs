@@ -19,7 +19,8 @@ use crate::bucket::{Copied, Place};
 use crate::database::stored::Db;
 use crate::entry::{Content, Entry, Hash, Key, Scope, hex, new_id, short, unhex};
 use crate::database::scopes::{self, ScopeDb};
-use crate::members::{self, Principal, Role, ScopeState};
+use crate::database::content;
+use crate::database::scopes::{Principal, Role, ScopeState};
 use crate::rank;
 use crate::release::{self, Release};
 use crate::schedules::{self, Schedule};
@@ -218,7 +219,7 @@ struct Pairing {
 }
 
 /// What a machine's node is: the device its person's CLI, MCP and Mac app sign with, and compute.
-pub const MACHINE: &[members::Kind] = &[members::Kind::Client, members::Kind::Compute];
+pub const MACHINE: &[scopes::Kind] = &[scopes::Kind::Client, scopes::Kind::Compute];
 
 const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
@@ -870,7 +871,7 @@ impl Node {
         let me = crate::keys::Endpoint::of(&self.0.key);
         // `global`'s first epoch, named by the genesis before anything is sealed under it.
         let global: [u8; 32] = rand::random();
-        let genesis = members::genesis(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&global));
+        let genesis = content::genesis(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&global));
         let ext = crate::entry::Ext { log: "global".into(), time: now_ms(), user: user.clone(), epoch: 0, previous: Vec::new() };
         let entry = Entry::create(&self.0.key, ext, None, genesis);
         // Until it's moved to S3-compatible storage, the network's bucket is a folder here.
@@ -910,7 +911,7 @@ impl Node {
         }
         for app in apps {
             self.bring_in(&me, app).await?;
-            self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
+            self.append(&Scope::Global, content::node("install", json!({ "app": app }))).await?;
         }
         self.settle().await?;
         self.emit(Event::Network);
@@ -1176,7 +1177,7 @@ fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, titl
             let scope = Scope::parse(&scope)?;
             ensure!(scopes.contains(&scope), "the call didn't name {scope}");
             ensure!(blob.len() == 64 && blob.bytes().all(|b| b.is_ascii_hexdigit()), "a blob is named by its hash");
-            (scope, members::node("forget", json!({ "blob": blob.to_lowercase() })))
+            (scope, content::node("forget", json!({ "blob": blob.to_lowercase() })))
         }
         Append::Retire { app: name, how } => {
             let db = i.r.db();
@@ -1190,14 +1191,14 @@ fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, titl
                 "erased" => bail!("Delete {title} before erasing it."),
                 other => bail!("an app is deleted, restored or erased, not {other}"),
             }
-            (Scope::Global, members::node("app", data))
+            (Scope::Global, content::node("app", data))
         }
         Append::Source { app: name, link } => {
             let db = i.r.db();
             let a = db.app(&name).filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
             ensure!(db.may(&me.user, "deploy", &scopes::app(&name)), "Only {title}'s owners can set where its code is kept.");
-            let link = members::source_link(&json!(link))?;
-            (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
+            let link = scopes::source_link(&json!(link))?;
+            (Scope::Global, content::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
         Append::Service { device, name, on, scope } => {
             let scope = match scope {
@@ -1224,12 +1225,12 @@ fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, s
         ensure!(managed(&k) || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
         // It always runs apps; what else it can run is the services built for it that it carries.
         ensure!(!on || crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
-        return Ok(members::service(&k, name, on, scope));
+        return Ok(content::service(&k, name, on, scope));
     }
-    let mut found: Vec<members::Machine> = db.machines().into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+    let mut found: Vec<scopes::Machine> = db.machines().into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     // A machine's services are named for it: by its name, it's its node.
     if found.len() > 1 {
-        found.retain(|s| s.is(members::Kind::Compute));
+        found.retain(|s| s.is(scopes::Kind::Compute));
     }
     let key = match found.as_slice() {
         [s] => s.key,
@@ -1240,7 +1241,7 @@ fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, s
         },
     };
     ensure!(managed(&key) || db.may(user, "switch", &scopes::device(&key)), "only {device}'s person switches what it runs");
-    Ok(members::service(&key, name, on, scope))
+    Ok(content::service(&key, name, on, scope))
 }
 
 /// The scope whose added app `name` is, as `user` sees it, for a service switched on with none said: their own, if
@@ -1270,7 +1271,7 @@ fn switch_entry(i: &Network, user: &str, scope: &Scope, app: &str, title: &str, 
     ensure!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
     ensure!(i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(app)), "{title} isn't on {name}.");
     ensure!(i.r.holds(scope), "This device can't open {name} yet.");
-    Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
+    Ok(content::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
 }
 
 /// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source. One with npm
@@ -1290,7 +1291,7 @@ pub fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
 /// blob too, so a node that runs it finds it.
 pub fn deploy(app: &str, bundle: &str, builds: impl IntoIterator<Item = String>) -> Content {
     let blobs = std::iter::once(bundle.to_string()).chain(builds).collect();
-    Content { blobs, ..members::node("deploy", json!({ "app": app, "bundle": bundle })) }
+    Content { blobs, ..content::node("deploy", json!({ "app": app, "bundle": bundle })) }
 }
 
 /// Writes a file only this account can read: device keys, pairing secrets.

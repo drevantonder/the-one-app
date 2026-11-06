@@ -21,7 +21,7 @@ use sha2::Digest;
 
 
 use crate::call::{Append, appends};
-use crate::members::Role;
+use crate::database::scopes::Role;
 
 /// The workerd build every node runs, and each platform's npm package of it with its sha512.
 const WORKERD: &str = "1.20261031.1";
@@ -46,7 +46,7 @@ pub struct Me {
     pub role: Option<Role>,
     /// The user's name.
     pub user_name: String,
-    /// The user's handle (`members::valid_handle`).
+    /// The user's handle (`scopes::valid_handle`).
     #[serde(default)]
     pub handle: String,
     /// The agent that asked (an MCP client's name, like "Claude Code"), when one did.
@@ -75,7 +75,7 @@ pub struct Context {
     pub from: Option<String>,
     /// The network's address, where a sign-in elsewhere sends the person back (`<address>/back`).
     pub address: Option<String>,
-    /// Everyone's and every group's handle (`Members::handles`).
+    /// Everyone's and every group's handle (`ScopeDb::handles`).
     pub handles: Value,
     /// The settings of the network's labs that are on (`labs::on_keys`); each app sees its own, as `ctx.labs`.
     #[serde(skip)]
@@ -133,7 +133,7 @@ impl Apps {
 
     /// The app runtime's program, as oned starts it: the port it serves, which it keeps as its child's.
     pub fn program(&self) -> std::io::Result<std::process::Command> {
-        let mut command = crate::oned::command(&[crate::members::APPS_PART, &format!("--runtime={}", self.0.dir.display())])?;
+        let mut command = crate::oned::command(&[crate::database::scopes::APPS_PART, &format!("--runtime={}", self.0.dir.display())])?;
         child(&mut command, &[("listening", &self.0.listener)]);
         Ok(command)
     }
@@ -523,7 +523,7 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16, outbound: u16,
     let mut bindings = Vec::new();
     let mut workers = Vec::new();
     for (i, (name, source)) in apps.iter().enumerate() {
-        ensure!(crate::members::valid_app_name(name), "app names are lowercase words joined by -");
+        ensure!(crate::database::scopes::valid_app_name(name), "app names are lowercase words joined by -");
         let app_dir = modules.join(name);
         std::fs::create_dir_all(&app_dir)?;
         std::fs::write(app_dir.join("app.js"), source)?;

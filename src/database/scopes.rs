@@ -1,19 +1,15 @@
 //! What a device asks of a scope database (`scope`): who's who and who may do what, from `global`'s, and what a
-//! scope's own entries add up to, from its own. Every question of who may do what is `permissions::may` over its rows;
-//! the rest are its tables as they are.
-//!
-//! Three things a step's rules check that the rows don't say stay in callers, each in one helper there: moving an app to
-//! another owner, an admin listing a person's machines but never their clients, and a person's machine running their
-//! own scope only if they listed it themselves (the builder writes that as `runner` rows).
+//! scope's own steps add up to, from its own, in the shapes it's read in (`User`, `Machine`, `Group`, `App`, …).
+//! Every question of who may do what is `permissions::may` over its rows; the rest are its tables as they are.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail, ensure};
+use serde::{Deserialize, Serialize};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
-use crate::entry::{Hash, Key, Scope, hex, unhex};
-use crate::members::{App, AppSchedules, Group, Kind, Machine, Members, Principal, Role, ScopeState, Switch, User, VaultKey};
+use crate::entry::{Hash, Key, Scope, hex, is_id, unhex};
 use crate::permissions;
 
 pub use super::scope::{app, device, group, object, person, service};
@@ -99,9 +95,9 @@ fn machine(r: &rusqlite::Row) -> rusqlite::Result<Machine> {
 }
 
 impl ScopeDb {
-    /// `scope`'s database, built from what replay made, as of `now`.
-    pub fn build(m: &Members, scope: &Scope, state: &ScopeState, now: u64) -> Result<ScopeDb> {
-        Ok(ScopeDb { db: super::scope::build(m, scope, state)?, now })
+    /// `scope`'s database with nothing in it yet, as of `now`.
+    pub fn empty(scope: &Scope, now: u64) -> Result<ScopeDb> {
+        Self::open(super::scope::empty(scope)?, now)
     }
 
     /// A scope database read as it is (a copy, or one its steps made): who holds what worked out again.
@@ -177,7 +173,7 @@ impl ScopeDb {
     /// `rows` its relations (`app_relations`). An app's types follow the core's rules but never touch the core's: a
     /// type the core has is the core's, so an app's of that name counts for nothing; only its rows on its own types
     /// count, and never a rule (`#…`, `@`, `*`). Asked in a transaction that's rolled back, so the database stays as
-    /// replay built it.
+    /// its steps left it.
     pub fn app_may(&self, user: &str, asks: &[(String, String)], types: &Value, rows: &[Relation], now: u64) -> Vec<bool> {
         let ask = || -> Result<Vec<bool>> {
             let tx = self.db.unchecked_transaction()?;
@@ -691,51 +687,7 @@ impl ScopeDb {
         self.rows("SELECT blob FROM blobs WHERE pinned OR blob NOT IN (SELECT blob FROM forgotten) UNION SELECT bundle FROM deploys", [], |r| r.get(0)).into_iter().collect()
     }
 
-    /// `global`'s database as replay's members, for applying a step to them as replay applies an entry
-    /// (`steps::apply`): what building it from them (`scope::build`) wrote back, so building again gives the same rows.
-    /// No cuts or forks: a step's place is its position, not a causal order.
-    pub fn members(&self) -> Members {
-        let mut m = Members::new(self.root());
-        m.name = self.name();
-        m.devices_at = self.devices_at();
-        m.recovery = self.recovery();
-        m.recovery_set = self.recovery_set();
-        m.recovery_was = self.recovery_was();
-        m.recovery_used = self.recovery_used();
-        m.users = self.users().into_iter().map(|u| (u.id.clone(), u)).collect();
-        m.groups = self.groups().into_iter().map(|g| (g.id.clone(), g)).collect();
-        // Each device as it was listed, its own `removed`: not as its person's removal leaves it.
-        let raw = self.rows(&format!("{} ORDER BY d.key", MACHINE.replace("d.removed OR coalesce(p.removed, 1)", "d.removed")), [], machine);
-        m.machines = raw.into_iter().map(|d| (d.key, d)).collect();
-        m.settings = self.settings();
-        m.services = self.switches();
-        m.apps = self.apps().into_iter().map(|a| (a.name.clone(), a)).collect();
-        for (scope, n) in self.epochs() {
-            for (e, hash) in self.epoch_hashes(&scope) {
-                m.epoch_hashes.insert((scope.clone(), e), hash);
-            }
-            let hash = self.epoch_hash(&scope, n).unwrap_or_default();
-            let mut to = self.rows("SELECT device FROM sealed WHERE scope = ?1 AND epoch = ?2 ORDER BY device", params![scope.to_string(), n], |r| r.get::<_, String>(0)).iter().map(|k| key(k)).collect::<Vec<_>>();
-            to.dedup();
-            m.epochs.insert(scope, crate::members::Epoch { n, to, hash });
-        }
-        m.owed = self.owed().into_iter().collect();
-        m.app_schedules = self.app_schedules();
-        for (scope, v) in self.vaults() {
-            for (n, public) in self.vault_publics(&scope) {
-                m.vault_publics.insert((scope.clone(), n), public);
-            }
-            m.vaults.insert(scope, v);
-        }
-        let chosen = self.rows("SELECT principal FROM runs_chosen", [], |r| r.get::<_, String>(0));
-        for p in chosen {
-            let user = id(&p);
-            m.runs.insert(user.clone(), self.runs(&user).unwrap_or_default());
-        }
-        m
-    }
-
-    /// A scope's own state, as its own tables keep it: what `scope::build` wrote of it (`members`'s counterpart).
+    /// A scope's own state, as its own tables keep it: what its steps made of it.
     pub fn state(&self) -> ScopeState {
         let mut s = ScopeState::default();
         for (app, installed, by, at) in self.rows("SELECT app, installed, installed_by, installed_at FROM installs", [], |r| {
@@ -760,7 +712,7 @@ impl ScopeDb {
             };
             Ok((
                 r.get::<_, String>(0)?,
-                crate::members::VaultRequest {
+                crate::database::scopes::VaultRequest {
                     app: r.get(1)?,
                     title: r.get(2)?,
                     fields: fields.as_array().into_iter().flatten().map(|f| (f["name"].as_str().unwrap_or("").to_string(), f["secret"] == true)).collect(),
@@ -783,104 +735,276 @@ impl ScopeDb {
     }
 }
 
+// Who's who, as a device reads it, and what names and lists a step may give.
+
+/// The node's own steps and databases. Apps never see them.
+pub const APP: &str = "node";
+/// The kind of node entry that sets app schedules.
+pub const APP_SCHEDULES: &str = "app-schedules";
+/// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.
+pub const APPS_PART: &str = "apps";
+/// The kinds of node entry that say a release of the node's or a service's program (`release`).
+pub const RELEASES: [&str; 2] = ["node-release", "service-release"];
+/// Who agents act as when the Vault fills their requests (`vault_fetch`): here too for the Cloudflare node.
+pub const AGENTS: &str = "agents";
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    Admin,
+    Member,
+}
+
+/// Who owns an app.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Principal {
+    User(String),
+    Group(String),
+    /// The network's admins.
+    Admins,
+}
+
+impl Principal {
+    pub fn parse(s: &str) -> Result<Principal> {
+        Ok(match s.split_once(':') {
+            None if s == "admins" => Principal::Admins,
+            Some(("user", id)) if is_id(id) => Principal::User(id.into()),
+            Some(("group", id)) if is_id(id) => Principal::Group(id.into()),
+            _ => bail!("{s} isn't user:<id>, group:<id> or admins"),
+        })
+    }
+}
+
+impl std::fmt::Display for Principal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Principal::User(id) => write!(f, "user:{id}"),
+            Principal::Group(id) => write!(f, "group:{id}"),
+            Principal::Admins => write!(f, "admins"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct User {
+    pub id: String,
+    pub name: String,
+    /// What every app calls them by in addresses and lists (`valid_handle`), unique among people and groups.
+    pub handle: String,
+    pub role: Role,
+    pub removed: bool,
+}
+
+/// What an endpoint does: a client is what a person and their agents use, and signs for them; compute runs apps'
+/// calls; a service offers a device's abilities.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Client,
+    Compute,
+    Service,
+}
+
+/// An endpoint of the network, listed by a `device` entry (or the genesis): its key, the key things are sealed to,
+/// whose it is, and what it does.
+#[derive(Clone, Debug)]
+pub struct Machine {
+    pub key: Key,
+    pub seal: Key,
+    pub user: String,
+    pub name: String,
+    pub roles: BTreeSet<Kind>,
+    /// A passkey listed as a device: its credential id.
+    pub passkey: Option<String>,
+    /// For a service endpoint, the service it offers (`whatsapp`): what calls naming it reach.
+    pub service: Option<String>,
+    /// For a service endpoint, whether it serves everyone its person's listing lets it (a push sender, say), not only
+    /// its own person.
+    pub shared: bool,
+    /// The device it's part of, when it's one's: for a service, its device's oned; for a native app's sign-in, the
+    /// device it's on (that device's oned, or an id of the device's own).
+    pub device: Option<Key>,
+    /// Who listed it: its person, from one of their own devices, or an admin.
+    pub by: String,
+    /// When it was listed, as its entry says (ms).
+    pub since: u64,
+    /// What it signed in with, when that was checked as it was let in (`sign_in_proof`): one of its person's accounts,
+    /// which their next device's sign-in is checked against. None for a shape this release doesn't know.
+    pub sign_in: Option<crate::sign_in_proof::Account>,
+    /// The city it asked to join from, as its request said.
+    pub place: Option<String>,
+    pub removed: bool,
+}
+
+impl Machine {
+    pub fn is(&self, kind: Kind) -> bool {
+        self.roles.contains(&kind)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Group {
+    pub id: String,
+    pub name: String,
+    /// As a person's: unique among people and groups.
+    pub handle: String,
+    pub members: BTreeMap<String, Role>,
+    pub invited: BTreeMap<String, Role>,
+}
+
+#[derive(Clone, Debug)]
+pub struct App {
+    pub name: String,
+    pub owner: Principal,
+    pub from: Option<String>,
+    /// Its latest deploy's bundle, a blob.
+    pub bundle: Option<String>,
+    pub deploys: u32,
+    /// Every deploy: (bundle, time, user), oldest first.
+    pub history: Vec<(String, u64, String)>,
+    /// When it was deleted, and by whom: it's in Recently Deleted until it's restored or erased.
+    pub deleted: Option<(u64, String)>,
+    /// Erased for good: gone from every list, and its name never used again.
+    pub erased: bool,
+    /// Where its code is kept, as its owners last said: a web address or `<cli>://<repo>`; empty once they cleared it.
+    /// None if they never did, so a built-in app links to its folder in the release's repo.
+    pub source: Option<String>,
+}
+
+/// The latest `service` entry for a part of a device's oned (a service, or `apps`, the app service): on or off there,
+/// as the device's person switched it.
+#[derive(Clone, Debug)]
+pub struct Switch {
+    pub on: bool,
+    pub by: String,
+    pub time: u64,
+    /// The scope whose added app it runs for (a service's), if its writer said: removing the app there, or moving its
+    /// service, switches it off, and that scope's admins may.
+    pub scope: Option<String>,
+}
+
+/// App schedules: who set them, until when, and the hash (`keys::epoch_hash`) of the app's key in each epoch
+/// it sealed to the endpoint (`keys::app_schedules_key_name`), so the endpoint takes from the bucket only those.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppSchedules {
+    pub by: String,
+    pub until: u64,
+    pub hashes: BTreeMap<u32, String>,
+}
+
+/// A scope's Vault key: its number, its X25519 public half, and the machines its secret half is sealed to
+/// (`keys::vault_key_name`), besides the recovery key. A new one whenever who's granted changes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VaultKey {
+    pub n: u32,
+    pub public: [u8; 32],
+    pub to: Vec<Key>,
+}
+
+/// An app's source link as an `app` entry gives it: a web address, or empty (or null) for none.
+pub fn source_link(v: &Value) -> Result<String> {
+    let link = match v {
+        Value::Null => "",
+        v => v.as_str().context("a source link is text")?.trim(),
+    };
+    let scheme = link.split_once("://").map(|(s, _)| s);
+    ensure!(link.is_empty() || (link.len() <= 500 && matches!(scheme, Some("https" | "http"))), "a source link is a web address (https://…)");
+    ensure!(!link.chars().any(char::is_whitespace), "a source link has no spaces");
+    Ok(link.to_string())
+}
+
+/// A person's or group's handle: lowercase letters, digits and single hyphens, neither first nor last, up to 39
+/// characters, like GitHub's logins.
+pub fn valid_handle(h: &str) -> bool {
+    !h.is_empty() && h.len() <= 39 && h.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !h.starts_with('-') && !h.ends_with('-') && !h.contains("--")
+}
+
+/// A handle made from a name: its ASCII letters and digits, lowercased, words joined by single hyphens, cut to 39;
+/// `fallback` for a name with none.
+pub fn handle_from(name: &str, fallback: &str) -> String {
+    let words: Vec<String> = name.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_ascii_lowercase).collect();
+    let handle = words.join("-");
+    let handle = handle[..handle.len().min(39)].trim_end_matches('-');
+    if handle.is_empty() { fallback.to_string() } else { handle.to_string() }
+}
+
+pub fn valid_app_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP
+}
+
+/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, requests for Vault items
+/// (the items themselves are in its `vault` database, `src/vault.rs`), and its schedules' switches.
+#[derive(Clone, Debug, Default)]
+pub struct ScopeState {
+    pub installed: BTreeSet<String>,
+    /// Who last installed each app here, and when: its schedules run as them, unless someone switched one on since.
+    pub installers: BTreeMap<String, (String, u64)>,
+    /// Each schedule switched on or off here, by (app, schedule): (on, by whom, when).
+    pub switches: BTreeMap<(String, String), (bool, String, u64)>,
+    /// Apps' and agents' requests for a person's item here, by id.
+    pub requests: BTreeMap<String, VaultRequest>,
+    /// The blobs this scope's apps said they no longer need, though their entries name them.
+    pub forgotten: BTreeSet<String>,
+    /// In a user's own scope: how they arranged each page, by page (`user`, `group:<id>` or `global`):
+    /// `{ items, hidden }`, as their latest `arrange` of it said.
+    pub arrangements: BTreeMap<String, Value>,
+}
+
+/// An app's or agent's request for a person's item that an app may use: the fields it wants (name, and whether
+/// secret), what for, who asked, and how it was answered: (`set` or `declined`, by whom, when).
+#[derive(Clone, Debug)]
+pub struct VaultRequest {
+    pub app: String,
+    pub title: String,
+    pub fields: Vec<(String, bool)>,
+    pub hosts: Vec<String>,
+    pub why: String,
+    pub need: Option<String>,
+    pub user: String,
+    pub agent: Option<String>,
+    pub time: u64,
+    pub answer: Option<(String, String, u64)>,
+}
+
+/// How people's roles changed from `before` to `after` (`ScopeDb::roles`), as the network's vault hears it: (user,
+/// role, invited, scopes) each. None, in every scope they may no longer use or were invited to; otherwise their role
+/// in each they're newly in, invited to, or an admin of no longer or now. Not someone joining the network (their
+/// invite link opens Everyone's to them), their own scope, nor a group just made (the vault made its key with it).
+pub fn roles_changed(before: &BTreeMap<(String, Scope), (Role, bool)>, after: &BTreeMap<(String, Scope), (Role, bool)>) -> Vec<(String, Option<Role>, bool, Vec<Scope>)> {
+    let mut out: BTreeMap<(String, Option<Role>, bool), Vec<Scope>> = BTreeMap::new();
+    for key in before.keys().chain(after.keys().filter(|k| !before.contains_key(*k))) {
+        let (user, scope) = key;
+        let (role, invited) = match (before.get(key), after.get(key)) {
+            (Some(_), None) => (None, false),
+            (b, Some(a)) if b == Some(a) => continue,
+            (_, Some(_)) if matches!(scope, Scope::User(_)) || !before.keys().any(|(_, s)| s == scope) => continue,
+            (None, Some((Role::Member, false))) if *scope == Scope::Global => continue,
+            (_, Some((role, invited))) => (Some(*role), *invited),
+            (None, None) => continue,
+        };
+        out.entry((user.clone(), role, invited)).or_default().push(scope.clone());
+    }
+    out.into_iter().map(|((user, role, invited), scopes)| (user, role, invited, scopes)).collect()
+}
+
+/// A page a person arranges: their own (`user`), a group's (`group:<id>`) or everyone's (`global`).
+pub fn valid_page(page: &str) -> bool {
+    page == "user" || page == "global" || page.strip_prefix("group:").is_some_and(is_id)
+}
+
+/// A Vault field's name (once a secret's): letters, digits, `_`, `-` and `.`.
+pub fn valid_secret_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+}
+
+/// A host an item's secret fields are sent to: a lowercase host name or IP address, without scheme or port.
+pub fn valid_host(host: &str) -> bool {
+    !host.is_empty() && host.len() <= 253 && host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-
-    /// That everything a device reads of `global`'s database is what replay's `members` says, but a removed person
-    /// listed in a group, whom it doesn't list.
-    pub(crate) fn reads(m: &Members) {
-        let db = ScopeDb::build(m, &Scope::Global, &ScopeState::default(), 0).unwrap();
-        let dbg = |v: &dyn std::fmt::Debug| format!("{v:?}");
-        assert_eq!((db.name(), db.root(), db.devices_at()), (m.name.clone(), m.root, m.devices_at));
-        assert_eq!((db.recovery(), db.recovery_was(), db.recovery_set(), db.recovery_used()), (m.recovery, m.recovery_was.clone(), m.recovery_set, m.recovery_used.clone()));
-        assert_eq!(db.cloudflare_node(), m.cloudflare_node());
-        assert_eq!(db.scopes(), m.scopes());
-        assert_eq!(db.settings(), m.settings);
-        assert_eq!(dbg(&db.switches()), dbg(&m.services));
-        let users: Vec<_> = m.users.values().map(|u| (u.id.clone(), u.name.clone(), u.handle.clone(), u.removed, (!u.removed).then_some(u.role))).collect();
-        assert_eq!(db.users().into_iter().map(|u| (u.id, u.name, u.handle, u.removed, (!u.removed).then_some(u.role))).collect::<Vec<_>>(), users);
-        let in_groups = |g: &Group| Group {
-            members: g.members.iter().filter(|(u, _)| m.user(u).is_some()).map(|(u, r)| (u.clone(), *r)).collect(),
-            invited: g.invited.iter().filter(|(u, _)| m.user(u).is_some()).map(|(u, r)| (u.clone(), *r)).collect(),
-            ..g.clone()
-        };
-        assert_eq!(dbg(&db.groups()), dbg(&m.groups.values().map(in_groups).collect::<Vec<_>>()));
-        assert_eq!(db.roles(), m.roles());
-        let handles = m.handles();
-        let mut expected = handles.as_array().unwrap().clone();
-        for h in expected.iter_mut().filter(|h| h["members"].is_object()) {
-            h["members"].as_object_mut().unwrap().retain(|u, _| m.user(u).is_some());
-        }
-        assert_eq!(db.handles(), Value::Array(expected));
-        for u in m.users.values() {
-            assert_eq!(dbg(&db.user(&u.id)), dbg(&m.user(&u.id)));
-            assert_eq!(db.groups_of(&u.id), m.groups_of(&u.id));
-            assert_eq!(db.by_handle(&u.handle), m.by_handle(&u.handle));
-            assert_eq!(db.runs(&u.id), m.runs.get(&u.id).cloned());
-            let unchosen: Vec<Key> = if m.runs.contains_key(&u.id) { Vec::new() } else { m.computes().filter(|c| c.user != u.id && m.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect() };
-            assert_eq!(db.runs_until_chosen(&u.id), unchosen);
-            let mut signs_in: Vec<_> = m.machines.keys().filter_map(|k| m.machine(k)).filter(|d| d.user == u.id && d.by == u.id && d.is(Kind::Client)).filter_map(|d| d.sign_in.clone()).collect();
-            signs_in.dedup();
-            assert_eq!(db.sign_ins(&u.id), signs_in);
-            for s in m.scopes() {
-                assert_eq!(db.role_in(&u.id, &s), m.role_in(&u.id, &s));
-                assert_eq!(dbg(&db.runners(&u.id, std::slice::from_ref(&s))), dbg(&m.runners(&u.id, std::slice::from_ref(&s))));
-            }
-            for k in m.machines.keys() {
-                assert_eq!(db.serves(k, &u.id), m.serves(k, &u.id));
-            }
-        }
-        for g in m.groups.values() {
-            assert_eq!(db.by_handle(&g.handle), m.by_handle(&g.handle));
-        }
-        for k in m.machines.keys() {
-            assert_eq!(dbg(&db.machine(k)), dbg(&m.machine(k)));
-            assert_eq!(dbg(&db.client(k)), dbg(&m.client(k)));
-            assert_eq!(dbg(&db.compute(k)), dbg(&m.compute(k)));
-            assert_eq!(dbg(&db.service(k)), dbg(&m.service(k)));
-            assert_eq!(db.seal_key(k), m.seal_key(k));
-            for s in m.scopes() {
-                assert_eq!(db.opens_vault(k, &s), m.opens_vault(k, &s));
-            }
-        }
-        assert_eq!(dbg(&db.machines().iter().map(|d| d.key).collect::<Vec<_>>()), dbg(&m.machines.keys().collect::<Vec<_>>()));
-        assert_eq!(dbg(&db.clients()), dbg(&m.clients().collect::<Vec<_>>()));
-        assert_eq!(dbg(&db.computes()), dbg(&m.computes().collect::<Vec<_>>()));
-        let nodes: Vec<(Key, Key)> = m.computes().map(|c| (c.key, c.seal)).chain(m.cloudflare_node().and_then(|k| Some((k, crate::cloudflare::twin_public(&k).ok()?)))).collect();
-        assert_eq!(db.nodes(), nodes);
-        for s in m.scopes() {
-            assert_eq!(dbg(&db.openers(&s)), dbg(&m.clients().filter(|c| m.may_use(&c.user, &s)).collect::<Vec<_>>()));
-        }
-        for name in m.machines.values().filter_map(|d| d.service.as_deref()) {
-            assert_eq!(dbg(&db.offering(name)), dbg(&m.offering(name).collect::<Vec<_>>()));
-        }
-        assert_eq!(dbg(&db.apps()), dbg(&m.apps.values().collect::<Vec<_>>()));
-        assert_eq!(db.epochs(), m.epochs.iter().map(|(s, e)| (s.clone(), e.n)).collect());
-        for (s, e) in &m.epochs {
-            assert_eq!(db.epoch(s), e.n);
-            let mut to = e.to.clone();
-            to.sort();
-            to.dedup();
-            assert_eq!(db.sealed_to(s), to);
-            assert_eq!(db.epoch_hashes(s), m.epoch_hashes.range((s.clone(), 0)..=(s.clone(), u32::MAX)).map(|((_, n), h)| (*n, h.clone())).collect());
-        }
-        assert_eq!(db.owed(), m.owed.iter().cloned().collect::<Vec<_>>());
-        assert_eq!(db.app_schedules(), m.app_schedules);
-        for now in [0, 1_000, u64::MAX / 2] {
-            assert_eq!(db.app_schedules_at(now), m.app_schedules_at(now).map(|(k, g)| (k.clone(), g.clone())).collect::<Vec<_>>());
-        }
-        let sorted = |v: &VaultKey| {
-            let mut v = v.clone();
-            v.to.sort();
-            v.to.dedup();
-            v
-        };
-        assert_eq!(db.vaults(), m.vaults.iter().map(|(s, v)| (s.clone(), sorted(v))).collect());
-        for s in m.scopes() {
-            assert_eq!(db.vault_publics(&s), m.vault_publics.iter().filter(|((v, _), _)| *v == s).map(|((_, n), p)| (*n, *p)).collect());
-        }
-    }
 
     /// An app's own types and rows answer only for its own objects: Alice is group g's admin, Bob its member, Dave a
     /// collaborator, Carol owns repo 2, and Erin is out of the network. Rows that would give a core role, make a rule,

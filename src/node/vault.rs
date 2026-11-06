@@ -11,7 +11,7 @@ use crate::vault::{Items, Lookup};
 use super::*;
 
 /// The node's database of a scope's items.
-const VAULT: (&str, &str) = (members::APP, crate::vault::DATABASE);
+const VAULT: (&str, &str) = (scopes::APP, crate::vault::DATABASE);
 
 impl Node {
     /// A scope's Vault database as `me`'s work opens it (`call_database`), brought up to date.
@@ -102,7 +102,7 @@ impl Node {
     pub(super) async fn new_vault_key(&self, scope: &Scope, n: u32, to: &[Key], recovery: &Key) -> Result<()> {
         let secret: [u8; 32] = rand::random();
         let public = crate::cloudflare::public_of(&secret);
-        self.append(&Scope::Global, members::vault(scope, n, &public, to)).await?;
+        self.append(&Scope::Global, content::vault(scope, n, &public, to)).await?;
         ensure!(self.with(|i| Ok(i.r.db().vault_publics(scope).get(&n) == Some(&public)))?, "another device made {scope}'s Vault key {n} just now");
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let seals: Vec<(String, [u8; 32])> = self.with(|i| Ok(to.iter().filter_map(|k| i.r.db().seal_key(k).map(|s| (hex(k), s))).collect()))?;
@@ -220,7 +220,7 @@ impl Node {
         let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
         ensure!(!crate::app::outbound::own_port(self, &host, port), "that's this device's own port");
         ensure!(!self.names_app(&host), "{host} is an app's name, not a site's");
-        let lookup = self.lookup(caller, members::AGENTS, &self.usable_scopes(&caller.user)?).await?;
+        let lookup = self.lookup(caller, scopes::AGENTS, &self.usable_scopes(&caller.user)?).await?;
         let used = std::sync::Mutex::new(Vec::<String>::new());
         let missing = std::sync::Mutex::new(Vec::<String>::new());
         let fill = |text: &str| {
@@ -275,7 +275,7 @@ impl Node {
         let found = name.split_once(':').map(|(id, field)| (id, field, lookup.scopes.iter().find_map(|(_, items)| items.get(id).cloned())));
         match found {
             Some((id, _, None)) => format!("no item {id} is in a Vault you may use: vault_list shows them, and {ask} use one"),
-            Some((_, _, Some(it))) if !it.apps.contains(members::AGENTS) => format!("agents may not use {} yet: {ask}", it.title),
+            Some((_, _, Some(it))) if !it.apps.contains(scopes::AGENTS) => format!("agents may not use {} yet: {ask}", it.title),
             Some((_, field, Some(it))) => {
                 let fields: Vec<&str> = it.fields.keys().map(String::as_str).collect();
                 format!("{} has no field {field}; it has {}", it.title, fields.join(", "))
@@ -397,10 +397,10 @@ impl Node {
         crate::vault::generate(&mut data);
         // Only the node says which app's call made an item.
         data.as_object_mut().context("an item is an object")?.remove("app");
-        let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == members::AGENTS));
+        let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == scopes::AGENTS));
         self.write_item(caller, scope, |items| {
             // Agents use an item (vault_fetch) only once its person lets agents use it, never by themselves.
-            let had = items.get(&id).is_some_and(|it| it.apps.contains(members::AGENTS));
+            let had = items.get(&id).is_some_and(|it| it.apps.contains(scopes::AGENTS));
             ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with vault_request, leaving out app, and they pick or make it");
             Ok(data.clone())
         })
@@ -478,7 +478,7 @@ impl Node {
     pub async fn request_item(&self, caller: &Caller, scope: &Scope, app: &str, need: Option<&str>, ask: &Value, why: &str) -> Result<Value> {
         let own = Scope::User(caller.user.clone());
         let shared = match need {
-            Some(need) if app != members::AGENTS && app != members::APP => self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d["shared"] == true),
+            Some(need) if app != scopes::AGENTS && app != scopes::APP => self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d["shared"] == true),
             _ => None,
         };
         let manages = |scope: &Scope| self.with(|i| Ok(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope))));
@@ -489,10 +489,10 @@ impl Node {
             None => &own,
         };
         let mut data = match need {
-            Some(_) if app == members::AGENTS => bail!(
+            Some(_) if app == scopes::AGENTS => bail!(
                 "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
             ),
-            Some(need) if app != members::APP => {
+            Some(need) if app != scopes::APP => {
                 let declared = self.0.apps.describe(app).await.map_err(|_| anyhow!("Not asked: {app} isn't added, so it declares nothing it needs"))?["vault"].clone();
                 let d = declared[need].clone();
                 if !d.is_object() {
@@ -525,10 +525,10 @@ impl Node {
         data["agent"] = json!(caller.agent);
         self.with(|i| {
             ensure!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
-            ensure!(i.r.db().app(app).is_some_and(|a| !a.erased) || app == members::APP || app == members::AGENTS, "no app named {app}");
+            ensure!(i.r.db().app(app).is_some_and(|a| !a.erased) || app == scopes::APP || app == scopes::AGENTS, "no app named {app}");
             Ok(())
         })?;
-        self.append_as(scope, &caller.user, members::node("vault-request", data)).await?;
+        self.append_as(scope, &caller.user, content::node("vault-request", data)).await?;
         // At the network's address (where people sign in) the web client opens it in any browser; a
         // network without one has only its apps to.
         let web = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()).remove("address")))?;
@@ -554,7 +554,7 @@ impl Node {
     /// app that declares a shared need of the same type, so one item an admin sets counts for them all.
     async fn sharing(&self, app: &str, need: Option<&str>) -> Vec<String> {
         let mut out = vec![app.to_string()];
-        let Some(need) = need.filter(|_| app != members::AGENTS && app != members::APP) else { return out };
+        let Some(need) = need.filter(|_| app != scopes::AGENTS && app != scopes::APP) else { return out };
         let Ok(d) = self.0.apps.describe(app).await else { return out };
         let d = &d["vault"][need];
         if d["shared"] != true || d["type"].as_str().is_none_or(str::is_empty) {
@@ -577,7 +577,7 @@ impl Node {
         let asked = self.with(|i| Ok(i.views.get(&scope.to_string()).and_then(|s| s.requests.get(id)).map(|r| (r.app.clone(), r.need.clone()))))?;
         let (sharing, kind) = match &asked {
             Some((app, need)) => {
-                let kind = match need.as_deref().filter(|_| app != members::AGENTS && app != members::APP) {
+                let kind = match need.as_deref().filter(|_| app != scopes::AGENTS && app != scopes::APP) {
                     Some(need) => self.0.apps.describe(app).await.ok().and_then(|d| d["vault"][need]["type"].as_str().map(str::to_string)),
                     None => None,
                 };
@@ -594,7 +594,7 @@ impl Node {
             Ok(r.clone())
         })?;
         if answer["declined"] == true {
-            return self.append_as(scope, &caller.user, members::node("vault-request", json!({ "id": id, "declined": true }))).await.map(|_| ());
+            return self.append_as(scope, &caller.user, content::node("vault-request", json!({ "id": id, "declined": true }))).await.map(|_| ());
         }
         // Named by the request it answers, so answering again (its `set` entry failed, or two devices answered at once)
         // changes that item rather than making another.
@@ -619,7 +619,7 @@ impl Node {
                     let mut data = json!({ "id": made, "title": title, "fields": fields, "hosts": r.hosts, "apps": sharing });
                     // What the node asked for itself (the network's storage) is an item of that type; what an app
                     // declared, of the type it declared.
-                    if let Some(need) = r.need.as_ref().filter(|_| r.app == members::APP) {
+                    if let Some(need) = r.need.as_ref().filter(|_| r.app == scopes::APP) {
                         data["type"] = json!(need);
                     } else if let Some(kind) = &kind {
                         data["type"] = json!(kind);
@@ -629,9 +629,9 @@ impl Node {
             })
         })
         .await?;
-        self.append_as(scope, &caller.user, members::node("vault-request", json!({ "id": id, "set": true }))).await?;
+        self.append_as(scope, &caller.user, content::node("vault-request", json!({ "id": id, "set": true }))).await?;
         // A place to back up to counts once an admin's device names it (`pin_place`), as answering does.
-        if r.app == members::APP && r.need.as_deref() == Some(crate::backups::KIND) && *scope == Scope::Global {
+        if r.app == scopes::APP && r.need.as_deref() == Some(crate::backups::KIND) && *scope == Scope::Global {
             let item = answer["item"].as_str().unwrap_or(&made).to_string();
             let fields = self.items(caller, scope).await?.get(&item).map(|it| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect());
             self.pin_place(caller, &item, Some(&fields.context("the place's item wasn't there")?)).await?;

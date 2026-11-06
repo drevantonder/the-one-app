@@ -5,7 +5,7 @@
 use super::*;
 
 /// The node's own database of a scope.
-const NODE_DATABASE: (&str, &str) = (members::APP, "main");
+const NODE_DATABASE: (&str, &str) = (scopes::APP, "main");
 
 /// Its schema, as its changes, oldest first.
 const SCHEMA: &[&str] = &["

@@ -42,7 +42,6 @@ pub mod sign_in_proof;
 #[cfg(feature = "node")]
 pub mod skills;
 pub mod labs;
-pub mod members;
 #[cfg(feature = "db")]
 pub mod permissions;
 pub mod rank;

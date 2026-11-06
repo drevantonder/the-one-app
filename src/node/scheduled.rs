@@ -68,7 +68,7 @@ impl Node {
     /// slot first. How it went is written as every run's is, where this device opens the scope's own rows.
     async fn run_schedule(&self, scope: &Scope, app: &str, schedule: &Schedule, user: &str, slot: u64) -> Result<()> {
         self.app_schedules_keys(scope, app).await?;
-        let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::bucket::folder(&scope.to_string()), members::APP, schedule.name);
+        let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::bucket::folder(&scope.to_string()), scopes::APP, schedule.name);
         if !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
             return Ok(());
         }

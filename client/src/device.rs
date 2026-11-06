@@ -21,7 +21,7 @@ use std::time::Duration;
 use ed25519_dalek::SigningKey;
 use one::entry::{Hash, Scope, hex};
 use one::keys::{self, Endpoint, Handed, Handoff, Need, Waited};
-use one::members;
+use one::database::{content, scopes};
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
@@ -150,8 +150,8 @@ async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32,
     }
     let mut log_keys = one::database::stored::Keys::new();
     for (n, epoch) in &epochs {
-        let Some(o) = one::bucket::Bucket::get(bucket, &keys::app_key_name("global", members::APP, *n)).await.map_err(failed)? else { continue };
-        let app = one::cloudflare::open_app_key(epoch, members::APP, &o.bytes).map_err(failed)?;
+        let Some(o) = one::bucket::Bucket::get(bucket, &keys::app_key_name("global", scopes::APP, *n)).await.map_err(failed)? else { continue };
+        let app = one::cloudflare::open_app_key(epoch, scopes::APP, &o.bytes).map_err(failed)?;
         log_keys.insert(*n, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME));
     }
     Ok((epochs, log_keys))
@@ -490,12 +490,12 @@ impl Device {
         self.read_members().await?;
         let Some((user, on, unnamed, first)) = todo()? else { return Ok(()) };
         if let (Some(device), Some((name, roles))) = (device, unnamed) {
-            let mut listed = members::device(&self.me, &user, &name, &roles, None);
+            let mut listed = content::device(&self.me, &user, &name, &roles, None);
             listed.data["device"] = json!(device);
             self.write("global", &user, listed).await?;
         }
         if !on.is_empty() {
-            self.write("global", &user, members::runs(&on)).await?;
+            self.write("global", &user, content::runs(&on)).await?;
         }
         if first {
             self.first_epoch(&format!("user:{user}"), &user).await?;
@@ -994,7 +994,7 @@ impl Device {
         let (recovery, to) = to(self)?;
         let key: [u8; 32] = rand::random();
         let hash = keys::epoch_hash(&key);
-        self.write("global", user, members::epoch(&parsed, 1, &to.iter().map(|e| e.key).collect::<Vec<_>>(), &hash)).await?;
+        self.write("global", user, content::epoch(&parsed, 1, &to.iter().map(|e| e.key).collect::<Vec<_>>(), &hash)).await?;
         self.read_members().await?;
         if self.known.lock().unwrap().as_ref().and_then(|k| k.who.epoch_hash(&parsed, 1)) != Some(hash) {
             return Err(failed("Another device made new keys for this just now. Try again."));

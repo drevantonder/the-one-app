@@ -84,7 +84,7 @@ pub const KEEP_STEPS_FOR: u64 = 90 * DAY;
 /// and the record of who did what. `tidy` deletes none of its steps, whoever asks.
 pub fn keeps_every_step(prefix: &str) -> bool {
     let mut parts = prefix.rsplit('/');
-    parts.next() == Some(crate::database::steps::NAME) && parts.next() == Some(crate::members::APP)
+    parts.next() == Some(crate::database::steps::NAME) && parts.next() == Some(crate::database::scopes::APP)
 }
 
 /// How long the newest copy that holds has been in the bucket before `tidy` deletes the copies before it: a reader that
@@ -1046,7 +1046,7 @@ pub fn sig_name(prefix: &str, n: u64) -> String {
 /// Whether the steps at `prefix` are a database's, with signatures beside them, rather than a scope's log's
 /// (`log::prefix`), whose entries are signed by their authors already.
 pub fn signed_beside(prefix: &str) -> bool {
-    !prefix.ends_with(&format!("/{}/{}", crate::members::APP, crate::database::steps::KEY_NAME))
+    !prefix.ends_with(&format!("/{}/{}", crate::database::scopes::APP, crate::database::steps::KEY_NAME))
 }
 
 /// A database's prefix and position, from the name of one of its steps or the signature beside one.

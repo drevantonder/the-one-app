@@ -18,7 +18,7 @@ pub use one::database::scopes::ScopeDb;
 use one::database::steps;
 use one::database::scopes::{NETWORK, device, object, person};
 use one::entry::{Hash, Key, Scope, hex};
-use one::members::{Kind, Members, Role, ScopeState};
+use one::database::scopes::{Kind, Role};
 
 /// `global`'s scope database's steps as far as this device read them (`one::database::steps`): the database the
 /// recovery key's freeze anchors, and the steps after, each opened here with the device's own keys and applied only if
@@ -136,7 +136,7 @@ impl Global {
             let checked = |epoch: &[u8; 32]| g.truth.as_ref().is_none_or(|t| t.db.epoch_hash(&Scope::Global, e) == Some(one::keys::epoch_hash(epoch)));
             if !keys.contains_key(&e)
                 && let Some(epoch) = epochs.get(&e).filter(|k| checked(k))
-                && let Some(app) = apps.get(&e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok())
+                && let Some(app) = apps.get(&e).and_then(|a| one::cloudflare::open_app_key(epoch, one::database::scopes::APP, a).ok())
             {
                 keys.insert(e, one::cloudflare::database_key(&app, steps::KEY_NAME));
             }
@@ -231,7 +231,7 @@ impl Global {
     pub fn who(&mut self) -> Result<ScopeDb> {
         match &mut self.truth {
             Some(t) => ScopeDb::open(steps::connection(&t.db.bytes()?)?, now()),
-            None => ScopeDb::build(&Members::default(), &Scope::Global, &ScopeState::default(), now()),
+            None => ScopeDb::empty(&Scope::Global, now()),
         }
     }
 
@@ -246,7 +246,7 @@ impl Global {
 fn all_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> one::database::stored::Keys {
     let mut keys = one::database::stored::Keys::new();
     for (e, epoch) in epochs {
-        if let Some(app) = apps.get(e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok()) {
+        if let Some(app) = apps.get(e).and_then(|a| one::cloudflare::open_app_key(epoch, one::database::scopes::APP, a).ok()) {
             keys.insert(*e, one::cloudflare::database_key(&app, steps::KEY_NAME));
         }
     }

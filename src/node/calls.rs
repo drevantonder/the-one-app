@@ -79,7 +79,7 @@ impl Node {
     /// devices' to send, and a sign-in's caller has this device's key.
     pub fn for_sign_in(&self, req: CallRequest) -> Result<CallRequest> {
         let req = self.resolve(req);
-        ensure!(req.app != members::APP, "a sign-in can't ask that");
+        ensure!(req.app != scopes::APP, "a sign-in can't ask that");
         Ok(req)
     }
 
@@ -91,7 +91,7 @@ impl Node {
     pub async fn call_picked(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let me = Caller { agent: req.agent.clone().or(me.agent), ..me };
         let req = self.identified(req)?;
-        if req.service.is_some() || req.device.is_some() || req.app == members::APP {
+        if req.service.is_some() || req.device.is_some() || req.app == scopes::APP {
             return self.route(req, me).await;
         }
         let req = self.reaching(req, &me)?;
@@ -302,7 +302,7 @@ impl Node {
             let m = i.r.db();
             let mut devices: Vec<Key> = if req.service.is_none() {
                 // Not one whose person switched its app service off.
-                m.runners(&me.user, &call_scopes(i, req, &me.user)?).into_iter().map(|s| s.key).filter(|k| !Self::off(m, k, members::APPS_PART)).collect()
+                m.runners(&me.user, &call_scopes(i, req, &me.user)?).into_iter().map(|s| s.key).filter(|k| !Self::off(m, k, scopes::APPS_PART)).collect()
             } else {
                 let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
                 if here && ((me.user == i.user && !passed) || (self.0.services.serves_everyone(&req.app) && i.r.db().serves(&self.0.id, &me.user))) {
@@ -330,7 +330,7 @@ impl Node {
     pub(super) fn resolve(&self, mut req: CallRequest) -> CallRequest {
         if let Some(service) = &req.service {
             req.app = service.clone();
-        } else if req.app != members::APP && (!self.deployed(&req.app) || req.device.as_deref() == Some("all")) {
+        } else if req.app != scopes::APP && (!self.deployed(&req.app) || req.device.as_deref() == Some("all")) {
             req.service = Some(req.app.clone());
         }
         req
@@ -441,7 +441,7 @@ impl Node {
     /// (which wait on theirs, and may be calls of services), SERVICE_LIMIT; and a second more for each MiB put for it
     /// (`PER_MIB`), which it reads and may keep.
     pub(super) async fn limit(&self, req: &CallRequest) -> Duration {
-        if req.app == members::APP {
+        if req.app == scopes::APP {
             return CALL_LIMIT;
         }
         let (apps, services) = self.uses_here(&req.app).await;
@@ -459,7 +459,7 @@ impl Node {
         if reading.elapsed() >= Duration::from_millis(1) {
             trace::note(json!({ "step": "logs" }), reading.elapsed());
         }
-        if req.app == members::APP {
+        if req.app == scopes::APP {
             return self.network_message(&req.tool, &input, me).await.map(Reply::Ok);
         }
         if req.service.as_deref() == Some(crate::push::NAME) {
@@ -520,7 +520,7 @@ impl Node {
         // app's database's, and the Vault's there too if it says it uses items.
         let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), DATABASE)).collect();
         if self.0.apps.describe(&req.app).await?["vault"].is_object() {
-            want.extend(scopes.iter().map(|s| (s.clone(), members::APP, crate::vault::DATABASE)));
+            want.extend(scopes.iter().map(|s| (s.clone(), scopes::APP, crate::vault::DATABASE)));
         }
         self.needs(me, &want).await?;
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
@@ -777,7 +777,7 @@ impl Node {
                 }
                 drop(db);
                 if !kept.is_empty() {
-                    writes.push((scope, Content { blobs: kept, ..members::node("keep", json!({})) }));
+                    writes.push((scope, Content { blobs: kept, ..content::node("keep", json!({})) }));
                 }
             }
             if wrote {
@@ -849,7 +849,7 @@ impl Node {
         crate::vault::blot(&mut answer.ok, &used.into_inner().unwrap());
         let scope = Scope::User(user.clone());
         if !answer.blobs.is_empty() {
-            self.append_as(&scope, &user, Content { blobs: answer.blobs, ..members::node("keep", json!({})) }).await?;
+            self.append_as(&scope, &user, Content { blobs: answer.blobs, ..content::node("keep", json!({})) }).await?;
         }
         Ok(answer.ok)
     }
@@ -1245,7 +1245,7 @@ impl Node {
         // sign-in a node passes on.
         let resolved = self.resolve(req.clone());
         ensure!(own || resolved.service.is_none() || self.0.services.serves_everyone(&resolved.app), "{} runs only for its person's own devices", resolved.app);
-        if !own && req.service.is_none() && req.app != members::APP {
+        if !own && req.service.is_none() && req.app != scopes::APP {
             let req = self.resolve(req.clone());
             let named = req.scopes.clone();
             self.with(|i| {
@@ -1290,7 +1290,7 @@ impl Node {
         let token = request["me"]["token"].as_str().is_some();
         // Passed on by another node with no sign-in, the keys it was handed with it, which `take_passed` checks.
         let passed = !token && request["keys"].is_string();
-        let hint = request["app"] == members::APP && matches!(request["op"].as_str(), Some("hello" | "changed"));
+        let hint = request["app"] == scopes::APP && matches!(request["op"].as_str(), Some("hello" | "changed"));
         self.with(|i| {
             let m = i.r.db();
             let client = m.client(&remote).is_some_and(|c| c.user == user);

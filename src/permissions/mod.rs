@@ -36,7 +36,7 @@
 //!   who already holds what it adds wherever it's held. The release's own roles change only with the release.
 //!
 //! Which object a call or a step is about, and who signed it, is the caller's to say: this only answers. So is moving
-//! an app to another owner, which replay allows only someone who may `delete` it and may `add-apps` where it goes.
+//! an app to another owner, which a step's rule allows only someone who may `delete` it and may `add-apps` where it goes.
 
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -122,7 +122,7 @@ insert or replace into roles (type, name, permissions, builtin) values
     ('vault', 'owner', '["use","change","invite","remove"]', 1),
     ('vault', 'user', '["use","leave"]', 1),
     ('app', 'owner', '["deploy","delete"]', 1);
--- the network's admins, who manage every group as replay lets them (members.rs `manages`) and add people to it, but
+-- the network's admins, who manage every group (`rules`' `manages`) and add people to it, but
 -- open none
 insert or replace into roles (type, name, permissions, gives, builtin) values
     ('group', 'manager', '["invite","remove","rename","run"]', '["member"]', 1);
@@ -139,7 +139,7 @@ insert into relations (subject, relation, object, until) values
     ('network:global#admin', 'admin', 'device:*', null);
 "#;
 
-/// Whether the network's admins make someone a group's admin, as replay always let them (`members.rs` `manages`), so
+/// Whether the network's admins make someone a group's admin, as they always could (`rules`' `manages`), so
 /// a group whose admins have all gone gets a new one: their `manager` role then gives a group's `admin` as well as its
 /// `member`. Not decided yet (the plan's open question on default roles): flip it here, and nowhere else.
 pub const NETWORK_ADMINS_MAKE_GROUP_ADMINS: bool = true;

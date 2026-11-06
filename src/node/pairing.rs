@@ -16,7 +16,7 @@ impl Node {
         self.with(|i| {
             let m = i.r.db();
             ensure!(m.compute(&self.0.id).is_some(), "this device isn't in {} yet", crate::config::YOURS);
-            let kinds = if user.as_ref().is_none_or(|u| *u == asker.user) { MACHINE } else { &[members::Kind::Compute][..] };
+            let kinds = if user.as_ref().is_none_or(|u| *u == asker.user) { MACHINE } else { &[scopes::Kind::Compute][..] };
             ensure!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds), "only admins pair other people's machines");
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.device_name());
             Ok(())
@@ -124,11 +124,11 @@ impl Node {
         let endpoint = crate::keys::Endpoint { key, seal: crate::cloudflare::twin_public(&key)? };
         // A machine of the person's own is their device too. An admin lists another person's as compute, which runs
         // what that admin's listing may (`global`, groups) but never that person's own scope, until a device of theirs
-        // lists it again (`Members::runs_for`).
-        let roles = if user == pairing.user { MACHINE } else { &[members::Kind::Compute][..] };
+        // lists it again (`scope::derive`'s runners).
+        let roles = if user == pairing.user { MACHINE } else { &[scopes::Kind::Compute][..] };
         // Listed already by a join with this code that didn't finish: only the relay's left.
         if !self.with(|i| Ok(i.r.db().machine(&key).is_some_and(|m| m.user == user)))? {
-            let listed = members::device(&endpoint, &user, &request.name, roles, None);
+            let listed = content::device(&endpoint, &user, &request.name, roles, None);
             self.member_content(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, listed).await.context("this device can no longer admit that machine")?;
         }
         // Waited for: until the relay lets it in, the machine that joined reaches nothing.

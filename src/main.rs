@@ -845,7 +845,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let device = flags.get("device").and_then(Value::as_str);
             post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
             let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
-            match (*how, *name == one::members::APPS_PART) {
+            match (*how, *name == one::database::scopes::APPS_PART) {
                 _ if device.is_some_and(|d| d.eq_ignore_ascii_case(one::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
                 ("off", true) => println!("Apps' calls no longer run {there}."),
                 (_, true) => println!("Apps' calls run {there} again."),
@@ -1454,7 +1454,7 @@ fn oned(args: &[String]) -> Result<()> {
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
             serve(args.iter().any(|a| a == "--throwaway"), args)
         }
-        [name] if *name == one::members::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::app::runtime::run(std::path::Path::new(dir)),
+        [name] if *name == one::database::scopes::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::app::runtime::run(std::path::Path::new(dir)),
         [name] => one::services::endpoint::run(name),
         _ => bail!("{} runs this device, or with a service's name, that service, as its oned starts it", one::oned::name()),
     }
@@ -1962,7 +1962,7 @@ fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<b
         false => format!("Set {item}'s {field}."),
     };
     // Whether an agent may use it now, since only the person lets agents use an item.
-    let agents = found.as_ref().is_some_and(|it| it["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == one::members::AGENTS))) || app == Some(one::members::AGENTS);
+    let agents = found.as_ref().is_some_and(|it| it["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == one::database::scopes::AGENTS))) || app == Some(one::database::scopes::AGENTS);
     Ok(match (agents, app) {
         (true, _) => format!("{done} Agents use it with vault_fetch, as {{{{{id}:{field}}}}}."),
         (false, None) => format!("{done} Agents may not use it yet: vault_request, leaving out app, asks the person to let you, and they pick it."),

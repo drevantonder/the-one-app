@@ -119,7 +119,7 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     }
     for entry in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
         let file = entry.file_name().to_string_lossy().to_string();
-        let Some(name) = file.strip_prefix(&prefix).filter(|n| crate::members::valid_app_name(n)) else { continue };
+        let Some(name) = file.strip_prefix(&prefix).filter(|n| crate::database::scopes::valid_app_name(n)) else { continue };
         if on.contains_key(name) || crate::services::endpoint::folder(name).is_dir() {
             names.insert(name.to_string());
         }
@@ -274,7 +274,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                     stop(&name, child);
                 }
                 if let Some(child) = apps.take() {
-                    stop(crate::members::APPS_PART, child);
+                    stop(crate::database::scopes::APPS_PART, child);
                 }
                 crate::app::runtime::stop_all();
                 if let Err(err) = std::fs::remove_dir_all(&dir) {
@@ -475,7 +475,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
 /// Keeps the app runtime running while its switch is on (with none, it is): started, and again whenever it stops,
 /// saying so once it keeps stopping; stopped once it's switched off.
 fn keep_runtime(node: &Node, runtime: &tokio::runtime::Handle, apps: &mut Option<std::process::Child>, stops: &mut Vec<Instant>) {
-    let name = crate::members::APPS_PART;
+    let name = crate::database::scopes::APPS_PART;
     if let Some(child) = apps
         && !matches!(child.try_wait(), Ok(None))
     {

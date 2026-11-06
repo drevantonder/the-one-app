@@ -72,7 +72,7 @@ impl Node {
         let named = self.with(|i| {
             let m = i.r.db();
             let switches = m.switches();
-            let unnamed = switches.iter().filter(|((k, name), s)| *k == self.0.id && s.on && s.scope.is_none() && name != members::APPS_PART).map(|((_, name), _)| name.clone());
+            let unnamed = switches.iter().filter(|((k, name), s)| *k == self.0.id && s.on && s.scope.is_none() && name != scopes::APPS_PART).map(|((_, name), _)| name.clone());
             let unrecorded = carried.iter().filter(|name| !switches.contains_key(&(self.0.id, name.to_string()))).cloned();
             Ok(unnamed
                 .chain(unrecorded)
@@ -142,7 +142,7 @@ impl Node {
 
     /// Whether this device runs apps' calls: unless its person switched its app service off.
     pub fn runs_apps(&self) -> bool {
-        self.with(|i| Ok(!Self::off(i.r.db(), &self.0.id, crate::members::APPS_PART))).unwrap_or(true)
+        self.with(|i| Ok(!Self::off(i.r.db(), &self.0.id, crate::database::scopes::APPS_PART))).unwrap_or(true)
     }
 
     /// The services serving on this device, whom each serves, and what each says it is. One its person switched off
@@ -167,7 +167,7 @@ impl Node {
         let m = i.r.db();
         let on = |name: &str| !Self::off(m, &self.0.id, name);
         let mut out: BTreeMap<String, Value> = BTreeMap::new();
-        out.insert(members::APPS_PART.into(), json!({ "name": members::APPS_PART, "on": on(members::APPS_PART) }));
+        out.insert(scopes::APPS_PART.into(), json!({ "name": scopes::APPS_PART, "on": on(scopes::APPS_PART) }));
         for (name, title) in self.offered_before() {
             out.insert(name.clone(), json!({ "name": name, "title": title, "on": on(&name) }));
         }

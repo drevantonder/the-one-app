@@ -35,11 +35,11 @@ pub fn database(db: &Connection) -> rusqlite::Result<()> {
 /// A signed step's or entry's content as an earlier release wrote it, in this release's names: app schedules' step,
 /// and the types, roles and rules a release's `defaults` step says.
 pub fn content(c: &mut Content) {
-    if c.app != crate::members::APP {
+    if c.app != crate::database::scopes::APP {
         return;
     }
     match c.kind.as_str() {
-        "grant" => c.kind = crate::members::APP_SCHEDULES.to_string(),
+        "grant" => c.kind = crate::database::scopes::APP_SCHEDULES.to_string(),
         super::steps::DEFAULTS => renamed(&mut c.data),
         _ => {}
     }
@@ -86,10 +86,10 @@ mod tests {
 
     #[test]
     fn a_step_from_before_reads_in_this_releases_names() {
-        let mut grant = Content::new(crate::members::APP, "grant", serde_json::json!({ "app": "notes" }));
+        let mut grant = Content::new(crate::database::scopes::APP, "grant", serde_json::json!({ "app": "notes" }));
         content(&mut grant);
-        assert_eq!(grant.kind, crate::members::APP_SCHEDULES);
-        let mut defaults = Content::new(crate::members::APP, super::super::steps::DEFAULTS, serde_json::json!({
+        assert_eq!(grant.kind, crate::database::scopes::APP_SCHEDULES);
+        let mut defaults = Content::new(crate::database::scopes::APP, super::super::steps::DEFAULTS, serde_json::json!({
             "types": [["install", "[\"use\",\"keep\"]"]], "roles": [["install", "admin", "[\"keep\"]", "[]"]], "rules": [["install:global#admin", "admin", "install:*"]],
         }));
         content(&mut defaults);

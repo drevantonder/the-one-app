@@ -56,7 +56,7 @@ impl Node {
         if !self.with(|i| Ok(self.opens(i.r.db(), scope)))? {
             return self.handed_step_keys(scope).await;
         }
-        self.database_keys(scope, members::APP, crate::database::steps::KEY_NAME, false).await
+        self.database_keys(scope, scopes::APP, crate::database::steps::KEY_NAME, false).await
     }
 
     /// The keys of `global`'s steps in each of its epochs given.
@@ -64,7 +64,7 @@ impl Node {
         let bucket = self.bucket()?;
         let mut out = crate::database::stored::Keys::new();
         for (n, epoch) in epochs {
-            if let Some(app) = crate::database::stored::app_key(&bucket, epoch, "global", members::APP, *n, false).await? {
+            if let Some(app) = crate::database::stored::app_key(&bucket, epoch, "global", scopes::APP, *n, false).await? {
                 out.insert(*n, crate::cloudflare::database_key(&app, crate::database::steps::KEY_NAME));
             }
         }
@@ -186,7 +186,7 @@ impl Node {
             if filled {
                 self.0.behind.lock().unwrap().remove(id);
             }
-            apps.extend(id.1.split('/').next().filter(|app| *app != members::APP && !apps.iter().any(|a: &String| a == app)).map(str::to_string));
+            apps.extend(id.1.split('/').next().filter(|app| *app != scopes::APP && !apps.iter().any(|a: &String| a == app)).map(str::to_string));
         }
         if !apps.is_empty() {
             self.emit(Event::Changed { apps });
@@ -215,7 +215,7 @@ impl Node {
             return;
         };
         let input = json!({ "services": services, "load": crate::load::current(), "parts": parts });
-        let req = CallRequest { app: members::APP.into(), tool: "hello".into(), input, ..Default::default() };
+        let req = CallRequest { app: scopes::APP.into(), tool: "hello".into(), input, ..Default::default() };
         for device in devices {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());
             tokio::spawn(async move {

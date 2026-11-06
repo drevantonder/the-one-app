@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::members::Role;
+use crate::database::scopes::Role;
 use crate::node::{CallRequest, Caller, Node};
 
 /// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
@@ -898,7 +898,7 @@ async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q):
 async fn runs(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["on"])?;
     let on = body["on"].as_array().ok_or_else(|| anyhow::anyhow!("on is a list of machines"))?.iter().map(|d| node.find_machine(d.as_str().unwrap_or(""))).collect::<anyhow::Result<Vec<_>>>()?;
-    node.member_content(&me.caller, crate::members::runs(&on)).await?;
+    node.member_content(&me.caller, crate::database::content::runs(&on)).await?;
     done()
 }
 
@@ -972,8 +972,8 @@ async fn handle(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
     only(&body, &["handle", "group"])?;
     let handle = text(&body, "handle")?.trim().to_string();
     let content = match body["group"].as_str() {
-        Some(group) => crate::members::handle("group", &node.find_group(group)?, &handle),
-        None => crate::members::handle("user", &me.caller.user, &handle),
+        Some(group) => crate::database::content::handle("group", &node.find_group(group)?, &handle),
+        None => crate::database::content::handle("user", &me.caller.user, &handle),
     };
     node.member_content(&me.caller, content).await?;
     done()
@@ -982,7 +982,7 @@ async fn handle(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
 /// `{ name, owner, from? }`: `owner` is `user:<id>`, `group:<id>`, `admins`, or a group's name.
 async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     let owner = text(&body, "owner")?;
-    let owner = match crate::members::Principal::parse(owner) {
+    let owner = match crate::database::scopes::Principal::parse(owner) {
         Ok(p) => p.to_string(),
         Err(_) => format!("group:{}", node.find_group(owner)?),
     };
@@ -1011,7 +1011,7 @@ async fn deploy(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
         None => text(&body, "bundle")?.to_string(),
     };
     let owner = match body["owner"].as_str() {
-        Some(o) => Some(crate::members::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
+        Some(o) => Some(crate::database::scopes::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
         None => None,
     };
     Ok(Json(node.deploy_making(&me.caller, text(&body, "app")?, &bundle, owner.as_deref(), body["wait"] == true).await?))
@@ -1039,7 +1039,7 @@ async fn install(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
 /// `{ app, name, owner? }`: a new app called `name`, from `app`, with data of its own. `owner` as for `/v1/app`.
 async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     let owner = match body["owner"].as_str() {
-        Some(o) => Some(crate::members::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
+        Some(o) => Some(crate::database::scopes::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
         None => None,
     };
     node.fork(&local(&node)?, text(&body, "app")?, text(&body, "name")?, owner.as_deref()).await?;

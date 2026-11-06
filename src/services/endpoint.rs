@@ -28,7 +28,6 @@ use serde_json::{Value, json};
 
 use crate::entry::{Entry, Hash, Key, hex, short, unhex};
 use crate::database::scopes::{self, ScopeDb};
-use crate::members::{self, Members};
 use crate::services::Services;
 
 /// The most an ask or its answer may carry, as between nodes.
@@ -126,7 +125,7 @@ impl Service {
     /// The service `name` kept in `dir`: its key (made the first time), and the network oned gave it.
     pub fn open(dir: &Path, name: &str) -> Result<Service> {
         use std::os::unix::fs::PermissionsExt;
-        ensure!(members::valid_app_name(name), "a service's name is lowercase words joined by -");
+        ensure!(scopes::valid_app_name(name), "a service's name is lowercase words joined by -");
         std::fs::create_dir_all(dir)?;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         let key_file = dir.join("key");
@@ -605,7 +604,7 @@ fn placed(root: Hash, entries: Vec<Entry>, steps: &[Option<crate::database::step
         .and_then(|recovery| crate::database::steps::Truth::read(steps, recovery, now_ms())?.map(|t| t.db).context("who's who has no freeze yet"));
     let db = built.unwrap_or_else(|err| {
         tracing::warn!("building the scope database: {err:#}");
-        ScopeDb::build(&Members::default(), &crate::entry::Scope::Global, &Default::default(), 0).expect("an empty scope database builds")
+        ScopeDb::empty(&crate::entry::Scope::Global, 0).expect("an empty scope database builds")
     });
     (genesis, db)
 }

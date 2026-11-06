@@ -2,7 +2,7 @@
 //! its own in the bucket, which the bucket keeps in one order.
 //!
 //! A step is one change, signed by the device that made it as its person: the same content an entry of the log carried
-//! (`members`' kinds, and a scope's own), for one position, under `entry::STEP_DOMAIN`, so it's never taken for an
+//! (`content`'s kinds), for one position, under `entry::STEP_DOMAIN`, so it's never taken for an
 //! entry nor an entry for it. Its position is signed in it (its `seq`), so a step can't be written twice, or anywhere
 //! but where its writer meant it: one that loses its position to another is signed again for the next. A node only
 //! carries a client's step to the bucket: it can hold one back, but change none.
@@ -30,8 +30,7 @@
 //!    state, a device that runs the scope's calls for them.
 //!
 //! A step that doesn't count is passed over, its position taken, as a database's are: nothing it says happens. What a
-//! counted one changes is what `members`' rules for that content change (`Members` and a scope's own state, read from
-//! the database and built back into it).
+//! counted one changes is its kind's rule's (`rules`), applied to a fresh copy of the database (`scope::fresh`).
 //!
 //! Its steps are sealed with the key the frozen log had in each epoch (`KEY_NAME`, `seal`), under their own names. A
 //! reader opens them itself: a node passes them on sealed. The frozen logs are read no more, but for the genesis, the
@@ -53,7 +52,7 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use crate::entry::{Content, Entry, Ext, Hash, Key, Scope, unhex};
-use crate::members::{self, Members, Principal, Role, ScopeState};
+use crate::database::scopes::{Principal, Role};
 use crate::permissions;
 
 use super::scopes::{self, ScopeDb};
@@ -65,7 +64,7 @@ pub const NAME: &str = "scope";
 
 /// Where a scope's database's steps are in the bucket.
 pub fn prefix(scope: &str) -> String {
-    format!("{}/{}/{}", crate::bucket::folder(scope), members::APP, NAME)
+    format!("{}/{}/{}", crate::bucket::folder(scope), scopes::APP, NAME)
 }
 
 /// A step of `scope`'s database for position `at`, signed by `key` as `user`, the scope at `epoch`.
@@ -218,7 +217,7 @@ pub struct Freeze {
 impl Freeze {
     /// The freeze `step` at position `at` says.
     pub fn of(step: &Entry, at: u64) -> Result<Freeze> {
-        ensure!(step.content.app == members::APP && step.content.kind == FREEZE && step.scope() == Scope::Global, "not a freeze");
+        ensure!(step.content.app == scopes::APP && step.content.kind == FREEZE && step.scope() == Scope::Global, "not a freeze");
         Freeze::from_data(&step.content.data, at)
     }
 
@@ -236,7 +235,7 @@ impl Freeze {
 
     /// As a freeze says it, and as a reader keeps it.
     pub fn content(&self) -> Content {
-        Content::new(members::APP, FREEZE, json!({ "hash": self.hash, "logs": self.logs }))
+        Content::new(scopes::APP, FREEZE, json!({ "hash": self.hash, "logs": self.logs }))
     }
 
     /// The last step of `global`'s log it holds.
@@ -258,7 +257,7 @@ pub fn seal(keys: &crate::database::stored::Keys, name: &str, bytes: &[u8]) -> R
 /// Where the network's genesis is: the first step of `global`'s frozen log, a pack of entries under its first epoch,
 /// read only. Every device pins its hash.
 pub fn genesis_name() -> String {
-    crate::database::stored::step_name(&format!("{}/{}/{KEY_NAME}", crate::bucket::folder("global"), members::APP), 1)
+    crate::database::stored::step_name(&format!("{}/{}/{KEY_NAME}", crate::bucket::folder("global"), scopes::APP), 1)
 }
 
 /// The entries in `sealed`, the first step of `global`'s frozen log as the bucket holds it (`genesis_name`), opened
@@ -277,7 +276,7 @@ pub async fn genesis(bucket: &impl crate::bucket::Bucket, keys: &crate::database
 /// The network's recovery key, as its genesis names it: the entry whose hash is `root` among `entries`, those of
 /// `global`'s log's first step. Only the first freeze it signed is who's who (`Truth::first`).
 pub fn recovery_of(root: Hash, entries: &[Entry]) -> Option<Key> {
-    let genesis = entries.iter().find(|e| e.hash() == root && e.content.app == members::APP && e.content.kind == "genesis")?;
+    let genesis = entries.iter().find(|e| e.hash() == root && e.content.app == scopes::APP && e.content.kind == "genesis")?;
     genesis.content.data["recovery"].as_str().and_then(|k| unhex(k).ok())
 }
 
@@ -287,7 +286,7 @@ pub fn genesis_of(pinned: Option<Hash>, entries: &[Entry]) -> Option<Hash> {
     if pinned.is_some() {
         return pinned;
     }
-    let mut found = entries.iter().filter(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash);
+    let mut found = entries.iter().filter(|e| e.content.app == scopes::APP && e.content.kind == "genesis").map(Entry::hash);
     let first = found.next()?;
     found.next().is_none().then_some(first)
 }
@@ -319,13 +318,20 @@ pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
 /// The freeze a new network starts with, at step 1 of `global`'s database, signed by its recovery key as `user`: who's
 /// who as `genesis`, its log's first entry, says it, with its log's one step. → the step, and its copy.
 pub fn first_freeze(recovery: &SigningKey, genesis: &Entry, user: &str, now: u64) -> Result<Given> {
-    let mut m = Members::new(Some(genesis.hash()));
-    m.try_step(genesis)?;
-    let mut db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), now)?;
-    db.conn().pragma_update(None, "user_version", READS)?;
+    let mut db = first(genesis, now)?;
     let freeze = Freeze { at: 1, hash: crate::database::stored::state_hash(db.conn())?, logs: [("global".to_string(), 1)].into() };
     let step = sign(recovery, &Scope::Global, 1, user, 1, now, freeze.content())?;
     Ok(Given { step, copy: Some(db.bytes()?) })
+}
+
+/// `global`'s database as `genesis`, its log's first entry, makes it: the network's first person, device, epoch and
+/// recovery key, with this release's types, roles and rules.
+pub fn first(genesis: &Entry, now: u64) -> Result<ScopeDb> {
+    let db = super::scope::empty(&Scope::Global)?;
+    db.pragma_update(None, "user_version", READS)?;
+    super::rules::genesis(&db, genesis)?;
+    super::scope::derive(&db)?;
+    ScopeDb::open(db, now)
 }
 
 /// The kind of step that starts a scope's database (not `global`'s) whose frozen log the freeze names, at position 0:
@@ -343,7 +349,7 @@ pub fn start_name(scope: &Scope) -> String {
 pub fn start(key: &SigningKey, scope: &Scope, user: &str, epoch: u32, now: u64, db: &mut ScopeDb) -> Result<Given> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
     let hash = crate::database::stored::state_hash(db.conn())?;
-    let step = sign(key, scope, 0, user, epoch, now, Content::new(members::APP, START, json!({ "hash": hash })))?;
+    let step = sign(key, scope, 0, user, epoch, now, Content::new(scopes::APP, START, json!({ "hash": hash })))?;
     Ok(Given { step, copy: Some(db.bytes()?) })
 }
 
@@ -355,11 +361,11 @@ pub fn start(key: &SigningKey, scope: &Scope, user: &str, epoch: u32, now: u64, 
 pub fn started(freeze: &Freeze, global: &ScopeDb, scope: &Scope, given: Option<&Given>, now: u64) -> Result<ScopeDb> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
     if freeze.logs.get(&scope.to_string()).is_none_or(|n| *n == 0) {
-        return ScopeDb::open(super::scope::build(&Members::default(), scope, &ScopeState::default())?, now);
+        return ScopeDb::empty(scope, now);
     }
     let given = given.with_context(|| format!("{scope}'s database has no start yet: one of its devices writes it"))?;
     let step = &given.step;
-    ensure!(step.content.app == members::APP && step.content.kind == START && step.seq() == 0 && step.scope() == *scope, "{scope}'s step 0 isn't its start");
+    ensure!(step.content.app == scopes::APP && step.content.kind == START && step.seq() == 0 && step.scope() == *scope, "{scope}'s step 0 isn't its start");
     ensure!(global.machine_ever(&step.author()).is_some(), "{scope}'s start isn't from one of the network's devices");
     let copy = connection(given.copy.as_deref().context("a start carries its copy")?)?;
     ensure!(Some(crate::database::stored::state_hash(&copy)?.as_str()) == step.content.data["hash"].as_str(), "{scope}'s start's copy isn't what it says");
@@ -575,48 +581,9 @@ pub struct Applied {
 /// Applies `step` to `db`, `scope`'s database as the steps before it left it, with `global`'s as it is now (for a
 /// scope other than `global`, whose permissions are `global`'s): → the database it leaves, or why it doesn't count.
 pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
-    let applied = apply_rules(db, global, scope, step);
-    #[cfg(test)]
-    oracle::same_as_members(db, global, scope, step);
-    applied
-}
-
-/// As `apply`, by `members`' rules, which the rules as rows are held to.
-#[cfg(test)]
-fn apply_members(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
     ensure!(step.scope() == *scope, "a step of another scope");
     let who = global.unwrap_or(db);
-    if step.content.app == members::APP && step.content.kind == DEFAULTS {
-        return defaults(db, who, scope, step);
-    }
-    ensure!(version(db.conn())? <= READS, Newer);
-    let mut m = who.members();
-    let mut state = db.state();
-    ensure!(step.epoch() <= m.epoch(scope), "it names an epoch its scope hasn't reached");
-    allowed(who, scope, step)?;
-    let member = members::is_member_entry(step);
-    if *scope == Scope::Global && member {
-        m.try_step(step)?;
-        if matches!(step.content.kind.as_str(), "install" | "uninstall") {
-            members::applies_in_scope(&m, &state, step)?;
-            state = apply_own(&m, state, step)?;
-        }
-    } else {
-        ensure!(m.counts(step), "{} can't write in {scope} for that person", crate::entry::short(&step.author()));
-        if step.content.app == members::APP {
-            state = apply_own(&m, state, step)?;
-        }
-    }
-    let built = super::scope::build(&if *scope == Scope::Global { m } else { Members::default() }, scope, &state)?;
-    carry(db.conn(), &built)?;
-    named(&built, step)?;
-    Ok(Applied { db: built })
-}
-
-fn apply_rules(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
-    ensure!(step.scope() == *scope, "a step of another scope");
-    let who = global.unwrap_or(db);
-    if step.content.app == members::APP && step.content.kind == DEFAULTS {
+    if step.content.app == scopes::APP && step.content.kind == DEFAULTS {
         return defaults(db, who, scope, step);
     }
     ensure!(version(db.conn())? <= READS, Newer);
@@ -690,7 +657,7 @@ pub fn release_defaults() -> Result<Content> {
     permissions::defaults(&db)?;
     let mut data = rules_of(&db)?;
     data["reads"] = json!(READS);
-    Ok(Content::new(members::APP, DEFAULTS, data))
+    Ok(Content::new(scopes::APP, DEFAULTS, data))
 }
 
 /// A database's types, roles and rules, as a `DEFAULTS` step says them.
@@ -751,47 +718,13 @@ fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<
     Ok(Applied { db: out })
 }
 
-/// What only steps say, which building from replay's members leaves out, copied from the database before: what they
-/// named, and the release's types, roles and rules the steps said (`DEFAULTS`), not this reader's own release's.
-#[cfg(test)]
-fn carry(from: &Connection, to: &Connection) -> Result<()> {
-    to.pragma_update(None, "user_version", version(from)?)?;
-    to.execute_batch(&format!("DELETE FROM types; DELETE FROM roles WHERE builtin = 1; DELETE FROM relations WHERE {RULE};"))?;
-    let mut rules = from.prepare(&format!("SELECT subject, relation, object, until FROM relations WHERE {RULE}"))?;
-    let mut rows = rules.query([])?;
-    while let Some(r) = rows.next()? {
-        to.execute("INSERT OR IGNORE INTO relations VALUES (?, ?, ?, ?)", rusqlite::params![r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<i64>>(3)?])?;
-    }
-    for table in ["types", "roles"] {
-        let mut q = from.prepare(&format!("SELECT * FROM {table}{}", if table == "roles" { " WHERE builtin = 1" } else { "" }))?;
-        let n = q.column_count();
-        let insert = format!("INSERT OR REPLACE INTO {table} VALUES ({})", vec!["?"; n].join(", "));
-        let mut rows = q.query([])?;
-        while let Some(row) = rows.next()? {
-            let values: Vec<rusqlite::types::Value> = (0..n).map(|i| row.get(i)).collect::<rusqlite::Result<_>>()?;
-            to.execute(&insert, rusqlite::params_from_iter(values))?;
-        }
-    }
-    for table in ["blobs", "releases"] {
-        let mut q = from.prepare(&format!("SELECT * FROM {table}"))?;
-        let n = q.column_count();
-        let insert = format!("INSERT INTO {table} VALUES ({})", vec!["?"; n].join(", "));
-        let mut rows = q.query([])?;
-        while let Some(row) = rows.next()? {
-            let values: Vec<rusqlite::types::Value> = (0..n).map(|i| row.get(i)).collect::<rusqlite::Result<_>>()?;
-            to.execute(&insert, rusqlite::params_from_iter(values))?;
-        }
-    }
-    Ok(())
-}
-
 /// What a counted step names that no other table keeps: its blobs, and a release.
 fn named(db: &Connection, step: &Entry) -> Result<()> {
-    let pinned = step.content.app == members::APP && step.content.kind != "keep";
+    let pinned = step.content.app == scopes::APP && step.content.kind != "keep";
     for blob in &step.content.blobs {
         db.execute("INSERT INTO blobs VALUES (?1, ?2) ON CONFLICT (blob) DO UPDATE SET pinned = max(pinned, ?2)", rusqlite::params![blob, pinned])?;
     }
-    if step.content.app == members::APP && members::RELEASES.contains(&step.content.kind.as_str()) {
+    if step.content.app == scopes::APP && scopes::RELEASES.contains(&step.content.kind.as_str()) {
         db.execute(
             "INSERT INTO releases VALUES (?, ?, ?, ?, ?)",
             rusqlite::params![step.seq(), step.content.kind, serde_json::to_string(&step.content)?, crate::entry::hex(&step.author()), i64::try_from(step.time()).unwrap_or(i64::MAX)],
@@ -800,15 +733,8 @@ fn named(db: &Connection, step: &Entry) -> Result<()> {
     Ok(())
 }
 
-/// A scope's own state after `step`, a node entry of its own: replay's rules for it, and what it does.
-#[cfg(test)]
-fn apply_own(m: &Members, mut state: ScopeState, step: &Entry) -> Result<ScopeState> {
-    members::apply_in_scope(m, &mut state, step)?;
-    Ok(state)
-}
-
 /// Rule 3: whether `step`'s signer, as its person, holds the permission its change needs in `db` (`global`'s), before
-/// it. Replay's own rules for the change are checked too, as it's applied (`apply`): this is the engine's.
+/// it. Its kind's rule is checked too, as it's applied (`rules::apply`): this is the engine's.
 pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
     let data = &step.content.data;
     let w = step.user();
@@ -818,12 +744,12 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
     let ok = match (step.content.app.as_str(), step.content.kind.as_str()) {
         // Rule 1: the recovery key lets a device in, and hands over to the next; nothing else.
         _ if db.recovery() == Some(step.author()) => matches!(step.content.kind.as_str(), "device" | "recovery") && *scope == Scope::Global,
-        (members::APP, "genesis") => false,
-        (members::APP, "device") => {
+        (scopes::APP, "genesis") => false,
+        (scopes::APP, "device") => {
             let user = text("user")?;
             let key = unhex(&text("key")?)?;
-            let kinds: Vec<members::Kind> = serde_json::from_value(data["roles"].clone()).unwrap_or_default();
-            let theirs = kinds.iter().any(|k| matches!(k, members::Kind::Client | members::Kind::Service));
+            let kinds: Vec<scopes::Kind> = serde_json::from_value(data["roles"].clone()).unwrap_or_default();
+            let theirs = kinds.iter().any(|k| matches!(k, scopes::Kind::Client | scopes::Kind::Service));
             let verb = if theirs { "add-devices" } else { "add-machines" };
             match (db.user_ever(&user), db.machine_ever(&key)) {
                 // Someone new, with their first device: given a role in the network by someone who may give it.
@@ -834,30 +760,30 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
                 (None, Some(_)) => false,
             }
         }
-        (members::APP, "role") => {
+        (scopes::APP, "role") => {
             let user = text("user")?;
             let was = db.user(&user).context("no such person")?.role;
             let to = role("role")?;
             to == was || (db.may_give(w, &user, super::scope::role(to), scopes::NETWORK) && db.may_take(w, &user, super::scope::role(was), scopes::NETWORK))
         }
-        (members::APP, "remove") => match text("user") {
+        (scopes::APP, "remove") => match text("user") {
             Ok(user) => db.user(&user).is_some_and(|u| db.may_take(w, &user, super::scope::role(u.role), scopes::NETWORK)),
             Err(_) => may("remove", &scopes::device(&unhex(&text("key")?)?)),
         },
         // A person's own say over their devices: turning one down before it's listed, and forgetting what one of
-        // theirs signed in with (replay checks it's theirs).
-        (members::APP, "refuse" | "forget-sign-in") => may("add-devices", &scopes::person(w)),
-        (members::APP, "epoch") => {
+        // theirs signed in with (its rule checks it's theirs).
+        (scopes::APP, "refuse" | "forget-sign-in") => may("add-devices", &scopes::person(w)),
+        (scopes::APP, "epoch") => {
             let s = Scope::parse(&text("scope")?)?;
             may("remove", &scopes::object(&s))
         }
-        (members::APP, "runs") => may("choose-devices", &scopes::person(w)),
-        (members::APP, members::APP_SCHEDULES) | (members::APP, "vault") => may("choose-devices", &scopes::object(&Scope::parse(&text("scope")?)?)),
-        (members::APP, "group") => may("make-groups", scopes::NETWORK),
-        (members::APP, "invite") => db.may_give(w, &text("user")?, super::scope::role(role("role")?), &scopes::group(&text("group")?)),
+        (scopes::APP, "runs") => may("choose-devices", &scopes::person(w)),
+        (scopes::APP, scopes::APP_SCHEDULES) | (scopes::APP, "vault") => may("choose-devices", &scopes::object(&Scope::parse(&text("scope")?)?)),
+        (scopes::APP, "group") => may("make-groups", scopes::NETWORK),
+        (scopes::APP, "invite") => db.may_give(w, &text("user")?, super::scope::role(role("role")?), &scopes::group(&text("group")?)),
         // Taking up an invite: the role the invite gave, which was checked as it was given.
-        (members::APP, "accept") => db.roles().get(&(w.to_string(), Scope::Group(text("group")?))).is_some_and(|(_, invited)| *invited),
-        (members::APP, "member") => {
+        (scopes::APP, "accept") => db.roles().get(&(w.to_string(), Scope::Group(text("group")?))).is_some_and(|(_, invited)| *invited),
+        (scopes::APP, "member") => {
             let (g, user) = (text("group")?, text("user")?);
             let object = scopes::group(&g);
             let was = db.group_role(&user, &g).or_else(|| db.group(&g).and_then(|grp| grp.invited.get(&user).copied()));
@@ -865,7 +791,7 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
             let took = was.is_none_or(|r| Some(r) == to || db.may_take(w, &user, super::scope::role(r), &object));
             took && to.is_none_or(|r| Some(r) == was || db.may_give(w, &user, super::scope::role(r), &object))
         }
-        (members::APP, "rename") => {
+        (scopes::APP, "rename") => {
             if let Ok(key) = text("key") {
                 may("rename", &scopes::device(&unhex(&key)?))
             } else if let Ok(user) = text("user") {
@@ -874,10 +800,10 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
                 may("rename", &scopes::group(&text("group")?))
             }
         }
-        (members::APP, "setting") => may("change-settings", scopes::NETWORK),
+        (scopes::APP, "setting") => may("change-settings", scopes::NETWORK),
         // Only while there's no recovery key (the one there was forked `global`): an admin names the next.
-        (members::APP, "recovery") => db.recovery().is_none() && may("change-settings", scopes::NETWORK),
-        (members::APP, "app") => {
+        (scopes::APP, "recovery") => db.recovery().is_none() && may("change-settings", scopes::NETWORK),
+        (scopes::APP, "app") => {
             let name = text("name")?;
             let owner = Principal::parse(&text("owner")?)?;
             let to = scopes::owner_object(&owner);
@@ -898,8 +824,8 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
                 }
             }
         }
-        (members::APP, "deploy") => may("deploy", &scopes::app(&text("app")?)),
-        (members::APP, "service") => {
+        (scopes::APP, "deploy") => may("deploy", &scopes::app(&text("app")?)),
+        (scopes::APP, "service") => {
             let k = unhex(&text("device")?)?;
             let on = data["on"] == true;
             let adds = |s: &str| Scope::parse(s).is_ok_and(|s| may("add-apps", &scopes::object(&s)));
@@ -911,13 +837,13 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
             };
             (theirs || (!on && was.as_deref().is_some_and(adds))) && (!on || data["scope"].as_str().is_none_or(adds))
         }
-        (members::APP, "install" | "uninstall" | "schedule" | "vault-request") => may("add-apps", &scopes::object(scope)) || runs_it(db, scope, step),
-        (members::APP, "keep" | "forget") => may("use", &scopes::object(scope)) || runs_it(db, scope, step),
+        (scopes::APP, "install" | "uninstall" | "schedule" | "vault-request") => may("add-apps", &scopes::object(scope)) || runs_it(db, scope, step),
+        (scopes::APP, "keep" | "forget") => may("use", &scopes::object(scope)) || runs_it(db, scope, step),
         // A release, which every node checks is signed with the release key before it takes it.
-        (members::APP, kind) if members::RELEASES.contains(&kind) => true,
-        (members::APP, "arrange") => *scope == Scope::User(w.to_string()) && may("use", &scopes::object(scope)),
-        // An app's own entries, and the release's: as replay counts them, by who signed them.
-        (members::APP, _) => false,
+        (scopes::APP, kind) if scopes::RELEASES.contains(&kind) => true,
+        (scopes::APP, "arrange") => *scope == Scope::User(w.to_string()) && may("use", &scopes::object(scope)),
+        // An app's own entries, and the release's: as their rules count them, by who signed them.
+        (scopes::APP, _) => false,
         _ => true,
     };
     ensure!(ok, "{} may not {} there", w, step.content.kind);
@@ -936,56 +862,9 @@ fn runs_it(db: &ScopeDb, scope: &Scope, step: &Entry) -> bool {
 }
 
 #[cfg(test)]
-mod oracle {
-    use super::*;
-    /// That `apply` by the rules leaves what `members`' did, or counts nothing where it did.
-    pub(crate) fn same_as_members(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) {
-        let applied = &apply_rules(db, global, scope, step);
-        let was = apply_members(db, global, scope, step);
-        for (d, s) in [(Some(db), scope), (global, &Scope::Global)] {
-            let Some(d) = d else { continue };
-            let old = super::super::scope::build(&if *s == Scope::Global { d.members() } else { Members::default() }, s, &d.state()).unwrap();
-            carry(d.conn(), &old).unwrap();
-            let new = super::super::scope::fresh(d.conn(), s).unwrap();
-            assert_eq!(crate::database::stored::state_hash(&new).unwrap(), crate::database::stored::state_hash(&old).unwrap(), "fresh {s}");
-        }
-        let hash = |a: &Result<Applied>| a.as_ref().ok().map(|a| crate::database::stored::state_hash(&a.db).unwrap());
-        assert_eq!(hash(applied), hash(&was), "{} step {}: rules {:?}, members {:?}", scope, step.content.kind, applied.as_ref().err().map(|e| format!("{e:#}")), was.as_ref().err().map(|e| format!("{e:#}")));
-    }
-}
-
-#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-
-    /// That `entries`, applied as steps from the genesis on, leave the database `m`, those entries stepped in memory,
-    /// builds: what each counted for and changed is the same read from and built back into the database each time.
-    pub(crate) fn agrees(entries: &[Entry], m: &Members) {
-        let mut start = Members::new(Some(entries[0].hash()));
-        start.try_step(&entries[0]).unwrap();
-        let mut db = ScopeDb::build(&start, &Scope::Global, &ScopeState::default(), 0).unwrap();
-        for e in &entries[1..] {
-            match apply(&db, None, &Scope::Global, e) {
-                Ok(a) => db = ScopeDb::open(a.db, 0).unwrap(),
-                Err(err) => tracing::debug!("{} doesn't count: {err:#}", e.content.kind),
-            }
-        }
-        let replayed = ScopeDb::build(m, &Scope::Global, &ScopeState::default(), 0).unwrap();
-        let hash = |d: &ScopeDb| crate::database::stored::state_hash(d.conn()).unwrap();
-        if hash(&db) != hash(&replayed) {
-            let dump = |d: &ScopeDb| {
-                let mut out = Vec::new();
-                for t in ["network", "principals", "invites", "devices", "relations", "epochs", "sealed", "owed", "app_schedules", "apps", "deploys", "services", "settings", "vault", "vault_opens", "recovery", "runs", "runs_chosen"] {
-                    let mut q = d.conn().prepare(&format!("SELECT * FROM {t} ORDER BY 1")).unwrap();
-                    let n = q.column_count();
-                    let rows: Vec<String> = q.query_map([], |r| Ok((0..n).map(|i| format!("{:?}", r.get::<_, rusqlite::types::Value>(i).unwrap())).collect::<Vec<_>>().join(", "))).unwrap().map(Result::unwrap).collect();
-                    out.push(format!("{t}: {rows:#?}"));
-                }
-                out.join("\n")
-            };
-            panic!("steps left\n{}\nin memory\n{}", dump(&db), dump(&replayed));
-        }
-    }
+    use crate::database::content;
 
     /// `global`'s entries, each written after every one before it.
     #[derive(Clone, Default)]
@@ -1012,19 +891,22 @@ pub(crate) mod tests {
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";
 
-    /// Who's who after `entries`, each written after every one before it, from the first, the genesis.
-    fn members_of(entries: &[Entry]) -> Members {
-        let mut m = Members::new(Some(entries[0].hash()));
-        for e in entries {
-            m.step(e);
+    /// `global`'s database after `entries`, the first the genesis, each after it applied as a step if it counts.
+    fn global_of(entries: &[Entry]) -> ScopeDb {
+        let mut db = first(&entries[0], 0).unwrap();
+        for e in &entries[1..] {
+            if let Ok(a) = apply(&db, None, &Scope::Global, e) {
+                db = ScopeDb::open(a.db, 0).unwrap();
+            }
         }
-        m
+        db
     }
 
     /// Andre's Mac starts the network, its recovery key kept offline, and lists Bob's laptop, Bob an admin too.
     fn two_admins() -> (History, SigningKey, SigningKey, SigningKey) {
         use crate::keys::Endpoint;
-        use crate::members::{Kind, device, genesis};
+        use crate::database::content::{device, genesis};
+        use crate::database::scopes::Kind;
         let (mac, laptop, recovery) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[7; 32]));
         let mut h = History::default();
         h.write(&mac, ANDRE, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)));
@@ -1056,7 +938,7 @@ pub(crate) mod tests {
         assert!(Truth::read(&[None, Some(swapped.clone())], key, 0).is_err(), "a copy that isn't what it says stops it");
         // A Welcome's hash pins who's who, whoever signed the freeze it names.
         let mut t = Truth::read(&[Some(theirs.clone())], key, 0).unwrap().unwrap();
-        let step = sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, members::setting("name", Some("Ours"))).unwrap();
+        let step = sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content::setting("name", Some("Ours"))).unwrap();
         assert!(t.take(2, Some(&step)).unwrap());
         let w = t.welcome().unwrap();
         let after = [Some(Given { step, copy: None })];
@@ -1070,11 +952,11 @@ pub(crate) mod tests {
     #[test]
     fn a_scope_starts_from_its_start() {
         let (h, mac, _, _) = two_admins();
-        let m = members_of(&h.entries);
-        let global = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
+        let global = global_of(&h.entries);
         let scope = Scope::User(ANDRE.into());
-        let state = ScopeState { installed: ["notes".to_string()].into(), arrangements: [("user".to_string(), json!({ "items": ["notes"] }))].into(), ..Default::default() };
-        let mut db = ScopeDb::open(super::super::scope::build(&Members::default(), &scope, &state).unwrap(), 0).unwrap();
+        let conn = super::super::scope::empty(&scope).unwrap();
+        conn.execute_batch(r#"INSERT INTO installs VALUES ('notes', 1, 'person:a000000000000001', 0); INSERT INTO pages VALUES ('user', '{"items":["notes"]}');"#).unwrap();
+        let mut db = ScopeDb::open(conn, 0).unwrap();
         let freeze = Freeze { at: 2, hash: "0".repeat(64), logs: [("global".to_string(), 9), (scope.to_string(), 4)].into() };
         let given = start(&mac, &scope, ANDRE, 1, 0, &mut db).unwrap();
         let given = decode(&scope, 0, &encoded(&given)).unwrap();
@@ -1095,10 +977,9 @@ pub(crate) mod tests {
     #[test]
     fn a_scope_s_reader_stops_at_a_newer_release_s_step() {
         let (h, mac, _, _) = two_admins();
-        let m = members_of(&h.entries);
-        let global = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
+        let global = global_of(&h.entries);
         let scope = Scope::User(ANDRE.into());
-        let db = || ScopeDb::open(super::super::scope::build(&Members::default(), &scope, &ScopeState::default()).unwrap(), 0).unwrap();
+        let db = || ScopeDb::empty(&scope, 0).unwrap();
         let mut newer = release_defaults().unwrap();
         newer.data["reads"] = json!(READS + 1);
         let newer = Some(Given { step: sign(&mac, &scope, 2, ANDRE, 1, 0, newer).unwrap(), copy: None });
@@ -1120,7 +1001,7 @@ pub(crate) mod tests {
         let (_, mac, _, _) = two_admins();
         let step = |at: u64| {
             let name = crate::database::stored::step_name(&prefix, at);
-            seal(&keys, &name, &encode(&sign(&mac, &Scope::Global, at, ANDRE, 1, 0, members::setting("name", Some("x"))).unwrap(), None)).unwrap()
+            seal(&keys, &name, &encode(&sign(&mac, &Scope::Global, at, ANDRE, 1, 0, content::setting("name", Some("x"))).unwrap(), None)).unwrap()
         };
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             bucket.create(&crate::database::stored::newest_name(&prefix), br#"{"at": 1000000000, "copy": 0, "epoch": 1}"#).await.unwrap();
@@ -1146,9 +1027,8 @@ pub(crate) mod tests {
     fn only_an_admin_s_newer_release_stops_a_reader() {
         let (h, mac, laptop, _) = two_admins();
         let mut h = h;
-        h.write(&mac, ANDRE, members::role(BOB, Role::Member));
-        let m = members_of(&h.entries);
-        let db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
+        h.write(&mac, ANDRE, content::role(BOB, Role::Member));
+        let db = global_of(&h.entries);
         let step = |key: &SigningKey, user: &str| {
             let mut content = release_defaults().unwrap();
             content.data["reads"] = json!(999);
@@ -1169,12 +1049,14 @@ pub(crate) mod tests {
     #[test]
     fn a_release_s_roles_only_move_on_and_an_older_reader_stops_at_a_newer_one() {
         use crate::keys::Endpoint;
-        use crate::members::{Kind, genesis};
+        use crate::database::content::genesis;
+        use crate::database::scopes::Kind;
         const ANDRE: &str = "a000000000000001";
         let mac = SigningKey::from_bytes(&[1; 32]);
         let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
-        let m = members_of(std::slice::from_ref(&g));
-        let db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
+        // A database an older release made.
+        let db = first(&g, 0).unwrap();
+        db.conn().pragma_update(None, "user_version", READS - 1).unwrap();
         let step = |at: u64, reads: u32| {
             let mut content = release_defaults().unwrap();
             content.data["reads"] = json!(reads);
@@ -1201,13 +1083,13 @@ pub(crate) mod tests {
     #[test]
     fn a_step_counts_only_if_its_signer_may_make_that_change_there() {
         use crate::keys::Endpoint;
-        use crate::members::{Kind, device, genesis, group, node, remove_device, setting};
+        use crate::database::content::{device, genesis, group, node, remove_device, setting};
+        use crate::database::scopes::Kind;
         const ANDRE: &str = "a000000000000001";
         const BOB: &str = "b000000000000002";
         let (mac, laptop, phone) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[3; 32]));
         let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
-        let m = members_of(std::slice::from_ref(&g));
-        let mut db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
+        let mut db = first(&g, 0).unwrap();
         let mut at = 0;
         let mut step = |db: &mut ScopeDb, key: &SigningKey, user: &str, epoch: u32, content: Content| -> bool {
             at += 1;
@@ -1233,191 +1115,5 @@ pub(crate) mod tests {
         let s = sign(&mac, &Scope::Global, 9, ANDRE, 1, 0, setting("name", Some("x"))).unwrap();
         assert!(decode(&Scope::Global, 10, &encode(&s, None)).is_err() && decode(&Scope::User(ANDRE.into()), 9, &encode(&s, None)).is_err());
         assert!(decode(&Scope::Global, 0, &encode(&g, None)).is_err());
-    }
-}
-
-#[cfg(test)]
-mod every_kind {
-    use super::*;
-    use crate::keys::Endpoint;
-    use crate::members::*;
-    use crate::entry::hex;
-    use serde_json::json;
-
-    const ANDRE: &str = "a000000000000001";
-    const BOB: &str = "b000000000000002";
-    const CY: &str = "c000000000000004";
-    const G: &str = "c000000000000003";
-
-    /// Every kind of step, allowed and not, in `global`, a person's own scope and a group's: `apply` holds each to what
-    /// `members`' rules made of it (`oracle`).
-    #[test]
-    fn every_kind_of_step_by_its_rule() {
-        let k = |n: u8| SigningKey::from_bytes(&[n; 32]);
-        let (mac, laptop, linux, phone, recovery, cy) = (k(1), k(2), k(4), k(5), k(7), k(6));
-        let id = |s: &SigningKey| s.verifying_key().to_bytes();
-        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, crate::members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client, Kind::Compute], &id(&recovery), &"e".repeat(64)));
-        let first = first_freeze(&recovery, &g, ANDRE, 0).unwrap();
-        let mut global = normalize(connection(first.copy.as_deref().unwrap()).unwrap(), &Scope::Global, 0).unwrap();
-        let mut scopes: BTreeMap<String, ScopeDb> = BTreeMap::new();
-        let mut at: BTreeMap<String, u64> = BTreeMap::new();
-        let mut counted = 0;
-        let mut step = |global: &mut ScopeDb, key: &SigningKey, user: &str, scope: &Scope, content: Content| {
-            let n = at.entry(scope.to_string()).or_insert(1);
-            *n += 1;
-            let epoch = global.epoch(scope).max(1).min(global.epoch(scope));
-            let s = sign(key, scope, *n, user, epoch, 5, content).unwrap();
-            if *scope == Scope::Global {
-                if let Ok(a) = apply(global, None, scope, &s) {
-                    *global = ScopeDb::open(a.db, 0).unwrap();
-                    counted += 1;
-                }
-            } else {
-                let db = scopes.remove(&scope.to_string()).unwrap_or_else(|| ScopeDb::open(super::super::scope::empty(scope).unwrap(), 0).unwrap());
-                let db = match apply(&db, Some(global), scope, &s) {
-                    Ok(a) => {
-                        counted += 1;
-                        ScopeDb::open(a.db, 0).unwrap()
-                    }
-                    Err(_) => db,
-                };
-                scopes.insert(scope.to_string(), db);
-            }
-        };
-        let gl = Scope::Global;
-        let (me, bob, grp) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()), Scope::Group(G.into()));
-        let h = "a".repeat(64);
-        let db = &mut global;
-        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Member))));
-        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&linux), ANDRE, "linux", &[Kind::Compute], None));
-        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&cy), CY, "cy", &[Kind::Client], Some(("Bob", Role::Admin))));
-        step(db, &laptop, BOB, &gl, setting("name", Some("x")));
-        step(db, &mac, ANDRE, &gl, setting("name", Some("Ours")));
-        step(db, &mac, ANDRE, &gl, setting("Bad Name", Some("x")));
-        step(db, &mac, ANDRE, &gl, setting("name", None));
-        step(db, &laptop, BOB, &gl, group(G, "Work"));
-        step(db, &mac, ANDRE, &gl, group(G, "Again"));
-        step(db, &laptop, BOB, &gl, invite(G, ANDRE, Role::Member));
-        step(db, &laptop, BOB, &gl, invite(G, CY, Role::Admin));
-        step(db, &mac, ANDRE, &gl, accept(G));
-        step(db, &cy, CY, &gl, accept(G));
-        step(db, &laptop, BOB, &gl, member(G, ANDRE, Some(Role::Admin)));
-        step(db, &mac, ANDRE, &gl, member(G, BOB, Some(Role::Member)));
-        step(db, &mac, ANDRE, &gl, member(G, CY, None));
-        step(db, &laptop, BOB, &gl, handle("group", G, "work"));
-        step(db, &laptop, BOB, &gl, handle("user", BOB, "andre"));
-        step(db, &laptop, BOB, &gl, handle("user", BOB, "bobby"));
-        step(db, &laptop, BOB, &gl, handle("user", ANDRE, "x"));
-        step(db, &mac, ANDRE, &gl, handle("user", BOB, "Not-Valid"));
-        step(db, &laptop, BOB, &gl, rename("group", G, "Work Ltd"));
-        step(db, &laptop, BOB, &gl, rename("key", &hex(&id(&mac)), "mine"));
-        step(db, &mac, ANDRE, &gl, rename("key", &hex(&id(&laptop)), "Bob's"));
-        step(db, &mac, ANDRE, &gl, rename("user", BOB, "Robert"));
-        step(db, &laptop, BOB, &gl, rename("user", ANDRE, "Dre"));
-        step(db, &laptop, BOB, &gl, role(BOB, Role::Admin));
-        step(db, &mac, ANDRE, &gl, role(BOB, Role::Admin));
-        step(db, &laptop, BOB, &gl, role(ANDRE, Role::Member));
-        step(db, &mac, ANDRE, &gl, role(ANDRE, Role::Member));
-        step(db, &laptop, BOB, &gl, role(ANDRE, Role::Admin));
-        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "notes", "owner": format!("group:{G}") })));
-        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "tally", "owner": "admins", "from": "notes" })));
-        step(db, &laptop, BOB, &gl, node("app", json!({ "name": "mine", "owner": format!("user:{ANDRE}") })));
-        step(db, &laptop, BOB, &gl, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
-        let deploy = |app: &str, bundle: &str| Content { blobs: vec![bundle.to_string()], ..node("deploy", json!({ "app": app, "bundle": bundle })) };
-        step(db, &mac, ANDRE, &gl, deploy("notes", &h));
-        step(db, &mac, ANDRE, &gl, deploy("notes", &"b".repeat(64)));
-        step(db, &mac, ANDRE, &gl, node("deploy", json!({ "app": "notes", "bundle": h })));
-        step(db, &laptop, BOB, &gl, deploy("tally", &h));
-        step(db, &mac, ANDRE, &gl, retire("tally", "admins", "erased").unwrap());
-        step(db, &mac, ANDRE, &gl, retire("tally", "admins", "deleted").unwrap());
-        step(db, &mac, ANDRE, &gl, deploy("tally", &h));
-        step(db, &mac, ANDRE, &gl, retire("tally", "admins", "restored").unwrap());
-        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "tally", "owner": "admins", "source": "https://example.com/x" })));
-        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "tally", "owner": "admins", "source": "ftp://x" })));
-        step(db, &mac, ANDRE, &gl, node("app", json!({ "name": "tally", "owner": format!("group:{G}") })));
-        step(db, &mac, ANDRE, &gl, retire("bobs", &format!("user:{BOB}"), "deleted").unwrap());
-        step(db, &laptop, BOB, &gl, retire("bobs", &format!("user:{BOB}"), "deleted").unwrap());
-        step(db, &laptop, BOB, &gl, retire("bobs", &format!("user:{BOB}"), "erased").unwrap());
-        step(db, &laptop, BOB, &gl, retire("bobs", &format!("user:{BOB}"), "restored").unwrap());
-        step(db, &mac, ANDRE, &gl, setting("serverless", Some(&hex(&id(&k(14))))));
-        step(db, &laptop, BOB, &gl, service(&id(&linux), "whatsapp", true, None));
-        step(db, &mac, ANDRE, &gl, service(&id(&linux), "whatsapp", true, Some(&gl)));
-        step(db, &laptop, BOB, &gl, service(&id(&linux), "whatsapp", false, None));
-        step(db, &laptop, BOB, &gl, service(&id(&k(14)), "shell", true, None));
-        step(db, &mac, ANDRE, &gl, service(&id(&k(14)), "shell", true, Some(&grp)));
-        step(db, &mac, ANDRE, &gl, service(&id(&k(9)), "shell", true, None));
-        step(db, &linux, ANDRE, &gl, service_endpoint(&Endpoint::of(&k(8)), ANDRE, "linux", "whatsapp", true, &id(&linux)));
-        step(db, &mac, ANDRE, &gl, service_endpoint(&Endpoint::of(&k(8)), ANDRE, "linux", "whatsapp", true, &id(&mac)));
-        step(db, &mac, ANDRE, &gl, runs(&[id(&linux), id(&k(14))]));
-        step(db, &laptop, BOB, &gl, runs(&[id(&linux), id(&laptop)]));
-        step(db, &laptop, BOB, &gl, runs(&[id(&linux), id(&k(14))]));
-        step(db, &laptop, BOB, &gl, epoch(&bob, 1, &[id(&laptop)], &h));
-        step(db, &laptop, BOB, &gl, epoch(&grp, 1, &[id(&laptop), id(&mac)], &h));
-        step(db, &mac, ANDRE, &gl, epoch(&me, 1, &[id(&mac)], &h));
-        step(db, &mac, ANDRE, &gl, epoch(&me, 3, &[id(&mac)], &h));
-        step(db, &mac, ANDRE, &gl, epoch(&gl, 2, &[id(&mac), id(&laptop), id(&k(30))], &h));
-        step(db, &laptop, BOB, &gl, app_schedules(&id(&linux), &bob, "notes", 99, &[(1, h.clone()), (2, "c".repeat(64))].into()));
-        step(db, &laptop, BOB, &gl, app_schedules(&id(&linux), &grp, "notes", 99, &[(1, h.clone())].into()));
-        step(db, &mac, ANDRE, &gl, app_schedules(&id(&linux), &bob, "notes", 99, &BTreeMap::new()));
-        step(db, &laptop, BOB, &gl, app_schedules(&id(&k(30)), &bob, "notes", 99, &BTreeMap::new()));
-        step(db, &laptop, BOB, &gl, app_schedules(&id(&linux), &bob, "node", 99, &BTreeMap::new()));
-        step(db, &laptop, BOB, &gl, vault(&bob, 1, &[3; 32], &[id(&linux)]));
-        step(db, &laptop, BOB, &gl, vault(&bob, 1, &[4; 32], &[id(&linux), id(&k(14))]));
-        step(db, &laptop, BOB, &gl, vault(&bob, 2, &[4; 32], &[id(&linux), id(&k(14))]));
-        step(db, &laptop, BOB, &gl, vault(&grp, 1, &[4; 32], &[id(&laptop)]));
-        // A scope's own, by its people and by the node that runs it.
-        for (key, user, scope) in [(&mac, ANDRE, &me), (&laptop, BOB, &bob), (&laptop, BOB, &grp), (&mac, ANDRE, &grp), (&linux, ANDRE, &me), (&linux, BOB, &bob), (&mac, ANDRE, &gl), (&laptop, BOB, &me)] {
-            step(db, key, user, scope, install("notes", true));
-            step(db, key, user, scope, install("nothing", true));
-            step(db, key, user, scope, install("tally", false));
-            step(db, key, user, scope, node("schedule", json!({ "app": "notes", "schedule": "daily", "on": true })));
-            step(db, key, user, scope, node("schedule", json!({ "app": "notes", "schedule": "daily" })));
-            step(db, key, user, scope, node("forget", json!({ "blob": "A".repeat(64) })));
-            step(db, key, user, scope, node("forget", json!({ "blob": "z" })));
-            step(db, key, user, scope, node("keep", json!({})));
-            let ask = |id: &str| node("vault-request", json!({ "id": id, "app": "notes", "title": " Key ", "fields": { "token": { "secret": true }, "user": {} }, "hosts": ["api.example.com"], "why": "w", "agent": "a" }));
-            step(db, key, user, scope, ask("d000000000000001"));
-            step(db, key, user, scope, ask("d000000000000001"));
-            step(db, key, user, scope, node("vault-request", json!({ "id": "d000000000000002", "app": "agents", "title": "x", "fields": { "bad name": {} } })));
-            step(db, key, user, scope, node("vault-request", json!({ "id": "d000000000000003", "app": "node", "title": "x", "fields": { "t": { "secret": true } } })));
-            step(db, key, user, scope, node("vault-request", json!({ "id": "d000000000000001", "declined": true })));
-            step(db, key, user, scope, node("vault-request", json!({ "id": "d000000000000001", "set": true })));
-            step(db, key, user, scope, node("arrange", json!({ "page": "user", "items": [{ "app": "notes" }, { "app": "notes", "widget": "w", "id": "1", "options": { "n": 1.5 } }], "hidden": ["tally"], "pages": { "order": [format!("group:{G}")], "hidden": [] } })));
-            step(db, key, user, scope, node("arrange", json!({ "page": "elsewhere", "items": [] })));
-            step(db, key, user, scope, node("device", json!({})));
-            step(db, key, user, scope, Content::new("notes", "anything", json!({})));
-        }
-        // Devices: turned down, forgotten, signing in again, and taken out.
-        step(db, &mac, ANDRE, &gl, refuse(&Endpoint::of(&k(20)), "MacBook"));
-        step(db, &mac, ANDRE, &gl, refuse(&Endpoint::of(&laptop), "laptop"));
-        step(db, &k(20), ANDRE, &gl, setting("name", Some("sneaky")));
-        let mut signed_in = device(&Endpoint::of(&phone), BOB, "phone", &[Kind::Client], None);
-        signed_in.data["sign_in"] = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
-        step(db, &laptop, BOB, &gl, signed_in);
-        step(db, &mac, ANDRE, &gl, forget_sign_in(&id(&phone)));
-        step(db, &laptop, BOB, &gl, forget_sign_in(&id(&phone)));
-        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&k(21)), BOB, "box", &[Kind::Compute], None));
-        step(db, &laptop, BOB, &gl, device(&Endpoint::of(&k(21)), BOB, "box", &[Kind::Compute], None));
-        step(db, &laptop, BOB, &gl, device(&Endpoint::of(&k(22)), ANDRE, "x", &[Kind::Client], None));
-        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&k(23)), "d000000000000009", "new", &[Kind::Client], Some(("New Person", Role::Member))));
-        step(db, &mac, ANDRE, &gl, device(&Endpoint::of(&k(24)), "d00000000000000a", "new", &[Kind::Client], Some(("New Person", Role::Member))));
-        step(db, &recovery, BOB, &gl, device(&Endpoint::of(&k(25)), BOB, "recovered", &[Kind::Client], None));
-        step(db, &recovery, BOB, &gl, device(&Endpoint::of(&k(26)), BOB, "box", &[Kind::Compute], None));
-        step(db, &recovery, ANDRE, &gl, setting("name", Some("r")));
-        step(db, &mac, ANDRE, &gl, node("recovery", json!({ "key": hex(&id(&k(31))) })));
-        step(db, &recovery, ANDRE, &gl, node("recovery", json!({ "key": hex(&id(&mac)) })));
-        step(db, &recovery, ANDRE, &gl, node("recovery", json!({ "key": hex(&id(&k(31))) })));
-        step(db, &k(31), ANDRE, &gl, node("recovery", json!({ "key": hex(&id(&k(32))) })));
-        step(db, &laptop, BOB, &gl, node("remove", json!({ "key": hex(&id(&phone)), "itself": true })));
-        step(db, &mac, ANDRE, &gl, remove_device(&id(&k(25))));
-        step(db, &mac, ANDRE, &gl, remove_device(&id(&linux)));
-        step(db, &laptop, BOB, &gl, remove_device(&id(&mac)));
-        step(db, &laptop, BOB, &gl, remove_user(ANDRE));
-        step(db, &mac, ANDRE, &gl, remove_user(BOB));
-        step(db, &laptop, BOB, &gl, rename("user", BOB, "Gone"));
-        step(db, &mac, ANDRE, &gl, remove_user(ANDRE));
-        step(db, &mac, ANDRE, &gl, node("member", json!({ "group": G, "user": ANDRE })));
-        step(db, &mac, ANDRE, &gl, epoch(&grp, 2, &[id(&mac)], &h));
-        assert!(counted > 100, "{counted} counted");
     }
 }

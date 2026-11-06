@@ -202,7 +202,7 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
     for n in bucket.list(&format!("{folder}/_vault"))? {
         copy(&format!("{folder}/_vault/{n}/recovery"), true)?;
     }
-    for app in bucket.list(&folder)?.into_iter().filter(|a| crate::members::valid_app_name(a) || a == crate::members::APP) {
+    for app in bucket.list(&folder)?.into_iter().filter(|a| crate::database::scopes::valid_app_name(a) || a == crate::database::scopes::APP) {
         for n in bucket.list(&format!("{folder}/{app}/_key"))? {
             copy(&format!("{folder}/{app}/_key/{n}"), true)?;
         }
@@ -252,7 +252,7 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
 /// its entries, not a database, takes the hint's.
 #[allow(clippy::too_many_arguments)]
 fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::database::stored::Keys, hinted: u64, above: u64) -> Result<u64> {
-    if (app, database) == (crate::members::APP, crate::database::steps::KEY_NAME) {
+    if (app, database) == (crate::database::scopes::APP, crate::database::steps::KEY_NAME) {
         return Ok(hinted.max(above));
     }
     let mut keys = crate::database::stored::Keys::new();
@@ -543,7 +543,7 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
         Ok(m) => m,
         Err(err) => {
             problems.push(format!("global: {err:#}"));
-            ScopeDb::build(&crate::members::Members::default(), &crate::entry::Scope::Global, &Default::default(), crate::node::now_ms())?
+            ScopeDb::empty(&crate::entry::Scope::Global, crate::node::now_ms())?
         }
     };
     let bytes: u64 = place.objects(&format!("{network}/objects"))?.iter().map(|o| o.2).sum();
@@ -567,8 +567,8 @@ fn who(place: &Place, network: &str, root: Option<crate::entry::Hash>, keys: &[[
     // The steps' key in each epoch: the node's app key there, opened with whichever of the epochs' keys does.
     let mut step_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
     for n in 1..=(keys.len() as u32 + 8) {
-        let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::keys::app_key_name("global", crate::members::APP, n)))? else { continue };
-        if let Some(app) = keys.iter().find_map(|k| crate::cloudflare::open_app_key(k, crate::members::APP, &sealed).ok()) {
+        let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::keys::app_key_name("global", crate::database::scopes::APP, n)))? else { continue };
+        if let Some(app) = keys.iter().find_map(|k| crate::cloudflare::open_app_key(k, crate::database::scopes::APP, &sealed).ok()) {
             step_keys.insert(n, crate::cloudflare::database_key(&app, steps::KEY_NAME));
         }
     }
@@ -633,10 +633,10 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         let prefix = format!("{folder}/{app}/{db}");
         // What a person calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
         let said = match (app, db) {
-            (crate::members::APP, "vault") => "Vault".to_string(),
-            (crate::members::APP, crate::database::steps::KEY_NAME) => "history".to_string(),
-            (crate::members::APP, crate::database::steps::NAME) => "who's who".to_string(),
-            (crate::members::APP, _) => "status".to_string(),
+            (crate::database::scopes::APP, "vault") => "Vault".to_string(),
+            (crate::database::scopes::APP, crate::database::steps::KEY_NAME) => "history".to_string(),
+            (crate::database::scopes::APP, crate::database::steps::NAME) => "who's who".to_string(),
+            (crate::database::scopes::APP, _) => "status".to_string(),
             (app, "main") => app.to_string(),
             (app, db) => format!("{app} {db}"),
         };
@@ -645,7 +645,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
             let Ok(Some(sealed)) = copy.get(&crate::keys::app_key_name(scope, app, *n)).await else { continue };
             match crate::cloudflare::open_app_key(epoch, app, &sealed.bytes) {
                 // A scope database's steps are sealed as its log is (`database::steps`).
-                Ok(key) => drop(keys.insert(*n, crate::cloudflare::database_key(&key, if (app, db) == (crate::members::APP, crate::database::steps::NAME) { crate::database::steps::KEY_NAME } else { db }))),
+                Ok(key) => drop(keys.insert(*n, crate::cloudflare::database_key(&key, if (app, db) == (crate::database::scopes::APP, crate::database::steps::NAME) { crate::database::steps::KEY_NAME } else { db }))),
                 Err(err) => out.push(format!("{scope} {said}: its key in epoch {n}: {err:#}")),
             }
         }
@@ -677,7 +677,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         }
         // The node's log of a scope is entries, which `check` restored, and its scope database's steps who's who, which
         // it checked too (`steps_of`); the rest are SQLite.
-        if [crate::database::steps::KEY_NAME, crate::database::steps::NAME].map(|db| format!("{}/{db}", crate::members::APP)).contains(database) || keys.is_empty() {
+        if [crate::database::steps::KEY_NAME, crate::database::steps::NAME].map(|db| format!("{}/{db}", crate::database::scopes::APP)).contains(database) || keys.is_empty() {
             continue;
         }
         match crate::database::stored::Db::open(&copy, &prefix, keys).await {
@@ -719,9 +719,9 @@ mod tests {
 
         // Who's who: the network's genesis, and the freeze its recovery key signed.
         const ANDRE: &str = "0123456789abcdef";
-        let node = crate::database::stored::app_key(&bucket, &epoch, "global", crate::members::APP, 1, true).await.unwrap().unwrap();
+        let node = crate::database::stored::app_key(&bucket, &epoch, "global", crate::database::scopes::APP, 1, true).await.unwrap().unwrap();
         let step_keys = crate::database::stored::Keys::from([(1, crate::cloudflare::database_key(&node, crate::database::steps::KEY_NAME))]);
-        let genesis = crate::members::genesis("Home", ANDRE, "Andre", &crate::keys::Endpoint::of(&device), "mac", &[crate::members::Kind::Client], recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&epoch));
+        let genesis = crate::database::content::genesis("Home", ANDRE, "Andre", &crate::keys::Endpoint::of(&device), "mac", &[crate::database::scopes::Kind::Client], recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&epoch));
         let genesis = Entry::create(&device, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis);
         let name = crate::database::steps::genesis_name();
         bucket.put(&name, &crate::database::steps::seal(&step_keys, &name, &crate::entry::pack(&[&genesis])).unwrap()).unwrap();

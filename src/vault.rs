@@ -90,7 +90,7 @@ impl std::fmt::Debug for Item {
 
 /// A field's name, as a placeholder names it: letters, digits, `_`, `-` and `.`.
 pub fn valid_field(name: &str) -> bool {
-    crate::members::valid_secret_name(name)
+    crate::database::scopes::valid_secret_name(name)
 }
 
 /// Applies a change to an item (`{ id, title?, type?, domain?, fields?, hosts?, apps?, app?, deleted? }`), made by
@@ -114,7 +114,7 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
         item.kind = kind.trim().to_string();
     }
     if !data["domain"].is_null() {
-        item.domain = data["domain"].as_str().filter(|d| crate::members::valid_host(d)).map(str::to_string);
+        item.domain = data["domain"].as_str().filter(|d| crate::database::scopes::valid_host(d)).map(str::to_string);
     }
     if let Some(fields) = data["fields"].as_object() {
         let before = item.fields.clone();
@@ -135,7 +135,7 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
     }
     if let Some(hosts) = data["hosts"].as_array() {
         item.hosts = hosts.iter().filter_map(|h| h.as_str().map(str::to_string)).collect();
-        ensure!(item.hosts.iter().all(|h| crate::members::valid_host(h)), "a host is a host name, like api.example.com");
+        ensure!(item.hosts.iter().all(|h| crate::database::scopes::valid_host(h)), "a host is a host name, like api.example.com");
     }
     ensure!(!item.hosts.is_empty() || !item.fields.values().any(|f| f.secret), "an item with a secret field is sent to one host or more");
     if let Some(apps) = data["apps"].as_array() {

@@ -290,7 +290,7 @@ impl Node {
     }
 
     /// The bundle this release has of `app`, if it's the built-in app of that name: owned by admins, not a fork.
-    pub(super) fn built_in(&self, app: &members::App) -> Option<&String> {
+    pub(super) fn built_in(&self, app: &scopes::App) -> Option<&String> {
         self.0.built_in.get(&app.name).filter(|_| app.owner == Principal::Admins && app.from.is_none())
     }
 
@@ -362,11 +362,11 @@ impl Node {
             for (n, name) in wanted.iter().enumerate().rev() {
                 ensure!(m.app(name).is_some(), "no app named {name}{}", if n > 0 { format!(", which {app} uses") } else { String::new() });
                 if n == 0 || !here.contains(name) {
-                    out.push((scope.clone(), members::node(if installed { "install" } else { "uninstall" }, json!({ "app": name }))));
+                    out.push((scope.clone(), content::node(if installed { "install" } else { "uninstall" }, json!({ "app": name }))));
                 }
             }
             // Where each service runs for this scope now: stopped where it no longer should, started where it should.
-            let ours = |s: &members::Switch| s.on && s.scope.as_deref() == Some(scope.to_string().as_str());
+            let ours = |s: &scopes::Switch| s.on && s.scope.as_deref() == Some(scope.to_string().as_str());
             let switches = m.switches();
             for service in &services {
                 let running: Vec<Key> = switches.iter().filter(|((_, n), s)| n == service && ours(s)).map(|((k, _), _)| *k).collect();
@@ -453,7 +453,7 @@ impl Node {
             })
         })?;
         if before.is_none() {
-            ensure!(members::valid_app_name(app), "{app}: an app's name is lowercase words joined by -, like water-log");
+            ensure!(scopes::valid_app_name(app), "{app}: an app's name is lowercase words joined by -, like water-log");
             let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
             self.member_as(caller, "app", json!({ "name": app, "owner": owner })).await?;
         }
@@ -494,7 +494,7 @@ fn built_in_source(app: &str) -> Option<String> {
 
 /// Where `app`'s service runs for the scopes `installed` names, and for `user` on their own nodes: `{ scope, node,
 /// name, online, problem }` each, `name` none once that node was removed, `problem` what its node said went wrong.
-fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), members::Switch>, parts_here: &[Value], app: &str, installed: &[String], user: &str) -> Vec<Value> {
+fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, parts_here: &[Value], app: &str, installed: &[String], user: &str) -> Vec<Value> {
     let m = i.r.db();
     let cloudflare = m.cloudflare_node();
     switches

@@ -166,20 +166,21 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         use one::database::steps;
         use one::entry::{Entry, Ext, Scope, pack};
         use one::keys::Endpoint;
-        use one::members::{self, Kind};
+        use one::database::{content, scopes};
+        use one::database::scopes::Kind;
         use one_client::members::Global;
         const ANDRE: &str = "a000000000000001";
         let browser_seed: [u8; 32] = rand::random();
         let (mac, browser, recovery) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&browser_seed), SigningKey::from_bytes(&rand::random()));
         let (epoch, app): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
-        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: vec![] }, None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch)));
+        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: vec![] }, None, content::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch)));
         let first = steps::first_freeze(&recovery, &g, ANDRE, 0).unwrap();
-        let listed = steps::sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, members::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None)).unwrap();
-        let (_, _, body) = steps::sign(&browser, &Scope::Global, 3, ANDRE, 1, 5, members::setting("greeting", Some("hi"))).unwrap().encode();
+        let listed = steps::sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None)).unwrap();
+        let (_, _, body) = steps::sign(&browser, &Scope::Global, 3, ANDRE, 1, 5, content::setting("greeting", Some("hi"))).unwrap().encode();
         let fields = json!({ "log": "global", "at": 3, "time": 5, "user": ANDRE, "epoch": 1 });
         let out = js(json!({ "op": "step", "seed": B64U.encode(&browser_seed), "fields": fields, "body": String::from_utf8(body).unwrap() }));
         let signed = Entry::decode_step(&b(&out["signed"]["header"]), &b(&out["signed"]["signature"]), &b(&out["signed"]["body"])).unwrap();
-        let sealed_app = b(&js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&epoch), "app": members::APP, "key": B64U.encode(&app) }))["sealed"]);
+        let sealed_app = b(&js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&epoch), "app": scopes::APP, "key": B64U.encode(&app) }))["sealed"]);
         let keys: one::database::stored::Keys = [(1, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME))].into();
         let prefix = steps::prefix("global");
         let sealed = |at: u64, step: &Entry, copy: Option<&[u8]>| {
@@ -206,7 +207,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let who = client.who().unwrap();
         assert_eq!(who.setting("greeting").as_deref(), Some("hi"), "the step a browser signed counts");
         // Another network's genesis: refused.
-        let other = Entry::create(&mac, Ext { log: "global".into(), time: 1, user: ANDRE.into(), epoch: 0, previous: vec![] }, None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &mac.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch)));
+        let other = Entry::create(&mac, Ext { log: "global".into(), time: 1, user: ANDRE.into(), epoch: 0, previous: vec![] }, None, content::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &mac.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch)));
         let mut elsewhere = Global::new(Some(other.hash()));
         assert!(elsewhere.add_sealed(&read, &epochs, &apps).is_err(), "a log that isn't the network it joined");
         // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
@@ -233,15 +234,16 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
     // Member entries' content (src/members.rs), as the web client builds what a browser signs (cloudflare/web/members.js).
     {
         use one::entry::Scope;
-        use one::members::{self, Kind, Role};
+        use one::database::content;
+        use one::database::scopes::{Kind, Role};
         let endpoint = one::keys::Endpoint { key: rand::random(), seal: rand::random() };
         let (key, seal) = (data_encoding::HEXLOWER.encode(&endpoint.key), data_encoding::HEXLOWER.encode(&endpoint.seal));
         let (user, group) = ("0123456789abcdef", "fedcba9876543210");
         let both = [
-            (members::device(&endpoint, user, "Chrome on Mac", &[Kind::Client], None), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Chrome on Mac" }])),
+            (content::device(&endpoint, user, "Chrome on Mac", &[Kind::Client], None), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Chrome on Mac" }])),
             (
                 {
-                    let mut c = members::device(&endpoint, user, "phone", &[Kind::Client], None);
+                    let mut c = content::device(&endpoint, user, "phone", &[Kind::Client], None);
                     c.data["device"] = json!(seal.clone());
                     c
                 },
@@ -250,41 +252,41 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             (
                 {
                     // Let in by its sign-in, from where it asked.
-                    let mut c = members::device(&endpoint, user, "phone", &[Kind::Client], None);
+                    let mut c = content::device(&endpoint, user, "phone", &[Kind::Client], None);
                     c.data["sign_in"] = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
                     c.data["place"] = json!("Sydney");
                     c
                 },
                 json!(["device", { "key": key, "seal": seal, "user": user, "name": "phone", "signIn": { "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } }, "place": "Sydney" }]),
             ),
-            (members::device(&endpoint, user, "Sam's Chrome", &[Kind::Client], Some(("Sam", Role::Member))), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Sam's Chrome", "newUser": { "name": "Sam", "role": "member" } }])),
-            (members::passkey(&endpoint, user, "Passkey", "cred-1"), json!(["passkey", { "key": key, "seal": seal, "user": user, "name": "Passkey", "credential": "cred-1" }])),
-            (members::role(user, Role::Admin), json!(["role", { "user": user, "role": "admin" }])),
-            (members::remove_user(user), json!(["removeUser", { "user": user }])),
-            (members::remove_device(&endpoint.key), json!(["removeDevice", { "key": key }])),
-            (members::refuse(&endpoint, "MacBook Pro"), json!(["refuse", { "key": key, "seal": seal, "name": "MacBook Pro" }])),
-            (members::forget_sign_in(&endpoint.key), json!(["forgetSignIn", { "key": key }])),
-            (members::setting("name", Some("Home")), json!(["setting", { "name": "name", "value": "Home" }])),
-            (members::setting("name", None), json!(["setting", { "name": "name" }])),
-            (members::group(group, "Family"), json!(["group", { "group": group, "name": "Family" }])),
-            (members::invite(group, user, Role::Member), json!(["invite", { "group": group, "user": user, "role": "member" }])),
-            (members::accept(group), json!(["accept", { "group": group }])),
-            (members::member(group, user, Some(Role::Admin)), json!(["member", { "group": group, "user": user, "role": "admin" }])),
-            (members::member(group, user, None), json!(["member", { "group": group, "user": user }])),
-            (members::rename("key", &key, "Work Mac"), json!(["rename", { "what": "key", "id": key, "name": "Work Mac" }])),
-            (members::rename("group", group, "Kin"), json!(["rename", { "what": "group", "id": group, "name": "Kin" }])),
-            (members::handle("user", user, "sam-2"), json!(["handle", { "what": "user", "id": user, "handle": "sam-2" }])),
-            (members::epoch(&Scope::User(user.into()), 2, &[endpoint.key], &seal), json!(["epoch", { "scope": format!("user:{user}"), "n": 2, "to": [key], "hash": seal }])),
-            (members::app_schedules(&endpoint.key, &Scope::Group(group.into()), "whatsapp", 0, &Default::default()), json!(["appSchedules", { "endpoint": key, "scope": format!("group:{group}"), "app": "whatsapp", "until": 0 }])),
-            (members::app_schedules(&endpoint.key, &Scope::User(user.into()), "whatsapp", 1_800_000_000_000, &[(1, seal.clone()), (2, key.clone())].into()), json!(["appSchedules", { "endpoint": key, "scope": format!("user:{user}"), "app": "whatsapp", "until": 1_800_000_000_000_u64, "keys": { "1": seal, "2": key } }])),
-            (members::retire("notes", "admins", "deleted").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "deleted" }])),
-            (members::retire("notes", "admins", "restored").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "restored" }])),
-            (members::install("notes", false), json!(["install", { "app": "notes", "installed": false }])),
-            (members::runs(&[endpoint.key]), json!(["runs", { "on": [key] }])),
-            (members::runs(&[]), json!(["runs", { "on": [] }])),
-            (members::service(&endpoint.key, "shell", false, None), json!(["service", { "device": key, "name": "shell" }])),
-            (members::service(&endpoint.key, "shell", true, None), json!(["service", { "device": key, "name": "shell", "on": true }])),
-            (members::service(&endpoint.key, "shell", true, Some(&Scope::Global)), json!(["service", { "device": key, "name": "shell", "on": true, "scope": "global" }])),
+            (content::device(&endpoint, user, "Sam's Chrome", &[Kind::Client], Some(("Sam", Role::Member))), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Sam's Chrome", "newUser": { "name": "Sam", "role": "member" } }])),
+            (content::passkey(&endpoint, user, "Passkey", "cred-1"), json!(["passkey", { "key": key, "seal": seal, "user": user, "name": "Passkey", "credential": "cred-1" }])),
+            (content::role(user, Role::Admin), json!(["role", { "user": user, "role": "admin" }])),
+            (content::remove_user(user), json!(["removeUser", { "user": user }])),
+            (content::remove_device(&endpoint.key), json!(["removeDevice", { "key": key }])),
+            (content::refuse(&endpoint, "MacBook Pro"), json!(["refuse", { "key": key, "seal": seal, "name": "MacBook Pro" }])),
+            (content::forget_sign_in(&endpoint.key), json!(["forgetSignIn", { "key": key }])),
+            (content::setting("name", Some("Home")), json!(["setting", { "name": "name", "value": "Home" }])),
+            (content::setting("name", None), json!(["setting", { "name": "name" }])),
+            (content::group(group, "Family"), json!(["group", { "group": group, "name": "Family" }])),
+            (content::invite(group, user, Role::Member), json!(["invite", { "group": group, "user": user, "role": "member" }])),
+            (content::accept(group), json!(["accept", { "group": group }])),
+            (content::member(group, user, Some(Role::Admin)), json!(["member", { "group": group, "user": user, "role": "admin" }])),
+            (content::member(group, user, None), json!(["member", { "group": group, "user": user }])),
+            (content::rename("key", &key, "Work Mac"), json!(["rename", { "what": "key", "id": key, "name": "Work Mac" }])),
+            (content::rename("group", group, "Kin"), json!(["rename", { "what": "group", "id": group, "name": "Kin" }])),
+            (content::handle("user", user, "sam-2"), json!(["handle", { "what": "user", "id": user, "handle": "sam-2" }])),
+            (content::epoch(&Scope::User(user.into()), 2, &[endpoint.key], &seal), json!(["epoch", { "scope": format!("user:{user}"), "n": 2, "to": [key], "hash": seal }])),
+            (content::app_schedules(&endpoint.key, &Scope::Group(group.into()), "whatsapp", 0, &Default::default()), json!(["appSchedules", { "endpoint": key, "scope": format!("group:{group}"), "app": "whatsapp", "until": 0 }])),
+            (content::app_schedules(&endpoint.key, &Scope::User(user.into()), "whatsapp", 1_800_000_000_000, &[(1, seal.clone()), (2, key.clone())].into()), json!(["appSchedules", { "endpoint": key, "scope": format!("user:{user}"), "app": "whatsapp", "until": 1_800_000_000_000_u64, "keys": { "1": seal, "2": key } }])),
+            (content::retire("notes", "admins", "deleted").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "deleted" }])),
+            (content::retire("notes", "admins", "restored").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "restored" }])),
+            (content::install("notes", false), json!(["install", { "app": "notes", "installed": false }])),
+            (content::runs(&[endpoint.key]), json!(["runs", { "on": [key] }])),
+            (content::runs(&[]), json!(["runs", { "on": [] }])),
+            (content::service(&endpoint.key, "shell", false, None), json!(["service", { "device": key, "name": "shell" }])),
+            (content::service(&endpoint.key, "shell", true, None), json!(["service", { "device": key, "name": "shell", "on": true }])),
+            (content::service(&endpoint.key, "shell", true, Some(&Scope::Global)), json!(["service", { "device": key, "name": "shell", "on": true, "scope": "global" }])),
         ];
         let out = js(json!({ "op": "members", "calls": both.iter().map(|(_, call)| call.clone()).collect::<Vec<_>>() }));
         for ((rust, call), js) in both.iter().zip(out["contents"].as_array().expect("contents")) {

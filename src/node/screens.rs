@@ -168,13 +168,13 @@ impl Node {
     pub async fn arrange(&self, caller: &Caller, page: &str, items: Value, hidden: Value, pages: Value) -> Result<()> {
         let scope = Scope::User(caller.user.clone());
         let content = self.with(|i| {
-            ensure!(members::valid_page(page), "a page is user, group:<id> or global");
+            ensure!(scopes::valid_page(page), "a page is user, group:<id> or global");
             ensure!(i.r.holds(&scope), "this device doesn't hold your data");
             let mut data = json!({ "page": page, "items": items, "hidden": if hidden.is_null() { json!([]) } else { hidden } });
             if page == "user" && !pages.is_null() {
                 data["pages"] = pages;
             }
-            Ok(members::node("arrange", data))
+            Ok(content::node("arrange", data))
         })?;
         self.append_as(&scope, &caller.user, content).await?;
         Ok(())

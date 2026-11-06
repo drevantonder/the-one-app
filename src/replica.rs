@@ -8,7 +8,6 @@ use ed25519_dalek::SigningKey;
 use crate::database::scopes::ScopeDb;
 use crate::database::steps::{self, Freeze, Given, Truth};
 use crate::entry::{Content, Entry, Hash, Key, Scope};
-use crate::members::Members;
 
 /// What one device holds and knows.
 pub struct Replica {
@@ -172,5 +171,5 @@ impl Replica {
 
 /// `global`'s scope database of nobody, which a device answers as until it has read its freeze.
 fn nobody(now: u64) -> ScopeDb {
-    ScopeDb::build(&Members::default(), &Scope::Global, &Default::default(), now).expect("an empty who's who builds")
+    ScopeDb::empty(&Scope::Global, now).expect("an empty who's who builds")
 }

@@ -81,7 +81,7 @@ impl Node {
                 hashes.insert(*n, crate::keys::epoch_hash(&key));
             }
         }
-        self.append(&Scope::Global, members::app_schedules(&endpoint, scope, app, until, &hashes)).await?;
+        self.append(&Scope::Global, content::app_schedules(&endpoint, scope, app, until, &hashes)).await?;
         Ok(())
     }
 
@@ -135,7 +135,7 @@ impl Node {
                 if me.user != i.user || m.client(&self.0.id).is_none() {
                     return Ok(Vec::new());
                 }
-                let due = |s: &Scope, g: &members::AppSchedules| g.until < now + (APP_SCHEDULES_DAYS - 1) * DAY || g.hashes.keys().next_back().copied().unwrap_or(0) < m.epoch(s);
+                let due = |s: &Scope, g: &scopes::AppSchedules| g.until < now + (APP_SCHEDULES_DAYS - 1) * DAY || g.hashes.keys().next_back().copied().unwrap_or(0) < m.epoch(s);
                 Ok(m.app_schedules_at(now).into_iter().filter(|((_, s, a), g)| a == app && g.by == i.user && due(s, g)).map(|((k, s, _), _)| (k, s)).collect())
             })
             .unwrap_or_default();

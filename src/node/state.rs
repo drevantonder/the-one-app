@@ -56,10 +56,10 @@ impl Node {
         // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
         let looking = device.or_else(|| {
             let m = network.as_ref()?.r.db();
-            m.machine(&viewer.key).filter(|d| viewer.key != self.0.id && d.user == viewer.user && d.is(members::Kind::Client)).map(|_| viewer.key)
+            m.machine(&viewer.key).filter(|d| viewer.key != self.0.id && d.user == viewer.user && d.is(scopes::Kind::Client)).map(|_| viewer.key)
         });
         let me = &viewer.user;
-        let device_now = |s: &members::Machine| {
+        let device_now = |s: &scopes::Machine| {
             let Some(i) = network.as_ref() else { return serde_json::Map::new() };
             let m = i.r.db();
             let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
@@ -72,7 +72,7 @@ impl Node {
             });
             let mut services: Vec<Service> = if s.key == self.0.id { here_services.clone() } else { session.map(|s| s.services.clone()).unwrap_or_default() };
             // What its services with endpoints of their own run there, as each says: they're part of it.
-            let parts = i.peers.iter().filter(|(k, _)| i.online(k) && m.machine(k).is_some_and(|p| p.is(members::Kind::Service) && p.device == Some(s.key)));
+            let parts = i.peers.iter().filter(|(k, _)| i.online(k) && m.machine(k).is_some_and(|p| p.is(scopes::Kind::Service) && p.device == Some(s.key)));
             for d in parts.flat_map(|(_, p)| p.services.iter()).cloned().collect::<Vec<_>>() {
                 if !services.iter().any(|h| h.0 == d.0) {
                     services.push(d);
@@ -93,7 +93,7 @@ impl Node {
                 _ => unreachable!(),
             }
         };
-        let client_now = |c: &members::Machine| {
+        let client_now = |c: &scopes::Machine| {
             match json!({ "me": Some(c.key) == looking }) {
                 Value::Object(now) => now,
                 _ => unreachable!(),
@@ -127,7 +127,7 @@ impl Node {
 
     /// The same, as `caller`, whose rights it's checked against.
     pub async fn member_as(&self, caller: &Caller, kind: &str, data: Value) -> Result<()> {
-        self.member_content(caller, members::node(kind, data)).await
+        self.member_content(caller, content::node(kind, data)).await
     }
 
     /// Signs one of `global`'s node entries with this device, for `caller`: it counts only if this device is theirs
@@ -196,9 +196,9 @@ impl Node {
         let found: Vec<Key> = self
             .with(|i| {
                 let m = i.r.db();
-                let serves = |s: &members::Machine| if own { s.user == user } else { s.user != user && m.may(user, "use", &scopes::service(&s.key)) };
+                let serves = |s: &scopes::Machine| if own { s.user == user } else { s.user != user && m.may(user, "use", &scopes::service(&s.key)) };
                 // Named as the device it's part of.
-                let on = |s: &members::Machine| s.device.and_then(|d| m.machine(&d)).is_some_and(|d| d.name.eq_ignore_ascii_case(name) || hex(&d.key).starts_with(name));
+                let on = |s: &scopes::Machine| s.device.and_then(|d| m.machine(&d)).is_some_and(|d| d.name.eq_ignore_ascii_case(name) || hex(&d.key).starts_with(name));
                 Ok(m.offering(service).into_iter().filter(|s| serves(s) && !name.is_empty() && on(s)).map(|s| s.key).collect())
             })
             .ok()?;
@@ -212,9 +212,9 @@ impl Node {
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| {
             let m = i.r.db();
-            let named: Vec<members::Machine> = m.machines().into_iter().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).collect();
+            let named: Vec<scopes::Machine> = m.machines().into_iter().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).collect();
             // A device, by its name, rather than the parts of it named for it.
-            let part = |d: &members::Machine| d.device.is_some_and(|of| named.iter().any(|n| n.key == of));
+            let part = |d: &scopes::Machine| d.device.is_some_and(|of| named.iter().any(|n| n.key == of));
             Ok(named.iter().filter(|d| !part(d)).map(|d| d.key).collect())
         })?;
         let names = || self.with(|i| Ok(i.r.db().machines().into_iter().filter(|m| !m.removed).map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
@@ -283,7 +283,7 @@ fn throwaway() -> bool {
     settings.is_some_and(|s| !s["throwaway_person"].is_null())
 }
 
-fn installed_services(m: &ScopeDb, device: &members::Machine, services: &[Service], build: Option<&str>) -> Vec<Value> {
+fn installed_services(m: &ScopeDb, device: &scopes::Machine, services: &[Service], build: Option<&str>) -> Vec<Value> {
     let name_of = |u: &String| m.user_ever(u).map(|u| u.name);
     services
         .iter()

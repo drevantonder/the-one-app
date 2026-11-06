@@ -234,7 +234,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
 
     // Sam is let in only with the proof of the secret Andre's invite made.
     let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let sams = new_key();
     let wrong = one::keys::invite_proof(b"another-secret", &one::keys::Endpoint::of(&sams));
     assert!(a.approve_request(&me, &asks(&sams, &sam.user, Some(wrong)), Some(&sam)).await.is_err());
@@ -339,7 +339,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
 
     // Sam, a person of the network, with a device of his.
     let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = one::keys::Endpoint::of(&sams);
     let proof = one::keys::invite_proof(secret.as_bytes(), &e);
@@ -352,7 +352,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     // Repos' own, and the Vault's, which fills in its items, as a client hands them when the node asks.
     let epochs = a.sealed_keys(&me, &global, Some(&one::entry::hex(&e.key)), None).await.unwrap();
     let mut keys = Vec::new();
-    for (app, database) in [("repos", "main"), (one::members::APP, one::vault::DATABASE)] {
+    for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::vault::DATABASE)] {
         let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
         for (n, epoch) in epochs["sealed"].as_object().unwrap() {
             let epoch: [u8; 32] = one::cloudflare::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
@@ -433,7 +433,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     a.call(repos("create", json!({ "name": "site", "owner": "team" }))).await.unwrap();
     assert!(!sams_push(&client, "team/site", "sams", false).await);
     a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
-    signed_by(&a, &client, &sams, one::members::accept(&group)).await;
+    signed_by(&a, &client, &sams, one::database::content::accept(&group)).await;
     assert!(sams_push(&client, "team/site", "sams", false).await, "a member of the group pushes to its repo");
     let refused = call(CallRequest { scopes: Some(vec!["global".into()]), ..repos("delete", json!({ "repo": "team/site" })) }, &client).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only Team's admins manage team/site"), "{refused:#}");
@@ -556,7 +556,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     // Sam, a person of the network but not in Team, with a device of his that hands its keys with his calls: Repos'
     // and the Vault's in global.
     let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = one::keys::Endpoint::of(&sams);
     let proof = one::keys::invite_proof(secret.as_bytes(), &e);
@@ -565,7 +565,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
     let epochs = a.sealed_keys(&me, &global, Some(&one::entry::hex(&e.key)), None).await.unwrap();
     let mut keys = Vec::new();
-    for (app, database) in [("repos", "main"), (one::members::APP, one::vault::DATABASE)] {
+    for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::vault::DATABASE)] {
         let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
         for (n, epoch) in epochs["sealed"].as_object().unwrap() {
             let epoch: [u8; 32] = one::cloudflare::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
@@ -590,7 +590,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
 
     // Once he's in Team, he sees the organization's repo, as its installation, and never Andre's, nor with his token.
     a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
-    signed_by(&a, &client, &sams, one::members::accept(&group)).await;
+    signed_by(&a, &client, &sams, one::database::content::accept(&group)).await;
     let (list, sent) = sams_list().await;
     assert_eq!(list, ["github.com/org/site"]);
     assert!(!sent.is_empty() && sent.iter().all(|(_, auth)| !auth.contains("andre-token")), "{sent:?}");

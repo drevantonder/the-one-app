@@ -340,8 +340,8 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
 /// never go with a request.
 pub fn may_hand(route: &str, need: &Need) -> bool {
-    let node = |of: &[&str]| need.app == crate::members::APP && of.contains(&need.database.as_str());
-    let apps = need.app != crate::members::APP && need.database == APP_DATABASE;
+    let node = |of: &[&str]| need.app == crate::database::scopes::APP && of.contains(&need.database.as_str());
+    let apps = need.app != crate::database::scopes::APP && need.database == APP_DATABASE;
     let code = need.scope == "global" && node(&[BLOBS]);
     match (app_of(route), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,

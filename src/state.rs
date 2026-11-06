@@ -8,7 +8,8 @@ use serde_json::{Map, Value, json};
 
 use crate::database::scopes::{NETWORK, ScopeDb, object};
 use crate::entry::hex;
-use crate::members::{self, Kind, Machine};
+use crate::database::scopes;
+use crate::database::scopes::{Kind, Machine};
 use crate::rank;
 
 /// What the node answering knows that the scope database doesn't.
@@ -158,7 +159,7 @@ fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         // Its parts, as a device's oned lists its own: it always runs apps, and an admin switches on each service built
         // for it that it carries (a built-in app's `service/cloudflare.js`).
         "serverless": m.cloudflare_node().map(|key| {
-            let mut parts = vec![json!({ "name": members::APPS_PART, "on": true, "fixed": true })];
+            let mut parts = vec![json!({ "name": scopes::APPS_PART, "on": true, "fixed": true })];
             parts.extend(crate::config::CLOUDFLARE_SERVICES.iter().map(|(name, _)| json!({ "name": name, "on": m.switch(&key, name).is_some_and(|s| s.on) })));
             json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key).iter().map(crate::entry::Scope::to_string).collect::<Vec<_>>(), "parts": parts })
         }),

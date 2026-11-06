@@ -224,7 +224,7 @@ impl Node {
         }
         let to = self.with(|i| Ok(i.r.db().openers(scope)))?;
         let hash = crate::keys::epoch_hash(&key);
-        self.append(&Scope::Global, members::node("epoch", json!({ "scope": name, "n": 1, "to": to.iter().map(|c| hex(&c.key)).collect::<Vec<_>>(), "hash": hash }))).await?;
+        self.append(&Scope::Global, content::node("epoch", json!({ "scope": name, "n": 1, "to": to.iter().map(|c| hex(&c.key)).collect::<Vec<_>>(), "hash": hash }))).await?;
         if self.with(|i| Ok(i.r.db().epoch_hash(scope, 1).as_deref() != Some(hash.as_str())))? {
             tracing::info!("another device made {scope}'s first epoch first: its key is used");
             return self.settled_first_epoch(scope).await;
@@ -358,7 +358,7 @@ impl Node {
             let Ok((prefix, at)) = db.try_lock().map(|db| (db.prefix().to_string(), db.at())) else { continue };
             match bucket.fill(&prefix, at).await {
                 Ok(0) => {}
-                Ok(_) => changed.extend(name.split('/').next().filter(|app| *app != members::APP).map(str::to_string)),
+                Ok(_) => changed.extend(name.split('/').next().filter(|app| *app != scopes::APP).map(str::to_string)),
                 Err(err) => tracing::debug!("{prefix}: {err:#}"),
             }
         }

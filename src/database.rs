@@ -1,7 +1,8 @@
 //! Databases: each scope's SQLite databases, every one kept in the bucket as signed steps and copies (`stored`): its
-//! apps' databases, and the scope database (`scope`), its signed steps (`steps`) and what a device asks of it
-//! (`scopes`).
+//! apps' databases, and the scope database (`scope`): its signed steps (`steps`), what each says (`content`), each
+//! kind's rule (`rules`), and what a device asks of it (`scopes`).
 
+pub mod content;
 pub mod migrate;
 pub mod rules;
 pub mod scope;

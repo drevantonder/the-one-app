@@ -16,7 +16,6 @@ use one::call::Append;
 use one::database::stored::Db;
 use one::entry::{Entry, Hash, Scope};
 use one::database::scopes::{ScopeDb, app, object};
-use one::members::{Members, ScopeState};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -689,7 +688,7 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) ->
                     let db = match (truth, scope.as_str(), &log.start) {
                         (Some(t), "global", _) => t.db,
                         (Some(t), _, Some(start)) => scope_truth(&t, start.as_ref(), &s, &log.steps)?,
-                        _ => ScopeDb::build(&Members::default(), &s, &ScopeState::default(), now())?,
+                        _ => ScopeDb::empty(&s, now())?,
                     };
                     r.insert(id.clone(), Replayed { at, db });
                 }

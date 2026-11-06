@@ -120,7 +120,7 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
     // A place an admin named whose details changed since, by someone who isn't one: nothing goes there until an admin
     // saves them, which names them again (`repin_place`), so a member can't send backups somewhere else.
     let pinned = pinned(m);
-    for (id, it) in i.vault.iter().filter(|(id, it)| it.apps.contains(members::APP) && it.kind == b::KIND && !it.fields.contains_key("device") && pinned.get(*id).is_some_and(|h| *h != item_hash(it))) {
+    for (id, it) in i.vault.iter().filter(|(id, it)| it.apps.contains(scopes::APP) && it.kind == b::KIND && !it.fields.contains_key("device") && pinned.get(*id).is_some_and(|h| *h != item_hash(it))) {
         out.push(Problem {
             place: id.clone(),
             title: format!("Not backing up to {}", it.title),
@@ -174,7 +174,7 @@ fn places(i: &Network) -> Vec<PlaceItem> {
     let pinned = pinned(i.r.db());
     i.vault
         .iter()
-        .filter(|(_, it)| it.apps.contains(members::APP) && it.kind == b::KIND)
+        .filter(|(_, it)| it.apps.contains(scopes::APP) && it.kind == b::KIND)
         .filter(|(id, it)| it.fields.contains_key("device") || pinned.get(*id).is_some_and(|h| *h == item_hash(it)))
         .map(|(id, it)| {
             let mut fields: BTreeMap<String, String> = it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
@@ -596,7 +596,7 @@ impl Node {
                 (title, fields, json!([host]))
             }
         };
-        let data = json!({ "title": title, "type": b::KIND, "fields": item_fields, "hosts": hosts, "apps": [members::APP] });
+        let data = json!({ "title": title, "type": b::KIND, "fields": item_fields, "hosts": hosts, "apps": [scopes::APP] });
         let id = self.set_item(caller, &Scope::Global, data).await?;
         match &place {
             Place::Folder(path) => self.keep_folder(&id, Some(path))?,
@@ -616,7 +616,7 @@ impl Node {
         let fields = json!({ "endpoint": { "secret": false }, "bucket": { "secret": false }, "key_id": { "secret": false }, "secret": { "secret": true } });
         let ask = json!({ "title": body["title"].as_str().unwrap_or("Backups"), "fields": fields, "hosts": [host] });
         let why = format!("Backups go to {endpoint}, encrypted: its bucket, access key ID and secret key.");
-        self.request_item(caller, &Scope::Global, members::APP, Some(b::KIND), &ask, &why).await
+        self.request_item(caller, &Scope::Global, scopes::APP, Some(b::KIND), &ask, &why).await
     }
 
     /// Stops backing up to a place: deletes its item. What's in the place stays there.
