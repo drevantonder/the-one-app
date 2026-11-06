@@ -173,6 +173,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let name = format!("{CLI}-{TARGET}");
     std::fs::copy(&binary, dir.join(&name))?;
     assets.push(name);
+    // state::install_line() fetches it from the latest release.
+    std::fs::write(dir.join("install.sh"), include_str!("../install.sh"))?;
+    assets.push("install.sh".into());
     // The native app for this platform (client/native, its own workspace), which install.sh puts on a desktop.
     if cfg!(target_os = "linux") {
         println!("Building the Linux app");
