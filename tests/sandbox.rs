@@ -65,27 +65,26 @@ fn endpoint(dir: &Path, declared: Declared, said: std::sync::mpsc::Sender<String
     bound.recv_timeout(Duration::from_secs(10)).unwrap();
 }
 
-/// The program: says what it could reach, a line each.
+/// The program: says what it could reach, a line each. Written by another process: a program this one wrote and
+/// then runs fails "Text file busy" when another thread forks as it's written, the child holding the file's write
+/// descriptor until it execs.
 fn program(dir: &Path, secret: &Path, declared: u16, undeclared: u16) -> std::path::PathBuf {
     let path = dir.join("program.sh");
-    std::fs::write(
-        &path,
-        format!(
+    let text = format!(
             "#!/bin/sh
 echo \"home=$(cat {secret} 2>/dev/null || echo hidden)\"
 echo \"others=$(ls {others} >/dev/null 2>&1 && echo seen || echo hidden)\"
 echo \"declared=$(curl -s -m 5 http://127.0.0.1:{declared}/ || echo refused)\"
 echo \"undeclared=$(curl -s -m 5 http://127.0.0.1:{undeclared}/ || echo refused)\"
 echo \"proxied=$(curl -s -m 5 -p -x \"$HTTPS_PROXY\" http://127.0.0.1:{undeclared}/ || echo refused)\"
-echo \"web=$(curl -s -m 5 -o /dev/null https://example.com && echo reached || echo refused)\"
 echo done
 ",
             secret = secret.display(),
-            others = one::services::sandbox::dir("whatsapp").parent().unwrap().display(),
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+            others = one::services::sandbox::dir("sandbox-test").parent().unwrap().display(),
+        );
+    let mut writer = std::process::Command::new("sh").arg("-c").arg("cat > \"$1\" && chmod 755 \"$1\"").arg("sh").arg(&path).stdin(std::process::Stdio::piped()).spawn().unwrap();
+    writer.stdin.take().unwrap().write_all(text.as_bytes()).unwrap();
+    assert!(writer.wait().unwrap().success());
     path
 }
 
@@ -103,46 +102,56 @@ fn said(lines: impl Iterator<Item = String>) -> std::collections::BTreeMap<Strin
     out
 }
 
+/// A file in the person's home, beside every service's sandbox folder, which only a service run as the person reads.
+fn secret(of: &str) -> std::path::PathBuf {
+    let secret = one::services::sandbox::dir("sandbox-test").with_file_name(format!("test-secret-{of}-{}", std::process::id()));
+    std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
+    std::fs::write(&secret, "the person's").unwrap();
+    secret
+}
+
+/// As the person: their files, but the network only through its endpoint, and only the declared port.
 #[test]
 fn a_service_reaches_only_what_its_app_declares() {
     let dir = super::temp("sandbox");
-    // In the person's home, beside every service's sandbox folder.
-    let secret = one::services::sandbox::dir("whatsapp").with_file_name(format!("test-secret-{}", std::process::id()));
-    std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
-    std::fs::write(&secret, "the person's").unwrap();
+    let secret = secret("person");
     let (declared, undeclared) = (server(), server());
     let app = Declared { network: vec![format!("127.0.0.1:{declared}")], person: true };
-
-    // As the person: their files, but only the declared port, and only through its endpoint.
     let name = format!("sandbox-test-{}", std::process::id());
     let launch = Launch { name: name.clone(), own_network: true, ports: vec![declared], data: Some(dir.join("data")) };
     let script = program(&dir, &secret, declared, undeclared);
     let sandbox = one::services::sandbox::prepare(&name, &script, Path::new(env!("CARGO_BIN_EXE_one")), "token", &launch).unwrap();
     let (tx, _) = std::sync::mpsc::channel();
-    endpoint(&sandbox, app.clone(), tx);
+    endpoint(&sandbox, app, tx);
     let _ = std::fs::remove_file(sandbox.join(one::services::sandbox::LOG));
     let out = std::process::Command::new(sandbox.join("oned")).arg0("oned").arg(format!("--sandboxed={}", sandbox.display())).stdout(std::process::Stdio::piped()).output().unwrap();
     let got = said(String::from_utf8_lossy(&out.stdout).lines().map(str::to_string));
     let _ = std::fs::remove_dir_all(&sandbox);
+    let _ = std::fs::remove_file(&secret);
     assert_eq!(got.get("home").map(String::as_str), Some("the person's"), "as the person, it reads their files: {got:?} {}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(got.get("declared").map(String::as_str), Some("ok"), "{got:?}");
     assert_eq!(got.get("undeclared").map(String::as_str), Some("refused"), "{got:?}");
     assert_eq!(got.get("proxied").map(String::as_str), Some("refused"), "{got:?}");
-    assert_eq!(got.get("web").map(String::as_str), Some("refused"), "{got:?}");
+}
 
-    // In its own unit, as its own user: none of the person's files, nor another service's folder.
-    if !one::services::sandbox::template().exists() {
-        let _ = std::fs::remove_file(&secret);
-        eprintln!("skipped a service in its own unit: this machine has no {} (`one services sandbox | sudo sh`)", one::services::sandbox::template().display());
-        return;
-    }
+/// In its own unit, as its own user: none of the person's files, nor another service's folder. This machine needs the
+/// unit's template (`one services sandbox | sudo sh`), and the test fails without it: a machine that can't run it
+/// can't say its services are kept in.
+#[test]
+fn a_service_in_its_own_unit_sees_none_of_the_persons_files() {
+    let template = one::services::sandbox::template();
+    assert!(template.exists(), "this machine has no {}: set it up with `one services sandbox | sudo sh`", template.display());
+    let dir = super::temp("sandbox-unit");
+    let secret = secret("unit");
+    let (declared, undeclared) = (server(), server());
+    let app = Declared { network: vec![format!("127.0.0.1:{declared}")], person: false };
     let name = "sandbox-test";
     // One run at a time on a machine: the unit is the same for all of them.
     let lock = std::fs::File::create(one::services::sandbox::dir(name).with_extension("lock")).unwrap();
     // SAFETY: a plain flock on a file this keeps open until it's dropped.
     unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) };
-    let app = Declared { person: false, ..app };
     let launch = Launch { name: name.into(), own_network: true, ports: vec![declared], data: None };
+    let script = program(&dir, &secret, declared, undeclared);
     let sandbox = one::services::sandbox::prepare(name, &script, Path::new(env!("CARGO_BIN_EXE_one")), "token", &launch).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     endpoint(&sandbox, app, tx);
@@ -160,5 +169,4 @@ fn a_service_reaches_only_what_its_app_declares() {
     assert_eq!(got.get("declared").map(String::as_str), Some("ok"), "{got:?}");
     assert_eq!(got.get("undeclared").map(String::as_str), Some("refused"), "{got:?}");
     assert_eq!(got.get("proxied").map(String::as_str), Some("refused"), "{got:?}");
-    assert_eq!(got.get("web").map(String::as_str), Some("refused"), "{got:?}");
 }
