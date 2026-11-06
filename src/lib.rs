@@ -103,4 +103,5 @@ pub mod push;
 pub mod screen;
 pub mod web;
 pub mod state;
+pub mod settings_tools;
 pub mod vault;

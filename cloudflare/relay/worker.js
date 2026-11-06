@@ -117,29 +117,12 @@ export default class extends WorkerEntrypoint {
       return new Response(null, { status: 204, headers });
     }
     const relay = IROH_PATHS.relay;
-    if (url.pathname === `${relay}/tell`) return this.tell(request);
+    if (url.pathname === `${relay}/tell`) return tell(this.env, request);
     if (url.pathname === `${relay}/computes`) return this.ask(request, "computes");
     if (url.pathname === `${relay}/seen`) return this.ask(request, "seen");
     if (url.pathname === relay) return this.relay().fetch(request);
     if (url.pathname === `${relay}/test` && this.env.TEST) return Response.json(await this.relay().testing(await request.json()));
     return refuse(404, "not the relay's");
-  }
-
-  /// A tell's signature is checked here first, where a forged one costs the network's one relay nothing; the relay
-  /// checks it again, and the rest.
-  async tell(request) {
-    try {
-      if (request.method !== "POST") throw new Error("a tell is a POST");
-      if (Number(request.headers.get("content-length") || 0) > TELL_BYTES) throw new Error("a tell is small");
-      const body = await request.arrayBuffer();
-      if (body.byteLength > TELL_BYTES) throw new Error("a tell is small");
-      const signed = JSON.parse(new TextDecoder().decode(body));
-      await checkRequest(RELAY, signed);
-      const error = await this.relay().tell(signed);
-      return error ? refuse(403, error) : new Response(null, { status: 204 });
-    } catch (e) {
-      return refuse(403, String(e.message || e));
-    }
   }
 
   async ask(request, what) {
@@ -176,14 +159,37 @@ export default class extends WorkerEntrypoint {
   }
 }
 
+/// A tell's signature is checked here first, where a forged one costs the network's one relay nothing; the relay checks
+/// it again, and the rest.
+async function tell(env, request) {
+  try {
+    if (request.method !== "POST") throw new Error("a tell is a POST");
+    if (Number(request.headers.get("content-length") || 0) > TELL_BYTES) throw new Error("a tell is small");
+    const body = await request.arrayBuffer();
+    if (body.byteLength > TELL_BYTES) throw new Error("a tell is small");
+    const signed = JSON.parse(new TextDecoder().decode(body));
+    await checkRequest(RELAY, signed);
+    const error = await relay(env).tell(signed);
+    return error ? refuse(403, error) : new Response(null, { status: 204 });
+  } catch (e) {
+    return refuse(403, String(e.message || e));
+  }
+}
+
 /// The network's one relay, made near its people (`LOCATION`, a location hint) rather than wherever its first request
 /// came from.
 const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 
-/// What the remote MCP server asks the relay, by its binding: its devices' own bindings, and who's here. Nothing else of the
-/// relay's object, so a hacked remote MCP server tells it nothing and sends as no endpoint but a device it holds the key of.
+/// What the remote MCP server asks the relay, by its binding: its devices' own bindings, and who's here; and what any
+/// device tells it, signed (`POST /relay/tell`, as a Worker can't reach its own zone's routes by fetch). Nothing else of
+/// the relay's object, so a hacked remote MCP server tells it only what a device it holds the key of may, and sends as
+/// no other endpoint.
 export class McpDevices extends WorkerEntrypoint {
+  fetch(request) {
+    return new URL(request.url).pathname === `${IROH_PATHS.relay}/tell` ? tell(this.env, request) : refuse(404, "the remote MCP server's devices only tell the relay");
+  }
+
   bind(request, name) {
     return relay(this.env).bind(request, name);
   }

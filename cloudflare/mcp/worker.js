@@ -2,7 +2,8 @@
 // signs in with is a device of theirs here, a client of the network like any app, which the person approves like any
 // device. It speaks MCP to them over HTTPS at `<address>/mcp`, and asks a node's own `/mcp` as that device, over iroh
 // (`<cli>/http/1`, one-client in cloudflare/node/src/clients.rs), handing it the keys a call needs, sealed to that node and
-// bound to the device's key; it sends nodes no token.
+// bound to the device's key; it sends nodes no token. A tool that changes who can do what it answers itself, signing
+// as that device (`one::settings_tools`), since a node signs that only for its own machine's programs.
 //
 // A device's secret is kept only sealed under its client's own tokens (copies.js), so nothing here opens it alone: the
 // Worker is on its clients' token path (its own token endpoint, in the authorization server's metadata it serves for
@@ -29,7 +30,7 @@ import { DurableObject } from "cloudflare:workers";
 import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { b64u, ed25519Public, hex, joinCode, random, signBytes, signedRequest, untilTaken } from "../shared/crypto.js";
-import { CODES, READS, RELAY } from "../shared/protocol.js";
+import { CODES, IROH_PATHS, READS, RELAY } from "../shared/protocol.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
 
@@ -403,18 +404,20 @@ export class Client extends DurableObject {
   }
 
   /// What its device's keyring is handed (cloudflare/node/src/clients.rs `On`, one-client's `js::On`): the network's
-  /// address, and its URL signer, which the keyring reads the bucket through; its key's signature; this object's
+  /// address, and its URL signer, which the keyring reads the bucket through, and the relay, which it tells as it takes
+  /// a device out (by their bindings: a Worker can't fetch its own zone's routes); its key's signature; this object's
   /// storage; and whether the relay still lets it in.
   on(me) {
     const storage = this.ctx.storage;
+    const to = { "/urls": this.env.SIGNER, [`${IROH_PATHS.relay}/tell`]: this.env.RELAY };
     return {
       address: origin(this.env),
       async ask(method, url, name, value, body) {
-        if (new URL(url).pathname !== "/urls") throw new Error("the remote MCP server's devices ask only the URL signer");
-        const r = await this.signer.fetch(url, { method, headers: { "content-type": "application/json" }, body });
+        const binding = to[new URL(url).pathname];
+        if (!binding) throw new Error("the remote MCP server's devices ask only the URL signer and tell only the relay");
+        const r = await binding.fetch(url, { method, headers: { "content-type": "application/json" }, body });
         return { status: r.status, body: await r.text() };
       },
-      signer: this.env.SIGNER,
       sign: (bytes) => signBytes(me.seed, bytes),
       get: async (name) => (await storage.get(KEPT + name)) ?? null,
       put: (name, bytes) => storage.put(KEPT + name, bytes),
@@ -451,8 +454,8 @@ export class Client extends DurableObject {
   }
 
   /// Removes the devices this one replaced, made by earlier sign-ins of the same client, once this one's approved: as
-  /// its person, by the node it asks, which takes each off the relay and lists it as removed. Tried once a device each
-  /// time the object starts.
+  /// its person's device, which takes each off the relay and signs it removed. Tried once a device each time the object
+  /// starts.
   async removeReplaced(me) {
     if (this.removedFor === me.key) return;
     this.removedFor = me.key;

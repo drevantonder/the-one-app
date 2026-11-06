@@ -5,7 +5,7 @@ use serde_json::{Map, Value, json};
 
 use crate::cli::{Command, Given};
 use crate::config::{CLI, YOURS};
-use crate::core_tools::{Asked, Feature, text};
+use crate::core_tools::{Asked, Feature};
 use crate::skills::hints;
 
 pub fn feature() -> Feature {
@@ -24,12 +24,9 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
     match tool {
         "list" => Ok(json!(said(&asked.node.get("/v1/state")?))),
         "handle" => {
-            let handle = text(input, "handle")?;
-            asked.node.post("/v1/handle", json!({ "handle": handle, "group": input.get("group") }))?;
-            Ok(json!(match input.get("group").and_then(Value::as_str) {
-                Some(group) => format!("{group}'s handle is now {handle}."),
-                None => format!("Your handle is now {handle}."),
-            }))
+            let handle = crate::settings_tools::HANDLE;
+            let (path, body) = (handle.asks)(input).map_err(anyhow::Error::msg)?;
+            Ok((handle.said)(input, &asked.node.post(path, body)?))
         }
         other => bail!("no tool groups_{other}"),
     }

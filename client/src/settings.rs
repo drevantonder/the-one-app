@@ -93,6 +93,10 @@ impl<O: Opens> Keyring<O> {
         if body.get("recovery").is_some() {
             return None;
         }
+        // What a request names (a group, a device) may be newer than this device last read: it reads what's new first.
+        if let Err(err) = self.read(on).await {
+            return Some(Err(err));
+        }
         let w = |c: Content| self.write(client, on, c);
         let done = |r: Result<(), Error>| r.map(|()| json!({}));
         Some(match (method, path) {
@@ -334,7 +338,6 @@ impl<O: Opens> Keyring<O> {
     /// then unlisted, it and its parts; then each scope its person opens that this person may move on gets a new epoch
     /// it doesn't have. Itself, it leaves (`leave`).
     async fn remove(&self, client: &Client, on: &(impl Address + Keep + Signs), device: &str) -> Result<Value, Error> {
-        self.read(on).await?;
         let key = self.find(|who| who.find_machine(device))?;
         if key == on.public() {
             return self.leave(client, on).await.map(|()| json!({ "removed": "this device" }));
@@ -358,7 +361,6 @@ impl<O: Opens> Keyring<O> {
     /// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they
     /// could open but their own gets a new epoch they don't have.
     async fn remove_person(&self, client: &Client, on: &(impl Address + Keep + Signs), person: &str) -> Result<Value, Error> {
-        self.read(on).await?;
         let user = self.user().ok_or_else(refused)?;
         let (gone, name, keys, scopes) = self.find(|who| {
             let gone = who.find_user(person)?;
@@ -443,7 +445,6 @@ impl<O: Opens> Keyring<O> {
     /// Devices waiting that this device may let in: its person's own, and someone new from an invite made here, whose
     /// proof is that invite's; but those taken out or turned down. Each with the invite it came from, if it did.
     async fn waiting(&self, on: &(impl Address + Keep + Signs)) -> Result<Vec<(Asked, Option<Invited>)>, Error> {
-        self.read(on).await?;
         let user = self.user().ok_or_else(refused)?;
         let asked = self.ask_auth(on, "GET", "/api/auth/devices/requests", json!({})).await?;
         let invites = self.invites(on).await;
