@@ -125,8 +125,8 @@ pub fn commands() -> Command {
                             println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave a 1Password reference (op://…) in its place.\n", crate::cloudflare::Settings::path().with_file_name(".env.local").display());
                             // People signing in with Google need its OAuth client, which is put beside the secrets first.
                             match crate::config::SIGN_IN {
-                                "google" => crate::cloudflare::Settings::load()?,
-                                _ => settings,
+                                crate::config::SignIn::Google => crate::cloudflare::Settings::load()?,
+                                crate::config::SignIn::Passkey => settings,
                             }
                         }
                     };
@@ -187,7 +187,7 @@ pub fn commands() -> Command {
                         let key = crate::node::device_key(&crate::home())?;
                         let invite = crate::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;
                         let days = crate::cloudflare::INVITE_DAYS;
-                        let how = if crate::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
+                        let how = if crate::config::SIGN_IN == crate::config::SignIn::Google { "they sign in with Google and join" } else { "they make their passkey and join" };
                         println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
                         let me = node.get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string));
                         if user.is_some() && user == me {

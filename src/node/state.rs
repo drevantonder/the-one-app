@@ -112,7 +112,7 @@ impl Node {
             arrangements: json!(arrangements),
             backups,
             guide: self.guide(),
-            passkeys: matches!(crate::mode::here(), crate::mode::Mode::Own),
+            throwaway: matches!(crate::mode::here(), crate::mode::Mode::Throwaway(_)),
             device_now: &device_now,
             client_now: &client_now,
         };

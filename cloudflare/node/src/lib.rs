@@ -738,7 +738,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
             backups: None,
             guide: None,
             // No throwaway network has a Cloudflare node.
-            passkeys: one::config::SIGN_IN != "google",
+            throwaway: false,
             device_now: &|_| Default::default(),
             client_now: &|_| Default::default(),
         },

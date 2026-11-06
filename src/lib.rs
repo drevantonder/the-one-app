@@ -3,6 +3,13 @@
 
 pub mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
+
+    /// How this build's people sign in (`sign_in` in the config): with a passkey, or with their workplace's Google account.
+    #[derive(PartialEq, Eq)]
+    pub enum SignIn {
+        Passkey,
+        Google,
+    }
 }
 
 use std::path::PathBuf;

@@ -49,7 +49,7 @@ pub fn mcp_entries() -> String {
     let server = server_name();
     format!(
         "On a device where `{CLI}` runs, MCP is a command there, one of two entries:\n\n- `{CLI} mcp`: every tool, two hundred or so, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the person in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
-        crate::config::ALWAYS_ON.iter().map(|a| format!("{a}'s tools")).chain(["`vault_request`".to_string()]).collect::<Vec<_>>().join(" and ")
+        crate::config::ALWAYS_ON.iter().map(|a| format!("{a}'s tools")).chain(crate::code::DIRECT.iter().map(|t| format!("`{t}`"))).collect::<Vec<_>>().join(", ")
     )
 }
 

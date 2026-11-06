@@ -31,9 +31,9 @@ pub struct Here<'a> {
     pub backups: Option<Value>,
     /// Where an agent reads how to connect itself, when the network has no address.
     pub guide: Option<String>,
-    /// Whether people manage passkeys at the network's address: not in a throwaway network, whose sign-in lets its person in
-    /// with none.
-    pub passkeys: bool,
+    /// Whether this is a throwaway network, whose sign-in lets its person in with no passkey. Every other network's people
+    /// manage passkeys at its address, a Google one's too: its admins sign in only with one.
+    pub throwaway: bool,
     /// What it knows of each device now: `kind` (as it last said), and whatever else it says of it.
     pub device_now: &'a dyn Fn(&Machine) -> Map<String, Value>,
     /// What it knows of each client now.
@@ -45,7 +45,7 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
     let settings = settings(&m.map(ScopeDb::settings).unwrap_or_default());
     let network = m.map(|m| network(m, user, &settings, &here));
     let address = settings.get("address").and_then(|a| a.as_str()).filter(|a| !a.is_empty());
-    let passkeys = address.filter(|_| here.passkeys).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
+    let passkeys = address.filter(|_| !here.throwaway).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
     let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""), passkeys.as_deref())).unwrap_or_default();
     let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "store": settings["store"], "install": install_line() });
     let mut state = json!({

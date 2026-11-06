@@ -267,12 +267,16 @@ pub fn search_tool(mode: Mode) -> Value {
     })
 }
 
-/// The tools `<cli> mcp --code` serves, of every tool there is: search and execute, the Vault's request (and how it
-/// went), and the tools of the apps every agent needs from the start (the config's `always_on`).
+/// The tools `<cli> mcp --code` serves of their own beside search and execute, besides those of the apps every agent needs
+/// from the start (the config's `always_on`).
+pub const DIRECT: &[&str] = &["deploy", "vault_request", "vault_status"];
+
+/// The tools `<cli> mcp --code` serves, of every tool there is: search and execute, the `DIRECT` ones, and the tools of the
+/// apps every agent needs from the start.
 pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
     let direct = |t: &Value| {
         let name = t["name"].as_str().unwrap_or("");
-        matches!(name, "deploy" | "vault_request" | "vault_status") || crate::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|tool| tool.starts_with('_')))
+        DIRECT.contains(&name) || crate::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|tool| tool.starts_with('_')))
     };
     [vec![search_tool(Mode::Code), execute_tool()], all.into_iter().filter(direct).collect()].concat()
 }

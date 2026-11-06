@@ -172,7 +172,7 @@ pub struct Settings {
 }
 
 fn google() -> bool {
-    crate::config::SIGN_IN == "google"
+    crate::config::SIGN_IN == crate::config::SignIn::Google
 }
 
 /// What Varlock reads the Workers' secrets by, each named as the Workers' binding is; `.env.local` gives their values.
