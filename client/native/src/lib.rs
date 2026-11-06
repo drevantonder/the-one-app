@@ -268,13 +268,19 @@ fn changed() {
         if let Err(e) = widgets::refresh(&device, &widgets_dir()).await {
             eprintln!("widgets: {e}");
         }
-        #[cfg(target_os = "macos")]
-        menubar::update();
-        #[cfg(target_os = "ios")]
-        iphone::tell("reload", json!({}));
-        #[cfg(target_os = "android")]
-        let _ = android::host("reload", json!({}));
+        redraw_widgets();
     });
+}
+
+/// The platform's own widgets drawn again from what's kept for them: a Mac's menu bar items, an iPhone's or Android
+/// phone's home-screen widgets.
+fn redraw_widgets() {
+    #[cfg(target_os = "macos")]
+    menubar::update();
+    #[cfg(target_os = "ios")]
+    iphone::tell("reload", json!({}));
+    #[cfg(target_os = "android")]
+    let _ = android::host("reload", json!({}));
 }
 
 /// What waits for the person (every app's badge on every page, and Settings'), counted on the app's icon: Windows'
@@ -559,10 +565,7 @@ async fn sign_out() -> Result<(), String> {
     }
     a.keep("user", None);
     widgets::forget(&widgets_dir());
-    #[cfg(target_os = "ios")]
-    iphone::tell("reload", json!({}));
-    #[cfg(target_os = "android")]
-    let _ = android::host("reload", json!({}));
+    redraw_widgets();
     badge(0);
     Ok(())
 }
@@ -738,7 +741,7 @@ fn menubar(kind: String, show: bool) -> Vec<String> {
 
 #[cfg(desktop)]
 fn login_now(app: &AppHandle) -> Option<bool> {
-    login::supported().then(|| login::on(app))
+    Some(login::on(app))
 }
 
 #[cfg(not(desktop))]
@@ -1045,7 +1048,7 @@ fn toggle_widget(kind: &str, at: tauri::Rect) {
 }
 
 /// One of the app menu's commands, to the window's page, which does it: "sidebar" (fold it or unfold it), "join".
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg(target_os = "macos")]
 fn command(name: &str) {
     if let Some(w) = app().handle.get_webview_window("main") {
         let _ = w.eval(format!("window.__oneNative?.command({})", json!(name)));
@@ -1081,11 +1084,6 @@ mod login {
         Some(app.path().config_dir().ok()?.join("autostart").join(format!("{}.desktop", app.config().identifier)))
     }
 
-    /// Whether the app switches it on this platform yet.
-    pub fn supported() -> bool {
-        cfg!(any(target_os = "linux", windows, target_os = "macos"))
-    }
-
     pub fn on(app: &AppHandle) -> bool {
         #[cfg(target_os = "linux")]
         return entry(app).is_some_and(|e| e.exists());
@@ -1098,11 +1096,6 @@ mod login {
         return {
             let _ = app;
             crate::mac::login()
-        };
-        #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
-        return {
-            let _ = app;
-            false
         };
     }
 

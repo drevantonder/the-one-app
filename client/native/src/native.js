@@ -31,8 +31,7 @@
   };
 
   window.__oneNative = {
-    /// `{ name, cli, platform, device, client, address, signedIn, user, opened, textScale }`: `opened`, a link it was opened with;
-    /// `textScale`, how many times usual the person has made text (a phone's; 1 for usual).
+    /// Who and where this is, and what this platform can do: lib.rs's `native` says each.
     about: () => invoke("native"),
     /// What the person typed, an address or an invite link → the address.
     address: (typed) => invoke("address", { typed }),
