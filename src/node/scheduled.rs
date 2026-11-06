@@ -35,7 +35,7 @@ impl Node {
             let mut due = Vec::new();
             let mut seen = BTreeSet::new();
             for ((_, scope, app), _) in m.app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == self.0.id) {
-                let Some(state) = i.views.get(&scope.to_string()).filter(|s| s.installed.contains(&app)) else { continue };
+                let Some(state) = i.views.get(&scope.to_string()).filter(|s| s.added.contains(&app)) else { continue };
                 let Some((_, list)) = declared.iter().find(|(a, _)| *a == app) else { continue };
                 for s in list.iter().filter_map(|s| s.as_ref().ok()) {
                     let Some(user) = runs_as(m, state, &scope, &app, &s.name) else { continue };
@@ -113,9 +113,9 @@ impl Node {
             let mut failing = Vec::new();
             for a in m.apps()?.into_iter().filter(|a| !a.erased && a.deleted.is_none()) {
                 let fails = reachable(i, &a.name, &viewer.user)?.iter().any(|scope| {
-                    let installed = i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(&a.name));
+                    let added = i.views.get(&scope.to_string()).is_some_and(|s| s.added.contains(&a.name));
                     let failed = i.status.get(&scope.to_string()).is_some_and(|st| st.runs.iter().any(|((app, _), runs)| app == &a.name && runs.last().is_some_and(|r| !r.ok)));
-                    installed && failed && m.may(&viewer.user, "add-apps", &scopes::object(scope))
+                    added && failed && m.may(&viewer.user, "add-apps", &scopes::object(scope))
                 });
                 if fails {
                     failing.push(a.name);
@@ -136,7 +136,7 @@ impl Node {
         Ok(out)
     }
 
-    /// An app's schedules where it's installed for `viewer` and this device holds the scope: what each runs and when,
+    /// An app's schedules where it's added for `viewer` and this device holds the scope: what each runs and when,
     /// whether it's on, whom it runs as, when it runs next, its last run, and whether a deploy changed or removed it;
     /// and its runs, newest first.
     pub(super) fn schedules_of(&self, viewer: &Caller, app: &str, declared: &[std::result::Result<Schedule, (String, String)>]) -> Result<(Vec<Value>, Vec<Value>)> {
@@ -147,7 +147,7 @@ impl Node {
             let (mut list, mut activity) = (Vec::new(), Vec::new());
             for scope in reachable(i, app, &viewer.user)? {
                 let Some(state) = i.views.get(&scope.to_string()) else { continue };
-                if !state.installed.contains(app) {
+                if !state.added.contains(app) {
                     continue;
                 }
                 let status = i.status.get(&scope.to_string()).cloned().unwrap_or_default();
@@ -219,14 +219,14 @@ impl Node {
     }
 }
 
-/// Whom a schedule of `app` in a scope runs as: whoever switched it on last, or else installed the app there, while
+/// Whom a schedule of `app` in a scope runs as: whoever switched it on last, or else added the app there, while
 /// they still manage the scope; nobody if it's switched off.
 fn runs_as(m: &ScopeDb, state: &ScopeState, scope: &Scope, app: &str, schedule: &str) -> Option<String> {
     let manages = |u: &String| m.may(u, "add-apps", &scopes::object(&scope));
     match state.switches.get(&(app.to_string(), schedule.to_string())) {
         Some((false, ..)) => None,
         Some((true, user, _)) if manages(user) => Some(user.clone()),
-        _ => state.installers.get(app).map(|(u, _)| u.clone()).filter(manages),
+        _ => state.added_by.get(app).map(|(u, _)| u.clone()).filter(manages),
     }
 }
 
@@ -234,7 +234,7 @@ fn runs_as(m: &ScopeDb, state: &ScopeState, scope: &Scope, app: &str, schedule: 
 pub(super) fn switch_entry(i: &Network, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
     let name = scope_name(i, &scope.to_string())?;
     ensure!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
-    ensure!(i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(app)), "{title} isn't on {name}.");
+    ensure!(i.views.get(&scope.to_string()).is_some_and(|s| s.added.contains(app)), "{title} isn't on {name}.");
     ensure!(i.r.holds(scope), "This device can't open {name} yet.");
     Ok(content::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
 }

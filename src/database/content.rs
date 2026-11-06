@@ -11,7 +11,7 @@ use crate::keys::{Key, hex};
 
 use crate::database::scopes::Scope;
 
-use super::scopes::{APP, APP_SCHEDULES, Kind, Role};
+use super::scopes::{ADD_APP, APP, APP_SCHEDULES, Kind, REMOVE_APP, Role};
 
 /// What a step says: its app, its kind, what it says, and the blobs it names.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -162,9 +162,9 @@ pub fn retire(app: &str, owner: &str, how: &str) -> Result<Content> {
     Ok(node("app", data))
 }
 
-/// Puts an app on a scope's page, or takes it off.
-pub fn install(app: &str, installed: bool) -> Content {
-    node(if installed { "install" } else { "uninstall" }, json!({ "app": app }))
+/// Adds an app to a scope, or removes it.
+pub fn added(app: &str, added: bool) -> Content {
+    node(if added { ADD_APP } else { REMOVE_APP }, json!({ "app": app }))
 }
 
 /// Lists a service endpoint offering `service` as `user`'s, a part of `device`, by that device: `shared` if it serves

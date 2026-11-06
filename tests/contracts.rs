@@ -299,7 +299,7 @@ fn the_web_client_builds_the_content_of_steps_as_rust_does() {
         (content::app_schedules(&endpoint.key, &Scope::User(user.into()), "whatsapp", 1_800_000_000_000, &[(1, seal.clone()), (2, key.clone())].into()), json!(["appSchedules", { "endpoint": key, "scope": format!("user:{user}"), "app": "whatsapp", "until": 1_800_000_000_000_u64, "keys": { "1": seal, "2": key } }])),
         (content::retire("notes", "admins", "deleted").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "deleted" }])),
         (content::retire("notes", "admins", "restored").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "restored" }])),
-        (content::install("notes", false), json!(["install", { "app": "notes", "installed": false }])),
+        (content::added("notes", false), json!(["add", { "app": "notes", "added": false }])),
         (content::runs(&[endpoint.key]), json!(["runs", { "on": [key] }])),
         (content::runs(&[]), json!(["runs", { "on": [] }])),
         (content::service(&endpoint.key, "shell", false, None), json!(["service", { "device": key, "name": "shell" }])),
@@ -386,7 +386,7 @@ fn the_workers_name_the_buckets_objects_as_nodes_do() {
     assert_eq!(out["prefixes"], json!(["user-abc/tally/main", "global/node/scope"]), "where an app's database of a scope is");
     assert_eq!(out["refusal"], json!(one::protocol::update_refusal("your One App network")), "what a device that reads less is told");
     use one::protocol::code;
-    assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED }), "the codes answers carry");
+    assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notAdded": code::NOT_ADDED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED }), "the codes answers carry");
 }
 
 /// The Settings screens say who agents are in an item's apps (`src/screen/settings/agents.js`) by the name the node

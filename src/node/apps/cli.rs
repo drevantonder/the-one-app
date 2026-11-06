@@ -16,11 +16,11 @@ pub fn commands() -> Command {
             ("deploy <app> --version <hash>".into(), "deploy an earlier version again (deploys lists them): a rollback".into()),
             ("deploys <app>".into(), "an app's deploys, newest last".into()),
             ("source <app> [path] [--version <hash>]".into(), "an app's code as deployed: its files, or one of them".into()),
-            ("install <app> [--scope user|global|<group>]".into(), "install an app, and the apps it uses, for you, a group you admin or everyone".into()),
-            ("uninstall <app> [--scope s]".into(), "".into()),
+            ("add <app> [--scope user|global|<group>]".into(), "add an app, and the apps it uses, for you, a group you admin or everyone".into()),
+            ("remove <app> [--scope s]".into(), "".into()),
             ("fork <app> <name> [--owner <owner>]".into(), "a new app from <app>'s code, with data of its own".into()),
             ("app delete|restore|erase <app>".into(), "delete an app you own (to Recently Deleted), restore it, or erase it for good".into()),
-            ("schedules".into(), "every schedule of the apps installed for you: when, as whom, and how it last went".into()),
+            ("schedules".into(), "every schedule of the apps added for you: when, as whom, and how it last went".into()),
             ("schedule on|off <app> <name> [--scope user|global|<group>]".into(), "switch an app's schedule on (it then runs as you) or off".into()),
         ],
         run: |g| {
@@ -36,9 +36,9 @@ pub fn commands() -> Command {
                     };
                     for app in &g.node.apps()? {
                         let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
-                        let installed: Vec<String> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
-                        let installed = if installed.is_empty() { String::new() } else { format!(", added for {}", installed.join(", ")) };
-                        println!("{} ({}{from}{installed})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
+                        let added: Vec<String> = app["added"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
+                        let added = if added.is_empty() { String::new() } else { format!(", added for {}", added.join(", ")) };
+                        println!("{} ({}{from}{added})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
                         tools::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
                     }
                 }
@@ -71,19 +71,19 @@ pub fn commands() -> Command {
                         _ => bail!("that file isn't text"),
                     }
                 }
-                ["uninstall", app] => {
+                ["remove", app] => {
                     let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-                    g.node.post("/v1/install", json!({ "app": app, "scope": scope, "installed": false }))?;
-                    println!("{app} is no longer installed in {scope}.");
+                    g.node.post("/v1/add", json!({ "app": app, "scope": scope, "added": false }))?;
+                    println!("{app} is no longer added to {scope}.");
                 }
                 ["fork", app, name] => {
                     g.node.post("/v1/fork", json!({ "app": app, "name": name, "owner": flags.get("owner") }))?;
                     println!("Forked {app} as {name}; deploy your changes with {CLI} deploy <dir> --name {name}.");
                 }
-                ["install", app] => {
+                ["add", app] => {
                     let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-                    g.node.post("/v1/install", json!({ "app": app, "scope": scope, "installed": true }))?;
-                    println!("{app} is installed in {scope}.");
+                    g.node.post("/v1/add", json!({ "app": app, "scope": scope, "added": true }))?;
+                    println!("{app} is added to {scope}.");
                 }
                 ["app", how @ ("delete" | "restore" | "erase"), app] => {
                     let past = match *how { "delete" => "deleted", "restore" => "restored", _ => "erased" };

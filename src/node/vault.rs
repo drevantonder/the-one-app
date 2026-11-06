@@ -27,7 +27,7 @@ pub fn request_app(app: Option<&str>) -> &str {
     app.unwrap_or(scopes::AGENTS)
 }
 
-/// Whether an installed app can declare what it needs: the agents and the Vault itself are not apps.
+/// Whether an app added can declare what it needs: the agents and the Vault itself are not apps.
 fn declares_needs(app: &str) -> bool {
     app != scopes::AGENTS && app != scopes::APP
 }
@@ -302,7 +302,7 @@ impl Node {
         }
     }
     /// The items in the scopes `viewer` manages (or `scope`), as a person sees them: never a secret field's value.
-    /// `wanted_by` is the apps installed for them that ask the Vault for fields it has.
+    /// `wanted_by` is the apps added for them that ask the Vault for fields it has.
     pub async fn vault(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Value>> {
         let needs = self.vault_needs(viewer).await?;
         let all = self.items_of(viewer, &self.managed_scopes(viewer, scope)?).await?;
@@ -348,13 +348,13 @@ impl Node {
         Ok(out)
     }
 
-    /// What the apps installed for `viewer` ask the Vault for: (app, need, its fields, whether it's accounts), from
+    /// What the apps added for `viewer` ask the Vault for: (app, need, its fields, whether it's accounts), from
     /// their `vault`.
     pub(super) async fn vault_needs(&self, viewer: &Caller) -> Result<Vec<(String, String, Vec<String>, bool)>> {
         let mut out = Vec::new();
         for app in self.apps(viewer).await? {
             let (Some(name), Some(needs)) = (app["name"].as_str(), app["vault"].as_object()) else { continue };
-            if app["installed"].as_array().is_none_or(|i| i.is_empty()) {
+            if app["added"].as_array().is_none_or(|i| i.is_empty()) {
                 continue;
             }
             for (need, d) in needs {

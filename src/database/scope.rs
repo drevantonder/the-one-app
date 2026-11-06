@@ -1,5 +1,5 @@
 //! The scope database: who and what a scope has (people, groups, devices, who holds which role, epochs, app schedules, apps,
-//! deploys, installs, services, settings, the Vault's bookkeeping, recovery) as SQLite rows: the truth, written as
+//! deploys, apps added, services, settings, the Vault's bookkeeping, recovery) as SQLite rows: the truth, written as
 //! signed steps (`steps`). Each step is applied by its kind's rule (`rules`) to a fresh copy of the database
 //! (`fresh`), and what follows from its rows is worked out again (`derive`), the same on every reader. It's small, so
 //! it's copied at each step.
@@ -7,7 +7,7 @@
 //! Every scope's database has the same tables, `permissions`' among them with its defaults. What `global`'s entries
 //! say of the whole network (people, groups, invites, devices, relations, epochs and app schedules of every scope, apps,
 //! services, settings, Vault keys, recovery) is filled in only in `global`'s, which everyone in the network reads; a
-//! person's or group's has only its own state (installs, schedules, Vault requests, pages, forgotten blobs), which
+//! person's or group's has only its own state (apps added, schedules, Vault requests, pages, forgotten blobs), which
 //! only those who use it may read.
 //!
 //! Who may do what is `permissions::may` over `relations`, whose objects are `object(scope)`, `device(key)`,
@@ -160,11 +160,11 @@ CREATE TABLE recovery (
   key TEXT NOT NULL,
   set_at INTEGER
 ) STRICT;
-CREATE TABLE installs (
+CREATE TABLE added (
   app TEXT PRIMARY KEY,
-  installed INTEGER NOT NULL,
-  installed_by TEXT NOT NULL,
-  installed_at INTEGER NOT NULL
+  added INTEGER NOT NULL,
+  added_by TEXT NOT NULL,
+  added_at INTEGER NOT NULL
 ) STRICT;
 CREATE TABLE schedules (
   app TEXT NOT NULL,
@@ -265,7 +265,7 @@ pub(crate) fn int(n: u64) -> i64 {
 pub const RULE: &str = "(substr(subject, 1, 1) IN ('#', '@') OR instr(subject, '*') > 0 OR instr(object, '*') > 0)";
 
 /// Tables of a scope's own state, in every scope's database.
-const OWN: &[&str] = &["installs", "schedules", "vault_requests", "pages", "forgotten"];
+const OWN: &[&str] = &["added", "schedules", "vault_requests", "pages", "forgotten"];
 
 /// Tables of what steps said that no rule changes, kept as they were: the blobs and releases they named, and the
 /// release's types, roles and rules their `DEFAULTS` said (`steps::DEFAULTS`), not this reader's own release's.

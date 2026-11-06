@@ -86,8 +86,8 @@ function x() {
 	let { places: I, admin: L } = i.data, R = !O.added && !L ? "Ask an admin to add it first" : null, z = A.data, B;
 	t[13] !== j || t[14] !== z ? (B = j || z?.runs_on.find(S)?.name || z?.nodes[0], t[13] = j, t[14] = z, t[15] = B) : B = t[15];
 	let V = B, H;
-	t[16] !== O.installed || t[17] !== i || t[18] !== A ? (H = async (e) => {
-		if (one.tap(), T(""), M(e), O.installed.length) {
+	t[16] !== O.added || t[17] !== i || t[18] !== A ? (H = async (e) => {
+		if (one.tap(), T(""), M(e), O.added.length) {
 			try {
 				await one.call("move", {
 					app: E,
@@ -98,7 +98,7 @@ function x() {
 			}
 			i.reload(), A.reload();
 		}
-	}, t[16] = O.installed, t[17] = i, t[18] = A, t[19] = H) : H = t[19];
+	}, t[16] = O.added, t[17] = i, t[18] = A, t[19] = H) : H = t[19];
 	let U = H, W;
 	t[20] !== i || t[21] !== V ? (W = async (e, t) => {
 		one.tap(), T(""), C((n) => ({
@@ -126,22 +126,22 @@ function x() {
 		size: 64
 	}), t[23] = O, t[24] = K);
 	let q;
-	if (t[25] !== O.installed || t[26] !== R || t[27] !== G || t[28] !== I || t[29] !== x) {
+	if (t[25] !== O.added || t[26] !== R || t[27] !== G || t[28] !== I || t[29] !== x) {
 		let e;
-		t[31] !== O.installed || t[32] !== R || t[33] !== G || t[34] !== x ? (e = (e) => {
+		t[31] !== O.added || t[32] !== R || t[33] !== G || t[34] !== x ? (e = (e) => {
 			let t = R || e.why;
 			return /* @__PURE__ */ p(l, {
 				title: e.name,
 				sub: t,
 				className: t ? "opacity-60" : void 0,
 				trailing: /* @__PURE__ */ p(f, {
-					checked: x[e.id] ?? O.installed.includes(e.id),
+					checked: x[e.id] ?? O.added.includes(e.id),
 					disabled: !!t,
 					"aria-label": e.name,
 					onCheckedChange: (t) => G(e, t)
 				})
 			}, e.id);
-		}, t[31] = O.installed, t[32] = R, t[33] = G, t[34] = x, t[35] = e) : e = t[35], q = I.map(e), t[25] = O.installed, t[26] = R, t[27] = G, t[28] = I, t[29] = x, t[30] = q;
+		}, t[31] = O.added, t[32] = R, t[33] = G, t[34] = x, t[35] = e) : e = t[35], q = I.map(e), t[25] = O.added, t[26] = R, t[27] = G, t[28] = I, t[29] = x, t[30] = q;
 	} else q = t[30];
 	let J;
 	t[36] === q ? J = t[37] : (J = /* @__PURE__ */ p(c, { children: q }), t[36] = q, t[37] = J);

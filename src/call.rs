@@ -9,7 +9,7 @@ pub enum Append {
     /// whose first value must be true as the write runs, else the call fails with that message.
     Exec { scope: String, sql: String, params: Vec<Value>, blobs: Vec<String>, check: Option<String> },
     /// Adds (or removes) an app in a scope; added, with its service run on `node` (a device's name, or `cloudflare`).
-    Install { app: String, scope: String, installed: bool, node: Option<String> },
+    Add { app: String, scope: String, added: bool, node: Option<String> },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     Switch { app: String, schedule: String, scope: String, on: bool },
     /// Says a scope no longer needs a blob it kept: once no scope does, devices delete it.
@@ -62,8 +62,8 @@ pub fn appends(list: &Value) -> Result<Vec<Append>> {
             appends.push(Append::Forget { scope, blob: blob.into() });
             continue;
         }
-        if let Some(name) = a["install"].as_str() {
-            appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false, node: a["node"].as_str().map(str::to_string) });
+        if let Some(name) = a["add"].as_str() {
+            appends.push(Append::Add { app: name.into(), scope, added: a["added"] != false, node: a["node"].as_str().map(str::to_string) });
             continue;
         }
         let sql = a["exec"].as_str().context("an app writes its database with exec")?.to_string();

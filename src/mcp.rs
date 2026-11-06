@@ -304,15 +304,15 @@ pub fn logs_said(r: &Value, device: &str) -> (Value, Option<String>) {
 }
 
 /// What `deploy` did, and what's next: its tools, putting it on a page, and undoing it.
-fn deploy_said(app: &str, r: &Value, installed: bool) -> String {
+fn deploy_said(app: &str, r: &Value, added: bool) -> String {
     let short = |b: &Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
     let mut out = vec![format!("Deployed {app} ({}){}.", short(&r["bundle"]), if r["made"] == true { ", a new app of yours" } else { "" })];
     let tools: Vec<String> = r["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|o| format!("{app}_{o}")).collect();
     match (&r["failed"], r["here"] == true) {
         (Value::String(why), _) => out.push(format!("{why}. Fix it and deploy again.")),
         (_, false) => out.push("Your devices take it within a few seconds.".into()),
-        _ if installed && tools.is_empty() => out.push("It has no tools.".into()),
-        _ if installed => out.push(format!("Its tools: {}.", tools.join(", "))),
+        _ if added && tools.is_empty() => out.push("It has no tools.".into()),
+        _ if added => out.push(format!("Its tools: {}.", tools.join(", "))),
         _ => out.push(format!(
             "Put it on your page with apps_add {{ app: \"{app}\", scope: \"user\" }}; its tools come then{}, at once where your client takes list_changed, else in your next session.",
             if tools.is_empty() { String::new() } else { format!(" ({})", tools.join(", ")) }
@@ -412,8 +412,8 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             };
             match node.post("/v1/deploy", body) {
                 Ok(r) => {
-                    let installed = node.get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["installed"].as_array().is_some_and(|i| !i.is_empty())));
-                    json!({ "content": [{ "type": "text", "text": format!("{}{service}", deploy_said(app, &r, installed == Some(true))) }] })
+                    let added = node.get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["added"].as_array().is_some_and(|i| !i.is_empty())));
+                    json!({ "content": [{ "type": "text", "text": format!("{}{service}", deploy_said(app, &r, added == Some(true))) }] })
                 }
                 Err(e) => failed(format!("{e:#}")),
             }

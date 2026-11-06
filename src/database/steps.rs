@@ -1176,7 +1176,7 @@ pub(crate) mod tests {
         let global = global_of(&h);
         let scope = Scope::User(ANDRE.into());
         let conn = super::super::scope::empty(&scope).unwrap();
-        conn.execute_batch(r#"INSERT INTO installs VALUES ('notes', 1, 'person:a000000000000001', 0); INSERT INTO pages VALUES ('user', '{"items":["notes"]}');"#).unwrap();
+        conn.execute_batch(r#"INSERT INTO added VALUES ('notes', 1, 'person:a000000000000001', 0); INSERT INTO pages VALUES ('user', '{"items":["notes"]}');"#).unwrap();
         let mut db = ScopeDb::open(conn, 0).unwrap();
         let freeze = Freeze { at: 2, hash: "0".repeat(64), logs: [("global".to_string(), 9), (scope.to_string(), 4)].into() };
         let given = start(&mac, &scope, ANDRE, 1, 0, &mut db).unwrap();
@@ -1192,7 +1192,7 @@ pub(crate) mod tests {
         swapped.copy = Some(c.serialize("main").unwrap().to_vec());
         assert!(started(&freeze, &global, &scope, Some(&swapped), 0).is_err(), "nor a copy that isn't what it says");
         let other = Scope::User(BOB.into());
-        assert!(started(&freeze, &global, &other, None, 0).unwrap().state()?.installed.is_empty(), "a scope with no frozen log starts empty");
+        assert!(started(&freeze, &global, &other, None, 0).unwrap().state()?.added.is_empty(), "a scope with no frozen log starts empty");
         Ok(())
     }
 
@@ -1292,7 +1292,7 @@ pub(crate) mod tests {
         assert!(apply(&db, None, &Scope::Global, &step(2, READS)).is_err(), "the same release's again changes nothing");
         // What each `READS` reads, from the first that reads the scope database (2): add `(READS, hash)`
         // when a release changes them, and read one more.
-        const PINNED: &[(u32, &str)] = &[(2, "1a26a7b14a1b8998d5edcf6b6d00db14a698c6109eb865f7bd8e7c86dcd295a4"), (3, "e614e4c705368711133be27dd44ff51c24ff89da7fe059001ad3990f0b454a67"), (4, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (5, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (6, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b")];
+        const PINNED: &[(u32, &str)] = &[(2, "1a26a7b14a1b8998d5edcf6b6d00db14a698c6109eb865f7bd8e7c86dcd295a4"), (3, "e614e4c705368711133be27dd44ff51c24ff89da7fe059001ad3990f0b454a67"), (4, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (5, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (6, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (7, "623223311093180cd17e55f5a9933c62c2b900d16936ed9bb902b30999c175a7")];
         let mut h = blake3::Hasher::new();
         h.update(super::super::scope::SCHEMA.as_bytes());
         h.update(permissions::SCHEMA.as_bytes());

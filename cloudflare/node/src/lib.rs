@@ -693,9 +693,9 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
         },
     )?;
     let me_user = m.user(me)?;
-    let installed_in = |app: &str, scope: &Scope| -> Result<bool> {
+    let added_in = |app: &str, scope: &Scope| -> Result<bool> {
         Ok(match r.get(scope) {
-            Some(d) => d.installed()?.contains(app),
+            Some(d) => d.added()?.contains(app),
             None => false,
         })
     };
@@ -713,39 +713,39 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
         .iter()
         .filter(|a| !a.erased)
         .map(|a| -> Result<Value> {
-            let mut installed: Vec<String> = Vec::new();
+            let mut added: Vec<String> = Vec::new();
             for key in r.0.keys() {
                 if let Ok(s) = Scope::parse(key)
-                    && installed_in(&a.name, &s)?
+                    && added_in(&a.name, &s)?
                     && m.may(me, "use", &object(&s))
                 {
-                    installed.push(key.clone());
+                    added.push(key.clone());
                 }
             }
-            installed.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
+            added.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
             let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
             let forks: Vec<&String> = every.iter().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
-            let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
+            let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "added": added });
             if let Some(link) = a.source.as_ref().filter(|l| !l.is_empty()) {
                 info["source"] = json!(link);
             }
             if let Some((time, by)) = &a.deleted {
-                info["installed"] = json!([]);
+                info["added"] = json!([]);
                 info["deleted"] = json!({ "time": time, "by": m.user_ever(by)?.map(|u| u.name), "yours": m.may(me, "delete", &app(&a.name)) });
                 info["reach"] = json!([]);
                 return Ok(info);
             }
             // As a node on a machine reaches them (src/node.rs: `reachable`), of the scopes read here.
-            let global = installed_in(&a.name, &Scope::Global)?;
+            let global = added_in(&a.name, &Scope::Global)?;
             let mut reach: Vec<Scope> = Vec::new();
             for g in m.groups_of(me)?.into_keys() {
                 let s = Scope::Group(g);
-                if r.get(&s).is_some() && (global || installed_in(&a.name, &s)?) {
+                if r.get(&s).is_some() && (global || added_in(&a.name, &s)?) {
                     reach.push(s);
                 }
             }
             let own = Scope::User(me.into());
-            if global || installed_in(&a.name, &own)? || !reach.is_empty() {
+            if global || added_in(&a.name, &own)? || !reach.is_empty() {
                 reach.insert(0, own);
             }
             if global {

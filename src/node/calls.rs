@@ -406,7 +406,7 @@ impl Node {
         let title = self.title(app).await;
         let info = self.catalog(me, false).await.ok()?.into_iter().find(|a| a["name"] == app)?;
         let runs: Vec<Value> = info["runs_on"].as_array().cloned().unwrap_or_default();
-        let added = info["installed"].as_array().is_some_and(|a| !a.is_empty());
+        let added = info["added"].as_array().is_some_and(|a| !a.is_empty());
         if !added || runs.iter().any(|r| r["name"].is_string() && r["online"] == true && r["problem"].is_null()) {
             return None;
         }
@@ -865,7 +865,7 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
         }
     };
     if reach.is_empty() {
-        bail!(crate::protocol::Coded::new(crate::protocol::code::NOT_INSTALLED, format!("{title} isn't on your pages: add it first")));
+        bail!(crate::protocol::Coded::new(crate::protocol::code::NOT_ADDED, format!("{title} isn't on your pages: add it first")));
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string())?)));

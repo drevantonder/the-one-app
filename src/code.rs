@@ -21,7 +21,7 @@ pub enum For {
     Mcp(Mode),
 }
 
-/// Every app installed for this user that has tools, the node's own among them, as `GET /v1/apps` gives them, with
+/// Every app added for this user that has tools, the node's own among them, as `GET /v1/apps` gives them, with
 /// each tool's input as MCP takes it (files explained, `device` and `confirm` where they apply).
 pub fn catalog(node: &Client) -> Result<Vec<Value>> {
     Ok(catalogs(node)?.0)

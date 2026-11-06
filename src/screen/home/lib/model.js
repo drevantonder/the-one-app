@@ -12,7 +12,7 @@ export const home = (() => {
   const hasScreens = (a) => has(a, "main");
   // The tool that lists an app's accounts, the one it says does (`accounts: true`): none for an app without.
   const accountsTool = (a) => a?.tools?.find((o) => o.accounts)?.name;
-  const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
+  const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
   const userName = (id) => (id === me()?.id ? "You" : network()?.users.find((u) => u.id === id)?.name || "Someone");
   // People by name, you last, as "you".
   const named = (ids) => ids.slice().sort((a, b) => (a === me()?.id) - (b === me()?.id) || userName(a).localeCompare(userName(b)))
@@ -58,7 +58,7 @@ export const home = (() => {
   }
   const page = (scope) => allPages().find((p) => p.scope === scope);
 
-  /// Whether this person may install into a scope: their own, a group they admin, or everyone's as an admin.
+  /// Whether this person may add apps to a scope: their own, a group they admin, or everyone's as an admin.
   function canArrange(scope) {
     if (scope === "user") return true;
     if (scope === "global") return isAdmin();
@@ -79,7 +79,7 @@ export const home = (() => {
   const accountsOn = (p) => h.apps.filter((a) => accountsTool(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const badge = (name, p) => Math.max(0, h.badges[p.scope]?.[name] || 0);
 
-  /// Every widget a page could show: those of the apps installed in its scope.
+  /// Every widget a page could show: those of the apps added to its scope.
   function widgetsOn(p) {
     const here = new Set(h.apps.filter((a) => scopes(a).includes(p.scope)).map((a) => a.name));
     return (h.widgets[p.scope] || []).filter((w) => here.has(w.app));
@@ -102,7 +102,7 @@ export const home = (() => {
     return copy;
   }
 
-  /// What a page shows, in its person's order: the widgets they put there and its apps' icons, those installed since
+  /// What a page shows, in its person's order: the widgets they put there and its apps' icons, those added since
   /// they last arranged it at the end, without those they took off it. A page never arranged shows its apps. A widget
   /// still to come keeps its place (`pending`), at its size, as a grey card.
   function items(p) {
@@ -171,8 +171,8 @@ export const home = (() => {
     if (settings(a, p)) out.push({ title: "Settings", icon: "gear-six", run: settings(a, p) });
     if (inStore(a)) out.push({ title: "Open in App Store", icon: "bag", run: inStore(a) });
     if (canArrange(p.scope) && (a.deploys || 0) > 0) {
-      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/install", { app: a.name, scope: p.scope, installed: false }),
-        (apps) => apps.map((x) => (x.name === a.name ? { ...x, installed: (x.installed || []).filter((s) => (s.startsWith("user:") ? "user" : s) !== p.scope) } : x))) });
+      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/add", { app: a.name, scope: p.scope, added: false }),
+        (apps) => apps.map((x) => (x.name === a.name ? { ...x, added: (x.added || []).filter((s) => (s.startsWith("user:") ? "user" : s) !== p.scope) } : x))) });
     }
     if (owns(a) && (a.deploys || 0) > 0) {
       out.push({

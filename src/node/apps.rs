@@ -1,4 +1,4 @@
-//! Apps: the network's, every one people may add, and adding, installing, deploying, forking and retiring them.
+//! Apps: the network's, every one people may add, and adding, deploying, forking and retiring them.
 
 use super::*;
 
@@ -40,7 +40,7 @@ impl Node {
     }
 
     /// Every app in the network: the node's own (`own`), then each app with what it does for `viewer` where it's
-    /// installed for them; and the services that serve them.
+    /// added for them; and the services that serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let mut out: Vec<Value> = super::own::all().iter().map(super::own::NodeApp::listed).collect();
         out.extend(self.catalog(viewer, false).await?);
@@ -58,8 +58,8 @@ impl Node {
                 continue;
             }
             // A service serves its user, so its screens are on their own page.
-            if describe["screens"].as_array().is_some_and(|s| !s.is_empty()) && describe["installed"].is_null() {
-                describe["installed"] = json!([Scope::User(viewer.user.clone()).to_string()]);
+            if describe["screens"].as_array().is_some_and(|s| !s.is_empty()) && describe["added"].is_null() {
+                describe["added"] = json!([Scope::User(viewer.user.clone()).to_string()]);
             }
             if let (Value::Null, Some(domain), Some(name)) = (&describe["image"], describe["domain"].as_str(), describe["name"].as_str()) {
                 if let Some((image, kind)) = self.logo(domain, name) {
@@ -113,7 +113,7 @@ impl Node {
     /// whoever needs them asks the whole list for), its picture named (`/v1/images/<name>`) rather than in it, so the
     /// list is small and each picture is kept for good where it's shown.
     pub async fn apps_drawn(&self, viewer: &Caller) -> Result<Vec<Value>> {
-        const DRAWN: &[&str] = &["name", "title", "icon", "color", "domain", "image", "image_kind", "installed", "deleted", "screens", "widgets", "owner"];
+        const DRAWN: &[&str] = &["name", "title", "icon", "color", "domain", "image", "image_kind", "added", "deleted", "screens", "widgets", "owner"];
         let mut out = Vec::new();
         for app in self.apps(viewer).await? {
             let Value::Object(mut app) = app else { continue };
@@ -161,8 +161,8 @@ impl Node {
         Some((kind.to_string(), data_encoding::BASE64.decode(data.as_bytes()).ok()?))
     }
 
-    /// Every app in the network: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
-    /// title and icon, and for one built in, the bundle this release has of it; for those installed for them, what it
+    /// Every app in the network: owner, `from`, forks, deploys, the scopes `viewer` may use it's added in, its
+    /// title and icon, and for one built in, the bundle this release has of it; for those added for them, what it
     /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the network hasn't
     /// added yet, with no deploys, each as its own code describes it. Every app that says what it is has `offers` (a
     /// `screens` page or widget, `accounts`), and, with a service, `nodes`: the names of the viewer's own nodes it can
@@ -176,18 +176,18 @@ impl Node {
             apps.iter()
                 .filter(|a| !a.erased)
                 .map(|a| -> Result<_> {
-                    let mut installed: Vec<String> = i
+                    let mut added: Vec<String> = i
                         .views
                         .iter()
-                        .filter(|(scope, s)| s.installed.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may(&viewer.user, "use", &scopes::object(&s))))
+                        .filter(|(scope, s)| s.added.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may(&viewer.user, "use", &scopes::object(&s))))
                         .map(|(scope, _)| scope.clone())
                         .collect();
-                    installed.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
+                    added.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
                     let reach = reachable(i, &a.name, &viewer.user)?;
                     let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
                     let forks: Vec<&String> = apps.iter().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
-                    let runs_on = runs_on(self, i, &switches, &parts_here, &a.name, &installed, &viewer.user)?;
-                    let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed, "runs_on": runs_on });
+                    let runs_on = runs_on(self, i, &switches, &parts_here, &a.name, &added, &viewer.user)?;
+                    let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "added": added, "runs_on": runs_on });
                     if let Some(bundle) = self.built_in(a) {
                         info["built_in"] = json!(bundle);
                     }
@@ -198,7 +198,7 @@ impl Node {
                     }
                     // A deleted app leaves every page; its owners see it in Recently Deleted.
                     if let Some((time, by)) = &a.deleted {
-                        info["installed"] = json!([]);
+                        info["added"] = json!([]);
                         info["deleted"] = json!({ "time": time, "by": m.user_ever(by)?.map(|u| u.name), "yours": m.may(&viewer.user, "delete", &scopes::app(&a.name)) });
                         return Ok((a.name.clone(), info, false));
                     }
@@ -211,7 +211,7 @@ impl Node {
                 let mut missing = Vec::new();
                 for (name, bundle) in self.0.built_in.iter() {
                     if i.r.db().app(name)?.is_none() {
-                        missing.push(json!({ "name": name, "owner": "admins", "from": null, "forks": [], "deploys": 0, "bundle": null, "history": [], "installed": [], "built_in": bundle, "source": built_in_source(name) }));
+                        missing.push(json!({ "name": name, "owner": "admins", "from": null, "forks": [], "deploys": 0, "bundle": null, "history": [], "added": [], "built_in": bundle, "source": built_in_source(name) }));
                     }
                 }
                 Ok(missing)
@@ -372,15 +372,15 @@ impl Node {
         (list("apps"), list("services"))
     }
 
-    /// The entries that install (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing
-    /// also installs each app it uses, and each they use, that isn't installed there yet, and runs its own services
+    /// The entries that add (or remove) `app` in `scope` for `caller`, with their own rights there. Adding it
+    /// also adds each app it uses, and each they use, that isn't added there yet, and runs its own services
     /// for it on `node` (a device's name, or `cloudflare`), one node each: added again with another node, they move
     /// there. The services of the apps it uses are theirs to place, each added with its own node (the App Store's
-    /// add does). Uninstalling stops its services there.
-    pub(super) async fn install_entries(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool, node: Option<&str>) -> Result<Vec<(Scope, Content)>> {
+    /// add does). Removing it stops its services there.
+    pub(super) async fn add_entries(&self, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<Vec<(Scope, Content)>> {
         let mut wanted = vec![app.to_string()];
         let mut i = 0;
-        while installed && i < wanted.len() {
+        while added && i < wanted.len() {
             self.bring_in(caller, &wanted[i]).await?;
             for used in self.uses(&wanted[i]).await.0 {
                 if !wanted.contains(&used) {
@@ -395,12 +395,12 @@ impl Node {
             let named = scope_name(i, &scope.to_string())?;
             ensure!(m.may(&caller.user, "add-apps", &scopes::object(scope)), "You can't add apps to {named}.");
             ensure!(i.r.holds(scope), "This device can't open {named} yet.");
-            let here = i.views.get(&scope.to_string()).map(|s| s.installed.clone()).unwrap_or_default();
+            let here = i.views.get(&scope.to_string()).map(|s| s.added.clone()).unwrap_or_default();
             let mut out = Vec::new();
             for (n, name) in wanted.iter().enumerate().rev() {
                 ensure!(m.app(name)?.is_some(), "no app named {name}{}", if n > 0 { format!(", which {app} uses") } else { String::new() });
                 if n == 0 || !here.contains(name) {
-                    out.push((scope.clone(), content::node(if installed { "install" } else { "uninstall" }, json!({ "app": name }))));
+                    out.push((scope.clone(), content::added(name, added)));
                 }
             }
             // Where each service runs for this scope now: stopped where it no longer should, started where it should.
@@ -408,12 +408,12 @@ impl Node {
             let switches = m.switches()?;
             for service in &services {
                 let running: Vec<Key> = switches.iter().filter(|((_, n), s)| n == service && ours(s)).map(|((k, _), _)| *k).collect();
-                let to = match node.filter(|_| installed) {
+                let to = match node.filter(|_| added) {
                     Some(node) => Some(service_entry(m, &caller.user, node, service, true, Some(scope))?),
                     None => None,
                 };
                 let to_key = to.as_ref().and_then(|c| c.data["device"].as_str()).and_then(|k| unhex(k).ok());
-                for k in running.iter().filter(|k| !installed || (to_key.is_some() && Some(**k) != to_key)) {
+                for k in running.iter().filter(|k| !added || (to_key.is_some() && Some(**k) != to_key)) {
                     out.push((Scope::Global, service_entry(m, &caller.user, &hex(k), service, false, None)?));
                 }
                 if let Some(to) = to.filter(|_| !running.contains(&to_key.unwrap_or_default())) {
@@ -424,9 +424,9 @@ impl Node {
         })
     }
 
-    pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool, node: Option<&str>) -> Result<()> {
+    pub async fn add(&self, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<()> {
         self.read_callers_scopes(caller).await?;
-        let entries = self.install_entries(caller, app, scope, installed, node).await?;
+        let entries = self.add_entries(caller, app, scope, added, node).await?;
         for (scope, content) in entries {
             self.append_as(&scope, &caller.user, content).await?;
         }
@@ -532,9 +532,9 @@ fn built_in_source(app: &str) -> Option<String> {
     (!repo.is_empty()).then(|| format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
 }
 
-/// Where `app`'s service runs for the scopes `installed` names, and for `user` on their own nodes: `{ scope, node,
+/// Where `app`'s service runs for the scopes `added` names, and for `user` on their own nodes: `{ scope, node,
 /// name, online, problem }` each, `name` none once that node was removed, `problem` what its node said went wrong.
-fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, parts_here: &[Value], app: &str, installed: &[String], user: &str) -> Result<Vec<Value>> {
+fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, parts_here: &[Value], app: &str, added: &[String], user: &str) -> Result<Vec<Value>> {
     let m = i.r.db();
     let cloudflare = m.cloudflare_node()?;
     let mut out = Vec::new();
@@ -542,7 +542,7 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
         let on = n == app
             && s.on
             && match &s.scope {
-                Some(s) => installed.contains(s),
+                Some(s) => added.contains(s),
                 None => m.machine(k)?.is_some_and(|d| d.user == user),
             };
         if on {

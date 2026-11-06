@@ -30,7 +30,7 @@ function Add() {
     one.tap()
     setError("")
     setPicked(n)
-    if (!a.installed.length) return
+    if (!a.added.length) return
     try {
       await one.call("move", { app: name, node: n })
     } catch (err) {
@@ -65,7 +65,7 @@ function Add() {
               title={p.name}
               sub={why}
               className={why ? "opacity-60" : undefined}
-              trailing={<Switch checked={put[p.id] ?? a.installed.includes(p.id)} disabled={!!why} aria-label={p.name} onCheckedChange={(on) => flip(p, on)} />}
+              trailing={<Switch checked={put[p.id] ?? a.added.includes(p.id)} disabled={!!why} aria-label={p.name} onCheckedChange={(on) => flip(p, on)} />}
             />
           )
         })}

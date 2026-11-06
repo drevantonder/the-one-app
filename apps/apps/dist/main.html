@@ -62,7 +62,7 @@ function ne(e) {
 	let t = Math.max(0, Math.round((e - Date.now()) / 6e4));
 	return t < 1 ? "now" : t < 60 ? "in " + t + "m" : t < 1440 ? "in " + Math.round(t / 60) + "h" : "in " + Math.round(t / 1440) + "d";
 }
-var re = (e, t) => e.installed.some((e) => t.some((t) => t.id === e));
+var re = (e, t) => e.added.some((e) => t.some((t) => t.id === e));
 function ie(t) {
 	let a = e(159), { name: l, list: u, onOpen: p, onGone: h, reloadList: _, bar: x } = t, C = x !== void 0 && x, { apps: T, places: ie } = u, k;
 	if (a[0] !== T || a[1] !== l) {

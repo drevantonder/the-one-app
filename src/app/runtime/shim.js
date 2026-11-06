@@ -262,10 +262,10 @@ function context(ask, body, appends, later) {
       }
       return (await ask("order")).json();
     },
-    /// Installs (or with `installed: false`, uninstalls) an app in a scope, with the caller's own rights there.
-    install: (name, scope, installed = true, node) => {
+    /// Adds (or with `added: false`, removes) an app in a scope, with the caller's own rights there.
+    add: (name, scope, added = true, node) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ install: name, scope, installed, ...(node ? { node } : {}) });
+      appends.push({ add: name, scope, added, ...(node ? { node } : {}) });
     },
     /// Deletes an app ("deleted": to Recently Deleted), restores it ("restored") or erases it for good ("erased"),
     /// for someone acting for its owner.

@@ -1,7 +1,7 @@
 // The App Store: the apps built into the release, whether or not the network has added them, and the apps made in the
-// network; who owns each, where it's installed, its forks and its code; and "Add to…" each place the person has a
+// network; who owns each, where it's added, its forks and its code; and "Add to…" each place the person has a
 // page: themselves, their groups and everyone, saying who can add it where they can't.
-// An ordinary app: it installs with ctx.install, with the caller's own rights. Installing a built-in app the network
+// An ordinary app: it adds apps with ctx.add, with the caller's own rights. Adding a built-in app the network
 // hasn't added yet adds it (admins only). Its screens are React, in screens/ and lib/, built into dist/ when it's
 // deployed (`one deploy apps/apps`), which is committed because a release ships the app as it is.
 import mainHtml from "./dist/main.html" with { type: "text" };
@@ -64,7 +64,7 @@ function where(a) {
   const runs_on = a.runs_on || [];
   const title = a.title || a.name;
   let problem = null;
-  if (a.installed?.length && !runs_on.some((r) => r.name && r.online && !r.problem)) {
+  if (a.added?.length && !runs_on.some((r) => r.name && r.online && !r.problem)) {
     const r = runs_on[0];
     const text = !r ? "Choose the node it runs on." : !r.name ? "The node it ran on was removed. Choose where it runs now." : !r.online ? `${r.name} is off. Turn it on, or move it to another node.` : r.problem;
     problem = nodes.length || r ? { title: `${title} needs its service on a node that's on`, text, move: nodes.length > 0 } : { title: `${title} can't run on your devices yet`, text: "None of them is a platform its service is built for.", move: false };
@@ -118,8 +118,8 @@ async function listed(ctx, { full, gone }) {
       name: a.name, title: a.title || a.name, icon: a.icon || null, color: a.color || null, ...(full ? { image: a.image || null, image_kind: a.image_kind || null } : {}),
       tagline: a.tagline || null, description: a.description || null,
       owner: a.owner, owner_name: name(a.owner),
-      from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
-      installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], services: [] }, service: a.service || null, runs_on: a.runs_on || [],
+      from: a.from || null, forks: a.forks || [], deploys: a.deploys, added: a.added || [],
+      added_names: (a.added || []).map(name), uses: a.uses || { apps: [], services: [] }, service: a.service || null, runs_on: a.runs_on || [],
       advanced: !!a.advanced, built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
       source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: !!a.offers?.screens, keeps_accounts: !!a.offers?.accounts,
     };
@@ -144,7 +144,7 @@ export default {
   icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
-  instructions: "The App Store lists every app in this network, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
+  instructions: "The App Store lists every app in this network, where each is added and its code. apps_add adds one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
 
   // The apps whose schedule, where you may switch it, failed its last run.
   async badge(ctx) {
@@ -158,7 +158,7 @@ export default {
       input: { type: "object", properties: { deleted: { type: "boolean", description: "only the apps in Recently Deleted, which apps_restore brings back" } } },
       async run(ctx, { deleted: gone } = {}) {
         const { apps, deleted } = await listed(ctx, { gone });
-        const line = (a) => `${a.title} (${a.name}): ${a.deleted ? `deleted ${new Date(a.deleted.time).toISOString().slice(0, 10)}${a.mine ? "" : `, ${a.owner_name}'s`}` : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
+        const line = (a) => `${a.title} (${a.name}): ${a.deleted ? `deleted ${new Date(a.deleted.time).toISOString().slice(0, 10)}${a.mine ? "" : `, ${a.owner_name}'s`}` : a.added_names.length ? `added for ${a.added_names.join(", ")}` : "not added"}`
           + `${a.screens ? "" : ", tools only"}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.description || a.tagline || ""}`.trimEnd();
         if (gone) return apps.length ? [...apps.map(line), "", "apps_restore brings back one you own; apps_erase deletes it for good."].join("\n") : "Nothing is in Recently Deleted.";
         return [
@@ -170,7 +170,7 @@ export default {
     },
     add: {
       reads: false,
-      description: "Install an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page. An app with a service runs it on node, one of your nodes it can run on (apps_devices lists them), or for everyone's or a group's, the Cloudflare node; asked when there's a choice.",
+      description: "Add an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page. An app with a service runs it on node, one of your nodes it can run on (apps_devices lists them), or for everyone's or a group's, the Cloudflare node; asked when there's a choice.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput, node: NODE } },
       async run(ctx, { app, scope, node }) {
         const a = await find(ctx, app);
@@ -179,9 +179,9 @@ export default {
           const w = where(used);
           if (used.runs_on?.some((r) => r.scope === (place === "user" ? `user:${ctx.me.user}` : place))) continue;
           const on = w.nodes.find((n) => node && n.toLowerCase() === String(node).toLowerCase()) || (w.nodes.length === 1 ? w.nodes[0] : undefined);
-          if (on) ctx.install(used.name, place, true, on);
+          if (on) ctx.add(used.name, place, true, on);
         }
-        ctx.install(app, place, true, nodeFor(a, node));
+        ctx.add(app, place, true, nodeFor(a, node));
         return `Added ${a.title || app}.`;
       },
     },
@@ -192,20 +192,20 @@ export default {
       async run(ctx, { app, node, scope }) {
         const a = await find(ctx, app);
         if (!hasService(a)) throw new Error(`${a.title || app} has no service to move`);
-        const place = scope ? placeOf(ctx, scope) : a.runs_on?.find((r) => r.scope)?.scope || a.installed?.find((s) => places(ctx).some((p) => p.may && p.id === s));
+        const place = scope ? placeOf(ctx, scope) : a.runs_on?.find((r) => r.scope)?.scope || a.added?.find((s) => places(ctx).some((p) => p.may && p.id === s));
         if (!place) throw new Error(`${a.title || app} isn't added anywhere you may move it: apps_add adds it`);
-        ctx.install(app, place === `user:${ctx.me.user}` ? "user" : place, true, nodeFor(a, node));
+        ctx.add(app, place === `user:${ctx.me.user}` ? "user" : place, true, nodeFor(a, node));
         return `${a.title || app} runs on ${node}.`;
       },
     },
     remove: {
       confirm: true,
       reads: false,
-      description: "Uninstall an app from a place: user (you), a group (by its name) or global (everyone). What it keeps there goes with it.",
+      description: "Remove an app from a place: user (you), a group (by its name) or global (everyone). What it keeps there goes with it.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       async run(ctx, { app, scope }) {
         await find(ctx, app);
-        ctx.install(app, placeOf(ctx, scope), false);
+        ctx.add(app, placeOf(ctx, scope), false);
         return `Removed ${app}.`;
       },
     },
@@ -257,7 +257,7 @@ export default {
     },
     health: {
       reads: true,
-      description: "How an app is doing where it's installed for you: its schedules (when each runs, on or off, as whom) and their recent runs and failures; for its owners, who used it, when and from what, its errors grouped with counts, and its AI cost. Times are ISO 8601.",
+      description: "How an app is doing where it's added for you: its schedules (when each runs, on or off, as whom) and their recent runs and failures; for its owners, who used it, when and from what, its errors grouped with counts, and its AI cost. Times are ISO 8601.",
       input: { type: "object", required: ["app"], properties: { app: APP } },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
@@ -283,7 +283,7 @@ export default {
     },
     switch: {
       reads: false,
-      description: "Switch one of an app's schedules on or off in a place where it's installed (user, a group by its name, or global); switched on, it runs as you.",
+      description: "Switch one of an app's schedules on or off in a place where it's added (user, a group by its name, or global); switched on, it runs as you.",
       input: { type: "object", required: ["app", "schedule", "scope", "on"], properties: { app: APP, schedule: { type: "string", description: "the schedule's name, from apps_health's schedules" }, scope: placeInput, on: { type: "boolean", description: "true to switch it on, false off" } } },
       async run(ctx, { app, schedule, scope, on }) {
         ctx.schedule(app, schedule, placeOf(ctx, scope), on);

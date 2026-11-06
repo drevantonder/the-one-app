@@ -48,8 +48,8 @@ function know(apps) {
     names,
     // An item's icon: the logo of the site it's for, else the icon of the app that made or uses it, else a key.
     icon: (item) => (item.image ? { name: item.title, image: item.image, image_kind: item.image_kind } : app(item.app || item.apps[0]) || { ...KEY, name: item.title }),
-    // The items the apps installed for this person make, as their `vault` says.
-    makers: () => apps.filter((a) => a.installed?.length).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.make && n.type).map((n) => ({ app: a.name, tool: n.make, type: n.type }))).sort((x, y) => x.type.localeCompare(y.type)),
+    // The items the apps added for this person make, as their `vault` says.
+    makers: () => apps.filter((a) => a.added?.length).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.make && n.type).map((n) => ({ app: a.name, tool: n.make, type: n.type }))).sort((x, y) => x.type.localeCompare(y.type)),
     // What the apps switched on for an item do with items of its type.
     actions: (item) => apps.filter((a) => item.apps.includes(a.name)).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.type && n.type === item.type).flatMap((n) => Object.entries(n.actions || {}).map(([tool, title]) => ({ app: a.name, tool, title })))).sort((x, y) => x.title.localeCompare(y.title)),
     // Its row's grey line: what it is, and the apps using it but the one that made it and those what it is names;

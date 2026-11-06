@@ -741,12 +741,12 @@ class Run {
   }
 
   /// The apps a page shows and the scopes each reads (src/node/screens.rs: `page_contexts`): with `page` (`user`,
-  /// `group:<id>` or `global`), those installed there, each reaching only it; without, every app, reaching all it may.
+  /// `group:<id>` or `global`), those added there, each reaching only it; without, every app, reaching all it may.
   pages(page) {
     const at = page === "user" ? `user:${this.who.user}` : page;
     return this.view.apps
       .filter((a) => a.bundle && !a.deleted)
-      .map((a) => ({ app: a, scopes: at ? (a.installed.includes(at) ? a.reach.filter((h) => h.id === at) : []) : a.reach }))
+      .map((a) => ({ app: a, scopes: at ? (a.added.includes(at) ? a.reach.filter((h) => h.id === at) : []) : a.reach }))
       .filter((p) => p.scopes.length);
   }
 
@@ -795,11 +795,11 @@ class Run {
     return out;
   }
 
-  /// Every app in the network, with what each does for this person where it's installed for them (src/node/apps.rs:
+  /// Every app in the network, with what each does for this person where it's added for them (src/node/apps.rs:
   /// `catalog`). What it says of itself comes from its latest deploy.
   /// `light`, as a window draws them (src/node/apps.rs: `apps_drawn`): what shows each one and where.
   async apps({ light = false } = {}) {
-    const drawn = ["name", "title", "icon", "color", "domain", "image", "image_kind", "installed", "deleted", "screens", "widgets", "owner"];
+    const drawn = ["name", "title", "icon", "color", "domain", "image", "image_kind", "added", "deleted", "screens", "widgets", "owner"];
     return Promise.all(this.view.apps.map(async ({ reach, ...info }) => {
       const app = deployed(this.view, info.name);
       const d = app && (await this.person.describe(this.who, app).catch(keysFirst));

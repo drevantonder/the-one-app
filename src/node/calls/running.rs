@@ -76,7 +76,7 @@ impl Node {
         self.0.grants.lock().unwrap().get(token).cloned()
     }
 
-    /// What every app installed for this machine's person says with an agent's prompt here: each app's `prompt` hook,
+    /// What every app added for this machine's person says with an agent's prompt here: each app's `prompt` hook,
     /// asked at once, their answers joined. The node remembers, per app and session, when it last asked, and tells
     /// the app as `since` (null on a session's first prompt). An app that fails, says nothing or takes longer than
     /// `PROMPT_LIMIT` (the harness waits for this) is left out.

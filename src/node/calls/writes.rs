@@ -27,7 +27,7 @@ impl Node {
                 self.write_insight(to, me, said);
             }
         }
-        let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
+        let (adds, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Add { .. }));
         let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
         let (items, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Vault { .. }));
         // Each scope's statements, in the order the call ran them, and the blobs they keep.
@@ -60,13 +60,13 @@ impl Node {
             self.share_blob(&scope, &blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
             put.push(format!("{scope} {blob}"));
         }
-        Ok(Prepared { statements, writes, items, installs, put })
+        Ok(Prepared { statements, writes, items, adds, put })
     }
 
-    /// Writes a call's prepared appends as its caller. Installs come last, since installing a built-in app the network
-    /// doesn't have yet adds it first.
+    /// Writes a call's prepared appends as its caller. Apps added come last, since adding a built-in app the network
+    /// doesn't have yet brings it in first.
     pub(in crate::node) async fn write_prepared(&self, app: &str, prepared: Prepared, scopes: &[Scope], me: &Caller) -> Result<()> {
-        let Prepared { statements, mut writes, items, installs, put } = prepared;
+        let Prepared { statements, mut writes, items, adds, put } = prepared;
         // The blobs it put in the bucket aren't put again by the steps that keep them.
         self.0.blobs.put_first.lock().unwrap().extend(put.iter().cloned());
         let wrote = async {
@@ -92,10 +92,10 @@ impl Node {
                     self.call_item(app, me, scopes, &id, scope, data, same, release).await?;
                 }
             }
-            for append in installs {
-                if let Append::Install { app, scope, installed, node } = append {
+            for append in adds {
+                if let Append::Add { app, scope, added, node } = append {
                     let scope = Scope::parse_for(&scope, &me.user)?;
-                    writes.extend(self.install_entries(me, &app, &scope, installed, node.as_deref()).await?);
+                    writes.extend(self.add_entries(me, &app, &scope, added, node.as_deref()).await?);
                 }
             }
             for (scope, content) in writes {
@@ -134,7 +134,7 @@ pub(in crate::node) struct Prepared {
     statements: Vec<(Scope, Vec<Statement>, Vec<String>)>,
     writes: Vec<(Scope, Content)>,
     items: Vec<Append>,
-    installs: Vec<Append>,
+    adds: Vec<Append>,
     /// `<scope> <hash>` of each blob put in the bucket.
     put: Vec<String>,
 }
@@ -182,6 +182,6 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
             };
             (Scope::Global, service_entry(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
         }
-        Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("installs, costs, statements and items are written on their own"),
+        Append::Add { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("apps added, costs, statements and items are written on their own"),
     })
 }

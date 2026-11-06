@@ -1,7 +1,8 @@
 //! Old names, read as this release names them: what a release from before the network and app schedules had their
 //! names wrote, in the scope database's copies and in signed steps and entries, which can't be written again. A reader
 //! turns them into this release's names as it reads them, here and nowhere else; nothing writes the old ones. The network's table and type were `install`; app schedules' tables `keeps` and `keep_keys`, and their
-//! step `grant`; the permission to choose which devices keep a scope's apps running, run its calls and open its Vault
+//! step `grant`; the apps added to a scope, its table `installs` (`installed`, `installed_by`, `installed_at`) and
+//! steps `install` and `uninstall`; the permission to choose which devices keep a scope's apps running, run its calls and open its Vault
 //! was `keep`. The setting that names the Cloudflare node was `serverless`. The Vault's agents, in an item's apps and a
 //! request's app, were `agents`, the AGENTS.md app's name, which never used the Vault.
 
@@ -18,6 +19,14 @@ pub fn database(db: &Connection) -> rusqlite::Result<()> {
         if has(old) && !has(new) {
             db.execute_batch(&format!("ALTER TABLE {old} RENAME TO {new}"))?;
         }
+    }
+    if has("installs") && !has("added") {
+        db.execute_batch(
+            "ALTER TABLE installs RENAME TO added;
+             ALTER TABLE added RENAME COLUMN installed TO added;
+             ALTER TABLE added RENAME COLUMN installed_by TO added_by;
+             ALTER TABLE added RENAME COLUMN installed_at TO added_at;",
+        )?;
     }
     if has("vault_requests") {
         db.execute("UPDATE vault_requests SET app = ?1 WHERE app = 'agents'", [crate::database::scopes::AGENTS])?;
@@ -39,13 +48,15 @@ pub fn database(db: &Connection) -> rusqlite::Result<()> {
 }
 
 /// A signed step's or entry's content as an earlier release wrote it, in this release's names: app schedules' step,
-/// and the types, roles and rules a release's `defaults` step says.
+/// adding and removing an app, and the types, roles and rules a release's `defaults` step says.
 pub fn content(c: &mut Content) {
     if c.app != crate::database::scopes::APP {
         return;
     }
     match c.kind.as_str() {
         "grant" => c.kind = crate::database::scopes::APP_SCHEDULES.to_string(),
+        "install" => c.kind = crate::database::scopes::ADD_APP.to_string(),
+        "uninstall" => c.kind = crate::database::scopes::REMOVE_APP.to_string(),
         "vault-request" if c.data["app"] == "agents" => c.data["app"] = crate::database::scopes::AGENTS.into(),
         "setting" if c.data["name"] == "serverless" => c.data["name"] = crate::database::scopes::CLOUDFLARE_NODE.into(),
         super::steps::DEFAULTS => renamed(&mut c.data),
@@ -84,7 +95,8 @@ mod tests {
         let now = crate::permissions::DEFAULTS;
         let then = now.replace("'network'", "'install'").replace("network:", "install:").replace("\"choose-devices\"", "\"keep\"");
         let schema = crate::database::scope::SCHEMA;
-        let schema_then = schema.replace("TABLE network ", "TABLE install ").replace("TABLE app_schedules ", "TABLE keeps ").replace("TABLE app_schedule_keys ", "TABLE keep_keys ");
+        let schema_then = schema.replace("TABLE network ", "TABLE install ").replace("TABLE app_schedules ", "TABLE keeps ").replace("TABLE app_schedule_keys ", "TABLE keep_keys ")
+            .replace("TABLE added (\n  app TEXT PRIMARY KEY,\n  added INTEGER NOT NULL,\n  added_by TEXT NOT NULL,\n  added_at", "TABLE installs (\n  app TEXT PRIMARY KEY,\n  installed INTEGER NOT NULL,\n  installed_by TEXT NOT NULL,\n  installed_at");
         assert_ne!(schema, schema_then, "the old tables' names");
         for (db, schema, defaults) in [(&old, &schema_then, &then), (&new, &schema.to_string(), &now.to_string())] {
             db.execute_batch(crate::permissions::SCHEMA).unwrap();
@@ -92,6 +104,8 @@ mod tests {
             db.execute_batch(defaults).unwrap();
             db.execute("INSERT INTO relations VALUES ('person:a', 'admin', ?1, NULL)", [crate::permissions::NETWORK.replace("network:", if std::ptr::eq(db, &old) { "install:" } else { "network:" })]).unwrap();
         }
+        old.execute("INSERT INTO installs VALUES ('notes', 1, 'person:a', 0)", []).unwrap();
+        new.execute("INSERT INTO added VALUES ('notes', 1, 'person:a', 0)", []).unwrap();
         database(&old).unwrap();
         database(&new).unwrap();
         assert_eq!(crate::database::stored::state_hash(&old).unwrap(), crate::database::stored::state_hash(&new).unwrap());
@@ -110,6 +124,11 @@ mod tests {
         let mut grant = Content::new(crate::database::scopes::APP, "grant", serde_json::json!({ "app": "notes" }));
         content(&mut grant);
         assert_eq!(grant.kind, crate::database::scopes::APP_SCHEDULES);
+        for (old, new) in [("install", crate::database::scopes::ADD_APP), ("uninstall", crate::database::scopes::REMOVE_APP)] {
+            let mut step = Content::new(crate::database::scopes::APP, old, serde_json::json!({ "app": "notes" }));
+            content(&mut step);
+            assert_eq!(step.kind, new);
+        }
         let mut setting = crate::database::content::setting("serverless", Some("abc"));
         content(&mut setting);
         assert_eq!(setting.data["name"], crate::database::scopes::CLOUDFLARE_NODE);

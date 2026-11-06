@@ -62,8 +62,8 @@ pub mod code {
     pub const NOT_SIGNED_IN: &str = "not_signed_in";
     /// No device runs what was asked now: its node or service is starting, asking again in a moment answers.
     pub const RESTARTING: &str = "restarting";
-    /// An app that isn't installed, or isn't on the person's pages.
-    pub const NOT_INSTALLED: &str = "not_installed";
+    /// An app that isn't added, or isn't on the person's pages.
+    pub const NOT_ADDED: &str = "not_added";
     /// A step signed for a position of who's who that another device's step has taken: sign it again for the next.
     pub const TAKEN: &str = "taken";
     /// A signed request the relay already took once (it takes each `(by, at)` once): sign it again with a new `at`.
@@ -207,7 +207,7 @@ pub fn javascript() -> String {
         blobs = json!(crate::bucket::BLOBS),
         fallback = json!(NOTE_FALLBACK),
         yours = json!(crate::config::YOURS),
-        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED }),
+        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notAdded": code::NOT_ADDED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED }),
         update = json!(UPDATE_REFUSAL),
     )
 }

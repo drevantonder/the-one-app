@@ -106,9 +106,9 @@ class Network:
     def seed(self, agents_md, skills, model):
         for app in ["agents", "ai", "computer", "agent-devices", "gmail", "google-calendar", "drive", "docs", "sheets", "whatsapp",
                     "messenger", "models", "shell", "imessage", "reminders", "calendar", "contacts"]:
-            self.run("install", app, "--scope", "global")
+            self.run("add", app, "--scope", "global")
         self.run("group", "create", "Family")
-        self.run("install", "board", "--scope", "Family")
+        self.run("add", "board", "--scope", "Family")
         t = now_ms()
         # The posts name only this network's own device, so what agents find on the board matches what they can reach.
         here = next(l.split("●", 1)[1].split("(this one)")[0].strip() for l in self.run("status").splitlines() if "(this one)" in l)
@@ -183,11 +183,11 @@ class Network:
             repo, path = check["repo_file"]
             r = subprocess.run([self.one, "repos", "file", repo, path], env=self.env(), capture_output=True, text=True)
             out["repo_file"] = r.returncode == 0 and "error" not in r.stdout.lower()[:200]
-        if "installed_in_group" in check:
-            app, group = check["installed_in_group"]
+        if "added_in_group" in check:
+            app, group = check["added_in_group"]
             # A line per app: "Repos (repos): added for Everyone, Family, a service. …"
             m = re.search(rf"\({re.escape(app)}\): added for (.+?)(?:, a service|, an update waiting)*\.(?: |$)", self.run("apps", "list"), re.M)
-            out["installed_in_group"] = bool(m) and group in m.group(1).split(", ")
+            out["added_in_group"] = bool(m) and group in m.group(1).split(", ")
         if "vault_request" in check:
             out["vault_request"] = bool(self.run("vault", "requests").strip())
         if "no_vault_value" in check:

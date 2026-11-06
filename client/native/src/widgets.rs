@@ -39,8 +39,8 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     let mut answered = true;
     let mut items = Vec::new();
     for (scope, title) in &pages {
-        // An app's widgets show on a page it's installed on.
-        let here: Vec<&Value> = apps.iter().filter(|a| a["installed"].as_array().is_some_and(|s| s.iter().any(|s| in_scope(s.as_str().unwrap_or(""), scope)))).collect();
+        // An app's widgets show on a page it's added to.
+        let here: Vec<&Value> = apps.iter().filter(|a| a["added"].as_array().is_some_and(|s| s.iter().any(|s| in_scope(s.as_str().unwrap_or(""), scope)))).collect();
         let widgets = match crate::node(device, "GET", &format!("/v1/widgets?scope={}", url::form_urlencoded::byte_serialize(scope.as_bytes()).collect::<String>()), None).await {
             Ok(Value::Array(w)) => w,
             _ => {
@@ -138,9 +138,9 @@ fn headline(tree: &Value) -> Option<String> {
     Some(best.1.0.clone())
 }
 
-/// Whether an app installed at `installed` (`user:<id>`, `group:<id>`, `global`) is on the page `scope`.
-fn in_scope(installed: &str, scope: &str) -> bool {
-    installed == scope || (scope == "user" && installed.starts_with("user:"))
+/// Whether an app added at `added` (`user:<id>`, `group:<id>`, `global`) is on the page `scope`.
+fn in_scope(added: &str, scope: &str) -> bool {
+    added == scope || (scope == "user" && added.starts_with("user:"))
 }
 
 /// Written whole or not at all, as a widget may read it at any moment.

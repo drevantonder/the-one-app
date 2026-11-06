@@ -130,7 +130,7 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
     Skill { name: server_name(), description: root_description(), body, files: vec![] }
 }
 
-/// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those installed for the person having their
+/// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those added for the person having their
 /// tools): the areas of their own, the Vault's, then one for each app with a guide.
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {

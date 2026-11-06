@@ -62,7 +62,7 @@ function se(e) {
 	let t = Math.max(0, Math.round((e - Date.now()) / 6e4));
 	return t < 1 ? "now" : t < 60 ? "in " + t + "m" : t < 1440 ? "in " + Math.round(t / 60) + "h" : "in " + Math.round(t / 1440) + "d";
 }
-var ce = (e, t) => e.installed.some((e) => t.some((t) => t.id === e));
+var ce = (e, t) => e.added.some((e) => t.some((t) => t.id === e));
 function v(t) {
 	let s = e(159), { name: u, list: m, onOpen: g, onGone: _, reloadList: v, bar: x } = t, S = x !== void 0 && x, { apps: C, places: fe } = m, w;
 	if (s[0] !== C || s[1] !== u) {

@@ -6,7 +6,7 @@ use super::*;
 /// they'd stay as apps no release ships. `built_in` is the bundle the running release ships under a name, which says
 /// it whatever the update sends; `deploys` 0 is one it offers but the network never added. Only one still running the
 /// release's own code goes: one an admin deployed their own code to (from its own repo, say) is theirs now, and stays.
-/// They wait in Recently Deleted, where an admin could restore one. Gives each renamed one's new name, with where the old one was installed.
+/// They wait in Recently Deleted, where an admin could restore one. Gives each renamed one's new name, with where the old one was added.
 pub(super) fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Vec<(String, Vec<String>)>> {
     let mut moved = Vec::new();
     for app in crate::node().get("/v1/apps")?.as_array().into_iter().flatten() {
@@ -18,7 +18,7 @@ pub(super) fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Ve
             match renamed.iter().find(|(old, _)| old == name) {
                 Some((_, new)) => {
                     println!("Deleted {name}: it's {new} now");
-                    let scopes = app["installed"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect();
+                    let scopes = app["added"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect();
                     moved.push((new.clone(), scopes));
                 }
                 None => println!("Deleted {name}: its folder is gone from apps/, so no release ships it"),
@@ -28,11 +28,11 @@ pub(super) fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Ve
     Ok(moved)
 }
 
-/// Adds each renamed built-in app where its old name was installed.
+/// Adds each renamed built-in app where its old name was added.
 pub(super) fn add_where(moved: &[(String, Vec<String>)]) {
     for (app, scopes) in moved {
         for scope in scopes {
-            match crate::node().post("/v1/install", json!({ "app": app, "scope": scope, "installed": true })) {
+            match crate::node().post("/v1/add", json!({ "app": app, "scope": scope, "added": true })) {
                 Ok(_) => println!("Added {app} to {scope}, where its old name was"),
                 Err(err) => println!("  couldn't add {app} to {scope}: {err:#}"),
             }

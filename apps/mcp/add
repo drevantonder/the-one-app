@@ -1,5 +1,5 @@
 #!/bin/sh
-# Makes a remote MCP server (streamable HTTP) an app with its tools, deploys it and installs it:
+# Makes a remote MCP server (streamable HTTP) an app with its tools, deploys it and adds it:
 #
 #   apps/mcp/add <name> <url> [--title <title>] [--header '<Name>: <value>']... [--scope user|global|<group>]
 #   apps/mcp/add <name>        deploys the server's tools as they are now: after sign_in, or when they change
@@ -57,7 +57,7 @@ deployed() { # whether the app as deployed has this file as it is here
 if [ $new = yes ] || ! deployed app.js || ! deployed server.json; then
   $one deploy "$dir"
 fi
-[ $new = no ] || $one install "$name" --scope "$scope"
+[ $new = no ] || $one add "$name" --scope "$scope"
 
 tries=0 # a deploy takes a moment to reach the devices, and restarts their runtimes
 until $one "$name" refresh_tools >"$dir/tools.next" 2>"$dir/error"; do

@@ -22,7 +22,7 @@ impl Node {
     }
 
     /// Every widget, rendered for `viewer`; with `scope` (`user`, `group:<id>` or `global`), those of the apps
-    /// installed there, for a shell's page of that scope, each reaching only it. Each comes at its own options at every
+    /// added there, for a shell's page of that scope, each reaching only it. Each comes at its own options at every
     /// size it draws, with its options (choices worked out now), and as each widget the viewer put on that page with
     /// options of their own (`placed`, by its id, at its size).
     pub async fn widgets(&self, viewer: Caller, scope: Option<&str>) -> Result<Vec<Value>> {
@@ -118,7 +118,7 @@ impl Node {
         Ok(Value::Object(asked.join_all().await.into_iter().flatten().collect()))
     }
 
-    /// The apps a page shows and the context each renders with: with `scope`, those installed there, each reaching
+    /// The apps a page shows and the context each renders with: with `scope`, those added there, each reaching
     /// only it; without, every app, reaching all it may. Each comes with its grant, which lasts as long as it's kept.
     pub(super) fn page_contexts(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<(String, Context, Granted)>> {
         let scope = scope.map(|s| Scope::parse_for(s, &viewer.user)).transpose()?;
@@ -127,8 +127,8 @@ impl Node {
             let mut ctx = self.read_context(&app, viewer)?;
             let granted = self.grant(&app, viewer, &mut ctx, 0);
             if let Some(scope) = &scope {
-                let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(&app))))?;
-                ctx.scopes.retain(|s| installed && s.id == scope.to_string());
+                let added = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|s| s.added.contains(&app))))?;
+                ctx.scopes.retain(|s| added && s.id == scope.to_string());
             }
             if !ctx.scopes.is_empty() {
                 out.push((app, ctx, granted));

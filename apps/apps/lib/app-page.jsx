@@ -12,7 +12,7 @@ function soon(ms) {
   return m < 1 ? "now" : m < 60 ? "in " + m + "m" : m < 1440 ? "in " + Math.round(m / 60) + "h" : "in " + Math.round(m / 1440) + "d"
 }
 
-export const onAPage = (a, places) => a.installed.some((id) => places.some((p) => p.id === id))
+export const onAPage = (a, places) => a.added.some((id) => places.some((p) => p.id === id))
 
 /// `list` is what the App Store's list call gave; `onOpen(name)` opens another app's page (a row of Works With),
 /// `onGone()` leaves this one once it's erased, and `reloadList` asks for the list again. `bar`: this page is a screen

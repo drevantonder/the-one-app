@@ -65,7 +65,7 @@ function R(e) {
 			...I,
 			name: e.title
 		},
-		makers: () => e.filter((e) => e.installed?.length).flatMap((e) => Object.values(e.vault || {}).filter((e) => e.make && e.type).map((t) => ({
+		makers: () => e.filter((e) => e.added?.length).flatMap((e) => Object.values(e.vault || {}).filter((e) => e.make && e.type).map((t) => ({
 			app: e.name,
 			tool: t.make,
 			type: t.type

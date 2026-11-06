@@ -32,5 +32,5 @@ export const members = {
     if (!change) throw new Error(`an app is deleted, restored or erased, not ${how}`);
     return node("app", { name: app, owner, ...change });
   },
-  install: ({ app, installed }) => node(installed ? "install" : "uninstall", { app }),
+  add: ({ app, added }) => node(added ? "add-app" : "remove-app", { app }),
 };

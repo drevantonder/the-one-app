@@ -538,22 +538,22 @@ fn note_change(i: &mut Network, scope: &Scope) {
     i.changed.entry(scope.clone()).and_modify(|c| c.1 = now).or_insert((now, now));
 }
 
-/// The scopes a call of `app` as `user` may reach: their own if it's installed for them at all, each of their groups
-/// it's installed for (in the group or in `global`; a group whose installs this device can't see counts), and `global`
-/// if it's installed there.
+/// The scopes a call of `app` as `user` may reach: their own if it's added for them at all, each of their groups
+/// it's added for (in the group or in `global`; a group whose apps added this device can't see counts), and `global`
+/// if it's added there.
 fn reachable(i: &Network, app: &str, user: &str) -> Result<Vec<Scope>> {
     let db = i.r.db();
-    let installed = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|st| st.installed.contains(app));
-    let global = installed(&Scope::Global);
+    let added = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|st| st.added.contains(app));
+    let global = added(&Scope::Global);
     let mut out = Vec::new();
     for g in db.groups_of(user)?.keys() {
         let s = Scope::Group(g.clone());
-        if global || installed(&s) || !i.r.holds(&s) {
+        if global || added(&s) || !i.r.holds(&s) {
             out.push(s);
         }
     }
     let mine = Scope::User(user.into());
-    if global || installed(&mine) || out.iter().any(|s| installed(s)) {
+    if global || added(&mine) || out.iter().any(|s| added(s)) {
         out.insert(0, mine);
     }
     if global {

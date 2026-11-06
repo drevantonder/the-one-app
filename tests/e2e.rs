@@ -58,7 +58,7 @@ async fn add_notes(a: &Node) {
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
-    a.install(&me, "notes", &one::database::scopes::Scope::Global, true, None).await.unwrap();
+    a.add(&me, "notes", &one::database::scopes::Scope::Global, true, None).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

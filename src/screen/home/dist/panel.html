@@ -14,7 +14,7 @@ var u = (() => {
 		widgets: {},
 		badges: {},
 		failed: /* @__PURE__ */ new Set()
-	}, t = () => e.state?.user, n = () => e.state?.network, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => e?.tools?.find((e) => e.accounts)?.name, l = (e) => (e.installed || []).map((e) => e.startsWith("user:") ? "user" : e), u = (e) => e === t()?.id ? "You" : n()?.users.find((t) => t.id === e)?.name || "Someone", d = (e) => e.slice().sort((e, n) => (e === t()?.id) - (n === t()?.id) || u(e).localeCompare(u(n))).map((e) => e === t()?.id ? "you" : u(e)), f = (e) => e.length < 2 ? e.join("") : `${e.slice(0, -1).join(", ")} and ${e.at(-1)}`, p = (e, n) => e.length === 1 && e[0] === t()?.id ? "" : `${e.length <= 3 ? f(d(e)).replace(/^y/, "Y") : `${e.length} people`} · ${m(n)}`;
+	}, t = () => e.state?.user, n = () => e.state?.network, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => e?.tools?.find((e) => e.accounts)?.name, l = (e) => (e.added || []).map((e) => e.startsWith("user:") ? "user" : e), u = (e) => e === t()?.id ? "You" : n()?.users.find((t) => t.id === e)?.name || "Someone", d = (e) => e.slice().sort((e, n) => (e === t()?.id) - (n === t()?.id) || u(e).localeCompare(u(n))).map((e) => e === t()?.id ? "you" : u(e)), f = (e) => e.length < 2 ? e.join("") : `${e.slice(0, -1).join(", ")} and ${e.at(-1)}`, p = (e, n) => e.length === 1 && e[0] === t()?.id ? "" : `${e.length <= 3 ? f(d(e)).replace(/^y/, "Y") : `${e.length} people`} · ${m(n)}`;
 	function m(e) {
 		let t = d(e);
 		return t.length ? t.length === 1 ? `apps chosen by ${t[0]}` : t.length === 2 ? `apps chosen by ${t[0]} and ${t[1]}` : `apps chosen by ${t.length} admins` : "apps chosen by admins";
@@ -150,13 +150,13 @@ var u = (() => {
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => z(() => one.api("POST", "/v1/install", {
+			run: () => z(() => one.api("POST", "/v1/add", {
 				app: e.name,
 				scope: t.scope,
-				installed: !1
+				added: !1
 			}), (n) => n.map((n) => n.name === e.name ? {
 				...n,
-				installed: (n.installed || []).filter((e) => (e.startsWith("user:") ? "user" : e) !== t.scope)
+				added: (n.added || []).filter((e) => (e.startsWith("user:") ? "user" : e) !== t.scope)
 			} : n))
 		}), b(e) && (e.deploys || 0) > 0 && n.push({
 			title: "Delete App…",

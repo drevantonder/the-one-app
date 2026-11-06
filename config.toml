@@ -15,7 +15,7 @@ repo = "drevantonder/the-one-app"
 release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"
 release_signer = "op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'"
 # Every folder in apps/ ships built into each release, and a new network has them all, for anyone to add to their own
-# page. These are the ones it also installs in global; each `one update` deploys the release's version of every one a network has.
+# page. These are the ones it also adds to global; each `one update` deploys the release's version of every one a network has.
 apps = ["repos", "apps"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.
@@ -45,6 +45,6 @@ wns_app = ""
 wns_object = ""
 
 # A network's settings until its admins change them in Settings (`setting` entries). Every network has store, the app
-# the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install).
+# the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.add).
 [settings]
 store = "apps"

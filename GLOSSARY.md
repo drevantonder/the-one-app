@@ -56,7 +56,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   service; operation, for a function.
 - **Added**: an app recorded as added to a scope, by a person, or for a group or everyone by its admin: the state the
   network should be in. The App Store only records it, like any app could; the core makes it so, deploying the app and
-  running its service on the node the person chose while adding it, and takes it all away when it's removed.
+  running its service on the node the person chose while adding it, and takes it all away when it's removed. Avoid:
+  install, uninstall.
 - **Accounts**: the accounts apps sign in to (a Gmail address, a WhatsApp number), listed together in the sidebar.
 - **App runtime**: where apps run on a node, switched on per node: a sandbox with no disk and no keys of its own, where
   an app reaches only its own databases, its own services, the web, and other apps' tools, through `ctx`. It is our

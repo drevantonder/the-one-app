@@ -92,7 +92,7 @@ impl Node {
     }
 
     /// Creates the network, with every built-in app added (owned by admins), so anyone may add one to their own page,
-    /// and these installed in `global`. Its first person is `user` if given (who they were in a network this one
+    /// and these added to `global`. Its first person is `user` if given (who they were in a network this one
     /// replaces, so their account at its sign-in is still theirs), else someone new. Who's who is its scope database from
     /// its first freeze on, which its new recovery key signs as it starts (`steps::first_freeze`).
     pub async fn create_with(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str]) -> Result<String> {
@@ -140,7 +140,7 @@ impl Node {
         }
         for app in apps {
             self.bring_in(&me, app).await?;
-            self.append(&Scope::Global, content::node("install", json!({ "app": app }))).await?;
+            self.append(&Scope::Global, content::added(app, true)).await?;
         }
         self.settle().await?;
         self.emit(Event::Network);

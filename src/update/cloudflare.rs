@@ -63,7 +63,7 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             }
             Err(err) => {
                 failed = true;
-                let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_INSTALLED) { " (add Shell in the App Store, or run one update on the device with the Cloudflare settings)" } else { "" };
+                let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_ADDED) { " (add Shell in the App Store, or run one update on the device with the Cloudflare settings)" } else { "" };
                 println!("  {name}: couldn't deploy to Cloudflare: {err:#}{hint}");
             }
         }

@@ -299,7 +299,7 @@ pub(super) fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, 
 /// The scope whose added app `name` is, as `user` sees it, for a service switched on with none said: their own, if
 /// it's added there, then everyone's, then one of their groups'.
 pub(super) fn added_scope(i: &Network, user: &str, name: &str) -> Result<Option<Scope>> {
-    let added = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|v| v.installed.contains(name));
+    let added = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|v| v.added.contains(name));
     let own = Scope::User(user.to_string());
     let db = i.r.db();
     let mut groups = Vec::new();

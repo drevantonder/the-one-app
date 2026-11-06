@@ -646,8 +646,8 @@ impl ScopeDb {
         self.row("SELECT value FROM settings WHERE name = ?1", [name], |r| r.get(0))
     }
 
-    pub fn installed(&self) -> Result<BTreeSet<String>> {
-        Ok(self.rows("SELECT app FROM installs WHERE installed = 1", [], |r| r.get(0))?.into_iter().collect())
+    pub fn added(&self) -> Result<BTreeSet<String>> {
+        Ok(self.rows("SELECT app FROM added WHERE added = 1", [], |r| r.get(0))?.into_iter().collect())
     }
 
     /// The releases steps said (`steps`), oldest first, as entries of their author's (`release::latest` reads them as
@@ -673,13 +673,13 @@ impl ScopeDb {
 
     pub fn state(&self) -> Result<ScopeState> {
         let mut s = ScopeState::default();
-        for (app, installed, by, at) in self.rows("SELECT app, installed, installed_by, installed_at FROM installs", [], |r| {
+        for (app, added, by, at) in self.rows("SELECT app, added, added_by, added_at FROM added", [], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, id(&r.get::<_, String>(2)?), r.get::<_, i64>(3)? as u64))
         })? {
-            if installed {
-                s.installed.insert(app.clone());
+            if added {
+                s.added.insert(app.clone());
             }
-            s.installers.insert(app, (by, at));
+            s.added_by.insert(app, (by, at));
         }
         for (app, schedule, on, by, at) in self.rows("SELECT app, schedule, switched_on, switched_by, switched_at FROM schedules", [], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?, id(&r.get::<_, String>(3)?), r.get::<_, i64>(4)? as u64))
@@ -726,6 +726,9 @@ pub const APP_DATABASE: &str = "main";
 pub const CLOUDFLARE_NODE: &str = "cloudflare_node";
 /// The kind of node entry that sets app schedules.
 pub const APP_SCHEDULES: &str = "app-schedules";
+/// The kinds of a scope's own entry that add an app to it, and remove it.
+pub const ADD_APP: &str = "add-app";
+pub const REMOVE_APP: &str = "remove-app";
 /// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.
 pub const APPS_PART: &str = "apps";
 /// The kinds of node entry that say a release of the node's or a service's program (`release`).
@@ -916,13 +919,13 @@ pub fn valid_app_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP && name != AGENTS
 }
 
-/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, requests for Vault items
+/// What a scope's own node entries add up to: the apps added to it, every `open` of it, requests for Vault items
 /// (the items themselves are in its `vault` database, `src/vault.rs`), and its schedules' switches.
 #[derive(Clone, Debug, Default)]
 pub struct ScopeState {
-    pub installed: BTreeSet<String>,
-    /// Who last installed each app here, and when: its schedules run as them, unless someone switched one on since.
-    pub installers: BTreeMap<String, (String, u64)>,
+    pub added: BTreeSet<String>,
+    /// Who last added each app here, and when: its schedules run as them, unless someone switched one on since.
+    pub added_by: BTreeMap<String, (String, u64)>,
     /// Each schedule switched on or off here, by (app, schedule): (on, by whom, when).
     pub switches: BTreeMap<(String, String), (bool, String, u64)>,
     /// Apps' and agents' requests for a person's item here, by id.

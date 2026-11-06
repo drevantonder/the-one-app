@@ -428,7 +428,7 @@ const h = OneUI.react.createElement;
   const label = (a) => a?.title || a?.name || "";
   const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
   const keepsAccounts = (a) => !!a?.tools?.some((t) => t.accounts);
-  const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
+  const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
 
   /// Every page this person can read, as the sidebar lists them: theirs, their groups', then everyone's.
   function pages() {
@@ -1286,7 +1286,7 @@ const h = OneUI.react.createElement;
     "POST /v1/service": (b) => write(members.service({ device: String(b.device || ""), name: String(b.name || ""), on: b.on === true })),
     "POST /v1/retire": (b) => write(members.retire({ app: b.app, owner: app(b.app)?.owner, how: b.how })),
     // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
-    "POST /v1/install": (b) => (b.scope === "global" ? write(members.install({ app: b.app, installed: b.installed !== false })) : api("/v1/install", { method: "POST", body: b })),
+    "POST /v1/add": (b) => (b.scope === "global" ? write(members.add({ app: b.app, added: b.added !== false })) : api("/v1/add", { method: "POST", body: b })),
     "POST /v1/invite-link": (b) => device.invite(String(b.name || "")),
     // As a machine's node answers it: `device` by its key; `scope` user (theirs), global or group:<id>; `days`, 0 to stop.
     "POST /v1/app-schedules": (b) => device.setAppSchedules({ endpoint: String(b.device || ""), app: String(b.app || ""), scope: !b.scope || b.scope === "user" ? `user:${me().id}` : String(b.scope), days: b.days ?? undefined }),

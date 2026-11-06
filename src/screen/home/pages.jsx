@@ -188,7 +188,7 @@ async function save(p, items, hidden = hiddenOf(p), { reload = false } = {}) {
 
 const resize = (p, kept, size) => save(p, keptOf(p).map((k) => (k.widget && k.id === kept.id ? { ...k, size } : k)))
 
-/// Takes a widget off a page, or an app's icon: the app stays installed there, under Edit's Taken Off This Page.
+/// Takes a widget off a page, or an app's icon: the app stays added there, under Edit's Taken Off This Page.
 function remove(p, item) {
   one.tap("medium")
   const kept = keptOf(p).filter((k) => keyOf(k) !== item.key)
