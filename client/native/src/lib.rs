@@ -252,12 +252,15 @@ fn let_in() {
         android::push(device);
         android::tell("notify", json!({ "ask": true, "once": true }));
     }
-    // The panel, drawn before this device was in (signed out), draws again.
+    #[cfg(windows)]
+    windows::register_push();
+}
+
+/// The panel, drawn before this device was in (signed out), drawn again now it is.
+fn redraw_panel() {
     if let Some(p) = app().handle.get_webview_window("panel") {
         let _ = p.eval("location.reload()");
     }
-    #[cfg(windows)]
-    windows::register_push();
 }
 
 /// Something changed on the person's devices (the page's events say): the widgets kept for the platform's own again.
@@ -456,24 +459,30 @@ async fn join() -> Result<Value, String> {
     // One key for each person at each address, as the Mac and iPhone apps keep them, its folder named by it too.
     let id = format!("{address} {user}");
     let secret = secrets::device_made(&id)?;
+    let mut made = false;
     let device = {
         let mut d = a.device.lock().unwrap();
         match d.as_ref() {
             Some(d) => d.clone(),
             None => {
                 let dir = a.data.join("client").join(secrets::folder(&id));
-                let made = Arc::new(one_client::Device::new(secret, &address, &dir.to_string_lossy()).keeping());
+                let new = Arc::new(one_client::Device::new(secret, &address, &dir.to_string_lossy()).keeping());
                 if let Some(on) = this_device() {
-                    made.on(&on);
+                    new.on(&on);
                 }
-                *d = Some(made.clone());
-                made
+                *d = Some(new.clone());
+                made = true;
+                new
             }
         }
     };
     match device.connect().await {
         Ok(true) => {
             let_in();
+            // Only the join that made it: every page joins as it starts, the panel's own too.
+            if made {
+                redraw_panel();
+            }
             println!("Let in.");
             return Ok(json!({ "in": true }));
         }
@@ -499,6 +508,7 @@ async fn wait() -> Result<(), String> {
         if device.wait(&token).await.map_err(|e| e.to_string())? {
             app().keep("invite", None);
             let_in();
+            redraw_panel();
             println!("Let in.");
             return Ok(());
         }
