@@ -1531,6 +1531,7 @@ fn oned(args: &[String]) -> Result<()> {
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
             serve(args.iter().any(|a| a == "--throwaway"), args)
         }
+        [name] if *name == one::members::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::apps::run(std::path::Path::new(dir)),
         [name] => one::service::run(name),
         _ => bail!("{} runs this device, or with a service's name, that service, as its oned starts it", one::oned::name()),
     }
@@ -1558,6 +1559,8 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         Some(h) => tokio::net::TcpListener::from_std(h.listener.try_clone()?)?,
         None => listen(&dir).await?,
     };
+    // Its app runtime is a program of its own, which oned starts as its parts.
+    one::apps::APART.store(true, std::sync::atomic::Ordering::SeqCst);
     let node = Node::start(&dir).await?;
     // Its parts that run as processes of their own, as its entries switch them.
     one::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());

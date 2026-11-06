@@ -244,6 +244,13 @@ WhatsApp; Move; remove WhatsApp and see the service stop and its folder go. `--a
 Check: `one throwaway` from nothing, every client: open apps, run tools, a schedule runs, a service runs; `one update` hands
 over without dropping a call.
 
+The split is done (2026-11-06), simpler than the above: the app runtime has no key and no endpoint (`oned apps`,
+`src/apps.rs`). oned stays what everyone calls, holds workerd's port and writes its config, and hands each call to it
+over that loopback; its asks come back through oned's outbound port, which holds the call's keys. oned starts it while
+the `apps` switch is on, and again when it stops, the services left running; a handover's new oned starts its own in its
+own folder. Calls' bookkeeping (keys, databases, steps) stays in oned, since only a holder of the call's keys can do it.
+Left for the contract, which needs phase 6: the entries and tools above.
+
 ### Phase 8: the Cloudflare node's switches
 
 The Cloudflare node runs today's app runtime already (Worker Loader). It gets the same switches in Settings › Devices,

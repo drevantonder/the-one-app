@@ -111,6 +111,11 @@ impl Node {
         Ok(serde_json::from_value(d["service"].clone())?)
     }
 
+    /// The app runtime this node hands apps' calls to.
+    pub fn app_runtime(&self) -> &crate::apps::Apps {
+        &self.0.apps
+    }
+
     /// Whether this device runs apps' calls: unless its person switched its app service off.
     pub fn runs_apps(&self) -> bool {
         self.with(|i| Ok(!Self::off(i.r.db(), &self.0.id, crate::members::APPS_PART))).unwrap_or(true)

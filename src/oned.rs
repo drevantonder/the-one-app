@@ -1,7 +1,9 @@
 //! oned (`<cli>d`): a device's always-on program, this program run by that name; the `<cli>` command line runs, answers
-//! and exits. Its key is the device's, and its parts are the app service (the node: running calls) and each service:
-//! each a process of oned's own (`oned <name>`, `service::run`) with its own key, which oned lists as its device's.
-//! Each is on while the device's latest `service` entry for it says so; with none, the app service is on, the rest off.
+//! and exits. Its key and endpoint are the device's, and everyone calls it; its parts are the app runtime (`oned apps`,
+//! `apps::run`: workerd, which oned hands apps' calls to over a loopback, holding no key or endpoint of its own) and
+//! each service: each a process of oned's own (`oned <name>`, `service::run`) with its own key, which oned lists as its
+//! device's. Each is on while the device's latest `service` entry for it says so; with none, the app runtime is on, the
+//! rest off; and each is started again when it stops, the rest left running.
 //! Only the device's person writes that entry (its switch in Settings' Devices), and oned starts and stops the parts as
 //! it changes. Each process part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
 //! person whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
@@ -242,11 +244,17 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
         let mut declared: BTreeMap<String, Option<crate::sandbox::Declared>> = BTreeMap::new();
         let mut started_with: BTreeMap<String, Option<crate::sandbox::Declared>> = BTreeMap::new();
         let device = node.device_name();
+        // The app runtime, while it runs, and when it stopped by itself lately.
+        let mut apps: Option<std::process::Child> = None;
+        let mut apps_stops: Vec<Instant> = Vec::new();
         loop {
             if let Some(dir) = ERASING.lock().unwrap().clone() {
                 std::thread::sleep(Duration::from_secs(1));
                 for (name, (child, _)) in std::mem::take(&mut running) {
                     stop(&name, child);
+                }
+                if let Some(child) = apps.take() {
+                    stop(crate::members::APPS_PART, child);
                 }
                 crate::apps::stop_all();
                 if let Err(err) = std::fs::remove_dir_all(&dir) {
@@ -260,6 +268,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                 std::thread::sleep(Duration::from_secs(2));
                 continue;
             }
+            keep_runtime(&node, &runtime, &mut apps, &mut apps_stops);
             if looked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 released = runtime.block_on(node.service_builds());
                 declared.clear();
@@ -436,6 +445,43 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
             std::thread::sleep(Duration::from_secs(2));
         }
     });
+}
+
+/// Keeps the app runtime running while its switch is on (with none, it is): started, and again whenever it stops,
+/// saying so once it keeps stopping; stopped once it's switched off.
+fn keep_runtime(node: &Node, runtime: &tokio::runtime::Handle, apps: &mut Option<std::process::Child>, stops: &mut Vec<Instant>) {
+    let name = crate::members::APPS_PART;
+    if let Some(child) = apps
+        && !matches!(child.try_wait(), Ok(None))
+    {
+        tracing::warn!("the app runtime stopped ({:?}): oned starts it again", child.try_wait());
+        *apps = None;
+        stops.retain(|t| t.elapsed() < Duration::from_secs(300));
+        stops.push(Instant::now());
+        if stops.len() >= 3 {
+            say(node, runtime, name, Now { doing: None, problem: Some("It keeps stopping. Its device’s log says why.".into()) });
+        }
+    }
+    match (apps.is_some(), node.runs_apps()) {
+        (false, true) => match node.app_runtime().program().and_then(|mut c| c.stdin(std::process::Stdio::null()).spawn()) {
+            Ok(child) => {
+                tracing::info!("oned started the app runtime");
+                *apps = Some(child);
+            }
+            Err(err) => say(node, runtime, name, Now { doing: None, problem: Some(format!("Couldn’t start it: {err:#}")) }),
+        },
+        (true, false) => {
+            say(node, runtime, name, Now { doing: Some("Stopping"), problem: None });
+            stop(name, apps.take().expect("running"));
+            stops.clear();
+            say(node, runtime, name, Now::default());
+        }
+        (true, true) if stops.len() >= 3 && stops.last().is_some_and(|t| t.elapsed() > Duration::from_secs(60)) => {
+            stops.clear();
+            say(node, runtime, name, Now::default());
+        }
+        _ => {}
+    }
 }
 
 /// Starts a part, given the install it's in and what its app declares it may reach.

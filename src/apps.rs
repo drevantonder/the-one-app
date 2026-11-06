@@ -1,4 +1,8 @@
-//! Apps run in workerd, Cloudflare's open-source Workers runtime, which the node starts beside itself.
+//! Apps run in workerd, Cloudflare's open-source Workers runtime. The app runtime is our wrapper around it, a program of
+//! its own (`oned apps`, `run`) that oned starts while the device's `apps` part is switched on and again if it stops: it
+//! holds no key and no endpoint, and only keeps a workerd serving the config the node writes, on a port the node holds,
+//! so a call waits there while it starts again rather than being refused. Outside oned (tests), the node keeps one in a
+//! thread of its own.
 //! Each deployed app is an ES module inside `runtime/shim.js`, which asks the node to run its queries and writes on
 //! its databases (`src/db.rs`), and runs its tools, widgets, hooks and screens.
 //! When the deploys change, the node writes the config again and restarts workerd.
@@ -10,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow, bail, ensure};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::Digest;
@@ -95,8 +99,8 @@ struct Runtime {
     outbound: u16,
     /// The apps loaded, (name, module source), and how many times the runtime was configured.
     loaded: Mutex<(Vec<(String, String)>, u64)>,
-    /// The running workerd's process id, so a hung one can be stopped and started again.
-    pid: Mutex<Option<u32>>,
+    /// The port workerd serves, held for as long as the node runs and handed to each that serves it.
+    listener: std::net::TcpListener,
     /// What each loaded app says it is, once asked.
     described: Mutex<std::collections::HashMap<String, Value>>,
 }
@@ -109,46 +113,29 @@ impl Apps {
     }
 
     fn start_blocking(dir: &Path, outbound: u16) -> Result<Self> {
-        let workerd = workerd()?;
-        stop_previous(dir);
         // Where apps' stores were kept before each app's databases were in the bucket.
         let _ = std::fs::remove_dir_all(dir.join("storage"));
-        // Held for as long as the node runs, and handed to each workerd it starts: no one takes the port meanwhile.
+        // Held for as long as the node runs, and handed to each workerd: no one takes the port meanwhile.
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
-        let config = write_config(dir, &[], port, outbound, 0)?;
-        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None), described: Mutex::new(Default::default()) });
-        let watch = runtime.clone();
-        let log = dir.join("workerd.log");
-        std::thread::Builder::new().name("workerd".into()).spawn(move || loop {
-            let out = std::fs::OpenOptions::new().create(true).append(true).open(&log).expect("workerd log");
-            let mut command = std::process::Command::new(&workerd);
-            command.arg("serve").arg(&config).stdout(out.try_clone().unwrap()).stderr(out);
-            // Elsewhere than Linux, where it dies with its node, the node stops it as it stops (stop_all), and the
-            // next start stops one a killed node left (stop_previous).
-            child(&mut command, &[("http", &listener)]);
-            let spawned = {
-                let mut running = RUNNING.lock().unwrap();
-                if STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
-                    return;
-                }
-                command.spawn().inspect(|c| {
-                    running.insert(c.id());
-                })
-            };
-            match spawned {
-                Ok(mut child) => {
-                    *watch.pid.lock().unwrap() = Some(child.id());
-                    let status = child.wait();
-                    RUNNING.lock().unwrap().remove(&child.id());
-                    tracing::debug!("the app runtime stopped ({status:?}); starting it again");
-                }
-                Err(err) => tracing::warn!("couldn't start the app runtime: {err}"),
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        })?;
+        write_config(dir, &[], port, outbound, 0)?;
+        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), listener, described: Mutex::new(Default::default()) });
+        if APART.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(Apps(runtime));
+        }
+        let workerd = workerd()?;
+        stop_previous(dir);
+        let (dir, listener) = (dir.to_path_buf(), runtime.listener.try_clone()?);
+        std::thread::Builder::new().name("workerd".into()).spawn(move || keep(&workerd, &dir, &listener))?;
         runtime.wait_ready(0)?;
         Ok(Apps(runtime))
+    }
+
+    /// The app runtime's program, as oned starts it: the port it serves, which it keeps as its child's.
+    pub fn program(&self) -> std::io::Result<std::process::Command> {
+        let mut command = crate::oned::command(&[crate::members::APPS_PART, &format!("--runtime={}", self.0.dir.display())])?;
+        child(&mut command, &[("listening", &self.0.listener)]);
+        Ok(command)
     }
 
     /// Runs exactly these apps, (name, module source), restarting the runtime if they changed.
@@ -167,7 +154,10 @@ impl Apps {
                 runtime.described.lock().unwrap().clear();
                 loaded.1
             };
-            runtime.restart();
+            // Stopped, the runtime starts with this config: there's no one to wait for.
+            if !runtime.restart() && APART.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(());
+            }
             runtime.wait_ready(generation)
         })
         .await?
@@ -286,11 +276,10 @@ impl Apps {
 }
 
 impl Runtime {
-    /// Stops the runtime; the watcher starts it again, with the config as it is now.
-    fn restart(&self) {
-        if let Some(pid) = *self.pid.lock().unwrap() {
-            let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status();
-        }
+    /// Stops the workerd serving this runtime's config, if one is: what keeps it starts it again, with the config as
+    /// it is now.
+    fn restart(&self) -> bool {
+        kill_serving(&self.dir)
     }
 
     /// Whether the runtime answers at all within a few seconds.
@@ -352,9 +341,11 @@ fn broken_since(log: &Path, from: u64) -> Option<Broken> {
     })
 }
 
+/// Set by oned before its node starts: the app runtime is a program of its own, which oned starts (`program`).
+pub static APART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Set once this process is stopping, under `RUNNING`'s lock: no workerd starts again.
 static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// The workerds this process's nodes run, by process id.
+/// The workerds this process runs, by process id.
 static RUNNING: Mutex<std::collections::BTreeSet<u32>> = Mutex::new(std::collections::BTreeSet::new());
 
 /// Stops every workerd this process runs, for good, as it stops: elsewhere than Linux they'd outlive it.
@@ -366,20 +357,86 @@ pub fn stop_all() {
     }
 }
 
-/// Stops each workerd still serving this runtime's config, which a node of this home left running: one killed, or
-/// elsewhere than Linux, where they don't die with it.
-fn stop_previous(dir: &Path) {
+/// Keeps a workerd serving `dir`'s config on `listener`, starting it again whenever it stops, until this process stops.
+fn keep(workerd: &Path, dir: &Path, listener: &std::net::TcpListener) {
+    let (config, log) = (dir.join("config.capnp"), dir.join("workerd.log"));
+    loop {
+        let out = std::fs::OpenOptions::new().create(true).append(true).open(&log).expect("workerd log");
+        let mut command = std::process::Command::new(workerd);
+        command.arg("serve").arg(&config).stdout(out.try_clone().unwrap()).stderr(out);
+        // Elsewhere than Linux, where it dies with what started it, that stops it as it stops (stop_all), and the
+        // next start stops one a killed one left (stop_previous).
+        child(&mut command, &[("http", listener)]);
+        let spawned = {
+            let mut running = RUNNING.lock().unwrap();
+            if STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            command.spawn().inspect(|c| {
+                running.insert(c.id());
+            })
+        };
+        match spawned {
+            Ok(mut child) => {
+                let status = child.wait();
+                RUNNING.lock().unwrap().remove(&child.id());
+                tracing::debug!("workerd stopped ({status:?}); starting it again");
+            }
+            Err(err) => tracing::warn!("couldn't start workerd: {err}"),
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Asked to stop (SIGTERM, from oned).
+static TERMINATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The app runtime, as oned starts it (`program`): keeps a workerd serving the config in `dir` on the port oned handed
+/// it, until oned asks it to stop or stops itself, then stops its workerd and exits.
+pub fn run(dir: &Path) -> Result<()> {
+    use std::os::fd::FromRawFd;
+    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into())).init();
+    let fd: i32 = std::env::args().find_map(|a| a.strip_prefix("--socket-fd=listening=").and_then(|f| f.parse().ok())).context("oned hands the app runtime its port")?;
+    // SAFETY: the listening socket oned handed this process, open past exec for it alone, owned here from now on.
+    let listener = unsafe { std::net::TcpListener::from_raw_fd(fd) };
+    let workerd = workerd()?;
+    stop_previous(dir);
+    extern "C" fn term(_: i32) {
+        TERMINATED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    // SAFETY: the handler only stores to an atomic.
+    unsafe { libc::signal(libc::SIGTERM, term as *const () as libc::sighandler_t) };
+    let parent = std::os::unix::process::parent_id();
+    let dir2 = dir.to_path_buf();
+    std::thread::Builder::new().name("workerd".into()).spawn(move || keep(&workerd, &dir2, &listener))?;
+    tracing::info!("the app runtime is serving {}", dir.display());
+    while !TERMINATED.load(std::sync::atomic::Ordering::SeqCst) && std::os::unix::process::parent_id() == parent {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    stop_all();
+    tracing::info!("the app runtime stopped");
+    Ok(())
+}
+
+/// Stops each workerd serving `dir`'s config, saying whether there was one.
+fn kill_serving(dir: &Path) -> bool {
     let serving = format!(" serve {}", dir.join("config.capnp").display());
-    let Ok(out) = std::process::Command::new("ps").args(["-A", "-ww", "-o", "pid=,command="]).output() else { return };
+    let Ok(out) = std::process::Command::new("ps").args(["-A", "-ww", "-o", "pid=,command="]).output() else { return false };
     let mut stopped = false;
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         let Some((pid, command)) = line.trim().split_once(' ') else { continue };
-        if command.contains("workerd") && command.contains(&serving) {
-            tracing::info!("stopping the app runtime an earlier node left running (pid {pid})");
+        if command.contains("workerd") && (command.ends_with(&serving) || command.contains(&format!("{serving} "))) {
             stopped |= std::process::Command::new("kill").arg("-9").arg(pid).status().is_ok_and(|s| s.success());
         }
     }
-    if stopped {
+    stopped
+}
+
+/// Stops each workerd still serving this runtime's config, which an earlier one left running: one killed, or
+/// elsewhere than Linux, where they don't die with it.
+fn stop_previous(dir: &Path) {
+    if kill_serving(dir) {
+        tracing::info!("stopped the workerd an earlier app runtime left running");
         std::thread::sleep(Duration::from_millis(300));
     }
 }
