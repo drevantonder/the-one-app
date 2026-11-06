@@ -57,9 +57,9 @@ const tile = (slot, extra) => ({ slot, kind: "app", ...extra })
 
 /// What a page's widgets act through: their app's tools, and their links.
 const widgetHost = (p) => ({
-  async run(app, op, input) {
+  async run(app, tool, input) {
     try {
-      await home.call(app, op, input)
+      await home.call(app, tool, input)
     } catch (err) {
       return one.plain(err).title
     }

@@ -75,7 +75,7 @@ impl Node {
         let started = Instant::now();
         let ran = match self.count(app, "schedule").await {
             Err(err) => Err(err),
-            Ok(()) => self.standing_call(scope, app, user, &schedule.op, schedule.input.clone(), "schedule").await,
+            Ok(()) => self.standing_call(scope, app, user, &schedule.tool, schedule.input.clone(), "schedule").await,
         };
         let error = ran.as_ref().err().map(|e| format!("{e:#}").chars().take(500).collect::<String>());
         let said = status::Run { slot, time: now_ms(), device: self.0.id, user: user.to_string(), ok: error.is_none(), error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
@@ -167,7 +167,7 @@ impl Node {
                             let switched = state.switches.get(&(app.to_string(), s.name.clone()));
                             v["description"] = json!(s.description);
                             v["when"] = json!(s.say());
-                            v["op"] = json!(s.op);
+                            v["op"] = json!(s.tool);
                             v["on"] = json!(switched.is_none_or(|(on, ..)| *on));
                             v["switched"] = json!(switched.map(|(on, by, t)| json!({ "on": on, "by": user_name(by), "time": t })));
                             v["runs_as"] = json!(user.as_deref().map(user_name));

@@ -44,8 +44,8 @@ impl Node {
         self.route(req, me).await
     }
 
-    /// A call from someone signed in at the install's address, which is its person's in every way but one: the node's own operations are its
-    /// devices' to ask, and a sign-in's caller has this device's key.
+    /// A call from someone signed in at the install's address, which is its person's in every way but one: the node's own network messages are its
+    /// devices' to send, and a sign-in's caller has this device's key.
     pub fn for_sign_in(&self, req: CallRequest) -> Result<CallRequest> {
         let req = self.resolve(req);
         ensure!(req.app != members::APP, "a sign-in can't ask that");
@@ -69,7 +69,7 @@ impl Node {
         let others: Vec<String> = devices.iter().filter(|k| **k != self.0.id).map(hex).collect();
         let started = Instant::now();
         let name = self.device_name();
-        let tried = |result: &str, why: Option<&str>| trace::note(json!({ "step": "device", "device": name, "app": req.app, "op": req.op, "result": result, "here": true, "why": why }), started.elapsed());
+        let tried = |result: &str, why: Option<&str>| trace::note(json!({ "step": "device", "device": name, "app": req.app, "op": req.tool, "result": result, "here": true, "why": why }), started.elapsed());
         if !devices.contains(&self.0.id) {
             let why = format!("{name} doesn't run everything {} reaches for you", req.app);
             tried("elsewhere", Some(&why));
@@ -127,7 +127,7 @@ impl Node {
         let req = self.identified(req)?;
         // Push runs on whichever node is asked, for anyone: it goes through the install's push Worker.
         if req.service.as_deref() == Some(crate::push::NAME) {
-            return self.push(&req.op, &req.input, &me, req.from.as_deref()).await;
+            return self.push(&req.tool, &req.input, &me, req.from.as_deref()).await;
         }
         if req.device.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
@@ -139,7 +139,7 @@ impl Node {
             let name = self.name_of(&device);
             // Each device tried, for a trace: how long it took, and why the next was tried.
             let tried = |result: &str, more: Value| {
-                let mut step = json!({ "step": "device", "device": name, "app": req.app, "op": req.op, "result": result });
+                let mut step = json!({ "step": "device", "device": name, "app": req.app, "op": req.tool, "result": result });
                 if let (Value::Object(step), Value::Object(more)) = (&mut step, more) {
                     step.extend(more);
                 }
@@ -234,7 +234,7 @@ impl Node {
         let here = self.runs_service_here(&req.app);
         // A service, or one of its functions, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
         // on the caller's first.
-        let about_here = |d: &Value| d["prefer"] == "here" || d["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == req.op.as_str() && o["prefer"] == "here"));
+        let about_here = |d: &Value| d["prefer"] == "here" || d["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == req.tool.as_str() && o["prefer"] == "here"));
         // This device: its node, or a part of it (a service endpoint of oned's own).
         let ours = |i: &Install, k: &Key| *k == self.0.id || i.r.db().machine(k).is_some_and(|m| m.device == Some(self.0.id));
         let here_first = req.service.is_some()
@@ -294,7 +294,7 @@ impl Node {
             && me.token.as_ref().is_none_or(|t| t == &client_token(&me.key))
             && self.with(|i| Ok(i.r.db().client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
-        let mut request = json!({ "app": req.app, "service": req.service, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });
+        let mut request = json!({ "app": req.app, "service": req.service, "op": req.tool, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
         // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone: only those the
         // device runs, and only the call's app's.
@@ -395,10 +395,10 @@ impl Node {
             trace::note(json!({ "step": "logs" }), reading.elapsed());
         }
         if req.app == members::APP {
-            return self.node_op(&req.op, &input, me).await.map(Reply::Ok);
+            return self.network_message(&req.tool, &input, me).await.map(Reply::Ok);
         }
         if req.service.as_deref() == Some(crate::push::NAME) {
-            return Ok(match self.push(&req.op, &input, me, req.from.as_deref()).await {
+            return Ok(match self.push(&req.tool, &input, me, req.from.as_deref()).await {
                 Ok(v) => Reply::Ok(v),
                 Err(err) => Reply::Error(format!("{err:#}")),
             });
@@ -412,7 +412,7 @@ impl Node {
             if passed(me) && !self.0.services.serves_everyone(&req.app) {
                 return Ok(Reply::Error(format!("{} runs only for its person's own devices", req.app)));
             }
-            return match self.run_service(&req.app, &req.op, input, me, req.from.clone()).await {
+            return match self.run_service(&req.app, &req.tool, input, me, req.from.clone()).await {
                 Err(err) if err.is::<crate::services::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
                 other => other.map(Reply::Ok),
             };
@@ -443,7 +443,7 @@ impl Node {
         }
         // A tool of a lab that's off isn't there.
         let described = self.0.apps.describe(&req.app).await?;
-        if let Some(lab) = described["ops"].as_array().into_iter().flatten().find(|o| o["name"] == req.op.as_str()).and_then(|o| o["lab"].as_str())
+        if let Some(lab) = described["ops"].as_array().into_iter().flatten().find(|o| o["name"] == req.tool.as_str()).and_then(|o| o["lab"].as_str())
             && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings(), &crate::labs::app_key(&req.app, lab))))?
         {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
@@ -459,7 +459,7 @@ impl Node {
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
         let mut lease = None;
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
-            let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
+            let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.tool.as_str() && o["reads"] == true);
             if !reads {
                 let base = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
                 let Some(taken) = self.take_lease(&base).await? else {
@@ -475,8 +475,8 @@ impl Node {
         let running = Instant::now();
         let app_failed = std::sync::atomic::AtomicBool::new(false);
         let ran = tokio::time::timeout(limit - Duration::from_secs(1), async {
-            let mut outcome = self.0.apps.call(&req.app, &req.op, input, &ctx, limit).await.inspect_err(|_| app_failed.store(true, std::sync::atomic::Ordering::Relaxed))?;
-            trace::note(json!({ "step": "run", "app": req.app, "op": req.op }), running.elapsed());
+            let mut outcome = self.0.apps.call(&req.app, &req.tool, input, &ctx, limit).await.inspect_err(|_| app_failed.store(true, std::sync::atomic::Ordering::Relaxed))?;
+            trace::note(json!({ "step": "run", "app": req.app, "op": req.tool }), running.elapsed());
             self.write_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
             anyhow::Ok(outcome)
         })
@@ -547,7 +547,7 @@ impl Node {
                     return;
                 }
                 let error: String = error.lines().next().unwrap_or("").chars().take(300).collect();
-                status::Said::Failed { app: app.into(), op: req.op.clone(), error, user: me.user.clone() }
+                status::Said::Failed { app: app.into(), tool: req.tool.clone(), error, user: me.user.clone() }
             }
         };
         self.write_insight(app, me, said);
@@ -619,7 +619,7 @@ impl Node {
             }
             let mut usage: Vec<Value> = people.into_iter().map(|((u, client), (days, last, agent))| json!({ "user": name(&u), "client": client, "agent": agent, "days": days, "last": last })).collect();
             usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
-            let mut errors: Vec<Value> = errors.into_iter().map(|((op, error), (count, first, last, user))| json!({ "op": op, "error": error, "count": count, "first": first, "last": last, "user": user })).collect();
+            let mut errors: Vec<Value> = errors.into_iter().map(|((tool, error), (count, first, last, user))| json!({ "op": tool, "error": error, "count": count, "first": first, "last": last, "user": user })).collect();
             errors.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
             let cost: Vec<Value> = cost.into_iter().map(|(model, (usd, input, output, calls))| json!({ "model": model, "usd": usd, "input": input, "output": output, "calls": calls })).collect();
             Ok(Some(json!({ "usage": usage, "errors": errors, "cost": cost })))
@@ -752,12 +752,12 @@ impl Node {
         Ok(answer.ok)
     }
 
-    /// The node's own operations, which other devices ask for.
-    pub(super) async fn node_op(&self, op: &str, input: &Value, me: &Caller) -> Result<Value> {
-        match op {
-            // Another device's hints, which only a device of the install gives.
+    /// The network messages other nodes send this one over iroh: `hello` and `changed`.
+    pub(super) async fn network_message(&self, message: &str, input: &Value, me: &Caller) -> Result<Value> {
+        match message {
+            // Another node's, which only a device of the install sends.
             "hello" | "changed" if self.with(|i| Ok(i.r.db().compute(&me.key).is_some()))? => {
-                if op == "hello" {
+                if message == "hello" {
                     let mut services: Vec<Service> = serde_json::from_value(input["services"].clone()).unwrap_or_default();
                     // Whom each serves, no more than the entries allow: that device's own person, and for one that
                     // serves everyone, those the device serves.
@@ -798,7 +798,7 @@ impl Node {
                 self.changed_there(&scope, wrote, None, None);
                 Ok(json!(null))
             }
-            other => bail!("the node has no operation {other}"),
+            other => bail!("the node has no network message {other}"),
         }
     }
 
@@ -950,13 +950,13 @@ impl Node {
             ("POST", "/call") => {
                 ensure!(!grant.read_only, "this call only reads: it can't run other apps' tools");
                 let req: Value = serde_json::from_slice(&body)?;
-                let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
+                let (app, tool) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
                 // An app may say which device runs it, like the one with a local model.
                 let device = req["device"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
                 // `ctx.services` says it's a service's; `ctx.apps`, an app's, unless it runs as a service anyway (on
                 // every device, or with no deploy). A service is its app's alone: other apps call that app's tools.
                 let service = req["service"] == true;
-                let call = self.resolve(CallRequest { app: app.into(), service: service.then(|| app.into()), op: op.into(), input: req["input"].clone(), device, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() });
+                let call = self.resolve(CallRequest { app: app.into(), service: service.then(|| app.into()), tool: tool.into(), input: req["input"].clone(), device, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() });
                 let (apps, services) = self.uses(&grant.app).await;
                 match call.service.is_some() {
                     true => {
@@ -1180,7 +1180,7 @@ impl Node {
     }
 
     /// Who a call another device passed on is for: with a sign-in's token, someone that device's node serves or whose
-    /// client it is; with none, only the person whose client device `remote` is, asking itself. The node's own hints
+    /// client it is; with none, only the person whose client device `remote` is, asking itself. The node's own network messages
     /// (`hello`, `changed`) come from any compute endpoint of the install, as itself; a person's service asks as them, as itself.
     pub(super) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;

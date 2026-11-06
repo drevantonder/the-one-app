@@ -5,12 +5,12 @@ use anyhow::{Context as _, Result, bail, ensure};
 use serde_json::{Value, json};
 
 
-/// A schedule as an app declares it: `{ op, input?, every: "15m" }` or `{ op, input?, at: "09:00", tz?, days? }`.
+/// A schedule as an app declares it: `{ tool, input?, every: "15m" }` or `{ tool, input?, at: "09:00", tz?, days? }`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Schedule {
     pub name: String,
     pub description: String,
-    pub op: String,
+    pub tool: String,
     pub input: Value,
     pub when: When,
 }
@@ -28,7 +28,7 @@ const DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 impl Schedule {
     /// Reads one of an app's schedules, as its module describes it.
     pub fn parse(name: &str, v: &Value) -> Result<Schedule> {
-        let op = v["op"].as_str().filter(|o| !o.is_empty()).context("a schedule names the op it runs")?.to_string();
+        let tool = v["op"].as_str().filter(|o| !o.is_empty()).context("a schedule names the tool it runs")?.to_string();
         let when = match (v["every"].as_str(), v["at"].as_str()) {
             (Some(every), None) => When::Every(duration(every)?),
             (None, Some(at)) => {
@@ -46,7 +46,7 @@ impl Schedule {
             }
             _ => bail!("a schedule runs every so often (every: \"15m\") or at a time of day (at: \"09:00\")"),
         };
-        Ok(Schedule { name: name.into(), description: v["description"].as_str().unwrap_or("").into(), op, input: v.get("input").cloned().unwrap_or(json!({})), when })
+        Ok(Schedule { name: name.into(), description: v["description"].as_str().unwrap_or("").into(), tool, input: v.get("input").cloned().unwrap_or(json!({})), when })
     }
 
     /// Every schedule an app's module describes; one that doesn't make sense is left out, with why.
@@ -64,7 +64,7 @@ impl Schedule {
 
     /// What it runs and when, as written: kept with each run, so a deploy that changes it shows.
     pub fn spec(&self) -> Value {
-        let mut v = json!({ "op": self.op, "input": self.input });
+        let mut v = json!({ "op": self.tool, "input": self.input });
         match &self.when {
             When::Every(ms) => v["every"] = json!(say_duration(*ms)),
             When::At { hour, minute, tz, days } => {

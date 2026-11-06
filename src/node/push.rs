@@ -9,9 +9,9 @@ use crate::push::{self, Send};
 
 impl Node {
     /// Runs a push tool for `me`: from app `from`, if an app asked.
-    pub(super) async fn push(&self, op: &str, input: &Value, me: &Caller, from: Option<&str>) -> Result<Value> {
+    pub(super) async fn push(&self, tool: &str, input: &Value, me: &Caller, from: Option<&str>) -> Result<Value> {
         let text = |name: &str| input[name].as_str().unwrap_or_default().to_string();
-        match op {
+        match tool {
             "send" => {
                 let note = crate::services::input::<Send>(input)?.note(from.unwrap_or(""))?;
                 self.push_note(&me.user, &note).await
@@ -22,8 +22,8 @@ impl Node {
                 ensure!((16..=200).contains(&token.len()) && token.bytes().all(|b| b.is_ascii_hexdigit()), "a device token is hex");
                 let name = Some(text("name")).filter(|n| !n.is_empty()).unwrap_or_else(|| self.user_name(&me.user));
                 let env = if text("env") == "sandbox" { "sandbox" } else { "production" };
-                self.ask_push(&format!("/push/{op}"), json!({ "legacy": { "user": me.user, "token": token, "env": env, "name": name } })).await?;
-                Ok(json!(if op == "register" { "Registered for push." } else { "Unregistered." }))
+                self.ask_push(&format!("/push/{tool}"), json!({ "legacy": { "user": me.user, "token": token, "env": env, "name": name } })).await?;
+                Ok(json!(if tool == "register" { "Registered for push." } else { "Unregistered." }))
             }
             "devices" => {
                 let mine = self.devices_of(&me.user)?;
@@ -38,7 +38,7 @@ impl Node {
                 let said = tokio::task::spawn_blocking(move || -> Result<Value> { Ok(agent().get(format!("{address}/push/key")).call()?.body_mut().read_json()?) }).await??;
                 Ok(json!({ "via": said["via"] }))
             }
-            op => bail!("push has no tool {op}"),
+            tool => bail!("push has no tool {tool}"),
         }
     }
 

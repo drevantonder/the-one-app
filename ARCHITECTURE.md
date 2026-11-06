@@ -21,7 +21,7 @@ Your devices, and your team's, as one place for apps and agents. An install is o
 
 - **The core never names an app or service.** Apps are deployed into the install while it runs; services run only where a device's owner turned them on. `config.toml` is the one place that names the product (the custom build).
 - **Devices reach each other over iroh,** each an endpoint of its own key, through the relay at the install's address when no direct path opens. A device answers only the install's devices.
-- **The bucket decides the order of writes.** A write is a step created only if its position is free. Notices between devices are hints; each device reads what changed from the bucket. Only the node's database, how things went, is changed in place.
+- **The bucket decides the order of writes.** A write is a step created only if its position is free. Network messages between nodes are nudges; each device reads what changed from the bucket. Only the node's database, how things went, is changed in place.
 - **A call runs once,** on a node that runs every scope it reaches, chosen by run priority.
 - **An older device can safely ignore what newer ones send.** Phones and Macs run behind the others.
 - **Speed** is held to targets measured in `one throwaway`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.

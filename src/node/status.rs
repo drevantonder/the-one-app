@@ -29,6 +29,8 @@ alter table backups rename column server to device;
 create table checks (place text, device text, time integer, error text, report text not null, primary key (place, device, time));
 ", "
 create table reads (device text primary key, reads integer not null, build text not null, time integer not null);
+", "
+alter table errors rename column op to tool;
 "];
 
 /// How many runs of each schedule a scope keeps.
@@ -66,7 +68,7 @@ pub struct Status {
 pub struct Insights {
     /// By (user, client): the days they used it, when last, and the agent last named.
     pub used: BTreeMap<(String, String), Used>,
-    /// By (op, error): how often, first and last, and by whom last.
+    /// By (tool, error): how often, first and last, and by whom last.
     pub errors: BTreeMap<(String, String), Failed>,
     /// By model: dollars, tokens in and out, and calls.
     pub cost: BTreeMap<String, Cost>,
@@ -146,7 +148,7 @@ pub struct CheckRun {
 pub enum Said {
     /// A call of `app` by `user` from `client` (`agent` naming who asked through it), on `day`.
     Used { app: String, user: String, client: String, agent: Option<String>, day: u64 },
-    Failed { app: String, op: String, error: String, user: String },
+    Failed { app: String, tool: String, error: String, user: String },
     Cost { app: String, model: String, usd: f64, input: u64, output: u64 },
     Ran { app: String, schedule: String, run: Run },
     Build { device: Key, build: String, target: String },
@@ -171,10 +173,10 @@ impl Node {
                        days = days + (excluded.day > day), day = max(day, excluded.day), last = max(last, excluded.last), agent = coalesce(excluded.agent, agent)",
                     &[json!(app), json!(user), json!(client), json!(day), json!(now), json!(agent)],
                 ),
-                Said::Failed { app, op, error, user } => ex(
-                    "insert into errors values (?, ?, ?, 1, ?, ?, ?) on conflict (app, op, error) do update set
+                Said::Failed { app, tool, error, user } => ex(
+                    "insert into errors values (?, ?, ?, 1, ?, ?, ?) on conflict (app, tool, error) do update set
                        count = count + 1, first = min(first, excluded.first), last = max(last, excluded.last), user = excluded.user",
-                    &[json!(app), json!(op), json!(error), json!(now), json!(now), json!(user)],
+                    &[json!(app), json!(tool), json!(error), json!(now), json!(now), json!(user)],
                 ),
                 Said::Cost { app, model, usd, input, output } => ex(
                     "insert into cost values (?, ?, ?, ?, ?, 1) on conflict (app, model) do update set
@@ -253,7 +255,7 @@ impl Node {
         }
         for r in rows("select * from errors")? {
             let failed = Failed { count: n(&r["count"]), first: n(&r["first"]), last: n(&r["last"]), user: text(&r["user"]) };
-            s.insights.entry(text(&r["app"])).or_default().errors.insert((text(&r["op"]), text(&r["error"])), failed);
+            s.insights.entry(text(&r["app"])).or_default().errors.insert((text(&r["tool"]), text(&r["error"])), failed);
         }
         for r in rows("select * from cost")? {
             let cost = Cost { usd: r["usd"].as_f64().unwrap_or(0.0), input: n(&r["input"]), output: n(&r["output"]), calls: n(&r["calls"]) };

@@ -32,12 +32,12 @@ impl Answers {
         Answers { dir: dir.join("answers"), key: keys::answers_key(key), reads: Mutex::default() }
     }
 
-    /// What `app`'s `op` answered last for `input` (JSON), if it only reads: its answer's JSON, and when (ms).
-    pub fn kept(&self, app: &str, op: &str, input: &[u8]) -> Option<(Vec<u8>, u64)> {
-        if self.reads(app, op) == Some(false) {
+    /// What `app`'s `tool` answered last for `input` (JSON), if it only reads: its answer's JSON, and when (ms).
+    pub fn kept(&self, app: &str, tool: &str, input: &[u8]) -> Option<(Vec<u8>, u64)> {
+        if self.reads(app, tool) == Some(false) {
             return None;
         }
-        let (path, name) = self.at(app, op, &serde_json::from_slice(input).ok()?);
+        let (path, name) = self.at(app, tool, &serde_json::from_slice(input).ok()?);
         let plain = keys::open(&self.key, &name, &std::fs::read(path).ok()?).ok()?;
         let at = u64::from_be_bytes(plain.get(..8)?.try_into().ok()?);
         Some((plain[8..].to_vec(), at))
@@ -57,8 +57,8 @@ impl Answers {
     /// it answered rather than failed.
     pub fn keep(&self, sent: &[u8], answer: &[u8]) {
         let Ok(sent) = serde_json::from_slice::<Value>(sent) else { return };
-        let (Some(app), Some(op)) = (sent["app"].as_str(), sent["op"].as_str()) else { return };
-        if self.reads(app, op) != Some(true) {
+        let (Some(app), Some(tool)) = (sent["app"].as_str(), sent["op"].as_str()) else { return };
+        if self.reads(app, tool) != Some(true) {
             return;
         }
         let Some(ok) = serde_json::from_slice::<Value>(answer).ok().and_then(|a| a.get("ok").cloned()) else { return };
@@ -66,7 +66,7 @@ impl Answers {
         if ok.len() > BIGGEST {
             return;
         }
-        let (path, name) = self.at(app, op, &sent["input"]);
+        let (path, name) = self.at(app, tool, &sent["input"]);
         let mut plain = now().to_be_bytes().to_vec();
         plain.extend(ok.as_bytes());
         let _ = std::fs::create_dir_all(&self.dir);
@@ -86,14 +86,14 @@ impl Answers {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 
-    /// Whether `app`'s `op` only reads, as `learn` last said; None until it has (an answer was kept only if it did then).
-    fn reads(&self, app: &str, op: &str) -> Option<bool> {
-        self.reads.lock().unwrap().as_ref().map(|r| r.get(app).is_some_and(|ops| ops.iter().any(|o| o == op)))
+    /// Whether `app`'s `tool` only reads, as `learn` last said; None until it has (an answer was kept only if it did then).
+    fn reads(&self, app: &str, tool: &str) -> Option<bool> {
+        self.reads.lock().unwrap().as_ref().map(|r| r.get(app).is_some_and(|tools| tools.iter().any(|o| o == tool)))
     }
 
     /// Where a call's last answer is, by what it asked, and the name its seal is bound to.
-    fn at(&self, app: &str, op: &str, input: &Value) -> (PathBuf, String) {
-        let name = hex(&keys::sha256(&keys::canonical(&json!([app, op, input]))));
+    fn at(&self, app: &str, tool: &str, input: &Value) -> (PathBuf, String) {
+        let name = hex(&keys::sha256(&keys::canonical(&json!([app, tool, input]))));
         (self.dir.join(&name), name)
     }
 }

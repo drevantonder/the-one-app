@@ -143,8 +143,8 @@ export const home = (() => {
 
   // MARK: Changing things
 
-  async function call(a, op, input = {}) {
-    return (await one.api("POST", "/v1/call", { app: a, op, input })).ok;
+  async function call(a, tool, input = {}) {
+    return (await one.api("POST", "/v1/call", { app: a, op: tool, input })).ok;
   }
 
   /// Says what went wrong, in the shell's own alert.

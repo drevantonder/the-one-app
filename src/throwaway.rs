@@ -598,8 +598,8 @@ fn devices(dir: &Path) -> serde_json::Map<String, Value> {
 
 /// One of this machine's install's Agent Devices tools (not the throwaway network's, which has none). When the node
 /// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
-fn agent_devices(op: &str, input: Value) -> Result<Value> {
-    Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one throwaway" })))?["ok"].clone())
+fn agent_devices(tool: &str, input: Value) -> Result<Value> {
+    Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": tool, "input": input, "client": "one throwaway" })))?["ok"].clone())
 }
 
 /// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.

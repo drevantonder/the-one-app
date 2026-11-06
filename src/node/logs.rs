@@ -305,7 +305,7 @@ impl Node {
             return;
         };
         let input = json!({ "services": services, "load": crate::load::current(), "parts": parts });
-        let req = CallRequest { app: members::APP.into(), op: "hello".into(), input, ..Default::default() };
+        let req = CallRequest { app: members::APP.into(), tool: "hello".into(), input, ..Default::default() };
         for device in devices {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());
             tokio::spawn(async move {

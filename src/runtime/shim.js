@@ -153,13 +153,13 @@ function context(ask, body, appends, later) {
       if (kind === "services" && name !== app.name) throw new Error(`${app.name} can't call the ${name} service: a service is only its own app's, so call the ${name} app's tools with ctx.apps`);
       if (!uses[kind].includes(name)) throw new Error(`${app.name} doesn't use ${name}: add it to uses.${kind}`);
       return new Proxy({}, {
-        get(_, op) {
-          if (typeof op !== "string" || op === "then") return undefined;
+        get(_, tool) {
+          if (typeof tool !== "string" || tool === "then") return undefined;
           return async (input = {}, { device, ...other } = {}) => {
             // An option it doesn't know (one renamed, say) fails, rather than running the call somewhere else.
             const [unknown] = Object.keys(other);
             if (unknown) throw new Error(`${unknown} isn't an option of ctx.${kind} calls: give device`);
-            return (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, service: kind === "services", op, input, device }) })).json()).ok;
+            return (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, service: kind === "services", op: tool, input, device }) })).json()).ok;
           };
         },
       });

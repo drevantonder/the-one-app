@@ -817,10 +817,10 @@ impl Device {
         }
     }
 
-    /// What `app`'s `op` answered last for `input` (JSON), if it only reads: its answer's JSON, and when (ms). For a
+    /// What `app`'s `tool` answered last for `input` (JSON), if it only reads: its answer's JSON, and when (ms). For a
     /// screen to show at once while it asks again (bridge.js's `kept`).
-    pub fn kept(&self, app: &str, op: &str, input: &[u8]) -> Option<(Vec<u8>, u64)> {
-        self.answers.as_ref()?.kept(app, op, input)
+    pub fn kept(&self, app: &str, tool: &str, input: &[u8]) -> Option<(Vec<u8>, u64)> {
+        self.answers.as_ref()?.kept(app, tool, input)
     }
 
     fn forget_answers(&self) {

@@ -34,8 +34,8 @@ async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
     panic!("timed out waiting for {what}");
 }
 
-fn board(op: &str, input: Value) -> CallRequest {
-    CallRequest { app: "board".into(), op: op.into(), input, ..Default::default() }
+fn board(tool: &str, input: Value) -> CallRequest {
+    CallRequest { app: "board".into(), tool: tool.into(), input, ..Default::default() }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -313,7 +313,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     a.create("Home", "Andre").await.unwrap();
     let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     // Naming no scopes, as git's requests don't: Sam's own runs nowhere, as he picked nowhere, so his run without it.
-    let repos = |op: &str, input: Value| CallRequest { app: "repos".into(), op: op.into(), input, ..Default::default() };
+    let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
     eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
 
     // A real one-commit pack, as git sends it.
@@ -408,9 +408,9 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     // Its issues: Sam opens one and comments, as anyone may, and edits and closes his own; he doesn't close, edit or
     // delete Andre's, label his own or make a label, which only those who push do, nor delete his own, which only its
     // owners do.
-    let issue = |op: &str, number: u64, mut input: Value| {
+    let issue = |tool: &str, number: u64, mut input: Value| {
         (input["repo"], input["number"]) = (json!("andre/home"), json!(number));
-        repos(op, input)
+        repos(tool, input)
     };
     assert_eq!(a.call(repos("open_issue", json!({ "repo": "andre/home", "title": "Andre's" }))).await.unwrap()["number"], 1);
     assert_eq!(call(repos("open_issue", json!({ "repo": "andre/home", "title": "Sam's" })), &client).await.unwrap()["number"], 2);
@@ -418,8 +418,8 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let refused = call(issue("close_issue", 1, json!({})), &client).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only its author and the owners and collaborators of andre/home close #1"), "{refused:#}");
     for req in [issue("edit_issue", 1, json!({ "title": "Sam's now" })), issue("edit_issue", 2, json!({ "labels": ["bug"] })), issue("delete_issue", 2, json!({ "confirm": true })), repos("set_label", json!({ "repo": "andre/home", "name": "sams" }))] {
-        let op = req.op.clone();
-        assert!(call(req, &client).await.is_err(), "Sam's {op} is refused");
+        let tool = req.tool.clone();
+        assert!(call(req, &client).await.is_err(), "Sam's {tool} is refused");
     }
     call(issue("edit_issue", 2, json!({ "title": "Sam's, edited" })), &client).await.unwrap();
     call(issue("close_issue", 2, json!({ "state_reason": "not_planned" })), &client).await.unwrap();
@@ -472,7 +472,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let a = start("repos-github").await;
     a.create("Home", "Andre").await.unwrap();
     let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
-    let repos = |op: &str, input: Value| CallRequest { app: "repos".into(), op: op.into(), input, ..Default::default() };
+    let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
     eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
 
     // GitHub, as far as this needs: Andre's own repo for his token, an organization's for the App's installation,

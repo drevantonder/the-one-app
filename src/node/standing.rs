@@ -185,10 +185,10 @@ impl Node {
 
     /// Runs one of `app`'s tools here in `scope`, as `user`, with the keys of the grant this device holds to keep it
     /// running there, and no others: standing work's calls (its schedules', from `client`).
-    pub async fn standing_call(&self, scope: &Scope, app: &str, user: &str, op: &str, input: Value, client: &str) -> Result<Value> {
+    pub async fn standing_call(&self, scope: &Scope, app: &str, user: &str, tool: &str, input: Value, client: &str) -> Result<Value> {
         self.standing_keys(scope, app).await?;
         let me = Caller { key: self.0.id, user: user.to_string(), agent: None, token: Some(grant_token(scope, app)) };
-        let req = CallRequest { app: app.to_string(), op: op.to_string(), input, scopes: Some(vec![scope.to_string()]), client: Some(client.into()), id: Some(new_id()), ..Default::default() };
+        let req = CallRequest { app: app.to_string(), tool: tool.to_string(), input, scopes: Some(vec![scope.to_string()]), client: Some(client.into()), id: Some(new_id()), ..Default::default() };
         match self.run_or_need(&req, &me).await {
             Ok(Reply::Ok(v)) => Ok(v),
             Ok(Reply::Error(e) | Reply::Elsewhere(e)) => Err(anyhow!(e)),

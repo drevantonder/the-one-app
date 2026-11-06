@@ -107,16 +107,16 @@
   const landed = new Map();
   // Calls answered from what was kept a while ago, by their key, while their answer is still out: what the note says.
   const old = new Map();
-  async function call(op, input) {
-    const m = { type: "call", app: ctx.app, op, input };
-    const key = JSON.stringify([op, input]);
+  async function call(tool, input) {
+    const m = { type: "call", app: ctx.app, op: tool, input };
+    const key = JSON.stringify([tool, input]);
     const got = landed.get(key);
     landed.clear();
     if (got && Date.now() - got.at < 10_000) return got.answer;
     const sent = () => host(m).then((answer) => (old.delete(key) && note(), answer));
     if (first.has(key)) return sent();
     first.add(key);
-    const kept = await host({ type: "kept", app: ctx.app, op, input }).catch(() => null);
+    const kept = await host({ type: "kept", app: ctx.app, op: tool, input }).catch(() => null);
     if (!kept || !("answer" in kept)) return sent();
     const fresh = sent();
     if (Date.now() - kept.at > 60_000) {
@@ -153,7 +153,7 @@
     config: ctx.config,
     // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,
-    call: (op, input = {}) => call(op, input),
+    call: (tool, input = {}) => call(tool, input),
     // Opens one of this app's screens; or with `app`, another app's (a notification's link, say). `scope` is the page
     // it's opened for (else this screen's). With `sheet`, it slides up over this one, and this resolves once it's gone,
     // to what it gave `close`; otherwise it's pushed on top, with Back.
