@@ -679,10 +679,16 @@ impl Node {
         self.0.id
     }
 
-    /// Waits until its apps are loaded and each has answered once, so a node taking over answers its first calls warm.
+    /// Waits until it has read every scope it holds and its apps are loaded and each has answered once, so a node
+    /// taking over answers its first calls warm: before it's read them, what's added where reads as nothing, and an
+    /// app's tools as missing.
     pub async fn warm(&self) {
+        let until = tokio::time::Instant::now() + Duration::from_secs(60);
+        while !self.ready() && tokio::time::Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
         let mut settled = self.0.settled.subscribe();
-        let _ = tokio::time::timeout(Duration::from_secs(60), settled.wait_for(|n| *n > 0)).await;
+        let _ = tokio::time::timeout_at(until, settled.wait_for(|n| *n > 0)).await;
         let mut asked = tokio::task::JoinSet::new();
         for app in self.0.apps.names() {
             let apps = self.0.apps.clone();
