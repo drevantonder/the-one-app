@@ -382,7 +382,15 @@ impl Node {
         if !carried.is_empty() {
             request["blobs"] = Value::Object(carried);
         }
+        // A service endpoint fills in nothing itself: an app's call to it is filled here, as one run here is.
+        let used = match service {
+            true => self.fill_for_service(&resolved.app, &mut request["input"], me, req.from.as_deref()).await?,
+            false => Vec::new(),
+        };
         let mut reply = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await?;
+        if let Some(ok) = reply.get_mut("ok") {
+            crate::vault::blot(ok, &used);
+        }
         let theirs = reply.get_mut("trace").map(Value::take).filter(Value::is_object);
         Ok((Reply::from_json(reply), theirs))
     }
@@ -827,31 +835,38 @@ impl Node {
         let user = if everyone { me.user.clone() } else { self.user()? };
         ensure!(me.user == user, "{} runs only for {}'s own user", self.service_title(app), self.device_name());
         let caller = self.me_for(me)?;
-        // An app's call has the fields of the items it's switched on for filled in, a secret one only for a service
-        // named among its item's hosts, and blotted out of the answer.
         let mut input = input;
-        let used = std::sync::Mutex::new(Vec::<String>::new());
-        if let Some(from) = from.as_ref().filter(|_| input.to_string().contains("{{")) {
-            let scopes = self.with(|i| Ok(reachable(i, from, &me.user).into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()))?;
-            let lookup = self.lookup(me, from, &scopes).await?;
-            lookup.refuse_shut(&input.to_string())?;
-            crate::vault::fill_value(&mut input, app, &|name| {
-                let found = lookup.get(name);
-                if let Some((hosts, value)) = &found {
-                    if !hosts.is_empty() {
-                        used.lock().unwrap().push(value.clone());
-                    }
-                }
-                found
-            })?;
-        }
+        let used = self.fill_for_service(app, &mut input, me, from.as_deref()).await?;
         let mut answer = self.0.services.call(app, function, input, caller.clone(), from).await?;
-        crate::vault::blot(&mut answer.ok, &used.into_inner().unwrap());
+        crate::vault::blot(&mut answer.ok, &used);
         let scope = Scope::User(user.clone());
         if !answer.blobs.is_empty() {
             self.append_as(&scope, &user, Content { blobs: answer.blobs, ..content::node("keep", json!({})) }).await?;
         }
         Ok(answer.ok)
+    }
+
+    /// Fills in an app's call of `app`'s service (`from` the app that made it): the fields of the items it's switched on
+    /// for, a secret one only for a service named among its item's hosts. → the secrets it filled, to blot out of the
+    /// answer. The node that runs the call fills it, whether the service runs here or as a service endpoint of its own,
+    /// which fills nothing itself.
+    pub async fn fill_for_service(&self, app: &str, input: &mut Value, me: &Caller, from: Option<&str>) -> Result<Vec<String>> {
+        let used = std::sync::Mutex::new(Vec::<String>::new());
+        if let Some(from) = from.filter(|_| input.to_string().contains("{{")) {
+            let scopes = self.with(|i| Ok(reachable(i, from, &me.user).into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()))?;
+            let lookup = self.lookup(me, from, &scopes).await?;
+            lookup.refuse_shut(&input.to_string())?;
+            crate::vault::fill_value(input, app, &|name| {
+                let found = lookup.get(name);
+                if let Some((hosts, value)) = &found
+                    && !hosts.is_empty()
+                {
+                    used.lock().unwrap().push(value.clone());
+                }
+                found
+            })?;
+        }
+        Ok(used.into_inner().unwrap())
     }
 
     /// The network messages other nodes send this one over iroh: `hello` and `changed`.

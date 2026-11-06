@@ -650,3 +650,26 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     let refused = a.deploy(&away, "tiny", &his, false).await.unwrap_err();
     assert!(format!("{refused:#}").contains("put it first"), "{refused:#}");
 }
+
+/// An app's call of its service has the secret of an item switched on for that app filled in, when the item names the
+/// service among its hosts, and blotted out of what comes back; another app's call, or one to a service the item
+/// doesn't name, gets none of it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_does() {
+    use one::database::scopes::Scope;
+    let a = start("vault-fill").await;
+    a.create("Home", "Andre").await.unwrap();
+    add_notes(&a).await;
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let item = json!({ "title": "Work", "type": "Browser profile", "hosts": ["notes"], "apps": ["notes"], "fields": { "_key": { "value": "s3cret", "secret": true } } });
+    let id = a.set_item(&me, &Scope::User(me.user.clone()), item).await.unwrap();
+    let asked = || json!({ "profile": { "key": format!("{{{{{id}:_key}}}}") } });
+    let mut input = asked();
+    let used = a.fill_for_service("notes", &mut input, &me, Some("notes")).await.unwrap();
+    assert_eq!(input["profile"]["key"], "s3cret");
+    assert_eq!(used, vec!["s3cret".to_string()], "what it filled is blotted out of the answer");
+    let mut input = asked();
+    assert!(a.fill_for_service("notes", &mut input, &me, Some("other")).await.is_err() || input == asked(), "an app the item isn't switched on for gets none of it");
+    let mut input = asked();
+    assert!(a.fill_for_service("shell", &mut input, &me, Some("notes")).await.is_err() || !input.to_string().contains("s3cret"), "a service its item doesn't name gets none of it");
+}
