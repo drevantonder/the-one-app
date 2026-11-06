@@ -131,7 +131,7 @@ export class Device {
       const welcome = !kept?.steps?.truth && read.length && (await get(`welcome:${this.user}`));
       const welcomed = welcome ? await this.api(`/v1/steps/global?from=0&welcome=${welcome}`, { keyless: !kept }).catch(() => null) : null;
       const steps = read.length ? { steps: read, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.logKeys() } : null;
-      let k = !steps && kept?.steps?.truth && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, steps);
+      let k = !steps && kept?.steps?.truth && kept?.members?.people?.[this.user]?.app_schedules ? kept.members : await this.replay(this.user, steps);
       // Before it knows the recovery key its network's genesis names: the log's first step, from the bucket.
       if (k.wants_log) k = await this.replay(this.user, { ...steps, keys: steps?.keys || (await this.logKeys()), log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, k.wants_log, k.wants_log) } });
       // One that didn't check out is read from the freeze on, the next time.
@@ -145,7 +145,7 @@ export class Device {
   /// The members as last checked, kept in this browser, to start with at once.
   async load() {
     const kept = (await get(`global:${this.user}`))?.members;
-    this.known ||= kept?.people?.[this.user]?.keeps ? kept : null;
+    this.known ||= kept?.people?.[this.user]?.app_schedules ? kept : null;
   }
 
   // Epochs and keys.
@@ -283,7 +283,7 @@ export class Device {
 
   /// Renews, in the background, this person's app schedules of `app` as they use it: once a day at most, and at once
   /// when the scope has an epoch their keys don't reach. One of theirs that ran out is stopped, as Stop does. Only those
-  /// the network's entries hold, as checked here (`keeps`, their name for older clients), never those a node lists: a hacked one could list itself.
+  /// the network's steps hold, as checked here (`app_schedules`), never those a node lists: a hacked one could list itself.
   async renewAppSchedules(app) {
     // Checked again first, at most once an hour, so it renews what its person's other devices set too.
     if (!(this.renewChecked > Date.now() - HOUR)) {
@@ -291,7 +291,7 @@ export class Device {
       await this.checked(true).catch(() => {});
     }
     const now = Date.now();
-    for (const g of this.known?.people[this.user]?.keeps || []) {
+    for (const g of this.known?.people[this.user]?.app_schedules || []) {
       if (g.until && g.until <= now) {
         const id = `${g.endpoint} ${g.scope} ${g.app}`;
         if (this.renewing.has(id)) continue;

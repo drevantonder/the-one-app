@@ -29,10 +29,9 @@ use crate::members::{Kind, Members, Principal, Role, ScopeState};
 use crate::permissions;
 
 /// The tables, the same in every scope's database, besides the permissions' (`permissions::SCHEMA`). STRICT, so a
-/// value is stored as the type it was given, and every table has a primary key, which changesets need. App schedules
-/// are `keeps` and `keep_keys`, and the network's row `install`: the names older devices read.
+/// value is stored as the type it was given, and every table has a primary key, which changesets need.
 pub const SCHEMA: &str = "
-CREATE TABLE install (
+CREATE TABLE network (
   id INTEGER PRIMARY KEY CHECK (id = 0),
   root TEXT,
   name TEXT NOT NULL,
@@ -95,7 +94,7 @@ CREATE TABLE sealed (
 CREATE TABLE owed (
   scope TEXT PRIMARY KEY
 ) STRICT;
-CREATE TABLE keeps (
+CREATE TABLE app_schedules (
   device TEXT NOT NULL,
   scope TEXT NOT NULL,
   app TEXT NOT NULL,
@@ -103,7 +102,7 @@ CREATE TABLE keeps (
   until INTEGER NOT NULL,
   PRIMARY KEY (device, scope, app)
 ) STRICT;
-CREATE TABLE keep_keys (
+CREATE TABLE app_schedule_keys (
   device TEXT NOT NULL,
   scope TEXT NOT NULL,
   app TEXT NOT NULL,
@@ -289,7 +288,7 @@ pub fn build(members: &Members, scope: &Scope, state: &ScopeState) -> Result<Con
 fn network(db: &Connection, m: &Members) -> Result<()> {
     let used = m.recovery_used.as_ref();
     db.execute(
-        "INSERT INTO install VALUES (0, ?, ?, ?, ?, ?)",
+        "INSERT INTO network VALUES (0, ?, ?, ?, ?, ?)",
         params![m.root.map(|r| r.to_hex()), m.name, int(m.devices_at), used.map(|(t, _)| int(*t)), used.map(|(_, u)| person(u))],
     )?;
     for u in m.users.values() {
@@ -341,9 +340,9 @@ fn network(db: &Connection, m: &Members) -> Result<()> {
         db.execute("INSERT INTO owed VALUES (?)", params![scope.to_string()])?;
     }
     for ((key, scope, app), g) in &m.app_schedules {
-        db.execute("INSERT INTO keeps VALUES (?, ?, ?, ?, ?)", params![hex(key), scope.to_string(), app, person(&g.by), int(g.until)])?;
+        db.execute("INSERT INTO app_schedules VALUES (?, ?, ?, ?, ?)", params![hex(key), scope.to_string(), app, person(&g.by), int(g.until)])?;
         for (n, hash) in &g.hashes {
-            db.execute("INSERT INTO keep_keys VALUES (?, ?, ?, ?, ?)", params![hex(key), scope.to_string(), app, n, hash])?;
+            db.execute("INSERT INTO app_schedule_keys VALUES (?, ?, ?, ?, ?)", params![hex(key), scope.to_string(), app, n, hash])?;
         }
     }
     for a in m.apps.values() {
@@ -478,7 +477,7 @@ pub(crate) mod tests {
             for s in &scopes {
                 let o = object(s);
                 assert_eq!(may(&p, "use", &o), m.may_use(u, s), "{u} uses {s}");
-                assert_eq!(may(&p, "keep", &o), m.is_scope_admin(u, s), "{u} sets app schedules in {s}");
+                assert_eq!(may(&p, "choose-devices", &o), m.is_scope_admin(u, s), "{u} sets app schedules in {s}");
                 assert_eq!(may(&p, "add-apps", &o), manages_scope(m, u, s), "{u} adds apps to {s}");
             }
             for g in m.groups.keys() {

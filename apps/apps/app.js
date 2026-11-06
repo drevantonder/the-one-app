@@ -39,7 +39,7 @@ const placeInput = { type: "string", description: "user (you), global (everyone)
 /// or the network's and they're an admin.
 function mine(ctx, owner) {
   if (owner === `user:${ctx.me.user}`) return true;
-  if (owner === "admins" || owner === "install") return ctx.me.role === "admin";
+  if (owner === "admins") return ctx.me.role === "admin";
   return ctx.groups.some((g) => g.id === owner && g.role === "admin");
 }
 

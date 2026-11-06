@@ -2,7 +2,7 @@
 //! there sealed to the machine (`keys::app_schedules_key_name`) while the log says so. This device's person sets them
 //! here, and renews them as they use the app, so app schedules nobody uses, or whose machine is off, end by themselves;
 //! a machine that holds them opens that app's databases there with their keys alone, as a call opens what it was
-//! handed, and never its other apps'. In the log they're a `grant` entry, the name older devices replay.
+//! handed, and never its other apps'. They're an `app-schedules` step.
 
 use crate::config::YOURS;
 use super::*;
@@ -64,7 +64,7 @@ impl Node {
     async fn write_app_schedules(&self, endpoint: Key, app: &str, scope: &Scope, until: u64) -> Result<()> {
         let (seal, mine, may) = self.with(|i| {
             let m = i.r.db();
-            Ok((m.seal_key(&endpoint), m.client(&self.0.id).is_some(), m.may(&i.user, "keep", &scopes::object(&scope))))
+            Ok((m.seal_key(&endpoint), m.client(&self.0.id).is_some(), m.may(&i.user, "choose-devices", &scopes::object(&scope))))
         })?;
         ensure!(mine, "{} isn't one of its person's own devices, which are what set app schedules", self.device_name());
         ensure!(may, "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
@@ -103,7 +103,7 @@ impl Node {
                 if m.client(&self.0.id).is_none_or(|c| c.user != me) {
                     return Ok(Vec::new());
                 }
-                Ok(m.app_schedules().into_iter().filter(|((k, s, _), g)| g.by == me && g.until != 0 && g.until <= now && m.machine(k).is_some() && m.may(&me, "keep", &scopes::object(s))).map(|(id, _)| id).collect())
+                Ok(m.app_schedules().into_iter().filter(|((k, s, _), g)| g.by == me && g.until != 0 && g.until <= now && m.machine(k).is_some() && m.may(&me, "choose-devices", &scopes::object(s))).map(|(id, _)| id).collect())
             })
             .unwrap_or_default();
         for id in ended {
@@ -170,7 +170,12 @@ impl Node {
                 continue;
             }
             let name = crate::keys::app_schedules_key_name(&scope.to_string(), app, &me, *n);
-            let Some(o) = crate::bucket::Bucket::get(&bucket, &name).await? else {
+            let before = crate::keys::app_schedules_key_name_before(&scope.to_string(), app, &me, *n);
+            let found = match crate::bucket::Bucket::get(&bucket, &name).await? {
+                Some(o) => Some(o),
+                None => crate::bucket::Bucket::get(&bucket, &before).await?,
+            };
+            let Some(o) = found else {
                 tracing::warn!("{name} isn't in the bucket yet");
                 continue;
             };

@@ -208,7 +208,7 @@ impl Node {
             return Box::pin(self.epoch_keys(scope, false)).await;
         }
         // A scope's first keys are its admins' to make, as they choose where its apps' schedules run.
-        let (may, recovery) = self.with(|i| Ok((i.r.db().may(&i.user, "keep", &scopes::object(scope)), i.r.db().recovery())))?;
+        let (may, recovery) = self.with(|i| Ok((i.r.db().may(&i.user, "choose-devices", &scopes::object(scope)), i.r.db().recovery())))?;
         ensure!(may, NotGiven(scope.clone(), self.device_name()));
         let recovery = recovery.context("the network has no recovery key to seal its keys to")?;
         let key: [u8; 32] = rand::random();

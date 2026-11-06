@@ -157,7 +157,7 @@ impl Node {
                     let runs = status.runs.get(&key);
                     let last = runs.and_then(|r| r.last()).map(|r| json!({ "time": r.time, "ok": r.ok, "error": r.error }));
                     let changed = status.changed.get(&key).filter(|(.., t)| now.saturating_sub(*t) < CHANGED_SHOWN).map(|(was, is, t)| json!({ "was": schedules::say(was), "is": schedules::say(is), "time": t }));
-                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": m.may(&viewer.user, "add-apps", &scopes::object(&scope)), "may_set_app_schedules": m.may(&viewer.user, "keep", &scopes::object(&scope)), "run_by": run_by, "last": last, "changed": changed })
+                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": m.may(&viewer.user, "add-apps", &scopes::object(&scope)), "may_set_app_schedules": m.may(&viewer.user, "choose-devices", &scopes::object(&scope)), "run_by": run_by, "last": last, "changed": changed })
                 };
                 for s in declared {
                     let mut v = match s {

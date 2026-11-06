@@ -19,6 +19,8 @@ use crate::entry::{Content, Entry, Hash, Key, Scope, hex, is_id, unhex};
 
 /// The node's own entries. Apps never see them.
 pub const APP: &str = "node";
+/// The kind of node entry that sets app schedules.
+pub const APP_SCHEDULES: &str = "app-schedules";
 /// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.
 pub const APPS_PART: &str = "apps";
 /// The kinds of node entry that say a release of the node's or a service's program (`release`).
@@ -182,7 +184,7 @@ pub struct Members {
     /// `global`'s first) named it: a device takes a key from the bucket as epoch n only if it has this hash.
     pub epoch_hashes: BTreeMap<(Scope, u32), String>,
     /// App schedules: until when (milliseconds) each endpoint may hold an app's keys in a scope, by (endpoint, scope,
-    /// app), as the latest `grant` of each said; one with `until: 0` is gone.
+    /// app), as the latest `app-schedules` step of each said; one with `until: 0` is gone.
     pub app_schedules: BTreeMap<(Key, Scope, String), AppSchedules>,
     /// Each scope's Vault key, by its newest `vault` entry that counts: items' secrets are sealed to its public half,
     /// which only the machines it lists open.
@@ -679,8 +681,7 @@ impl Members {
                 ensure!(on.iter().all(|k| self.compute(k).is_some() || self.cloudflare_node() == Some(*k)), "only the network's machines that run things, and its Cloudflare node, run someone's own");
                 self.runs.insert(w, on);
             }
-            // App schedules, by the name older devices replay.
-            "grant" => {
+            APP_SCHEDULES => {
                 let endpoint = key_of("endpoint")?;
                 let scope = Scope::parse(&text("scope")?)?;
                 let app = text("app")?;
@@ -1249,11 +1250,10 @@ pub fn runs(on: &[Key]) -> Content {
     node("runs", json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
 }
 
-/// App schedules: `endpoint` runs `app`'s schedules in `scope` until `until`, or no longer with 0. The entry is
-/// `grant`, as older devices replay it.
+/// App schedules: `endpoint` runs `app`'s schedules in `scope` until `until`, or no longer with 0.
 pub fn app_schedules(endpoint: &Key, scope: &Scope, app: &str, until: u64, keys: &BTreeMap<u32, String>) -> Content {
     let keys: serde_json::Map<String, Value> = keys.iter().map(|(n, h)| (n.to_string(), json!(h))).collect();
-    node("grant", json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until, "keys": keys }))
+    node(APP_SCHEDULES, json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until, "keys": keys }))
 }
 
 /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), as its owner (`owner`) says.

@@ -83,7 +83,7 @@ export function server(version) {
   async function global(user, steps) {
     const [, { get, put }] = await code;
     const kept = await get(`global:${user}`);
-    if (!steps && kept?.steps?.truth && kept?.members?.people?.[user]?.keeps) return kept.members;
+    if (!steps && kept?.steps?.truth && kept?.members?.people?.[user]?.app_schedules) return kept.members;
     const { Global } = await glue;
     const root = kept?.root || (await get(`genesis:${user}`)) || "";
     // Where they were read to, as kept, then those this browser read since from the bucket, sealed, its log's first

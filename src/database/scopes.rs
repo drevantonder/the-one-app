@@ -106,6 +106,7 @@ impl ScopeDb {
 
     /// A scope database read as it is (a copy, or one its steps made): who holds what worked out again.
     pub fn open(db: Connection, now: u64) -> Result<ScopeDb> {
+        super::migrate::database(&db)?;
         permissions::close(&db, None)?;
         Ok(ScopeDb { db, now })
     }
@@ -286,22 +287,22 @@ impl ScopeDb {
 
     /// The network's name.
     pub fn name(&self) -> String {
-        self.row("SELECT name FROM install", [], |r| r.get(0)).unwrap_or_default()
+        self.row("SELECT name FROM network", [], |r| r.get(0)).unwrap_or_default()
     }
 
     /// The network's genesis.
     pub fn root(&self) -> Option<Hash> {
-        self.row("SELECT root FROM install", [], |r| r.get::<_, Option<String>>(0)).flatten().and_then(|h| Hash::from_hex(&h).ok())
+        self.row("SELECT root FROM network", [], |r| r.get::<_, Option<String>>(0)).flatten().and_then(|h| Hash::from_hex(&h).ok())
     }
 
     /// When the network's devices last changed.
     pub fn devices_at(&self) -> u64 {
-        self.row("SELECT devices_at FROM install", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as u64
+        self.row("SELECT devices_at FROM network", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as u64
     }
 
     /// When the recovery key last let a device in, and whose.
     pub fn recovery_used(&self) -> Option<(u64, String)> {
-        self.row("SELECT recovery_used_at, recovery_used_by FROM install", [], |r| Ok(r.get::<_, Option<i64>>(0)?.zip(r.get::<_, Option<String>>(1)?)))
+        self.row("SELECT recovery_used_at, recovery_used_by FROM network", [], |r| Ok(r.get::<_, Option<i64>>(0)?.zip(r.get::<_, Option<String>>(1)?)))
             .flatten()
             .map(|(t, u)| (t as u64, id(&u)))
     }
@@ -581,16 +582,16 @@ impl ScopeDb {
         self.rows("SELECT scope FROM owed", [], |r| r.get::<_, String>(0)).iter().filter_map(|s| Scope::parse(s).ok()).collect()
     }
 
-    /// All app schedules, by (device, scope, app), as their latest `grant` said: whether in force is `app_schedules_at`'s.
+    /// All app schedules, by (device, scope, app), as their latest `app-schedules` step said: whether in force is `app_schedules_at`'s.
     pub fn app_schedules(&self) -> BTreeMap<(Key, Scope, String), AppSchedules> {
-        let rows = self.rows("SELECT device, scope, app, principal, until FROM keeps", [], |r| {
+        let rows = self.rows("SELECT device, scope, app, principal, until FROM app_schedules", [], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, id(&r.get::<_, String>(3)?), r.get::<_, i64>(4)? as u64))
         });
         rows.into_iter()
             .filter_map(|(k, s, a, by, until)| {
                 let scope = Scope::parse(&s).ok()?;
                 let hashes = self
-                    .rows("SELECT epoch, key_hash FROM keep_keys WHERE device = ?1 AND scope = ?2 AND app = ?3", params![k, s, a], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .rows("SELECT epoch, key_hash FROM app_schedule_keys WHERE device = ?1 AND scope = ?2 AND app = ?3", params![k, s, a], |r| Ok((r.get(0)?, r.get(1)?)))
                     .into_iter()
                     .collect();
                 Some(((key(&k), scope, a), AppSchedules { by, until, hashes }))
@@ -600,7 +601,7 @@ impl ScopeDb {
 
     /// The app schedules in force at `now`: not over, on a device still listed, by someone who may still set them there.
     pub fn app_schedules_at(&self, now: u64) -> Vec<((Key, Scope, String), AppSchedules)> {
-        self.app_schedules().into_iter().filter(|((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.may(&g.by, "keep", &object(s))).collect()
+        self.app_schedules().into_iter().filter(|((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.may(&g.by, "choose-devices", &object(s))).collect()
     }
 
     /// A scope's current Vault key, if it has one.

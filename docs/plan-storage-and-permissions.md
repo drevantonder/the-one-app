@@ -123,7 +123,7 @@ Left, each its own piece of work:
 - **The store of entries** (`src/store.rs`, `src/node/logs.rs`, `Replica::store`) still mirrors the frozen logs, for that and for what still asks it: blobs an entry names, backups' snapshots, release entries, device seqs. Each moves to the scope database's rows, then the store goes.
 - **Step rules as rows.** A step is applied by `members`' hand-written rules on `Members` read from the database and built back (`steps::apply`); replacing them with SQL over the rows and `may` deletes most of `src/members.rs`.
 - **`members.js`** stays: it builds the content of the steps a browser signs, the same content entries carried.
-- **Renaming** what older devices read (`grant`, the `keep` verb, `keeps` tables, `_grants`), **moving folders**, and **generating the file map**, as planned.
+- **Moving folders** and **generating the file map**, as planned. (The renames are done: `app-schedules` steps, the `choose-devices` verb, the `network`, `app_schedules` and `app_schedule_keys` tables, `_app_schedules`, the bucket's `network` object; what older releases wrote is read in these names by `src/database/migrate.rs`.)
 
 ## The scope database's tables
 

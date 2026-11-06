@@ -1,4 +1,4 @@
-// Stand-in sites for tests. The bucket (https://s3.test/install/…, and /install/… asked directly) keeps objects in
+// Stand-in sites for tests. The bucket (https://s3.test/network/…, and /network/… asked directly) keeps objects in
 // memory, each with an ETag that changes as it does, creating one only if it isn't there when asked with
 // If-None-Match: *, and replacing one only while it's the version If-Match names. Google's token endpoint, given an
 // authorization code, signs in whoever it names: the code is its ID token's claims. Anything else answers with what it
@@ -23,7 +23,7 @@ export default {
       pushes.push({ url: request.url, headers: Object.fromEntries(request.headers), body: btoa(String.fromCharCode(...body)) });
       return new Response("", { status: url.pathname.endsWith("/gone") ? 410 : 201 });
     }
-    if (url.host === "s3.test" || url.pathname.startsWith("/install/")) {
+    if (url.host === "s3.test" || url.pathname.startsWith("/network/")) {
       const name = url.pathname;
       const etag = { etag: tags.get(name) };
       if (request.method === "GET") return objects.has(name) ? new Response(objects.get(name), { headers: etag }) : new Response("", { status: 404 });

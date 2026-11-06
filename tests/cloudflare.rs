@@ -261,7 +261,7 @@ impl Workers {
         // The network's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
         settings.genesis = Some(data_encoding::HEXLOWER.encode(&GENESIS));
-        settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
+        settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "network", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = cloudflare::WORKERS.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();
         let web = crate::temp("web");

@@ -75,7 +75,7 @@ impl Node {
         let endpoint = self.find_device(device)?;
         let (mine, may, current, recovery) = self.with(|i| {
             let m = i.r.db();
-            Ok((m.client(&self.0.id).is_some(), m.may(&i.user, "keep", &scopes::object(&scope)), m.vault(scope).unwrap_or_default(), m.recovery()))
+            Ok((m.client(&self.0.id).is_some(), m.may(&i.user, "choose-devices", &scopes::object(&scope)), m.vault(scope).unwrap_or_default(), m.recovery()))
         })?;
         ensure!(mine, "{} isn't one of its person's own devices, which are what grant", self.device_name());
         ensure!(may, "only {scope}'s person, or its admins, say which machines open its Vault");

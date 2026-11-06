@@ -16,7 +16,7 @@
 //! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`cloudflare::seal_to`)
 //! <folder>/_epochs/<n>/recovery             and to the network's recovery key
 //! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`cloudflare::seal_app_key`)
-//! <folder>/<app>/_grants/<endpoint>/<n>      and sealed to an endpoint that runs its app schedules (`cloudflare::seal_to`)
+//! <folder>/<app>/_app_schedules/<endpoint>/<n>  and sealed to an endpoint that runs its app schedules (`cloudflare::seal_to`)
 //! <folder>/_vault/<n>/<endpoint key hex>     the scope's Vault secret key n, sealed to a machine its `vault` entry grants
 //! <folder>/_vault/<n>/recovery               and to the network's recovery key
 //! ```
@@ -206,8 +206,13 @@ pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
 }
 
 /// Where an app's key in epoch `n` of a scope is kept sealed to an endpoint that runs the app's schedules there: its
-/// key in hex. `_grants` is the folder older devices read them from.
+/// key in hex.
 pub fn app_schedules_key_name(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
+    format!("{}/{app}/_app_schedules/{endpoint}/{n}", crate::bucket::folder(scope))
+}
+
+/// Where a build from before app schedules had their name sealed it: read when it isn't under its own name.
+pub fn app_schedules_key_name_before(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
     format!("{}/{app}/_grants/{endpoint}/{n}", crate::bucket::folder(scope))
 }
 

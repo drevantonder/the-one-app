@@ -61,7 +61,7 @@ impl Node {
         place.can_hold_a_network()?;
         let reached = {
             let place = place.clone();
-            tokio::task::spawn_blocking(move || place.get(NETWORK_OBJECT)).await?
+            tokio::task::spawn_blocking(move || bucket_root(&place)).await?
         };
         let steps = vec![json!({ "step": "Reached it through the URL signer", "error": reached.as_ref().err().map(|e| format!("{e:#}")) })];
         if reached.is_err() {
@@ -113,7 +113,7 @@ impl Node {
         let (place, theirs) = (to.clone(), root.clone());
         tokio::task::spawn_blocking(move || -> Result<()> {
             place.can_hold_a_network()?;
-            if let Some(other) = place.get(NETWORK_OBJECT)?.filter(|r| r != theirs.as_bytes()) {
+            if let Some(other) = bucket_root(&place)?.filter(|r| r != theirs.as_bytes()) {
                 bail!("that bucket holds another network's data ({})", String::from_utf8_lossy(&other));
             }
             Ok(())
@@ -160,7 +160,7 @@ impl Node {
         let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no network"))?;
         let (p, theirs) = (place.clone(), root.clone());
         tokio::task::spawn_blocking(move || -> Result<()> {
-            if let Some(other) = p.get(NETWORK_OBJECT)?.filter(|r| r != theirs.as_bytes()) {
+            if let Some(other) = bucket_root(&p)?.filter(|r| r != theirs.as_bytes()) {
                 bail!("that bucket holds another network's data ({})", String::from_utf8_lossy(&other));
             }
             p.create(NETWORK_OBJECT, theirs.as_bytes())?;
@@ -263,12 +263,12 @@ mod tests {
             crate::db::step_name(db, 3),
             crate::db::step_name(db, 1_000_000),
             "user:a/blobs/abc".to_string(),
-            "install".to_string(),
+            "network".to_string(),
         ]
         .into();
         names.sort();
         let moved = super::to_move(&names);
-        let want = [crate::db::step_name(log, 1), crate::db::step_name(log, 2), crate::db::copy_name(log, 2), crate::db::newest_name(log), crate::db::step_name(db, 1), crate::db::sig_name(db, 1), "user:a/blobs/abc".to_string(), "install".to_string()];
+        let want = [crate::db::step_name(log, 1), crate::db::step_name(log, 2), crate::db::copy_name(log, 2), crate::db::newest_name(log), crate::db::step_name(db, 1), crate::db::sig_name(db, 1), "user:a/blobs/abc".to_string(), "network".to_string()];
         assert_eq!(moved.iter().collect::<std::collections::BTreeSet<_>>(), want.iter().collect());
         // As the URL signer creates them (`cloudflare/signer/worker.js`'s `after`), one after another in that order.
         let mut there = std::collections::BTreeSet::new();

@@ -163,7 +163,7 @@ impl Node {
                 let key = crate::keys::unhex(to)?;
                 self.with(|i| {
                     let db = i.r.db();
-                    ensure!(db.may(&caller.user, "keep", &scopes::object(scope)), "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
+                    ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
                     ensure!(db.machine(&key).is_some(), "that endpoint isn't one of the network's");
                     Ok(())
                 })?;
@@ -921,7 +921,7 @@ impl Node {
                 }
                 let owed: BTreeSet<Owing> = db.owed().into_iter().filter(|s| starts_epochs(db, &me, s)).map(Owing::Epoch).collect();
                 let epochs = db.epochs().into_iter().filter(|(s, _)| db.sealed_to(s).contains(&self.0.id) && starts_epochs(db, &me, s)).map(|(s, n)| (Owing::Epoch(s), n));
-                let vaults: BTreeMap<Scope, (u32, Vec<Key>)> = db.vaults().into_iter().filter(|(s, v)| v.to.contains(&self.0.id) && db.may(&me, "keep", &scopes::object(s))).map(|(s, v)| (s, (v.n, v.to))).collect();
+                let vaults: BTreeMap<Scope, (u32, Vec<Key>)> = db.vaults().into_iter().filter(|(s, v)| v.to.contains(&self.0.id) && db.may(&me, "choose-devices", &scopes::object(s))).map(|(s, v)| (s, (v.n, v.to))).collect();
                 let listed: Vec<(Owing, u32)> = epochs.chain(vaults.iter().map(|(s, (n, _))| (Owing::Vault(s.clone()), *n))).collect();
                 Ok((owed, listed, (vaults, db.recovery())))
             })

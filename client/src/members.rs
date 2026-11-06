@@ -270,8 +270,8 @@ fn now() -> u64 {
 /// - `epochs`: each scope's newest epoch `n` and every epoch's hash
 /// - `people`: each person's `uses` and `starts` (scopes they open, and whose new epochs they start), `nodes` (those
 ///   that run their calls), `runs_until_chosen`, `approves` (whose new devices they let in), `invites` (someone new),
-///   `removes_people`, `removes` (the devices they may take out), and `keeps`: their app schedules on a device still
-///   listed (named so for older clients), `{ endpoint, scope, app, until, keys }` (each epoch's key hash), the only ones their browser renews
+///   `removes_people`, `removes` (the devices they may take out), and `app_schedules`: theirs on a device still
+///   listed, `{ endpoint, scope, app, until, keys }` (each epoch's key hash), the only ones their browser renews
 ///
 /// Of who's who as it is (`Global::who`).
 pub fn view_of(db: &ScopeDb) -> Result<Value> {
@@ -301,9 +301,9 @@ pub fn view_of(db: &ScopeDb) -> Result<Value> {
     let schedules = db.app_schedules();
     let mut answers = Map::new();
     for u in &people {
-        let keeps: Vec<Value> = schedules
+        let own: Vec<Value> = schedules
             .iter()
-            .filter(|((k, s, _), g)| g.by == *u && db.machine(k).is_some() && db.may(u, "keep", &object(s)))
+            .filter(|((k, s, _), g)| g.by == *u && db.machine(k).is_some() && db.may(u, "choose-devices", &object(s)))
             .map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "keys": g.hashes }))
             .collect();
         answers.insert(
@@ -317,7 +317,7 @@ pub fn view_of(db: &ScopeDb) -> Result<Value> {
                 "invites": db.may(u, "invite", NETWORK),
                 "removes_people": db.may(u, "remove", NETWORK),
                 "removes": listed.iter().filter(|d| db.may(u, "remove", &device(&d.key))).map(|d| hex(&d.key)).collect::<Vec<_>>(),
-                "keeps": keeps,
+                "app_schedules": own,
                 "sign_ins": db.sign_ins(u),
             }),
         );

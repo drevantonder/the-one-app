@@ -251,9 +251,11 @@ export class Relay extends DurableObject {
       this.sql.exec("ALTER TABLE bound ADD COLUMN ticket TEXT NOT NULL DEFAULT ''");
     } catch {}
     this.sql.exec("DELETE FROM bound WHERE ticket = ''");
+    // The first devices were let in by the network, which a release from before it was called one wrote as `install`.
+    this.sql.exec("UPDATE keys SET by = 'network' WHERE by = 'install'");
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
       for (const { key, role, admin } of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
-        if (isKey(key) && String(role).split(" ").every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'install', ?, ?)", key, admin === true ? 1 : 0, role);
+        if (isKey(key) && String(role).split(" ").every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'network', ?, ?)", key, admin === true ? 1 : 0, role);
       }
     }
     /// Each proven endpoint's socket, by its key; kept in the sockets' attachments across hibernation.

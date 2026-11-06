@@ -1,6 +1,7 @@
 //! Databases: each scope's SQLite databases. For now only the scope database (`scope`), its signed steps (`steps`),
 //! and what a device asks of it (`scopes`); apps' databases are still `src/db.rs`.
 
+pub mod migrate;
 pub mod scope;
 pub mod scopes;
 pub mod steps;
@@ -9,7 +10,7 @@ pub mod steps;
 /// that reads less is told to update, by nodes (`HEADER`), the relay, sign-in and the URL signer (`reads` in what it
 /// asks them, `cloudflare/shared/crypto.js`'s `READS`, which `tests/contracts.rs` holds to this). A release that changes
 /// `scope::SCHEMA`, `permissions::SCHEMA` or `permissions::defaults` reads one more.
-pub const READS: u32 = 3;
+pub const READS: u32 = 4;
 
 /// The header a client says what it reads in.
 pub const HEADER: &str = "x-one-reads";

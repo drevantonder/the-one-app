@@ -258,14 +258,16 @@ impl Entry {
         Scope::parse(&h.log)?;
         ensure!(h.size == body.len() as u64, "body size mismatch");
         ensure!(h.body == keys::sha256(body), "body hash mismatch");
-        let content: Content = serde_json::from_slice(body).context("decode body")?;
+        let mut content: Content = serde_json::from_slice(body).context("decode body")?;
+        crate::database::migrate::content(&mut content);
         Ok(Entry { hash: Hash(keys::sha256(header)), header: h, raw: header.to_vec(), signature: signature.try_into().expect("checked"), body: body.to_vec(), content, depth: 0 })
     }
 
     /// Decodes an entry this device already checked when it arrived.
     pub fn decode_trusted(header: &[u8], signature: &[u8], body: &[u8], depth: u64) -> Result<Self> {
         let h = Header::parse(&serde_json::from_slice(header).context("decode header")?)?;
-        let content: Content = serde_json::from_slice(body).context("decode body")?;
+        let mut content: Content = serde_json::from_slice(body).context("decode body")?;
+        crate::database::migrate::content(&mut content);
         let signature = signature.try_into().map_err(|_| anyhow!("not a signature"))?;
         Ok(Entry { hash: Hash(keys::sha256(header)), header: h, raw: header.to_vec(), signature, body: body.to_vec(), content, depth })
     }
