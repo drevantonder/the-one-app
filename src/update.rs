@@ -328,7 +328,7 @@ fn services(src: &Path) -> Vec<String> {
 
 /// Builds the Go service in `dir` for `os` and `arch` (Go's names) at `out`, saying it was built from `built`.
 fn go_build(dir: &Path, os: &str, arch: &str, built: &str, out: &Path) -> Result<()> {
-    let mut go = Command::new("go");
+    let mut go = Command::new(go());
     go.current_dir(dir).env("CGO_ENABLED", "0").env("GOOS", os).env("GOARCH", arch);
     go.args(["build", "-trimpath", "-ldflags", &format!("-X main.built={built}"), "-o"]).arg(out).arg(".");
     run_quiet(&mut go)
@@ -858,6 +858,12 @@ pub fn client(src: &Path, config: &Path) -> Result<PathBuf> {
 pub fn cargo() -> PathBuf {
     let rustup = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cargo/bin/cargo");
     if quiet(Command::new("cargo").arg("--version")) || !rustup.exists() { "cargo".into() } else { rustup }
+}
+
+/// Go, also where mise's shims put it, for a shell that doesn't have it on its PATH.
+fn go() -> PathBuf {
+    let mise = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share/mise/shims/go");
+    if quiet(Command::new("go").arg("version")) || !mise.exists() { "go".into() } else { mise }
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String> {
