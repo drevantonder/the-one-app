@@ -1,6 +1,6 @@
 //! The Cloudflare node's Rust: the machine node's own code, as WebAssembly on Workers. `worker.js` answers requests
 //! and runs apps; this checks who asks, opens the keys callers hand it, signs what it asks the URL signer, and
-//! reads and writes apps' databases in the bucket (`src/db.rs`), through the presigned URLs `worker.js` gets. It holds
+//! reads and writes apps' databases in the bucket (`src/database/stored.rs`), through the presigned URLs `worker.js` gets. It holds
 //! no keys but those handed it for a device's requests.
 
 mod clients;
@@ -13,7 +13,7 @@ use anyhow::{Context, Result, anyhow};
 use js_sys::{Function, Promise, Reflect, Uint8Array};
 use one::bucket::{Bucket, Failed, Object, Trouble};
 use one::call::Append;
-use one::db::Db;
+use one::database::stored::Db;
 use one::entry::{Entry, Hash, Scope};
 use one::database::scopes::{ScopeDb, app, object};
 use one::members::{Members, ScopeState};
@@ -83,14 +83,14 @@ fn thrown(err: anyhow::Error) -> JsError {
 /// An error as `worker.js` reads it: one that stopped at an epoch whose key it wasn't handed says which (`missing`).
 fn failed(err: anyhow::Error) -> JsValue {
     let out = js_sys::Error::new(&format!("{err:#}"));
-    if let Some(m) = err.downcast_ref::<one::db::Missing>() {
+    if let Some(m) = err.downcast_ref::<one::database::stored::Missing>() {
         let _ = Reflect::set(&out, &"missing".into(), &m.epoch.into());
     }
     out.into()
 }
 
 /// A database's keys as `worker.js` keeps them: JSON, `{ <epoch>: <key, base64url> }`.
-fn keys_of(keys: &str) -> Result<one::db::Keys> {
+fn keys_of(keys: &str) -> Result<one::database::stored::Keys> {
     let keys: BTreeMap<u32, String> = serde_json::from_str(keys)?;
     keys.into_iter().map(|(n, k)| Ok((n, one::cloudflare::decode_key(&k)?))).collect()
 }
@@ -146,8 +146,8 @@ pub async fn needs(bucket: JsValue, wants: String, epochs: String) -> Result<Str
         let (scope, app, database) = (w["scope"].as_str().unwrap_or(""), w["app"].as_str().unwrap_or(""), w["database"].as_str().unwrap_or(""));
         let have: Vec<u32> = serde_json::from_value(w["have"].clone()).unwrap_or_default();
         let newest = epochs.get(scope).copied().unwrap_or(1).max(1);
-        let hint = match bucket.get(&one::db::newest_name(&prefix_of(scope, app, database).map_err(thrown)?)).await.map_err(thrown)? {
-            Some(o) => Some(one::db::newest(&o.bytes)),
+        let hint = match bucket.get(&one::database::stored::newest_name(&prefix_of(scope, app, database).map_err(thrown)?)).await.map_err(thrown)? {
+            Some(o) => Some(one::database::stored::newest(&o.bytes)),
             None => None,
         };
         let oldest = match hint {
@@ -161,9 +161,9 @@ pub async fn needs(bucket: JsValue, wants: String, epochs: String) -> Result<Str
 }
 
 /// The keys of a database a call uses, of those handed (`keys_of`), for a scope whose current epoch is `current`
-/// (`one::db::handed`): a `missing` error names the epoch it lacks.
-fn usable(keys: &str, current: u32) -> Result<one::db::Keys, JsValue> {
-    one::db::handed(keys_of(keys).map_err(failed)?, current.max(1)).map_err(|m| failed(m.into()))
+/// (`one::database::stored::handed`): a `missing` error names the epoch it lacks.
+fn usable(keys: &str, current: u32) -> Result<one::database::stored::Keys, JsValue> {
+    one::database::stored::handed(keys_of(keys).map_err(failed)?, current.max(1)).map_err(|m| failed(m.into()))
 }
 
 /// How many people's databases and entries one isolate keeps, the least lately used going first: each person's are
@@ -307,7 +307,7 @@ pub async fn write(handle: u32, bucket: JsValue, statements: String) -> Result<f
     let list: Vec<(String, Vec<Value>, Option<String>)> = serde_json::from_str(&statements)?;
     let (owner, mut db) = take(handle).map_err(thrown)?;
     let (at, bucket) = (db.at(), Js(bucket));
-    let wrote = db.write(&bucket, |c| one::db::statements(c, &list)).await;
+    let wrote = db.write(&bucket, |c| one::database::stored::statements(c, &list)).await;
     let step = if db.at() > at { db.at() as f64 } else { 0.0 };
     put(handle, (owner, db));
     wrote.map_err(thrown)?;
@@ -406,7 +406,7 @@ pub fn config() -> String {
     json!({ "name": one::config::NAME, "cli": one::config::CLI, "port": one::config::PORT, "made_here": one::config::MADE_HERE }).to_string()
 }
 
-/// Where an app's database of a scope is in the bucket (`src/db.rs`): only of a scope there can be, and an app and
+/// Where an app's database of a scope is in the bucket (`src/database/stored.rs`): only of a scope there can be, and an app and
 /// database whose names are only letters, digits and dashes.
 fn prefix_of(scope: &str, app: &str, database: &str) -> Result<String> {
     let scope = Scope::parse(scope)?.to_string();
@@ -424,9 +424,9 @@ pub fn prefix(scope: &str, app: &str, database: &str) -> Result<String, JsError>
 /// each with the signature beside it, as JSON: what's read next. A scope's log's steps have none.
 #[wasm_bindgen]
 pub fn following(name: &str, n: u32) -> String {
-    let Some((prefix, at)) = one::db::position(name) else { return "[]".into() };
-    let signed = one::db::signed_beside(prefix);
-    let names = (at..=at + n as u64).flat_map(|i| [Some(one::db::step_name(prefix, i)), signed.then(|| one::db::sig_name(prefix, i))]).flatten();
+    let Some((prefix, at)) = one::database::stored::position(name) else { return "[]".into() };
+    let signed = one::database::stored::signed_beside(prefix);
+    let names = (at..=at + n as u64).flat_map(|i| [Some(one::database::stored::step_name(prefix, i)), signed.then(|| one::database::stored::sig_name(prefix, i))]).flatten();
     Value::from(names.filter(|other| other.as_str() > name).collect::<Vec<_>>()).to_string()
 }
 
@@ -436,7 +436,7 @@ pub fn following(name: &str, n: u32) -> String {
 /// A scope's steps this isolate read for one person's object: the keys they were read with, which reading of them this
 /// is, and the steps, by position from the first: of `global`, its freeze among them.
 struct Held {
-    keys: one::db::Keys,
+    keys: one::database::stored::Keys,
     read: u64,
     steps: Vec<Option<one::database::steps::Given>>,
     /// Of another scope: its start (`steps::START`, step 0), once looked for; none inside if there's none.
@@ -508,7 +508,7 @@ pub async fn read_scope(owner: String, bucket: JsValue, scope: String, keys: Str
 }
 
 /// `read_scope`, of `id`'s scope for its owner, with its `keys`: `global`'s genesis first.
-async fn read_scope_with(id: (String, String), bucket: &Js, keys: one::db::Keys) -> Result<()> {
+async fn read_scope_with(id: (String, String), bucket: &Js, keys: one::database::stored::Keys) -> Result<()> {
     if LOGS.with(|l| l.borrow().get(&id).is_none_or(|l| l.keys != keys)) {
         let genesis = match id.1.as_str() {
             "global" => match bucket.get(&one::database::steps::genesis_name()).await? {
@@ -561,7 +561,7 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
         // above every one made, as the steps before it leave it, is junk: passed over.
         let made = LOGS.with(|l| l.borrow().get(&global).map(|g| Held::made(g, &scope)).transpose());
         match (read.waits, made) {
-            (Some(epoch), Ok(Some(made))) if epoch <= made => return Err(one::db::Missing { epoch }.into()),
+            (Some(epoch), Ok(Some(made))) if epoch <= made => return Err(one::database::stored::Missing { epoch }.into()),
             (Some(_), Ok(Some(made))) if read.junk_at_end(made) => {}
             _ => return Ok(()),
         }
@@ -635,12 +635,12 @@ pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, f
     let mut out = json!({});
     let mut from = from as u64;
     if let Some(w) = welcome.as_deref().and_then(steps::Welcome::parse).filter(|w| w.at <= read)
-        && let Some(freeze) = bucket.get(&one::db::step_name(&prefix, w.freeze)).await.map_err(failed)?
+        && let Some(freeze) = bucket.get(&one::database::stored::step_name(&prefix, w.freeze)).await.map_err(failed)?
     {
         out = json!({ "welcome": w.to_string(), "freeze": sealed(w.freeze, freeze) });
         from = w.freeze;
         if let Some(c) = w.copy()
-            && let Some(copy) = bucket.get(&one::db::copy_name(&prefix, c)).await.map_err(failed)?
+            && let Some(copy) = bucket.get(&one::database::stored::copy_name(&prefix, c)).await.map_err(failed)?
         {
             out["start"] = sealed(c, copy);
             from = c;
@@ -648,7 +648,7 @@ pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, f
     }
     let mut list = Vec::new();
     let mut at = from.min(read);
-    while let Some(o) = bucket.get(&one::db::step_name(&prefix, at + 1)).await.map_err(failed)? {
+    while let Some(o) = bucket.get(&one::database::stored::step_name(&prefix, at + 1)).await.map_err(failed)? {
         at += 1;
         if at > from {
             list.push(sealed(at, o));
@@ -871,7 +871,7 @@ pub async fn bundle(bucket: JsValue, keys: String, hash: String) -> Result<Strin
     let name = one::bucket::blob_name("global", &hash);
     let sealed = Js(bucket).get(&name).await.map_err(failed)?.ok_or_else(|| failed(anyhow!("{name} isn't in the bucket yet: a node on one of your machines puts it there")))?;
     let epoch = one::keys::epoch_of(&sealed.bytes).map_err(failed)?;
-    let key = keys.get(&epoch).ok_or_else(|| failed(one::db::Missing { epoch }.into()))?;
+    let key = keys.get(&epoch).ok_or_else(|| failed(one::database::stored::Missing { epoch }.into()))?;
     let bytes = one::keys::open(key, &name, &sealed.bytes).map_err(failed)?;
     if blake3::hash(&bytes).to_hex().as_str() != hash {
         return Err(failed(anyhow!("the bundle kept as {hash} isn't it")));

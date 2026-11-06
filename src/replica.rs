@@ -77,7 +77,7 @@ impl Replica {
     /// Where this device has read `global`'s scope database to, for a device it lets in to start from.
     pub fn welcome(&self) -> Result<Option<steps::Welcome>> {
         let Some((freeze, at)) = &self.frozen else { return Ok(None) };
-        Ok(Some(steps::Welcome { freeze: freeze.at, at: *at, hash: crate::db::state_hash(self.db.conn())? }))
+        Ok(Some(steps::Welcome { freeze: freeze.at, at: *at, hash: crate::database::stored::state_hash(self.db.conn())? }))
     }
 
     /// Starts again from what `keep` kept, checked against its hash (`steps::Truth::kept`), as this device started.

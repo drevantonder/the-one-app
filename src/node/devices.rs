@@ -144,7 +144,7 @@ impl Node {
                     }
                     Ok(())
                 })?;
-                ensure!(crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, to), &sealed).await?, "{scope}'s epoch {n} is sealed to {to} already");
+                ensure!(crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, to), &sealed).await?, "{scope}'s epoch {n} is sealed to {to} already");
                 Ok(json!({}))
             }
             (None, Some(app)) => {
@@ -152,7 +152,7 @@ impl Node {
                 ensure!(self.with(|i| Ok(i.r.db().may(&caller.user, "use", &scopes::object(scope))))?, "you don't use {scope}");
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
                 let key = crate::keys::app_key_name(&name, app, n);
-                let there = match crate::db::created(&bucket, &key, &sealed).await? {
+                let there = match crate::database::stored::created(&bucket, &key, &sealed).await? {
                     true => sealed,
                     false => Bucket::get(&bucket, &key).await?.context("an app's key went as it was made")?.bytes,
                 };
@@ -168,7 +168,7 @@ impl Node {
                     Ok(())
                 })?;
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
-                crate::db::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, to, n), &sealed).await?;
+                crate::database::stored::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, to, n), &sealed).await?;
                 Ok(json!({}))
             }
             _ => bail!("give to (an endpoint's key, or recovery), app, or both"),
@@ -361,8 +361,8 @@ impl Node {
         let mut db = db.lock().await;
         self.write_in(&scope, &mut db, &self.bucket()?, |c| {
             match invite {
-                Some(i) => crate::db::execute(c, "insert or replace into invites values (?, ?, ?, ?, ?)", &[json!(i.user), json!(i.secret), json!(i.name), json!(i.role), json!(i.until)])?,
-                None => crate::db::execute(c, "delete from invites where user = ?", &[json!(user)])?,
+                Some(i) => crate::database::stored::execute(c, "insert or replace into invites values (?, ?, ?, ?, ?)", &[json!(i.user), json!(i.secret), json!(i.name), json!(i.role), json!(i.until)])?,
+                None => crate::database::stored::execute(c, "delete from invites where user = ?", &[json!(user)])?,
             };
             Ok(())
         })
@@ -520,7 +520,7 @@ impl Node {
             };
             let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
             if Bucket::get(&bucket, &at).await?.is_none() {
-                crate::db::created(&bucket, &at, &crate::cloudflare::seal_to(&to.seal, &key)?).await?;
+                crate::database::stored::created(&bucket, &at, &crate::cloudflare::seal_to(&to.seal, &key)?).await?;
             }
             opened += 1;
         }
@@ -790,7 +790,7 @@ impl Node {
         for (n, key) in self.epoch_keys(scope, false).await? {
             let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
             if Bucket::get(&bucket, &at).await?.is_none() {
-                crate::db::created(&bucket, &at, &crate::cloudflare::seal_to(&to.seal, &key)?).await?;
+                crate::database::stored::created(&bucket, &at, &crate::cloudflare::seal_to(&to.seal, &key)?).await?;
             }
         }
         Ok(())
@@ -1027,12 +1027,12 @@ impl Node {
         // Not while there's none (the one there was forked `global`), until an admin names the next: a removal still
         // takes keys away from whoever it removes.
         if let Some(recovery) = recovery
-            && !crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::cloudflare::seal_to(&crate::cloudflare::twin_public(&recovery)?, &key)?).await?
+            && !crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::cloudflare::seal_to(&crate::cloudflare::twin_public(&recovery)?, &key)?).await?
         {
             tracing::warn!("{scope}'s epoch {n} was sealed to the recovery key already, not with its key: the recovery key won't open it");
         }
         for c in &to {
-            crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&c.key)), &crate::cloudflare::seal_to(&c.seal, &key)?).await?;
+            crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&c.key)), &crate::cloudflare::seal_to(&c.seal, &key)?).await?;
         }
         self.forget_epochs(scope);
         Ok(n)

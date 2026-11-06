@@ -4,7 +4,7 @@
 //! so a call waits there while it starts again rather than being refused. Outside oned (tests), the node keeps one in a
 //! thread of its own.
 //! Each deployed app is an ES module inside `runtime/shim.js`, which asks the node to run its queries and writes on
-//! its databases (`src/db.rs`), and runs its tools, widgets, hooks and screens.
+//! its databases (`src/database/stored.rs`), and runs its tools, widgets, hooks and screens.
 //! When the deploys change, the node writes the config again and restarts workerd.
 //! Every request an app makes (its `fetch`es, and the shim's asks of the node) goes to the node's outbound port,
 //! `src/app/outbound.rs`, carrying the token of the call it's made in.

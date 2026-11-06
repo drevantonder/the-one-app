@@ -107,7 +107,7 @@ impl Node {
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let seals: Vec<(String, [u8; 32])> = self.with(|i| Ok(to.iter().filter_map(|k| i.r.db().seal_key(k).map(|s| (hex(k), s))).collect()))?;
         for (at, seal) in std::iter::once(("recovery".to_string(), crate::cloudflare::twin_public(recovery)?)).chain(seals) {
-            crate::db::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::cloudflare::seal_to(&seal, &secret)?).await?;
+            crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::cloudflare::seal_to(&seal, &secret)?).await?;
         }
         if to.contains(&self.0.id) {
             self.0.app_schedules.vault.lock().unwrap().insert((scope.clone(), n), secret);

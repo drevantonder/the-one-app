@@ -152,7 +152,7 @@ Every row change is in a signed step, so "who did what" for seven years is the s
 | A | 0 | Strip ARCHITECTURE.md back | none | `ARCHITECTURE.md` |
 | B | 1.1 | The permissions engine | the tables agreed | `src/permissions/` |
 | C | 1.2 | The scope database and its builder from the log | the tables agreed | `src/database/scope*`, the builder |
-| D | 1.4 | Storage: signatures beside steps, levels, deletion | none | `src/db.rs`, `src/bucket*` |
+| D | 1.4 | Storage: signatures beside steps, levels, deletion | none | `src/database/stored.rs`, `src/bucket*` |
 | E | 1.6 | Clients sync with TanStack DB | none | the screens' shared JavaScript |
 | F1 | 1.3 | The node reads the scope database and `may` | B, C | `src/node/`, `src/*.rs` callers |
 | F2 | 1.3 | The client crate and the browser | B, C | `client/`, `cloudflare/web/` |

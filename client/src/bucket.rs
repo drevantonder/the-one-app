@@ -65,7 +65,7 @@ impl Bucket for Signed {
             let name = &asked;
             // A database's step: the positions after it too, which come next.
             let item = match name.rsplit_once('/').and_then(|(prefix, at)| Some((prefix, at.parse::<u64>().ok()?))) {
-                Some((prefix, at)) if one::db::step_name(prefix, at) == *name && at > 0 => json!({ "steps": prefix, "from": at, "to": at + AHEAD }),
+                Some((prefix, at)) if one::database::stored::step_name(prefix, at) == *name && at > 0 => json!({ "steps": prefix, "from": at, "to": at + AHEAD }),
                 _ => json!(name),
             };
             let key = ed25519_dalek::SigningKey::from_bytes(&secret);

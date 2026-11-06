@@ -771,7 +771,7 @@ impl Node {
                 let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;
                 let mut db = db.lock().await;
                 let at = db.at();
-                self.write_in(&scope, &mut db, &bucket, |c| crate::db::statements(c, &list)).await?;
+                self.write_in(&scope, &mut db, &bucket, |c| crate::database::stored::statements(c, &list)).await?;
                 if db.at() > at {
                     self.ping(&scope, Some((app, DATABASE, db.at())));
                 }
@@ -1017,7 +1017,7 @@ impl Node {
 
     /// `scope`'s database of the app a call runs, as the call reads it: caught up at its first read, so it reads one
     /// state of the scope throughout, and that read traced (where its data came from, and how long getting it took).
-    async fn call_db(&self, token: &str, grant: &Grant, scope: &Scope) -> Result<tokio::sync::OwnedMutexGuard<crate::db::Db>> {
+    async fn call_db(&self, token: &str, grant: &Grant, scope: &Scope) -> Result<tokio::sync::OwnedMutexGuard<crate::database::stored::Db>> {
         ensure!(grant.scopes.contains(scope), "the call didn't name {scope}");
         let started = Instant::now();
         let first = !grant.caught_up.contains(scope);

@@ -161,7 +161,7 @@ impl Node {
         let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await?;
         // As every write is, so a step that says the log may be frozen is answered, not the end of every row here.
         self.write_in(scope, &mut *db.lock().await, &self.bucket()?, |c| {
-            let ex = |sql: &str, params: &[Value]| crate::db::execute(c, sql, params).map(|_| ());
+            let ex = |sql: &str, params: &[Value]| crate::database::stored::execute(c, sql, params).map(|_| ());
             match &said {
                 Said::Used { app, user, client, agent, day } => ex(
                     "insert into used values (?, ?, ?, 1, ?, ?, ?) on conflict (app, user, client) do update set

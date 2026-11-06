@@ -10,7 +10,7 @@
 //! self-service), or by the network's recovery key, kept offline by an admin, each use of it an entry in the log.
 //! A scope gets a new epoch when a person, or a device that didn't sign itself out (lost or stolen), loses the right
 //! to open it, never on sign-out, where the device deletes its own key: the keys are sealed to everyone who still
-//! belongs. Epochs never go down along a database's positions (`src/db.rs`).
+//! belongs. Epochs never go down along a database's positions (`src/database/stored.rs`).
 //!
 //! ```text
 //! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`cloudflare::seal_to`)

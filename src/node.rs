@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 use crate::app::runtime::{Apps, Context, Me, ScopeHandle};
 use crate::call::Append;
 use crate::bucket::{Copied, Place};
-use crate::db::Db;
+use crate::database::stored::Db;
 use crate::entry::{Content, Entry, Hash, Key, Scope, hex, new_id, short, unhex};
 use crate::database::scopes::{self, ScopeDb};
 use crate::members::{self, Principal, Role, ScopeState};
@@ -449,9 +449,9 @@ pub struct Inner {
     /// from the bucket.
     behind: Mutex<std::collections::HashSet<(Scope, String)>>,
     /// Each scope's epochs this device opens, by number, once it has looked.
-    epochs: Mutex<HashMap<Scope, crate::db::Keys>>,
+    epochs: Mutex<HashMap<Scope, crate::database::stored::Keys>>,
     /// Each database's keys by epoch as this device opens them (`database_keys`), with the newest epoch they're as of.
-    database_keys: Mutex<HashMap<(Scope, String), (u32, crate::db::Keys)>>,
+    database_keys: Mutex<HashMap<(Scope, String), (u32, crate::database::stored::Keys)>>,
     /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
     sent: Mutex<Option<Vec<sync::Sent>>>,
     /// Whether this device is moving to the network's new storage now.
@@ -881,9 +881,9 @@ impl Node {
         let bucket = self.bucket()?;
         let recovery_seal = crate::cloudflare::twin_public(recovery.verifying_key().as_bytes())?;
         for (to, seal) in [("recovery".to_string(), recovery_seal), (hex(&me.key), me.seal)] {
-            crate::db::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::cloudflare::seal_to(&seal, &global)?).await?;
+            crate::database::stored::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::cloudflare::seal_to(&seal, &global)?).await?;
         }
-        self.0.epochs.lock().unwrap().insert(Scope::Global, crate::db::Keys::from([(1, global)]));
+        self.0.epochs.lock().unwrap().insert(Scope::Global, crate::database::stored::Keys::from([(1, global)]));
         // Its genesis, where every device reads it (`steps::genesis_name`), and who's who, as the freeze its recovery key
         // signs at step 1 of its scope database: its genesis's.
         let keys = self.step_keys(&Scope::Global).await?;
@@ -895,7 +895,7 @@ impl Node {
             Ok(())
         })?;
         let first = crate::database::steps::first_freeze(&recovery, &entry, &user, now_ms())?;
-        let name = crate::db::step_name(&crate::database::steps::prefix("global"), 1);
+        let name = crate::database::stored::step_name(&crate::database::steps::prefix("global"), 1);
         let sealed = crate::database::steps::seal(&keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref()))?;
         ensure!(crate::bucket::Bucket::create(&bucket, &name, &sealed).await?, "the new network's bucket isn't empty");
         self.read_steps().await?;

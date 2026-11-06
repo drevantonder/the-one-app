@@ -128,7 +128,7 @@ pub struct Device {
 
 /// `global`'s epochs sealed to the device whose key is `key`, opened, by number, and its log's key in each, from
 /// `bucket`.
-async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32, [u8; 32]>, one::db::Keys), Error> {
+async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32, [u8; 32]>, one::database::stored::Keys), Error> {
     let me = hex(&key.verifying_key().to_bytes());
     let opens = keys::seal_secret(key);
     let mut epochs: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
@@ -148,7 +148,7 @@ async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32,
             return Err(failed(format!("This device hasn't been given {YOURS}'s keys yet.")));
         }
     }
-    let mut log_keys = one::db::Keys::new();
+    let mut log_keys = one::database::stored::Keys::new();
     for (n, epoch) in &epochs {
         let Some(o) = one::bucket::Bucket::get(bucket, &keys::app_key_name("global", members::APP, *n)).await.map_err(failed)? else { continue };
         let app = one::cloudflare::open_app_key(epoch, members::APP, &o.bytes).map_err(failed)?;
@@ -854,7 +854,7 @@ impl Device {
             each.entry(prefix(n)).or_insert(scope);
         }
         let asked = n0_future::join_all(each.keys().map(|p| {
-            let (bucket, name) = (&bucket, one::db::newest_name(p));
+            let (bucket, name) = (&bucket, one::database::stored::newest_name(p));
             async move { one::bucket::Bucket::get(bucket, &name).await }
         }));
         // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.

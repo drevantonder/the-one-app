@@ -7,7 +7,7 @@
 // log in the bucket and asks of the scope database it builds from it (src/lib.rs, the machine node's own Rust), and
 // each app's latest deploy from the bucket too, through the URL signer's URLs, keeping what it read sealed in its
 // Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, src/app/runtime/shim.js as its `ctx`) and writes
-// what a call wrote as one step (src/db.rs). An app's requests go out from here, filled in with the Vault's items it's
+// what a call wrote as one step (src/database/stored.rs). An app's requests go out from here, filled in with the Vault's items it's
 // switched on for, read as any node reads them: each scope's `vault` database, opened with the keys handed for it.
 //
 // It answers what it can itself (the network's state, apps, widgets, badges, screens, and the calls of apps that keep
@@ -182,7 +182,7 @@ class Sealed {
   }
 }
 
-/// The bucket as src/db.rs reads and writes it (src/lib.rs: `Js`). A database's steps are read one after another, so
+/// The bucket as src/database/stored.rs reads and writes it (src/lib.rs: `Js`). A database's steps are read one after another, so
 /// asking for one fetches the next few at once; each fetched object is used once, so a read after a lost race is fresh.
 /// What's read or written is kept sealed (`Sealed`), and only what isn't there is fetched, its URLs signed in one
 /// request to the URL signer for everything asked for in the same turn, and kept while they last.
@@ -263,7 +263,7 @@ class Bucket {
   }
 
   /// The objects directly in `folder`, as `[name, when the bucket wrote it (ms)]`, a page at a time from URLs the URL
-  /// signer gives: a database's copies, for a reader whose steps were deleted (src/db.rs `gap`).
+  /// signer gives: a database's copies, for a reader whose steps were deleted (src/database/stored.rs `gap`).
   async objects(folder) {
     const unanswered = (message) => Object.assign(new Error(message), { unanswered: true });
     const unescape = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");

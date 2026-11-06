@@ -150,7 +150,7 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
 /// A scope's items, as its database has them.
 pub fn load(conn: &Connection) -> Result<Items> {
     let mut out = Items::new();
-    for row in crate::db::query(conn, "select id, item from items", &[])? {
+    for row in crate::database::stored::query(conn, "select id, item from items", &[])? {
         let (Some(id), Some(item)) = (row["id"].as_str(), row["item"].as_str()) else { continue };
         let mut item: Item = serde_json::from_str(item).context("an item that isn't one")?;
         item.opened = !item.fields.values().any(|f| f.secret);
@@ -232,12 +232,12 @@ pub fn change(conn: &Connection, data: &Value, user: &str, time: u64, known: imp
     if let (Some(_), Some((n, public))) = (sealing.keys, sealing.public) {
         for (other, item) in items.iter_mut().filter(|(i, it)| **i != id && it.opened && it.sealed.as_ref().is_some_and(|s| s.n < n)) {
             seal_item(other, item, n, &public)?;
-            crate::db::execute(conn, "insert or replace into items values (?, ?)", &[json!(other), json!(row(item)?)])?;
+            crate::database::stored::execute(conn, "insert or replace into items values (?, ?)", &[json!(other), json!(row(item)?)])?;
         }
     }
     match items.get(&id) {
-        Some(item) => crate::db::execute(conn, "insert or replace into items values (?, ?)", &[json!(id), json!(row(item)?)])?,
-        None => crate::db::execute(conn, "delete from items where id = ?", &[json!(id)])?,
+        Some(item) => crate::database::stored::execute(conn, "insert or replace into items values (?, ?)", &[json!(id), json!(row(item)?)])?,
+        None => crate::database::stored::execute(conn, "delete from items where id = ?", &[json!(id)])?,
     };
     Ok(id)
 }
@@ -484,7 +484,7 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     // A member adds an item: sealed to the Vault key, so the row they can read has no secret.
     let made = json!({ "id": id, "title": "Key", "fields": { "user": { "value": "andre" }, "token": { "value": "s3cret", "secret": true } }, "hosts": ["api.example.com"], "apps": ["two"] });
     change(&conn, &made, "bob", 1, |_| true, &member).unwrap();
-    let rows = crate::db::query(&conn, "select item from items", &[]).unwrap();
+    let rows = crate::database::stored::query(&conn, "select item from items", &[]).unwrap();
     assert!(!rows[0]["item"].as_str().unwrap().contains("s3cret"), "the row has it only sealed");
     let shut = load(&conn).unwrap();
     let lookup = Lookup { app: "two".into(), user: "bob".into(), scopes: vec![(Scope::Global, shut.clone())] };
@@ -495,9 +495,9 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     assert!(change(&conn, &json!({ "id": id, "apps": ["evil"] }), "bob", 2, |_| true, &member).is_err());
     change(&conn, &json!({ "id": id, "title": "Key, renamed" }), "bob", 2, |_| true, &member).unwrap();
     // Nor by rewriting its row: what's sealed counts.
-    let mut row: Value = serde_json::from_str(crate::db::query(&conn, "select item from items", &[]).unwrap()[0]["item"].as_str().unwrap()).unwrap();
+    let mut row: Value = serde_json::from_str(crate::database::stored::query(&conn, "select item from items", &[]).unwrap()[0]["item"].as_str().unwrap()).unwrap();
     (row["hosts"], row["apps"]) = (json!(["evil.example.com"]), json!(["evil"]));
-    crate::db::execute(&conn, "update items set item = ?", &[json!(row.to_string())]).unwrap();
+    crate::database::stored::execute(&conn, "update items set item = ?", &[json!(row.to_string())]).unwrap();
     let mut opened = load(&conn).unwrap();
     open_all(&mut opened, &keys);
     let it = &opened[id];

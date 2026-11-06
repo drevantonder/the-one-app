@@ -124,7 +124,7 @@ pub struct Job<'a> {
     /// The key of the scope's newest epoch, and that key sealed to the recovery key, as the bucket keeps it.
     pub key: [u8; 32],
     /// Every epoch's key the device holds of the scope, which open its databases' copies to choose one that holds.
-    pub epochs: crate::db::Keys,
+    pub epochs: crate::database::stored::Keys,
     pub sealed: Vec<u8>,
     pub device: Key,
     pub now: u64,
@@ -178,7 +178,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 /// as the bucket is: each epoch's key and Vault key sealed to the recovery key, each app's key in each epoch (sealed under it), and
 /// each database's new steps, the signatures beside them (and those of the last few steps it copied before, which may
 /// have come just after their steps), and newest copy that holds (sealed as they are), past what `snap` says it has.
-fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs: &crate::db::Keys, snap: &mut Snapshot) -> Result<()> {
+fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs: &crate::database::stored::Keys, snap: &mut Snapshot) -> Result<()> {
     /// How many of the last steps a run copied the next looks for signatures of again.
     const SIGNED_LATE: u64 = 4;
     let folder = folder(scope);
@@ -208,54 +208,54 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
         }
         for database in bucket.list(&format!("{folder}/{app}"))?.into_iter().filter(|d| !d.starts_with('_')) {
             let prefix = format!("{folder}/{app}/{database}");
-            let Some(hint) = bucket.get(&crate::db::newest_name(&prefix))? else { continue };
-            let (_, hinted, epoch) = crate::db::newest(&hint);
+            let Some(hint) = bucket.get(&crate::database::stored::newest_name(&prefix))? else { continue };
+            let (_, hinted, epoch) = crate::database::stored::newest(&hint);
             let (mut at, mut copied) = snap.databases.get(&format!("{app}/{database}")).copied().unwrap_or((0, 0));
             let newest_copy = newest_holding(bucket, scope, &prefix, &app, &database, epochs, hinted, copied)?;
-            if newest_copy > copied && copy(&crate::db::copy_name(&prefix, newest_copy), false)? {
+            if newest_copy > copied && copy(&crate::database::stored::copy_name(&prefix, newest_copy), false)? {
                 copied = newest_copy;
                 at = at.max(newest_copy);
             }
             // The steps before the copy aren't kept here, so a reader of a restored bucket goes on from it.
-            let tidied = crate::db::tidied_name(&prefix);
+            let tidied = crate::database::stored::tidied_name(&prefix);
             if copied > 0 && !copy(&tidied, true)? {
                 place.put(&format!("{network}/bucket/{tidied}"), b"{}")?;
             }
-            let signed = crate::db::signed_beside(&prefix);
-            // And the step at the copy's position, without which a reader doesn't start from it (`db::start`), with the
+            let signed = crate::database::stored::signed_beside(&prefix);
+            // And the step at the copy's position, without which a reader doesn't start from it (`stored::start`), with the
             // signature beside it, which says what the copy comes to.
             if copied > 0 {
-                copy(&crate::db::step_name(&prefix, copied), true)?;
+                copy(&crate::database::stored::step_name(&prefix, copied), true)?;
                 if signed {
-                    copy(&crate::db::sig_name(&prefix, copied), true)?;
+                    copy(&crate::database::stored::sig_name(&prefix, copied), true)?;
                 }
             }
             // A signature is written just after its step, so the last steps a run copied may have come without theirs.
             for n in (copied.max(at.saturating_sub(SIGNED_LATE)) + 1..=at).filter(|_| signed) {
-                copy(&crate::db::sig_name(&prefix, n), true)?;
+                copy(&crate::database::stored::sig_name(&prefix, n), true)?;
             }
-            while copy(&crate::db::step_name(&prefix, at + 1), false)? {
+            while copy(&crate::database::stored::step_name(&prefix, at + 1), false)? {
                 if signed {
-                    copy(&crate::db::sig_name(&prefix, at + 1), false)?;
+                    copy(&crate::database::stored::sig_name(&prefix, at + 1), false)?;
                 }
                 at += 1;
             }
-            place.put(&format!("{network}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == hinted { epoch } else { 0 } }))?)?;
+            place.put(&format!("{network}/bucket/{}", crate::database::stored::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == hinted { epoch } else { 0 } }))?)?;
             snap.databases.insert(format!("{app}/{database}"), (at, copied));
         }
     }
     Ok(())
 }
 
-/// The newest copy of a database above `above` that holds, as a reader chooses it (`db::sealed_copy_holds`): the newest
+/// The newest copy of a database above `above` that holds, as a reader chooses it (`stored::sealed_copy_holds`): the newest
 /// hint's, `hinted`, first, then the others, newest first; `above` if none does. A scope's frozen log, whose copies are
 /// its entries, not a database, takes the hint's.
 #[allow(clippy::too_many_arguments)]
-fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::db::Keys, hinted: u64, above: u64) -> Result<u64> {
+fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::database::stored::Keys, hinted: u64, above: u64) -> Result<u64> {
     if (app, database) == (crate::members::APP, crate::database::steps::KEY_NAME) {
         return Ok(hinted.max(above));
     }
-    let mut keys = crate::db::Keys::new();
+    let mut keys = crate::database::stored::Keys::new();
     for (n, epoch) in epochs {
         let Some(sealed) = bucket.get(&crate::keys::app_key_name(scope, app, *n))? else { continue };
         if let Ok(key) = crate::cloudflare::open_app_key(epoch, app, &sealed) {
@@ -265,10 +265,10 @@ fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database
     let mut copies: Vec<u64> = bucket.list(&format!("{prefix}/copy"))?.iter().filter_map(|n| n.parse().ok()).filter(|n| *n != hinted).collect();
     copies.sort_unstable_by(|a, b| b.cmp(a));
     for at in std::iter::once(hinted).chain(copies).filter(|c| *c > above) {
-        let Some(copy) = bucket.get(&crate::db::copy_name(prefix, at))? else { continue };
-        let step = bucket.get(&crate::db::step_name(prefix, at))?;
-        let beside = bucket.get(&crate::db::sig_name(prefix, at))?;
-        if crate::db::sealed_copy_holds(prefix, &keys, at, &copy, step.as_deref(), beside.as_deref()) {
+        let Some(copy) = bucket.get(&crate::database::stored::copy_name(prefix, at))? else { continue };
+        let step = bucket.get(&crate::database::stored::step_name(prefix, at))?;
+        let beside = bucket.get(&crate::database::stored::sig_name(prefix, at))?;
+        if crate::database::stored::sealed_copy_holds(prefix, &keys, at, &copy, step.as_deref(), beside.as_deref()) {
             return Ok(at);
         }
     }
@@ -580,7 +580,7 @@ fn who(place: &Place, network: &str, root: Option<crate::entry::Hash>, keys: &[[
     let now = crate::node::now_ms();
     let mut read = Vec::new();
     for at in 1.. {
-        let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::db::step_name(&prefix, at)))? else { break };
+        let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::database::stored::step_name(&prefix, at)))? else { break };
         match steps::open(&step_keys, u32::MAX, &crate::entry::Scope::Global, at, &sealed) {
             steps::Opened::Step(given) => read.push(Some(given)),
             steps::Opened::Junk => read.push(None),
@@ -623,7 +623,7 @@ impl crate::bucket::Bucket for Copy<'_> {
 /// to the snapshot's last, are in the place, and are the same bytes as the network's bucket has (`live`), or without
 /// it, open with their epoch's key; then it restores from them into a throwaway database, which must reach that step.
 /// `epochs` are the scope's epoch keys. → what's wrong, one line each; nothing when all is well.
-pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, epochs: &crate::db::Keys, live: Option<&impl crate::bucket::Bucket>) -> Vec<String> {
+pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, epochs: &crate::database::stored::Keys, live: Option<&impl crate::bucket::Bucket>) -> Vec<String> {
     use crate::bucket::Bucket;
     let (scope, folder) = (&snapshot.scope, folder(&snapshot.scope));
     let copy = Copy { place, root: format!("{network}/bucket/") };
@@ -640,7 +640,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
             (app, "main") => app.to_string(),
             (app, db) => format!("{app} {db}"),
         };
-        let mut keys = crate::db::Keys::new();
+        let mut keys = crate::database::stored::Keys::new();
         for (n, epoch) in epochs {
             let Ok(Some(sealed)) = copy.get(&crate::keys::app_key_name(scope, app, *n)).await else { continue };
             match crate::cloudflare::open_app_key(epoch, app, &sealed.bytes) {
@@ -649,8 +649,8 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
                 Err(err) => out.push(format!("{scope} {said}: its key in epoch {n}: {err:#}")),
             }
         }
-        let copy_of = (*copied > 0).then(|| (format!("its copy at step {copied}"), crate::db::copy_name(&prefix, *copied)));
-        let names = copy_of.into_iter().chain((((*copied).max(1))..=*at).map(|n| (format!("step {n}"), crate::db::step_name(&prefix, n))));
+        let copy_of = (*copied > 0).then(|| (format!("its copy at step {copied}"), crate::database::stored::copy_name(&prefix, *copied)));
+        let names = copy_of.into_iter().chain((((*copied).max(1))..=*at).map(|n| (format!("step {n}"), crate::database::stored::step_name(&prefix, n))));
         let mut wrong = None;
         for (said_as, name) in names {
             let problem = match copy.get(&name).await {
@@ -680,7 +680,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         if [crate::database::steps::KEY_NAME, crate::database::steps::NAME].map(|db| format!("{}/{db}", crate::members::APP)).contains(database) || keys.is_empty() {
             continue;
         }
-        match crate::db::Db::open(&copy, &prefix, keys).await {
+        match crate::database::stored::Db::open(&copy, &prefix, keys).await {
             Ok(restored) if restored.at() >= *at => {}
             Ok(restored) => out.push(format!("{scope} {said}: it restores only to step {} of {at}", restored.at())),
             Err(err) => out.push(format!("{scope} {said}: it doesn't restore: {err:#}")),
@@ -691,7 +691,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
 
 /// What's wrong with a sealed step or copy, if it doesn't open with its epoch's key: nothing, too, when that key isn't
 /// one of `keys`.
-fn opens(keys: &crate::db::Keys, name: &str, sealed: &[u8]) -> Option<String> {
+fn opens(keys: &crate::database::stored::Keys, name: &str, sealed: &[u8]) -> Option<String> {
     let epoch = match crate::keys::epoch_of(sealed) {
         Ok(e) => e,
         Err(err) => return Some(format!("{err:#}")),
@@ -719,44 +719,44 @@ mod tests {
 
         // Who's who: the network's genesis, and the freeze its recovery key signed.
         const ANDRE: &str = "0123456789abcdef";
-        let node = crate::db::app_key(&bucket, &epoch, "global", crate::members::APP, 1, true).await.unwrap().unwrap();
-        let step_keys = crate::db::Keys::from([(1, crate::cloudflare::database_key(&node, crate::database::steps::KEY_NAME))]);
+        let node = crate::database::stored::app_key(&bucket, &epoch, "global", crate::members::APP, 1, true).await.unwrap().unwrap();
+        let step_keys = crate::database::stored::Keys::from([(1, crate::cloudflare::database_key(&node, crate::database::steps::KEY_NAME))]);
         let genesis = crate::members::genesis("Home", ANDRE, "Andre", &crate::keys::Endpoint::of(&device), "mac", &[crate::members::Kind::Client], recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&epoch));
         let genesis = Entry::create(&device, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis);
         let name = crate::database::steps::genesis_name();
         bucket.put(&name, &crate::database::steps::seal(&step_keys, &name, &crate::entry::pack(&[&genesis])).unwrap()).unwrap();
         let first = crate::database::steps::first_freeze(&recovery, &genesis, ANDRE, 0).unwrap();
         let steps = crate::database::steps::prefix("global");
-        let name = crate::db::step_name(&steps, 1);
+        let name = crate::database::stored::step_name(&steps, 1);
         bucket.put(&name, &crate::database::steps::seal(&step_keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref())).unwrap()).unwrap();
-        crate::db::hint(&bucket, &steps, 1, 0, 1).await.unwrap();
+        crate::database::stored::hint(&bucket, &steps, 1, 0, 1).await.unwrap();
 
         // A database with more steps than one copy holds, so a reader starts from its copy.
         let prefix = "global/tally/main";
-        let app = crate::db::app_key(&bucket, &epoch, "global", "tally", 1, true).await.unwrap().unwrap();
-        let keys = crate::db::Keys::from([(1, crate::cloudflare::database_key(&app, "main"))]);
-        let mut db = crate::db::Db::open(&bucket, prefix, keys).await.unwrap();
+        let app = crate::database::stored::app_key(&bucket, &epoch, "global", "tally", 1, true).await.unwrap().unwrap();
+        let keys = crate::database::stored::Keys::from([(1, crate::cloudflare::database_key(&app, "main"))]);
+        let mut db = crate::database::stored::Db::open(&bucket, prefix, keys).await.unwrap();
         db.sign_as(device.clone());
         db.migrate(&bucket, &["create table posts (text text)".to_string()]).await.unwrap();
-        for n in 0..crate::db::COPY_EVERY + 5 {
+        for n in 0..crate::database::stored::COPY_EVERY + 5 {
             db.write(&bucket, |c| Ok(c.execute("insert into posts values (?)", [format!("post {n}")])?)).await.unwrap();
         }
         let at = db.at();
-        let (_, copy, _) = crate::db::newest(&crate::bucket::Bucket::get(&bucket, &crate::db::newest_name(prefix)).await.unwrap().unwrap().bytes);
+        let (_, copy, _) = crate::database::stored::newest(&crate::bucket::Bucket::get(&bucket, &crate::database::stored::newest_name(prefix)).await.unwrap().unwrap().bytes);
         assert!(copy > 0 && copy < at, "it has a copy, and steps after it");
 
         // Junk at a copy's position, and the newest hint naming it, from a device without the key: the backup copies
         // the copy that holds.
-        let junk = crate::db::copy_name(prefix, 10 * crate::db::COPY_EVERY);
+        let junk = crate::database::stored::copy_name(prefix, 10 * crate::database::stored::COPY_EVERY);
         bucket.put(&junk, &crate::keys::seal(1, &rand::random(), &junk, b"junk")).unwrap();
-        bucket.put(&crate::db::newest_name(prefix), &serde_json::to_vec(&json!({ "at": at, "copy": 10 * crate::db::COPY_EVERY })).unwrap()).unwrap();
+        bucket.put(&crate::database::stored::newest_name(prefix), &serde_json::to_vec(&json!({ "at": at, "copy": 10 * crate::database::stored::COPY_EVERY })).unwrap()).unwrap();
 
         let job = |previous: Option<Snapshot>, now: u64| Job {
             place: &place,
             network,
             scope: "global",
             key: epoch,
-            epochs: crate::db::Keys::from([(1, epoch)]),
+            epochs: crate::database::stored::Keys::from([(1, epoch)]),
             sealed: crate::cloudflare::seal_to(&crate::cloudflare::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
             device: *device.verifying_key().as_bytes(),
             now,
@@ -768,7 +768,7 @@ mod tests {
         assert_eq!(back_up(job(Some(first), 1_500_000), |h| (h == hash).then(|| blob.clone())).unwrap(), None, "nothing new for a snapshot");
 
         let keys: BTreeMap<String, Vec<[u8; 32]>> = [("global".to_string(), vec![epoch])].into();
-        let epochs = crate::db::Keys::from([(1, epoch)]);
+        let epochs = crate::database::stored::Keys::from([(1, epoch)]);
         let checked = || {
             let (report, restored) = check(&Check { place: &place, network, keys: &keys, root: Some(genesis.hash()) }).unwrap();
             (report["problems"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect::<Vec<_>>(), restored, report)
@@ -782,7 +782,7 @@ mod tests {
         assert_eq!(check_databases(&place, network, &snapshot, &epochs, None::<&Place>).await, Vec::<String>::new(), "and opens without the network's bucket");
 
         // A step that's changed in the backup, then one that's gone: the one its copy starts beside.
-        let name = |n: u64| format!("{network}/bucket/{}", crate::db::step_name(prefix, n));
+        let name = |n: u64| format!("{network}/bucket/{}", crate::database::stored::step_name(prefix, n));
         let good = place.get(&name(at)).unwrap().unwrap();
         let mut bad = good.clone();
         *bad.last_mut().unwrap() ^= 1;

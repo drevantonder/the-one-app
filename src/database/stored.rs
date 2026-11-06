@@ -1,4 +1,4 @@
-//! App databases: an app's data in a scope is one SQLite database, the truth, kept in the bucket as steps at numbered
+//! A database as the bucket keeps it, an app's or the scope database. An app's data in a scope is one SQLite database, the truth, kept in the bucket as steps at numbered
 //! positions, each sealed under one of its scope's epochs (`src/keys.rs`) and naming it: the changeset of one write
 //! (SQLite's session extension), or one of the app's schema changes. Reading it is its newest copy and the steps after;
 //! writing it is a step created only if its position is free, so when two devices write at once, one wins and the

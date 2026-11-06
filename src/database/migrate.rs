@@ -79,7 +79,7 @@ mod tests {
         }
         database(&old).unwrap();
         database(&new).unwrap();
-        assert_eq!(crate::db::state_hash(&old).unwrap(), crate::db::state_hash(&new).unwrap());
+        assert_eq!(crate::database::stored::state_hash(&old).unwrap(), crate::database::stored::state_hash(&new).unwrap());
         crate::permissions::close(&old, None).unwrap();
         assert!(crate::permissions::may(&old, "person:a", "choose-devices", crate::permissions::NETWORK, 0).unwrap());
     }

@@ -30,7 +30,7 @@ fn token_of(token: &str) -> Option<(Scope, &str)> {
 #[derive(Default)]
 pub(super) struct State {
     /// The app keys app schedules sealed to this device, by (scope, app), each by epoch: kept while they're in force.
-    keys: Mutex<HashMap<(Scope, String), crate::db::Keys>>,
+    keys: Mutex<HashMap<(Scope, String), crate::database::stored::Keys>>,
     /// The Vault secret keys sealed to this machine, by scope and number, each the one its `vault` entry names.
     pub(super) vault: Mutex<HashMap<(Scope, u32), [u8; 32]>>,
     /// The app schedules this device is renewing now.
@@ -75,9 +75,9 @@ impl Node {
             let newest = epochs.keys().next_back().copied().unwrap_or(0);
             let (bucket, name, to) = (self.bucket()?, scope.to_string(), hex(&endpoint));
             for (n, epoch) in &epochs {
-                let Some(key) = crate::db::app_key(&bucket, epoch, &name, app, *n, *n == newest).await? else { continue };
+                let Some(key) = crate::database::stored::app_key(&bucket, epoch, &name, app, *n, *n == newest).await? else { continue };
                 // One there already is the same key, or junk the hash written beside it passes over.
-                crate::db::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, &to, *n), &crate::cloudflare::seal_to(&seal, &key)?).await?;
+                crate::database::stored::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, &to, *n), &crate::cloudflare::seal_to(&seal, &key)?).await?;
                 hashes.insert(*n, crate::keys::epoch_hash(&key));
             }
         }
@@ -163,7 +163,7 @@ impl Node {
         let id = (scope.clone(), app.to_string());
         let had = self.0.app_schedules.keys.lock().unwrap().get(&id).cloned().unwrap_or_default();
         let (bucket, secret, me) = (self.bucket()?, self.seal_secret(), hex(&self.0.id));
-        let mut keys = crate::db::Keys::new();
+        let mut keys = crate::database::stored::Keys::new();
         for (n, hash) in &hashes {
             if let Some(key) = had.get(n).filter(|k| crate::keys::epoch_hash(k) == *hash) {
                 keys.insert(*n, *key);
@@ -202,7 +202,7 @@ impl Node {
     }
 
     /// The keys an app schedules token opens of a database: only its app's in its scope, while they're in force.
-    pub(super) fn app_schedules_handed(&self, token: &str, scope: &Scope, app: &str, database: &str) -> crate::db::Keys {
+    pub(super) fn app_schedules_handed(&self, token: &str, scope: &Scope, app: &str, database: &str) -> crate::database::stored::Keys {
         let Some((s, a)) = token_of(token) else { return Default::default() };
         if s != *scope || a != app || self.app_schedules_until(token) <= now_ms() {
             return Default::default();

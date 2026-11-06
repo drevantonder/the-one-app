@@ -101,9 +101,9 @@ impl Signer {
         // A database's step or the signature beside one: the positions after it too, which come next, and the
         // signature beside each.
         let ahead = if kind == "create" { CREATE_AHEAD } else { READ_AHEAD };
-        let items: Vec<Value> = match crate::db::position(ask.name) {
+        let items: Vec<Value> = match crate::database::stored::position(ask.name) {
             Some((prefix, at)) => {
-                let sigs = (at..=at + ahead).filter(|_| crate::db::signed_beside(prefix)).map(|n| json!(crate::db::sig_name(prefix, n)));
+                let sigs = (at..=at + ahead).filter(|_| crate::database::stored::signed_beside(prefix)).map(|n| json!(crate::database::stored::sig_name(prefix, n)));
                 std::iter::once(json!({ "steps": prefix, "from": at, "to": at + ahead })).chain(sigs).collect()
             }
             None => vec![json!(ask.name)],

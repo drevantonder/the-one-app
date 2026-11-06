@@ -27,7 +27,7 @@ impl Node {
         let from = self.with(|i| Ok(i.r.at().unwrap_or(i.r.looked)))?;
         let mut at = from;
         loop {
-            let name = crate::db::step_name(&prefix, at + 1);
+            let name = crate::database::stored::step_name(&prefix, at + 1);
             let keys = match self.step_keys(&Scope::Global).await {
                 Ok(keys) => keys,
                 // Not given `global`'s newest epoch yet, as between its own new epoch's step and its seals: it reads
@@ -105,7 +105,7 @@ impl Node {
             let opened = (|| -> Result<(u64, ScopeDb)> {
                 let bytes = data_encoding::BASE64.decode(kept["db"].as_str().context("no database")?.as_bytes())?;
                 let conn = steps::connection(&bytes)?;
-                ensure!(Some(crate::db::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "it isn't what it was");
+                ensure!(Some(crate::database::stored::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "it isn't what it was");
                 Ok((kept["at"].as_u64().context("no position")?, steps::normalize(conn, &scope, now_ms())?))
             })();
             match opened {
@@ -144,7 +144,7 @@ impl Node {
             self.share_blob(&Scope::Global, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
         }
         let keys = self.step_keys(&Scope::Global).await?;
-        let name = crate::db::step_name(&steps::prefix("global"), at);
+        let name = crate::database::stored::step_name(&steps::prefix("global"), at);
         if !crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(step, None))?).await? {
             return Ok(false);
         }
@@ -196,12 +196,12 @@ impl Node {
         let mut out = json!({});
         let mut from = from;
         if let Some(w) = welcome.filter(|w| w.at <= read)
-            && let Some(freeze) = crate::bucket::Bucket::get(&bucket, &crate::db::step_name(&prefix, w.freeze)).await?
+            && let Some(freeze) = crate::bucket::Bucket::get(&bucket, &crate::database::stored::step_name(&prefix, w.freeze)).await?
         {
             out = json!({ "welcome": w.to_string(), "freeze": sealed(w.freeze, freeze) });
             from = w.freeze;
             if let Some(c) = w.copy()
-                && let Some(copy) = crate::bucket::Bucket::get(&bucket, &crate::db::copy_name(&prefix, c)).await?
+                && let Some(copy) = crate::bucket::Bucket::get(&bucket, &crate::database::stored::copy_name(&prefix, c)).await?
             {
                 out["start"] = sealed(c, copy);
                 from = c;
@@ -209,7 +209,7 @@ impl Node {
         }
         let mut list = Vec::new();
         let mut at = from.min(read);
-        while let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::db::step_name(&prefix, at + 1)).await? {
+        while let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::database::stored::step_name(&prefix, at + 1)).await? {
             at += 1;
             if at > from {
                 list.push(sealed(at, o));
@@ -264,7 +264,7 @@ impl Node {
             if !read.is_empty() {
                 note_change(i, scope);
             }
-            let kept = json!({ "at": at, "hash": crate::db::state_hash(db.conn())?, "db": data_encoding::BASE64.encode(&db.bytes()?) });
+            let kept = json!({ "at": at, "hash": crate::database::stored::state_hash(db.conn())?, "db": data_encoding::BASE64.encode(&db.bytes()?) });
             i.scope_dbs.insert(scope.clone(), (at, db));
             Ok((kept, newer, forgotten))
         })?;
@@ -294,7 +294,7 @@ impl Node {
                 self.share_blob(scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
             }
             let keys = self.step_keys(scope).await?;
-            let name = crate::db::step_name(&steps::prefix(&scope.to_string()), at);
+            let name = crate::database::stored::step_name(&steps::prefix(&scope.to_string()), at);
             if crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(&step, None))?).await? {
                 self.read_scope_steps_now(scope).await?;
                 let copy = self.with(|i| i.scope_dbs.get_mut(scope).map(|(_, d)| d.bytes()).transpose())?;

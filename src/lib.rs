@@ -35,8 +35,6 @@ pub mod bucket;
 pub mod call;
 #[cfg(feature = "db")]
 pub mod database;
-#[cfg(feature = "db")]
-pub mod db;
 pub mod entry;
 #[cfg(feature = "node")]
 pub mod sign_in;

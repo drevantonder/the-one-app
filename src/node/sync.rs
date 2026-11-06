@@ -52,7 +52,7 @@ impl Node {
 
     /// The keys a scope's database's steps are sealed with in the bucket, by epoch (`steps::KEY_NAME`). Of one this
     /// device runs but doesn't open, those a caller who does handed it.
-    pub(super) async fn step_keys(&self, scope: &Scope) -> Result<crate::db::Keys> {
+    pub(super) async fn step_keys(&self, scope: &Scope) -> Result<crate::database::stored::Keys> {
         if !self.with(|i| Ok(self.opens(i.r.db(), scope)))? {
             return self.handed_step_keys(scope).await;
         }
@@ -60,11 +60,11 @@ impl Node {
     }
 
     /// The keys of `global`'s steps in each of its epochs given.
-    pub(super) async fn step_keys_of(&self, epochs: &crate::db::Keys) -> Result<crate::db::Keys> {
+    pub(super) async fn step_keys_of(&self, epochs: &crate::database::stored::Keys) -> Result<crate::database::stored::Keys> {
         let bucket = self.bucket()?;
-        let mut out = crate::db::Keys::new();
+        let mut out = crate::database::stored::Keys::new();
         for (n, epoch) in epochs {
-            if let Some(app) = crate::db::app_key(&bucket, epoch, "global", members::APP, *n, false).await? {
+            if let Some(app) = crate::database::stored::app_key(&bucket, epoch, "global", members::APP, *n, false).await? {
                 out.insert(*n, crate::cloudflare::database_key(&app, crate::database::steps::KEY_NAME));
             }
         }
@@ -85,7 +85,7 @@ impl Node {
         let mut input = json!({ "scope": scope.to_string() });
         if let Some((app, database, at)) = wrote {
             input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
-            let name = crate::db::step_name(&database_prefix(scope, app, database), at);
+            let name = crate::database::stored::step_name(&database_prefix(scope, app, database), at);
             let bucket = self.bucket().ok();
             if let Some(step) = bucket.as_ref().and_then(|b| b.kept(&name).ok().flatten()).filter(|s| s.len() <= SENT_STEP) {
                 input["step"] = json!(data_encoding::BASE64.encode(&step));
@@ -116,7 +116,7 @@ impl Node {
         self.0.behind.lock().unwrap().insert(id.clone());
         let open = self.open_dbs().iter().any(|(open, _)| *open == id);
         match step.filter(|_| open) {
-            Some(step) => self.confirm_sent(Sent { name: crate::db::step_name(&database_prefix(&id.0, &app, &database), at), step, sig, id, at }),
+            Some(step) => self.confirm_sent(Sent { name: crate::database::stored::step_name(&database_prefix(&id.0, &app, &database), at), step, sig, id, at }),
             None => drop(tokio::spawn(async move { node.fill_to(&[(id, at)]).await })),
         }
     }

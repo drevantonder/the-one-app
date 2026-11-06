@@ -180,14 +180,14 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let out = js(json!({ "op": "step", "seed": B64U.encode(&browser_seed), "fields": fields, "body": String::from_utf8(body).unwrap() }));
         let signed = Entry::decode_step(&b(&out["signed"]["header"]), &b(&out["signed"]["signature"]), &b(&out["signed"]["body"])).unwrap();
         let sealed_app = b(&js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&epoch), "app": members::APP, "key": B64U.encode(&app) }))["sealed"]);
-        let keys: one::db::Keys = [(1, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME))].into();
+        let keys: one::database::stored::Keys = [(1, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME))].into();
         let prefix = steps::prefix("global");
         let sealed = |at: u64, step: &Entry, copy: Option<&[u8]>| {
-            let name = one::db::step_name(&prefix, at);
+            let name = one::database::stored::step_name(&prefix, at);
             json!({ "at": at, "sealed": B64U.encode(&one::database::steps::seal(&keys, &name, &steps::encode(step, copy)).unwrap()) })
         };
         let (s1, s2, s3) = (sealed(1, &first.step, first.copy.as_deref()), sealed(2, &listed, None), sealed(3, &signed, None));
-        let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::db::step_name(&prefix, 4), b"not a step").unwrap()) });
+        let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::database::stored::step_name(&prefix, 4), b"not a step").unwrap()) });
         let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
         // The log's first step as the URL signer's `get` gives it.
         let log_steps = json!([{ "at": 1, "sealed": B64U.encode(&one::database::steps::seal(&keys, &one::database::steps::genesis_name(), &pack(&[&g])).unwrap()) }]);
@@ -210,20 +210,20 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let mut elsewhere = Global::new(Some(other.hash()));
         assert!(elsewhere.add_sealed(&read, &epochs, &apps).is_err(), "a log that isn't the network it joined");
         // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
-        let welcome = steps::Welcome { freeze: 1, at: 3, hash: one::db::state_hash(who.conn()).unwrap() };
+        let welcome = steps::Welcome { freeze: 1, at: 3, hash: one::database::stored::state_hash(who.conn()).unwrap() };
         let said = js(json!({ "op": "joining", "asked": [], "said": [[200, { "approved": true, "genesis": g.hash().to_hex(), "welcome": welcome.to_string() }]] }));
         let given = json!({ "welcome": said["said"][0]["welcome"], "freeze": s1, "at": 3, "steps": [s2, s3] });
         let mut new = Global::new(Some(g.hash()));
         assert_eq!(new.add_sealed(&given, &epochs, &apps).unwrap(), None);
         assert!(new.frozen() && new.at() == 3, "a new device starts where it was welcomed");
-        assert_eq!(one::db::state_hash(new.who().unwrap().conn()).unwrap(), welcome.hash);
+        assert_eq!(one::database::stored::state_hash(new.who().unwrap().conn()).unwrap(), welcome.hash);
         let mut other = given.clone();
         other["welcome"] = json!(steps::Welcome { hash: "0".repeat(64), ..welcome.clone() }.to_string());
         let mut new = Global::new(Some(g.hash()));
         assert_eq!(new.add_sealed(&other, &epochs, &apps).unwrap(), Some(1), "nor from a Welcome its steps don't come to: it reads from the freeze");
         assert!(!new.frozen());
         // Junk at the first position, under an epoch no one made, and anything after it: passed over, not waited for.
-        let name = one::db::step_name(&prefix, 1);
+        let name = one::database::stored::step_name(&prefix, 1);
         let junk = json!({ "at": 1, "sealed": B64U.encode(&one::keys::seal(0xFFFF_FFFF, &rand::random(), &name, b"junk")) });
         let mut fresh = Global::new(Some(g.hash()));
         assert_eq!(fresh.add_sealed(&json!({ "steps": [junk, sealed(2, &first.step, first.copy.as_deref())], "log": { "to": 1, "steps": log_steps } }), &epochs, &apps).unwrap(), None);

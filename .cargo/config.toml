@@ -1,5 +1,5 @@
-# App databases record each write as a changeset (src/db.rs), with SQLite's session extension. rusqlite's `session`
+# App databases record each write as a changeset (src/database/stored.rs), with SQLite's session extension. rusqlite's `session`
 # feature would build its bindings with bindgen, which needs libclang on every machine that builds; the bundled SQLite
-# built with these instead, and the few functions declared in src/db.rs, need nothing more.
+# built with these instead, and the few functions declared in src/database/stored.rs, need nothing more.
 [env]
 LIBSQLITE3_FLAGS = "-DSQLITE_ENABLE_SESSION -DSQLITE_ENABLE_PREUPDATE_HOOK"

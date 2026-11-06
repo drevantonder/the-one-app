@@ -40,7 +40,7 @@
 //! ```text
 //! <prefix>/0                  a scope's start, but `global`'s, with its copy
 //! <prefix>/<n>               step n, from 1: one signed step, its header, signature and body, and a freeze's copy
-//! <prefix>/copy/<n>          the database after step n, every `db::COPY_EVERY` steps
+//! <prefix>/copy/<n>          the database after step n, every `stored::COPY_EVERY` steps
 //! <prefix>/newest            the newest hint, as a database's
 //! ```
 
@@ -129,8 +129,8 @@ pub enum Opened {
 /// Step `at` of `scope`'s database, sealed as the bucket holds it, opened with `keys`, under `made`, the newest epoch
 /// of the scope made as the reader knows it: one above it is junk, since an epoch is always made before anything is
 /// sealed under it, and a reader waits only for an epoch that was. Every reader judges it so.
-pub fn open(keys: &crate::db::Keys, made: u32, scope: &Scope, at: u64, sealed: &[u8]) -> Opened {
-    let name = crate::db::step_name(&prefix(&scope.to_string()), at);
+pub fn open(keys: &crate::database::stored::Keys, made: u32, scope: &Scope, at: u64, sealed: &[u8]) -> Opened {
+    let name = crate::database::stored::step_name(&prefix(&scope.to_string()), at);
     let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Opened::Junk };
     let Some(key) = keys.get(&epoch) else { return if epoch > made { Opened::Junk } else { Opened::Waits(epoch) } };
     match crate::keys::open(key, &name, sealed).and_then(|b| decode(scope, at, &b)) {
@@ -162,12 +162,12 @@ impl Read {
 /// for one that will never be a step. Stops at the first position with nothing, or one under an epoch it has no key
 /// for (`Read::waits`), which its reader takes once it's applied those before (`Read::junk_at_end`); fails at a
 /// position with nothing that a later step says was written, rather than read on as if the steps ended there.
-pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, from: u64) -> Result<Read> {
+pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, scope: &Scope, from: u64) -> Result<Read> {
     let prefix = prefix(&scope.to_string());
     let mut out = Read::default();
     loop {
         let at = from + out.steps.len() as u64 + 1;
-        let Some(o) = bucket.get(&crate::db::step_name(&prefix, at)).await? else {
+        let Some(o) = bucket.get(&crate::database::stored::step_name(&prefix, at)).await? else {
             missing(bucket, keys, scope, at).await?;
             break;
         };
@@ -188,8 +188,8 @@ pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, s
 /// on as if it never was would pass over whatever it and those after it changed. Anything else there is anyone's to
 /// write (the URL signer creates a position only after the one before it, but an older one didn't), so it says
 /// nothing: the steps end at `at`, and the next writer writes there. Nor does the newest hint.
-pub async fn missing(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, at: u64) -> Result<()> {
-    let later = match bucket.get(&crate::db::step_name(&prefix(&scope.to_string()), at + 1)).await? {
+pub async fn missing(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, scope: &Scope, at: u64) -> Result<()> {
+    let later = match bucket.get(&crate::database::stored::step_name(&prefix(&scope.to_string()), at + 1)).await? {
         Some(o) => matches!(open(keys, u32::MAX, scope, at + 1, &o.bytes), Opened::Step(_)),
         None => false,
     };
@@ -209,7 +209,7 @@ pub const MOST_STEPS: u64 = 1 << 53;
 pub struct Freeze {
     /// The freeze's position.
     pub at: u64,
-    /// The state hash its copy comes to, as it is (`db::state_hash`).
+    /// The state hash its copy comes to, as it is (`stored::state_hash`).
     pub hash: String,
     /// The last step of every scope's log that counts, by scope: `global`'s among them.
     pub logs: BTreeMap<String, u64>,
@@ -250,7 +250,7 @@ impl Freeze {
 pub const KEY_NAME: &str = "log";
 
 /// Seals a step or copy of a scope's database as `name` under the newest epoch `keys` has.
-pub fn seal(keys: &crate::db::Keys, name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+pub fn seal(keys: &crate::database::stored::Keys, name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     let (epoch, key) = keys.last_key_value().with_context(|| format!("no key to write {name} with"))?;
     Ok(crate::keys::seal(*epoch, key, name, bytes))
 }
@@ -258,18 +258,18 @@ pub fn seal(keys: &crate::db::Keys, name: &str, bytes: &[u8]) -> Result<Vec<u8>>
 /// Where the network's genesis is: the first step of `global`'s frozen log, a pack of entries under its first epoch,
 /// read only. Every device pins its hash.
 pub fn genesis_name() -> String {
-    crate::db::step_name(&format!("{}/{}/{KEY_NAME}", crate::bucket::folder("global"), members::APP), 1)
+    crate::database::stored::step_name(&format!("{}/{}/{KEY_NAME}", crate::bucket::folder("global"), members::APP), 1)
 }
 
 /// The entries in `sealed`, the first step of `global`'s frozen log as the bucket holds it (`genesis_name`), opened
 /// with `keys`, `global`'s by epoch: the genesis among them (`recovery_of`).
-pub fn genesis_entries(keys: &crate::db::Keys, sealed: &[u8]) -> Result<Vec<Entry>> {
+pub fn genesis_entries(keys: &crate::database::stored::Keys, sealed: &[u8]) -> Result<Vec<Entry>> {
     let key = keys.get(&crate::keys::epoch_of(sealed)?).context("the genesis is under a key this device wasn't given")?;
     crate::entry::unpack(&crate::keys::open(key, &genesis_name(), sealed)?)
 }
 
 /// The entries of `global`'s frozen log's first step, the genesis among them, read from the bucket with `keys`.
-pub async fn genesis(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys) -> Result<Vec<Entry>> {
+pub async fn genesis(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys) -> Result<Vec<Entry>> {
     let sealed = bucket.get(&genesis_name()).await?.with_context(|| format!("{YOURS}'s genesis isn't in its bucket"))?;
     genesis_entries(keys, &sealed.bytes)
 }
@@ -294,7 +294,7 @@ pub fn genesis_of(pinned: Option<Hash>, entries: &[Entry]) -> Option<Hash> {
 
 /// The network's genesis (`root`, or for a reader that pins none, `genesis_of`) and the recovery key it names, read
 /// from the bucket with `keys`, `global`'s by epoch (`genesis_entries`).
-pub async fn recovery_key(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, root: Option<Hash>) -> Result<(Hash, Key)> {
+pub async fn recovery_key(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, root: Option<Hash>) -> Result<(Hash, Key)> {
     let entries = genesis(bucket, keys).await?;
     let root = genesis_of(root, &entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
     let key = recovery_of(root, &entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
@@ -323,7 +323,7 @@ pub fn first_freeze(recovery: &SigningKey, genesis: &Entry, user: &str, now: u64
     m.try_step(genesis)?;
     let mut db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), now)?;
     db.conn().pragma_update(None, "user_version", READS)?;
-    let freeze = Freeze { at: 1, hash: crate::db::state_hash(db.conn())?, logs: [("global".to_string(), 1)].into() };
+    let freeze = Freeze { at: 1, hash: crate::database::stored::state_hash(db.conn())?, logs: [("global".to_string(), 1)].into() };
     let step = sign(recovery, &Scope::Global, 1, user, 1, now, freeze.content())?;
     Ok(Given { step, copy: Some(db.bytes()?) })
 }
@@ -335,14 +335,14 @@ pub const START: &str = "start";
 
 /// Where a scope's database's start is: position 0, before its first step.
 pub fn start_name(scope: &Scope) -> String {
-    crate::db::step_name(&prefix(&scope.to_string()), 0)
+    crate::database::stored::step_name(&prefix(&scope.to_string()), 0)
 }
 
 /// `scope`'s start, step 0 of its database, signed by `key` as `user`, the scope at `epoch`: `db`, what its frozen log's
 /// entries added up to at the freeze.
 pub fn start(key: &SigningKey, scope: &Scope, user: &str, epoch: u32, now: u64, db: &mut ScopeDb) -> Result<Given> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
-    let hash = crate::db::state_hash(db.conn())?;
+    let hash = crate::database::stored::state_hash(db.conn())?;
     let step = sign(key, scope, 0, user, epoch, now, Content::new(members::APP, START, json!({ "hash": hash })))?;
     Ok(Given { step, copy: Some(db.bytes()?) })
 }
@@ -362,7 +362,7 @@ pub fn started(freeze: &Freeze, global: &ScopeDb, scope: &Scope, given: Option<&
     ensure!(step.content.app == members::APP && step.content.kind == START && step.seq() == 0 && step.scope() == *scope, "{scope}'s step 0 isn't its start");
     ensure!(global.machine_ever(&step.author()).is_some(), "{scope}'s start isn't from one of the network's devices");
     let copy = connection(given.copy.as_deref().context("a start carries its copy")?)?;
-    ensure!(Some(crate::db::state_hash(&copy)?.as_str()) == step.content.data["hash"].as_str(), "{scope}'s start's copy isn't what it says");
+    ensure!(Some(crate::database::stored::state_hash(&copy)?.as_str()) == step.content.data["hash"].as_str(), "{scope}'s start's copy isn't what it says");
     normalize(copy, scope, now)
 }
 
@@ -403,7 +403,7 @@ impl Truth {
     fn of_freeze(given: &Given, at: u64, now: u64) -> Result<Truth> {
         let freeze = Freeze::of(&given.step, at)?;
         let copy = connection(given.copy.as_deref().context("a freeze carries its copy")?)?;
-        ensure!(crate::db::state_hash(&copy)? == freeze.hash, "a freeze's copy isn't what it says");
+        ensure!(crate::database::stored::state_hash(&copy)? == freeze.hash, "a freeze's copy isn't what it says");
         Ok(Truth { freeze, at, db: normalize(copy, &Scope::Global, now)? })
     }
 
@@ -431,30 +431,30 @@ impl Truth {
     /// As a reader keeps it, to start from again: `{ freeze, freeze_at, at, hash, db }`, the database's bytes base64.
     pub fn keep(&mut self) -> Result<Value> {
         let bytes = self.db.bytes()?;
-        Ok(json!({ "freeze": self.freeze.content().data, "freeze_at": self.freeze.at, "at": self.at, "hash": crate::db::state_hash(self.db.conn())?, "db": data_encoding::BASE64.encode(&bytes) }))
+        Ok(json!({ "freeze": self.freeze.content().data, "freeze_at": self.freeze.at, "at": self.at, "hash": crate::database::stored::state_hash(self.db.conn())?, "db": data_encoding::BASE64.encode(&bytes) }))
     }
 
     /// What `keep` kept, checked against the hash it kept with it, in this release's form.
     pub fn kept(kept: &Value, now: u64) -> Result<Truth> {
         let bytes = data_encoding::BASE64.decode(kept["db"].as_str().context("no database kept")?.as_bytes())?;
         let conn = connection(&bytes)?;
-        ensure!(Some(crate::db::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "who's who this device kept isn't what it was");
+        ensure!(Some(crate::database::stored::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "who's who this device kept isn't what it was");
         let freeze = Freeze::from_data(&kept["freeze"], kept["freeze_at"].as_u64().context("no freeze kept")?)?;
         Ok(Truth { freeze, at: kept["at"].as_u64().context("no position kept")?, db: normalize(conn, &Scope::Global, now)? })
     }
 }
 
 /// After its writer wrote step `at` of a scope's database: a copy of the database it leaves (`db`'s bytes), sealed
-/// as its steps are, at every `COPY_EVERY`th step; and the newest hint moved on, as a database's (`db::hint`). Only
+/// as its steps are, at every `COPY_EVERY`th step; and the newest hint moved on, as a database's (`stored::hint`). Only
 /// saves readers work, so a link that fails it fails nothing. The hint is anyone's to write, so nothing here trusts it.
-pub async fn written(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, at: u64, bytes: Vec<u8>) -> Result<()> {
+pub async fn written(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, scope: &Scope, at: u64, bytes: Vec<u8>) -> Result<()> {
     let prefix = prefix(&scope.to_string());
     let epoch = *keys.keys().next_back().context("no key")?;
-    if at % crate::db::COPY_EVERY == 0 {
-        let name = crate::db::copy_name(&prefix, at);
+    if at % crate::database::stored::COPY_EVERY == 0 {
+        let name = crate::database::stored::copy_name(&prefix, at);
         bucket.create(&name, &seal(keys, &name, &bytes)?).await?;
     }
-    crate::db::hint(bucket, &prefix, at, at - at % crate::db::COPY_EVERY, epoch).await
+    crate::database::stored::hint(bucket, &prefix, at, at - at % crate::database::stored::COPY_EVERY, epoch).await
 }
 
 /// Where the device that let a new one in had read `global`'s scope database to (its Welcome): its freeze's position,
@@ -478,10 +478,10 @@ impl Welcome {
         (at >= freeze && at < 1 << 53 && hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).then(|| Welcome { freeze, at, hash: hash.to_string() })
     }
 
-    /// The copy a new device starts from: the newest at or before `at` the bucket keeps (one every `db::COPY_EVERY`
+    /// The copy a new device starts from: the newest at or before `at` the bucket keeps (one every `stored::COPY_EVERY`
     /// steps), or none, for the freeze's own.
     pub fn copy(&self) -> Option<u64> {
-        let c = self.at - self.at % crate::db::COPY_EVERY;
+        let c = self.at - self.at % crate::database::stored::COPY_EVERY;
         (c > self.freeze).then_some(c)
     }
 }
@@ -495,7 +495,7 @@ impl std::fmt::Display for Welcome {
 impl Truth {
     /// Where this reader is, as it welcomes a new device.
     pub fn welcome(&self) -> Result<Welcome> {
-        Ok(Welcome { freeze: self.freeze.at, at: self.at, hash: crate::db::state_hash(self.db.conn())? })
+        Ok(Welcome { freeze: self.freeze.at, at: self.at, hash: crate::database::stored::state_hash(self.db.conn())? })
     }
 
     /// Who's who as `welcome` says it: from `freeze`, the step at its freeze's position, and `start`, the copy at
@@ -515,16 +515,16 @@ impl Truth {
         for given in after {
             t.take(t.at + 1, given.as_ref().map(|g| &g.step))?;
         }
-        ensure!(crate::db::state_hash(t.db.conn())? == welcome.hash, "who's who from that copy isn't what the device that let this one in said");
+        ensure!(crate::database::stored::state_hash(t.db.conn())? == welcome.hash, "who's who from that copy isn't what the device that let this one in said");
         Ok(t)
     }
 }
 
 /// Who's who as `welcome` says it, read from the bucket with `keys`, `global`'s log's keys by epoch (`Truth::welcomed`):
 /// from the copy before the Welcome's step, or, if that one isn't there or doesn't come to its hash, from its freeze's.
-pub async fn welcomed(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, welcome: &Welcome, now: u64) -> Result<Truth> {
-    async fn step(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, at: u64) -> Result<Option<Given>> {
-        let o = bucket.get(&crate::db::step_name(&prefix("global"), at)).await?.with_context(|| format!("global's step {at} isn't there"))?;
+pub async fn welcomed(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, welcome: &Welcome, now: u64) -> Result<Truth> {
+    async fn step(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, at: u64) -> Result<Option<Given>> {
+        let o = bucket.get(&crate::database::stored::step_name(&prefix("global"), at)).await?.with_context(|| format!("global's step {at} isn't there"))?;
         // Opened only with keys it was given, so any epoch it wasn't is junk.
         let made = keys.keys().next_back().copied().unwrap_or(0);
         Ok(match open(keys, made, &Scope::Global, at, &o.bytes) {
@@ -537,7 +537,7 @@ pub async fn welcomed(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Key
     let freeze = step(bucket, keys, welcome.freeze).await?.context("the step it was welcomed with isn't a freeze")?;
     let mut tried = None;
     if let Some(c) = welcome.copy() {
-        let name = crate::db::copy_name(&prefix, c);
+        let name = crate::database::stored::copy_name(&prefix, c);
         let copy = async {
             let o = bucket.get(&name).await?.context("no copy")?;
             let key = keys.get(&crate::keys::epoch_of(&o.bytes)?).context("its copy is under a key this device wasn't given")?;
@@ -948,9 +948,9 @@ mod oracle {
             let old = super::super::scope::build(&if *s == Scope::Global { d.members() } else { Members::default() }, s, &d.state()).unwrap();
             carry(d.conn(), &old).unwrap();
             let new = super::super::scope::fresh(d.conn(), s).unwrap();
-            assert_eq!(crate::db::state_hash(&new).unwrap(), crate::db::state_hash(&old).unwrap(), "fresh {s}");
+            assert_eq!(crate::database::stored::state_hash(&new).unwrap(), crate::database::stored::state_hash(&old).unwrap(), "fresh {s}");
         }
-        let hash = |a: &Result<Applied>| a.as_ref().ok().map(|a| crate::db::state_hash(&a.db).unwrap());
+        let hash = |a: &Result<Applied>| a.as_ref().ok().map(|a| crate::database::stored::state_hash(&a.db).unwrap());
         assert_eq!(hash(applied), hash(&was), "{} step {}: rules {:?}, members {:?}", scope, step.content.kind, applied.as_ref().err().map(|e| format!("{e:#}")), was.as_ref().err().map(|e| format!("{e:#}")));
     }
 }
@@ -972,7 +972,7 @@ pub(crate) mod tests {
             }
         }
         let replayed = ScopeDb::build(m, &Scope::Global, &ScopeState::default(), 0).unwrap();
-        let hash = |d: &ScopeDb| crate::db::state_hash(d.conn()).unwrap();
+        let hash = |d: &ScopeDb| crate::database::stored::state_hash(d.conn()).unwrap();
         if hash(&db) != hash(&replayed) {
             let dump = |d: &ScopeDb| {
                 let mut out = Vec::new();
@@ -1061,7 +1061,7 @@ pub(crate) mod tests {
         assert!(t.take(2, Some(&step)).unwrap());
         let w = t.welcome().unwrap();
         let after = [Some(Given { step, copy: None })];
-        assert_eq!(crate::db::state_hash(Truth::welcomed(&w, &theirs, None, &after, 0).unwrap().db.conn()).unwrap(), w.hash);
+        assert_eq!(crate::database::stored::state_hash(Truth::welcomed(&w, &theirs, None, &after, 0).unwrap().db.conn()).unwrap(), w.hash);
         assert!(Truth::welcomed(&Welcome { hash: "0".repeat(64), ..w.clone() }, &theirs, None, &after, 0).is_err(), "nor another hash");
         assert!(Truth::welcomed(&w, &theirs, None, &[None], 0).is_err(), "nor a step held back");
     }
@@ -1079,7 +1079,7 @@ pub(crate) mod tests {
         let freeze = Freeze { at: 2, hash: "0".repeat(64), logs: [("global".to_string(), 9), (scope.to_string(), 4)].into() };
         let given = start(&mac, &scope, ANDRE, 1, 0, &mut db).unwrap();
         let given = decode(&scope, 0, &encoded(&given)).unwrap();
-        let hash = |d: &ScopeDb| crate::db::state_hash(d.conn()).unwrap();
+        let hash = |d: &ScopeDb| crate::database::stored::state_hash(d.conn()).unwrap();
         assert_eq!(hash(&started(&freeze, &global, &scope, Some(&given), 0).unwrap()), hash(&db));
         assert!(started(&freeze, &global, &scope, None, 0).is_err(), "none yet: it waits for one");
         let stranger = start(&SigningKey::from_bytes(&[9; 32]), &scope, ANDRE, 1, 0, &mut db).unwrap();
@@ -1117,21 +1117,21 @@ pub(crate) mod tests {
         use crate::bucket::Bucket;
         let bucket = crate::bucket::Memory::default();
         let prefix = prefix("global");
-        let keys: crate::db::Keys = [(1, [9; 32])].into();
+        let keys: crate::database::stored::Keys = [(1, [9; 32])].into();
         let (_, mac, _, _) = two_admins();
         let step = |at: u64| {
-            let name = crate::db::step_name(&prefix, at);
+            let name = crate::database::stored::step_name(&prefix, at);
             seal(&keys, &name, &encode(&sign(&mac, &Scope::Global, at, ANDRE, 1, 0, members::setting("name", Some("x"))).unwrap(), None)).unwrap()
         };
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
-            bucket.create(&crate::db::newest_name(&prefix), br#"{"at": 1000000000, "copy": 0, "epoch": 1}"#).await.unwrap();
+            bucket.create(&crate::database::stored::newest_name(&prefix), br#"{"at": 1000000000, "copy": 0, "epoch": 1}"#).await.unwrap();
             assert!(read(&bucket, &keys, &Scope::Global, 0).await.unwrap().steps.is_empty(), "nothing written, nothing read, and no failure");
-            bucket.create(&crate::db::step_name(&prefix, 3), b"x").await.unwrap();
+            bucket.create(&crate::database::stored::step_name(&prefix, 3), b"x").await.unwrap();
             assert!(read(&bucket, &keys, &Scope::Global, 0).await.unwrap().steps.is_empty(), "nor junk after a position with nothing");
-            bucket.create(&crate::db::step_name(&prefix, 2), &step(2)).await.unwrap();
+            bucket.create(&crate::database::stored::step_name(&prefix, 2), &step(2)).await.unwrap();
             assert!(read(&bucket, &keys, &Scope::Global, 0).await.is_err(), "but a step after one with nothing stops it: that one was written");
             // Junk at 1, under an epoch no one made.
-            let junk = crate::db::step_name(&prefix, 1);
+            let junk = crate::database::stored::step_name(&prefix, 1);
             bucket.create(&junk, &crate::keys::seal(0xFFFF_FFFF, &[3; 32], &junk, b"junk")).await.unwrap();
             let r = read(&bucket, &keys, &Scope::Global, 0).await.unwrap();
             assert!(r.steps.is_empty() && r.junk_at_end(1) && !r.junk_at_end(u32::MAX), "it waits only for an epoch that was made");

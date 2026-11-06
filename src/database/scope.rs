@@ -17,7 +17,7 @@
 //! People and groups are named as `person:<id>` and `group:<id>`; an app owned by the network's admins as `admins`.
 //! Keys and hashes are lowercase hex, times milliseconds, flags 0 or 1, and lists and arrangements JSON.
 //!
-//! Its state hash is any database's (`db::state_hash`): its rows', whatever order they were written in, and whatever
+//! Its state hash is any database's (`stored::state_hash`): its rows', whatever order they were written in, and whatever
 //! SQLite's pages hold.
 
 use anyhow::Result;
@@ -670,7 +670,7 @@ pub(crate) mod tests {
             }
         }
         // The same rows written the other way round hash the same, and building again gives the same database.
-        let state_hash = crate::db::state_hash;
+        let state_hash = crate::database::stored::state_hash;
         let hash = state_hash(&db).unwrap();
         assert_eq!(hash, state_hash(&build(m, &Scope::Global, &ScopeState::default()).unwrap()).unwrap());
         let copy = Connection::open_in_memory().unwrap();

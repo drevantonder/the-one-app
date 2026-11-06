@@ -89,7 +89,7 @@ impl Global {
     /// Reads `global`'s steps after those held from `bucket`, opened with `keys`, its log's keys by epoch, and takes
     /// them, its genesis first if it needs it: one under an epoch above every one made, as the steps before it leave
     /// it, is junk, passed over.
-    pub async fn read_steps(&mut self, bucket: &impl one::bucket::Bucket, keys: &one::db::Keys) -> Result<()> {
+    pub async fn read_steps(&mut self, bucket: &impl one::bucket::Bucket, keys: &one::database::stored::Keys) -> Result<()> {
         if self.wants_genesis() {
             let (root, recovery) = steps::recovery_key(bucket, keys, self.root).await?;
             (self.root, self.recovery) = (Some(root), Some(recovery));
@@ -131,8 +131,8 @@ impl Global {
             let Some(bytes) = first.and_then(|s| data_encoding::BASE64URL_NOPAD.decode(s["sealed"].as_str()?.as_bytes()).ok()) else { return Ok(Some(1)) };
             self.genesis(&steps::genesis_entries(&all_keys(epochs, apps), &bytes)?)?;
         }
-        let mut keys = one::db::Keys::new();
-        let key = |keys: &mut one::db::Keys, g: &Global, e: u32| {
+        let mut keys = one::database::stored::Keys::new();
+        let key = |keys: &mut one::database::stored::Keys, g: &Global, e: u32| {
             let checked = |epoch: &[u8; 32]| g.truth.as_ref().is_none_or(|t| t.db.epoch_hash(&Scope::Global, e) == Some(one::keys::epoch_hash(epoch)));
             if !keys.contains_key(&e)
                 && let Some(epoch) = epochs.get(&e).filter(|k| checked(k))
@@ -196,7 +196,7 @@ impl Global {
         let Some(freeze) = opened(welcome.freeze, freeze)? else { bail!("the step it was welcomed with isn't a freeze") };
         let start = match given.get("start").filter(|s| s["at"].as_u64().is_some() && s["at"].as_u64() == welcome.copy()) {
             Some(s) => {
-                let name = one::db::copy_name(&steps::prefix("global"), s["at"].as_u64().unwrap_or(0));
+                let name = one::database::stored::copy_name(&steps::prefix("global"), s["at"].as_u64().unwrap_or(0));
                 let bytes = sealed(s).ok_or_else(|| anyhow::anyhow!("no copy"))?;
                 let key = keys.get(&one::keys::epoch_of(&bytes)?).ok_or_else(|| anyhow::anyhow!("its copy is under a key this device wasn't given"))?;
                 Some(one::keys::open(key, &name, &bytes)?)
@@ -243,8 +243,8 @@ impl Global {
 
 /// `global`'s log's key in each of `epochs` sealed to this device (raw, by number), from `apps`, the node's key sealed
 /// under each: unchecked, so what they open is used only once who's who it comes to says they're its, or its hash pins it.
-fn all_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> one::db::Keys {
-    let mut keys = one::db::Keys::new();
+fn all_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> one::database::stored::Keys {
+    let mut keys = one::database::stored::Keys::new();
     for (e, epoch) in epochs {
         if let Some(app) = apps.get(e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok()) {
             keys.insert(*e, one::cloudflare::database_key(&app, steps::KEY_NAME));

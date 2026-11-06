@@ -172,7 +172,7 @@ async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 3
 /// opened with the recovery key alone.
 async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str, sql: &str) -> Vec<String> {
     let (copy, keys) = backed_up_keys(dir, install, recovery, scope, app, database);
-    match one::db::Db::open(&copy, &format!("{}/{app}/{database}", one::bucket::folder(scope)), keys).await {
+    match one::database::stored::Db::open(&copy, &format!("{}/{app}/{database}", one::bucket::folder(scope)), keys).await {
         Ok(db) => db.query(sql, &[]).unwrap().into_iter().filter_map(|r| r.values().next().and_then(|v| v.as_str()).map(str::to_string)).collect(),
         Err(_) => Vec::new(),
     }
@@ -180,10 +180,10 @@ async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], sc
 
 /// The backup's copy of the network's bucket, and the keys of `app`'s `database` in `scope` there, opened with the
 /// recovery key alone.
-fn backed_up_keys(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (one::bucket::Place, one::db::Keys) {
+fn backed_up_keys(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (one::bucket::Place, one::database::stored::Keys) {
     let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
     let folder = one::bucket::folder(scope);
-    let mut keys = one::db::Keys::new();
+    let mut keys = one::database::stored::Keys::new();
     for n in copy.list(&format!("{folder}/_epochs")).unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {
         let epoch = one::backups::unseal(recovery, &copy.get(&one::keys::epoch_name(scope, n, "recovery")).unwrap().unwrap()).unwrap();
         let Ok(Some(sealed)) = copy.get(&one::keys::app_key_name(scope, app, n)) else { continue };

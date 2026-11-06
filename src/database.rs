@@ -1,11 +1,13 @@
-//! Databases: each scope's SQLite databases. For now only the scope database (`scope`), its signed steps (`steps`),
-//! and what a device asks of it (`scopes`); apps' databases are still `src/db.rs`.
+//! Databases: each scope's SQLite databases, every one kept in the bucket as signed steps and copies (`stored`): its
+//! apps' databases, and the scope database (`scope`), its signed steps (`steps`) and what a device asks of it
+//! (`scopes`).
 
 pub mod migrate;
 pub mod rules;
 pub mod scope;
 pub mod scopes;
 pub mod steps;
+pub mod stored;
 
 /// What this build reads of who's who: the scope database's tables, types, roles and rules of this number. A device
 /// that reads less is told to update, by nodes (`HEADER`), the relay, sign-in and the URL signer (`reads` in what it

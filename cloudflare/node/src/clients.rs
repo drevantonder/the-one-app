@@ -170,10 +170,10 @@ pub async fn device_close(me: String) {
 struct View {
     user: String,
     seal: Key,
-    global: one::db::Keys,
+    global: one::database::stored::Keys,
     who: Global,
     db: ScopeDb,
-    epochs: HashMap<Scope, one::db::Keys>,
+    epochs: HashMap<Scope, one::database::stored::Keys>,
     apps: HashMap<(Scope, String, u32), Key>,
 }
 
@@ -182,8 +182,8 @@ impl View {
     /// open says it's theirs, as a node's first read is (`Node::first_global_read`).
     async fn read(bucket: &crate::Js, me: &Key, user: &str, seal: &Key) -> Result<View> {
         let mine = data_encoding::HEXLOWER.encode(me);
-        let mut candidates = one::db::Keys::new();
-        for n in 1..=one::db::EPOCHS_MAX {
+        let mut candidates = one::database::stored::Keys::new();
+        for n in 1..=one::database::stored::EPOCHS_MAX {
             let Some(o) = one::bucket::Bucket::get(bucket, &one::keys::epoch_name("global", n, &mine)).await? else { break };
             if let Some(k) = one::cloudflare::open_sealed(seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()) {
                 candidates.insert(n, k);
@@ -191,9 +191,9 @@ impl View {
         }
         loop {
             ensure!(!candidates.is_empty(), "no keys of your One App network are sealed to this device yet");
-            let mut log_keys = one::db::Keys::new();
+            let mut log_keys = one::database::stored::Keys::new();
             for (n, epoch) in &candidates {
-                if let Ok(Some(app)) = one::db::app_key(bucket, epoch, "global", members::APP, *n, false).await {
+                if let Ok(Some(app)) = one::database::stored::app_key(bucket, epoch, "global", members::APP, *n, false).await {
                     log_keys.insert(*n, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME));
                 }
             }
@@ -223,11 +223,11 @@ impl View {
 
     /// A scope's epochs this device opens, by number: each one who's who made, from its copy in the bucket sealed to
     /// this device whose hash is the one who's who names (`Node::epoch_keys`).
-    async fn epoch_keys(&mut self, bucket: &crate::Js, me: &Key, scope: &Scope) -> Result<one::db::Keys> {
+    async fn epoch_keys(&mut self, bucket: &crate::Js, me: &Key, scope: &Scope) -> Result<one::database::stored::Keys> {
         let m = &self.db;
         let hashes: BTreeMap<u32, String> = (1..=m.epoch(scope)).filter_map(|n| Some((n, m.epoch_hash(scope, n)?))).collect();
         let kept = self.epochs.get(scope).cloned().unwrap_or_default();
-        let mut keys: one::db::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&one::keys::epoch_hash(k))).collect();
+        let mut keys: one::database::stored::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&one::keys::epoch_hash(k))).collect();
         let mine = data_encoding::HEXLOWER.encode(me);
         for (n, hash) in &hashes {
             if keys.contains_key(n) {
@@ -317,13 +317,13 @@ pub async fn device_keys(me: String, need: String, bucket: JsValue) -> Result<St
             let epochs = view.epoch_keys(&bucket, &me, &scope).await?;
             let newest = epochs.keys().next_back().copied().unwrap_or(0);
             // From the epoch its newest copy is under: older ones open only its history.
-            let hint = one::bucket::Bucket::get(&bucket, &one::db::newest_name(&prefix)).await?;
+            let hint = one::bucket::Bucket::get(&bucket, &one::database::stored::newest_name(&prefix)).await?;
             let oldest = one::keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), view.db.epoch(&scope));
             for (epoch, epoch_key) in epochs.range(oldest..) {
                 let id = (scope.clone(), app.to_string(), *epoch);
                 let app_key = match view.apps.get(&id) {
                     Some(k) => Some(*k),
-                    None => one::db::app_key(&bucket, epoch_key, &scope.to_string(), app, *epoch, *epoch == newest).await?,
+                    None => one::database::stored::app_key(&bucket, epoch_key, &scope.to_string(), app, *epoch, *epoch == newest).await?,
                 };
                 let Some(app_key) = app_key else { continue };
                 view.apps.insert(id, app_key);

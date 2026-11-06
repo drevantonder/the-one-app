@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::db::Keys;
+use crate::database::stored::Keys;
 use crate::keys::Need;
 
 use super::*;
@@ -316,7 +316,7 @@ impl Node {
                 keys.insert(n, key);
             }
         }
-        crate::db::handed(keys, newest).map_err(|_| NotGiven(scope.clone(), self.device_name()).into())
+        crate::database::stored::handed(keys, newest).map_err(|_| NotGiven(scope.clone(), self.device_name()).into())
     }
 
     /// Which of the keys `offered` for epoch `n` of a scope's database's steps opens what the bucket holds under that
@@ -334,16 +334,16 @@ impl Node {
         }
         let bucket = self.bucket()?;
         let prefix = crate::database::steps::prefix(&scope.to_string());
-        let (at, copy, epoch) = Bucket::get(&bucket, &crate::db::newest_name(&prefix)).await?.map_or((0, 0, 0), |o| crate::db::newest(&o.bytes));
+        let (at, copy, epoch) = Bucket::get(&bucket, &crate::database::stored::newest_name(&prefix)).await?.map_or((0, 0, 0), |o| crate::database::stored::newest(&o.bytes));
         let mut sealed = None;
         if copy > 0 && epoch == n {
-            sealed = Bucket::get(&bucket, &crate::db::copy_name(&prefix, copy)).await?.map(|o| (crate::db::copy_name(&prefix, copy), o.bytes));
+            sealed = Bucket::get(&bucket, &crate::database::stored::copy_name(&prefix, copy)).await?.map(|o| (crate::database::stored::copy_name(&prefix, copy), o.bytes));
         }
         // From the last step anyone said is there, or this device read, on to the last there is.
         let read = self.with(|i| Ok(i.scope_dbs.get(scope).map_or(0, |(at, _)| *at)))?;
         let mut top = at.max(read);
         for _ in 0..STEPS_CHECKED {
-            match Bucket::get(&bucket, &crate::db::step_name(&prefix, top + 1)).await? {
+            match Bucket::get(&bucket, &crate::database::stored::step_name(&prefix, top + 1)).await? {
                 Some(_) => top += 1,
                 None => break,
             }
@@ -352,7 +352,7 @@ impl Node {
             if sealed.is_some() {
                 break;
             }
-            let name = crate::db::step_name(&prefix, step);
+            let name = crate::database::stored::step_name(&prefix, step);
             let Some(o) = Bucket::get(&bucket, &name).await? else { continue };
             match crate::keys::epoch_of(&o.bytes) {
                 Ok(e) if e == n => sealed = Some((name, o.bytes)),
@@ -431,7 +431,7 @@ impl Node {
         let hints = futures_util::future::try_join_all(want.iter().map(|(scope, app, database)| {
             let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
             let bucket = &bucket;
-            async move { crate::bucket::Bucket::get(bucket, &crate::db::newest_name(&prefix)).await }
+            async move { crate::bucket::Bucket::get(bucket, &crate::database::stored::newest_name(&prefix)).await }
         }))
         .await?;
         let mut need = Vec::new();
@@ -465,7 +465,7 @@ impl Node {
         };
         let db = match self.database(scope, app, database, schema, Some(super::databases::Given { keys, bucket: &bucket, until, app_schedules })).await {
             Err(err) => {
-                let epoch = err.downcast_ref::<crate::db::Missing>().map(|m| m.epoch).or(err.downcast_ref::<crate::db::Ahead>().map(|a| a.epoch));
+                let epoch = err.downcast_ref::<crate::database::stored::Missing>().map(|m| m.epoch).or(err.downcast_ref::<crate::database::stored::Ahead>().map(|a| a.epoch));
                 return match epoch {
                     Some(epoch) => Err(self.need(vec![Need { scope: scope.to_string(), epoch, app: app.into(), database: database.into() }]).into()),
                     None => Err(err),

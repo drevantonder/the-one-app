@@ -429,7 +429,7 @@ impl Node {
     }
 
     /// Every epoch's key of each scope this device holds, by its name, of those it opens.
-    async fn held_epochs(&self) -> BTreeMap<String, crate::db::Keys> {
+    async fn held_epochs(&self) -> BTreeMap<String, crate::database::stored::Keys> {
         let scopes = self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
         let mut out = BTreeMap::new();
         for scope in scopes {

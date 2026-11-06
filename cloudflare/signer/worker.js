@@ -13,7 +13,7 @@
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
 // admin's endpoint removes. A step at position n of a database or log (`<prefix>/<n>`, n > 1) is created only once the
 // one before it is there, or the copy of the steps up to it (`<prefix>/copy/<n-1>`), or the database's older steps
-// were deleted (`<prefix>/tidied`, src/db.rs), past which its readers look for a copy that holds; and a copy only once
+// were deleted (`<prefix>/tidied`, src/database/stored.rs), past which its readers look for a copy that holds; and a copy only once
 // its step is: so no endpoint without the keys leaves a gap in the steps its readers take for the end, nor plants one
 // past it. Others asked for in
 // the same trip are left out, and asked for again when they're next. `confirm` says whether each object is there with that ETag, `newest` what each
@@ -50,7 +50,7 @@ const fail = (status, message) => {
 /// A name in the bucket: parts that are neither empty, `.` nor `..`.
 const isName = (name) => typeof name === "string" && name.length <= 1024 && name.split("/").every((p) => p && p !== "." && p !== "..");
 
-/// The names an item says: a name, or `{ steps, from, to }`, a database's steps at those positions (src/db.rs's
+/// The names an item says: a name, or `{ steps, from, to }`, a database's steps at those positions (src/database/stored.rs's
 /// `step_name`).
 function names(item) {
   if (typeof item === "string") return isName(item) ? [item] : fail(400, `${item} isn't a name in the bucket`);
