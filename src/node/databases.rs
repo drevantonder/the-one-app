@@ -431,7 +431,7 @@ impl Node {
                     Scope::Group(_) => "group",
                     Scope::User(_) => "user",
                 };
-                serde_json::from_value(self.0.apps.describe(app).await?["schema"][kind].clone()).unwrap_or_default()
+                serde_json::from_value::<Option<Vec<String>>>(self.0.apps.describe(app).await?["schema"][kind].clone()).with_context(|| format!("{app}'s schema for {kind} isn't a list of statements"))?.unwrap_or_default()
             }
         };
         let id = (scope.clone(), format!("{app}/{database}"));

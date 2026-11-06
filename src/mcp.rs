@@ -240,6 +240,8 @@ fn agent_name(raw: &str) -> String {
 
 /// The MCP server's instructions (src/skills.rs): the rules first, short enough that every harness keeps all of them.
 fn instructions(node: &Client, mode: Mode) -> String {
+    // A harness starts its MCP server at login, before the node may be up: the instructions then say less, and a
+    // tool call says why it can't.
     let state = node.get("/v1/state").unwrap_or_default();
     let apps: Vec<Value> = node.apps().unwrap_or_default().into_iter().filter(|a| usable(node, a)).collect();
     crate::skills::instructions(mode, &apps, state["user"]["name"].as_str())

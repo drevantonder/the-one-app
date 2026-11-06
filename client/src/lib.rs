@@ -289,6 +289,7 @@ impl Client {
         let client = self.clone();
         n0_future::task::spawn(async move {
             let (first, fallback) = client.in_order(&nodes);
+            // Opens a connection ahead of the first call, which reports its own failure.
             let _ = client.pick(&first, &fallback, &mut None).await;
         });
     }

@@ -603,7 +603,7 @@ impl Node {
         let (sharing, kind) = match &asked {
             Some((app, need)) => {
                 let kind = match need.as_deref().filter(|_| declares_needs(app)) {
-                    Some(need) => self.0.apps.describe(app).await.ok().and_then(|d| d["vault"][need]["type"].as_str().map(str::to_string)),
+                    Some(need) => self.0.apps.describe(app).await?["vault"][need]["type"].as_str().map(str::to_string),
                     None => None,
                 };
                 (self.sharing(app, need.as_deref()).await, kind)

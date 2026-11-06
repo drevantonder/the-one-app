@@ -278,7 +278,10 @@ impl Node {
                     done.push(line.to_string());
                     continue;
                 }
-                Err(_) => continue,
+                Err(err) => {
+                    tracing::warn!("whether {blob} is still named in {log}: {err:#}");
+                    continue;
+                }
             }
             let Ok(bucket) = self.bucket() else { continue };
             let name = crate::bucket::blob_name(log, blob);

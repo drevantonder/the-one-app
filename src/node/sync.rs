@@ -103,7 +103,9 @@ impl Node {
         let (node, scope) = (self.clone(), scope.clone());
         let Some((app, database, at)) = wrote.map(|(a, d, at)| (a.to_string(), d.to_string(), at)) else {
             tokio::spawn(async move {
-                let _ = node.read_scope(&scope).await;
+                if let Err(err) = node.read_scope(&scope).await {
+                    tracing::warn!("reading {scope}, which another device said changed: {err:#}");
+                }
             });
             return;
         };

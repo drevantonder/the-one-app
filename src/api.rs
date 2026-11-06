@@ -309,7 +309,11 @@ pub async fn serve_guide(node: Node) {
                     Ok(listener) => {
                         node.set_guide(Some(format!("http://{ip}:{port}/llms.txt")));
                         let app = Router::new().route("/llms.txt", get(llms)).route("/skills/{name}/{*path}", get(skill_file)).with_state(node.clone());
-                        serving = Some((ip, tokio::spawn(async move { axum::serve(listener, app).await.ok(); })));
+                        serving = Some((ip, tokio::spawn(async move {
+                            if let Err(err) = axum::serve(listener, app).await {
+                                tracing::warn!("serving the skills: {err}");
+                            }
+                        })));
                     }
                     Err(e) => tracing::debug!("can't serve the skills on {ip}:{port}: {e}"),
                 }

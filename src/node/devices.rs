@@ -975,7 +975,7 @@ impl Node {
                     match Bucket::get(&bucket, &name).await {
                         Ok(Some(_)) => drop(node.0.owed.lock().unwrap().sealed.insert((owing, n))),
                         Ok(None) => drop(unsealed.insert((owing, n))),
-                        Err(_) => {}
+                        Err(err) => tracing::debug!("looking in the bucket for {name}: {err:#}"),
                     }
                 }
                 node.0.owed.lock().unwrap().unsealed = unsealed;
