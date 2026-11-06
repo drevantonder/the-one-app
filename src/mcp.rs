@@ -275,7 +275,7 @@ fn logs_tool() -> Value {
 }
 
 /// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
-/// node there says no unless the caller may remove that device (src/node/calls.rs).
+/// node there says no unless the caller may remove that device (src/node/calls/running.rs).
 pub fn logs_read(node: &Client, input: &Map<String, Value>, agent: Option<&str>, client: &str, trace: bool) -> crate::api::client::Called {
     let Some(device) = input.get("device").and_then(Value::as_str) else {
         return crate::api::client::Called { ok: Err(anyhow::anyhow!("which device? {CLI} devices lists them")), trace: None };

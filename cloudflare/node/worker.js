@@ -657,7 +657,7 @@ class Call {
   }
 
   /// Whether the caller may do each permission to each object of `asks` (`[[permission, object]]`), in order: the
-  /// core's rows, and the app's own types and its rows in `scope` (src/node/calls.rs: `/may`).
+  /// core's rows, and the app's own types and its rows in `scope` (src/node/calls/running.rs: `/may`).
   async may(scope, asks) {
     if (!this.scopes.includes(scope)) refuse(403, `the call didn't name ${scope}`);
     const types = (await this.person.describe(this.who, this.app)).types;
