@@ -27,11 +27,8 @@ use wasm_bindgen_futures::JsFuture;
 const THROUGH_RELAY: u64 = 0x6f6e;
 /// The most a client's request may carry: a call and its input. A Worker has 128 MB.
 const ASK_LIMIT: usize = 4 << 20;
-/// The most a request's head may be.
 const HEAD_LIMIT: usize = 64 << 10;
-/// The most the answer to an ask this node sends may carry.
 const ANSWER_LIMIT: usize = 16 << 20;
-/// How many streams another endpoint may have open on a connection at once.
 const STREAMS: u32 = 8;
 /// How many connections others may have open to it at once, and how many of their asks it reads at once.
 const CONNECTIONS: usize = 32;
@@ -315,7 +312,6 @@ fn reply(status: u16, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `{ "error": why }`.
 fn json(why: &str) -> String {
     serde_json::json!({ "error": why }).to_string()
 }

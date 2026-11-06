@@ -199,13 +199,11 @@ fn put(handle: u32, db: (String, Db)) {
     OPEN.with(|o| o.borrow_mut().1.insert(handle, db));
 }
 
-/// Where epoch `n` of `scope` is kept sealed to `to` (an endpoint's key, hex, or `recovery`) in the bucket.
 #[wasm_bindgen]
 pub fn epoch_name(scope: &str, n: u32, to: &str) -> String {
     one::keys::epoch_name(scope, n, to)
 }
 
-/// Where `app`'s key in epoch `n` of `scope` is kept sealed under that epoch in the bucket.
 #[wasm_bindgen]
 pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
     one::keys::app_key_name(scope, app, n)
@@ -243,15 +241,13 @@ pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, 
 
 /// Whether an open database was opened with exactly the keys a call was handed (`usable`): only then may the call use
 /// it, since a key it holds that the call wasn't handed may open what the call mustn't read, and one the call was
-/// handed that it lacks may be a wrong key, which mustn't change what others read. False once it's been closed, and
-/// for one opened before this isolate found its network's log frozen, so it's opened again with phase 2 on for it.
+/// handed that it lacks may be a wrong key, which mustn't change what others read. False once it's been closed.
 #[wasm_bindgen]
 pub fn opens(handle: u32, keys: &str, current: u32) -> bool {
     let Ok(keys) = usable(keys, current) else { return false };
     OPEN.with(|o| o.borrow().1.get(&handle).is_some_and(|(_, db)| *db.keys() == keys))
 }
 
-/// Brings an open database up to what the bucket has, and to `migrations`, with the keys it was opened with.
 #[wasm_bindgen]
 pub async fn refresh(handle: u32, bucket: JsValue, migrations: String) -> Result<(), JsValue> {
     let bucket = Js(bucket);
@@ -267,7 +263,6 @@ pub async fn refresh(handle: u32, bucket: JsValue, migrations: String) -> Result
     done.map_err(failed)
 }
 
-/// Reads with a statement that only reads: its rows, as JSON.
 #[wasm_bindgen]
 pub fn query(handle: u32, sql: &str, params: &str) -> Result<String, JsError> {
     let params: Vec<Value> = serde_json::from_str(params)?;
@@ -311,7 +306,6 @@ pub fn close(handle: u32) {
     OPEN.with(|o| o.borrow_mut().1.remove(&handle));
 }
 
-/// The migrations of a scope's Vault database (`node`'s `vault`), for `open`.
 #[wasm_bindgen]
 pub fn vault_schema() -> String {
     json!([one::vault::SCHEMA]).to_string()
@@ -601,7 +595,6 @@ pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, f
     Ok(out.to_string())
 }
 
-/// The time now (ms), which a scope database built now answers who may as of.
 fn now() -> u64 {
     js_sys::Date::now() as u64
 }

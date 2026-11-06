@@ -4,19 +4,16 @@
 // open, which goes. Forgotten with the sign-in.
 
 const DB = "one.answers";
-/// Answers kept at most, the oldest going first, and the most one may be (its JSON, in characters).
 const MOST = 300;
 const BIGGEST = 1_000_000;
 
 const done = (req) => new Promise((ok, fail) => ((req.onsuccess = () => ok(req.result)), (req.onerror = () => fail(req.error))));
 const finished = (tx) => new Promise((ok, fail) => ((tx.oncomplete = () => ok()), (tx.onerror = tx.onabort = () => fail(tx.error))));
 
-/// A value's JSON with every object's keys in order, so the same call is the same however its input was built.
 const canonical = (v) => JSON.stringify(v, (_, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x));
 
 let opening = null;
 
-/// The store, open for `user`, with their key: made afresh, emptied of anything else, for anyone but whom it was for.
 function ready(user) {
   if (opening?.user === user) return opening.ready;
   opening?.ready.then((o) => o.db.close(), () => {});
@@ -44,13 +41,11 @@ function ready(user) {
   return ready;
 }
 
-/// Where a call's answer is kept, and what its seal is bound to: whose, and which call.
 async function named(user, app, op, input) {
   const id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical([app, op, input])))), (b) => b.toString(16).padStart(2, "0")).join("");
   return { id, aad: new TextEncoder().encode(`${user}\n${id}`) };
 }
 
-/// What `user`'s call last answered, and when: `{ answer, at }`, or null.
 export async function kept(user, app, op, input) {
   if (!user) return null;
   const { db, key } = await ready(user);
@@ -65,7 +60,6 @@ export async function kept(user, app, op, input) {
   }
 }
 
-/// Keeps what `user`'s call answered, sealed, as its last answer.
 export async function keep(user, app, op, input, answer) {
   const json = JSON.stringify(answer ?? null);
   if (!user || json.length > BIGGEST) return;
@@ -89,7 +83,6 @@ export async function keep(user, app, op, input, answer) {
   await finished(tx);
 }
 
-/// Forgets every answer kept, and the key they're sealed with: as this browser signs out, or is taken out.
 export async function forget() {
   const was = opening;
   opening = null;

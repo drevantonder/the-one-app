@@ -37,7 +37,7 @@
 // it gave. Sign-in tells them apart by the client whose token asks to join: one whose every sign-in comes back to the
 // device it was made on (the web client's page, the native apps' `<cli>://signed-in/` or loopback) signed in itself;
 // any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
-// which the person's devices approve only by a tap, and older ones read as nothing.
+// which the person's devices approve only by a tap.
 //
 // It pushes (`PUSH`, the push Worker's entrypoint for the network's own Workers) to the person's devices, never the one asking: "<device>
 // wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`; and
@@ -85,7 +85,6 @@ function goesTo(uri, origin) {
 }
 const [ON_DEVICE, BY_CODE] = ["an app on this device", "where you got your code"];
 
-/// The client a token request names in its HTTP Basic authorization, if it does.
 function basicClient(headers) {
   const basic = /^basic (.+)$/i.exec(headers?.get?.("authorization") || "");
   try {
@@ -99,15 +98,12 @@ function basicClient(headers) {
 const refuse = (status, message) => {
   throw new APIError({ 400: "BAD_REQUEST", 401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 503: "SERVICE_UNAVAILABLE" }[status], { message });
 };
-/// The longest an invite works.
 const INVITE = 30 * 86_400_000;
-/// How long a device's request to join waits.
 const REQUEST = 15 * 60_000;
 /// How long a request waits for a device to let it in by itself before its person is pushed "wants in".
 const WANTS_IN = 10_000;
 /// The most devices of one person pushed to, the newest.
 const PUSHED_TO = 20;
-/// How long a sign-in code works.
 const CODE = 10 * 60_000;
 /// How lately someone signed in for a client to be added as them, or a passkey added.
 const FRESH = 5 * 60_000;
@@ -128,17 +124,14 @@ function joinOf(query) {
   return JOIN.test(join || "") ? join : null;
 }
 
-/// A device's key and seal key, from what `join` names.
 const endpointOf = (join) => [hex.decode(join.slice(0, 64)), hex.decode(join.slice(64))];
 
 /// The network's root (`ROOT`, hex, as the device deploying to Cloudflare holds it), which a sign-in for a device
 /// names beside it: without it, a sign-in names no device, and its device is approved by its code.
 const rootOf = (env) => (/^[0-9a-f]{64}$/.test(env.ROOT || "") ? hex.decode(env.ROOT) : null);
 
-/// Base64 of any kind, as base64url.
 const asB64u = (s) => String(s || "").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 
-/// A SHA-256 hash, as hex, of a secret kept only that way.
 async function hash(secret) {
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -258,7 +251,6 @@ export class Auth extends DurableObject {
         before: createAuthMiddleware(async (ctx) => {
           if (ctx.path === "/oauth2/authorize" && ctx.query) {
             ctx.query.resource = await self.audience(ctx.query.client_id);
-            // Every client gets a refresh token, asked for or not, so it stays signed in.
             const scopes = String(ctx.query.scope || "").split(" ").filter(Boolean);
             if (!scopes.includes("offline_access")) ctx.query.scope = [...scopes, "offline_access"].join(" ");
           }
@@ -271,7 +263,6 @@ export class Auth extends DurableObject {
           rpID: url.hostname,
           rpName: env.NAME || "The One App",
           origin: url.origin,
-          // A sign-in for a device keeps its assertion, for that device's request to join.
           authentication: {
             async afterVerification({ clientData }) {
               self.keepAssertion(clientData);
@@ -402,7 +393,6 @@ export class Auth extends DurableObject {
     return { by, fields, admin: allowed.admin === true };
   }
 
-  /// Takes a signed request's signature once: one sent again is refused.
   taken(sig) {
     const sql = this.ctx.storage.sql;
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * 60_000);
@@ -464,14 +454,12 @@ export class Auth extends DurableObject {
     return {};
   }
 
-  /// Forgets requests to join that waited too long, and sign-ins for devices made as long ago.
   expire() {
     // An approved one is kept as long again from its approval, for its device to see.
     this.ctx.storage.sql.exec("delete from requests where coalesce(approved, made) <= ?", Date.now() - REQUEST);
     this.ctx.storage.sql.exec("delete from proofs where made <= ?", Date.now() - REQUEST);
   }
 
-  /// Keeps what `user`'s sign-in for the device `join` names showed, for its request to join.
   keepProof(join, user, proof) {
     this.ctx.storage.sql.exec("insert or replace into proofs (key, user, proof, made) values (?, ?, ?, ?)", join.slice(0, 64), user, JSON.stringify(proof), Date.now());
   }
@@ -577,18 +565,15 @@ export class Auth extends DurableObject {
     return { until: made + REQUEST };
   }
 
-  /// Keeps `key` as one of `user`'s devices, for pushes.
   theirs(key, user) {
     this.ctx.storage.sql.exec("insert or replace into devices (key, user, at) values (?, ?, ?)", key, user, Date.now());
   }
 
-  /// Wakes by `at` to push "wants in" for requests still waiting then.
   async wantsInBy(at) {
     const now = await this.ctx.storage.getAlarm();
     if (now == null || now > at) await this.ctx.storage.setAlarm(at);
   }
 
-  /// Pushes "wants in" for each request nothing approved within `WANTS_IN`, once, and wakes again for the next.
   async alarm() {
     this.expire();
     const sql = this.ctx.storage.sql;
@@ -617,7 +602,6 @@ export class Auth extends DurableObject {
     }
   }
 
-  /// Requests to join, as they're shown: with the person's name, and whether one was approved.
   shown(rows) {
     const sql = this.ctx.storage.sql;
     return rows.map((r) => {
@@ -645,7 +629,6 @@ export class Auth extends DurableObject {
     return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", theirs).toArray()) };
   }
 
-  /// A request by its device's key, if the asker may see it: its person, or one of the network's devices.
   async mayTouch(request, key) {
     this.expire();
     const sql = this.ctx.storage.sql;
@@ -656,7 +639,6 @@ export class Auth extends DurableObject {
     return row;
   }
 
-  /// One request, for its new device to see it still waits.
   async request(request, key) {
     const row = await this.mayTouch(request, key);
     return this.shown([row])[0];
@@ -756,7 +738,6 @@ export class Auth extends DurableObject {
   // minute ago) gives nothing to a client whose link the person was sent. Starting one keeps a secret in a cookie only
   // this address sets, with a hash of the authorization's query; coming back, the two must match, once.
 
-  /// Starts signing in with Google for a client's authorization (`oauth_query`), on the sign-in page.
   async startGoogle(request, { oauth_query }) {
     this.fromOurPages(request);
     const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
@@ -768,7 +749,6 @@ export class Auth extends DurableObject {
     return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-google-start", secret, STARTED / 1000) } });
   }
 
-  /// Refuses what only this address's own pages ask.
   fromOurPages(request) {
     if (request.headers.get("origin") !== new URL(this.env.ADDRESS).origin) refuse(403, "only the sign-in page asks that");
   }
@@ -807,7 +787,6 @@ export class Auth extends DurableObject {
     }
   }
 
-  /// The page a code is typed into, or with one (`c`), on to its sign-in.
   codeOpened(typed, look, google) {
     if (typed == null) return html(codePage({ ...look, google }));
     const code = String(typed).toUpperCase().replace(/[^A-Z]/g, "");
@@ -836,7 +815,6 @@ export class Auth extends DurableObject {
     return json(JSON.parse(row.back));
   }
 
-  /// The invite a link's secret opens, while it works.
   async openInvite(secret) {
     if (!secret) refuse(403, "Joining takes an invite link: ask an admin for one.");
     if (typeof secret !== "string" || secret.length < 32) refuse(404, "That invite link isn't whole: open the link you were sent as it is.");
@@ -863,7 +841,6 @@ export class Auth extends DurableObject {
     this.ctx.storage.sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
   }
 
-  /// What an invite page shows: whose it is, and on a network whose people sign in with Google, the email it's for.
   async inviteAbout({ secret }) {
     const invite = await this.openInvite(secret);
     return { person: invite.name, until: invite.until, email: invite.email };
@@ -901,7 +878,6 @@ export class Auth extends DurableObject {
     const resp = await this.auth.handler(new Request(new URL("/api/auth/oauth2/consent", request.url), { method: "POST", headers, body: JSON.stringify({ accept: true, oauth_query }) }));
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) throw Object.assign(new Error(out.error_description || out.message || "signing in didn't work"), { status: resp.status });
-    // Every authorization asks for the passkey (or Google): none is kept for next time.
     this.ctx.storage.sql.exec("delete from oauthConsent where clientId = ? and userId = ?", client.clientId, signedIn.user.id);
     return { url: out.url };
   }

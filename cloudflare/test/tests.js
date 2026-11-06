@@ -7,7 +7,6 @@ import { verify } from "../shared/token.js";
 import { Copies } from "../mcp/copies.js";
 import { apns, encrypt, fcm, webPush, wns } from "../push/senders.js";
 
-/// A Durable Object's storage, in memory.
 class Store {
   constructor() {
     this.kept = new Map();

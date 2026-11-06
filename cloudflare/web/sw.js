@@ -55,8 +55,6 @@ addEventListener("notificationclick", (e) => {
   );
 });
 
-// MARK: Opening a note
-
 /// The note sealed to one of this browser's devices, which are kept as `device:<user>` in IndexedDB's `one` (kept.js).
 async function opened(sealed) {
   for (const d of await devices()) {

@@ -25,7 +25,6 @@ use wasm_bindgen::prelude::*;
 
 type Key = [u8; 32];
 
-/// The most a node's answer to a device may be.
 const ANSWER_MOST: usize = 8 << 20;
 /// A device not asked for this long is taken to have ended with its object, which didn't close it: its key leaves.
 const FORGOTTEN_AFTER: f64 = 10.0 * 60_000.0;
@@ -162,8 +161,6 @@ pub async fn device_close(me: String) {
     SENDS.with(|s| s.borrow_mut().remove(&me));
 }
 
-// Who's who, as the device reads it itself.
-
 /// What a device knows of who's who: `global`'s scope database's steps as its epochs open them in the bucket, the
 /// database they leave, and the keys it opened, each epoch's only while it's the key who's who says.
 struct View {
@@ -184,7 +181,6 @@ impl View {
         Ok(View { user: user.into(), seal: *seal, global, who, epochs: HashMap::from([(Scope::Global, epochs)]), apps: HashMap::new() })
     }
 
-    /// Who's who as it read it.
     fn db(&self) -> &ScopeDb {
         &self.who.truth().expect("a view is made once it's read the freeze").db
     }

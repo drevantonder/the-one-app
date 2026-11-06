@@ -7,8 +7,8 @@
 // It admits only the network's endpoints, on its one list of them: `{ by, admin, role }` per key, `by` the key that let
 // it in, `role` what it is (`client`, `compute` or `service`, or a machine's several, with spaces). The network's first
 // devices, and its recovery key as a client, are put in when the network is made (`DEVICES`, `{ key, role, admin }`
-// each, from the Workers'
-// deploy, taken only while the list is empty, which it never is again: the last admin can't be taken out); after that,
+// each, from the Workers' deploy, taken only while the list is empty, which it never is again: the last admin can't
+// be taken out); after that,
 // devices tell it, and nothing else changes it. A computer joining with a pairing code a device made gets in too, by
 // the ticket it shows as iroh's relay auth token, until the code expires, and reaches only that device until it's
 // added. A session's endpoint gets in too (a browser's: its device key can't be read out of WebCrypto, and iroh signs
@@ -49,8 +49,8 @@
 // comes back by RPC (`fromNode`, on the `CloudflareNode` entrypoint, which only its Worker binds) and goes out as from
 // it. It's one of the network's endpoints, as compute.
 //
-// Nor are the remote MCP server's devices (cloudflare/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
-// (`MCP`) while it runs: one binds its key (`bind`, a request signed by that key, which must be on the list) to its
+// Nor are the remote MCP server's devices (cloudflare/mcp/), one per remote MCP client, each in a Durable Object of
+// that Worker's (`MCP`) while it runs: one binds its key (`bind`, a request signed by that key, which must be on the list) to its
 // object, which then gets the datagrams sent to that key by RPC (`deliver`), and passes back by RPC what it sends
 // (`fromClient`), until it unbinds or its binding lapses. Binding gives it a ticket, which sending and unbinding must
 // show, so one device's object sends only as itself. The remote MCP server binds the `McpDevices` entrypoint, never the
@@ -65,25 +65,17 @@ initSync({ module: wasm });
 
 /// The WebSocket subprotocol iroh's endpoints ask for: version 2 of its relay protocol.
 const PROTOCOL = "iroh-relay-v2";
-/// A tell's most bytes.
 const TELL_BYTES = 4096;
-/// How long a socket may take to answer its challenge, how many sockets that haven't may come from one place (an IPv4
-/// address, an IPv6 /64), from one IPv6 /48 (a site's, which holds 65,536 /64s) and from everywhere, how long a
-/// pairing code may work, and how many one device may have.
 const PROVE_WITHIN = 30_000;
 const UNPROVEN_PER_PLACE = 8;
 const UNPROVEN_PER_SITE = 32;
 const UNPROVEN = 256;
 const PAIRING_FOR = 7 * 86_400_000;
-/// How often an endpoint's last time here is noted.
 const HOUR = 3_600_000;
 const PAIRINGS_PER_DEVICE = 8;
-/// Whether a key on the list plays `role`.
 const is = (it, role) => !!it && rolesOf(it.role).includes(role);
-/// How often a sender is told that an endpoint it sends to isn't here, and how many such it remembers.
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
-/// The most datagrams for the Cloudflare node gathered in one turn before they're handed to it.
 const FOR_NODE_MOST = 1024;
 
 const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (h) => parseInt(h, 16));
@@ -147,8 +139,6 @@ export default class extends WorkerEntrypoint {
     }
   }
 
-  /// What the relay tells the network's endpoints (`computes`, or when each was last `seen`), for a request signed by a
-  /// key on the list or a session's endpoint.
   async ask(request, what) {
     let asked;
     try {
@@ -168,13 +158,11 @@ export default class extends WorkerEntrypoint {
     }
     const said = await this.relay()[what](asked.by, asked);
     if (said?.update) return refuse(426, updateRefusal(this.env.YOURS));
-    // And which of them are connected now, which a client races first.
     if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
     if (said && typeof said === "object") return Response.json({ [what]: said });
     return said === null ? refuse(403, `the relay takes only ${this.env.YOURS}'s devices`) : refuse(400, said);
   }
 
-  /// Whether `key` (hex) is one of the network's endpoints: `{ admin }` if it is, for the URL signer, by its binding.
   async allowed(key) {
     return isKey(key) ? this.relay().allowed(key) : null;
   }
@@ -192,17 +180,14 @@ const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 /// What the remote MCP server asks the relay, by its binding: its devices' own bindings, and who's here. Nothing else of the
 /// relay's object, so a hacked remote MCP server tells it nothing and sends as no endpoint but a device it holds the key of.
 export class McpDevices extends WorkerEntrypoint {
-  /// Binds a device's key to its object, by `request` signed with that key: → `{ ticket, until }`, or `{ error }`.
   bind(request, name) {
     return relay(this.env).bind(request, name);
   }
 
-  /// Unbinds a device's key, by the ticket its binding gave.
   unbind(key, ticket) {
     return relay(this.env).unbind(key, ticket);
   }
 
-  /// Datagrams a device sends, as from its key, by the ticket its binding gave: → the keys of those not here.
   fromClient(key, ticket, items) {
     return relay(this.env).fromClient(key, ticket, items);
   }
@@ -220,7 +205,6 @@ export class McpDevices extends WorkerEntrypoint {
   }
 }
 
-/// What the Cloudflare node asks the relay, by its binding: sending as itself, and who's here.
 export class CloudflareNode extends WorkerEntrypoint {
   fromNode(items) {
     return relay(this.env).fromNode(items);
@@ -235,8 +219,6 @@ export class Relay extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    // The list: each key with the key that let it in; pairing codes, with the device that made them and the computer
-    // they let in, once one has; and the tells taken.
     this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL, role TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, key TEXT);
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
@@ -248,16 +230,15 @@ export class Relay extends DurableObject {
         if (isKey(key) && rolesOf(role).every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'network', ?, ?)", key, admin === true ? 1 : 0, role);
       }
     }
-    /// Each proven endpoint's socket, by its key; kept in the sockets' attachments across hibernation.
+    // Rebuilt from the sockets' attachments, which Hibernation keeps.
     this.sockets = new Map();
     for (const ws of ctx.getWebSockets()) {
       const said = ws.deserializeAttachment();
       if (said?.id) this.sockets.set(said.id, ws);
     }
-    /// The remote MCP server's devices bound here: key → `{ name, until, ticket }`, its object's name, and what it shows.
     this.bound = new Map();
     for (const b of this.sql.exec("SELECT key, name, until, ticket FROM bound WHERE until > ?", Date.now()).toArray()) this.bound.set(b.key, { name: b.name, until: b.until, ticket: b.ticket });
-    /// When each sender was last told an endpoint isn't here, `<from> <to>` → ms; lost on hibernation, which is fine.
+    // `<from> <to>` → ms; lost on hibernation, which is fine.
     this.told = new Map();
     /// Only a test binds `TEST` (tests/cloudflare.rs on the Workers it serves itself; a network's bindings come from its
     /// settings, which hold none): its clock, moved by `testing`, so what ends with time ends without waiting; and a
@@ -267,7 +248,6 @@ export class Relay extends DurableObject {
     this.waiting = [];
   }
 
-  /// The time expiries are judged by.
   now() {
     return Date.now() + this.skew;
   }
@@ -332,7 +312,6 @@ export class Relay extends DurableObject {
     return true;
   }
 
-  /// The compute endpoints' keys, for whom `asks` lets ask: → else null or why not.
   computes(by, asked) {
     const may = this.asks(by, asked);
     if (may !== true) return may;
@@ -349,7 +328,6 @@ export class Relay extends DurableObject {
     return Object.fromEntries(this.sql.exec("SELECT seen.key, seen.at FROM seen JOIN keys ON keys.key = seen.key").toArray().map((r) => [r.key, r.at]));
   }
 
-  /// Takes a signed request, `(by, at)`, once: → whether it wasn't taken before.
   take(by, at) {
     const now = Date.now();
     this.sql.exec("DELETE FROM tells WHERE at < ? OR at > ?", now - 2 * FRESH, now + 2 * FRESH);
@@ -456,7 +434,6 @@ export class Relay extends DurableObject {
     ws.send(endpoint_gone(unhex(to)));
   }
 
-  /// Datagrams for the Cloudflare node, from `src`: gathered this turn, then handed to it by RPC, which wakes it.
   toNode(src, frame) {
     let d;
     try {
@@ -493,12 +470,10 @@ export class Relay extends DurableObject {
     return [...gone];
   }
 
-  /// Which of `keys` are connected here now.
   connected(keys) {
     return keys.filter((k) => this.sockets.has(k));
   }
 
-  /// The remote MCP server's object a key is bound to, if it is: its name.
   boundTo(key) {
     const b = this.env.MCP && this.bound.get(key);
     if (!b) return null;
@@ -528,20 +503,17 @@ export class Relay extends DurableObject {
     return { ticket, until };
   }
 
-  /// Unbinds `key`: by the remote MCP server, with its binding's ticket, or here, as it's taken out or its binding lapses.
   unbind(key, ticket) {
     if (ticket !== undefined && !this.ticketed(key, ticket)) return;
     this.bound.delete(key);
     this.sql.exec("DELETE FROM bound WHERE key = ?", key);
   }
 
-  /// Whether `ticket` is the one `key`'s binding gave.
   ticketed(key, ticket) {
     const b = this.bound.get(key);
     return !!b && typeof ticket === "string" && ticket.length === 64 && b.ticket === ticket;
   }
 
-  /// Datagrams for one of the remote MCP server's devices, `to`, from `src`: gathered this turn, then handed to its object.
   toClient(to, name, src, frame) {
     let d;
     try {
@@ -562,8 +534,6 @@ export class Relay extends DurableObject {
     waiting.get(to).push([src, (d[0] << 8) | d[1], d.slice(2)]);
   }
 
-  /// Datagrams one of the remote MCP server's devices sends, `[dst, segment size, contents]` each, passed on as from it, if
-  /// it's bound: → the keys of those not here.
   fromClient(key, ticket, items) {
     if (!Array.isArray(items)) return [];
     if (!this.boundTo(key) || !this.ticketed(key, ticket)) return items.map(([dst]) => dst);
@@ -579,7 +549,6 @@ export class Relay extends DurableObject {
     return [...gone];
   }
 
-  /// A socket's answer to its challenge: it's let in if it proves a key on the list, or the key its pairing code let in.
   async prove(ws, said, bytes) {
     let id;
     try {
@@ -596,7 +565,6 @@ export class Relay extends DurableObject {
     if (id && !attachment && said.joining) {
       const pairing = this.pairing(said.joining);
       if (pairing && pairing.until > this.now() && [null, id].includes(pairing.key)) {
-        // A pairing code lets in one computer: this one, again if it reconnects, until it expires or it's added.
         this.sql.exec("UPDATE pairings SET key = ? WHERE hash = ?", id, pairing.hash);
         attachment = { id, pairing: pairing.hash, until: pairing.until, to: pairing.by };
       }
@@ -625,10 +593,8 @@ export class Relay extends DurableObject {
     }
   }
 
-  /// Takes a socket in as `id`, as `attachment` says, and tells it so.
   async admit(ws, id, attachment) {
     if (attachment.until) await this.wake(attachment.until);
-    // The newest socket of a key is the one it's reached at.
     for (const other of this.ctx.getWebSockets()) {
       if (other !== ws && other.deserializeAttachment()?.id === id) {
         other.serializeAttachment({});
@@ -640,12 +606,10 @@ export class Relay extends DurableObject {
     ws.serializeAttachment(attachment);
     this.sockets.set(id, ws);
     ws.send(confirm());
-    // When it was last here, as its device (a session's, the one that vouched for it), at most once an hour.
     const device = attachment.by || id, now = Date.now();
     if (this.key(device)) this.sql.exec("INSERT INTO seen VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET at = excluded.at WHERE at < ?", device, now, now - HOUR);
   }
 
-  /// Closes `key`'s socket, if it has one.
   end(key, why) {
     const ws = this.sockets.get(key);
     this.sockets.delete(key);
@@ -704,7 +668,6 @@ export class Relay extends DurableObject {
         if (!admin) return "that key is in already: only an admin's device changes it";
         if (it.admin === 1 && !wants && this.admins() === 1) return "that's the last admin's key";
         this.sql.exec("UPDATE keys SET admin = ?, role = ? WHERE key = ?", wants ? 1 : 0, told.role, told.add);
-        // A key that's no longer a client vouches for no session.
         if (told.role !== "client") this.endSessionsOf(told.add);
       } else if (!it) {
         if (told.role !== "client" && !admin && !is(by, "compute")) return "only an admin's device or a compute adds a compute or a service";
@@ -771,7 +734,6 @@ export class Relay extends DurableObject {
     }
   }
 
-  /// Closes the sockets of the sessions `key` vouched for.
   endSessionsOf(key) {
     for (const ws of this.ctx.getWebSockets()) {
       const said = ws.deserializeAttachment();

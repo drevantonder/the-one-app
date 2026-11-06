@@ -1,4 +1,3 @@
-// post.html's form: the fields in the address's fragment, sent to its `to` once the person says Continue.
 const q = new URLSearchParams(location.hash.slice(1));
 const form = document.getElementById("form");
 let to = null;

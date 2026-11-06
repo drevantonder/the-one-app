@@ -6,7 +6,6 @@ import { b64u } from "./crypto.js";
 
 const json = (part) => JSON.parse(new TextDecoder().decode(b64u.decode(part)));
 
-/// The key in `jwks` that signed a token with this header, if sign-in publishes it.
 const publishedKey = (jwks, header) => (jwks.keys || []).find((k) => k.kid === header.kid && k.kty === "OKP" && k.crv === "Ed25519");
 
 /// Whether `jwks` holds the key `token` names; null for what isn't a token.
@@ -36,14 +35,11 @@ export async function verify(token, jwks, iss, now = Date.now()) {
   return claims;
 }
 
-/// The bearer token in a request, if there is one.
 export function bearer(request) {
   const auth = request.headers.get("authorization") || "";
   return auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : null;
 }
 
-/// Sign-in's keys, fetched with `get()` (→ a Response of its JWKS) and kept five minutes, or until a token
-/// names a key that isn't among them.
 export class Issuer {
   constructor(iss, get) {
     this.iss = iss;

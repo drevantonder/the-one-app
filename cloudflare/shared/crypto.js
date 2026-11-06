@@ -48,7 +48,6 @@ export async function hkdf(ikm, info, salt = new Uint8Array()) {
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: bytes(salt), info: bytes(info) }, key, 256));
 }
 
-/// A key to derive from, kept without its bytes: they're wiped once it's made.
 export async function hkdfKey(raw) {
   const key = await crypto.subtle.importKey("raw", raw, "HKDF", false, ["deriveBits"]);
   raw.fill(0);
@@ -59,21 +58,18 @@ export function random(n = 32) {
   return crypto.getRandomValues(new Uint8Array(n));
 }
 
-/// An app's key, sealed under its scope's key.
 export async function sealAppKey(scopeKey, app, key) {
   const nonce = random(12);
   const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, await aes(await hkdf(scopeKey, `one/app\0${app}`), "encrypt"), key);
   return concat(nonce, new Uint8Array(sealed));
 }
 
-/// An app's key, from its sealed copy and its scope's key.
 export async function openAppKey(scopeKey, app, sealed) {
   sealed = bytes(sealed);
   const key = await aes(await hkdf(scopeKey, `one/app\0${app}`), "decrypt");
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: sealed.slice(0, 12) }, key, sealed.slice(12)));
 }
 
-/// A database's key in an app, from the app's key.
 export function databaseKey(appKey, database) {
   return hkdf(appKey, `one/database\0${database}`);
 }
@@ -91,7 +87,6 @@ export async function keyPair() {
   return { secret: b64u.decode(jwk.d), public: b64u.decode(jwk.x) };
 }
 
-/// Seals `plain` to an X25519 public key.
 export async function sealTo(to, plain) {
   to = bytes(to);
   const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
@@ -121,14 +116,12 @@ export async function idOf(secret) {
   return b64u.encode(await hkdf(secret, "one/id"));
 }
 
-/// Seals `plain` under a secret.
 export async function sealUnder(secret, plain) {
   const nonce = random(12);
   const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, await aes(await hkdf(secret, "one/sealed-under"), "encrypt"), bytes(plain));
   return concat(nonce, new Uint8Array(sealed));
 }
 
-/// Opens what was sealed under `secret`, or fails.
 export async function openUnder(secret, sealed) {
   sealed = bytes(sealed);
   const key = await aes(await hkdf(secret, "one/sealed-under"), "decrypt");
@@ -167,14 +160,12 @@ export async function signingKey(key) {
   return crypto.subtle.importKey("jwk", { kty: "OKP", crv: "Ed25519", d: b64u.encode(seed), x: b64u.encode(pub) }, { name: "Ed25519" }, false, ["sign"]);
 }
 
-/// The public half of an Ed25519 seed.
 export async function ed25519Public(seed) {
   const pkcs8 = concat(new Uint8Array([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20]), bytes(seed));
   const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, true, ["sign"]);
   return b64u.decode((await crypto.subtle.exportKey("jwk", key)).x);
 }
 
-/// The public half of an X25519 secret (a passkey's seal key, say).
 export async function x25519Public(secret) {
   const pkcs8 = concat(new Uint8Array([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20]), bytes(secret));
   const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "X25519" }, true, ["deriveBits"]);
@@ -237,14 +228,12 @@ export async function signedRequest(key, by, domain, fields, at = nextAt()) {
   return { ...out, sig: b64u.encode(await sign(key, domain, out)) };
 }
 
-/// Checks a signed request at `now`: → `{ by, fields }`, or throws.
 export async function checkRequest(domain, request, now = Date.now()) {
   const checked = await checkSigned(domain, request);
   if (Math.abs(checked.fields.at - now) > FRESH) throw new Error("it was signed too long ago, or the clock that signed it is wrong");
   return checked;
 }
 
-/// A signed request's signature, whenever it was signed: → `{ by, fields }`, or throws.
 async function checkSigned(domain, request) {
   if (!request || typeof request !== "object") throw new Error("not a request");
   const { sig, ...fields } = request;
@@ -306,14 +295,12 @@ export async function seal(epoch, key, name, plain) {
   return concat(head, nonce, new Uint8Array(sealed));
 }
 
-/// The epoch a sealed object names.
 export function epochOf(sealed) {
   sealed = bytes(sealed);
   if (sealed.length < 32) throw new Error("too short to be sealed");
   return new DataView(sealed.buffer, sealed.byteOffset).getUint32(0);
 }
 
-/// Opens what `seal` sealed, with its epoch's key.
 export async function open(key, name, sealed) {
   sealed = bytes(sealed);
   epochOf(sealed);
@@ -329,7 +316,6 @@ export async function sealHandoff(to, handoff) {
   return b64u.encode(await sealTo(to, JSON.stringify(handoff)));
 }
 
-/// Opens a handoff sealed to the key pair `{ secret, public }`.
 export async function openHandoff(pair, sealed) {
   return JSON.parse(new TextDecoder().decode(await openSealed(pair, b64u.decode(sealed))));
 }
@@ -368,8 +354,6 @@ export function joinChallenge(root, key, seal, at) {
 export async function passkeyKeys(prf) {
   return { sign: await hkdf(prf, "one/passkey-device/sign"), seal: await hkdf(prf, "one/passkey-device/seal") };
 }
-
-// MARK: What a node is handed
 
 /// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
 /// or its screens (`/v1/screens/<app>`). Null for any other. (src/keys.rs `app_of`.)

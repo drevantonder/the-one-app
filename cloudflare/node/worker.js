@@ -65,11 +65,8 @@ const screenPage = (request, html) => tagged(request, html, "text/html; charset=
 
 const kindOf = (scope) => (scope === "global" ? "global" : scope.startsWith("group:") ? "group" : "user");
 
-/// What a person reads when something needs a device and none is on.
 const OFF = "none of your devices is on right now";
 
-/// The most a request's body may carry, and how many of each thing a person's object keeps at once: devices asking, and
-/// the databases each handed keys of.
 const BODY_MOST = 4 << 20;
 const SIGN_INS_MOST = 64;
 const DATABASES_MOST = 512;
@@ -82,10 +79,8 @@ const USER = "x-one-user";
 /// How long the keys a request hands are kept, at most: they come again with the next.
 const HANDED_FOR = 3_600_000;
 
-/// A person's object.
 const personOf = (env, user) => env.NODE.get(env.NODE.idFromName(`user:${user}`), near(env));
 
-/// A request's body, as JSON, read only up to `BODY_MOST`.
 async function bodyOf(request) {
   if (Number(request.headers.get("content-length") || 0) > BODY_MOST) refuse(413, "that's more than a request may carry");
   if (!request.body) return {};
@@ -111,9 +106,6 @@ async function bodyOf(request) {
   }
 }
 
-// The bucket, through the URL signer's presigned URLs, and what this node read of it, sealed.
-
-/// The names of the `n` steps after `name`, if it's a database's step.
 const following = (name, n) => JSON.parse(after(name, n));
 
 const newestOf = (scope, app, database) => `${prefix(scope, app, database)}/newest`;
@@ -202,7 +194,6 @@ class Bucket {
     return out;
   }
 
-  /// A URL to read `name`: those wanted in one turn are signed in one request.
   readUrl(name) {
     const kept = this.urls.get(name);
     if (kept && kept.until > Date.now() + 60_000) return kept.url;
@@ -210,7 +201,6 @@ class Bucket {
       const wanted = (this.wanted = new Map());
       queueMicrotask(() => {
         this.wanted = null;
-        // At most as many as the URL signer signs at once.
         const all = [...wanted.keys()];
         for (let at = 0; at < all.length; at += MOST_URLS) {
           const names = all.slice(at, at + MOST_URLS);
@@ -245,7 +235,6 @@ class Bucket {
     return got;
   }
 
-  /// Starts fetching `names`, for a read soon.
   prefetch(names) {
     for (const n of names) if (!this.fetched.has(n)) this.fetched.set(n, this.fetchObject(n).catch(() => null));
   }
@@ -329,10 +318,7 @@ function serially(db, f) {
   return run;
 }
 
-/// Databases a person's object keeps open, the `OPEN_MOST` used last.
 const OPEN_MOST = 4;
-
-// A person's object: everything a request of theirs reads, opens and runs.
 
 class Person {
   constructor(object) {
@@ -374,8 +360,6 @@ class Person {
     return who;
   }
 
-  /// Keeps the keys a device handed with its requests (`opened`), no longer than its word lasts, and starts fetching
-  /// what they open.
   take(who, opened) {
     const now = Date.now();
     if (!this.handed.has(who.hash) && this.handed.size >= SIGN_INS_MOST) {
@@ -412,7 +396,6 @@ class Person {
     return keys;
   }
 
-  /// Each of `scopes`' current epoch, as the network's signed entries say: `{ <scope>: n }`.
   epochs(scopes) {
     return JSON.parse(epochsOf(this.owner, JSON.stringify(scopes)));
   }
@@ -453,8 +436,6 @@ class Person {
       return this.needs([{ scope, app, database, have: Object.keys(handed).map(Number), missing: err.missing }], who);
     }
   }
-
-  // Who can do what.
 
   /// Reads `scopes`' steps for a request, each with the keys its person handed: a scope whose they didn't hand is
   /// asked for with 428, so its steps are never shown to someone who can't open them.
@@ -503,8 +484,6 @@ class Person {
     view.epochs = this.epochs(read);
     return view;
   }
-
-  // Apps.
 
   moduleOf(who, hash) {
     if (!this.modules.has(hash)) {
@@ -736,7 +715,6 @@ class Run {
     try {
       const body = { ...fields, me: this.view.me, now: Date.now(), scopes, read_only: !writes, token: crypto.randomUUID(), from, address: this.env.ADDRESS?.replace(/\/$/, "") ?? null, handles: this.view.handles };
       const reply = await p.appWorker(this.who, app).getEntrypoint("Call").run(what, null, body, new ForCall(this, app, call, finished, depth));
-      // Keys it found it needs while it ran are asked for as they are.
       if (call.need) throw call.need;
       if (reply.error !== undefined) refuse(400, reply.error);
       if (writes) {
@@ -752,7 +730,6 @@ class Run {
     }
   }
 
-  /// A call of `req.app`'s tool `req.op`, here: → `{ ok }`.
   async call(req, from = null, depth = 0) {
     const p = this.person;
     const app = deployed(this.view, req.app) || refuse(404, `no app named ${req.app}`);
@@ -835,7 +812,6 @@ class Run {
   }
 }
 
-/// An app in the network with a deploy, as `view` has it; or null.
 const deployed = (view, name) => view.apps.find((a) => a.name === name && a.bundle && !a.deleted) || null;
 
 /// A describe that failed: for keys the device didn't hand, said (428), so it hands them with the next; else none.
@@ -851,7 +827,6 @@ const plain = (d, view) => !d.uses?.apps?.length && servedHere(view, d) && !d.va
 /// `cloudflare_node.parts`), and this node carries its build.
 const onHere = (view, name) => Object.hasOwn(services, name) && (view.state.network.cloudflare_node?.parts || []).some((p) => p.name === name && p.on);
 
-/// Whether every service an app uses runs here.
 const servedHere = (view, d) => (d?.uses?.services || []).every((s) => onHere(view, s));
 
 /// A function of a service built for Cloudflare, run here: → `{ ok }`, or null when it can't answer here (it gave
@@ -878,7 +853,6 @@ async function ownService(run, q, d) {
   return machineCall(run, q, d);
 }
 
-/// What a person reads when an app needs a service on a device and none is on.
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
 
 /// What the node does for an app while it runs, as it asks (src/node.rs: `internal`): its databases, other apps'
@@ -961,7 +935,6 @@ async function machineCall(run, q, d) {
   return answered(out, q.app);
 }
 
-/// What a node on a machine answered, as an app's call here takes it.
 function answered(out, app) {
   if (out.ok !== undefined) return out;
   refuse(400, out.error || out.elsewhere || `${app} failed`);
@@ -975,9 +948,6 @@ async function screenOf(request, person, who, view, app, name, params, scope) {
   return screenPage(request, screen(JSON.stringify(context), body, new URL(request.url).searchParams.get("linked") === "true"));
 }
 
-// Its endpoint, which reaches devices over iroh.
-
-/// How long reaching a device may take, and how long this node stays awake once nobody asks it anything.
 const CONNECT = 2_000;
 const IDLE = 30_000;
 
@@ -985,9 +955,6 @@ const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padS
 const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (h) => parseInt(h, 16));
 const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 
-// Requests.
-
-/// Answers a request in its person's object.
 async function route(p, request) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -1074,7 +1041,6 @@ const b64u = (bytes) => {
   return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 };
 
-/// A failure, as the API says it.
 function failure(err) {
   if (err instanceof Refused) return json({ error: err.message, ...err.said }, err.status);
   console.error(err.stack || err);
@@ -1114,7 +1080,6 @@ export class Node extends DurableObject {
     this.last = Date.now();
   }
 
-  /// A request of its person's, from the endpoint object, which proved who asked.
   async fetch(request) {
     if (this.isEndpoint) return json({ error: "the Cloudflare node's endpoint answers only asks over iroh" }, 400);
     this.person ||= new Person(this);
@@ -1125,7 +1090,6 @@ export class Node extends DurableObject {
     }
   }
 
-  /// The node's endpoint object, which a person's object asks devices through.
   endpoint() {
     return this.env.NODE.get(this.env.NODE.idFromName("node"), near(this.env));
   }
@@ -1134,7 +1098,6 @@ export class Node extends DurableObject {
     if (!this.isEndpoint) throw new Error("only the Cloudflare node's endpoint does that");
   }
 
-  /// The relay, by its `CloudflareNode` entrypoint: sending as this node, and who's here.
   relay() {
     return this.env.RELAY;
   }

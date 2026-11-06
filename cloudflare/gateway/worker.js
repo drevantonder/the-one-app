@@ -1,14 +1,12 @@
 // The gateway: the network's address, the one people use. It holds no keys and runs no app code; it only sends each
-// request where its path says: signing in to sign-in (with the gateway's host kept, since passkeys belong to
-// it), `/urls` to the URL signer, `/push/…` to the push Worker, `/mcp` and what MCP clients read to sign in to the remote MCP server, `/relay` (and iroh's
-// `/ping` and `/generate_204`) to the relay, and everything else to the web client's files. Devices reach the
-// network's nodes over iroh, never through here, and so does git: `/repos/…` here is git on a computer without the CLI,
-// told how to get it.
+// request where its path says: signing in to sign-in (with the gateway's host kept, since passkeys belong to it),
+// `/urls` to the URL signer, `/push/…` to the push Worker, `/mcp` and what MCP clients read to sign in to it to the
+// remote MCP server, `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything else to the web
+// client's files. Devices reach the network's nodes over iroh, never through here, and so does git: `/repos/…` here is
+// git on a computer without the CLI, told how to get it.
 
-/// Paths the sign-in answers: exactly these, or under the ones ending in `/`.
 const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
-/// The remote MCP server's: MCP, its token endpoint, the resource's metadata, and the authorization server's as MCP clients
-/// find it (RFC 8414's path for the issuer `<address>/api/auth`), which names its token endpoint.
+// The authorization server's metadata is where MCP clients look for it: RFC 8414's path for the issuer `<address>/api/auth`.
 const MCP = ["/mcp", "/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server/api/auth", "/.well-known/openid-configuration/api/auth"];
 
 const TYPES = {
@@ -19,7 +17,6 @@ const TYPES = {
 
 const under = (path, prefixes) => prefixes.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p || path.startsWith(`${p}/`)));
 
-/// Where a path goes: `mcp`, `auth` or `web`.
 function where(path) {
   if (under(path, MCP)) return "mcp";
   if (under(path, AUTH)) return "auth";
@@ -31,10 +28,8 @@ const refuse = (status, error) => Response.json({ error }, { status, headers: { 
 const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 const sha256 = async (data) => hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? new TextEncoder().encode(data) : data));
 
-/// Phosphor's icons (`icons.json`), read once per isolate, with the start of its SHA-256 that names it.
 let icons = null;
 
-/// `/icons?names=a,b&v=…`: only the icons named, of the set `v` names, so a screen's few don't cost the whole set.
 async function someIcons(env, url) {
   icons ||= env.ASSETS.fetch(new Request(new URL("/icons.json", url.origin))).then(async (r) => {
     const body = await r.arrayBuffer();
@@ -49,7 +44,6 @@ async function someIcons(env, url) {
   });
 }
 
-/// The web client's files: `/` and any path that isn't a file are its page, which routes itself.
 async function toWeb(request, env, url) {
   if (!["GET", "HEAD"].includes(request.method)) return refuse(405, "only GET and HEAD here");
   if (url.pathname === "/icons") return someIcons(env, url);
@@ -64,8 +58,7 @@ async function toWeb(request, env, url) {
   headers.set("x-frame-options", "SAMEORIGIN");
   const type = TYPES[path.split(".").pop().toLowerCase()];
   if (resp.ok && type) headers.set("content-type", type);
-  // The large files are also kept brotli-compressed at its best (`<file>.br`, made when the Workers' files are), a
-  // fifth smaller than the edge's own compression: sent as they are to a browser that takes brotli, as the file itself.
+  // `<file>.br`, made with the Workers' files, is a fifth smaller than the edge's own compression.
   const packed = resp.ok && request.method === "GET" && /\bbr\b/.test(request.headers.get("accept-encoding") || "") && !path.endsWith(".br") ? await ask(`${path}.br`) : null;
   const send = (body) => {
     if (!packed?.ok) return new Response(body, { status: resp.status, headers });
@@ -76,13 +69,10 @@ async function toWeb(request, env, url) {
     headers.delete("etag");
     return new Response(packed.body, { status: resp.status, headers, encodeBody: "manual" });
   };
-  // The client's WebAssembly is at a path named by what it is, so it's never fetched twice.
   if (resp.ok && path.startsWith("/client/")) {
     headers.set("cache-control", "public, max-age=31536000, immutable");
     return send(resp.body);
   }
-  // A file named by its content (`?v=`, the start of its SHA-256, as index.html names it) is kept for good, by the
-  // browser and Cloudflare's edge, once it's checked to be that content; anything else is asked about each time.
   const v = url.searchParams.get("v");
   if (v && resp.ok && request.method === "GET") {
     const body = await resp.arrayBuffer();
@@ -94,8 +84,7 @@ async function toWeb(request, env, url) {
   return send(resp.body);
 }
 
-/// Git at a repo's address, `/repos/<owner>/<repo>.git`, from a computer whose git doesn't go through the CLI (which reaches the
-/// repo over iroh): what to do, which git shows as the remote's.
+// Git shows this body as the remote's error.
 function gitWithoutCli(env, url) {
   const name = env.NAME || "The One App", cli = env.CLI || "one";
   const said = [
@@ -110,7 +99,6 @@ function gitWithoutCli(env, url) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // The relay, iroh's: its WebSockets, its probes, and what devices tell it go to its own Worker (cloudflare/relay/).
     if (["/relay", "/relay/tell", "/relay/computes", "/relay/seen", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
     if (url.pathname === "/urls") return env.SIGNER.fetch(request);
     if (url.pathname.startsWith("/push/")) return env.PUSH.fetch(request);

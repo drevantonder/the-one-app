@@ -1,14 +1,13 @@
-// This browser as a device of its person (ARCHITECTURE.md): its own Ed25519 key, which signs, and
-// X25519 key, which what's sealed to it is sealed to, both made here, not extractable, kept in IndexedDB by person. It
-// gets in when one of their devices approves it; then it opens its scopes' epochs, sealed to it, and from them the keys
-// a call needs, which it hands the node with the call (`x-one-keys`). What it opens stays in this page's memory, as keys
-// that can't be read back, and goes with it. What changes who can do what it signs itself (members.js).
+// This browser as a device of its person (ARCHITECTURE.md): its own Ed25519 key, which signs, and X25519 key, which
+// what's sealed to it is sealed to, both made here, not extractable, kept in IndexedDB by person. Once one of their
+// devices approves it, it opens its scopes' epochs and from them the keys a call needs, which it hands the node with the
+// call (`x-one-keys`). What it opens stays in this page's memory, as keys that can't be read back. What changes who can
+// do what it signs itself (members.js).
 //
 // Who's who it takes only from the network's own signed entries, checked by its client's WebAssembly (`checked`), never
 // from what a node says (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must
-// have, which nodes may be handed a scope's keys, and who may approve or remove what. Each is answered there, from the
-// scope database and its permissions (client/src/members.rs, `Who`), and only looked up here. A hacked node holds no
-// keys, and gets none this way.
+// have, which nodes may be handed a scope's keys, and who may approve or remove what. Each is answered there
+// (client/src/members.rs, `Who`) and only looked up here, so a hacked node gets no keys.
 
 import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signStep, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
 import { PUSH, READS, RELAY, SIGN_IN_DOMAIN, URLS, databasePrefix } from "../shared/protocol.js";
@@ -20,8 +19,6 @@ const text = new TextEncoder();
 /// How long app schedules last (src/node/app_schedules.rs), unless their person renews them as they use the app.
 const APP_SCHEDULES_DAYS = 30, DAY = 86_400_000, HOUR = 3_600_000;
 
-// MARK: Kept in this browser
-
 const raw = async (key) => new Uint8Array(await crypto.subtle.exportKey("raw", key));
 
 /// This browser's keys for `user`, made the first time: `{ key, seal }` (hex) to list it by, and the private halves,
@@ -29,7 +26,6 @@ const raw = async (key) => new Uint8Array(await crypto.subtle.exportKey("raw", k
 export async function browserKeys(user) {
   let d = await get(`device:${user}`);
   if (!d) {
-    // The keys its sign-in was for, made before it knew whose.
     d = (await get("device:")) || (await newKeys());
     await put(`device:${user}`, d);
     await del("device:");
@@ -58,7 +54,6 @@ export async function passkeyKeysOf(prf) {
   return { key: hex.encode(await ed25519Public(pk.sign)), seal: hex.encode(seal), sign: pk.sign, opens: { secret: pk.seal, public: seal } };
 }
 
-/// What this browser asks sign-in to let it in with: its keys and name, and for someone new, proof of their invite.
 export async function joinAsk(keys, name, invite) {
   return { key: keys.key, seal: keys.seal, name, reads: READS, ...(invite ? { proof: await inviteProof(text.encode(invite), hex.decode(keys.key), hex.decode(keys.seal)) } : {}) };
 }
@@ -66,7 +61,7 @@ export async function joinAsk(keys, name, invite) {
 /// The code this browser shows to be approved: its key's, as 4 and 4.
 export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
 
-// MARK: Who opens what, as the network's signed entries say (`k`, one-client's `members::view`)
+// Who opens what, as the network's signed entries say (`k`, one-client's `members::view`)
 
 /// What a scope's epochs are sealed to: the client devices of the people who may use it, and nothing that only runs
 /// calls.
@@ -80,8 +75,6 @@ const starts = (k, scope, user) => !!k.people[user]?.starts.includes(scope);
 
 /// Whether a node runs each of `scopes`' calls, so it may be handed their keys.
 const runsAll = (k, node, scopes) => !!k?.runs_for[node] && scopes.every((s) => k.runs_for[node].includes(s));
-
-// MARK: The device
 
 export class Device {
   /// `me`: this browser's keys; `user`: its person; `state()`: the node's /v1/state as last read, for what it shows;
@@ -99,9 +92,7 @@ export class Device {
     this.dbKeys = new Map();
     /// What each kind of request needed the last time (`one.needs`, which names no key).
     this.needs = JSON.parse(localStorage.getItem("one.needs") || "{}");
-    /// The app schedules this browser is renewing now.
     this.renewing = new Set();
-    /// When `renewAppSchedules` last checked the entries again.
     this.renewChecked = 0;
     /// What's being fetched now, by what it is, for everything that wants it at once to wait on the one fetch.
     this.fetching = new Map();
@@ -147,8 +138,6 @@ export class Device {
     this.known ||= kept?.people?.[this.user]?.app_schedules ? kept : null;
   }
 
-  // Epochs and keys.
-
   /// `global`'s epochs sealed to this browser, opened (hex, by number), and the node's key in each, sealed under it
   /// (base64url, by number): what it opens `global`'s scope database's steps with. Unchecked here: who's who checks
   /// each epoch against the steps before it, before it's used (src/database/steps.rs `Reader::add`).
@@ -188,7 +177,6 @@ export class Device {
       this.epochs.set(scope, all);
       return newest;
     });
-    // Its first made once, however many ask for it at once.
     const made = () => this.epochs.get(scope)?.has(n);
     if (!made() && n === 1 && newest === 0) await this.once(`first ${scope}`, async () => made() || (starts(await this.checked(true), scope, this.user) && (await this.newEpoch(scope, 1))));
     if (!made()) throw new Error("This device can't open that yet.");
@@ -196,8 +184,8 @@ export class Device {
   }
 
   /// Starts a scope's epoch `n`: a random key, written first as an `epoch` entry naming its hash (which, first in
-  /// causal order, makes it), then sealed to the recovery key, if there is one, and each client device of the people who may open it but
-  /// those in `except` (keys being taken out), before it's used.
+  /// causal order, makes it), then sealed to the recovery key, if there is one, and each client device of the people who
+  /// may open it but those in `except` (keys being taken out), before it's used.
   async newEpoch(scope, n, { except = [] } = {}) {
     const k = await this.checked(true);
     const key = random(32);
@@ -237,8 +225,7 @@ export class Device {
   }
 
   /// An app's key in epoch `n` of a scope as its bytes, opened now (for sealing it to a device that runs the app's
-  /// schedules): the one sealed under the epoch, or a new one if it has none yet. Its epochs' are asked for once, however
-  /// many ask at once.
+  /// schedules): the one sealed under the epoch, or a new one if it has none yet.
   async appKeyBytes(scope, app, n, note = noting) {
     const [epoch, all] = await Promise.all([
       this.epoch(scope, n, note),
@@ -252,8 +239,6 @@ export class Device {
     }
     return openAppKey(epoch, app, b64u.decode(sealed));
   }
-
-  // App schedules.
 
   /// Runs `app`'s schedules in `scope` on one of the network's devices (`endpoint`) for `days`, 30 at most (0 stops
   /// them): the app's key in each epoch of the scope, sealed to it first, then the app schedules naming each one's
@@ -275,7 +260,6 @@ export class Device {
       }
     }
     await this.write("global", members.appSchedules({ endpoint, scope, app, until, keys }));
-    // Checked again, so what it renews next goes by this.
     await this.checked(true);
     if (!until) await this.renew([scope], []);
   }
@@ -341,8 +325,6 @@ export class Device {
     return this.dbKeys.get(id);
   }
 
-  // Handing a call its keys.
-
   /// What a request is, to remember what it needed: an app's call by its app, anything else by its path.
   static route(path, body) {
     const at = new URL(path, location.origin).pathname;
@@ -364,13 +346,13 @@ export class Device {
   }
 
   /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must ask only what
-  /// `askedFor` lets it, be listed by the network's entries, and run every scope it needs keys of, as they say. Of each, only epochs from the one its newest copy is under are
-  /// handed (`oldestNeeded`): older ones open only its history. What it needed is all this kind of request hands next
-  /// time, to whichever node it's sent to, of the scopes that one runs. Throws if it asks for more, or this browser can't
-  /// open it. Requests of a kind that get the
-  /// same 428 at once learn from it once, and one sent before another learned goes again with what that learned. `note(step, fetch)` times each thing it asks for (developer mode's traces).
+  /// `askedFor` lets it, be listed by the network's entries, and run every scope it needs keys of, as they say. Of each,
+  /// only epochs from the one its newest copy is under are handed (`oldestNeeded`): older ones open only its history.
+  /// What it needed is all this kind of request hands next time, to whichever node it's sent to, of the scopes that one
+  /// runs. Throws if it asks for more, or this browser can't open it. Requests of a kind that get the same 428 at once
+  /// learn from it once, and one sent before another learned goes again with what that learned. `note(step, fetch)`
+  /// times each thing it asks for (developer mode's traces).
   learn(route, answer, node, note = noting, sentWith = this.needs[route]) {
-    // Another of its kind learned since this one was sent (`sentWith`, what it went with): it goes again with that.
     if (this.needs[route] !== sentWith) return Promise.resolve();
     const asked = JSON.stringify([node, answer]);
     const now = this.learning.get(route);
@@ -430,8 +412,6 @@ export class Device {
     return out.newest || {};
   }
 
-  // Signing.
-
   /// Writes `content` to `log`'s database as `as` (this browser, or a passkey): `global`'s only, as a step (`step`).
   async write(log, content, as = this.me) {
     if (log !== "global") throw new Error(`a browser writes only Everyone's who's who, not ${log}`);
@@ -453,7 +433,6 @@ export class Device {
     }
   }
 
-  /// A request to `path` signed for `domain` by `as`, with `fields`.
   signed(domain, fields, as = this.me) {
     return signedRequest(as.sign, hex.decode(as.key), domain, fields);
   }
@@ -489,8 +468,6 @@ export class Device {
     const init = method === "POST" ? { method, headers: { "content-type": "application/json" }, body: JSON.stringify(request) } : { method, headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(request))) } };
     return answer(await fetch(path + query, init));
   }
-
-  // Devices joining.
 
   /// Devices waiting to be let in that this browser may approve: its person's own, and for an admin, those of people
   /// they invited from this browser, whose proof is right. Each with its code.
@@ -596,8 +573,8 @@ export class Device {
   /// Takes this browser out of its person's devices, as it signs out, so signing in again makes a new one that
   /// replaces it, never a second. Itself it may (the network lets a device take out its person's, itself among them),
   /// but nothing it writes after counts, so it goes in this order: its removal, then off the network, which ends its
-  /// connection, so nothing is asked after. Its scopes keep
-  /// their keys, as it forgets its own (ARCHITECTURE.md): a device in doubt is removed from another, which makes new ones.
+  /// connection, so nothing is asked after. Its scopes keep their keys, as it forgets its own (ARCHITECTURE.md): a
+  /// device in doubt is removed from another, which makes new ones.
   async leave() {
     const k = await this.checked(true);
     if (!k.devices.some((d) => d.key === this.me.key)) return;
@@ -605,8 +582,8 @@ export class Device {
     await this.tell({ remove: this.me.key });
   }
 
-  /// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they could open but their own (everyone's and their groups')
-  /// gets a new epoch they don't have. Their own stays as it is.
+  /// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they
+  /// could open but their own (everyone's and their groups') gets a new epoch they don't have. Their own stays as it is.
   async removePerson(user) {
     const k = await this.checked(true);
     if (user === this.user) throw new Error("You can’t remove yourself. Another admin can.");
@@ -630,8 +607,6 @@ export class Device {
     }
   }
 
-  // Invites.
-
   /// An invite link for someone new called `name`, made by this admin's browser: its secret stays here, to check the
   /// newcomer's device by when it asks to be let in. → `{ link, until }`.
   async invite(name) {
@@ -642,8 +617,6 @@ export class Device {
     await put(`invite:${user}`, { secret, name: name.trim(), user, until });
     return { link: `${location.origin}/invite#${secret}`, until };
   }
-
-  // Passkeys.
 
   /// Lists a passkey (from its PRF output in this tab) as a way back in: it's sealed what this browser opens.
   async listPasskey(prf, credential) {
@@ -671,7 +644,6 @@ const kindOf = (scope) => (scope === "global" ? "everyone" : scope.startsWith("g
 /// Where a database of `need`'s is in the bucket (src/bucket.rs `folder`).
 const prefixOf = (n) => databasePrefix(n.scope, n.app, n.database);
 
-/// A response's JSON, or its error, thrown.
 async function answer(r) {
   const out = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(out.error || out.message || "That didn’t work. Try again."), { status: r.status });

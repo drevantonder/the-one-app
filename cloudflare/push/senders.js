@@ -21,21 +21,18 @@ import { NOTE_FALLBACK } from "../shared/protocol.js";
 const text = new TextEncoder();
 const json64 = (v) => b64u.encode(text.encode(JSON.stringify(v)));
 
-/// The bytes of a PEM block, however its lines were broken when it was pasted.
 export function pem(textOf) {
   const m = /-----BEGIN [^-]+-----([\s\S]*?)-----END /.exec(String(textOf || ""));
   if (!m) throw new Error("not a PEM key");
   return Uint8Array.from(atob(m[1].replace(/\s+/g, "")), (c) => c.charCodeAt(0));
 }
 
-/// A JWT signed with `key` (a CryptoKey: ECDSA P-256 for ES256, RSASSA-PKCS1-v1_5 for RS256).
 export async function jwt(header, claims, key) {
   const signing = `${json64(header)}.${json64(claims)}`;
   const algorithm = header.alg === "ES256" ? { name: "ECDSA", hash: "SHA-256" } : { name: "RSASSA-PKCS1-v1_5" };
   return `${signing}.${b64u.encode(await crypto.subtle.sign(algorithm, key, text.encode(signing)))}`;
 }
 
-/// What each made token is kept as, by whose it is, until it's due again.
 const tokens = new Map();
 async function kept(whose, ttl, make) {
   const now = Date.now();
@@ -46,10 +43,7 @@ async function kept(whose, ttl, make) {
   tokens.set(whose, { token, until: now + (typeof made === "string" ? ttl : Math.min(ttl, made.ttl)) });
   return token;
 }
-/// Forgets a token a service refused, so the next send makes another.
 const forget = (whose) => tokens.delete(whose);
-
-// MARK: APNs
 
 /// `config`: `{ team, key_id, key }` (the .p8's text). `device`: `{ address, env, topic }`. `note`: the sealed bytes.
 export async function apns(fetch, config, device, { note, quiet, name }) {
@@ -82,8 +76,6 @@ export async function apns(fetch, config, device, { note, quiet, name }) {
   return { failed: `APNs said ${resp.status} ${reason}`.trim() };
 }
 
-// MARK: FCM
-
 /// `account`: the Firebase service account's JSON key (`{ project_id, client_email, private_key, token_uri }`).
 export async function fcm(fetch, account, device, { note, quiet }) {
   if (!account?.private_key) return { failed: "FCM isn't set up for this network" };
@@ -112,8 +104,6 @@ export async function fcm(fetch, account, device, { note, quiet }) {
   return { failed: `FCM said ${resp.status} ${code}`.trim() };
 }
 
-// MARK: WNS
-
 /// `app`: `{ tenant, client_id, client_secret }`, the Windows app's Entra registration. `device.address`: its channel URI.
 export async function wns(fetch, app, device, { note }) {
   if (!app?.client_secret) return { failed: "WNS isn't set up for this network" };
@@ -140,7 +130,6 @@ export async function wns(fetch, app, device, { note }) {
   return { failed: `WNS said ${resp.status} ${resp.headers.get("x-wns-error-description") || ""}`.trim() };
 }
 
-/// A WNS channel: https, at notify.windows.com.
 export const isWnsChannel = (address) => {
   try {
     const url = new URL(address);
@@ -149,8 +138,6 @@ export const isWnsChannel = (address) => {
     return false;
   }
 };
-
-// MARK: Web Push
 
 /// The push services browsers subscribe with, by host: Chrome's and Edge's, Firefox's and Safari's. A browser's
 /// endpoint is anywhere else only if it isn't a browser.

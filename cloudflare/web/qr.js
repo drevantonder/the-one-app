@@ -9,7 +9,6 @@ for (let i = 0, x = 1; i < 255; i++, x = x & 0x80 ? (x << 1) ^ 0x11d : x << 1) (
 for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
 const mul = (a, b) => (a && b ? EXP[LOG[a] + LOG[b]] : 0);
 
-/// Reed-Solomon's error correction codewords of `data`, `n` of them.
 function correction(data, n) {
   let g = [1];
   for (let i = 0; i < n; i++) {
@@ -22,7 +21,6 @@ function correction(data, n) {
   return r.slice(data.length);
 }
 
-/// The codewords of `bytes` in version `v`, blocks interleaved.
 function codewords(bytes, v) {
   const [total, ec, blocks] = VERSIONS[v];
   const capacity = total - ec * blocks;
@@ -51,7 +49,6 @@ const MASKS = [
   (x, y) => (((x * y) % 2) + ((x * y) % 3)) % 2 === 0, (x, y) => (((x + y) % 2) + ((x * y) % 3)) % 2 === 0,
 ];
 
-/// The modules of a QR code of `text`: rows of booleans, dark true.
 export function qr(text) {
   const bytes = [...new TextEncoder().encode(text)];
   const v = VERSIONS.findIndex((t) => t && t[0] - t[1] * t[2] - 2 >= bytes.length);
@@ -91,7 +88,6 @@ export function qr(text) {
       if (!fixed[y][x] && i < words.length * 8) (dark[y][x] = ((words[i >>> 3] >>> (7 - (i & 7))) & 1) === 1), i++;
     }
   }
-  // The mask that scans best: least penalty, as the standard counts it.
   const masked = (m) => dark.map((row, y) => row.map((on, x) => (fixed[y][x] ? on : on !== MASKS[m](x, y))));
   let best = null;
   for (let m = 0; m < 8; m++) {
@@ -126,7 +122,6 @@ function penalty(grid) {
   return score + Math.floor(Math.abs(darkCount * 20 - n * n * 10) / (n * n)) * 10;
 }
 
-/// A QR code of `text` as an SVG, with its quiet zone, drawn in the current text colour on the background.
 export function qrSvg(text) {
   const grid = qr(text);
   const n = grid.length + 8;

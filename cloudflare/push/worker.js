@@ -68,7 +68,6 @@ export default class extends WorkerEntrypoint {
   }
 }
 
-/// What the network's own Workers send by, by binding.
 export class Sender extends WorkerEntrypoint {
   /// `notes`: `[{ to, note }]` sealed already, or `[{ to, plain }]`, sealed here to the seal key `to` registered; each
   /// may be `quiet`. → what happened to each, by key.
@@ -76,13 +75,11 @@ export class Sender extends WorkerEntrypoint {
     return push(this.env).send("workers", notes, null);
   }
 
-  /// The keys of the devices that registered as `user`'s, the newest first, at most `most`.
   theirs(user, most = 20) {
     return push(this.env).theirs(user, most);
   }
 }
 
-/// Which push services this network has what it needs for.
 function senders(env) {
   return VIAS.filter((via) => ({ apns: env.APNS_KEY, fcm: env.FCM_ACCOUNT, wns: env.WNS_CLIENT_SECRET, webpush: env.VAPID_KEY })[via]);
 }
@@ -93,11 +90,9 @@ export class Push extends DurableObject {
     const sql = ctx.storage.sql;
     sql.exec("create table if not exists devices (key text primary key, via text not null, address text not null, env text not null default '', topic text not null default '', keys text, seal text not null, at integer not null, user text)");
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
-    /// Sends and notes counted this minute, by sender and by device.
     this.counted = new Map();
   }
 
-  /// A signed request to `route`: checked fresh, taken once, from one of the network's endpoints. → `{ status, said }`.
   async asked(what, route, body) {
     try {
       return { status: 200, said: await this.answer(what, route, body) };
@@ -161,7 +156,6 @@ export class Push extends DurableObject {
     return { unregistered: true };
   }
 
-  /// A node asks which of a person's devices (`keys`) registered.
   devices(node, { user, keys = [] }) {
     if (!node) fail(403, "Only a node asks which devices registered.");
     const sql = this.ctx.storage.sql;
@@ -169,7 +163,6 @@ export class Push extends DurableObject {
     return { registered };
   }
 
-  /// Counts one more against `who` this minute: whether it's within `most`.
   count(who, most) {
     const now = Date.now();
     const c = this.counted.get(who);

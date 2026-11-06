@@ -29,7 +29,7 @@ let about = null;
 const panel = !!native && new URLSearchParams(location.search).has("panel");
 /// On a Mac, a widget's own menu bar item opens the panel showing only that widget (`<app>.<widget>`), with no rows.
 const panelWidget = panel ? new URLSearchParams(location.search).get("widget") : null;
-/// The app on a phone: its home is the pages side by side, with no sidebar (`Shell`'s `phone`), as Andre decided.
+/// The app on a phone: its home is the pages side by side, with no sidebar (`Shell`'s `phone`).
 const phone = () => !!native && ["iPhone", "Android"].includes(about?.platform);
 const h = OneUI.react.createElement;
 
@@ -38,8 +38,6 @@ const h = OneUI.react.createElement;
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
   const random = (n) => b64u(crypto.getRandomValues(new Uint8Array(n)));
-
-  // MARK: Signing in
 
   const KEPT = "one.signin";
   // What the client's own screens keep between visits (one.cache), the window as it was last (LAST), the screens it
@@ -60,7 +58,6 @@ const h = OneUI.react.createElement;
     kept: () => JSON.parse(localStorage.getItem(KEPT) || "null"),
     keep: (tokens) => localStorage.setItem(KEPT, JSON.stringify(tokens)),
 
-    /// Sign-in's endpoints, as it says them.
     async meta() {
       const r = await fetch("/.well-known/oauth-authorization-server");
       if (!r.ok) throw new Error("The sign-in service isn’t answering. Try again in a moment.");
@@ -147,7 +144,6 @@ const h = OneUI.react.createElement;
       return navigator.locks ? navigator.locks.request("one.refresh", refresh) : refresh();
     },
 
-    /// Who the access token says this is (its `sub`).
     user() {
       try {
         return JSON.parse(atob(auth.kept().access.split(".")[1].replaceAll("-", "+").replaceAll("_", "/"))).sub || null;
@@ -189,8 +185,6 @@ const h = OneUI.react.createElement;
     });
   }
 
-  // MARK: The node
-
   class NodeError extends Error {}
   const UNANSWERED = "Your devices aren’t answering. Make sure one of them is on and online.";
 
@@ -231,7 +225,6 @@ const h = OneUI.react.createElement;
     const user = auth.user();
     const joining = performance.now();
     if (!user || !(native ? nativeIn : await net.start(user).catch(() => false))) throw Object.assign(new NodeError("This device hasn't been approved yet."), { status: 403 });
-    // How long it waited to join the network, if it did, and what that took.
     if (trace && performance.now() - joining >= 1) trace.network = Math.round(performance.now() - joining);
     if (trace && !native && (trace.network || trace.first)) trace.joined = await net.took();
     for (let needed = 0, misses = 0, behind = 0; ; ) {
@@ -263,7 +256,6 @@ const h = OneUI.react.createElement;
       } finally {
         watch.stop();
       }
-      // The keys it opened to hand with it, if it asked for any (after a reload, say).
       if (opened.length) trace.fetches.at(-1).handed = handedIn(opened);
       // A node that doesn't list this browser may not have read its approval yet: the relay says if it's out, else it's
       // asked again in a moment (`BEHIND`), as every client does.
@@ -279,7 +271,6 @@ const h = OneUI.react.createElement;
       if (r.status === 428 && device && needed < 3 && !keyless) {
         needed++;
         if (trace) trace.keys = needed;
-        // What this browser did before sending it again, each thing it asked for timed.
         const learning = performance.now(), steps = [];
         try {
           await device.learn(route, await r.json(), r.node, trace ? noting(learning, steps) : undefined, sentWith);
@@ -448,22 +439,16 @@ const h = OneUI.react.createElement;
     return answer;
   }
 
-  /// Runs an app's tool as this person → its result.
   async function call(app, op, input = {}) {
-    // A call that only reads, asked while the same is under way (a screen that started again as its page changed),
-    // waits for that one's answer rather than running again.
     const same = reads(app, op) ? JSON.stringify([app, op, input]) : null;
     if (same && reading.has(same)) return reading.get(same);
     const asked = api("/v1/call", { method: "POST", body: { app, op, input, client: about?.client || "web" } }).then((r) => r.ok);
     if (same) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
     const out = await asked;
-    // Using an app renews the app schedules that run it for this person.
     device?.renewAppSchedules(app);
     return out;
   }
   const reading = new Map();
-
-  // MARK: What the window shows
 
   /// The sidebar's: the node's state, its apps and their badges. What's beside it is a screen the node serves.
   const store = { state: null, apps: [], badges: {} };
@@ -580,8 +565,6 @@ const h = OneUI.react.createElement;
       } catch (err) {
         if (err.signedOut) return err.removed ? undefined : showSignedOut();
       }
-      // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting longer
-      // each miss.
       if (Date.now() - started > 10_000) misses = 0;
       if (!mine.signal.aborted) await sleep(retryWait(misses++));
     }
@@ -591,7 +574,6 @@ const h = OneUI.react.createElement;
   addEventListener("pageshow", (e) => e.persisted && auth.kept() && (refreshState().catch(() => {}), listen()));
 
   async function handle(event) {
-    // What changed is asked for again, never shared from before.
     for (const path in recent) delete recent[path];
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneEvent: event }, "*");
     if (["devices", "network"].includes(event.type)) await refreshState();
@@ -602,8 +584,6 @@ const h = OneUI.react.createElement;
       await refreshApps();
     }
   }
-
-  // MARK: Where the window is
 
   /// The URL is the place: `/` (You), `/page/<scope>`, `/accounts` (every page's), `/settings`, `/settings/<screen>?params=`
   /// (a Settings screen), `/app/<app>/<screen>?params=&scope=`; and `/vault?id=&scope=`, a request for an item, as a sheet
@@ -662,7 +642,7 @@ const h = OneUI.react.createElement;
     render();
   }
   /// Settings' text size on a phone (`about.textScale`, how many times usual): the whole window zoomed by it, its screens'
-  /// frames too, but never narrower than 320 pixels, as the old Android app's were.
+  /// frames too, but never narrower than 320 pixels.
   function zoomed() {
     const scale = about?.textScale > 0 ? about.textScale : 1;
     document.documentElement.style.zoom = scale === 1 ? "" : Math.min(scale, innerWidth / 320);
@@ -680,8 +660,6 @@ const h = OneUI.react.createElement;
   /// The sidebar row selected: where the window is, or what a pushed screen was opened from.
   const selection = () => history.state?.selection || location.pathname + location.search;
   addEventListener("popstate", () => render());
-
-  // MARK: Drawing
 
   const root = $("#root");
   /// What #root shows: the window, or what stands before it (signing in, waiting to be let in, a problem). Drawn at
@@ -715,7 +693,6 @@ const h = OneUI.react.createElement;
     const r = route(), key = JSON.stringify(r);
     // The screen where the window is, kept as it is while the rest redraws around it.
     const fresh = !(shown === key && frames.some((f) => !f.sheet && f.into.isConnected));
-    // A page shows its own large title.
     if (fresh) (shown = key), (barTitle = r.kind === "own" && r.name === "pages" ? "" : titleOf(r));
     drawWindow();
     if (fresh) screen.show(detail, r);
@@ -878,8 +855,6 @@ const h = OneUI.react.createElement;
     },
   };
 
-  // MARK: Screens
-
   /// Every screen showing: the one beside the sidebar, and the sheets over it, each an app's or the client's own, in a
   /// sandboxed frame whose bridge this page answers: an app's acting only as that app, and only the client's own as the
   /// person.
@@ -903,7 +878,6 @@ const h = OneUI.react.createElement;
       const at = { "x-kept-at": String(Date.now()) };
       window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html, { headers: at }))).catch(() => {});
     },
-    /// When it was kept (ms), if it says.
     async when(kind, key) {
       try {
         return Number((await (await caches.open(KEPT_SCREENS)).match(kept.url(kind, key)))?.headers.get("x-kept-at")) || null;
@@ -945,8 +919,7 @@ const h = OneUI.react.createElement;
 
   /// A page that links @one/ui and the bridge (`linked`, src/screen.rs: an app's as its node gives it, and the client's
   /// own), with them written in from this window's cache, where its own page has them: a sandboxed frame's cache is its
-  /// alone, so it would download them again for every screen. Each that can't be had here stays linked, alone: an older
-  /// node's page links the old kit, which the address no longer has.
+  /// alone, so it would download them again for every screen. Each that can't be had here stays linked.
   const LINKED = /<link rel="stylesheet" href="(\/screen\/[a-z/]+\.css\?v=[0-9a-f]+)">|<script( nonce="[0-9a-f]+")? src="(\/screen\/[a-z/]+\.js\?v=[0-9a-f]+)"><\/script>/g;
   const linkedFiles = {};
   const linkedFile = (url) =>
@@ -1031,7 +1004,7 @@ const h = OneUI.react.createElement;
   }
 
   /// While the person's devices don't answer, what the window shows from what it kept, as one banner across its top
-  /// (Andre): every screen showing its kept page, and the window's state, each with how it's asked again (`retry`) and
+  /// every screen showing its kept page, and the window's state, each with how it's asked again (`retry`) and
   /// when what it shows was kept. Asked again by itself, and at Try Now; the banner goes once all have answered.
   const offline = {
     waiting: new Map(),
@@ -1042,7 +1015,6 @@ const h = OneUI.react.createElement;
     add(key, retry, at) {
       if (this.waiting.has(key)) return;
       this.waiting.set(key, { retry, at: at || Date.now() });
-      // A moment's wait says nothing.
       setTimeout(() => this.waiting.size && !this.shown && ((this.shown = true), redraw()), 1500);
       if (!this.timer) this.later();
     },
@@ -1077,10 +1049,7 @@ const h = OneUI.react.createElement;
       });
     },
   };
-  /// The window drawn again, as it is, for what's over it.
   const redraw = () => windowShown && !panel && drawWindow();
-
-  // MARK: Stills
 
   /// A screen's still, in a frame of its own as sandboxed as the screen's, answering nothing but its frame's ask for it.
   function showStill(f, html) {
@@ -1168,7 +1137,6 @@ const h = OneUI.react.createElement;
   function openSheet(r) {
     return new Promise((done) => {
       let value = null;
-      // A request is answered in it, or not: Cancel, not Done.
       const sheet = ui.showSheet({ title: titleOf(r), done: r.name === "request" ? "Cancel" : "Done" });
       const f = frameFor(r, sheet.body, { sheet: { close: (v) => ((value = v ?? null), sheet.close()), title: sheet.setTitle } });
       sheet.closed.then(() => ((frames = frames.filter((x) => x !== f)), done(value)));
@@ -1185,7 +1153,7 @@ const h = OneUI.react.createElement;
     const r = f.route, mine = r.kind === "own";
     if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
     if (typeof e.data?.oneSheets === "number") return void shade(f, e.data.oneSheets > 0);
-    // The panel's window fits its screen, as the Mac app's did, up to most of the screen.
+    // The panel's window fits its screen, up to most of the screen.
     if (typeof e.data?.oneHeight === "number") {
       if (panel && !f.sheet) native.fit(Math.min(e.data.oneHeight, window.screen.availHeight - 80) + ($(".panel-head")?.offsetHeight || 0) + ($(".panel-rows")?.offsetHeight || 0) + 2);
       return;
@@ -1199,7 +1167,6 @@ const h = OneUI.react.createElement;
       const got = !mine && reads(r.app, op) ? await answers.kept(auth.user(), r.app, op, m.input ?? {}).catch(() => null) : null;
       return void f.frame.contentWindow?.postMessage({ oneReply: id, ok: got }, "*");
     }
-    // What it's waiting on: its still shows until it's been answered.
     f.busy++;
     watch(f);
     await joined;
@@ -1238,8 +1205,7 @@ const h = OneUI.react.createElement;
           return null;
         },
         title: (title, m) => {
-          // Empty while the screen shows its own large title, as the Mac app's bar is; the tab is named by what the
-          // screen says it's called.
+          // Empty while the screen shows its own large title; the tab is named by what the screen says it's called.
           // A sheet too says nothing while the screen's large title shows (`one.largeTitle`, which names it).
           if (f.sheet) f.sheet.title(title || (m.name ? "" : titleOf(r)));
           // Developer's panel has the bar of the screen it's under.
@@ -1294,8 +1260,6 @@ const h = OneUI.react.createElement;
     }
   });
 
-  // MARK: Settings
-
   /// What Settings shows this person, in order, as the node says (`settings_items`).
   const settingsItems = () => withWaiting(store.state)?.settings_items || [];
   /// Whether a url is this site's: a page the gateway serves, shown in place rather than in a new tab.
@@ -1325,7 +1289,6 @@ const h = OneUI.react.createElement;
     return api(url.pathname + url.search, { method, body });
   }
 
-  /// Signs `content` in `log` as this browser, and writes it.
   const write = (content, log = "global") => device.write(log, content);
 
   /// What Settings' screens change that this browser signs itself, as its person's device: what a node's route of the
@@ -1396,8 +1359,6 @@ const h = OneUI.react.createElement;
     },
   };
 
-  // MARK: Devices waiting to be let in
-
   /// Devices waiting that this browser may let in, as last asked: Settings › Devices has a badge for each, and the
   /// first time one is seen here, Devices opens to ask about it. Those its person said aren't theirs aren't asked again.
   let waiting = [];
@@ -1458,7 +1419,6 @@ const h = OneUI.react.createElement;
     return now;
   }
 
-  /// Every 10 seconds while the page shows.
   async function watchWaiting() {
     for (;;) {
       if (document.visibilityState === "visible") await waitingNow().catch(() => {});
@@ -1480,8 +1440,6 @@ const h = OneUI.react.createElement;
     return { prf: Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)), credential };
   }
 
-  // MARK: Appearance
-
   const LOOK = "one.appearance";
   const appearance = () => (["light", "dark"].includes(localStorage.getItem(LOOK)) ? localStorage.getItem(LOOK) : "automatic");
 
@@ -1498,8 +1456,6 @@ const h = OneUI.react.createElement;
   const shellOf = () => ({ ...(about?.scan ? { __oneCan: { scan: true } } : {}), ...(about?.lifts ? { __oneLifts: true } : {}) });
 
   const schemed = oneHost.scheme();
-
-  // MARK: Starting
 
   function showSignedOut(error, note) {
     if (panel) return drawPanel();
@@ -1521,8 +1477,7 @@ const h = OneUI.react.createElement;
       };
       const whose = about.yours.charAt(0).toUpperCase() + about.yours.slice(1);
       const field = { label: "Address", placeholder: "one.example.com", note: `${whose}’s address, or the invite link you were sent.` };
-      // An invite link opens in the browser, where its person makes their passkey, then signs in here with it.
-      // A Mac whose own node is in no network yet joins one with a pairing code, as the Mac app did.
+      // A Mac whose own node is in no network yet joins one with a pairing code.
       const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing() } : undefined;
       return void show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name, field, action: { label: "Sign In", invite: "Open Invite", run: take }, note: about.unpaired ? `This Mac isn’t part of ${about.yours} yet. Join it from another of your computers, with a pairing code.` : undefined, other, problem: error }));
     }
@@ -1644,7 +1599,7 @@ const h = OneUI.react.createElement;
     nativeIn = true;
   }
 
-  /// A link the app was opened with, there once this device is in, as the old native apps took them:
+  /// A link the app was opened with, there once this device is in:
   /// `<cli>://open?app=&screen=&params=&scope=` (an app's screen; with no app, the page `scope`), `<cli>://page?scope=`
   /// (`&folder=accounts`, its Accounts), `<cli>://settings[/<item>]`, `<cli>://vault?id=&scope=` (a request, as a sheet),
   /// `<cli>://signed-in` (the window in front, which the app does), and a link to the address's own pages.
@@ -1691,10 +1646,9 @@ const h = OneUI.react.createElement;
     document.documentElement.style.visibility = "";
     if (native) {
       about = await native.about();
-      // The app draws its next start in it from the first frame (one kept before the app kept it too).
+      // The app draws its next start in it from the first frame.
       native.appearance?.(appearance());
       native.onOpen = opened;
-      // A phone's Back, and its text size changing while this runs.
       native.onBack = hardwareBack;
       native.onScale = (scale) => ((about.textScale = scale), zoomed());
       zoomed();
@@ -1784,8 +1738,6 @@ const h = OneUI.react.createElement;
     notifications(false).catch((err) => console.warn("notifications:", err));
   }
 
-  // MARK: Notifications
-
   /// What was last registered for pushes here: the subscription's endpoint, the device's key and the network's VAPID
   /// key, and when.
   const PUSHED = "one.pushed";
@@ -1809,7 +1761,6 @@ const h = OneUI.react.createElement;
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
     const was = JSON.parse(localStorage.getItem(PUSHED) || "null");
-    // One made with another key (the push Worker's VAPID key made again) is made again.
     if (sub && was && was.vapid !== vapid) await sub.unsubscribe(), (sub = null);
     sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(vapid.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)) });
     if (was?.endpoint !== sub.endpoint || was?.key !== device.me.key || was?.vapid !== vapid || Date.now() - was.at > 86_400_000) {

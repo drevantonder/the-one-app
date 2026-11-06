@@ -13,13 +13,13 @@
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
 // admin's endpoint removes. A step at position n of a database or log (`<prefix>/<n>`, n > 1) is created only once the
 // one before it is there, or the copy of the steps up to it (`<prefix>/copy/<n-1>`), or the database's older steps
-// were deleted (`<prefix>/tidied`, src/database/stored.rs), past which its readers look for a copy that holds; and a copy only once
-// its step is: so no endpoint without the keys leaves a gap in the steps its readers take for the end, nor plants one
-// past it. Others asked for in
-// the same trip are left out, and asked for again when they're next. `confirm` says whether each object is there with that ETag, `newest` what each
-// database's newest hint says (`<prefix>/newest`, never sealed), and `get` each object's bytes, sealed as they are, for
-// browsers, which can't read the bucket: all open nothing. It knows
-// nobody's scopes and checks none: everything in the bucket is sealed, so what it hands out opens nothing without keys.
+// were deleted (`<prefix>/tidied`, src/database/stored.rs), past which its readers look for a copy that holds; and a
+// copy only once its step is: so no endpoint without the keys leaves a gap in the steps its readers take for the end,
+// nor plants one past it. Others asked for in the same trip are left out, and asked for again when they're next.
+// `confirm` says whether each object is there with that ETag, `newest` what each database's newest hint says
+// (`<prefix>/newest`, never sealed), and `get` each object's bytes, sealed as they are, for browsers, which can't read
+// the bucket: all open nothing. It knows nobody's scopes and checks none: everything in the bucket is sealed, so what it
+// hands out opens nothing without keys.
 // A request from a device that says it reads less of who's who than this build (`reads`, shared/protocol.js's `READS`;
 // an older build says nothing) is 426, telling it to update, if it would create, replace or remove, or comes from a
 // client alone. A machine that runs things still reads, so a node takes the release it updates to.
@@ -28,7 +28,6 @@ import { b64u, behind, checkRequest, rolesOf } from "../shared/crypto.js";
 import { COPY, MOST_URLS, NEWEST, STEP_DIGITS, URLS, copyName, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { bucketUrls } from "../shared/s3.js";
 
-/// How long URLs work, in seconds, and the most objects it confirms at once.
 const EXPIRES = 15 * 60;
 const CONFIRM = 100;
 /// How long the relay's answer about a key is kept here: a removed endpoint is refused within this.
@@ -47,11 +46,9 @@ const fail = (status, message) => {
   throw new Refused(status, message);
 };
 
-/// A name in the bucket: parts that are neither empty, `.` nor `..`.
 const isName = (name) => typeof name === "string" && name.length <= 1024 && name.split("/").every((p) => p && p !== "." && p !== "..");
 
-/// The names an item says: a name, or `{ steps, from, to }`, a database's steps at those positions (src/database/stored.rs's
-/// `step_name`).
+// stepName is src/database/stored.rs's `step_name`.
 function names(item) {
   if (typeof item === "string") return isName(item) ? [item] : fail(400, `${item} isn't a name in the bucket`);
   const { steps, from, to } = item || {};
@@ -61,7 +58,6 @@ function names(item) {
 
 const list = (v) => (v === undefined ? [] : Array.isArray(v) ? v : fail(400, "each kind is a list"));
 
-/// What the relay said about each key lately: key → { at, said }.
 const known = new Map();
 
 async function allowed(env, key) {
@@ -74,7 +70,6 @@ async function allowed(env, key) {
   return said;
 }
 
-/// Whether each object is in the bucket with the ETag given: by the R2 binding where there is one, else by HEAD.
 async function confirm(env, bucket, asked) {
   const bare = (etag) => String(etag).replace(/^W\//, "").replace(/"/g, "");
   const heads = env.R2 ? null : (await bucketUrls(bucket, { head: asked.map((a) => a.name) }, 60)).head;
@@ -86,7 +81,6 @@ async function confirm(env, bucket, asked) {
   return out;
 }
 
-/// Each database's newest hint, by its prefix: its text, or null if it has none.
 async function newest(env, bucket, prefixes) {
   const names = prefixes.map(newestName);
   const reads = env.R2 ? null : (await bucketUrls(bucket, { read: names }, 60)).read;
@@ -100,7 +94,6 @@ async function newest(env, bucket, prefixes) {
   return out;
 }
 
-/// Whether each of `names` is in the bucket: by the R2 binding where there is one, else by HEAD.
 async function present(env, bucket, names) {
   const heads = env.R2 || !names.length ? null : (await bucketUrls(bucket, { head: names }, 60)).head;
   const out = new Map();
@@ -125,14 +118,12 @@ function after(name) {
   return at > 1 ? [stepName(prefix, at - 1), copyName(prefix, at - 1), tidiedName(prefix)] : null;
 }
 
-/// Of `names` to create, those whose turn it is (`after`): → them, in their order.
 async function due(env, bucket, names) {
   const needs = names.map(after);
   const there = await present(env, bucket, [...new Set(needs.flat().filter(Boolean))]);
   return names.filter((_, i) => !needs[i] || needs[i].some((n) => there.get(n)));
 }
 
-/// Each object's bytes, by its name, base64url: null for one that isn't there.
 async function got(env, bucket, names) {
   const reads = env.R2 ? null : (await bucketUrls(bucket, { read: names }, 60)).read;
   const out = {};

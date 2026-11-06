@@ -38,14 +38,10 @@ import { Copies } from "./copies.js";
 initSync({ module: wasm });
 
 const IDLE = 30_000;
-/// The MCP requests' headers a node is given and gives back.
 const TO_NODE = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version"];
 const FROM_NODE = ["content-type", "mcp-session-id"];
-/// The most a request to the Worker may be.
 const BODY_MOST = 1 << 20;
-/// How often a device reads what's new of who's who, at most.
 const VIEW_EVERY = 10_000;
-/// What it keeps of what each tool needed: the most databases a tool's calls are handed, and the most tools kept.
 const NEEDS_MOST = 16;
 const TOOLS_MOST = 128;
 /// How long the relay keeps a device's binding, if it doesn't say, and how long before that ends it's bound again.
@@ -60,14 +56,12 @@ const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 const origin = (env) => new URL(env.ADDRESS).origin;
 const CORS = { "access-control-allow-origin": "*" };
 
-/// Sign-in's keys, as every service checks its tokens.
 let issuer = null;
 const issuerOf = (env) => (issuer ||= new Issuer(`${origin(env)}/api/auth`, () => env.AUTH.fetch(`${origin(env)}/api/auth/jwks`)));
 
 /// A token's claims, unchecked: only for one sign-in just gave us by its binding.
 const claimsOf = (token) => JSON.parse(new TextDecoder().decode(b64u.decode(token.split(".")[1])));
 
-/// The device of a client and person.
 const deviceOf = (env, client, user) => env.CLIENT.get(env.CLIENT.idFromName(`${client}\n${user}`), near(env));
 
 /// What an MCP client is told when it has no sign-in, or one that won't do: where to sign in (RFC 9728).
@@ -87,14 +81,12 @@ async function authorizationServer(env, which) {
   return json(meta, 200, CORS);
 }
 
-/// A request's body as text, if it's at most `BODY_MOST` bytes: else null.
 async function bodyOf(request) {
   if (Number(request.headers.get("content-length") || 0) > BODY_MOST) return null;
   const bytes = await request.arrayBuffer();
   return bytes.byteLength > BODY_MOST ? null : new TextDecoder().decode(bytes);
 }
 
-/// What a token request asks, as a form or JSON: a `get(name)`.
 function askedOf(request, body) {
   if (/json/i.test(request.headers.get("content-type") || "")) {
     let o = {};
@@ -106,7 +98,6 @@ function askedOf(request, body) {
   return new URLSearchParams(body);
 }
 
-/// A token request, passed on to sign-in: its answer, once the client's device secret is sealed under the new tokens.
 async function token(request, env) {
   const body = await bodyOf(request);
   if (body === null) return json({ error: "invalid_request", error_description: "that request is too big" }, 413);
@@ -132,7 +123,6 @@ async function token(request, env) {
   return json(out, 200, { "cache-control": "no-store", pragma: "no-cache" });
 }
 
-/// An MCP request: its device answers it, if its access token opens the device.
 async function mcp(request, env) {
   const token = bearer(request);
   if (!token) return signInFirst(env);
@@ -194,7 +184,6 @@ function answerAll(body, text) {
   return { status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(out) };
 }
 
-
 /// What an MCP request's needs are kept by: its tool (`tools/call <name>`), or its method; none for a batch, whose
 /// calls hand only what a 428 names.
 function toolOf(body) {
@@ -209,7 +198,6 @@ function toolOf(body) {
   return `${msg.method}${name}`.slice(0, 160);
 }
 
-/// A database a 428 names, as kept: `{ scope, app, database }`, or null if it isn't one.
 function needOf(n) {
   const plain = (s, most) => typeof s === "string" && s.length > 0 && s.length <= most && /^[A-Za-z0-9:_-]+$/.test(s);
   return n && plain(n.scope, 80) && plain(n.app, 64) && plain(n.database, 64) ? { scope: n.scope, app: n.app, database: n.database } : null;
@@ -266,13 +254,11 @@ class Bucket {
   }
 }
 
-/// One remote MCP client's device, for one person.
 export class Client extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.copies = new Copies(ctx.storage);
     this.asking = 0;
-    /// Datagrams sent this turn, for the relay.
     this.out = [];
     /// Who's who as it last read it: `{ listed, nodes: Map(key → { seal, scopes: Set }), at }`.
     this.view = null;
@@ -286,7 +272,6 @@ export class Client extends DurableObject {
     this.run = null;
   }
 
-  /// The relay, by its entrypoint for the remote MCP server's devices.
   relay() {
     return this.env.RELAY;
   }
@@ -371,15 +356,12 @@ export class Client extends DurableObject {
     }
   }
 
-  /// Whether a device of its person approved it: the relay lets it in.
   async approved(device) {
     if (this.isApproved) return true;
     this.isApproved = !!(await this.relay().allowed(device.key));
     return this.isApproved;
   }
 
-  /// Its endpoint, started with its key, bound at the relay, knowing who's who, and bound again before its binding
-  /// lapses: → the nodes it asks.
   async start(me) {
     if (this.run && this.run.key !== me.key) await this.end();
     // One it's closing is closed first, as it's the same endpoint.
@@ -403,7 +385,6 @@ export class Client extends DurableObject {
     return this.order;
   }
 
-  /// Starts `run`, unless it's ended meanwhile.
   async begin(run, me) {
     const began = Date.now();
     const ended = () => {
@@ -463,7 +444,6 @@ export class Client extends DurableObject {
     return reading;
   }
 
-  /// The nodes it asks, again: those the entries list that are on the relay now. → them.
   async reorder(me) {
     const nodes = this.view?.nodes || new Map();
     const online = new Set(await this.relay().connected([...nodes.keys()]));
@@ -491,7 +471,6 @@ export class Client extends DurableObject {
     } catch {}
   }
 
-  /// What `tool`'s calls needed, as nodes said with 428.
   async needsOf(tool) {
     return (tool && (await this.ctx.storage.get(`needs:${tool}`))) || [];
   }
@@ -523,7 +502,6 @@ export class Client extends DurableObject {
         r = await device_fetch(me.key, "POST", "/mcp", said, bytes);
       } catch (err) {
         if (err.sent) return answerAll(body, `Your device stopped answering: ${err.message}`);
-        // None it knew of answered: those on now, once.
         if (tries === 0 && (await this.reorder(me)).length) {
           handing = null;
           continue;
@@ -533,7 +511,6 @@ export class Client extends DurableObject {
       const node = this.view.nodes.get(r.node);
       if (!node) return answerAll(body, `A device ${this.env.YOURS} doesn't list as running your calls answered: it was given nothing.`);
       this.ctx.waitUntil(this.learnOrder(me));
-      // Keys sealed to a node other than the one that answered: it says what it needs, sealed to it.
       if (r.status === 400 && handing && handing.to !== r.node && tries === 0) {
         handing = null;
         continue;

@@ -24,12 +24,10 @@ export class Copies {
     return `copy:${await idOf(token)}`;
   }
 
-  /// Seals `secret` under `token`, opening until `until` (ms).
   async keep(secret, token, until) {
     await this.store.put(await this.name(token), { sealed: await sealUnder(token, secret), until });
   }
 
-  /// The secret, if `token` opens a copy that's still kept: or null.
   async open(token) {
     const name = await this.name(token);
     const copy = await this.store.get(name);
@@ -65,7 +63,6 @@ export class Copies {
     return secret;
   }
 
-  /// Forgets the copies whose time is over.
   async sweep() {
     const now = this.now();
     const over = [...(await this.store.list({ prefix: "copy:" })).entries()].filter(([, c]) => c.until <= now).map(([k]) => k);

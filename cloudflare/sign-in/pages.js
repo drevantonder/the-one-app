@@ -19,7 +19,6 @@ const GHOST = "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 roun
 const INPUT = "mb-2.5 h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-center text-base shadow-xs outline-none placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
 const HEADING = "mt-2.5 text-3xl font-semibold tracking-tight text-balance framed:hidden";
 const TITLE = `${HEADING} mb-2`;
-// A title with a button straight under it, no line between.
 const TITLE_THEN_BUTTON = `${HEADING} mb-5`;
 const TEXT = "mb-5 text-sm text-muted-foreground";
 const NOTE = "mt-2 text-sm text-muted-foreground";
@@ -60,14 +59,12 @@ const webauthn = `
     if (r.authenticatorData) Object.assign(response, { authenticatorData: b64u.encode(r.authenticatorData), signature: b64u.encode(r.signature), userHandle: r.userHandle && b64u.encode(r.userHandle) });
     return { id: c.id, rawId: b64u.encode(c.rawId), type: c.type, response, clientExtensionResults: {}, authenticatorAttachment: c.authenticatorAttachment };
   }
-  /// Keeps a passkey's PRF output in this tab, if it gave one.
   function keepPrf(c) {
     const first = c.getClientExtensionResults().prf?.results?.first;
     if (!first) return;
     sessionStorage.setItem("one.prf", b64u.encode(first));
     sessionStorage.setItem("one.prf.credential", c.id);
   }
-  /// A button busy with what its tap started: disabled at once, a spinner and \`label\` in it. → what puts it back.
   function busy(b, label) {
     const was = b.innerHTML;
     b.disabled = true;
@@ -77,7 +74,7 @@ const webauthn = `
     addEventListener("pageshow", (e) => e.persisted && undo(), { once: true });
     return undo;
   }
-  /// A passkey prompt's options, asked for before the tap (\`ready\`), so the prompt comes the moment it's tapped. Each
+  /// A passkey prompt's options are asked for before the tap (\`ready\`), so the prompt comes the moment it's tapped. Each
   /// is used once, and only while it's fresh: sign-in keeps one challenge, for five minutes.
   // A sign-in for a device (\`join\`, in its client's authorization) has the passkey sign a challenge naming it.
   const JOIN = new URLSearchParams(location.search).get("join");
@@ -94,8 +91,6 @@ const webauthn = `
     return e && e.path === path && Date.now() - e.at < 240000 ? e.asked.catch(() => api(path)) : api(path);
   }
   const register = (context) => ASK.new + (context ? "?context=" + encodeURIComponent(context) : "");
-  /// Makes a passkey, for someone signed in, or with an invite link's secret as \`context\` (which signs them in): →
-  /// its credential id and its id in the sign-in.
   async function newPasskey(context) {
     const o = await options(register(context));
     const publicKey = { ...o, challenge: b64u.decode(o.challenge), user: { ...o.user, id: b64u.decode(o.user.id) },
@@ -105,7 +100,6 @@ const webauthn = `
     keepPrf(c);
     return { credential: c.id, id: made.id };
   }
-  /// Signs in with a passkey: → its credential id.
   async function withPasskey() {
     const o = await options(ASK.in);
     const publicKey = { ...o, challenge: b64u.decode(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })),
@@ -117,8 +111,7 @@ const webauthn = `
   }
 `;
 
-/// What a client other than the web client is told: what it will do, and where it goes, since its name is only what it
-/// calls itself. Uses the page's network.
+/// A client's name is only what it calls itself, so a client other than the web client is told what it will do and where it goes.
 const acts = `
   function acts(about) {
     const what = document.getElementById("what");
@@ -130,15 +123,14 @@ const acts = `
   }
 `;
 
-/// A page, its colours for the browser's bar the theme's page colour. Near the top, not centred: text that comes in
-/// later (a client's name, a note) grows the page down, never moving what's already there. In the web client's frame
-/// (the passkeys' page, beside its sidebar, whose bar already says Passkeys) it has no mark or title.
+/// A page, near the top, not centred: text that comes in later (a client's name, a note) grows the page down, never
+/// moving what's already there. In the web client's frame (the passkeys' page, beside its sidebar, whose bar already says
+/// Passkeys) it has no mark or title.
 const page = (title, body, script) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141414"><title>${escape(title)}</title><link rel="icon" href="/logo.png"><style>${css}</style></head>
 <body class="grid min-h-screen items-start justify-items-center px-6 pt-[max(40px,14vh)] pb-10 framed:min-h-0 framed:pt-6"><main class="w-[min(380px,100%)] text-center"><img class="mx-auto block size-28 framed:hidden" src="/logo.png" alt="">${body}<div class="problems empty:hidden mt-3.5" role="status"></div></main><script>${webauthn}${script}</script></body></html>`;
 
-/// Which passkeys work, in plain words, for the pages that make or ask for one.
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
 
 /// Signing in, to the network or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
@@ -367,7 +359,6 @@ export function passkeysPage(look) {
       <p class="${NOTE}" id="step">${escape(WORKS)}</p>
     </section>`;
   const script = `
-    // In the web client, beside its sidebar, whose bar already says Passkeys.
     if (window.top !== window) document.documentElement.classList.add("framed");
     const esc = (t) => String(t).replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
     const when = (d) => new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
@@ -388,7 +379,6 @@ export function passkeysPage(look) {
       document.getElementById("list").innerHTML = list.map((p) => '<div class="flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left text-sm"><span class="min-w-0 flex-1"><span class="block truncate font-medium">' + esc(p.name || "Passkey") + '</span><span class="block truncate text-muted-foreground">Added ' + esc(when(p.createdAt)) + '</span></span>' +
         (list.length > 1 ? '<button class="${GHOST}" data-id="' + esc(p.id) + '">Remove</button>' : '') + '</div>').join("");
     }
-    // Both buttons start with a passkey they have: its prompt's options are asked for now, so it comes at once.
     show();
     ready(ASK.in);
     document.getElementById("signin").onclick = async (e) => {
@@ -399,7 +389,6 @@ export function passkeysPage(look) {
       undo();
     };
     const step = document.getElementById("step"), steps = step.textContent;
-    // A passkey is added just after signing in: with one they have, if they have one.
     document.getElementById("add").onclick = async (e) => {
       say();
       const b = e.currentTarget, undo = busy(b, list.length ? "Signing In…" : "Adding…");

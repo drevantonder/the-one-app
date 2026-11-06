@@ -3,20 +3,16 @@
 // over a BroadcastChannel. index.html loads this first, so the client's WebAssembly is on its way while the page draws,
 // and a person already signed in starts their session at once.
 
-/// The client's worker, as index.html started it, and where it is: none, and this build has no client.
 const started = self.oneNet || {};
 const url = started.url || "";
 
-/// Each request's id, and what's waiting on it: `{ answered, body }`.
 const waiting = new Map();
 let n = 0;
 const tab = crypto.getRandomValues(new Uint32Array(2)).join("-");
 
-/// What a message from the client means for the request it answers.
 function received(m) {
   const w = waiting.get(m.id);
   if (!w) return;
-  // The node the client picked for it: its keys, sealed to that node alone.
   if (m.keysFor !== undefined) {
     Promise.resolve()
       .then(() => w.keys?.(m.keysFor))
@@ -52,10 +48,8 @@ function received(m) {
   }
 }
 
-/// Sends the client a message: through the SharedWorker's port, to this tab's own client, or to the tab that has it.
 let send = () => {};
 
-/// Fails what's waiting, for a tab that lost the one it asked.
 function lost() {
   for (const [id, w] of waiting) {
     waiting.delete(id);
@@ -65,7 +59,6 @@ function lost() {
   }
 }
 
-/// Whether this browser has a client.
 let has = false;
 
 /// A new tab leads the others, its client new, with no session: each tab starts its person's again (`starting` said
@@ -108,7 +101,6 @@ if (url && typeof SharedWorker === "function") {
     if (follows) lost(), again();
     channel.postMessage({ leader: tab });
     for (const m of queued.splice(0)) mine(tab, m);
-    // Held while this tab lives.
     await new Promise(() => {});
   };
   navigator.locks.request("one.net", { ifAvailable: true }, async (lock) => {
@@ -119,7 +111,6 @@ if (url && typeof SharedWorker === "function") {
   });
 }
 
-/// Asks the client: → its answer, or for a fetch, the response.
 function ask(m, transfer) {
   const id = `${tab}:${++n}`;
   return new Promise((resolve, reject) => {
@@ -128,7 +119,6 @@ function ask(m, transfer) {
   });
 }
 
-/// The person signed in here, from their access token, for their session to start before the page asks for it.
 function signedIn() {
   try {
     const access = JSON.parse(localStorage.getItem("one.signin") || "null")?.access;
@@ -141,7 +131,6 @@ function signedIn() {
 let starting = null;
 
 export const net = {
-  /// Whether this browser has a client at all.
   has,
 
   /// Starts `user`'s session (again, once this browser was just let in): → whether this browser is their device, so
@@ -158,7 +147,6 @@ export const net = {
     return starting.ready;
   },
 
-  /// How long each part of joining the network took, once it's joined: for developer mode.
   took() {
     return starting?.took || Promise.resolve(null);
   },
@@ -209,12 +197,10 @@ export const net = {
     return (await ask({ op: "signedInWith", proof, key, seal, address, root, clients, accounts })).account;
   },
 
-  /// Whether the relay still lets this browser in, as one of its person's devices: false once it's taken out.
   still() {
     return net.has ? ask({ op: "still" }).then((m) => m.device) : Promise.resolve(true);
   },
 
-  /// A fresh endpoint, after the network came back.
   reconnect() {
     if (net.has) send({ op: "reconnect" });
   },
@@ -224,6 +210,5 @@ export const net = {
 addEventListener("online", () => net.reconnect());
 document.addEventListener("resume", () => net.reconnect());
 
-// Someone signed in: their session starts now, while the page loads.
 const user = signedIn();
 if (user) net.start(user).catch(() => {});
