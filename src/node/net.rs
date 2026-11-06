@@ -17,6 +17,10 @@ const CONNECT: Duration = Duration::from_secs(10);
 const UNSEEN_CONNECT: Duration = Duration::from_secs(3);
 /// How long after one like that couldn't be reached it isn't tried again, unless it says hello first.
 const DOWN_FOR: Duration = Duration::from_secs(20);
+/// How long this device may hear from no other (a hello, either way) before it binds its endpoint again, and, if that
+/// doesn't help, how much longer each time: up to `QUIET_MAX`.
+const QUIET: Duration = Duration::from_secs(2 * 60);
+const QUIET_MAX: Duration = Duration::from_secs(30 * 60);
 /// How long a notice waits to be taken before it's sent again on a new connection.
 const NOTICE_WAIT: Duration = Duration::from_millis(500);
 /// The most an ask or its answer may carry: an email of a claim's receipts, base64, fits.
@@ -49,6 +53,8 @@ pub(super) struct Net {
     endpoint: Mutex<Option<(String, Endpoint)>>,
     /// The task binding the endpoint and taking what others open, with the address it's for.
     task: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
+    /// When the endpoint was last bound, and how many times in a row it was bound again for hearing from no device.
+    bound: Mutex<Option<(Instant, u32)>>,
     /// A connection to each device, opened by either end; each held while it's being opened.
     conns: Mutex<HashMap<Key, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
     /// When each device that hadn't said hello lately couldn't be reached (`DOWN_FOR`).
@@ -164,32 +170,74 @@ impl Node {
         self.0.net.endpoint.lock().unwrap().as_ref().map(|(_, e)| e.addr())
     }
 
-    /// Binds this device's endpoint, then takes the connections other devices open, until it's replaced.
+    /// Binds this device's endpoint, then takes the connections other devices open, until it's replaced. One that
+    /// closes (the relay or the network went away under it) is bound again.
     async fn keep_net(self, address: String) {
-        let mut wait = Duration::from_secs(1);
-        let endpoint = loop {
-            match self.bind(&address, None).await {
-                Ok(endpoint) => break endpoint,
-                Err(err) => tracing::warn!("this device's endpoint: {err:#}"),
-            }
-            tokio::time::sleep(wait).await;
-            wait = (wait * 2).min(Duration::from_secs(60));
-        };
-        *self.0.net.endpoint.lock().unwrap() = Some((address.clone(), endpoint.clone()));
-        tracing::info!("this device is reached through the relay at {address}");
-        while let Some(incoming) = endpoint.accept().await {
-            let node = self.clone();
-            tokio::spawn(async move {
-                let conn = match incoming.accept() {
-                    Ok(accepting) => accepting.await,
-                    Err(err) => return tracing::debug!("a connection that didn't open: {err:#}"),
-                };
-                match conn {
-                    Ok(conn) => node.take_conn(conn).await,
-                    Err(err) => tracing::debug!("a connection that didn't open: {err:#}"),
+        loop {
+            let mut wait = Duration::from_secs(1);
+            let endpoint = loop {
+                match self.bind(&address, None).await {
+                    Ok(endpoint) => break endpoint,
+                    Err(err) => tracing::warn!("this device's endpoint: {err:#}"),
                 }
-            });
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(Duration::from_secs(60));
+            };
+            *self.0.net.endpoint.lock().unwrap() = Some((address.clone(), endpoint.clone()));
+            {
+                let mut bound = self.0.net.bound.lock().unwrap();
+                *bound = Some((Instant::now(), bound.map_or(0, |(_, n)| n)));
+            }
+            tracing::info!("this device is reached through the relay at {address}");
+            while let Some(incoming) = endpoint.accept().await {
+                let node = self.clone();
+                tokio::spawn(async move {
+                    let conn = match incoming.accept() {
+                        Ok(accepting) => accepting.await,
+                        Err(err) => return tracing::debug!("a connection that didn't open: {err:#}"),
+                    };
+                    match conn {
+                        Ok(conn) => node.take_conn(conn).await,
+                        Err(err) => tracing::debug!("a connection that didn't open: {err:#}"),
+                    }
+                });
+            }
+            tracing::warn!("this device's endpoint closed: binding it again");
+            self.0.net.conns.lock().unwrap().clear();
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
+    }
+
+    /// Binds this device's endpoint again if it has heard from no other device (no hello either way) for a while, which
+    /// a relay connection that died without the endpoint noticing looks like: nothing reaches it, and it reaches
+    /// nothing, with the process running. Waits longer each time it didn't help, so one whose others are all off
+    /// doesn't keep at it. Asked now and then.
+    pub(super) fn check_relay(&self) {
+        if super::HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let Some((since, n)) = *self.0.net.bound.lock().unwrap() else { return };
+        let Ok((others, heard)) = self.with(|i| Ok((i.r.db().computes().iter().filter(|c| c.key != self.0.id).count(), i.peers.values().map(|p| p.seen).max()))) else { return };
+        if heard.is_some_and(|h| h > since) {
+            if n > 0 {
+                tracing::info!("this device hears from other devices again");
+                *self.0.net.bound.lock().unwrap() = Some((since, 0));
+            }
+            return;
+        }
+        let quiet = since.elapsed();
+        if others == 0 || quiet < (QUIET * 2u32.pow(n.min(5))).min(QUIET_MAX) {
+            return;
+        }
+        tracing::warn!("this device heard from none of {others} other devices in {}s: binding its endpoint again (the {}{} time in a row)", quiet.as_secs(), n + 1, match n + 1 { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" });
+        let Some((address, old)) = self.0.net.task.lock().unwrap().take() else { return };
+        old.abort();
+        if let Some((_, endpoint)) = self.0.net.endpoint.lock().unwrap().take() {
+            tokio::spawn(async move { endpoint.close().await });
+        }
+        self.0.net.conns.lock().unwrap().clear();
+        *self.0.net.bound.lock().unwrap() = Some((Instant::now(), n + 1));
+        *self.0.net.task.lock().unwrap() = Some((address.clone(), tokio::spawn(self.clone().keep_net(address))));
     }
 
     async fn bind(&self, address: &str, ticket: Option<&str>) -> Result<Endpoint> {
