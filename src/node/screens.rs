@@ -36,7 +36,13 @@ impl Node {
             .collect();
         let none = json!({});
         let mut out = Vec::new();
-        for (app, ctx, _granted) in self.page_contexts(&viewer, scope)? {
+        let contexts = self.page_contexts(&viewer, scope)?;
+        // The keys of every app's database here that the caller didn't hand, asked for at once (428), as the Vault
+        // does: an app's render reaches its data in its own process, which can't say what it lacked as a need, so a
+        // widget would only say it stopped working until something else had them.
+        let want: Vec<(Scope, &str, &str)> = contexts.iter().flat_map(|(app, ctx, _)| ctx.scopes.iter().filter_map(|s| Some((Scope::parse(&s.id).ok()?, app.as_str(), "main")))).collect();
+        self.needs(&viewer, &want).await?;
+        for (app, ctx, _granted) in contexts {
             let describe = self.0.apps.describe(&app).await?;
             for w in describe["widgets"].as_array().into_iter().flatten() {
                 let widget = w["name"].as_str().unwrap_or_default();
