@@ -18,9 +18,6 @@ fn marker() -> String {
     format!(".synced-{}", crate::config::CLI)
 }
 
-/// What earlier versions marked their folders with: taken over by the next write, never removed.
-const OLD_MARKERS: [&str; 2] = [".synced", ".theoneapp"];
-
 /// Whether a skill's name is one of the built-in skills'.
 fn built_in(name: &str) -> bool {
     let server = crate::skills::server_name();
@@ -168,7 +165,6 @@ fn harnesses(home: &Path, written: &mut Written) {
     let args = |harness: &str| mcp_args(harness).iter().map(|a| s(a)).collect::<Vec<_>>();
     if claude.is_dir() {
         edit(&claude.join("settings.json"), true, |t| with_hook(t, "UserPromptSubmit", &hook, &port));
-        edit(&claude.join("settings.json"), false, |t| without_hooks(t, OLD_HOOKS));
         // Claude Code keeps user-scoped MCP servers beside its config folder, or in it if that's moved.
         let file = if std::env::var_os("CLAUDE_CONFIG_DIR").is_some() { claude.join(".claude.json") } else { home.join(".claude.json") };
         let entry = CstInputValue::Object(vec![("type".into(), s("stdio")), ("command".into(), s(&cli)), ("args".into(), CstInputValue::Array(args("claude"))), ("env".into(), CstInputValue::Object(vec![]))]);
@@ -176,12 +172,10 @@ fn harnesses(home: &Path, written: &mut Written) {
     }
     if codex.is_dir() {
         edit(&codex.join("hooks.json"), true, |t| with_hook(t, "UserPromptSubmit", &hook, &port));
-        edit(&codex.join("hooks.json"), false, |t| without_hooks(t, OLD_HOOKS));
         edit(&codex.join("config.toml"), true, |t| with_codex_mcp(t, &server, &cli, mcp_args("codex")));
     }
     let opencode = config.join("opencode");
     if opencode.is_dir() {
-        written.remove(&opencode.join("plugins").join(format!("{}-board.js", crate::config::CLI)));
         written.write(&opencode.join("plugins").join(format!("{}-hooks", crate::config::CLI)).join("index.ts"), &plugin(OPENCODE_PLUGIN));
         let entry = CstInputValue::Object(vec![("type".into(), s("local")), ("command".into(), CstInputValue::Array([vec![s(&cli)], args("opencode")].concat())), ("enabled".into(), true.into())]);
         edit(&json_or_jsonc(&opencode, "opencode"), true, |t| with_mcp(t, "mcp", &server, entry));
@@ -192,7 +186,6 @@ fn harnesses(home: &Path, written: &mut Written) {
         edit(&json_or_jsonc(&amp, "settings"), true, |t| with_mcp(t, "amp.mcpServers", &server, entry));
     }
     if pi.is_dir() {
-        written.remove(&pi.join("extensions").join(format!("{}-board.ts", crate::config::CLI)));
         written.write(&pi.join("extensions").join(format!("{}-hooks.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
     }
     git(&addr);
@@ -315,37 +308,6 @@ fn with_hook(text: &str, event: &str, command: &str, ours: &str) -> Result<Optio
     Ok(changed.then(|| root.to_string()))
 }
 
-/// Hooks this node put in harnesses' settings before (Agent Hooks'), which it takes back out.
-const OLD_HOOKS: &str = " agent-hooks context ";
-
-/// Takes every hook whose command has `ours` in it out of the settings (Claude Code's and Codex's format), and says
-/// what the text becomes if that changes it.
-fn without_hooks(text: &str, ours: &str) -> Result<Option<String>> {
-    let root = parse_json(text)?;
-    let Some(hooks) = root.object_value().unwrap().object_value("hooks") else { return Ok(None) };
-    let mut changed = false;
-    for prop in hooks.properties() {
-        let Some(groups) = prop.value().and_then(|v| v.as_array()) else { continue };
-        for group in groups.elements() {
-            let Some(list) = group.as_object().and_then(|g| g.array_value("hooks")) else { continue };
-            for hook in list.elements() {
-                let command = hook.as_object().and_then(|h| h.get("command")).and_then(|p| p.value()).and_then(|v| v.as_string_lit()).and_then(|s| s.decoded_value().ok());
-                if command.is_some_and(|c| c.contains(ours)) {
-                    hook.remove();
-                    changed = true;
-                }
-            }
-            if changed && list.elements().is_empty() {
-                group.remove();
-            }
-        }
-        if changed && groups.elements().is_empty() {
-            prop.remove();
-        }
-    }
-    Ok(changed.then(|| root.to_string()))
-}
-
 /// Adds `entry` as MCP server `name` in the object at top-level key `key`, unless there's one by that name already.
 fn with_mcp(text: &str, key: &str, name: &str, entry: CstInputValue) -> Result<Option<String>> {
     let root = parse_json(text)?;
@@ -386,7 +348,7 @@ fn ours(dir: &Path) -> bool {
 }
 
 fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
-    if dir.exists() && !ours(dir) && !OLD_MARKERS.iter().any(|m| dir.join(m).is_file()) {
+    if dir.exists() && !ours(dir) {
         once(format!("left {} alone: it isn't a synced skill", dir.display()));
         return Ok(());
     }
@@ -438,15 +400,6 @@ impl Written {
             return;
         }
         self.hashes.insert(key, hash(text));
-    }
-
-    /// Deletes a file this app wrote and no longer writes, unless it was edited on this device.
-    fn remove(&mut self, file: &Path) {
-        let key = file.to_string_lossy().to_string();
-        let Some(hash) = self.hashes.remove(&key) else { return };
-        if std::fs::read(file).is_ok_and(|now| blake3::hash(&now).to_hex().to_string() == hash) {
-            let _ = std::fs::remove_file(file);
-        }
     }
 
     fn save(&self) {
