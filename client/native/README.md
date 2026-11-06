@@ -47,10 +47,10 @@ colour on what's tapped, a Mac build with push.
 - Seen on a Mac: the window, the panel, the dock's count, the widgets' menu bar popovers and the app menu's keys (⌘\,
   ⌘⇧I, ⌘⇧J). Built and checked by its build; the Mac's screen has been locked each time.
 - Felt on a real phone: touch and hold lifting on the iPhone, haptics, the iPhone's document camera and share sheet,
-  the iPhone's Safari sign-in sheet, Android's font size.
+  the iPhone's Safari sign-in sheet.
 - The iPhone's window following Dynamic Type: WebKit's CSS zoom left screens' frames at no size (a black window) and its
   page zoom keeps the layout at the screen's width, so the window doesn't zoom there (`platform::iphone::text_scale`).
-  Android's font size zooms it by CSS, not yet tried at a size other than the default.
+  Android's font size zooms it by CSS, which Chromium lays frames out in.
 - Join with a Pairing Code on a Mac whose node is in no network: built, no such Mac to try.
 - Speed on real devices: usable within 1.5 s of a cold open is met on Linux (a debug build under Xvfb: window 0.8 s, the
   home 1.1 to 1.25 s); release builds on the Mac, iPhone, Android and Windows not measured.
