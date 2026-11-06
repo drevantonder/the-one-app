@@ -1,6 +1,10 @@
 # Architecture
 
-Your devices, and your team's, as one place for apps and agents. A network is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; at its address, a few small Workers on Cloudflare (`cloudflare/`), each named by its job, only route, sign in, relay and carry pushes. This page holds only what the code can't say: where to look, and the rules that span many files. How a piece works is in its module doc (`//!` at the top of each file in `src/`, a comment at the top of each Worker, `client/`, `cloudflare/node/` and each app's `service/`) and its tests.
+Your devices, and your team's, as one place for apps and agents. A network is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; at its address, a few small Workers on Cloudflare, each named by its job, only route, sign in, relay and carry pushes. Each app's database for a scope is the truth, kept as signed steps in the bucket, and who can do what is the scope database's rows.
+
+It's held to targets measured in `one throwaway`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.
+
+This page holds only what the code can't say. How each part works is its folder's doc: `cargo test map -- --nocapture` prints them all, as a map. `tests/contracts.rs` is where two languages must agree.
 
 ## Trust
 
@@ -17,14 +21,15 @@ Your devices, and your team's, as one place for apps and agents. A network is on
 - **A service's program runs in its sandbox** (`src/sandbox.rs`): no keys, the network only to the hosts its app declares, and, unless its app declares it runs as the person (said wherever it's switched on), its own OS user and folder and none of theirs; so the sandbox protects a node, not who wrote the code. A machine that can't give one runs it without, and says so on it.
 - **Only the URL signer holds the bucket's credentials;** everything in the bucket is sealed, so what it hands out opens nothing.
 
-## Rules that span files
+## The three rules
 
-- **The core never names an app or service.** Apps are deployed into the network while it runs; services run only where a device's owner turned them on. `config.toml` is the one place that names the product (the custom build).
-- **Devices reach each other over iroh,** each an endpoint of its own key, through the relay at the network's address when no direct path opens. A device answers only the network's devices.
-- **The bucket decides the order of writes.** A write is a step created only if its position is free. Network messages between nodes are nudges; each device reads what changed from the bucket. Only the node's database, how things went, is changed in place.
-- **A call runs once,** on a node that runs every scope it reaches, chosen by run priority.
-- **Every device runs the same release.** We're pre-production: a rename or a change of shape reaches every caller in the same change, with no backwards compatibility, and every device updates; stored data is migrated.
-- **Speed** is held to targets measured in `one throwaway`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.
+Who can do what is the signed steps of each scope's database, in the one order the bucket gives them, and every reader checks each step by three rules:
+
+1. the network's first step, and the recovery key it names;
+2. epochs never go down;
+3. each step's signer holds the permission its change needs (`src/permissions/`).
+
+A removed device's later steps fail rule 3, because they come after its removal in the one order.
 
 ## Designed, not built
 
@@ -34,7 +39,3 @@ Your devices, and your team's, as one place for apps and agents. A network is on
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
 - The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.
-
-## Where to look
-
-`src/` and each file's module doc, until the plan's phase 3 generates a map. `tests/contracts.rs` is where two languages must agree.
