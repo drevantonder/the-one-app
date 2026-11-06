@@ -497,7 +497,7 @@ pub fn forwarded(call: &Value, user: &str, client: &str, from: &[u8; 32], seal: 
     call.insert("scopes".into(), json!(scopes));
     let keys: Vec<Handed> = keys.into_iter().filter(|k| scopes.contains(&k.scope)).collect();
     call.insert("keys".into(), seal_handoff(seal, &Handoff { for_: HEXLOWER.encode(from), until, keys })?.into());
-    Ok(json!({ "kind": "ask", "body": { "call": call } }))
+    Ok(json!({ "kind": crate::protocol::message::ASK, "body": { "call": call } }))
 }
 
 /// A key a call lacked, which its caller hands it when it sends the call again: what a node answers with 428.

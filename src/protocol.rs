@@ -63,6 +63,19 @@ pub mod path {
     }
 }
 
+/// The kinds of message devices send each other over iroh, as `{ kind, body }`: a node's with another, with a service's
+/// endpoint, and what a client or the Cloudflare node asks of a node.
+pub mod message {
+    /// A call to run (`{ call }`), or a person's request to join a network (`{ join }`).
+    pub const ASK: &str = "ask";
+    /// What a device says of itself to another, which answers what it needs to know of it.
+    pub const HELLO: &str = "hello";
+    /// The scope database's steps, sent to a service's endpoint that is behind.
+    pub const STEPS: &str = "steps";
+    /// An app's data changed, which the other devices pass on to their screens.
+    pub const CHANGED: &str = "changed";
+}
+
 /// What a database keeps in the bucket beside its steps (`<prefix>/<n>`): the newest step's hint, where its steps
 /// were deleted past (`tidied`), and the copy of its steps up to one, in a folder of its own.
 pub const NEWEST: &str = "newest";

@@ -357,12 +357,12 @@ impl Service {
     async fn answer(&self, remote: Key, msg: &Value) -> Value {
         let body = &msg["body"];
         match msg["kind"].as_str() {
-            Some("hello") => self.hello(remote, body["steps"].as_u64().unwrap_or(0) as usize).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
-            Some("steps") => match self.take_steps(&remote, &body["steps"]) {
+            Some(crate::protocol::message::HELLO) => self.hello(remote, body["steps"].as_u64().unwrap_or(0) as usize).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
+            Some(crate::protocol::message::STEPS) => match self.take_steps(&remote, &body["steps"]) {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
-            Some("ask") if self.is_node(&remote) => self.run(remote, &body["call"]).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
+            Some(crate::protocol::message::ASK) if self.is_node(&remote) => self.run(remote, &body["call"]).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
             _ => json!({ "error": format!("only {YOURS}'s devices are answered") }),
         }
     }
@@ -482,7 +482,7 @@ impl Service {
         };
         let mut why = Vec::new();
         for node in nodes {
-            match self.send(node, &json!({ "kind": "ask", "body": { "call": call } })).await {
+            match self.send(node, &json!({ "kind": crate::protocol::message::ASK, "body": { "call": call } })).await {
                 Ok(answer) if answer.get("elsewhere").is_some() => why.push(answer["elsewhere"].as_str().unwrap_or("").to_string()),
                 Ok(answer) => return Ok(answer),
                 Err(err) => why.push(format!("{}: {err:#}", short(&node))),

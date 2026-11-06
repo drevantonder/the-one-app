@@ -5,6 +5,7 @@
 //! back. Devices are found by the network's list of them, never n0's discovery.
 
 use crate::config::YOURS;
+use crate::protocol::message as M;
 use iroh::endpoint::{Connection, QuicTransportConfig, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey};
 
@@ -297,15 +298,15 @@ impl Node {
                     Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
                 };
                 let answer = match msg["kind"].as_str() {
-                    Some("ask") if msg["body"]["trace"] == true => {
+                    Some(M::ASK) if msg["body"]["trace"] == true => {
                         let t = trace::Trace::new();
                         let mut answer = trace::within(Some(t.clone()), node.accept_call(remote, &msg["body"]["call"])).await.json();
                         answer["trace"] = t.done(&node.device_name());
                         answer
                     }
-                    Some("ask") => node.accept_call(remote, &msg["body"]["call"]).await.json(),
-                    Some("hello") => node.hello_from(&remote, &msg["body"]).map(|()| Value::Null).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
-                    Some("changed") => {
+                    Some(M::ASK) => node.accept_call(remote, &msg["body"]["call"]).await.json(),
+                    Some(M::HELLO) => node.hello_from(&remote, &msg["body"]).map(|()| Value::Null).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
+                    Some(M::CHANGED) => {
                         node.changed_from(&msg["body"]);
                         Value::Null
                     }
@@ -333,7 +334,7 @@ impl Node {
                     Err(err) => return tracing::debug!("what the Cloudflare node sent: {err:#}"),
                 };
                 let answer = match msg["kind"].as_str() {
-                    Some("ask") => crate::api::call_from_cloudflare_node(&node, remote, msg["body"]["call"].clone()).await,
+                    Some(M::ASK) => crate::api::call_from_cloudflare_node(&node, remote, msg["body"]["call"].clone()).await,
                     _ => json!({ "error": "the Cloudflare node only asks for calls" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
@@ -492,7 +493,7 @@ impl Node {
                     Err(err) => return tracing::debug!("what service {} sent: {err:#}", short(&remote)),
                 };
                 let answer = match msg["kind"].as_str() {
-                    Some("ask") => node.accept_service_call(remote, &msg["body"]["call"]).await.json(),
+                    Some(M::ASK) => node.accept_service_call(remote, &msg["body"]["call"]).await.json(),
                     _ => json!({ "error": "a service only asks for calls" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
@@ -539,7 +540,7 @@ impl Node {
             let (mut send, mut recv) = conn.accept_bi().await?;
             let msg: Value = serde_json::from_slice(&recv.read_to_end(JOIN_LIMIT).await?)?;
             let answer = match msg["body"].get("join") {
-                Some(join) if msg["kind"] == "ask" => self.joining(remote, join).await,
+                Some(join) if msg["kind"] == M::ASK => self.joining(remote, join).await,
                 _ => json!({ "error": format!("only {YOURS}'s devices are answered") }),
             };
             send.write_all(answer.to_string().as_bytes()).await?;
@@ -739,12 +740,12 @@ impl Node {
     pub(super) async fn ask(&self, to: Key, call: Value, limit: Duration) -> Result<Value> {
         // A traced request asks that device for its own part too.
         let body = if trace::on() { json!({ "call": call, "trace": true }) } else { json!({ "call": call }) };
-        self.send(&to, "ask", &body, true, limit).await
+        self.send(&to, M::ASK, &body, true, limit).await
     }
 
     /// Says hello to another device: what runs here and its load. → once it's taken.
     pub(super) async fn say_hello_to(&self, to: &Key, hello: &Value) -> Result<()> {
-        let answer = self.send(to, "hello", hello, true, CONNECT).await?;
+        let answer = self.send(to, M::HELLO, hello, true, CONNECT).await?;
         match answer["error"].as_str() {
             Some(err) => bail!("{err}"),
             None => Ok(()),
@@ -763,14 +764,14 @@ impl Node {
             steps = crate::database::steps::read(&bucket, &keys, &Scope::Global, 0, made).await?.steps;
         }
         let hello = json!({ "steps": steps.len() });
-        let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
+        let mut answer = self.send(&to, M::HELLO, &hello, true, CONNECT).await?;
         if answer["behind"] == true && !steps.is_empty() {
             let list: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
-            let taken = self.send(&to, "steps", &json!({ "steps": list }), true, CONNECT).await?;
+            let taken = self.send(&to, M::STEPS, &json!({ "steps": list }), true, CONNECT).await?;
             if let Some(err) = taken["error"].as_str() {
                 bail!("{} didn't take the scope database's steps: {err}", short(&to));
             }
-            answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
+            answer = self.send(&to, M::HELLO, &hello, true, CONNECT).await?;
         }
         if let Some(err) = answer["error"].as_str() {
             bail!("{err}");
@@ -785,9 +786,9 @@ impl Node {
             let (node, body) = (self.clone(), changed.clone());
             tokio::spawn(async move {
                 // Answered, so one lost on a connection that died unseen is sent again on a new one.
-                if let Err(err) = node.send(&device, "changed", &body, true, CHANGED_WAIT).await {
+                if let Err(err) = node.send(&device, M::CHANGED, &body, true, CHANGED_WAIT).await {
                     node.drop_conn(&device);
-                    if let Err(err) = node.send(&device, "changed", &body, true, CHANGED_WAIT).await {
+                    if let Err(err) = node.send(&device, M::CHANGED, &body, true, CHANGED_WAIT).await {
                         tracing::debug!("telling {}: {err:#}", short(&device));
                     }
                     tracing::debug!("telling {}, tried again: {err:#}", short(&device));
@@ -815,7 +816,7 @@ impl Node {
         };
         let answer = async {
             let (mut send, mut recv) = conn.open_bi().await?;
-            send.write_all(json!({ "kind": "ask", "body": { "join": join } }).to_string().as_bytes()).await?;
+            send.write_all(json!({ "kind": M::ASK, "body": { "join": join } }).to_string().as_bytes()).await?;
             send.finish()?;
             let answer = tokio::time::timeout(Duration::from_secs(30), recv.read_to_end(MESSAGE_LIMIT)).await.context("the device that made the pairing code didn't answer")??;
             anyhow::Ok(serde_json::from_slice(&answer)?)
