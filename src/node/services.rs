@@ -14,21 +14,23 @@ impl Node {
         &self.0.services
     }
 
-    /// Registers a service; the node says so in its hello to the other devices, and to shells when that changes it:
-    /// an app of its name shows its picture (a Mac app's icon).
+    /// Registers a service, which says only what's about its machine; the node says so in its hello to the other
+    /// devices, and to shells when that changes it: an app of its name shows its picture (a Mac app's icon).
     pub async fn register_service(&self, app: &str, describe: Value) -> Result<()> {
-        self.0.services.offer(app, &describe);
+        self.0.services.offer(app);
+        self.learn_app(app).await;
         // Kept, so its switch shows while what offers it (the Mac app) isn't running.
+        let title = json!(self.service_title(app));
         let mut kept = self.offered_before();
-        if kept.get(app) != Some(&describe["title"]) {
-            kept.insert(app.to_string(), describe["title"].clone());
+        if kept.get(app) != Some(&title) {
+            kept.insert(app.to_string(), title);
             let _ = std::fs::write(self.0.dir.join(OFFERED), serde_json::to_vec(&kept).unwrap_or_default());
         }
         if let Some(why) = self.removed_here(app) {
             bail!("{why}");
         }
         self.stand_down(app)?;
-        if let Some(domain) = describe["domain"].as_str() {
+        if let Some(domain) = self.listed_as_app(app, describe.clone())["domain"].as_str() {
             self.logo(domain, app);
         }
         if self.0.services.register(app, describe) {
@@ -36,6 +38,21 @@ impl Node {
         }
         self.say_hello();
         Ok(())
+    }
+
+    /// Asks the app `app` what it is, so its service is listed as that and not as itself.
+    pub(super) async fn learn_app(&self, app: &str) {
+        let _ = self.0.apps.describe_any(app).await;
+    }
+
+    /// A service's description, as its app says it is with what the service says of its machine over it.
+    pub(super) fn listed_as_app(&self, app: &str, machine: Value) -> Value {
+        let mut d = self.0.apps.identity(app).unwrap_or_else(|| json!({}));
+        d["name"] = json!(app);
+        for (k, v) in machine.as_object().into_iter().flatten() {
+            d[k] = v.clone();
+        }
+        d
     }
 
     /// Switches a part of a device's oned (a service, or `apps`, the app service) on or off there (this device if none
@@ -154,8 +171,9 @@ impl Node {
         let everyone: Vec<String> = m.users().into_iter().map(|u| u.id).filter(|u| m.serves(&self.0.id, u)).collect();
         let removed = |name: &str| Self::off(m, &self.0.id, name);
         let services = self.0.services.describe().into_iter().filter(|d| !removed(d["name"].as_str().unwrap_or(""))).map(|d| {
-            let users = if d["serves"] == "everyone" { everyone.clone() } else { vec![i.user.clone()] };
-            (d["name"].as_str().unwrap_or("").to_string(), users, d)
+            let (name, users) = (d["name"].as_str().unwrap_or("").to_string(), if d["serves"] == "everyone" { everyone.clone() } else { vec![i.user.clone()] });
+            let d = self.listed_as_app(&name, d);
+            (name, users, d)
         });
         services.collect()
     }
@@ -173,8 +191,8 @@ impl Node {
         for (name, title) in self.offered_before() {
             out.insert(name.clone(), json!({ "name": name, "title": title, "on": on(&name) }));
         }
-        for (name, d) in self.0.services.offered() {
-            out.insert(name.clone(), json!({ "name": name, "title": d["title"], "on": on(&name) }));
+        for name in self.0.services.offered() {
+            out.insert(name.clone(), json!({ "name": name, "title": self.service_title(&name), "on": on(&name) }));
         }
         // A process of oned's is on only by its entry: with none, it's off; but a Mac helper the Mac app carries is on
         // unless switched off, as oned runs it.
@@ -197,7 +215,7 @@ impl Node {
         // A registered one (the Mac app's), switched on but not registered now: starting while it registers again,
         // as it does within seconds of this node or it starting; stopped once it hasn't for a while.
         let starting = crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(60));
-        let lately: BTreeSet<String> = self.0.services.offered().into_iter().map(|(name, _)| name).collect();
+        let lately: BTreeSet<String> = self.0.services.offered().into_iter().collect();
         let before = self.offered_before();
         for (name, part) in out.iter_mut() {
             let registered = lately.contains(name) || before.contains_key(name);

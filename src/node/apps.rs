@@ -15,7 +15,7 @@ impl Node {
 
     /// What people call the service `name`: its title, else its name.
     pub(super) fn service_title(&self, name: &str) -> String {
-        self.0.services.title(name).unwrap_or_else(|| name.to_string())
+        self.0.apps.identity(name).and_then(|d| d["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string)).unwrap_or_else(|| name.to_string())
     }
 
     pub(super) fn deployed(&self, app: &str) -> bool {
@@ -219,7 +219,7 @@ impl Node {
         let mut out = Vec::new();
         for (name, mut info, mine) in listed.into_iter().chain(missing.into_iter().map(|info| (info["name"].as_str().unwrap_or_default().to_string(), info, false))) {
             let here = self.0.apps.has(&name);
-            let described = if here { self.0.apps.describe(&name).await } else { self.0.apps.describe_unadded(&name).await };
+            let described = self.0.apps.describe_any(&name).await;
             if let Ok(Value::Object(d)) = described {
                 let described = Value::Object(d.clone());
                 info["offers"] = json!({

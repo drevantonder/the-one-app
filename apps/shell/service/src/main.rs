@@ -7,28 +7,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use one_service::{Answer, Call, Host, Service};
-use serde_json::{Value, json};
+use serde_json::json;
 
 fn main() -> Result<()> {
-    one_service::serve(Service { name: "shell", describe, call, start: None })
-}
-
-fn describe() -> Value {
-    json!({
-        "title": "Shell", "icon": "terminal-window", "color": "#3a3a3c", "prefer": "here", "description": "Runs commands on your own devices",
-        "instructions": "Run a shell command on one of your own devices with shell_run; give device (a device's name) to choose which. Every command is logged where only you can read it.",
-        "ops": [{
-            "name": "run",
-            "reads": false,
-            "description": "Run a shell command on this device (or the device given) and return its exit code and output. Every command is logged.",
-            "input": { "type": "object", "required": ["command"], "properties": {
-                "command": { "type": "string", "description": "run by sh -c" },
-                "dir": { "type": "string", "description": "working directory; default is the home directory" },
-                "timeout": { "type": "integer", "description": "seconds, default 60, at most 600" },
-            }},
-        }],
-        "widgets": [],
-    })
+    one_service::serve(Service { name: "shell", prefer_here: &["run"], call, start: None })
 }
 
 fn call(host: &Host, call: &Call) -> Result<Answer> {

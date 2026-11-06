@@ -4,37 +4,9 @@ import Helper
 
 struct CalendarApp: Service {
     let app = "calendar"
+    let localApp: String? = "com.apple.iCal"
 
     func needs() async -> String? { Events.shared.needs(.event) }
-
-    var description: [String: Any] {
-        let fields: [String: [String: Any]] = [
-            "title": str("what it is"),
-            "start": str("an ISO 8601 date-time (2026-11-01T09:00), or a date for an all-day event"),
-            "end": str("an ISO 8601 date-time, or the last day of an all-day event; default an hour after start, or the same day"),
-            "all_day": flag("an all-day event"),
-            "calendar": str("a calendar's name; default is the default calendar"),
-            "location": str("where"),
-            "notes": str("more detail"),
-        ]
-        let id = str("the event's id, as events gives it; for a repeating event it names one occurrence")
-        let future = flag("for a repeating event, this occurrence and every later one, not just this one")
-        return describe(title: "Calendar", icon: "calendar", localApp: "com.apple.iCal", summary: "Lets your apps and agents use Calendar on your Mac", instructions:
-            "Calendar is the person's Apple Calendar through their Mac: every account it has, such as iCloud, Google or Exchange. " +
-            "calendar_events lists events in a time range, by default the coming week. Times are ISO 8601; without an offset they're in the Mac's time zone.", functions: [
-            function("calendars", "The calendars, with whether each can be changed."),
-            function("events", "Events in a time range, earliest first.", [
-                "from": str("ISO 8601; default the start of today"),
-                "to": str("ISO 8601; a date includes that whole day; default a week after from"),
-                "calendar": str("a calendar's name; omit for every calendar"),
-                "query": str("only events whose title, location or notes contain this"),
-                "limit": num("at most this many; default 200"),
-            ]),
-            function("create", "Create an event.", fields, required: ["title", "start"]),
-            function("update", "Change an event: only the fields given.", fields.merging(["id": id, "future": future]) { a, _ in a }, required: ["id"]),
-            function("delete", "Delete an event.", ["id": id, "future": future], required: ["id"]),
-        ])
-    }
 
     func run(_ function: String, _ input: Input) async throws -> Any {
         let ek = Events.shared, store = ek.store

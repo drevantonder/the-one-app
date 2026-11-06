@@ -65,6 +65,7 @@ export default {
   tagline: "Your chats",
   icon: "whatsapp-logo",
   color: "#25d366",
+  domain: "whatsapp.com",
   description: "Your WhatsApp chats, for your agents: read, search and send",
   needs: "Needs a device of yours to link your phone to",
   instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. Each list pages back with limit and skip. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",

@@ -7,11 +7,16 @@ import os
 /// registers only once it has what it needs from the person: until then the Mac app's own copy, if it has one, answers.
 public protocol Service: Sendable {
     var app: String { get }
-    var description: [String: Any] { get }
+    /// The Mac app it reaches, by bundle id, whose icon is its picture.
+    var localApp: String? { get }
     /// What it still needs from the person before it can answer (a permission macOS hasn't given it), in words for
     /// them; nil once it has it. Asked every few seconds until then: asking macOS, which shows its prompt, is done once.
     func needs() async -> String?
     func run(_ function: String, _ input: Input) async throws -> Any
+}
+
+extension Service {
+    public var localApp: String? { nil }
 }
 
 /// Runs `service` until oned stops it: an app with no Dock icon or menu, so it can show an alert or a menu bar item.
@@ -47,16 +52,11 @@ enum Node {
         try? FileManager.default.removeItem(at: problem)
         while true {
             do {
-                try await post(url, service.description)
+                try await post(url, Wire.registration(localApp: service.localApp))
                 while true {
                     guard let call = try await next(url) else { continue }
                     Task.detached {
-                        var reply: [String: Any]
-                        do {
-                            reply = ["ok": try await service.run(call.function, call.input)]
-                        } catch {
-                            reply = ["error": (error as? Refusal)?.description ?? error.localizedDescription]
-                        }
+                        let reply = await Wire.reply { try await service.run(call.function, call.input) }
                         try? await post(url.appending(path: "calls/\(call.id)"), reply)
                     }
                 }
@@ -73,12 +73,6 @@ enum Node {
         return URLSession(configuration: config)
     }()
 
-    private struct Call: Sendable {
-        var id: UInt64
-        var function: String
-        var input: Input
-    }
-
     /// Read for each request, so an endpoint that starts after it still lets it in.
     private static func authorize(_ request: inout URLRequest) {
         if let token = try? String(contentsOf: home.appending(path: "local-token"), encoding: .utf8) {
@@ -87,16 +81,14 @@ enum Node {
     }
 
     /// Its endpoint's next call; nil if there was none for 25 seconds.
-    private static func next(_ url: URL) async throws -> Call? {
+    private static func next(_ url: URL) async throws -> Wire.Call? {
         var request = URLRequest(url: url.appending(path: "calls"), timeoutInterval: 40)
         authorize(&request)
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode
         if status == 204 { return nil }
-        guard status == 200, let call = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = (call["id"] as? NSNumber)?.uint64Value, let function = call["op"] as? String
-        else { throw URLError(.badServerResponse) }
-        return Call(id: id, function: function, input: Input(call["input"] as? [String: Any] ?? [:], caller: call["caller"] as? [String: Any] ?? [:]))
+        guard status == 200 else { throw URLError(.badServerResponse) }
+        return try Wire.call(data)
     }
 
     private static func post(_ url: URL, _ body: Any) async throws {
@@ -107,6 +99,43 @@ enum Node {
         authorize(&request)
         let (_, response) = try await session.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+    }
+}
+
+/// What a service and its node say to each other, in JSON: the same as `service/src/lib.rs` and WhatsApp's Go service say
+/// it, which tests/contracts.rs holds all three to with `service/wire.json`.
+enum Wire {
+    /// A call the node hands it: `{ id, op, input, caller }`.
+    struct Call: Sendable {
+        var id: UInt64
+        var function: String
+        var input: Input
+    }
+
+    static func call(_ data: Data) throws -> Call {
+        guard let call = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = (call["id"] as? NSNumber)?.uint64Value, let function = call["op"] as? String
+        else { throw URLError(.badServerResponse) }
+        return Call(id: id, function: function, input: Input(call["input"] as? [String: Any] ?? [:], caller: call["caller"] as? [String: Any] ?? [:]))
+    }
+
+    /// What it says it is, which is only what's about this Mac: its title, instructions and tools are its app's.
+    static func registration(localApp: String?) -> [String: Any] {
+        var d: [String: Any] = ["version": build]
+        if let localApp {
+            d["local_app"] = localApp
+            if let image = appIcon(localApp) { (d["image"], d["image_kind"]) = (image, "icon") }
+        }
+        return d
+    }
+
+    /// The answer to a call: `{ ok }`, or `{ error }` in words for whoever asked.
+    static func reply(_ run: () async throws -> Any) async -> [String: Any] {
+        do {
+            return ["ok": try await run()]
+        } catch {
+            return ["error": (error as? Refusal)?.description ?? error.localizedDescription]
+        }
     }
 }
 
@@ -231,21 +260,12 @@ public func object(_ fields: [String: Any?]) -> [String: Any] {
 }
 
 /// This helper's build, as the Mac app's build gives it.
-public var build: String { Bundle.main.object(forInfoDictionaryKey: "BuildCommit") as? String ?? "" }
-
-/// A service's description: what it is, the Mac app it reaches (`localApp`, a bundle id) and that app's icon as its
-/// picture, and the helper's build and how it's installed.
-public func describe(title: String, icon: String, localApp: String, summary: String, instructions: String, functions: [[String: Any]]) -> [String: Any] {
-    var d: [String: Any] = ["title": title, "icon": icon, "local_app": localApp, "description": summary, "instructions": instructions, "ops": functions, "widgets": [Any](),
-                            "version": build, "install": "Comes with the Mac app."]
-    if let image = appIcon(localApp) { (d["image"], d["image_kind"]) = (image, "icon") }
-    return d
-}
+private var build: String { Bundle.main.object(forInfoDictionaryKey: "BuildCommit") as? String ?? "" }
 
 /// A Mac app's icon, as a PNG data URL small enough to travel in every Hello: 88 pixels, a 44-point tile at 2x. Only
 /// the icon's own shape: macOS draws app icons on a grid that leaves a clear margin (100 of 1024 points on each side),
 /// which is cut away, so a shell draws it edge to edge as the Dock does.
-public func appIcon(_ bundle: String) -> String? {
+private func appIcon(_ bundle: String) -> String? {
     guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else { return nil }
     let icon = NSWorkspace.shared.icon(forFile: url.path)
     let size = 88
@@ -260,16 +280,6 @@ public func appIcon(_ bundle: String) -> String? {
     guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
     return "data:image/png;base64," + png.base64EncodedString()
 }
-
-public func function(_ name: String, _ description: String, _ properties: [String: [String: Any]] = [:], required: [String] = []) -> [String: Any] {
-    var input: [String: Any] = ["type": "object", "properties": properties]
-    if !required.isEmpty { input["required"] = required }
-    return ["name": name, "description": description, "input": input]
-}
-
-public func str(_ description: String) -> [String: Any] { ["type": "string", "description": description] }
-public func num(_ description: String) -> [String: Any] { ["type": "integer", "description": description] }
-public func flag(_ description: String) -> [String: Any] { ["type": "boolean", "description": description] }
 
 extension String {
     public var nonEmpty: String? { isEmpty ? nil : self }

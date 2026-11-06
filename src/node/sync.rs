@@ -293,11 +293,11 @@ impl Node {
                 return false;
             }
         };
-        let (mut describe, _) = offers;
+        let (describe, _) = offers;
         // Whom it serves is what its listing says, never what it says of itself.
         let users: Vec<String> = self.with(|i| { let m = i.r.db(); Ok(m.users().into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&key))).collect()) }).unwrap_or_default();
-        describe["name"] = json!(name);
-        let services: Vec<Service> = vec![(name.clone(), users, describe)];
+        self.learn_app(&name).await;
+        let services: Vec<Service> = vec![(name.clone(), users, self.listed_as_app(&name, describe))];
         let far = self.round_trip(&key);
         let changed = self.with(|i| {
             if let Some(far) = far {

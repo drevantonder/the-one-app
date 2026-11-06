@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use one_service::{Answer, Call, Host, Service};
-use serde_json::{Value, json};
+use serde_json::json;
 
 /// The custom build's command (`one`), and whether this service writes into the harnesses: not for a node with a
 /// home of its own (a throwaway network's), which writes nowhere else.
@@ -25,11 +25,7 @@ fn main() -> Result<()> {
         eprintln!("agents: its node has a home of its own, so it leaves this machine's harnesses alone");
     }
     let _ = HERE.set((cli, writes));
-    one_service::serve(Service { name: "agents", describe, call, start: Some(start) })
-}
-
-fn describe() -> Value {
-    json!({ "title": "AGENTS.md", "icon": "brain", "color": "#ff2d55", "description": "Writes your agents' instructions and skills into every harness on this device", "ops": [], "widgets": [] })
+    one_service::serve(Service { name: "agents", prefer_here: &[], call, start: Some(start) })
 }
 
 fn call(_: &Host, call: &Call) -> Result<Answer> {

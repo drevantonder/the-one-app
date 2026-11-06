@@ -9,36 +9,7 @@ use serde_json::{Value, json};
 const OLLAMA: &str = "http://127.0.0.1:11434";
 
 fn main() -> Result<()> {
-    one_service::serve(Service { name: "models", describe, call, start: None })
-}
-
-fn describe() -> Value {
-    json!({
-        "title": "Models", "icon": "cpu", "color": "#32ade6", "description": "Runs AI models on your own devices",
-        "instructions": "Local models run on the device that has them. models_here lists this device's models; give device \"all\" for every device's, and which are loaded. models_chat asks one and returns its answer, on whichever of your devices has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
-        "ops": [
-            { "name": "here", "reads": true, "prefer": "here", "description": "This device's local models, and whether each is loaded; give device \"all\" for every device's.", "input": { "type": "object", "properties": {} } },
-            { "name": "chat", "reads": true, "description": "Ask a local model and get its answer, on whichever of your devices has it (or the device given). Give prompt, or messages as [{role, content}]; system sets its instructions; format \"json\" or a JSON schema makes it answer in JSON.",
-              "input": { "type": "object", "required": ["model"], "properties": {
-                  "model": { "type": "string", "description": "a model's name as here lists it" },
-                  "prompt": { "type": "string" },
-                  "images": { "type": "array", "items": { "type": "string" }, "description": "images (JPEG, PNG or WebP) in base64, shown with the prompt" },
-                  "messages": { "type": "array", "items": { "type": "object" } },
-                  "system": { "type": "string" },
-                  "format": { "description": "\"json\", or a JSON schema the answer must match" },
-                  "think": { "type": "boolean", "description": "whether a thinking model reasons first" },
-                  "options": { "type": "object", "description": "Ollama's options, like { temperature: 0, num_predict: 1024 }" },
-              }}},
-            { "name": "decide", "reads": true, "description": "Ask a decision model (a model with the decision capability, like clef-flash) questions about something and get typed answers with probabilities: choice (one of criteria, an object of option: description), noul (yes/no) or score (levels, lowest first). Answers { answers: { name: { choice, probabilities, confidence } }, usage }.",
-              "input": { "type": "object", "required": ["model", "questions"], "properties": {
-                  "model": { "type": "string", "description": "a decision model, like clef-flash" },
-                  "state": { "type": "object", "description": "what to decide about: named fields" },
-                  "questions": { "type": "object", "description": "named questions, each { type, instructions, criteria | levels }" },
-                  "images": { "type": "array", "description": "images in base64 (or [{ content_type, base64 }]), named in state as image 1, 2..." },
-              }}},
-        ],
-        "widgets": [],
-    })
+    one_service::serve(Service { name: "models", prefer_here: &["here"], call, start: None })
 }
 
 fn call(_: &Host, call: &Call) -> Result<Answer> {

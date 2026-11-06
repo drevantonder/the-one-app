@@ -50,7 +50,7 @@ const GONE_AFTER: Duration = Duration::from_secs(60);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {
     pub id: u64,
-    /// The function it runs: `op` on the wire, which older services read.
+    /// The function it runs: `op` on the wire.
     #[serde(rename = "op")]
     pub function: String,
     pub input: Value,
@@ -72,9 +72,9 @@ struct Registered {
 /// The services registered over the local API.
 pub struct Services {
     by_app: Mutex<HashMap<String, std::sync::Arc<Registered>>>,
-    /// Every service that asked to register lately, switched on here or not, by what it said it is: what this device
-    /// could run (the Mac app's, which it offers while it runs).
-    offered: Mutex<HashMap<String, (Value, Instant)>>,
+    /// When each service last asked to register, switched on here or not: what this device could run (the Mac app's,
+    /// which it offers while it runs).
+    offered: Mutex<HashMap<String, Instant>>,
     next: std::sync::atomic::AtomicU64,
 }
 
@@ -95,25 +95,20 @@ impl Services {
     }
 
     /// Notes that `app` asked to register here, switched on or not.
-    pub fn offer(&self, app: &str, describe: &Value) {
-        self.offered.lock().unwrap().insert(app.to_string(), (describe.clone(), Instant::now()));
+    pub fn offer(&self, app: &str) {
+        self.offered.lock().unwrap().insert(app.to_string(), Instant::now());
     }
 
-    /// The services that asked to register here lately, switched on or not, each as it said it is.
-    pub fn offered(&self) -> Vec<(String, Value)> {
+    /// The services that asked to register here lately, switched on or not.
+    pub fn offered(&self) -> Vec<String> {
         let offered = self.offered.lock().unwrap();
-        offered.iter().filter(|(_, (_, at))| at.elapsed() < GONE_AFTER).map(|(n, (d, _))| (n.clone(), d.clone())).collect()
+        offered.iter().filter(|(_, at)| at.elapsed() < GONE_AFTER).map(|(n, _)| n.clone()).collect()
     }
 
     fn get(&self, app: &str) -> Option<std::sync::Arc<Registered>> {
         let p = self.by_app.lock().unwrap().get(app).cloned()?;
         let fresh = p.seen.lock().unwrap().elapsed() < GONE_AFTER;
         fresh.then_some(p)
-    }
-
-    /// A registered service's title, if it gives one.
-    pub fn title(&self, app: &str) -> Option<String> {
-        self.get(app)?.describe["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string)
     }
 
     pub fn has(&self, app: &str) -> bool {
@@ -142,12 +137,11 @@ impl Services {
             p = self.get(app);
         }
         let p = p.ok_or_else(|| crate::protocol::Coded::error(crate::protocol::code::RESTARTING, format!("{app} isn't running on this device")))?;
-        let title = p.describe["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or(app).to_string();
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         p.replies.lock().unwrap().insert(id, (tx, caller.clone()));
-        p.calls.send(Call { id, function: function.into(), input, caller, from }).map_err(|_| anyhow!("{title} stopped"))?;
-        let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{title} didn't answer"))??;
+        p.calls.send(Call { id, function: function.into(), input, caller, from }).map_err(|_| anyhow!("{app} stopped"))?;
+        let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{app} didn't answer"))??;
         if let Some(why) = reply.get("elsewhere") {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
         }

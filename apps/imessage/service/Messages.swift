@@ -7,35 +7,7 @@ import SQLite3
 /// iMessage: reads the Messages database (which needs Full Disk Access) and sends through the Messages app.
 struct MessagesApp: Service {
     let app = "imessage"
-
-    var description: [String: Any] {
-        let chat = str("the chat's name, a part of it only one chat has, a phone number or email address, or an id chats gives")
-        let since = str("only messages after this: an ISO 8601 date or date-time")
-        return describe(title: "iMessage", icon: "chat-circle", localApp: "com.apple.MobileSMS", summary: "Lets your apps and agents read and send your Messages", instructions:
-            "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; " +
-            "imessage_search finds messages. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. " +
-            "Reading never marks a message read.", functions: [
-            function("chats", "Recent chats, most recent first: who, when, the last message, and how many are unread.", [
-                "unread": flag("only chats with unread messages"),
-                "limit": num("at most this many; default 30"),
-                "skip": num("skip this many of the most recent, to page back"),
-            ]),
-            function("read", "A chat's messages, newest last. Page back with skip.", [
-                "chat": chat, "since": since,
-                "limit": num("this many; default 30"),
-                "skip": num("skip this many of the newest, to read further back"),
-            ], required: ["chat"]),
-            function("search", "Messages containing some text, across chats or in one, newest last.", [
-                "query": str("text to look for, case-insensitive"), "chat": str("only in this chat"), "since": since,
-                "limit": num("at most this many; default 30"),
-                "skip": num("skip this many of the newest matches, to page back"),
-            ], required: ["query"]),
-            function("send", "Send an iMessage from the person's account, to a phone number, an email address or a chat. This sends a real message to a real person.", [
-                "to": str("a phone number with its country code, an email address, or a chat as chats names it"),
-                "text": str("the message"),
-            ], required: ["to", "text"]),
-        ])
-    }
+    let localApp: String? = "com.apple.MobileSMS"
 
     /// Full Disk Access to read Messages' database, which macOS never asks for: the person turns it on. Then control of
     /// Messages, to send, which it asks for once (Messages open, hidden, if it isn't). Contacts' names are asked for

@@ -4,41 +4,9 @@ import Helper
 
 struct RemindersApp: Service {
     let app = "reminders"
+    let localApp: String? = "com.apple.reminders"
 
     func needs() async -> String? { Events.shared.needs(.reminder) }
-
-    var description: [String: Any] {
-        let priority = str("high, medium, low or none")
-        return describe(title: "Reminders", icon: "list-checks", localApp: "com.apple.reminders", summary: "Lets your apps and agents use Reminders on your Mac", instructions:
-            "Reminders are the person's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; " +
-            "reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.", functions: [
-            function("lists", "The reminder lists."),
-            function("list", "Reminders, soonest due first; only those not completed, unless asked.", [
-                "list": str("a list's name; omit for every list"),
-                "until": str("only reminders due by then: an ISO 8601 date or date-time"),
-                "query": str("only reminders whose title or notes contain this"),
-                "completed": flag("include completed reminders"),
-                "limit": num("at most this many; default 100"),
-            ]),
-            function("create", "Create a reminder.", [
-                "title": str("what to be reminded of"),
-                "list": str("a list's name; default is the default list"),
-                "due": str("an ISO 8601 date (2026-11-01), or a date-time (2026-11-01T09:00) to be alerted then"),
-                "notes": str("more detail"),
-                "priority": priority,
-            ], required: ["title"]),
-            function("update", "Change a reminder, or complete it.", [
-                "id": str("the reminder's id, as list gives it"),
-                "title": str("a new title"),
-                "list": str("move it to this list"),
-                "due": str("an ISO 8601 date or date-time, or \"none\" to clear it"),
-                "notes": str("new notes"),
-                "priority": priority,
-                "completed": flag("true completes it; false makes it not done again"),
-            ], required: ["id"]),
-            function("delete", "Delete a reminder.", ["id": str("the reminder's id, as list gives it")], required: ["id"]),
-        ])
-    }
 
     func run(_ function: String, _ input: Input) async throws -> Any {
         let ek = Events.shared, store = ek.store

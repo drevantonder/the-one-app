@@ -104,6 +104,8 @@ struct Runtime {
     listener: std::net::TcpListener,
     /// What each loaded app says it is, once asked.
     described: Mutex<std::collections::HashMap<String, Value>>,
+    /// What each app last said it is, kept when the apps load again, for a service to be listed as its app says.
+    identity: Mutex<std::collections::HashMap<String, Value>>,
 }
 
 impl Apps {
@@ -120,7 +122,7 @@ impl Apps {
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         write_config(dir, &[], port, outbound, 0)?;
-        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), Vec::new(), 0)), listener, described: Mutex::new(Default::default()) });
+        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), Vec::new(), 0)), listener, described: Mutex::new(Default::default()), identity: Mutex::new(Default::default()) });
         if APART.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(Apps(runtime));
         }
@@ -286,8 +288,23 @@ impl Apps {
         let d = asking.await?["ok"].clone();
         if self.0.loaded.lock().unwrap().2 == generation {
             self.0.described.lock().unwrap().insert(app.to_string(), d.clone());
+            self.0.identity.lock().unwrap().insert(app.to_string(), d.clone());
         }
         Ok(d)
+    }
+
+    /// What `app` last said it is, run here or not yet added: nothing until it's been described.
+    pub fn identity(&self, app: &str) -> Option<Value> {
+        self.0.identity.lock().unwrap().get(app).cloned()
+    }
+
+    /// Describes `app` as it runs here or, if no one has added it, as a built-in waiting to be: what a service of it
+    /// is listed as.
+    pub async fn describe_any(&self, app: &str) -> Result<Value> {
+        match self.has(app) {
+            true => self.describe(app).await,
+            false => self.describe_unadded(app).await,
+        }
     }
 
     /// `app`'s title, if it runs here and declares one.

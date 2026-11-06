@@ -17,18 +17,7 @@ use one_service::{Answer, Call, Host, Service};
 const ASK: Duration = Duration::from_secs(15);
 
 fn main() -> Result<()> {
-    one_service::serve(Service { name: "ai-usage", describe, call: |h, c| call(h, c).map(Answer::new), start: None })
-}
-
-fn describe() -> Value {
-    json!({
-        "title": "AI Usage", "description": "This machine's AI plan limits, from the providers themselves", "icon": "gauge",
-        "instructions": "AI Usage reads every AI plan signed in on its machine straight from the provider: ai-usage_usage gives each account's windows (used % and resets) and ai-usage_accounts just the sign-ins, no network. A token never leaves the service. It never renews one: a sign-in that's run out renews when its tool is next used.",
-        "ops": [
-            { "name": "usage", "reads": true, "description": "Every AI account's usage on this machine, asked of the providers now: { accounts: [{ provider, account, email, org, active, disabled, plan, session|weekly|monthly: { used, resetsAt }, models, extra, error }] }.", "input": { "type": "object", "properties": {} }},
-            { "name": "accounts", "reads": true, "description": "The AI sign-ins on this machine, without asking the providers: { accounts: [{ provider, account, email, org, active, disabled, expired }] }.", "input": { "type": "object", "properties": {} }},
-        ],
-    })
+    one_service::serve(Service { name: "ai-usage", prefer_here: &[], call: |h, c| call(h, c).map(Answer::new), start: None })
 }
 
 /// A sign-in found on this machine: who it is, and its token, which only ever reaches its own provider.

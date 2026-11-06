@@ -4,20 +4,8 @@ import Foundation
 
 struct ContactsApp: Service {
     let app = "contacts"
+    let localApp: String? = "com.apple.AddressBook"
     private static let store = Unshared(CNContactStore())
-
-    var description: [String: Any] {
-        describe(title: "Contacts", icon: "user-circle", localApp: "com.apple.AddressBook", summary: "Lets your apps and agents look up your contacts", instructions:
-            "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; " +
-            "contacts_me is the person's own card.", functions: [
-            function("search", "Find contacts by name, email address or phone number.", [
-                "query": str("a name or part of one, an email address, or a phone number"),
-                "limit": num("at most this many; default 25"),
-            ], required: ["query"]),
-            function("get", "One contact, by the id search gives.", ["id": str("the contact's id")], required: ["id"]),
-            function("me", "The person's own contact card."),
-        ])
-    }
 
     func run(_ function: String, _ input: Input) async throws -> Any {
         try Self.access()

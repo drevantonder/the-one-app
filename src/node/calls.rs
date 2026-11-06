@@ -342,9 +342,9 @@ impl Node {
             return Ok(vec![self.find_device(device)?]);
         }
         let here = self.runs_service_here(&req.app);
-        // A service, or one of its functions, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
-        // on the caller's first.
-        let about_here = |d: &Value| d["prefer"] == "here" || d["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == req.tool.as_str() && o["prefer"] == "here"));
+        // A function of a service that's about its own machine (`prefer: { run: "here" }`: Shell's run, Models' here) runs on
+        // the caller's first.
+        let about_here = |d: &Value| d["prefer"][req.tool.as_str()] == "here";
         // This device: its node, or a part of it (a service endpoint of oned's own).
         let ours = |i: &Network, k: &Key| *k == self.0.id || i.r.db().machine(k).is_some_and(|m| m.device == Some(self.0.id));
         let here_first = req.service.is_some()

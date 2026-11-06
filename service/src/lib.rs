@@ -1,11 +1,11 @@
 //! A service in Rust: a program of its own, which its device's oned starts (`oned <name>`, src/services/endpoint.rs) and tells
 //! where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`) and where its data goes (`<NAME>_DATA`).
 //! It registers, long-polls for calls and answers each on a thread of its own, registering again whenever it's
-//! forgotten, until oned stops it, as WhatsApp's service does in Go.
+//! forgotten, until oned stops it. What it says to its node, and the node to it, is `service/wire.json`, which WhatsApp's service
+//! in Go and the Mac's in Swift (`service/swift`) say as well; tests/contracts.rs holds them to it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail, ensure};
@@ -69,11 +69,12 @@ impl std::fmt::Display for Elsewhere {
 
 impl std::error::Error for Elsewhere {}
 
-/// A service: what it says it is, and how it answers.
+/// A service: its name, which is its app's, and how it answers. What the app is (its title, tools and instructions) the
+/// app says; a service says only what's about its machine.
 pub struct Service {
     pub name: &'static str,
-    /// What it says it is; it registers again when this changes (as Agent Devices' browser tools, read from a device).
-    pub describe: fn() -> Value,
+    /// The functions about its own machine (Shell's `run`), which a call tries on the caller's device first.
+    pub prefer_here: &'static [&'static str],
     /// Runs one call, on a thread of its own.
     pub call: fn(host: &Host, call: &Call) -> Result<Answer>,
     /// Starts what it does between calls, once, before it registers.
@@ -198,15 +199,9 @@ pub fn serve(service: Service) -> Result<()> {
     if let Some(start) = service.start {
         start(&host);
     }
-    let described = || {
-        let mut describe = (service.describe)();
-        describe["version"] = json!(BUILD);
-        describe
-    };
-    // Calls being answered: registering again forgets them, so it waits for none.
-    let running = Arc::new(AtomicUsize::new(0));
+    let prefer: Value = service.prefer_here.iter().map(|f| (f.to_string(), json!("here"))).collect::<serde_json::Map<_, _>>().into();
+    let describe = json!({ "version": BUILD, "prefer": prefer });
     loop {
-        let describe = described();
         if let Err(err) = host.post(&format!("/v1/services/{name}"), &describe) {
             eprintln!("registering: {err:#}");
             std::thread::sleep(Duration::from_secs(3));
@@ -221,20 +216,14 @@ pub fn serve(service: Service) -> Result<()> {
                         continue;
                     }
                 },
-                Ok(None) => {
-                    if running.load(SeqCst) == 0 && described() != describe {
-                        break;
-                    }
-                    continue;
-                }
+                Ok(None) => continue,
                 Err(err) => {
                     eprintln!("waiting for calls: {err:#}");
                     std::thread::sleep(Duration::from_secs(1));
                     break;
                 }
             };
-            let (host, run, running) = (host.clone(), service.call, running.clone());
-            running.fetch_add(1, SeqCst);
+            let (host, run) = (host.clone(), service.call);
             std::thread::spawn(move || {
                 // One that panics is answered as failed, not left for its caller to wait out.
                 let reply = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&host, &call))) {
@@ -244,7 +233,6 @@ pub fn serve(service: Service) -> Result<()> {
                     Ok(Err(err)) => json!({ "error": format!("{err:#}") }),
                     Err(_) => json!({ "error": format!("{} failed: it panicked", host.name) }),
                 };
-                running.fetch_sub(1, SeqCst);
                 if let Err(err) = host.post(&format!("/v1/services/{}/calls/{}", host.name, call.id), &reply) {
                     eprintln!("answering {}: {err:#}", call.function);
                 }

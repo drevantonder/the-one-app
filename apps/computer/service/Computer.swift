@@ -10,22 +10,6 @@ import Helper
 struct ComputerApp: Service {
     let app = "computer"
 
-    var description: [String: Any] {
-        ["title": "Computer Use", "icon": "cursor-click", "color": "#ff9500",
-         "description": "Lets your own agents use this Mac's apps, keyboard and pointer, once you turn it on",
-         "instructions": "Agents use this Mac through Computer Use, as a device named after it.",
-         "ops": [
-            function("_status", "Whether agents may use this Mac, its name, the permissions macOS gave, and the agent using it now."),
-            function("_allow", "Turns letting agents use this Mac on or off. Turning it on asks the person at the Mac first.", ["on": flag("on or off")], required: ["on"]),
-            function("_tools", "This Mac's tools, or one in full.", ["name": str("a tool's name")]),
-            function("_use", "Runs one of this Mac's tools.", ["tool": str("the tool's name"), "args": ["type": "object", "description": "the tool's input"]], required: ["tool"]),
-            function("_screen", "A small picture of this Mac's screen.", ["width": num("its width in pixels; default 640")]),
-         ],
-         "widgets": [Any](),
-         "version": build,
-         "install": "Comes with the Mac app."]
-    }
-
     /// Nothing while agents may not use this Mac; once they may, Accessibility and Screen Recording, asked for once.
     /// Screen Recording counts only from a process started after it's given, so once Accessibility is, the helper
     /// stops now and then for oned to start it again, until it has both.

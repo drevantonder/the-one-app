@@ -151,7 +151,7 @@ fn main() -> Result<()> {
     {
         return linux::delete_all(std::path::Path::new(dir));
     }
-    one_service::serve(Service { name: NAME, describe, call, start: Some(start) })
+    one_service::serve(Service { name: NAME, prefer_here: &[], call, start: Some(start) })
 }
 
 fn start(host: &Host) {
@@ -176,128 +176,8 @@ fn call(host: &Host, call: &Call) -> Result<Answer> {
     ds.run(&caller, &call.function, input)
 }
 
-fn describe() -> Value {
-    let mut functions = own_functions();
-    let tools: Vec<Tool> = DEVICES.get().map(|ds| ds.tools.lock().unwrap().clone()).unwrap_or_else(|| {
-        std::fs::read(one_service::dir(NAME).join("tools.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
-    });
-    for t in &tools {
-        if BROWSING.contains(&t.name.as_str()) {
-            functions.push(json!({ "name": t.name, "description": t.description, "input": with_device(&t.input_schema) }));
-        }
-    }
-    // Chrome devices answer them here, with or without a Linux device to read their descriptions from.
-    for name in BROWSING {
-        if !functions.iter().any(|f| f["name"] == name) {
-            functions.push(json!({ "name": name, "description": "One of the browser tools, as Computer Use describes it.", "input": with_device(&json!({ "type": "object", "additionalProperties": true })) }));
-        }
-    }
-    json!({ "title": "Agent Devices", "description": "Devices your agents use: Linux with a browser, Windows, Android and iPhones", "icon": "browsers", "color": "#a2845e",
-        "instructions": INSTRUCTIONS, "ops": functions, "widgets": [] })
-}
-
-fn with_device(schema: &Value) -> Value {
-    let mut s = if schema.is_object() { schema.clone() } else { json!({ "type": "object" }) };
-    if !s["properties"].is_object() {
-        s["properties"] = json!({});
-    }
-    s["properties"]["device"] = device_arg();
-    s
-}
-
-fn object(props: Value, required: &[&str]) -> Value {
-    let mut o = json!({ "type": "object", "properties": props });
-    if !required.is_empty() {
-        o["required"] = json!(required);
-    }
-    o
-}
-
-fn s(description: &str) -> Value {
-    json!({ "type": "string", "description": description })
-}
-
-fn n(description: &str) -> Value {
-    json!({ "type": "integer", "description": description })
-}
-
-fn b(description: &str) -> Value {
-    json!({ "type": "boolean", "description": description })
-}
-
-fn device_arg() -> Value {
-    s("which device, by name; default the only one")
-}
-
-fn kind_arg() -> Value {
-    s("linux (with a browser; the default), chrome (the machine's own Chrome, no container: quicker and lighter, where its owner allows it), windows, android or iphone: kinds lists what each of your devices runs")
-}
-
-const INSTRUCTIONS: &str = "Devices for agents on your devices: Linux with a browser, a machine's own Chrome where its owner allows it, and Windows, Android and iPhones where this machine runs them (kinds). Agents use them through Computer Use (computer_*), and the person sees them on the Agent Devices page.";
-
-/// The device's tools offered as functions of their own; the rest are reached through use.
+/// The device's browser tools, which this service's functions are; the rest are reached through `use`.
 const BROWSING: [&str; 8] = ["get_browser_state", "browser_prepare", "browser_navigate", "browser_click", "browser_type", "browser_select", "browser_pointer", "browser_dialog"];
-
-fn own_functions() -> Vec<Value> {
-    let name = object(json!({ "device": s("the device's name") }), &["device"]);
-    let size_arg = s("small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small");
-    let prof = json!({ "type": "object", "description": "a browser profile, as the app gives it from its Vault item: item, name, key (filled in by the node), blob and salt" });
-    let function = |name: &str, description: &str, input: Value| json!({ "name": name, "description": description, "input": input });
-    vec![
-        function("list", "The agent devices on every one of your devices: the device each is on, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
-            object(json!({ "here": b("only those on this device") }), &[])),
-        function("kinds", "The kinds of device each of your devices runs (linux, chrome, windows, android, iphone), with what input each takes, whether it has room for another and how many lasting ones nobody has borrowed, and its memory to spare in GB. A kind it can't run now (chrome its owner hasn't allowed) has unavailable: why.",
-            object(json!({ "here": b("only those on this device") }), &[])),
-        function("chrome", "Whether each of your devices runs chrome devices (its own Chrome, outside any container): allowed; shared, that it runs calls of a group's, global or someone else's too, where it's off until its owner allows it; chosen, that its owner chose; and can, why it can't (no Chrome installed), or \"\".",
-            object(json!({ "here": b("only this device") }), &[])),
-        function("set_chrome", "Allow chrome devices on one of your devices, or not: only its owner may. It holds whatever the device comes to run.",
-            object(json!({ "on": s("which device, by name; default this one"), "allowed": b("true to allow them") }), &["allowed"])),
-        function("adopt", "Make something already on this device a lasting agent device: a Windows VM's folder, an Android Virtual Device, or a simulator.",
-            object(json!({ "device": s("its name"), "kind": kind_arg(), "dir": s("windows: its folder"), "id": s("android: its AVD; iphone: its simulator's UDID"),
-                "port": n("windows: its SSH port here; android: its console port"), "display": n("windows: its VNC display"), "cpus": n("windows: its CPUs"), "gb": n("windows: its memory") }), &["device", "kind"])),
-        function("open", "Open a URL in a device's browser.", object(json!({ "device": s("the device's name"), "url": s("the URL") }), &["device", "url"])),
-        function("install", "Install an app on a device: a file here or a URL (.apk, .msi, .msix, .exe, .app, .deb), or a package's name (winget id, Android package, apt package).",
-            object(json!({ "device": s("the device's name"), "app": s("the app") }), &["device", "app"])),
-        function("run", "Run a command on a device and give its output: PowerShell on Windows, the shell on Android and Linux, simctl spawn on an iPhone.",
-            object(json!({ "device": s("the device's name"), "command": s("the command") }), &["device", "command"])),
-        function("reach", "Let a Windows, Android or iPhone device reach a port of this machine's 127.0.0.1 at the same port on its own, until it stops.",
-            object(json!({ "device": s("the device's name"), "port": n("the port") }), &["device", "port"])),
-        function("borrow", "Borrow a device for as long as you need it. Linux (the default): one of your own whose browser starts with a copy of a browser profile, quick, as a spare is kept ready. Chrome: a machine's own Chrome, started for you with a copy of the profile, in a second; its browser tools are ready at once (browser_prepare gives target_id and tab_id). Other kinds: the person's lasting device, one agent at a time, or a throwaway copy of it. Give it back with give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
-            object(json!({ "kind": kind_arg(), "device": s("a lasting device, by name"), "copy": b("a throwaway copy, not the lasting device"),
-                "for": s("what you need it for, in a few words, e.g. Reading Messenger; the person sees it"),
-                "profile": prof.clone(), "screen": b("false for a device nobody watches: no view link"),
-                "by": s("who's borrowing, e.g. your app's name; default the device you call from") }), &["for"])),
-        function("give_back", "Give back a borrowed device: it's deleted with everything in it, its browser's changes to the profile too. A sign_in device's profile is saved first.", name.clone()),
-        function("sign_in", "For the person: opens a page in a browser on a browser profile and gives a link to use it from their own devices, to sign in to sites. It's saved when its time is up, or on save_profile.",
-            object(json!({ "profile": prof.clone(), "url": s("the page to open, e.g. a site's sign-in page"), "minutes": n("how long until it's saved and closed; default 30, at most 240") }), &["profile"])),
-        function("save_profile", "Save a browser profile from the device signing in to it (closing that device), or from the device named.",
-            object(json!({ "device": s("the device's name"), "profile": prof }), &[])),
-        function("signing_in", "The browser profiles being signed in to on each of your devices: item, profile, device, on and until.", object(json!({}), &[])),
-        function("create", "Create a lasting device and start it, for the person, on the first of your devices in Where Things Run (Settings > Devices) that runs its kind and has room: Linux with a browser of its own unless kind says another. Takes a minute. Agents borrow instead.",
-            object(json!({ "device": s("its name: lowercase letters, digits and dashes"), "kind": kind_arg(), "size": size_arg.clone() }), &["device"])),
-        function("resize", "Change how much CPU and memory a device may use, at once, without restarting it.",
-            object(json!({ "device": s("the device's name"), "size": size_arg.clone() }), &["device", "size"])),
-        function("start", "Start a stopped (or paused) device. It starts again after the device it's on restarts, if that has memory to spare then.", name.clone()),
-        function("stop", "Stop a device. Its files and sign-ins stay; it stays stopped until started.", name.clone()),
-        function("delete", "Delete a device and everything in it, its sign-ins too. Only when the person asked.", name.clone()),
-        function("view", "A link to watch and use a device in a browser, for the person: to solve a challenge, or to see what an agent is doing. Works on their own devices.",
-            object(json!({ "device": device_arg(), "minutes": n("how long the link works; default 60, at most 1440") }), &[])),
-        function("screen", "A small picture of a device as it is now.",
-            object(json!({ "device": device_arg(), "width": n("the picture's width in pixels; default 640, at most 1920") }), &[])),
-        function("tools", "The device's other tools, for computer_use; with name, that tool's full description and input.",
-            object(json!({ "device": device_arg(), "name": s("a tool's name") }), &[])),
-        function("refresh_tools", "Read the devices' tools again from a running device, as after its image was updated.", object(json!({}), &[])),
-        function("use", "Run one of the device's tools, as computer_tools lists them, e.g. list_windows, launch_app, click, type_text, get_guide.",
-            object(json!({ "device": device_arg(), "tool": s("the tool's name"), "args": { "type": "object", "description": "the tool's input" } }), &["tool"])),
-        function("backup", "Back up a device's home folder (its files and sign-ins, without caches) as a blob any of your devices can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.", name),
-        function("backups", "The backups of agent devices on every one of your devices, newest first.",
-            object(json!({ "device": s("only this device's"), "here": b("only those on this device") }), &[])),
-        function("restore", "Make an agent device on this device from a backup: the newest of the one named, from any of your devices, or the one with blob.",
-            object(json!({ "device": s("the backed-up device's name"), "blob": s("a particular backup's blob"), "as": s("the new device's name; default the same"), "size": size_arg }), &[])),
-        function("move", "Move an agent device to another of your devices: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
-            object(json!({ "device": s("the device's name"), "to": s("which of your devices to move it to") }), &["device", "to"])),
-    ]
-}
 
 /// The functions that act on this device even when given a device it doesn't have.
 const LOCAL: [&str; 12] = ["list", "kinds", "chrome", "set_chrome", "adopt", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"];
