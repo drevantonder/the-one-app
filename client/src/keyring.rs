@@ -18,7 +18,7 @@ use n0_future::time::{Duration, Instant};
 use one::config::YOURS;
 use one::database::scopes::{Scope, ScopeDb};
 use one::database::steps::{Reader, Welcome};
-use one::keys::{self, Handed, Handoff, Hash, Need, hex};
+use one::keys::{self, Handed, Handoff, Hash, Need, Opens, hex};
 use serde_json::{Value, json};
 
 use crate::{Body, Client, Error, Request, Response, TRACE_HEADER, not_let_in, unsent};
@@ -29,10 +29,11 @@ const KINDS_KEPT: usize = 128;
 const ROOT: &str = "root";
 const WELCOME: &str = "welcome";
 const NEEDS: &str = "needs.json";
+const WHO: &str = "who.json";
 
 /// Where a device keeps what outlives one run of it, by name: the network's root, pinned the first time it reads it
-/// (`root`); where the device that let it in had read to (`welcome`), until it's read from there; and what each kind
-/// of request needed (`needs.json`).
+/// (`root`); where the device that let it in had read to (`welcome`), until it's read from there; who's who as it last
+/// read it (`who.json`), to start from; and what each kind of request needed (`needs.json`).
 pub trait Keep {
     fn get(&self, name: &str) -> impl Future<Output = Option<Vec<u8>>>;
     fn put(&self, name: &str, bytes: &[u8]) -> impl Future<Output = anyhow::Result<()>>;
@@ -78,12 +79,36 @@ impl Known {
     fn who(&self) -> &ScopeDb {
         &self.reader.truth().expect("known once who's who is read").db
     }
+
+    /// What `reader` says, for the device whose key is `key`: fails `not_let_in` until it lists it as a client of its
+    /// person's.
+    fn of(reader: Reader, steps: one::database::stored::Keys, key: &[u8; 32], at: u64) -> Result<Known, Error> {
+        let who = &reader.truth().ok_or_else(|| not_let_in("This device isn't listed yet."))?.db;
+        let user = who.client(key).map_err(failed)?.map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
+        // The nodes that run something of its person's, and the Cloudflare node, which runs anyone's calls.
+        let cloudflare_node = who.cloudflare_node().map_err(failed)?;
+        let mut nodes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
+        for (key, seal) in who.nodes().map_err(failed)? {
+            if Some(key) == cloudflare_node || who.serves(&key, &user).map_err(failed)? {
+                nodes.insert(key, seal);
+            }
+        }
+        let set = one::rank::set(&who.settings().map_err(failed)?);
+        let ranks = nodes
+            .keys()
+            .map(|k| {
+                let id = if Some(*k) == cloudflare_node { one::rank::CLOUDFLARE.to_string() } else { hex(k) };
+                (*k, match one::rank::priority(&set, &id) { one::rank::Priority::Number(n) => n, one::rank::Priority::Last => u32::MAX })
+            })
+            .collect();
+        Ok(Known { reader, steps, user, nodes, cloudflare_node, ranks, at })
+    }
 }
 
-pub struct Keyring {
+pub struct Keyring<O = [u8; 32]> {
     key: [u8; 32],
-    /// Its seal key's secret, which opens what's sealed to it.
-    opens: [u8; 32],
+    /// What opens what's sealed to it: its seal key's secret, or in a browser, the WebCrypto key that can't be read.
+    opens: O,
     known: Mutex<Option<Known>>,
     /// Held while it reads who's who, so it reads once at a time.
     reading: tokio::sync::Mutex<()>,
@@ -96,9 +121,9 @@ pub struct Keyring {
     learning: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
-impl Keyring {
+impl<O: Opens> Keyring<O> {
     /// The keyring of the device whose key is `key`, opening what's sealed to it with `opens`.
-    pub fn new(key: [u8; 32], opens: [u8; 32]) -> Keyring {
+    pub fn new(key: [u8; 32], opens: O) -> Keyring<O> {
         Keyring {
             key,
             opens,
@@ -119,11 +144,18 @@ impl Keyring {
         let (bucket, now, me) = (on.bucket(), now(), hex(&self.key));
         let pinned = on.get(ROOT).await.and_then(|r| Hash::from_hex(String::from_utf8_lossy(&r).trim()).ok());
         let mut reader = Reader::new(pinned);
-        // From a copy of what it knows, which is asked meanwhile.
+        // From a copy of what it knows, which is asked meanwhile, or what it knew when it last ran, whose keys it opens
+        // again.
         let had = self.known.lock().unwrap().as_mut().and_then(|k| Some((k.reader.kept().ok()?, k.steps.clone())));
+        let had = match had {
+            Some(had) => Some(had),
+            None => on.get(WHO).await.and_then(|w| serde_json::from_slice(&w).ok()).map(|kept| (kept, Default::default())),
+        };
         let (epochs, steps) = match had {
             Some((kept, steps)) if reader.restart(&kept, now).is_ok() => {
-                reader.read(bucket, &steps, now).await.map_err(failed)?;
+                if !steps.is_empty() {
+                    reader.read(bucket, &steps, now).await.map_err(failed)?;
+                }
                 let newest = reader.truth().map(|t| t.db.epoch(&Scope::Global)).transpose().map_err(failed)?.unwrap_or(0);
                 match steps.keys().next_back().is_some_and(|n| *n >= newest) {
                     true => (BTreeMap::new(), steps),
@@ -148,28 +180,37 @@ impl Keyring {
         {
             on.put(ROOT, root.to_hex().as_bytes()).await.map_err(failed)?;
         }
-        let who = &reader.truth().ok_or_else(|| not_let_in("This device isn't listed yet."))?.db;
-        let user = who.client(&self.key).map_err(failed)?.map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
-        // The nodes that run something of its person's, and the Cloudflare node, which runs anyone's calls.
-        let cloudflare_node = who.cloudflare_node().map_err(failed)?;
-        let mut nodes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
-        for (key, seal) in who.nodes().map_err(failed)? {
-            if Some(key) == cloudflare_node || who.serves(&key, &user).map_err(failed)? {
-                nodes.insert(key, seal);
-            }
+        let mut known = Known::of(reader, steps, &self.key, now)?;
+        // Kept only to start from next time.
+        if let Ok(kept) = known.reader.kept().map(|k| k.to_string()) {
+            let _ = on.put(WHO, kept.as_bytes()).await;
         }
-        let set = one::rank::set(&who.settings().map_err(failed)?);
-        let ranks = nodes
-            .keys()
-            .map(|k| {
-                let id = if Some(*k) == cloudflare_node { one::rank::CLOUDFLARE.to_string() } else { hex(k) };
-                (*k, match one::rank::priority(&set, &id) { one::rank::Priority::Number(n) => n, one::rank::Priority::Last => u32::MAX })
-            })
-            .collect();
         self.epochs.lock().unwrap().extend(epochs.into_iter().map(|(n, key)| (("global".to_string(), n), key)));
-        *self.known.lock().unwrap() = Some(Known { reader, steps, user, nodes, cloudflare_node, ranks, at: now });
+        *self.known.lock().unwrap() = Some(known);
         Ok(())
     }
+
+    /// Who's who as it last read it when it ran before, if it kept it: → whether it knows who's who now.
+    pub async fn restore(&self, on: &impl Keep) -> bool {
+        if self.known.lock().unwrap().is_some() {
+            return true;
+        }
+        let Some(kept) = on.get(WHO).await.and_then(|w| serde_json::from_slice::<Value>(&w).ok()) else { return false };
+        let pinned = on.get(ROOT).await.and_then(|r| Hash::from_hex(String::from_utf8_lossy(&r).trim()).ok());
+        let mut reader = Reader::new(pinned);
+        let Ok(known) = reader.restart(&kept, now()).map_err(failed).and_then(|_| Known::of(reader, Default::default(), &self.key, 0)) else { return false };
+        self.known.lock().unwrap().get_or_insert(known);
+        true
+    }
+
+    /// Who's who as it last read it when it ran before, at once, if it kept it; else read from the bucket.
+    pub async fn load(&self, on: &(impl Address + Keep)) -> Result<(), Error> {
+        if self.restore(on).await {
+            return Ok(());
+        }
+        self.read(on).await
+    }
+
 
     /// Reads who's who again if it's been a while and it doesn't know one of `nodes` (as a node said they are).
     pub async fn reread_for(&self, on: &(impl Address + Keep), nodes: &[[u8; 32]]) {
@@ -182,6 +223,11 @@ impl Keyring {
     /// Who's who, as it last read it, for `f`: none before it has.
     pub fn who<R>(&self, f: impl FnOnce(&ScopeDb) -> R) -> Option<R> {
         self.known.lock().unwrap().as_ref().map(|k| f(k.who()))
+    }
+
+    /// Where it read who's who to, as it welcomes a device it approves.
+    pub fn welcome(&self) -> Option<Welcome> {
+        self.known.lock().unwrap().as_ref()?.reader.truth()?.welcome().ok()
     }
 
     /// Its person, as who's who lists this device.
@@ -214,7 +260,7 @@ impl Keyring {
         *self.needs.lock().unwrap() = Some(BTreeMap::new());
         self.epochs.lock().unwrap().clear();
         self.app_keys.lock().unwrap().clear();
-        for kept in [NEEDS, ROOT, WELCOME] {
+        for kept in [NEEDS, ROOT, WELCOME, WHO] {
             on.delete(kept).await;
         }
     }
@@ -432,7 +478,7 @@ impl Keyring {
         let (epochs, sealed) = n0_future::future::zip(epochs, sealed).await;
         for (scope, kept) in scopes.iter().zip(epochs) {
             if let Ok(kept) = kept {
-                self.open_epochs(scope, &kept)?;
+                self.open_epochs(scope, &kept).await?;
             }
         }
         for ((scope, app), kept) in apps.iter().zip(sealed) {
@@ -450,18 +496,15 @@ impl Keyring {
 
     /// Opens each of a scope's epochs in `kept` (what `/v1/keys` gave, sealed to this device) whose hash is the one
     /// who's who names.
-    fn open_epochs(&self, scope: &str, kept: &Value) -> Result<(), Error> {
+    async fn open_epochs(&self, scope: &str, kept: &Value) -> Result<(), Error> {
         let Ok(parsed) = Scope::parse(scope) else { return Ok(()) };
-        let opened: Vec<(u32, [u8; 32])> = kept["sealed"]
-            .as_object()
-            .into_iter()
-            .flatten()
-            .filter_map(|(m, sealed)| {
-                let m = m.parse::<u32>().ok()?;
-                let key = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| keys::open_sealed(&self.opens, &s).ok())?;
-                Some((m, <[u8; 32]>::try_from(key).ok()?))
-            })
-            .collect();
+        let mut opened: Vec<(u32, [u8; 32])> = Vec::new();
+        for (m, sealed) in kept["sealed"].as_object().into_iter().flatten() {
+            let (Ok(m), Ok(sealed)) = (m.parse::<u32>(), B64U.decode(sealed.as_str().unwrap_or("").as_bytes())) else { continue };
+            if let Some(key) = keys::open_sealed_by(&self.opens, &sealed).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
+                opened.push((m, key));
+            }
+        }
         for (m, key) in opened {
             let made = self.who(|who| who.epoch_hash(&parsed, m)).transpose().map_err(failed)?.flatten();
             if made == Some(keys::epoch_hash(&key)) {
@@ -511,7 +554,7 @@ impl Keyring {
             if fresh {
                 self.read(on).await?;
             }
-            self.open_epochs(scope, &kept)?;
+            self.open_epochs(scope, &kept).await?;
             if let Some(key) = self.epochs.lock().unwrap().get(&(scope.to_string(), n)) {
                 return Ok(*key);
             }

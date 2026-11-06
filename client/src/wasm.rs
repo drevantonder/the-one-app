@@ -15,7 +15,7 @@ fn key(hex: &str) -> Result<[u8; 32], JsError> {
 }
 
 #[wasm_bindgen]
-pub struct Client(crate::Client);
+pub struct Client(std::rc::Rc<crate::Client>);
 
 #[wasm_bindgen]
 impl Client {
@@ -25,7 +25,7 @@ impl Client {
     pub async fn start(secret: Vec<u8>, certificate: String, address: String, nodes: Vec<String>) -> Result<Client, JsError> {
         let secret: [u8; 32] = secret.try_into().map_err(|_| js("a session's key is 32 bytes"))?;
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
-        Ok(Client(crate::Client::start(secret, Some(certificate), &address, &nodes).await.map_err(js)?))
+        Ok(Client(std::rc::Rc::new(crate::Client::start(secret, Some(certificate), &address, &nodes).await.map_err(js)?)))
     }
 
     pub async fn certify(&self, certificate: String) {
@@ -74,7 +74,7 @@ impl Client {
                 }
             }
         };
-        let response = self.0.fetch_with(crate::Request { method, path, headers, body: body.into() }, sealed).await.map_err(|e| Failed { message: e.to_string(), trace: traced(e.trace) })?;
+        let response = self.0.fetch_with(crate::Request { method, path, headers, body: body.into() }, sealed).await.map_err(Failed::of)?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
         let trace = traced(response.trace);
         Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
@@ -89,6 +89,97 @@ impl Client {
     }
 }
 
+/// This browser as a device of its person (client/src/keyring.rs): who's who as it reads it itself, the keys it opens,
+/// and its requests, which hand them, through its session's `Client`. `key` and `seal` are its keys, hex; `on` is what it
+/// reaches through JavaScript (`crate::js::On`), and `shared(share)`, the X25519 secret its seal key, which WebCrypto
+/// never lets out, agrees with `share`.
+#[wasm_bindgen]
+pub struct Keyring {
+    keyring: crate::keyring::Keyring<crate::js::Seal>,
+    on: crate::js::On,
+    client: std::cell::RefCell<Option<std::rc::Rc<crate::Client>>>,
+}
+
+#[wasm_bindgen]
+impl Keyring {
+    #[wasm_bindgen(constructor)]
+    pub fn new(key: String, seal: String, on: JsValue) -> Result<Keyring, JsError> {
+        let opens = crate::js::Seal { public: self::key(&seal)?, js: crate::js::Js(on.clone()) };
+        Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), on: crate::js::On::of(on), client: Default::default() })
+    }
+
+    /// The session's client, which its requests go through.
+    pub fn connect(&self, client: &Client) {
+        *self.client.borrow_mut() = Some(client.0.clone());
+    }
+
+    /// Who's who as it read it when it last ran, if it kept it, with nothing asked of the network (the URL signer
+    /// remembers a while that a device not let in yet isn't): → whether it knows who's who now.
+    pub async fn restore(&self) -> bool {
+        self.keyring.restore(&self.on).await
+    }
+
+    /// Who's who as it read it when it last ran, or from the bucket if it kept none: throws, with `notLetIn`, until it
+    /// lists this device.
+    pub async fn load(&self) -> Result<(), Failed> {
+        self.keyring.load(&self.on).await.map_err(Failed::of)
+    }
+
+    /// Who's who, with what's new in the bucket.
+    pub async fn read(&self) -> Result<(), Failed> {
+        self.keyring.read(&self.on).await.map_err(Failed::of)
+    }
+
+    /// Who's who as it last read it, as JSON (`members::view_of`), with where it read to (`welcome`, `steps::Welcome`),
+    /// as it welcomes a device it approves: "" before it has.
+    pub fn members(&self) -> Result<String, JsError> {
+        let Some(mut view) = self.keyring.who(crate::members::view_of).transpose().map_err(js)? else { return Ok(String::new()) };
+        if let Some(welcome) = self.keyring.welcome() {
+            view["welcome"] = welcome.to_string().into();
+        }
+        Ok(view.to_string())
+    }
+
+    /// The nodes it may ask, hex (`nodes`), with each one's run priority (`ranks`, by key), and the Cloudflare node's
+    /// key (`wakes`), if the network has one, as JSON.
+    pub fn nodes(&self) -> String {
+        let hex = |k: &[u8; 32]| data_encoding::HEXLOWER.encode(k);
+        let ranks: serde_json::Map<String, serde_json::Value> = self.keyring.ranks().into_iter().map(|(k, r)| (hex(&k), r.into())).collect();
+        let nodes: Vec<String> = self.keyring.nodes().keys().map(hex).collect();
+        serde_json::json!({ "nodes": nodes, "ranks": ranks, "wakes": self.keyring.cloudflare_node().as_ref().map(hex) }).to_string()
+    }
+
+    /// A request to its person's nodes (`Keyring::request`), with the keys its kind needed, handed until `until` (ms),
+    /// learning what a node asks for: as `Client::fetch`, its trace each try's, as a JSON list. Before who's who lists
+    /// this device, it's read again a few times while the relay lets it in, as its approval may not be there yet.
+    pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>, until: f64, trace: bool) -> Result<Response, Failed> {
+        use crate::keyring::Address;
+        let mut behind = 0;
+        loop {
+            match self.keyring.load(&self.on).await {
+                Err(e) if e.not_let_in && behind < one::keys::BEHIND.len() && self.on.let_in().await => {
+                    n0_future::time::sleep(std::time::Duration::from_millis(one::keys::BEHIND[behind])).await;
+                    behind += 1;
+                }
+                loaded => break loaded.map_err(Failed::of)?,
+            }
+        }
+        let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
+        let mut fetches = trace.then(Vec::new);
+        let client = self.client.borrow().clone().ok_or_else(|| Failed::of(crate::keyring::refused()))?;
+        let sent = self.keyring.request(&client, &self.on, crate::Request { method, path, headers, body: body.into() }, until as u64, fetches.as_mut()).await;
+        let traced = fetches.map(|f| serde_json::Value::from(f).to_string()).unwrap_or_default();
+        let response = sent.map_err(|e| Failed { trace: traced.clone(), ..Failed::of(e) })?;
+        let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
+        Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace: traced, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
+    }
+
+    /// Forgets all it knew and kept but the network's root, as a device that's out does.
+    pub async fn forget(&self) {
+        self.keyring.forget(&self.on).await
+    }
+}
+
 fn traced(trace: Option<serde_json::Value>) -> String {
     trace.map(|t| t.to_string()).unwrap_or_default()
 }
@@ -98,10 +189,30 @@ fn traced(trace: Option<serde_json::Value>) -> String {
 pub struct Failed {
     message: String,
     trace: String,
+    not_let_in: bool,
+    code: Option<String>,
+}
+
+impl Failed {
+    fn of(e: crate::Error) -> Failed {
+        Failed { message: e.to_string(), trace: traced(e.trace.clone()), not_let_in: e.not_let_in, code: e.code }
+    }
 }
 
 #[wasm_bindgen]
 impl Failed {
+    /// The network doesn't list this device (yet, or any more).
+    #[wasm_bindgen(getter, js_name = notLetIn)]
+    pub fn not_let_in(&self) -> bool {
+        self.not_let_in
+    }
+
+    /// What kind of refusal the node said it was (shared/protocol.js `CODES`), if it said.
+    #[wasm_bindgen(getter)]
+    pub fn code(&self) -> Option<String> {
+        self.code.clone()
+    }
+
     #[wasm_bindgen(getter)]
     pub fn message(&self) -> String {
         self.message.clone()
@@ -163,73 +274,6 @@ impl Response {
     }
 }
 
-/// Who's who as this browser reads it (src/database/steps.rs, client/src/members.rs): from where it read `global`'s
-/// scope database's steps to, as it kept that, of the network whose root is `root` (hex, or none the first time).
-/// Throws if a step doesn't check, or they're another network's.
-#[wasm_bindgen]
-pub struct Global {
-    root: String,
-    steps: String,
-    at: u64,
-    members: String,
-}
-
-#[wasm_bindgen]
-impl Global {
-    #[wasm_bindgen(constructor)]
-    /// `steps`, as JSON: `{ kept, given, epochs, apps }`, where its scope database's steps were read to as it kept that
-    /// (`steps::Reader::kept`), and those this browser read since from the bucket itself (`{ steps, welcome, freeze,
-    /// start }`, through the URL signer's `get`) with the keys to open them: `global`'s epochs sealed to this
-    /// device, opened (hex, by number), and the node's key sealed in each (base64url, by number)
-    /// (`steps::Reader::add`).
-    pub fn new(root: String, steps: Option<String>) -> Result<Global, JsError> {
-        let root = (!root.is_empty()).then(|| one::keys::Hash::from_hex(&root)).transpose().map_err(js)?;
-        let mut g = one::database::steps::Reader::new(root);
-        let now = js_sys::Date::now() as u64;
-        if let Some(steps) = steps.filter(|s| !s.is_empty()) {
-            let steps: serde_json::Value = serde_json::from_str(&steps).map_err(js)?;
-            if steps["kept"].is_object() {
-                g.restart(&steps["kept"], now).map_err(js)?;
-            }
-            let epochs = steps["epochs"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, key(k.as_str()?).ok()?))).collect();
-            let apps = steps["apps"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, data_encoding::BASE64URL_NOPAD.decode(k.as_str()?.as_bytes()).ok()?))).collect();
-            let sealed = one::database::steps::Sealed::from_json(&steps["given"]);
-            g.add(&sealed, &crate::members::step_keys(&epochs, &apps), Some(&epochs), now, |_, _, _| Ok(())).map_err(js)?;
-        }
-        let members = match g.truth() {
-            Some(t) => crate::members::view_of(&t.db),
-            None => crate::members::view_of(&one::database::scopes::ScopeDb::empty(&one::database::scopes::Scope::Global, now).map_err(js)?),
-        }
-        .map_err(js)?
-        .to_string();
-        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members })
-    }
-
-    /// Where its scope database's steps were read to, as JSON (`steps::Reader::kept`): to keep, and give again.
-    #[wasm_bindgen(getter)]
-    pub fn steps(&self) -> String {
-        self.steps.clone()
-    }
-
-    /// The last of them: what to ask a node for those after (`GET /v1/steps/global?from=`).
-    #[wasm_bindgen(getter)]
-    pub fn at(&self) -> f64 {
-        self.at as f64
-    }
-
-    /// The network's root, hex: to keep, and give again.
-    #[wasm_bindgen(getter)]
-    pub fn root(&self) -> String {
-        self.root.clone()
-    }
-
-    /// Who's who, as JSON (`members::view_of`).
-    #[wasm_bindgen(getter)]
-    pub fn members(&self) -> String {
-        self.members.clone()
-    }
-}
-
 /// Where the issuer of a new device's sign-in (`proof`, as sign-in passed it on, JSON) publishes its keys, for the issuers
 /// devices of the network at `address` take: "" for a passkey's, or any other issuer.
 #[wasm_bindgen(js_name = issuerKeysAt)]
@@ -260,4 +304,14 @@ pub fn signed_in_with(proof: String, key: String, seal: String, address: String,
         None => one::sign_in_proof::check(&proof, &device, &network, keys.as_ref(), now),
     };
     Ok(serde_json::to_string(&account.map_err(js)?).map_err(js)?)
+}
+
+/// If `name` is a database's step, or the signature beside one: the signature beside it, and the `n` steps after it,
+/// each with the signature beside it, as JSON: what's read next. A scope's log's steps have none.
+#[wasm_bindgen]
+pub fn following(name: &str, n: u32) -> String {
+    let Some((prefix, at)) = one::database::stored::position(name) else { return "[]".into() };
+    let signed = one::database::stored::signed_beside(prefix);
+    let names = (at..=at + n as u64).flat_map(|i| [Some(one::database::stored::step_name(prefix, i)), signed.then(|| one::database::stored::sig_name(prefix, i))]).flatten();
+    serde_json::Value::from(names.filter(|other| other.as_str() > name).collect::<Vec<_>>()).to_string()
 }

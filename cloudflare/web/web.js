@@ -11,7 +11,6 @@
 import * as answers from "./answers.js";
 import { del, put } from "./kept.js";
 import { waited } from "../shared/crypto.js";
-import { BEHIND, CODES } from "../shared/protocol.js";
 import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf, signingInFor } from "./device.js";
 import { members } from "./members.js";
 import { net } from "./net.js";
@@ -45,10 +44,8 @@ const h = OneUI.react.createElement;
   const SCREENS = "one.screens.";
   const LAST = "one.last.window";
   const KEPT_SCREENS = "one.screens";
-  // What each kind of request needed (device.js), which another sign-in here needn't start from.
-  const NEEDS = "one.needs";
   const forgetScreens = () => {
-    Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k.startsWith(LAST) || k === NEEDS).forEach((k) => localStorage.removeItem(k));
+    Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k.startsWith(LAST)).forEach((k) => localStorage.removeItem(k));
     window.caches?.delete(KEPT_SCREENS).catch(() => {});
     return answers.forget();
   };
@@ -200,15 +197,14 @@ const h = OneUI.react.createElement;
   /// one of their devices asks, of their nodes, itself, over iroh (net.js), saying whose it is (`x-one-user`), which a
   /// node checks against the device its connection proves. It goes with the keys it needed last time; a node that needs
   /// others says so (428), and it goes again once with them. Asked again for a few seconds while no node answers, as
-  /// one restarting doesn't; a call carries an id, so it runs once however often it's sent. With `keyless`, a 428 fails
-  /// it instead, for a device that can't yet tell whom to hand keys to.
-  async function api(path, { method = "GET", body, query, raw, signal, since, keyless } = {}) {
+  /// one restarting doesn't; a call carries an id, so it runs once however often it's sent.
+  async function api(path, { method = "GET", body, query, raw, signal, since } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
     if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
     const trace = developer.on() ? developer.start(url.pathname, body, since) : null;
     try {
-      const out = await sending(url, method, body, raw, signal, trace, keyless);
+      const out = await sending(url, method, body, raw, signal, trace);
       if (trace) trace.status = raw ? out.status : 200;
       return out;
     } catch (err) {
@@ -219,35 +215,39 @@ const h = OneUI.react.createElement;
     }
   }
 
-  /// `api`'s request, each send's trace kept in `trace` if it has one.
-  async function sending(url, method, body, raw, signal, trace, keyless) {
-    const route = Device.route(url.pathname, body);
+  /// `api`'s request, each send's trace kept in `trace` if it has one. The device sends it again with the keys a node
+  /// asks for (one-client's keyring, in net-worker.js, or the native app's); a request that doesn't reach a node is
+  /// asked again here.
+  async function sending(url, method, body, raw, signal, trace) {
     const user = auth.user();
     const joining = performance.now();
     if (!user || !(native ? nativeIn : await net.start(user).catch(() => false))) throw Object.assign(new NodeError("This device hasn't been approved yet."), { status: 403 });
     if (trace && performance.now() - joining >= 1) trace.network = Math.round(performance.now() - joining);
     if (trace && !native && (trace.network || trace.first)) trace.joined = await net.took();
-    for (let needed = 0, misses = 0, behind = 0; ; ) {
+    const traced = (json) => {
+      const said = developer.parse(json);
+      for (const f of Array.isArray(said) ? said : [said]) {
+        trace.fetches.push(f);
+        if (f.client) trace.keys++;
+      }
+    };
+    for (let misses = 0; ; ) {
       const headers = { "x-one-user": user };
       if (trace) headers["x-one-trace"] = "1";
       if (body !== undefined) headers["content-type"] = "application/json";
-      // Keys go only to the one node the request is sent to, which this browser reaches itself, as its connection
-      // proves: sealed to it once the client picks it. One sent while another of its kind learns what it needs goes
-      // with what that learned.
-      await device?.learning.get(route)?.done.catch(() => {});
-      const sentWith = device?.needs[route];
-      const handing = performance.now(), opened = [];
       const until = auth.kept()?.until || Date.now() + 60_000;
-      const keys = sentWith?.need?.length ? (node) => device.handoff(route, until, node, trace ? noting(handing, opened) : undefined) : undefined;
       const sent = body === undefined ? undefined : JSON.stringify(body);
       let r;
       const watch = watching();
       try {
-        r = await Promise.race([(native || net).fetch(method, url.pathname + url.search, headers, sent, signal, keys), watch.out]);
-        trace?.fetches.push(developer.parse(r.trace));
+        r = await Promise.race([(native || net).fetch(method, url.pathname + url.search, headers, sent, signal, until, !!trace), watch.out]);
+        if (trace) traced(r.trace);
       } catch (err) {
-        trace?.fetches.push(developer.parse(err.trace));
-        if (opened.length) trace.fetches.at(-1).handed = handedIn(opened);
+        if (trace) traced(err.trace);
+        if (err.notLetIn) {
+          if (await takenOut()) throw gone();
+          throw Object.assign(new NodeError(err.message), { status: 403 });
+        }
         if (err.removed || signal?.aborted || misses >= 5) throw err;
         // A request that fails may be one a browser taken out of its person's devices can't make.
         if (await takenOut()) throw gone();
@@ -256,49 +256,12 @@ const h = OneUI.react.createElement;
       } finally {
         watch.stop();
       }
-      if (opened.length) trace.fetches.at(-1).handed = handedIn(opened);
-      // A node that doesn't list this browser may not have read its approval yet: the relay says if it's out, else it's
-      // asked again in a moment (`BEHIND`), as every client does.
-      if (r.status === 403 && (await r.clone().json().catch(() => null))?.code === CODES.notLetIn) {
-        if (await takenOut()) throw gone();
-        if (behind < BEHIND.length) {
-          await sleep(BEHIND[behind++]);
-          continue;
-        }
-        throw Object.assign(new NodeError("Your devices haven't caught up with this one yet. Try again in a moment."), { status: 403 });
-      }
-      // A node may find what it needs as it goes: the Cloudflare node, its logs' keys first, then a call's.
-      if (r.status === 428 && device && needed < 3 && !keyless) {
-        needed++;
-        if (trace) trace.keys = needed;
-        const learning = performance.now(), steps = [];
-        try {
-          await device.learn(route, await r.json(), r.node, trace ? noting(learning, steps) : undefined, sentWith);
-        } finally {
-          const last = trace?.fetches.at(-1);
-          if (last) last.client = { ms: Math.round(performance.now() - learning), steps };
-        }
-        continue;
-      }
       if (raw && r.ok) return r;
       const out = await r.json().catch(() => null);
       if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again.")), { status: r.status, code: out?.code });
       return out;
     }
   }
-
-  /// Times each thing `fetch` asks for, from `start`, into `steps` (Device's `note`).
-  const noting = (start, steps) => async (step, fetch) => {
-    const at = performance.now();
-    try {
-      return await fetch();
-    } finally {
-      steps.push({ ...step, at: Math.round(at - start), ms: Math.round(performance.now() - at) });
-    }
-  };
-
-  /// The keys a request opened before it was sent, as its trace says it: how long, and each thing asked for.
-  const handedIn = (steps) => ({ ms: Math.max(...steps.map((s) => s.at + s.ms)), steps });
 
   /// Developer mode, on this browser alone (Settings › Developer, for admins): each request asks its nodes for a trace
   /// (`x-one-trace`), kept here, the latest `KEPT`, for screens to show (`traces`, Developer's Timing).
@@ -366,12 +329,13 @@ const h = OneUI.react.createElement;
   }
 
   /// This browser's key goes: a removed key can't be let in again, so signing in makes a new one. With it, what it kept
-  /// as that device: the nodes it asks, and the network it was let into and its steps, which the next approval names
-  /// again. As a native app's device forgets (one-client's `Device::sign_out`).
+  /// as that device: the nodes it asks, and what its keyring kept (one-client's `keyring::Keep`: the network it was let
+  /// into, who's who and what each kind of request needed), which the next approval names again. As a native app's
+  /// device forgets (one-client's `Device::sign_out`).
   async function forgetDevice() {
     events?.abort();
     const user = auth.user();
-    if (user) await Promise.all([`device:${user}`, `nodes:${user}`, `root:${user}`, `global:${user}`].map(del)).catch(() => {});
+    if (user) await Promise.all(["device", "nodes", "root", "welcome", "who.json", "needs.json"].map((k) => del(`${k}:${user}`))).catch(() => {});
   }
 
   /// Signs out as a device: out of its person's devices first (`Device.leave`), so signing in again replaces it, then its
@@ -1553,9 +1517,9 @@ const h = OneUI.react.createElement;
     const bytes = Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
     try {
       const pk = await passkeyKeysOf(bytes);
-      if (!(await net.start(user, true, { key: pk.key, sign: pk.sign }))) return false;
+      if (!(await net.start(user, true, { key: pk.key, sign: pk.sign, seal: pk.opens.secret, sealKey: pk.seal }))) return false;
       await refreshState();
-      await new Device(keys, { user, state: () => store.state, api, bearer, replay: net.global }).approveByPasskey(bytes);
+      await new Device(keys, { user, state: () => store.state, api, bearer }).approveByPasskey(bytes);
       return await net.start(user, true);
     } catch (err) {
       console.warn("the passkey didn't let this browser in:", err);
@@ -1704,8 +1668,7 @@ const h = OneUI.react.createElement;
       // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
       if (native) await nativeJoin();
       else {
-        device = new Device(await join(user), { user, state: () => store.state, api, bearer, replay: net.global });
-        await device.load();
+        device = new Device(await join(user), { user, state: () => store.state, api, bearer });
       }
     } catch (err) {
       if (err.signedOut) return err.removed ? undefined : showSignedOut();

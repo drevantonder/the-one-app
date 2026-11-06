@@ -183,8 +183,37 @@ pub fn seal_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
 pub fn open_sealed(secret: &[u8; 32], sealed: &[u8]) -> Result<Vec<u8>> {
     ensure!(sealed.len() >= 48, "not sealed");
     let share: [u8; 32] = sealed[..32].try_into()?;
-    let shared = MontgomeryPoint(share).mul_clamped(*secret).0;
-    let key = hkdf_salted(&shared, &[&share[..], &public_of(secret)].concat(), b"one/sealed-to");
+    opened(&MontgomeryPoint(share).mul_clamped(*secret).0, &public_of(secret), sealed)
+}
+
+/// What opens what's sealed to a seal key: its secret, or where that can't be read (a browser's WebCrypto key), what
+/// agrees a secret with it.
+pub trait Opens {
+    /// The seal key.
+    fn public(&self) -> [u8; 32];
+    /// The X25519 secret it shares with `share`.
+    fn shared(&self, share: &[u8; 32]) -> impl Future<Output = Result<[u8; 32]>>;
+}
+
+impl Opens for [u8; 32] {
+    fn public(&self) -> [u8; 32] {
+        public_of(self)
+    }
+
+    async fn shared(&self, share: &[u8; 32]) -> Result<[u8; 32]> {
+        Ok(MontgomeryPoint(*share).mul_clamped(*self).0)
+    }
+}
+
+/// `open_sealed`, by what opens it.
+pub async fn open_sealed_by(opens: &impl Opens, sealed: &[u8]) -> Result<Vec<u8>> {
+    ensure!(sealed.len() >= 48, "not sealed");
+    let share: [u8; 32] = sealed[..32].try_into()?;
+    opened(&opens.shared(&share).await?, &opens.public(), sealed)
+}
+
+fn opened(shared: &[u8; 32], public: &[u8; 32], sealed: &[u8]) -> Result<Vec<u8>> {
+    let key = hkdf_salted(shared, &[&sealed[..32], public].concat(), b"one/sealed-to");
     cipher(&key).decrypt(&Default::default(), &sealed[32..]).map_err(|_| anyhow!("that key doesn't open it"))
 }
 

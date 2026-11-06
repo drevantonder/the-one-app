@@ -10,70 +10,15 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result, anyhow};
-use js_sys::{Function, Promise, Reflect, Uint8Array};
-use one::bucket::{Bucket, Failed, Object, Trouble};
+use js_sys::Reflect;
+use one::bucket::Bucket;
 use one::call::Append;
 use one::database::stored::Db;
 use one::database::scopes::{Scope, ScopeDb, app, object};
 use one::keys::Hash;
+use one_client::js::Js;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
-
-/// The bucket as `worker.js` reaches it: an object whose `get(name)`, `create(name, bytes)`, `replace(name, bytes,
-/// tag)` and `objects(folder)` give promises, of `{ bytes, tag }` or null, of whether it was written, and of
-/// `[name, written]` for each object in the folder.
-struct Js(JsValue);
-
-impl Js {
-    async fn ask(&self, method: &str, args: &[JsValue]) -> Result<JsValue> {
-        let f: Function = Reflect::get(&self.0, &method.into()).map_err(said)?.dyn_into().map_err(|_| anyhow!("the bucket has no {method}"))?;
-        let promise: Promise = f.apply(&self.0, &args.iter().collect()).map_err(said)?.dyn_into().map_err(|_| anyhow!("{method} gave no promise"))?;
-        JsFuture::from(promise).await.map_err(|err| match Reflect::get(&err, &"unanswered".into()).is_ok_and(|u| u.is_truthy()) {
-            true => Failed(Trouble::Unreachable, format!("{}", said(err))).into(),
-            false => said(err),
-        })
-    }
-}
-
-impl Bucket for Js {
-    async fn get(&self, name: &str) -> Result<Option<Object>> {
-        let got = self.ask("get", &[name.into()]).await?;
-        if got.is_null() || got.is_undefined() {
-            return Ok(None);
-        }
-        let bytes = Uint8Array::new(&Reflect::get(&got, &"bytes".into()).map_err(said)?).to_vec();
-        let tag = Reflect::get(&got, &"tag".into()).map_err(said)?.as_string().context("an object has its tag")?;
-        Ok(Some(Object { bytes, tag }))
-    }
-
-    async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
-        Ok(self.ask("create", &[name.into(), Uint8Array::from(bytes).into()]).await?.is_truthy())
-    }
-
-    async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
-        Ok(self.ask("replace", &[name.into(), Uint8Array::from(bytes).into(), tag.map(JsValue::from).unwrap_or(JsValue::NULL)]).await?.is_truthy())
-    }
-
-    async fn wait(&self, ms: u64) {
-        let _ = self.ask("wait", &[(ms as f64).into()]).await;
-    }
-
-    async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
-        let listed: js_sys::Array = self.ask("objects", &[folder.into()]).await?.dyn_into().map_err(|_| anyhow!("a listing is a list"))?;
-        listed
-            .iter()
-            .map(|o| {
-                let o: js_sys::Array = o.dyn_into().map_err(|_| anyhow!("a listed object is [name, written]"))?;
-                Ok((o.get(0).as_string().context("a listed object has its name")?, o.get(1).as_f64().unwrap_or(0.0) as u64))
-            })
-            .collect()
-    }
-}
-
-fn said(err: JsValue) -> anyhow::Error {
-    anyhow!("{}", err.as_string().or_else(|| Reflect::get(&err, &"message".into()).ok().and_then(|m| m.as_string())).unwrap_or_else(|| format!("{err:?}")))
-}
 
 fn thrown(err: anyhow::Error) -> JsError {
     JsError::new(&format!("{err:#}"))
@@ -398,16 +343,6 @@ fn prefix_of(scope: &str, app: &str, database: &str) -> Result<String> {
 #[wasm_bindgen]
 pub fn prefix(scope: &str, app: &str, database: &str) -> Result<String, JsError> {
     prefix_of(scope, app, database).map_err(thrown)
-}
-
-/// If `name` is a database's step, or the signature beside one: the signature beside it, and the `n` steps after it,
-/// each with the signature beside it, as JSON: what's read next. A scope's log's steps have none.
-#[wasm_bindgen]
-pub fn following(name: &str, n: u32) -> String {
-    let Some((prefix, at)) = one::database::stored::position(name) else { return "[]".into() };
-    let signed = one::database::stored::signed_beside(prefix);
-    let names = (at..=at + n as u64).flat_map(|i| [Some(one::database::stored::step_name(prefix, i)), signed.then(|| one::database::stored::sig_name(prefix, i))]).flatten();
-    Value::from(names.filter(|other| other.as_str() > name).collect::<Vec<_>>()).to_string()
 }
 
 // Who can do what: each scope's database's steps (`src/database/steps.rs`), which every question of who's who and who

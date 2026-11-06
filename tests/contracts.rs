@@ -178,9 +178,8 @@ fn a_step_is_signed_the_same_for_its_position() {
 
 /// Who's who as steps (`src/database/steps.rs`), as a browser reads it: the node's key sealed under an epoch as a
 /// browser that makes one seals it, the freeze the recovery key signed and a step a browser signed, sealed as a node
-/// puts them in the bucket and read from it as the URL signer's `get` gives them (`cloudflare/web/device.js`
-/// `bucketSteps`), opened and applied by the client (its WebAssembly's `Global`, `cloudflare/web/net-worker.js`); and
-/// from a Welcome, sign-in's word passed on as JavaScript reads it.
+/// puts them in the bucket and read from it as the URL signer's `get` gives them (`cloudflare/web/net-worker.js`),
+/// opened and applied by the client's keyring; and from a Welcome, sign-in's word passed on as JavaScript reads it.
 #[test]
 fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<()> {
     let formats = Formats::start();
@@ -214,9 +213,8 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     };
     let (s1, s2, s3) = (sealed(1, &first.step, first.copy.as_deref()), sealed(2, &listed, None), sealed(3, &signed, None));
     let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::database::stored::step_name(&prefix, 4), b"not a step").unwrap()) });
-    let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
-    // As a browser gives them (client/src/wasm.rs `Global`).
-    let step_keys = one_client::members::step_keys(&epochs, &apps);
+    let epochs = std::collections::BTreeMap::from([(1, epoch)]);
+    let step_keys: one::database::stored::Keys = [(1, one::keys::open_database_key(&epoch, scopes::APP, steps::NAME, &sealed_app)?)].into();
     let add = |r: &mut Reader, given: &serde_json::Value| r.add(&steps::Sealed::from_json(given), &step_keys, Some(&epochs), 0, |_, _, _| Ok(()));
     let frozen = |r: &Reader| r.truth().is_some();
     // A freeze an admin's device signed is nothing.

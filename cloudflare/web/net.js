@@ -15,16 +15,9 @@ const tab = crypto.getRandomValues(new Uint32Array(2)).join("-");
 function received(m) {
   const w = waiting.get(m.id);
   if (!w) return;
-  if (m.keysFor !== undefined) {
-    Promise.resolve()
-      .then(() => w.keys?.(m.keysFor))
-      .catch(() => null)
-      .then((keys) => send({ op: "keys", id: m.id, keys: keys || null }));
-    return;
-  }
   if (m.error !== undefined) {
     waiting.delete(m.id);
-    const err = Object.assign(new Error(m.error), { trace: m.trace });
+    const err = Object.assign(new Error(m.error), { trace: m.trace, notLetIn: m.notLetIn, code: m.code });
     if (w.body) w.body.error(err);
     else w.reject(err);
   } else if (m.status !== undefined) {
@@ -34,8 +27,8 @@ function received(m) {
     const headers = new Headers();
     for (let i = 0; i + 1 < m.headers.length; i += 2) headers.append(m.headers[i], m.headers[i + 1]);
     const empty = m.status === 204 || m.status === 304;
-    // And which node answered, as its connection proved, the one its 428 may be believed from; and in developer mode,
-    // the nodes it tried and what the one that answered did (`trace`, JSON).
+    // And which node answered, as its connection proved; and in developer mode, each try's nodes and what the one that
+    // answered did (`trace`, JSON).
     w.resolve(Object.assign(new Response(empty ? null : stream, { status: m.status, headers }), { node: m.node, trace: m.trace }));
   } else if (m.part) {
     w.body?.enqueue(m.part);
@@ -153,17 +146,17 @@ export const net = {
     return starting?.took || Promise.resolve(null);
   },
 
-  /// A request to the node: method, path with its query, headers (`{ name: value }`), body bytes or none, an
-  /// AbortSignal, and `keys`, which gives the `x-one-keys` for the one node it's sent to (its key, hex → the header's
-  /// value or null, or a promise of it), asked once the client picks it. → a Response, its body streamed as it comes,
-  /// and `node`, the key of the node that answered.
-  fetch(method, path, headers = {}, body, signal, keys) {
+  /// A request to the node, as this browser's device: method, path with its query, headers (`{ name: value }`), body
+  /// bytes or none, an AbortSignal, until when the keys it hands may be used (ms), and whether to trace it. → a
+  /// Response, its body streamed as it comes, and `node`, the key of the node that answered. Fails with `notLetIn` while
+  /// the network doesn't list this device.
+  fetch(method, path, headers = {}, body, signal, until = Date.now() + 60_000, trace = false) {
     const bytes = body === undefined ? undefined : body instanceof Uint8Array ? body : new TextEncoder().encode(body);
     const buffer = bytes && bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const id = `${tab}:${++n}`;
     return new Promise((resolve, reject) => {
       if (signal?.aborted) return reject(signal.reason);
-      waiting.set(id, { resolve, reject, keys });
+      waiting.set(id, { resolve, reject });
       signal?.addEventListener("abort", () => {
         const w = waiting.get(id);
         if (!w) return;
@@ -172,7 +165,7 @@ export const net = {
         if (w.body) w.body.error(signal.reason);
         else reject(signal.reason);
       });
-      send({ op: "fetch", id, method, path, headers: Object.entries(headers).flat(), body: buffer, keys: !!keys }, buffer ? [buffer] : []);
+      send({ op: "fetch", id, method, path, headers: Object.entries(headers).flat(), body: buffer, until, trace }, buffer ? [buffer] : []);
     });
   },
 
@@ -182,12 +175,11 @@ export const net = {
     if (net.has) send({ op: "nodes", user, nodes, ranks, wakes });
   },
 
-  /// `user`'s who's who as `global`'s scope database's steps say it, checked here by the client's WebAssembly and
-  /// kept: `steps` are those this browser read from the bucket (`Device.bucketSteps`). Throws if one doesn't check, or
-  /// they're another network's than the one first kept.
-  async global(user, steps) {
+  /// Who's who as `global`'s scope database's steps say it, as this browser's device read and checked them itself
+  /// (one-client's `members::view_of`), with what's new in the bucket if `fresh`: null before it has.
+  async members(fresh = false) {
     if (!net.has) throw new Error("This device can't check who's who in your One App network.");
-    return (await ask({ op: "global", user, steps })).members;
+    return (await ask({ op: "members", fresh })).members;
   },
 
   /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as sign-in passed it on) shows, checked

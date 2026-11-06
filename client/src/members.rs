@@ -15,24 +15,10 @@ use anyhow::Result;
 use serde_json::{Map, Value, json};
 
 pub use one::database::scopes::ScopeDb;
-use one::database::steps;
 use one::database::scopes::{NETWORK, device, object, person};
 use one::keys::hex;
 use one::database::scopes::Scope;
 use one::database::scopes::{Kind, Role};
-
-/// `global`'s step key in each of `epochs` given to this device (raw, by number), from `apps`, the node's key sealed
-/// under each: unchecked, so a reader uses each only once who's who says its epoch is the one it made
-/// (`steps::Reader::add`).
-pub fn step_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> one::database::stored::Keys {
-    let mut keys = one::database::stored::Keys::new();
-    for (e, epoch) in epochs {
-        if let Some(key) = apps.get(e).and_then(|a| one::keys::open_database_key(epoch, one::database::scopes::APP, steps::NAME, a).ok()) {
-            keys.insert(*e, key);
-        }
-    }
-    keys
-}
 
 /// What a browser seals, hands and signs by, as JSON for it to keep and look up (`cloudflare/web/device.js`,
 /// `net-worker.js`), each answer worked out here:

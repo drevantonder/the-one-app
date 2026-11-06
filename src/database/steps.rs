@@ -860,12 +860,12 @@ impl Reader {
 }
 
 /// Who's who read from `bucket` into `reader`, from where it is, by a device that holds no key of `global`'s yet but
-/// those sealed to it there (`to`, its key in hex, opened with `secret`): each epoch its steps are sealed under, and
+/// those sealed to it there (`to`, its key in hex, opened by `opens`): each epoch its steps are sealed under, and
 /// each who's who made, sealed to it. With `welcome`, from there, or if that doesn't check out (then none), from the
 /// first.
 /// → the epochs, each only once who's who says it's the one it made (none before it's read the freeze), and the steps'
 /// key in each.
-pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Reader, to: &str, secret: &[u8; 32], welcome: &mut Option<Welcome>, now: u64) -> Result<(BTreeMap<u32, [u8; 32]>, crate::database::stored::Keys)> {
+pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Reader, to: &str, opens: &impl crate::keys::Opens, welcome: &mut Option<Welcome>, now: u64) -> Result<(BTreeMap<u32, [u8; 32]>, crate::database::stored::Keys)> {
     let mut sealed = fetch(bucket, reader.at(), welcome.as_ref().filter(|_| reader.truth.is_none())).await?;
     let (mut epochs, mut tried, mut keys) = (BTreeMap::new(), std::collections::BTreeSet::new(), crate::database::stored::Keys::new());
     let mut fetched = true;
@@ -880,7 +880,7 @@ pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Re
         }
         for n in &wanted {
             if let Some(o) = bucket.get(&crate::keys::epoch_name("global", *n, to)).await?
-                && let Some(key) = crate::keys::open_sealed(secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok())
+                && let Some(key) = crate::keys::open_sealed_by(opens, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok())
             {
                 epochs.insert(*n, key);
             }

@@ -13,7 +13,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use js_sys::{Function, Reflect, Uint8Array};
-use one_client::keyring::{Address, Keep, Keyring};
+use one_client::js::On;
+use one_client::keyring::Keyring;
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
@@ -171,46 +172,4 @@ pub async fn device_view(me: String, seal: Vec<u8>, on: JsValue) -> Result<Strin
     keyring.read(&On::of(on)).await.map_err(|e| failed(&e))?;
     let nodes: Vec<_> = keyring.nodes().iter().map(|(key, seal)| json!({ "key": one::keys::hex(key), "seal": one::keys::hex(seal) })).collect();
     Ok(json!({ "user": keyring.user(), "nodes": nodes }).to_string())
-}
-
-/// What a device's object hands its keyring: `{ bucket, get(name), put(name, bytes), delete(name), letIn() }`, the
-/// bucket as `worker.js` reads it through the URL signer (`crate::Js`), what it keeps in its storage, and whether the
-/// relay still lets it in, each a promise.
-struct On {
-    bucket: crate::Js,
-    js: crate::Js,
-}
-
-impl On {
-    fn of(on: JsValue) -> On {
-        On { bucket: crate::Js(Reflect::get(&on, &"bucket".into()).unwrap_or(JsValue::NULL)), js: crate::Js(on) }
-    }
-}
-
-impl Keep for On {
-    async fn get(&self, name: &str) -> Option<Vec<u8>> {
-        let got = self.js.ask("get", &[name.into()]).await.ok()?;
-        (!got.is_null() && !got.is_undefined()).then(|| Uint8Array::new(&got).to_vec())
-    }
-
-    async fn put(&self, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
-        self.js.ask("put", &[name.into(), Uint8Array::from(bytes).into()]).await.map(|_| ())
-    }
-
-    async fn delete(&self, name: &str) {
-        let _ = self.js.ask("delete", &[name.into()]).await;
-    }
-}
-
-impl Address for On {
-    type Bucket = crate::Js;
-
-    fn bucket(&self) -> &crate::Js {
-        &self.bucket
-    }
-
-    /// Unless the relay says it doesn't, as a relay that didn't answer may still.
-    async fn let_in(&self) -> bool {
-        self.js.ask("letIn", &[]).await.ok().is_none_or(|v| v.is_truthy())
-    }
 }

@@ -23,6 +23,8 @@ pub mod members;
 #[cfg(feature = "relayed")]
 pub mod relayed;
 #[cfg(target_family = "wasm")]
+pub mod js;
+#[cfg(target_family = "wasm")]
 mod wasm;
 
 #[cfg(not(target_family = "wasm"))]
