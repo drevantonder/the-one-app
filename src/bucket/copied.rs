@@ -144,7 +144,7 @@ impl<B: Bucket> Bucket for Copied<B> {
         let moved = self.moved.try_read().ok();
         let asking = std::time::Instant::now();
         let got = Bucket::get(moved.as_deref().and_then(Option::as_ref).unwrap_or(&self.place), name).await?;
-        crate::node::trace::bucket(asking.elapsed(), got.is_some());
+        crate::node::trace::bucket("read", asking.elapsed(), got.is_some());
         if let Some(o) = got.as_ref().filter(|_| kept(name)) {
             if let Err(err) = self.here.create(name, &o.bytes) {
                 tracing::debug!("keeping {name}: {err:#}");
@@ -159,7 +159,9 @@ impl<B: Bucket> Bucket for Copied<B> {
         }
         tracing::trace!(target: "bucket", "create {name}");
         let moved = self.moved.read().await;
+        let asking = std::time::Instant::now();
         let created = Bucket::create(moved.as_ref().unwrap_or(&self.place), name, bytes).await?;
+        crate::node::trace::bucket("create", asking.elapsed(), created);
         if created && kept(name) {
             if let Err(err) = self.here.create(name, bytes) {
                 tracing::debug!("keeping {name}: {err:#}");
@@ -174,7 +176,10 @@ impl<B: Bucket> Bucket for Copied<B> {
         }
         tracing::trace!(target: "bucket", "replace {name}");
         let moved = self.moved.read().await;
-        Bucket::replace(moved.as_ref().unwrap_or(&self.place), name, bytes, tag).await
+        let asking = std::time::Instant::now();
+        let replaced = Bucket::replace(moved.as_ref().unwrap_or(&self.place), name, bytes, tag).await?;
+        crate::node::trace::bucket("replace", asking.elapsed(), replaced);
+        Ok(replaced)
     }
 
     async fn wait(&self, ms: u64) {

@@ -78,19 +78,19 @@ pub fn note(step: Value, took: std::time::Duration) {
     let _ = TRACE.try_with(|t| t.note(step, took));
 }
 
-/// Notes one ask of the bucket itself (not this device's copy), joined to the ask just before it: a database's steps
-/// are asked for one after another.
-pub fn bucket(took: std::time::Duration, found: bool) {
+/// Notes one ask of the bucket itself (not this device's copy), a `read` or a write (`create`, `replace`), joined to the
+/// ask just before it if that was of the same kind: a database's steps are asked for one after another.
+pub fn bucket(kind: &str, took: std::time::Duration, found: bool) {
     let _ = TRACE.try_with(|t| {
         let mut steps = t.0.1.lock().unwrap();
-        if let Some(last) = steps.last_mut().filter(|s| s["step"] == "bucket") {
+        if let Some(last) = steps.last_mut().filter(|s| s["step"] == "bucket" && s["kind"] == kind) {
             last["asks"] = json!(last["asks"].as_u64().unwrap_or(0) + 1);
             last["found"] = json!(last["found"].as_u64().unwrap_or(0) + found as u64);
             last["ms"] = json!(last["ms"].as_u64().unwrap_or(0) + took.as_millis() as u64);
             return;
         }
         drop(steps);
-        t.note(json!({ "step": "bucket", "asks": 1, "found": found as u64 }), took);
+        t.note(json!({ "step": "bucket", "kind": kind, "asks": 1, "found": found as u64 }), took);
     });
 }
 
@@ -149,7 +149,26 @@ fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
             }
             "bucket" => {
                 listed += ms;
-                out.push(format!("{lane} fetched {} of {} from the bucket: {ms} ms", s["found"], s["asks"]));
+                match s["kind"].as_str() {
+                    Some(kind @ ("create" | "replace")) => out.push(format!("{lane} {kind}d {} in the bucket: {ms} ms", s["asks"])),
+                    _ => out.push(format!("{lane} fetched {} of {} from the bucket: {ms} ms", s["found"], s["asks"])),
+                }
+            }
+            "lease" => {
+                listed += ms;
+                out.push(format!("{lane} took the call's lease: {ms} ms"));
+            }
+            "prepare" if ms >= 5 => {
+                listed += ms;
+                out.push(format!("{lane} prepared what the call changed: {ms} ms"));
+            }
+            "write" => {
+                listed += ms;
+                out.push(format!("{lane} wrote what the call changed: {ms} ms"));
+            }
+            "keys" => {
+                listed += ms;
+                out.push(format!("{lane} checked the call's keys: {ms} ms"));
             }
             "behind" => {
                 listed += ms;

@@ -541,14 +541,19 @@ impl Node {
         if self.0.apps.describe(&req.app).await?["vault"].is_object() {
             want.extend(scopes.iter().map(|s| (s.clone(), scopes::APP, crate::vault::DATABASE)));
         }
+        let checking = Instant::now();
         self.needs(me, &want).await?;
+        trace::note(json!({ "step": "keys" }), checking.elapsed());
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
         let mut lease = None;
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.tool.as_str() && o["reads"] == true);
             if !reads {
                 let base = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
-                let Some(taken) = self.take_lease(&base).await? else {
+                let leasing = Instant::now();
+                let taken = self.take_lease(&base).await?;
+                trace::note(json!({ "step": "lease" }), leasing.elapsed());
+                let Some(taken) = taken else {
                     return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into()));
                 };
                 lease = Some(taken);
@@ -566,10 +571,15 @@ impl Node {
             answered.store(true, Ordering::Relaxed);
             let mut outcome = ran?;
             trace::note(json!({ "step": "run", "app": req.app, "op": req.tool }), running.elapsed());
+            let preparing = Instant::now();
             let prepared = self.prepare_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
+            trace::note(json!({ "step": "prepare" }), preparing.elapsed());
             writing.store(true, Ordering::Relaxed);
+            let writing_at = Instant::now();
             let (node, app, scopes, me) = (self.clone(), req.app.clone(), scopes.clone(), me.clone());
-            tokio::spawn(async move { node.write_prepared(&app, prepared, &scopes, &me).await }).await??;
+            let traced = trace::current();
+            tokio::spawn(trace::within(traced, async move { node.write_prepared(&app, prepared, &scopes, &me).await })).await??;
+            trace::note(json!({ "step": "write" }), writing_at.elapsed());
             anyhow::Ok(outcome)
         })
         .await
