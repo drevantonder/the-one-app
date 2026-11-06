@@ -1076,7 +1076,12 @@ fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, pers
     let start = Instant::now();
     let (mut signed, mut approved) = (false, false);
     loop {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(180), "the Linux app didn't sign in: {} says why", dir.join(&log).display());
+        let said = std::fs::read_to_string(dir.join(&log)).unwrap_or_default();
+        if start.elapsed() > Duration::from_secs(180) {
+            // Its display's words (Xvfb's) only if the app has none: they're mostly keyboard warnings.
+            let display_said = if said.trim().is_empty() { std::fs::read_to_string(dir.join(format!("{name}/display.log"))).unwrap_or_default() } else { String::new() };
+            return Err(didnt_sign_in("Linux app", &[("the app", said), ("its display", display_said)], &format!("{} is empty, so it may not have started", dir.join(&log).display())));
+        }
         std::thread::sleep(Duration::from_secs(1));
         let said = std::fs::read_to_string(dir.join(&log)).unwrap_or_default();
         if said.lines().any(|l| l == "Let in.") {
@@ -1101,7 +1106,7 @@ fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, pers
     println!(
         "The Linux app of this build is signed in to the throwaway network{}, on this machine in the display {display}.
   See it: DISPLAY={display} import -window root shot.png
-  Use it: DISPLAY={display} xdotool …, or run JavaScript in its page: curl -d '<js>' http://127.0.0.1:{control}/eval
+  Use it: DISPLAY={display} xdotool …, or in its page: curl -d '<js>' http://127.0.0.1:{control}/eval runs JavaScript, and /value gives an expression's value, as JSON
   What it said: {}; {CLI} throwaway stop stops it",
         person.map(|name| format!(" as {name}")).unwrap_or_default(),
         dir.join(&log).display()
@@ -1161,7 +1166,20 @@ fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, ipho
     let start = Instant::now();
     let (mut signed, mut approved) = (false, false);
     loop {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(180), "the app didn't sign in: {host}:{log} says why");
+        let said = ssh(&format!("cat '{log}' 2>/dev/null || true"))?;
+        if start.elapsed() > Duration::from_secs(180) {
+            // The app's own words (its log file, which a launch that never wrote leaves empty), then the system's of it: the
+            // simulator's unified log, which is where an iPhone app's prints go (without WebKit's chatter), or the Mac's launch job.
+            let (what, system, whose) = if iphone {
+                let predicate = format!("process == \"{NAME}\" && !(subsystem BEGINSWITH \"com.apple.\")");
+                let shown = ssh(&format!("xcrun simctl spawn {sim} log show --last 5m --style compact --predicate '{predicate}' 2>&1 | grep -v -e '^Filtering' -e '^Timestamp' -e SecItemCopyMatching -e 'Loading Preferences' | tail -n 20 || true"));
+                ("iPhone app", shown.unwrap_or_default(), "the simulator's log")
+            } else {
+                let job = ssh(&format!("launchctl print gui/$(id -u)/app.{CLI}.mac.throwaway 2>&1 | grep -E 'state|last exit|runs' || true"));
+                ("Mac app", job.unwrap_or_default(), "its launch job")
+            };
+            return Err(didnt_sign_in(what, &[("the app", said), (whose, system)], &format!("{host}:{log} is empty or missing, so it may not have started: look at it with ssh {host}")));
+        }
         std::thread::sleep(Duration::from_secs(2));
         let said = ssh(&format!("cat '{log}' 2>/dev/null || true"))?;
         if said.lines().any(|l| l.trim() == "Let in.") {
@@ -1189,7 +1207,7 @@ fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, ipho
         println!(
             "The iPhone app of this build is signed in to the throwaway network, on a simulator of its own on {host} ({sim}).
   See it: ssh {host} xcrun simctl io {sim} screenshot /tmp/shot.png
-  Use it: run JavaScript in its page there: ssh {host} curl -d '<js>' http://127.0.0.1:{control}/eval; open a link: ssh {host} xcrun simctl openurl {sim} '{CLI}://…'
+  Use it: in its page there: ssh {host} curl -d '<js>' http://127.0.0.1:{control}/eval runs JavaScript, and /value gives an expression's value, as JSON; open a link: ssh {host} xcrun simctl openurl {sim} '{CLI}://…'
   What it said: {host}:{log}; {CLI} throwaway stop shuts the simulator down and deletes it"
         );
         return Ok(());
@@ -1197,7 +1215,7 @@ fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, ipho
     println!(
         "The Mac app of this build is signed in to the throwaway network, on {host} beside the app there (its menu bar item, its window).
   See it: ssh {host} screencapture -x /tmp/shot.png
-  Use it: run JavaScript in its page there: ssh {host} curl -d '<js>' http://127.0.0.1:{control}/eval (/eval/panel, the panel's)
+  Use it: in its page there: ssh {host} curl -d '<js>' http://127.0.0.1:{control}/eval runs JavaScript, and /value gives an expression's value, as JSON (/eval/panel and /value/panel, the panel's)
   What it said: {host}:{log}; {CLI} throwaway stop stops it"
     );
     Ok(())
@@ -1262,7 +1280,12 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare
     let start = Instant::now();
     let (mut signed, mut approved) = (false, false);
     loop {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(180), "the Android app didn't sign in: look at it with {CLI} computer screen --device {device}, and at what it said with {CLI} agent-devices run --device {device} \"logcat -d -s RustStdoutStderr\"");
+        if start.elapsed() > Duration::from_secs(180) {
+            let said = on_device(device, "logcat -d -s RustStdoutStderr:I")?;
+            let said: Vec<&str> = said.lines().filter_map(|l| l.split_once("RustStdoutStderr: ").map(|(_, s)| s.trim())).collect();
+            let crashed = on_device(device, "logcat -d -b crash").unwrap_or_default();
+            return Err(didnt_sign_in("Android app", &[("the app", said.join("\n")), ("Android's crash log", crashed)], &format!("look at it with {CLI} computer screen --device {device}")));
+        }
         std::thread::sleep(Duration::from_secs(2));
         let said = on_device(device, "logcat -d -s RustStdoutStderr:I")?;
         let said: Vec<&str> = said.lines().filter_map(|l| l.split_once("RustStdoutStderr: ").map(|(_, s)| s.trim())).collect();
@@ -1300,9 +1323,30 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare
     }
     std::fs::write(&signed_in, &here)?;
     println!(
-        "  Run JavaScript in its page: {CLI} agent-devices run --device {device} \"(printf 'POST /eval HTTP/1.0\\r\\ncontent-length: <length>\\r\\n\\r\\n'; printf '%s' '<js>') | nc -w 2 127.0.0.1 {control}\"; what it said: {CLI} agent-devices run --device {device} \"logcat -d -s RustStdoutStderr\"; open a link: {CLI} agent-devices run --device {device} \"am start -a android.intent.action.VIEW -d '{CLI}://…' {package}\""
+        "  In its page, POST /eval runs JavaScript and POST /value gives an expression's value, as JSON: {CLI} agent-devices run --device {device} \"(printf 'POST /eval HTTP/1.0\\r\\ncontent-length: <length>\\r\\n\\r\\n'; printf '%s' '<js>') | nc -w 2 127.0.0.1 {control}\"; what it said: {CLI} agent-devices run --device {device} \"logcat -d -s RustStdoutStderr\"; open a link: {CLI} agent-devices run --device {device} \"am start -a android.intent.action.VIEW -d '{CLI}://…' {package}\""
     );
     Ok(())
+}
+
+/// A client that didn't sign in, with the last of what it said (`said`: who said it, and what), which says why; a client that
+/// said nothing says so, and where else to look.
+fn didnt_sign_in(what: &str, said: &[(&str, String)], elsewhere: &str) -> anyhow::Error {
+    let mut message = format!("the {what} didn't sign in");
+    let mut any = false;
+    for (who, text) in said {
+        let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+        if !lines.is_empty() {
+            any = true;
+            message += &format!("\n{who} said, last:");
+            for line in &lines[lines.len().saturating_sub(15)..] {
+                message += &format!("\n  {}", line.chars().take(300).collect::<String>());
+            }
+        }
+    }
+    if !any {
+        message += &format!(" and said nothing: {elsewhere}");
+    }
+    anyhow::anyhow!(message)
 }
 
 /// Whether text is the code a new device shows to be approved: "ABCD EFGH".
@@ -1379,7 +1423,10 @@ Start-ScheduledTask -TaskName one-throwaway-app"#
     let start = Instant::now();
     let (mut signed, mut approved) = (false, false);
     loop {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(180), "the Windows app didn't sign in: look at it with {CLI} computer screen --device {device}, and at what it said in %TEMP%\\one-throwaway-app.log there");
+        if start.elapsed() > Duration::from_secs(180) {
+            let tail = |file: &str| on_device(device, &format!(r#"$f = "$env:TEMP\{file}"; if (Test-Path $f) {{ Get-Content $f -Tail 20 }}"#)).unwrap_or_default();
+            return Err(didnt_sign_in("Windows app", &[("the app", tail("one-throwaway-app.log")), ("its errors", tail("one-throwaway-app.err"))], &format!("look at it with {CLI} computer screen --device {device}")));
+        }
         std::thread::sleep(Duration::from_secs(2));
         let said = on_device(device, r#"$log = "$env:TEMP\one-throwaway-app.log"; if (Test-Path $log) { Get-Content $log }"#)?;
         if said.lines().any(|l| l.trim() == "Let in.") {
@@ -1404,7 +1451,7 @@ Start-ScheduledTask -TaskName one-throwaway-app"#
         }
     }
     std::fs::write(&signed_in, &here)?;
-    println!("  Run JavaScript in its page: {CLI} agent-devices run --device {device} \"Invoke-WebRequest -UseBasicParsing -Method Post -Body '<js>' http://127.0.0.1:{control}/eval\"; what it said is in %TEMP%\\one-throwaway-app.log there");
+    println!("  In its page, /eval runs JavaScript and /value gives an expression's value, as JSON: {CLI} agent-devices run --device {device} \"Invoke-WebRequest -UseBasicParsing -Method Post -Body '<js>' http://127.0.0.1:{control}/eval\"; what it said is in %TEMP%\\one-throwaway-app.log there");
     Ok(())
 }
 
