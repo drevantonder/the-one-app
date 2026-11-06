@@ -53,7 +53,7 @@ pub fn run(args: &[String]) -> Result<i32> {
 /// was given.
 fn here(asked: &str) -> Result<String> {
     if crate::client_device::node_here() {
-        let state = crate::get("/v1/state")?;
+        let state = crate::node().get("/v1/state")?;
         let address = state["network"]["settings"]["address"].as_str().with_context(|| format!("this computer's {NAME} has no address yet: an admin sets it with {CLI} cloudflare use"))?;
         return Ok(address.trim_end_matches('/').to_string());
     }
@@ -126,7 +126,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
         if status >= 400 && kind.starts_with("application/json") {
             let said: serde_json::Value = resp.body_mut().read_json().unwrap_or_default();
             let error = said["error"].as_str().unwrap_or("that didn't work").to_string();
-            return drop(head.send((status, "text/plain".into(), Some(crate::tools::in_cli_words(&error)))));
+            return drop(head.send((status, "text/plain".into(), Some(one::tools::in_cli_words(&crate::node(), &error)))));
         }
         if head.send((status, kind, None)).is_err() {
             return;

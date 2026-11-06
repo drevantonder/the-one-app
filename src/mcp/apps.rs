@@ -4,11 +4,9 @@
 
 use serde_json::{Value, json};
 
-use one::config::CLI;
+use crate::config::CLI;
 
-use one::api::addr;
-
-use crate::{agent, get, to_node};
+use crate::api::Client;
 
 const MIME: &str = "text/html;profile=mcp-app";
 
@@ -30,12 +28,12 @@ pub fn read(uri: &str) -> Result<Value, Value> {
         return Err(json!({ "code": -32002, "message": format!("no resource {uri}") }));
     }
     // @one/ui, the bridge and what web pages draw for screens, as the web client has them (src/screen/).
-    let mut view = include_str!("mcp_view.html").to_string();
+    let mut view = include_str!("view.html").to_string();
     for (name, text) in [
-        ("ui.css", include_str!("screen/ui/dist/ui.css")),
-        ("bridge.js", include_str!("screen/bridge.js")),
-        ("host.js", include_str!("screen/host.js")),
-        ("ui.js", include_str!("screen/ui/dist/ui.js")),
+        ("ui.css", include_str!("../screen/ui/dist/ui.css")),
+        ("bridge.js", include_str!("../screen/bridge.js")),
+        ("host.js", include_str!("../screen/host.js")),
+        ("ui.js", include_str!("../screen/ui/dist/ui.js")),
     ] {
         view = view.replacen(&format!("/*{name}*/"), text, 1);
     }
@@ -47,7 +45,7 @@ pub fn tools() -> Vec<Value> {
     let ui = json!({ "ui": { "resourceUri": view_uri() } });
     vec![
         {
-            let mut show = one::node::widgets::show_tool();
+            let mut show = crate::node::widgets::show_tool();
             show["_meta"] = ui.clone();
             show
         },
@@ -60,7 +58,7 @@ pub fn tools() -> Vec<Value> {
                 "params": { "type": "object", "description": "what the screen is opened with" },
                 "scope": { "type": "string", "description": "the page it's opened from: user, group:<id> or global" },
             } },
-            "annotations": one::skills::hints(true, false),
+            "annotations": crate::skills::hints(true, false),
             "_meta": ui,
         }),
         // Only the view calls it, for the icons a screen or widget draws.
@@ -70,7 +68,7 @@ pub fn tools() -> Vec<Value> {
             "inputSchema": { "type": "object", "required": ["names"], "properties": {
                 "names": { "type": "array", "items": { "type": "string" }, "description": "Phosphor icons' names, like git-branch" },
             } },
-            "annotations": one::skills::hints(true, false),
+            "annotations": crate::skills::hints(true, false),
             "_meta": { "ui": { "visibility": ["app"] } },
         }),
         // Only the view calls it, again and again while it's on screen, so what it shows keeps up: a chat sends a view
@@ -81,28 +79,28 @@ pub fn tools() -> Vec<Value> {
             "inputSchema": { "type": "object", "required": ["apps"], "properties": {
                 "apps": { "type": "array", "items": { "type": "string" }, "description": "the apps shown" },
             } },
-            "annotations": one::skills::hints(true, false),
+            "annotations": crate::skills::hints(true, false),
             "_meta": { "ui": { "visibility": ["app"] } },
         }),
     ]
 }
 
 /// Answers `widgets_show` and `screens_open`; None for any other tool.
-pub fn call(name: &str, input: &Value) -> Option<Value> {
+pub fn call(node: &Client, name: &str, input: &Value) -> Option<Value> {
     let result = match name {
-        "widgets_show" => one::node::widgets::show(input, &crate::Local),
-        "screens_open" => screen(input),
+        "widgets_show" => crate::node::widgets::show(input, node),
+        "screens_open" => screen(node, input),
         "screens_icons" => icons(input),
-        "screens_changes" => changes(input),
+        "screens_changes" => changes(node, input),
         _ => return None,
     };
     Some(result.unwrap_or_else(|e| json!({ "isError": true, "content": [{ "type": "text", "text": format!("{e:#}") }] })))
 }
 
-fn screen(input: &Value) -> anyhow::Result<Value> {
+fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     let app = input["app"].as_str().unwrap_or_default();
     let screen = input["screen"].as_str().unwrap_or("main");
-    let mut url = format!("http://{}/v1/screens/{app}/{screen}", addr());
+    let mut url = format!("/v1/screens/{app}/{screen}");
     let params = if input["params"].is_object() { input["params"].to_string() } else { "{}".into() };
     let mut query = vec![("params", params)];
     if let Some(scope) = input["scope"].as_str() {
@@ -110,17 +108,18 @@ fn screen(input: &Value) -> anyhow::Result<Value> {
     }
     url.push('?');
     url.push_str(&query.iter().map(|(k, v)| format!("{k}={}", urlencode(v))).collect::<Vec<_>>().join("&"));
-    let mut resp = to_node(agent().get(&url)).call()?;
-    let html = resp.body_mut().read_to_string()?;
-    anyhow::ensure!(resp.status().is_success(), "{}", html.trim());
+    let page = node.open(&url, None)?;
+    let mut html = String::new();
+    std::io::Read::read_to_string(&mut { page.body }, &mut html)?;
+    anyhow::ensure!(page.status == 200, "{}", html.trim());
     // Its title, as the web client names it; and where the web client shows it, for what a chat can't do (give files).
-    let apps = get("/v1/apps").unwrap_or_default();
+    let apps = node.get("/v1/apps").unwrap_or_default();
     let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == app);
     let title = found
         .and_then(|a| a["screens"].as_array().into_iter().flatten().find(|s| s["name"] == screen)?["title"].as_str())
         .or_else(|| found.and_then(|a| a["title"].as_str().or(a["name"].as_str())))
         .unwrap_or(app);
-    let address = get("/v1/state").ok().and_then(|s| s["network"]["settings"]["address"].as_str().map(|a| a.trim_end_matches('/').to_string()));
+    let address = node.get("/v1/state").ok().and_then(|s| s["network"]["settings"]["address"].as_str().map(|a| a.trim_end_matches('/').to_string()));
     let web = address.map(|a| format!("{a}/app/{}/{}?{}", urlencode(app), urlencode(screen), query.iter().map(|(k, v)| format!("{k}={}", urlencode(v))).collect::<Vec<_>>().join("&")));
     Ok(json!({
         "content": [{ "type": "text", "text": format!("Opened {app}'s {screen} screen for the person.") }],
@@ -130,21 +129,21 @@ fn screen(input: &Value) -> anyhow::Result<Value> {
 
 /// The node's next event that changes what the view shows of `apps` (their data, or which apps there are), within 25
 /// seconds; none if nothing does by then.
-fn changes(input: &Value) -> anyhow::Result<Value> {
+fn changes(node: &Client, input: &Value) -> anyhow::Result<Value> {
     use std::io::BufRead;
     const WAIT: std::time::Duration = std::time::Duration::from_secs(25);
     let apps: Vec<&str> = input["apps"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     let mut events = vec![];
-    let resp = to_node(agent().get(format!("http://{}/v1/events", addr()))).config().timeout_global(Some(WAIT)).build().call()?;
-    if resp.status() == 204 {
+    let resp = node.open("/v1/events", Some(WAIT))?;
+    if resp.status == 204 {
         // A node with none to say (the Cloudflare node, while no machine is on): the view asks again after the wait.
         std::thread::sleep(WAIT);
     } else {
-        anyhow::ensure!(resp.status().is_success(), "the node's events didn't open ({})", resp.status());
+        anyhow::ensure!(resp.status == 200, "the node's events didn't open ({})", resp.status);
         // Read beside the wait, which ends it: as a device, its stream has no timeout of its own, and the thread reading
         // it ends at its next line (a keep-alive at most 15 seconds on), once nobody listens.
         let (tx, lines) = std::sync::mpsc::channel();
-        let body = resp.into_body().into_reader();
+        let body = resp.body;
         std::thread::spawn(move || {
             for line in std::io::BufReader::new(body).lines().map_while(Result::ok) {
                 if tx.send(line).is_err() {
@@ -166,7 +165,7 @@ fn changes(input: &Value) -> anyhow::Result<Value> {
 }
 
 fn icons(input: &Value) -> anyhow::Result<Value> {
-    static ALL: std::sync::LazyLock<serde_json::Map<String, Value>> = std::sync::LazyLock::new(|| serde_json::from_slice(one::screen::ICONS).unwrap_or_default());
+    static ALL: std::sync::LazyLock<serde_json::Map<String, Value>> = std::sync::LazyLock::new(|| serde_json::from_slice(crate::screen::ICONS).unwrap_or_default());
     let paths: serde_json::Map<String, Value> =
         input["names"].as_array().into_iter().flatten().filter_map(Value::as_str).take(500).map(|n| (n.to_string(), ALL.get(n).cloned().unwrap_or_else(|| "".into()))).collect();
     Ok(json!({ "content": [{ "type": "text", "text": format!("{} icons.", paths.len()) }], "structuredContent": { "paths": paths } }))

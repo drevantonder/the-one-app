@@ -4,7 +4,8 @@
 use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
 
-use crate::node::own::{Ask, Asked, NodeApp};
+use crate::api::Client;
+use crate::node::own::{Asked, NodeApp};
 use crate::skills::hints;
 
 pub fn app() -> NodeApp {
@@ -33,7 +34,7 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
 }
 
 /// The widgets `input` asks for (`app`, `widget`, `scope`), as MCP answers: in words, and as they are to draw.
-pub fn show(input: &Value, node: &dyn Ask) -> Result<Value> {
+pub fn show(input: &Value, node: &Client) -> Result<Value> {
     let scope = input["scope"].as_str().map(|s| format!("?scope={s}")).unwrap_or_default();
     let all = node.get(&format!("/v1/widgets{scope}"))?;
     let wanted: Vec<Value> = all

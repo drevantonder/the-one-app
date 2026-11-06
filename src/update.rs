@@ -12,7 +12,6 @@ use one::{cache, release};
 use serde_json::{Value, json};
 
 use crate::build::{self, PLATFORMS, Platform, cargo, git, quietly, show, succeeds};
-use crate::{get, post};
 
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
@@ -142,7 +141,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if !linux.is_empty() && linux.iter().all(|d| d["build"] == short) {
         println!("  every Linux device already runs {short}");
     } else {
-        let published = timed("published the node", || build::publish(&binary, &key, &version, None))?;
+        let published = timed("published the node", || build::publish(&crate::node(), &binary, &key, &version, None))?;
         println!("{}", build::published_said(&published, None));
     }
     let started_at = Instant::now();
@@ -383,7 +382,7 @@ pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
             std::fs::rename(path.with_extension("new"), path)?;
         }
     }
-    post("/v1/service", json!({ "name": name, "device": device, "on": true }))?;
+    crate::node().post("/v1/service", json!({ "name": name, "device": device, "on": true }))?;
     println!("{name}'s service {built} is on {there}: its oned starts it; {CLI} services says when it's running.");
     Ok(())
 }
@@ -406,7 +405,7 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
             let built = build::build_service(&src.join("apps").join(name), &commit[..12], PLATFORMS.iter(), &out)?.context("it has no service")?;
             for (platform, program) in built.made {
                 let version = Version { commit: commit.into(), target: platform.target.into(), committed };
-                build::publish(&program, key, &version, Some(name)).with_context(|| format!("publish it for {}", platform.target))?;
+                build::publish(&crate::node(), &program, key, &version, Some(name)).with_context(|| format!("publish it for {}", platform.target))?;
             }
             Ok(())
         };
@@ -432,12 +431,12 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
 /// They wait in Recently Deleted, where an admin could restore one. Gives each renamed one's new name, with where the old one was installed.
 fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Vec<(String, Vec<String>)>> {
     let mut moved = Vec::new();
-    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+    for app in crate::node().get("/v1/apps")?.as_array().into_iter().flatten() {
         let ours = app["bundle"].is_null() || app["bundle"] == app["built_in"];
         let had = ours && app["built_in"].is_string() && app["deploys"].as_u64().is_some_and(|n| n > 0);
         let Some(name) = app["name"].as_str().filter(|_| had) else { continue };
         if app["deleted"].is_null() && !src.join("apps").join(name).join("app.js").is_file() {
-            post("/v1/retire", json!({ "app": name, "how": "deleted" }))?;
+            crate::node().post("/v1/retire", json!({ "app": name, "how": "deleted" }))?;
             match renamed.iter().find(|(old, _)| old == name) {
                 Some((_, new)) => {
                     println!("Deleted {name}: it's {new} now");
@@ -455,7 +454,7 @@ fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Vec<(String, 
 fn add_where(moved: &[(String, Vec<String>)]) {
     for (app, scopes) in moved {
         for scope in scopes {
-            match post("/v1/install", json!({ "app": app, "scope": scope, "installed": true })) {
+            match crate::node().post("/v1/install", json!({ "app": app, "scope": scope, "installed": true })) {
                 Ok(_) => println!("Added {app} to {scope}, where its old name was"),
                 Err(err) => println!("  couldn't add {app} to {scope}: {err:#}"),
             }
@@ -470,7 +469,7 @@ fn deploy_apps(src: &Path, changed: &[String]) -> Result<()> {
     if changed.is_empty() {
         return Ok(());
     }
-    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+    for app in crate::node().get("/v1/apps")?.as_array().into_iter().flatten() {
         let Some(name) = app["name"].as_str().filter(|_| app["built_in"].is_string()) else { continue };
         let dir = src.join("apps").join(name);
         if !dir.join("app.js").is_file() {
@@ -479,9 +478,9 @@ fn deploy_apps(src: &Path, changed: &[String]) -> Result<()> {
         let files = one::app::bundle::sources(&dir)?;
         let files: Vec<(&str, &[u8])> = files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect();
         let bundle = one::node::built_in_bundle(&files)?;
-        let blob = crate::put_blob(&bundle)?;
+        let blob = crate::node().put_blob(&bundle)?;
         if app["bundle"].as_str() != Some(blob.as_str()) {
-            post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
+            crate::node().post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
             println!("Deployed {name}'s new version ({})", &blob[..12]);
         }
     }
@@ -672,10 +671,10 @@ fn finish(after: Option<After>) -> Result<()> {
 
 /// Deploys this device's release's version of each built-in app the network has, where it runs another.
 fn deploy_built_in() -> Result<()> {
-    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+    for app in crate::node().get("/v1/apps")?.as_array().into_iter().flatten() {
         let (Some(name), Some(bundle)) = (app["name"].as_str(), app["built_in"].as_str()) else { continue };
         if app["bundle"].as_str() != Some(bundle) {
-            post("/v1/deploy", json!({ "app": name, "bundle": bundle }))?;
+            crate::node().post("/v1/deploy", json!({ "app": name, "bundle": bundle }))?;
             println!("Deployed {name}'s new version ({})", &bundle[..12]);
         }
     }
@@ -743,7 +742,7 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
 
 /// This user's own devices, as this one sees them now: none while its node restarts.
 fn devices() -> Vec<Value> {
-    let state = get("/v1/state").unwrap_or_default();
+    let state = crate::node().get("/v1/state").unwrap_or_default();
     let me = state["network"]["user"].clone();
     state["network"]["devices"].as_array().into_iter().flatten().filter(|d| d["user"] == me).cloned().collect()
 }
@@ -820,7 +819,7 @@ pub fn wait(args: &[String]) -> Result<()> {
 fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     let short = &commit[..commit.len().min(12)];
     // Says so when no node answers, which later polls (a node restarting on the new build) never do.
-    get("/v1/state")?;
+    crate::node().get("/v1/state")?;
     let all: Vec<Value> = devices();
     ensure!(!all.is_empty(), "no devices are listed here yet");
     for n in names {
@@ -986,7 +985,7 @@ fn run_here(command: &str) -> Result<Value> {
 
 fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
     // Shell's service on that device, by its name: its own program there, or built into an older node.
-    let r = post("/v1/call", json!({ "device": device["name"], "service": "shell", "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
+    let r = crate::node().post("/v1/call", json!({ "device": device["name"], "service": "shell", "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
     Ok(r["ok"].clone())
 }
 

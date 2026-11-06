@@ -7,11 +7,12 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
-use one::config::CLI;
-use one::skills::{Mode, path, ts};
+use crate::config::CLI;
+use crate::skills::{Mode, path, ts};
 use serde_json::{Value, json};
 
-use crate::{get, tools};
+use crate::api::Client;
+use crate::tools;
 
 /// Who a search answers: someone at the command line, or an MCP client in one of its modes.
 #[derive(Clone, Copy)]
@@ -22,16 +23,16 @@ pub enum For {
 
 /// Every app installed for this user that has tools, as `GET /v1/apps` gives them, with each tool's input as
 /// MCP takes it (files explained, `device` and `confirm` where they apply), and the Vault's tools as an app.
-pub fn catalog() -> Result<Vec<Value>> {
-    Ok(catalogs()?.0)
+pub fn catalog(node: &Client) -> Result<Vec<Value>> {
+    Ok(catalogs(node)?.0)
 }
 
 /// What a search looks through: `catalog`'s apps, then the apps the person could add, which have no tools for
 /// them yet: those not added where they are, nor deleted.
-pub fn catalogs() -> Result<(Vec<Value>, Vec<Value>)> {
-    let mut apps = one::node::own::listed();
+pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
+    let mut apps = crate::node::own::listed();
     let mut addable = Vec::new();
-    for mut app in get("/v1/apps")?.as_array().cloned().unwrap_or_default() {
+    for mut app in node.get("/v1/apps")?.as_array().cloned().unwrap_or_default() {
         let tools: Vec<Value> = app["ops"]
             .as_array()
             .into_iter()
@@ -219,7 +220,7 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
             return format!("Nothing added does that.\n\n{adds}");
         }
         let names: Vec<&str> = apps.iter().filter_map(|a| a["name"].as_str()).collect();
-        return format!("Nothing matches. Try other words, or an app's name: {}. If no app does it yet, make one: load the skill {}-build.", names.join(", "), one::skills::server_name());
+        return format!("Nothing matches. Try other words, or an app's name: {}. If no app does it yet, make one: load the skill {}-build.", names.join(", "), crate::skills::server_name());
     }
     let mut text = String::new();
     let mut shown: Vec<&Value> = Vec::new();
@@ -266,7 +267,7 @@ pub fn search_tool(mode: Mode) -> Value {
             "query": { "type": "string", "description": "a few words for the task, or an app's name" },
             "limit": { "type": "integer", "description": "how many tools, 8 if not given" },
         } },
-        "annotations": one::skills::hints(true, false),
+        "annotations": crate::skills::hints(true, false),
     })
 }
 
@@ -275,7 +276,7 @@ pub fn search_tool(mode: Mode) -> Value {
 pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
     let direct = |t: &Value| {
         let name = t["name"].as_str().unwrap_or("");
-        matches!(name, "deploy" | "vault_request" | "vault_status") || one::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|tool| tool.starts_with('_')))
+        matches!(name, "deploy" | "vault_request" | "vault_status") || crate::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|tool| tool.starts_with('_')))
     };
     [vec![search_tool(Mode::Code), execute_tool()], all.into_iter().filter(direct).collect()].concat()
 }
@@ -289,7 +290,7 @@ pub fn execute_tool() -> Value {
         "name": "execute",
         "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what sends or can't be undone needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
         "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
-        "annotations": one::skills::hints(false, false),
+        "annotations": crate::skills::hints(false, false),
     })
 }
 
@@ -299,13 +300,13 @@ const RUNNER: &[(&str, &str)] = &[("package.json", include_str!("codemode/packag
 /// The folder the runner runs in, its packages installed (once per version of its files) with the pinned Bun.
 fn runner() -> Result<(PathBuf, PathBuf)> {
     use sha2::Digest;
-    let bun = one::app::deploy::bun()?;
+    let bun = crate::app::deploy::bun()?;
     let mut hash = sha2::Sha256::new();
     for (path, text) in RUNNER {
         hash.update(format!("{path}\0{}\0{text}", text.len()));
     }
     let hash = data_encoding::HEXLOWER.encode(&hash.finalize());
-    let dir = one::cache().join(format!("codemode-{}", &hash[..16]));
+    let dir = crate::cache().join(format!("codemode-{}", &hash[..16]));
     if dir.join("node_modules/@opencode/codemode").is_dir() {
         return Ok((bun, dir));
     }
@@ -334,9 +335,9 @@ fn runner() -> Result<(PathBuf, PathBuf)> {
 /// Runs a script: each call it makes is checked against its tool's inputs and run as the person, as an MCP call
 /// is, what sends or can't be undone only with confirm: true. Gives back code mode's result: `{ ok, value | error,
 /// logs, truncated, toolCalls }`.
-pub fn execute(script: &str, agent: Option<&str>, client: &str) -> Result<Value> {
+pub fn execute(node: &Client, script: &str, agent: Option<&str>, client: &str) -> Result<Value> {
     anyhow::ensure!(!script.trim().is_empty(), "give the script as code");
-    let apps = catalog()?;
+    let apps = catalog(node)?;
     let mut tools = Vec::new();
     let mut descriptions = serde_json::Map::new();
     for app in &apps {
@@ -372,7 +373,7 @@ pub fn execute(script: &str, agent: Option<&str>, client: &str) -> Result<Value>
             let answer = (|| {
                 let spec = spec.with_context(|| format!("no tool {app}_{tool}"))?;
                 anyhow::ensure!(input.is_object() || input.is_null(), "a tool's input is an object, not {input}");
-                crate::dispatch(&format!("{app}_{tool}"), input.as_object().cloned().unwrap_or_default(), agent, client, Some(spec))
+                crate::mcp::dispatch(node, &format!("{app}_{tool}"), input.as_object().cloned().unwrap_or_default(), agent, client, Some(spec)).ok
             })();
             let reply = match answer {
                 Ok(ok) => json!({ "reply": id, "ok": ok }),

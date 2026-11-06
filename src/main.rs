@@ -1,4 +1,3 @@
-use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
@@ -8,14 +7,13 @@ use one::skills::Mode;
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
-mod build;
 mod client_device;
-mod code;
 mod git_remote;
-mod mcp_apps;
-mod tools;
 mod throwaway;
 mod update;
+
+use one::api::Client;
+use one::{build, code, tools};
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
 fn commands() -> Vec<Command> {
@@ -36,8 +34,8 @@ fn command_words() -> Vec<String> {
 }
 
 /// What `help` and the bare command say: what an agent needs to start, and where the rest is.
-fn help() -> String {
-    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+fn help(node: &Client) -> String {
+    let apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
     let names: Vec<&str> = apps.iter().filter(|a| a["ops"].as_array().is_some_and(|o| !o.is_empty())).filter_map(|a| a["name"].as_str()).collect();
     let yours = match names.is_empty() {
         true => String::new(),
@@ -94,7 +92,7 @@ fn main() {
     client_device::end();
     if let Err(err) = ran {
         // What the node says names its tools (apps_restore); the command line names them as commands.
-        eprintln!("{CLI}: {}", tools::in_cli_words(&format!("{err:#}")));
+        eprintln!("{CLI}: {}", tools::in_cli_words(&node(), &format!("{err:#}")));
         std::process::exit(tools::exit_code(&err));
     }
 }
@@ -102,15 +100,9 @@ fn main() {
 fn run(args: Vec<String>) -> Result<()> {
     // --json is everyone's, wherever it's typed: what a tool gives back, as JSON.
     let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
-    if args[..end].iter().any(|a| a == "--json") {
-        tools::JSON.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
+    let json = args[..end].iter().any(|a| a == "--json");
     // --trace too: a call prints what it did, and where, after its answer.
-    let traced = args[..end].iter().any(|a| a == "--trace");
-    // (A throwaway's command runs this again with it already taken out.)
-    if traced {
-        TRACE_ASKED.with(|t| t.set(true));
-    }
+    let trace = args[..end].iter().any(|a| a == "--trace");
     // A throwaway's command is run by what it starts (a client's CLI, this again), which takes it out itself.
     let keep_trace = args.first().map(String::as_str) == Some("throwaway");
     let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || (*a != "--json" && (keep_trace || *a != "--trace"))).map(|(_, a)| a.clone()).collect();
@@ -122,11 +114,11 @@ fn run(args: Vec<String>) -> Result<()> {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
         unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     }
-    let agent = agent_from_env();
-    let given = Given { words: &positional, flags: &flags, args: &args, node: &Local, agent: agent.as_deref() };
+    let (agent, node, words) = (one::mcp::agent_from_env(), node(), command_words());
+    let given = Given { words: &positional, flags: &flags, args: &args, node: &node, agent: agent.as_deref(), json, trace, commands: &words };
     // --help shows help, whatever the command: never runs it. An app's tool's is the app's own.
     if flags.contains_key("help") || positional.iter().any(|p| p == "-h") {
-        match command_help(&positional) {
+        match command_help(&node, &positional) {
             Some(text) => print!("{text}"),
             None => _ = (generic().run)(&given)?,
         }
@@ -159,7 +151,7 @@ fn network() -> Command {
         run: |g| {
             let (flags, args) = (g.flags, g.args);
             match g.words().as_slice() {
-                ["sign-in"] => sign_in(&flags)?,
+                ["sign-in"] => sign_in(g.node, &flags)?,
                 ["sign-out"] => {
                     // A device takes itself out of its person's devices first, while its sign-in still says who it is; git
                     // here then no longer reaches its repos, which a node here still serves.
@@ -175,14 +167,14 @@ fn network() -> Command {
                     }
                 }
                 ["status"] if flags.contains_key("until") => update::wait(&args)?,
-                ["status"] => status(&get("/v1/state")?),
+                ["status"] => status(g.node, &g.node.get("/v1/state")?),
                 ["create", name @ ..] if !name.is_empty() => {
                     let user_name = flags.get("as").and_then(Value::as_str).context("say what to call you with --as <your name>")?;
                     let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": flags.get("user") }))?;
                     println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
                 }
                 ["pair"] => {
-                    let r = post("/v1/pair", json!({ "user": flags.get("user") }))?;
+                    let r = g.node.post("/v1/pair", json!({ "user": flags.get("user") }))?;
                     println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
                 }
                 ["join", code] => {
@@ -190,22 +182,22 @@ fn network() -> Command {
                     println!("Joined. Syncing now; {CLI} status shows progress.");
                 }
                 ["settings"] => {
-                    let state = get("/v1/state")?;
+                    let state = g.node.get("/v1/state")?;
                     for (name, value) in state["network"]["settings"].as_object().context("not in a network yet")? {
                         println!("{name} = {value}");
                     }
                 }
                 ["settings", name, value @ ..] => {
                     let value = if flags.contains_key("default") { Value::Null } else { json!(value.join(" ")) };
-                    post("/v1/settings", json!({ "name": name, "value": value }))?;
+                    g.node.post("/v1/settings", json!({ "name": name, "value": value }))?;
                     println!("Set {name}.");
                 }
                 ["role", user, role] => {
-                    post("/v1/role", json!({ "user": user, "role": role }))?;
+                    g.node.post("/v1/role", json!({ "user": user, "role": role }))?;
                     println!("{user} is now {role}.");
                 }
                 ["rename", name @ ..] if !name.is_empty() => {
-                    post("/v1/name", json!({ "name": name.join(" ") }))?;
+                    g.node.post("/v1/name", json!({ "name": name.join(" ") }))?;
                     println!("This device is now {}.", name.join(" "));
                 }
                 _ => return Ok(false),
@@ -232,14 +224,14 @@ fn apps() -> Command {
             let flags = g.flags;
             match g.words().as_slice() {
                 ["apps"] => {
-                    let groups = get("/v1/state")?["network"]["groups"].clone();
+                    let groups = g.node.get("/v1/state")?["network"]["groups"].clone();
                     // Where it's added, as the App Store says it: you, a group by its name, everyone.
                     let place = |scope: &str| match scope.split_once(':') {
                         Some(("group", id)) => groups.as_array().into_iter().flatten().find(|g| g["id"] == id).and_then(|g| g["name"].as_str()).unwrap_or(id).to_string(),
                         Some(("user", _)) => "you".to_string(),
                         _ => "everyone".to_string(),
                     };
-                    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+                    for app in g.node.get("/v1/apps")?.as_array().into_iter().flatten() {
                         let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
                         let installed: Vec<String> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
                         let installed = if installed.is_empty() { String::new() } else { format!(", added for {}", installed.join(", ")) };
@@ -249,12 +241,12 @@ fn apps() -> Command {
                 }
                 ["deploy", app] if flags.contains_key("version") => {
                     let version = flags["version"].as_str().context("give --version <hash>")?;
-                    let here = post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?["here"] == true;
-                    println!("{}", deployed_said(&format!("Deployed {app} ({version}) again."), here));
+                    let here = g.node.post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?["here"] == true;
+                    println!("{}", deployed_said(g.node, &format!("Deployed {app} ({version}) again."), here));
                 }
-                ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
+                ["deploy", dir] => deploy(g.node, std::path::Path::new(dir), &flags)?,
                 ["deploys", app] => {
-                    let apps = get("/v1/apps")?;
+                    let apps = g.node.get("/v1/apps")?;
                     let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}"))?;
                     for d in found["history"].as_array().into_iter().flatten() {
                         let current = if d["bundle"] == found["bundle"] { "  (running)" } else { "" };
@@ -269,7 +261,7 @@ fn apps() -> Command {
                     if let [path] = rest {
                         q.push(format!("path={path}"));
                     }
-                    let r = get(&format!("/v1/source/{app}?{}", q.join("&")))?;
+                    let r = g.node.get(&format!("/v1/source/{app}?{}", q.join("&")))?;
                     match (&r["text"], &r["files"]) {
                         (Value::String(text), _) => print!("{text}"),
                         (_, Value::Array(files)) => files.iter().for_each(|f| println!("{:>8}  {}", f["size"], f["path"].as_str().unwrap_or(""))),
@@ -278,16 +270,16 @@ fn apps() -> Command {
                 }
                 ["uninstall", app] => {
                     let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-                    post("/v1/install", json!({ "app": app, "scope": scope, "installed": false }))?;
+                    g.node.post("/v1/install", json!({ "app": app, "scope": scope, "installed": false }))?;
                     println!("{app} is no longer installed in {scope}.");
                 }
                 ["fork", app, name] => {
-                    post("/v1/fork", json!({ "app": app, "name": name, "owner": flags.get("owner") }))?;
+                    g.node.post("/v1/fork", json!({ "app": app, "name": name, "owner": flags.get("owner") }))?;
                     println!("Forked {app} as {name}; deploy your changes with {CLI} deploy <dir> --name {name}.");
                 }
                 ["install", app] => {
                     let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-                    post("/v1/install", json!({ "app": app, "scope": scope, "installed": true }))?;
+                    g.node.post("/v1/install", json!({ "app": app, "scope": scope, "installed": true }))?;
                     println!("{app} is installed in {scope}.");
                 }
                 _ => return Ok(false),
@@ -316,11 +308,11 @@ fn running() -> Command {
             match g.words().as_slice() {
                 ["app", how @ ("delete" | "restore" | "erase"), app] => {
                     let past = match *how { "delete" => "deleted", "restore" => "restored", _ => "erased" };
-                    post("/v1/retire", json!({ "app": app, "how": past }))?;
+                    g.node.post("/v1/retire", json!({ "app": app, "how": past }))?;
                     println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
                 }
                 ["services"] => {
-                    let state = get("/v1/state")?;
+                    let state = g.node.get("/v1/state")?;
                     let all: Vec<Value> = state["network"]["devices"].as_array().cloned().unwrap_or_default();
                     for s in &all {
                         let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
@@ -372,7 +364,7 @@ fn running() -> Command {
                 ["services", "try", dir] => update::try_service(std::path::Path::new(dir), flags.get("device").and_then(Value::as_str))?,
                 ["services", how @ ("on" | "off"), name] => {
                     let device = flags.get("device").and_then(Value::as_str);
-                    post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
+                    g.node.post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
                     let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
                     match (*how, *name == one::database::scopes::APPS_PART) {
                         _ if device.is_some_and(|d| d.eq_ignore_ascii_case(one::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
@@ -383,7 +375,7 @@ fn running() -> Command {
                     }
                 }
                 ["schedules"] => {
-                    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+                    for app in g.node.get("/v1/apps")?.as_array().into_iter().flatten() {
                         for s in app["schedules"].as_array().into_iter().flatten() {
                             let state = match (&s["invalid"], s["removed"] == true, s["on"] == true) {
                                 (Value::String(why), ..) => format!("doesn't make sense: {why}"),
@@ -402,26 +394,27 @@ fn running() -> Command {
                 }
                 ["schedule", on @ ("on" | "off"), app, name] => {
                     let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-                    post("/v1/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
+                    g.node.post("/v1/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
                     println!("{app}'s schedule {name} is {on} in {scope}.");
                 }
                 ["logs", device] => {
                     takes_only(&flags, &["service", "since", "grep", "lines"])?;
                     let mut input = flags.clone();
                     input.insert("device".into(), json!(device));
-                    let read = logs_read(&input);
-                    if read.is_err() {
-                        print_trace();
+                    let read = one::mcp::logs_read(g.node, &input, g.agent, "cli", g.trace);
+                    if read.ok.is_err() {
+                        tools::print_trace(read.trace.as_deref());
                     }
-                    let (lines, note) = logs_said(&read.map_err(|e| anyhow::anyhow!(tools::in_cli_words(&format!("{e:#}"))))?, device);
-                    match tools::json() {
+                    let trace = read.trace;
+                    let (lines, note) = one::mcp::logs_said(&read.ok.map_err(|e| anyhow::anyhow!(tools::in_cli_words(g.node, &format!("{e:#}"))))?, device);
+                    match g.json {
                         true => println!("{}", serde_json::to_string_pretty(&lines)?),
                         false => {
                             lines.as_array().into_iter().flatten().filter_map(Value::as_str).for_each(|l| println!("{l}"));
                             note.iter().for_each(|n| eprintln!("{n}"));
                         }
                     }
-                    print_trace();
+                    tools::print_trace(trace.as_deref());
                 }
                 _ => return Ok(false),
             }
@@ -450,7 +443,7 @@ fn releases() -> Command {
                         [path] => std::fs::canonicalize(path)?,
                         _ => std::env::current_exe()?,
                     };
-                    publish(&path, &flags, &update::release_key()?)?;
+                    publish(g.node, &path, &flags, &update::release_key()?)?;
                 }
                 ["file", "put", file] => {
                     let read = std::fs::File::open(file).with_context(|| format!("read {file}"))?;
@@ -485,21 +478,21 @@ fn agents() -> Command {
             let flags = g.flags;
             match g.words().as_slice() {
                 [] | ["help"] => {
-                    println!("{}", help());
-                    println!("\n{}", connection());
+                    println!("{}", help(g.node));
+                    println!("\n{}", connection(g.node));
                 }
                 ["help", "all"] => println!("{}", every_command()),
-                ["help", rest @ ..] => match command_help(&rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
+                ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
-                    None => bail!("{}", tools::unknown(rest[0], None, true)?),
+                    None => bail!("{}", tools::unknown(g.node, rest[0], None, Some(g.commands))?),
                 },
-                ["mcp"] => mcp(if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
+                ["mcp"] => one::mcp::stdio(std::sync::Arc::new(node()), if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
                 ["run", file] => {
                     let script = match *file {
                         "-" => std::io::read_to_string(std::io::stdin())?,
                         file => std::fs::read_to_string(file).with_context(|| format!("read {file}"))?,
                     };
-                    let result = code::execute(&script, agent_from_env().as_deref(), "cli")?;
+                    let result = code::execute(g.node, &script, g.agent, "cli")?;
                     for line in result["logs"].as_array().into_iter().flatten() {
                         eprintln!("{}", line.as_str().map(String::from).unwrap_or_else(|| line.to_string()));
                     }
@@ -513,7 +506,7 @@ fn agents() -> Command {
                     }
                 }
                 ["skills"] => {
-                    let skills = skills();
+                    let skills = one::mcp::skills(g.node);
                     let width = skills.iter().map(|s| s.name.len()).max().unwrap_or(0);
                     for s in &skills {
                         println!("{:width$}  {}", s.name, s.description);
@@ -521,17 +514,17 @@ fn agents() -> Command {
                     println!("\n{CLI} skills <name> prints one; {CLI} skills <name> <file> one of its other files.");
                 }
                 ["skills", name, path @ ..] => {
-                    let skill = skills().into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", one::skills::server_name())) == Some(*name));
+                    let skill = one::mcp::skills(g.node).into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", one::skills::server_name())) == Some(*name));
                     let skill = skill.with_context(|| format!("no skill {name}: {CLI} skills lists them"))?;
                     let path = path.first().copied().unwrap_or("SKILL.md");
                     print!("{}", skill.file(path).with_context(|| format!("{} has no {path}: it has {}", skill.name, skill.all_files().iter().map(|f| f.0.as_str()).collect::<Vec<_>>().join(", ")))?);
                 }
                 ["search", words @ ..] if !words.is_empty() => {
                     let limit = flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
-                    let (apps, addable) = code::catalogs()?;
+                    let (apps, addable) = code::catalogs(g.node)?;
                     println!("{}", code::search(&apps, &addable, &words.join(" "), limit, code::For::Cli));
                 }
-                ["version"] if tools::json() => println!("{}", one::release::Version::this().json()),
+                ["version"] if g.json => println!("{}", one::release::Version::this().json()),
                 ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
                 _ => return Ok(false),
             }
@@ -552,9 +545,9 @@ fn generic() -> Command {
             match g.words().as_slice() {
                 [app] if !app.starts_with('-') => {
                     // The node's own apps (Devices, Widgets) aren't in its app list, but read the same.
-                    let apps = get("/v1/apps")?;
+                    let apps = g.node.get("/v1/apps")?;
                     let own = one::node::own::listed();
-                    let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", tools::unknown(app, None, true)?) };
+                    let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", tools::unknown(g.node, app, None, Some(g.commands))?) };
                     println!("{} ({app})", found["title"].as_str().unwrap_or(app));
                     if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                         println!("\n{i}\n");
@@ -565,9 +558,9 @@ fn generic() -> Command {
                 [app, tool, ..] => {
                     // The words and flags after `<app> <tool>`, as written.
                     let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
-                    tools::run(app, tool, &args[at(tool, at(app, 0))..])?
+                    tools::run(g, app, tool, &args[at(tool, at(app, 0))..])?
                 }
-                [first, ..] => bail!("{}", tools::unknown(first, None, true)?),
+                [first, ..] => bail!("{}", tools::unknown(g.node, first, None, Some(g.commands))?),
                 _ => return Ok(false),
             }
             Ok(true)
@@ -577,7 +570,7 @@ fn generic() -> Command {
 
 /// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform
 /// (--target <triple> --commit <hash> --committed <seconds>), or a service's program (--service <name>, with those).
-fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
+fn publish(node: &Client, path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
     // The binary knows what it is; ask it, unless it's for another platform and can't run here, or a service's.
     let service = flags.get("service").and_then(Value::as_str);
     let version = if service.is_none() { one::release::Version::of(path) } else { None };
@@ -587,78 +580,27 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
         commit: flag("commit").or(version.as_ref().map(|v| v.commit.clone())).context("say which commit this is with --commit")?,
         target: flag("target").or(version.as_ref().map(|v| v.target.clone())).context("say which platform this is for with --target")?,
     };
-    println!("{}", build::published_said(&build::publish(path, key, &version, service)?, service));
+    println!("{}", build::published_said(&build::publish(node, path, key, &version, service)?, service));
     Ok(())
 }
 
 /// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the network hasn't one by that
 /// name, and deploys it, saying whether this device runs it yet.
-fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
+fn deploy(node: &Client, dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     anyhow::ensure!(dir.is_dir(), "no folder {} in {}: give the app's folder", dir.display(), std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default());
     let name = match flags.get("name").and_then(Value::as_str) {
         Some(name) => name.to_string(),
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
-    let (blob, service) = built_with_service(dir)?;
-    let here = post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
-    println!("{}", deployed_said(&format!("Deployed {name} ({}).{service}", &blob[..12]), here));
+    let (blob, service) = build::built_with_service(node, dir)?;
+    let here = node.post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
+    println!("{}", deployed_said(node, &format!("Deployed {name} ({}).{service}", &blob[..12]), here));
     Ok(())
 }
 
-/// The app in `dir` built into a bundle, as a blob of this machine's node, with its service built here for each platform
-/// this machine can build it for, each build a blob its bundle names: → the bundle, and what was built of its service.
-fn built_with_service(dir: &std::path::Path) -> Result<(String, String)> {
-    let mut builds = std::collections::BTreeMap::new();
-    let mut service = String::new();
-    let out = std::env::temp_dir().join(format!("{CLI}-service-{}", std::process::id()));
-    let built = build::build_service(dir, &build::built_from(&dir.join("service"), false).unwrap_or_default(), build::PLATFORMS.iter(), &out).and_then(|built| {
-        if let Some(built) = &built {
-            for (platform, program) in &built.made {
-                builds.insert(platform.target.to_string(), put_blob(&std::fs::read(program)?)?);
-            }
-        }
-        Ok(built)
-    });
-    let _ = std::fs::remove_dir_all(&out);
-    if let Some(built) = built? {
-        let said = |platforms: Vec<&build::Platform>| platforms.iter().map(|p| p.said).collect::<Vec<_>>().join(", ");
-        service = format!(" Its service is built for {}.", said(built.made.iter().map(|(p, _)| *p).collect()));
-        if !built.missed.is_empty() {
-            service += &format!(" Not for {}: this machine can't build it for them, so deploy it again from one that can.", said(built.missed));
-        }
-    }
-    Ok((put_blob(&one::app::deploy::build(dir, &builds)?)?, service))
-}
-
-/// Keeps `bytes` as a blob on this machine's node, giving its hash.
-fn put_blob(bytes: &[u8]) -> Result<String> {
-    Ok(request(agent().post(format!("http://{}/v1/blobs", api::addr())).send(bytes))?["blob"].as_str().unwrap_or("").to_string())
-}
-
-/// The deploy tool's files built into a bundle on this machine, as a blob of its node's: for React screens and a
-/// service in Go, which only the machine that deploys builds. → the bundle, and what was built of its service.
-fn built_here(files: &Map<String, Value>) -> Result<(String, String)> {
-    anyhow::ensure!(!files.contains_key("service/Cargo.toml"), "its service is in Rust, whose build would run its build scripts here: deploy it with {CLI} deploy <its folder>");
-    let files = one::app::deploy::given(files)?;
-    if !files.iter().any(|(p, _)| p == "service/go.mod") {
-        return Ok((put_blob(&one::app::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)?, String::new()));
-    }
-    let dir = std::env::temp_dir().join(format!("{CLI}-deploy-{}", std::process::id()));
-    let built = (|| {
-        for (path, bytes) in &files {
-            let path = dir.join(path);
-            std::fs::create_dir_all(path.parent().unwrap_or(&dir))?;
-            std::fs::write(path, bytes)?;
-        }
-        built_with_service(&dir)
-    })();
-    let _ = std::fs::remove_dir_all(&dir);
-    built
-}
-
 /// What a deploy did, after `done`: which devices run it yet, as far as this one knows (`here`, whether it does).
-fn deployed_said(done: &str, here: bool) -> String {
-    let device = get("/v1/state").ok().and_then(|s| s["device"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "This device".into());
+fn deployed_said(node: &Client, done: &str, here: bool) -> String {
+    let device = node.get("/v1/state").ok().and_then(|s| s["device"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "This device".into());
     match here {
         true => format!("{done} {device} runs it now; your other devices take it within a few seconds."),
         false => format!("{done} Your devices take it within a few seconds: until then, its calls say they don't have its latest version yet."),
@@ -667,7 +609,7 @@ fn deployed_said(done: &str, here: bool) -> String {
 
 /// A built-in command's help, for --help after it: every_command()'s lines for it, or help() when none are. None for
 /// an app's tool, and for an app that isn't a built-in command too, whose help is their own.
-fn command_help(words: &[String]) -> Option<String> {
+fn command_help(node: &Client, words: &[String]) -> Option<String> {
     let first = words.first().filter(|w| *w != "-h")?;
     let text = every_command();
     // The lines for the most words given that have any: vault set's, else every vault line.
@@ -689,11 +631,11 @@ fn command_help(words: &[String]) -> Option<String> {
     };
     let commands: Vec<&String> = words.iter().take_while(|w| !w.starts_with('-')).collect();
     let (said, out) = (1..=commands.len()).rev().map(|n| (n, lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")))).find(|(_, o)| !o.is_empty()).unwrap_or_default();
-    let app = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().chain(&one::node::own::listed()).any(|a| a["name"] == first.as_str());
+    let app = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().chain(&one::node::own::listed()).any(|a| a["name"] == first.as_str());
     match (app, out.is_empty()) {
         (true, _) if words.len() > 1 && said < commands.len() => None,
         (true, true) => None,
-        (false, true) => Some(format!("{}\n", help())),
+        (false, true) => Some(format!("{}\n", help(node))),
         (_, false) => Some(format!("Usage:\n{out}")),
     }
 }
@@ -733,8 +675,8 @@ fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
 }
 
 /// Whether a device runs here, and which install it's in, for the bare command.
-fn connection() -> String {
-    let state = match get("/v1/state") {
+fn connection(node: &Client) -> String {
+    let state = match node.get("/v1/state") {
         Ok(state) => state,
         Err(err) if client_device::active() => return format!("This computer is one of your devices, but {err:#}."),
         Err(_) => return format!("{}.", client_device::not_here()),
@@ -753,47 +695,70 @@ fn connection() -> String {
     format!("Connected to {network} as {me}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
 }
 
+/// How the CLI asks this machine's node (`agent()`): as whom this machine is signed in as, when `signed_in`.
+struct Http {
+    signed_in: bool,
+}
+
+impl one::api::client::Via for Http {
+    fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<std::time::Duration>) -> Result<one::api::client::Answer> {
+        let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::addr()));
+        for (name, value) in headers {
+            req = req.header(*name, *value);
+        }
+        if self.signed_in && let Some(token) = token() {
+            req = req.header("authorization", format!("Bearer {token}"));
+        }
+        let agent = agent();
+        let req = agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build();
+        let resp = agent.run(req).map_err(unreached)?;
+        let trace = resp.headers().get(one::node::trace::HEADER).and_then(|h| h.to_str().ok()).map(str::to_string);
+        Ok(one::api::client::Answer { status: resp.status().as_u16(), trace, body: Box::new(resp.into_body().into_reader()) })
+    }
+
+    fn tries(&self) -> Option<Value> {
+        client_device::take_tries()
+    }
+}
+
+/// This machine's node, as the CLI asks it.
+fn node() -> Client {
+    Client::new(Http { signed_in: true }, false)
+}
+
+/// The access token this machine is signed in with, sent with what it asks its node: none as a device, which asks as its
+/// own key, its sign-in only for asking to be let in.
+fn token() -> Option<String> {
+    if client_device::active() {
+        return None;
+    }
+    one::sign_in::token().unwrap_or_else(|err| {
+        static SAID: std::sync::Once = std::sync::Once::new();
+        SAID.call_once(|| eprintln!("{err:#}"));
+        None
+    })
+}
+
+/// A request to this machine's node, as whom this machine is signed in as (`token`).
+fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+    match token() {
+        Some(token) => r.header("authorization", format!("Bearer {token}")),
+        None => r,
+    }
+}
+
 /// An HTTP client for this machine's node, as one of its own programs; or, where none runs and this computer is a
 /// device of its person, for their nodes, over iroh (`client_device::instead`).
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).middleware(client_device::instead).middleware(api::as_this_machine).build().into()
 }
 
-thread_local! {
-    /// What the last MCP call that asked for its trace did, as text for its answer.
-    static TRACE_TEXT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-}
-
-thread_local! {
-    /// Whether the calls this thread makes ask their node for a trace (`--trace`, or `trace: true` in MCP), and what the
-    /// last one's node said it did (its `x-one-trace`).
-    static TRACE_ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static TRACED: std::cell::RefCell<Option<Value>> = const { std::cell::RefCell::new(None) };
-}
-
+/// What a node answered over HTTP, as `api::client::answered` says it.
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
-    let mut resp = match resp {
-        Ok(resp) => resp,
-        // Not even reached: the nodes tried are all there is to say.
-        Err(err) => return Err(unreached(err)),
-    };
-    if let Some(trace) = resp.headers().get(one::node::trace::HEADER).and_then(|h| data_encoding::BASE64.decode(h.as_bytes()).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
-        TRACED.with(|t| *t.borrow_mut() = Some(trace));
-    }
-    let refused = matches!(resp.status().as_u16(), 401 | 403);
-    let body: Value = resp.body_mut().read_json()?;
-    if let Some(err) = body.get("error") {
-        if body.get("need").is_some() {
-            NEEDED.with(|n| *n.borrow_mut() = Some(body.clone()));
-        }
-        let err = err.as_str().unwrap_or("failed").to_string();
-        let code = body.get("code").and_then(Value::as_str).map(str::to_string);
-        return Err(match refused || code.as_deref() == Some(one::protocol::code::REFUSED) {
-            true => one::cli::Failed::Refused(err).into(),
-            false => one::protocol::Coded::or_plain(code, err),
-        });
-    }
-    Ok(body)
+    // Not even reached: the nodes tried are all there is to say.
+    let mut resp = resp.map_err(unreached)?;
+    let status = resp.status().as_u16();
+    one::api::client::answered(status, resp.body_mut().read_json()?)
 }
 
 /// Why a request to this machine's node, or to its person's as their device, got no answer, saying what to do.
@@ -804,47 +769,8 @@ fn unreached(err: ureq::Error) -> anyhow::Error {
     }
 }
 
-thread_local! {
-    /// The access token of the person an MCP request over HTTP came from, while it's answered (`mcp_http`).
-    static SIGNED_IN: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-}
-
-thread_local! {
-    /// What a call this thread asked for an MCP request over HTTP needed and wasn't handed (`{ error, need, to, seal }`),
-    /// which its caller is answered with 428, to hand them and ask again.
-    static NEEDED: std::cell::RefCell<Option<Value>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Whether what this thread asks the node, it asks for someone signed in elsewhere, not this machine's person.
-fn signed_in() -> bool {
-    SIGNED_IN.with(|t| t.borrow().is_some())
-}
-
-/// Whether this process is the node, which is never signed in itself: it's only sent its people's access tokens.
-static IN_NODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// A request to this machine's node: as the person an MCP request over HTTP came from, while it's answered, or as
-/// whom this machine is signed in as.
-fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
-    let token = match SIGNED_IN.with(|t| t.borrow().clone()) {
-        Some(token) => Some(token),
-        None if IN_NODE.load(std::sync::atomic::Ordering::Relaxed) => None,
-        // A device asks as its own key: its sign-in is only for asking to be let in.
-        None if client_device::active() => None,
-        None => one::sign_in::token().unwrap_or_else(|err| {
-            static SAID: std::sync::Once = std::sync::Once::new();
-            SAID.call_once(|| eprintln!("{err:#}"));
-            None
-        }),
-    };
-    match token {
-        Some(token) => r.header("authorization", format!("Bearer {token}")),
-        None => r,
-    }
-}
-
 /// `sign-in`: this machine signs in at the network's address, as the person who approves its code with their passkey.
-fn sign_in(flags: &Map<String, Value>) -> Result<()> {
+fn sign_in(node: &Client, flags: &Map<String, Value>) -> Result<()> {
     // Someone new's invite: its link (`<address>/invite#<secret>`), or its secret with --address.
     let invite = flags.get("invite").and_then(Value::as_str).map(|i| match i.split_once("/invite#") {
         Some((address, secret)) => (Some(address.to_string()), secret.to_string()),
@@ -887,106 +813,27 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         eprintln!("{err:#}");
     }
     if client_device::node_here() {
-        let state = get("/v1/state")?;
+        let state = node.get("/v1/state")?;
         let me = state["user"]["name"].as_str().unwrap_or("you");
         println!("Signed in as {me}. {CLI} and {CLI} mcp on this machine act as you until {CLI} sign-out.");
         return Ok(());
     }
     client_device::join(&address, invite.as_ref().map(|(_, secret)| secret.as_str()))?;
-    let state = get("/v1/state")?;
+    let state = node.get("/v1/state")?;
     let me = state["user"]["name"].as_str().unwrap_or("you");
     println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", one::sign_in::hostname());
     Ok(())
 }
 
-/// This machine's node, as `get` and `post` ask it, for the node's own apps.
-struct Local;
-
-impl one::node::own::Ask for Local {
-    fn get(&self, path: &str) -> Result<Value> {
-        get(path)
-    }
-
-    fn post(&self, path: &str, body: Value) -> Result<Value> {
-        post(path, body)
-    }
-}
-
-fn get(path: &str) -> Result<Value> {
-    request(to_node(agent().get(format!("http://{}{path}", api::addr()))).call())
-}
-
-fn post(path: &str, body: Value) -> Result<Value> {
-    request(to_node(agent().post(format!("http://{}{path}", api::addr()))).send_json(&body))
-}
-
-/// A call, asking for its trace if `--trace` (or MCP's `trace`) did: what it did stays for `print_trace`.
-fn post_call(body: Value) -> Result<Value> {
-    let asked = TRACE_ASKED.with(|t| t.get());
-    TRACED.with(|t| *t.borrow_mut() = None);
-    drop(client_device::take_tries());
-    let request_ = to_node(agent().post(format!("http://{}/v1/call", api::addr())));
-    let request_ = if asked { request_.header(one::node::trace::HEADER, "1") } else { request_ };
-    request(request_.send_json(&body))
-}
-
-/// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
-/// node there says no unless the caller may remove that device (src/node/calls.rs).
-fn logs_read(input: &Map<String, Value>) -> Result<Value> {
-    let device = input.get("device").and_then(Value::as_str).context("which device? one devices lists them")?;
-    let mut asked = input.clone();
-    asked.remove("device");
-    asked.remove("trace");
-    one::logs::Ask::from_json(&Value::Object(asked.clone())).map_err(|e| one::cli::Failed::Typed(format!("{e:#}")))?;
-    Ok(post_call(json!({ "device": device, "app": one::database::scopes::APP, "op": "logs", "input": asked, "agent": agent_from_env(), "client": "cli" }))?["ok"].take())
-}
-
-/// What a log read gives, as its lines and, if there's something to say about them, a note.
-fn logs_said(r: &Value, device: &str) -> (Value, Option<String>) {
-    let (shown, matched) = (r["shown"].as_u64().unwrap_or(0), r["matched"].as_u64().unwrap_or(0));
-    let note = if shown == 0 {
-        let from = r["oldest"].as_u64().map(|ms| format!("; its log goes back to {}", one::node::own::say_time(ms))).unwrap_or_default();
-        Some(format!("{device}'s {} log has no lines like that{from}.", r["log"].as_str().unwrap_or("node")))
-    } else if matched > shown {
-        Some(format!("{shown} of the {matched} lines that match, the newest: narrow it with --since or --grep."))
-    } else {
-        None
-    };
-    (r["lines"].clone(), note)
-}
-
-/// What the last call did, as lines (`one::node::trace::said`), if it asked for a trace: after its answer, or the
-/// reason it failed. Empty if it didn't ask, or made no call.
-fn trace_lines() -> Vec<String> {
-    if !TRACE_ASKED.with(|t| t.get()) {
-        return Vec::new();
-    }
-    let (node, tries) = (TRACED.with(|t| t.borrow_mut().take()), client_device::take_tries());
-    let named = || get("/v1/state").ok().and_then(|s| s["device"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "the device that answered".into());
-    if node.is_none() && tries.is_none() {
-        return vec![format!("no trace: this ran in {CLI} here, not on a device")];
-    }
-    let answered = if node.is_some() { String::new() } else { named() };
-    one::node::trace::said(tries.as_ref(), node.as_ref(), &answered)
-}
-
-/// Prints a call's trace, after its answer, to stderr, so what's on stdout stays the answer.
-fn print_trace() {
-    let lines = trace_lines();
-    if !lines.is_empty() {
-        eprintln!("\ntrace:\n  {}", lines.join("\n  "));
-    }
-}
-
 /// For a node in no network yet, which no one is signed in to: a sign-in this CLI kept for its address was another
 /// node's there before, so it isn't sent, and once the node is in a network it's let go.
 fn unsigned_post(path: &str, body: Value) -> Result<Value> {
-    let r = request(agent().post(format!("http://{}{path}", api::addr())).send_json(&body))?;
+    let r = Client::new(Http { signed_in: false }, false).post(path, body)?;
     let _ = one::sign_in::sign_out();
     Ok(r)
 }
 
-fn status(state: &Value) {
+fn status(node: &Client, state: &Value) {
     let device = &state["device"];
     match client_device::said(state) {
         Some(said) => println!("{said}"),
@@ -1013,7 +860,7 @@ fn status(state: &Value) {
             println!("  {}  {}", g["name"].as_str().unwrap_or(""), members.join(", "));
         }
     }
-    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    let apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
     let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
     // Each with a line of the services it runs, and the ones switched off there.
     let all = i["devices"].as_array().cloned().unwrap_or_default();
@@ -1132,7 +979,6 @@ fn oned(args: &[String]) -> Result<()> {
         [] if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--sandboxed=")) => one::services::sandbox::launch(std::path::Path::new(dir)),
         [] => {
             usual_path();
-            IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
             serve(args.iter().any(|a| a == "--throwaway"), args)
         }
         [name] if *name == one::database::scopes::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::app::runtime::run(std::path::Path::new(dir)),
@@ -1185,7 +1031,6 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     std::fs::write(dir.join("pid"), std::process::id().to_string())?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::keys::hex(&node.id())[..8], api::addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
-    api::serve_mcp(axum::routing::post(mcp_http));
     let mut routes = api::guarded(api::routes(), node.clone());
     if is_try {
         let home = dir.clone();
@@ -1334,452 +1179,4 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     bind().await.with_context(|| format!("listen on {}: the node there didn't stop", api::addr()))
-}
-
-/// The local MCP server, over stdio: every app tool is a tool, with `search` to find them; or in code mode (`--code`), `search` and
-/// `execute`, which runs scripts with them, and the few tools every agent needs from the start.
-fn mcp(mode: Mode) -> Result<()> {
-    let stdin = std::io::stdin();
-    // The agent this serves, credited on its calls: the client's own name for itself, else what its environment says.
-    let mut agent = agent_from_env();
-    for line in stdin.lock().lines() {
-        let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
-        // A chat's view waiting on a change is answered beside the rest, which go on meanwhile.
-        if msg["method"] == "tools/call" && msg["params"]["name"] == "screens_changes" {
-            let mut agent = agent.clone();
-            std::thread::spawn(move || {
-                if let Some(reply) = mcp_answer(&msg, &mut agent, mode, true) {
-                    let mut out = std::io::stdout().lock();
-                    let _ = writeln!(out, "{reply}").and_then(|_| out.flush());
-                }
-            });
-            continue;
-        }
-        if let Some(reply) = mcp_answer(&msg, &mut agent, mode, true) {
-            let mut out = std::io::stdout().lock();
-            writeln!(out, "{reply}")?;
-            if TOOLS_CHANGED.take() {
-                writeln!(out, "{}", json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }))?;
-            }
-            out.flush()?;
-        }
-    }
-    Ok(())
-}
-
-/// MCP over Streamable HTTP, at `/mcp`: what `mcp` answers over stdio, for a client device over iroh, as its person (the
-/// remote MCP server, cloudflare/mcp/, is remote MCP clients' device), or for a program on this machine, as its person. Each POST
-/// is answered with JSON; the server sends nothing unasked, so there's no stream to GET. A tool that needs keys it
-/// wasn't handed is answered 428 with what it needs, as `/v1/call` is, for its caller to hand them and ask again.
-/// Nothing is kept between requests, since the next may reach another node: the session id carries only the client's
-/// name, credited on its calls.
-async fn mcp_http(client: Option<axum::Extension<api::FromClient>>, headers: axum::http::HeaderMap, body: String) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    // A client device's request is asked of the API by a ticket made for it alone, which ends with it.
-    let asking = client.map(|axum::Extension(api::FromClient(key, until))| api::AskingAs::new(key, until));
-    let token = match &asking {
-        Some(asking) => Some(asking.ticket().to_string()),
-        None => headers.get("authorization").and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string()),
-    };
-    let mut agent = headers.get("mcp-session-id").and_then(|s| s.to_str().ok()).and_then(|s| s.split_once('.')).and_then(|(_, name)| data_encoding::BASE64URL_NOPAD.decode(name.as_bytes()).ok()).and_then(|n| String::from_utf8(n).ok());
-    let Ok(msg) = serde_json::from_str::<Value>(&body) else {
-        let error = json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "the body isn't JSON" } });
-        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(error)).into_response();
-    };
-    let initialize = msg["method"] == "initialize";
-    let answered = tokio::task::spawn_blocking(move || {
-        SIGNED_IN.with(|t| *t.borrow_mut() = token);
-        NEEDED.with(|n| *n.borrow_mut() = None);
-        let reply = match &msg {
-            Value::Array(batch) => Some(json!(batch.iter().filter_map(|m| mcp_answer(m, &mut agent, Mode::All, false)).collect::<Vec<_>>())).filter(|r| r.as_array().is_some_and(|r| !r.is_empty())),
-            msg => mcp_answer(msg, &mut agent, Mode::All, false),
-        };
-        SIGNED_IN.with(|t| *t.borrow_mut() = None);
-        (reply, agent, NEEDED.with(|n| n.borrow_mut().take()))
-    })
-    .await;
-    drop(asking);
-    if let Ok((_, _, Some(needed))) = &answered {
-        return (axum::http::StatusCode::PRECONDITION_REQUIRED, axum::Json(needed.clone())).into_response();
-    }
-    let answered = answered.map(|(reply, agent, _)| (reply, agent));
-    match answered {
-        Ok((None, _)) => axum::http::StatusCode::ACCEPTED.into_response(),
-        Ok((Some(reply), agent)) => {
-            let mut resp = axum::Json(reply).into_response();
-            if initialize {
-                let session = format!("{:016x}.{}", rand::random::<u64>(), data_encoding::BASE64URL_NOPAD.encode(agent.unwrap_or_default().as_bytes()));
-                resp.headers_mut().insert("mcp-session-id", session.parse().expect("base64url and hex are header-safe"));
-            }
-            resp
-        }
-        Err(err) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({ "error": err.to_string() }))).into_response(),
-    }
-}
-
-thread_local! {
-    /// Whether the call just answered changed the tools a session lists, so stdio tells the client after its answer.
-    static TOOLS_CHANGED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Every app's tools by name, as `GET /v1/apps` gives them: what a session's list of tools is made of.
-fn tool_names(apps: &Value) -> Vec<String> {
-    let mut names: Vec<String> = apps.as_array().into_iter().flatten().flat_map(|a| a["ops"].as_array().into_iter().flatten().map(move |o| format!("{}_{}", a["name"].as_str().unwrap_or(""), o["name"].as_str().unwrap_or("")))).collect();
-    names.sort();
-    names
-}
-
-/// A tool call, and what it changed of the tools a session lists (adding an app, say): over stdio, `stdio` sends MCP's
-/// notification after the answer; over HTTP, which sends nothing unasked, the answer says which tools are new.
-fn call_and_tell(params: &Value, agent: Option<&str>, mode: Mode, stdio: bool) -> Value {
-    let name = params["name"].as_str().unwrap_or("");
-    let apps = (mode == Mode::All && name != "search").then(|| get("/v1/apps").ok()).flatten();
-    let reads = |apps: &Value| match name.split_once('_') {
-        Some((a, o)) => one::node::own::find(a).is_some() || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
-        None => name == "search",
-    };
-    let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
-    let mut out = call_tool(params, agent, mode);
-    let Some(before) = before else { return out };
-    let Ok(after) = get("/v1/apps").map(|a| tool_names(&a)) else { return out };
-    if after == before {
-        return out;
-    }
-    if stdio {
-        TOOLS_CHANGED.set(true);
-        return out;
-    }
-    let mut new: Vec<&str> = after.iter().filter(|t| !before.contains(t)).filter_map(|t| t.split_once('_').map(|(a, _)| a)).collect();
-    new.dedup();
-    if let (Some(first), Some(content)) = (new.first(), out["content"].as_array_mut()) {
-        content.push(json!({ "type": "text", "text": format!("New tools for {}: they come with your next session. Until then, `{CLI} {first} <tool>` runs them where `{CLI}` runs.", new.join(", ")) }));
-    }
-    out
-}
-
-/// The answer to one MCP message, over stdio or HTTP (`stdio` false): None for a notification. `agent` is the
-/// client's name, which `initialize` says.
-fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode, stdio: bool) -> Option<Value> {
-    let id = msg.get("id")?.clone();
-    let result = match msg["method"].as_str().unwrap_or("") {
-        "initialize" => Ok({
-            if let Some(name) = msg["params"]["clientInfo"]["name"].as_str().filter(|n| !n.trim().is_empty()) {
-                *agent = Some(agent_name(name));
-            }
-            json!({
-            "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-            "capabilities": { "tools": { "listChanged": stdio }, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
-            "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
-            "instructions": instructions(mode),
-            })
-        }),
-        "ping" => Ok(json!({})),
-        "tools/list" => tools().map(|t| {
-            let mut t = match mode {
-                Mode::All => [vec![code::search_tool(mode)], t].concat(),
-                Mode::Code => code::code_tools(t),
-            };
-            t.extend(mcp_apps::tools());
-            json!({ "tools": t })
-        }),
-        "tools/call" => Ok(call_and_tell(&msg["params"], agent.as_deref(), mode, stdio)),
-        // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
-        "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
-        "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
-            uri if uri.starts_with("skill://") => skill_resource(uri),
-            uri => mcp_apps::read(uri),
-        },
-        // Skills over MCP (SEP-2640): the same skills the agents service writes into harnesses' folders.
-        "skills/list" => Ok(json!({ "resultType": "complete", "skills": skills().iter().map(skill_entry).collect::<Vec<_>>(), "ttlMs": 60_000, "cacheScope": "session" })),
-        "skills/get" => {
-            let uri = msg["params"]["uri"].as_str().unwrap_or("");
-            skills().iter().find(|s| format!("skill://{}/SKILL.md", s.name) == uri).map(|s| json!({ "skill": skill_entry(s) })).ok_or_else(|| json!({ "code": -32602, "message": format!("no skill {uri}") }))
-        }
-        other => Err(json!({ "code": -32601, "message": format!("unknown method {other}") })),
-    };
-    Some(match result {
-        Ok(r) => json!({ "jsonrpc": "2.0", "id": id, "result": r }),
-        Err(e) => json!({ "jsonrpc": "2.0", "id": id, "error": e }),
-    })
-}
-
-/// The skills for this person: the root first (src/skills.rs).
-fn skills() -> Vec<one::skills::Skill> {
-    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    one::skills::all(&apps)
-}
-
-/// A skill as `skills/list` lists it: where its SKILL.md is, its frontmatter, and each of its files with its digest.
-fn skill_entry(s: &one::skills::Skill) -> Value {
-    use sha2::Digest;
-    let files: Vec<Value> = s
-        .all_files()
-        .iter()
-        .map(|(path, text)| json!({ "uri": format!("skill://{}/{path}", s.name), "digest": format!("sha256:{}", data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()))), "size": text.len() }))
-        .collect();
-    json!({ "uri": format!("skill://{}/SKILL.md", s.name), "frontmatter": { "name": s.name, "description": s.description }, "resources": files })
-}
-
-/// One of a skill's files, as `resources/read` gives it: `skill://<name>/<path>`.
-fn skill_resource(uri: &str) -> Result<Value, Value> {
-    let (name, path) = uri.trim_start_matches("skill://").split_once('/').unwrap_or((uri, ""));
-    let text = skills().into_iter().find(|s| s.name == name).and_then(|s| s.file(path)).ok_or_else(|| json!({ "code": -32002, "message": format!("no resource {uri}") }))?;
-    let mime = if path.ends_with(".js") { "text/javascript" } else { "text/markdown" };
-    Ok(json!({ "contents": [{ "uri": uri, "mimeType": mime, "text": text }] }))
-}
-
-/// The agent running this command, if one is: `<CLI>_AGENT`, else what agent harnesses say about themselves.
-fn agent_from_env() -> Option<String> {
-    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
-    if let Some(a) = var(&format!("{}_AGENT", CLI.to_uppercase().replace('-', "_"))) {
-        return Some(a);
-    }
-    // AI_AGENT is `<name>_<version>_<kind>`, like claude-code_2-1-314_agent.
-    if let Some(a) = var("AI_AGENT") {
-        return Some(agent_name(a.split('_').next().unwrap_or(&a)));
-    }
-    let named = [("CLAUDECODE", "Claude Code"), ("CODEX_THREAD_ID", "Codex"), ("CODEX_SANDBOX", "Codex"), ("OPENCODE", "OpenCode"), ("AMP_THREAD_ID", "Amp")];
-    named.iter().find(|(k, _)| var(k).is_some()).map(|(_, n)| n.to_string())
-}
-
-/// An agent's name as people know it, from what it calls itself (an MCP client's `clientInfo.name`).
-fn agent_name(raw: &str) -> String {
-    let known = [
-        (&["claude-code", "claude code", "claude-ai", "claude"][..], "Claude Code"),
-        (&["codex", "codex-mcp-client", "codex_cli_rs", "codex-cli"][..], "Codex"),
-        (&["opencode"][..], "OpenCode"),
-        (&["amp", "amp-cli", "ampcode"][..], "Amp"),
-        (&["pi", "pi-coding-agent"][..], "Pi"),
-        (&["cursor", "cursor-vscode", "cursor-agent"][..], "Cursor"),
-        (&["gemini-cli", "gemini"][..], "Gemini CLI"),
-        (&["t3-code", "t3code"][..], "T3 Code"),
-    ];
-    let lower = raw.trim().to_lowercase();
-    known.iter().find(|(names, _)| names.contains(&lower.as_str())).map(|(_, n)| n.to_string()).unwrap_or_else(|| raw.trim().to_string())
-}
-
-/// The MCP server's instructions (src/guide.rs): the rules first, short enough that every harness keeps all of them.
-fn instructions(mode: Mode) -> String {
-    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    let state = get("/v1/state").unwrap_or_default();
-    one::skills::instructions(mode, &apps, state["user"]["name"].as_str())
-}
-
-
-/// MCP's `deploy`, `{CLI} deploy` for an agent with no shell: the app's files as text, built where it's asked.
-fn deploy_tool() -> Value {
-    json!({
-        "name": "deploy",
-        "description": format!("Deploy an app from its files: builds it as {CLI} deploy builds a folder, npm packages, React screens (screens/<name>.jsx, into dist/<name>.html, with this machine's Bun or Node), a service in Go (service/go.mod, for every platform, with this machine's Go) and all, and makes the app if the name is new, owned by you. Or put back an earlier version. Answers with its tools and how to put it on your page."),
-        "inputSchema": { "type": "object", "required": ["app"], "properties": {
-            "app": { "type": "string", "description": "the app's name, lowercase words joined by -, like water-log; a new name makes a new app" },
-            "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "every file of the app, each path → its text: { \"app.js\": \"export default { … }\" }, and package.json for npm packages" },
-            "version": { "type": "string", "description": "instead of files: an earlier version to put back, from this tool's answer or apps_list" },
-        } },
-        "annotations": one::skills::hints(false, false),
-    })
-}
-
-fn logs_tool() -> Value {
-    json!({
-        "name": "logs",
-        "description": "Read a device's node log, or one of its services', over the network, instead of ssh: the newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's person and the network's admins may.",
-        "inputSchema": { "type": "object", "required": ["device"], "properties": {
-            "device": { "type": "string", "description": "the device's name (devices_requests and groups_list name them; the status command lists them)" },
-            "service": { "type": "string", "description": "a service's name, like whatsapp; omit for the node's own log" },
-            "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d" },
-            "grep": { "type": "string", "description": "only lines with this text in them, whatever its case" },
-            "lines": { "type": "integer", "description": "how many of the newest to give" },
-        } },
-        "annotations": one::skills::hints(true, false),
-    })
-}
-
-/// What `deploy` did, and what's next: its tools, putting it on a page, and undoing it.
-fn deploy_said(app: &str, r: &Value, installed: bool) -> String {
-    let short = |b: &Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
-    let mut out = vec![format!("Deployed {app} ({}){}.", short(&r["bundle"]), if r["made"] == true { ", a new app of yours" } else { "" })];
-    let tools: Vec<String> = r["ops"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|o| format!("{app}_{o}")).collect();
-    match (&r["failed"], r["here"] == true) {
-        (Value::String(why), _) => out.push(format!("{why}. Fix it and deploy again.")),
-        (_, false) => out.push("Your devices take it within a few seconds.".into()),
-        _ if installed && tools.is_empty() => out.push("It has no tools.".into()),
-        _ if installed => out.push(format!("Its tools: {}.", tools.join(", "))),
-        _ => out.push(format!(
-            "Put it on your page with apps_add {{ app: \"{app}\", scope: \"user\" }}; its tools come then{}, at once where your client takes list_changed, else in your next session.",
-            if tools.is_empty() { String::new() } else { format!(" ({})", tools.join(", ")) }
-        )),
-    }
-    out.push(match &r["before"] {
-        b if *b == r["bundle"] => "It ran this version already.".into(),
-        Value::String(_) => format!("To undo, deploy {{ app: \"{app}\", version: \"{}\" }}.", short(&r["before"])),
-        _ => "To undo, apps_delete removes it.".into(),
-    });
-    out.join("\n")
-}
-
-fn tools() -> Result<Vec<Value>, Value> {
-    let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-    let mut tools = vec![deploy_tool()];
-    // A sign-in from elsewhere can't ask a device for its log.
-    if !signed_in() {
-        tools.push(logs_tool());
-    }
-    // What only this machine's person runs, a sign-in from elsewhere can't; and MCP Apps' own version of a tool wins.
-    let drawn: Vec<Value> = mcp_apps::tools().iter().map(|t| t["name"].clone()).collect();
-    for app in one::node::own::all().into_iter().filter(|a| a.elsewhere || !signed_in()) {
-        tools.extend(app.tools.into_iter().filter(|t| !drawn.contains(&t["name"])));
-    }
-    for app in apps.as_array().into_iter().flatten() {
-        let name = app["name"].as_str().unwrap_or("");
-        // Tools starting with `_` are for the screens, and the node's own.
-        for tool in app["ops"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')) {
-            tools.push(json!({ "name": format!("{name}_{}", tool["name"].as_str().unwrap_or("")), "description": tool["description"], "inputSchema": tools::mcp_schema(app, tool), "annotations": tools::mcp_annotations(tool) }));
-        }
-    }
-    Ok(tools)
-}
-
-/// A tool's answer, within the budget an agent reads (tools::BUDGET).
-fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
-    let mut out = answer_tool(params, agent, mode);
-    let name = params["name"].as_str().unwrap_or("");
-    let chars: usize = out["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).map(str::len).sum();
-    if chars > tools::BUDGET {
-        let tool = match name {
-            "search" => Some(code::search_tool(mode)["inputSchema"].clone()).map(|input| json!({ "input": input })),
-            _ => name.split_once('_').and_then(|(a, o)| tools::find(a, o)).map(|(_, o)| o),
-        };
-        tools::within_budget(&mut out["content"], tool.as_ref());
-    }
-    out
-}
-
-fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
-    let name = params["name"].as_str().unwrap_or("");
-    let input = params["arguments"].as_object().cloned().unwrap_or_default();
-    let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
-    // This server's own tools, checked as apps' are, in dispatch.
-    let own = [code::search_tool(mode), code::execute_tool(), deploy_tool(), logs_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
-    if let Some(Err(e)) = own.map(|t| tools::check(&t["inputSchema"], &Value::Object(input.clone()))) {
-        return failed(format!("{e:#}"));
-    }
-    if let Some(out) = mcp_apps::call(name, &Value::Object(input.clone())) {
-        return out;
-    }
-    match name {
-        "search" => {
-            let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
-            match code::catalogs() {
-                Ok((apps, addable)) => json!({ "content": [{ "type": "text", "text": code::search(&apps, &addable, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(mode)) }] }),
-                Err(e) => failed(format!("{e:#}")),
-            }
-        }
-        "deploy" => {
-            let app = input.get("app").and_then(Value::as_str).unwrap_or("");
-            let mut service = String::new();
-            let body = match (input.get("files"), input.get("version")) {
-                // React screens and a service are built here, on the machine that deploys, as `deploy <folder>` builds them.
-                (Some(Value::Object(files)), None) if !signed_in() && (one::app::deploy::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match built_here(files) {
-                    Ok((bundle, built)) => {
-                        service = built;
-                        json!({ "app": app, "bundle": bundle, "wait": true })
-                    }
-                    Err(e) => return failed(format!("{e:#}")),
-                },
-                (Some(files), None) => json!({ "app": app, "files": files, "wait": true }),
-                (None, Some(version)) => json!({ "app": app, "bundle": version, "wait": true }),
-                _ => return failed("give files, the app's files, or version, an earlier one to put back".into()),
-            };
-            match post("/v1/deploy", body) {
-                Ok(r) => {
-                    let installed = get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["installed"].as_array().is_some_and(|i| !i.is_empty())));
-                    json!({ "content": [{ "type": "text", "text": format!("{}{service}", deploy_said(app, &r, installed == Some(true))) }] })
-                }
-                Err(e) => failed(format!("{e:#}")),
-            }
-        }
-        "logs" => match logs_read(&input) {
-            Ok(r) => {
-                let (lines, note) = logs_said(&r, input.get("device").and_then(Value::as_str).unwrap_or(""));
-                let text: Vec<&str> = lines.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-                json!({ "content": [{ "type": "text", "text": format!("{}{}", text.join("\n"), note.map(|n| format!("\n{n}")).unwrap_or_default()) }] })
-            }
-            Err(e) => failed(format!("{e:#}")),
-        },
-        "execute" => match code::execute(input.get("code").and_then(Value::as_str).unwrap_or(""), agent, "mcp") {
-            Ok(result) => json!({ "isError": result["ok"] != true, "content": [{ "type": "text", "text": code::shown(&result) }] }),
-            Err(e) => failed(format!("{e:#}")),
-        },
-        _ => with_trace(match dispatch(name, input, agent, "mcp", None) {
-            // A script gets an empty list as it is; an agent reading gets it in words.
-            Ok(ok) => match ["accounts", "devices"].into_iter().find_map(|tool| Some((name.strip_suffix(&format!("_{tool}"))?, tool))).filter(|_| ok == json!([])).and_then(|(app, tool)| Some((tools::find(app, tool)?.0, tool))).and_then(|(a, tool)| tools::none_said(&a, tool, &ok, false)) {
-                Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
-                None => json!({ "content": tools::mcp_content(&ok) }),
-            },
-            Err(e) => failed(format!("{e:#}")),
-        }),
-    }
-}
-
-/// A tool's answer with its trace after it, when it asked for one (`trace: true`), as well as when it failed.
-fn with_trace(mut out: Value) -> Value {
-    if let (Some(text), Some(content)) = (TRACE_TEXT.with(|t| t.borrow_mut().take()), out["content"].as_array_mut()) {
-        content.push(json!({ "type": "text", "text": text }));
-    }
-    out
-}
-
-/// What to say for a tool nobody here lists: an app's tools when the app is right, else the nearest tools.
-fn unknown_tool(name: &str) -> Result<String> {
-    if let Some((app, tool)) = name.split_once('_')
-        && get("/v1/apps")?.as_array().into_iter().flatten().chain(&one::node::own::listed()).any(|a| a["name"] == app)
-    {
-        return tools::unknown(app, Some(tool), false);
-    }
-    let tools = tools().map_err(|e| anyhow::anyhow!("{}", e["message"].as_str().unwrap_or("")))?;
-    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    match tools::nearest(name, &names).as_slice() {
-        [] => match name.split_once('_') {
-            Some((app, tool)) => tools::unknown(app, Some(tool), false),
-            None => Ok(format!("no tool {name}: search finds the tools for a task")),
-        },
-        near => Ok(format!("no tool {name}: did you mean {}?", near.join(" or "))),
-    }
-}
-
-/// Runs one tool as the person, an app's tool or the Vault's, for MCP or a code mode script: what can't be undone
-/// only with confirm: true. `spec` is the tool, when the caller has it already.
-fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<(Value, Value)>) -> Result<Value> {
-    let Some((app, tool)) = name.split_once('_') else { bail!("{}", unknown_tool(name)?) };
-    let Some((a, spec)) = spec.or_else(|| tools::find(app, tool)) else { bail!("{}", unknown_tool(name)?) };
-    // Checked as MCP lists it, before anything runs: a wrong input says what's wrong, never runs as something else.
-    tools::check(&tools::mcp_schema(&a, &spec), &Value::Object(input.clone()))?;
-    let spec = Some(spec);
-    let own = one::node::own::find(app);
-    let device = if own.is_some() || spec.as_ref().is_some_and(tools::own_device) { None } else { input.remove("device") };
-    let confirmed = input.remove("confirm") == Some(json!(true));
-    // `trace: true` gives, beside the answer, what the call did and where (`one <app> <tool> --trace`).
-    let traced = input.remove("trace") == Some(json!(true));
-    TRACE_TEXT.with(|t| *t.borrow_mut() = None);
-    if let Some(spec) = &spec {
-        anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
-    }
-    if let Some(own) = own {
-        anyhow::ensure!(own.elsewhere || !signed_in(), "{} is this machine's own person's to use, not someone signed in from elsewhere", own.title);
-        return (own.run)(tool, &input, &one::node::own::Asked { node: &Local, agent, client, confirmed });
-    }
-    if let Some(spec) = spec {
-        tools::mcp_files(&spec, &mut input)?;
-    }
-    if traced {
-        TRACE_ASKED.with(|t| t.set(true));
-    }
-    let called = post_call(json!({ "device": device, "app": app, "op": tool, "input": input, "agent": agent, "client": client }));
-    if traced {
-        let lines = trace_lines();
-        TRACE_ASKED.with(|t| t.set(false));
-        TRACE_TEXT.with(|t| *t.borrow_mut() = Some(format!("trace:\n  {}", lines.join("\n  "))));
-    }
-    Ok(called?["ok"].take())
 }

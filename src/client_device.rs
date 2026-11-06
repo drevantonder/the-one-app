@@ -64,7 +64,7 @@ fn forget() {
 
 /// Whether what this CLI asks goes to its person's nodes over iroh: it's a device of theirs, and no node runs here.
 pub fn active() -> bool {
-    !crate::IN_NODE.load(std::sync::atomic::Ordering::Relaxed) && !node_here() && kept().is_some()
+    !node_here() && kept().is_some()
 }
 
 /// This computer's own name, as it asks to be let in, and its key.

@@ -5,12 +5,12 @@ use serde_json::{Map, Value, json};
 
 use crate::cli::{Command, Failed};
 use crate::config::{CLI, NAME, YOURS};
-use crate::node::own::Ask;
+use crate::api::Client;
 
 /// `settings` with the network's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
 /// node on this machine knows them, for the relay to take only them; none when no node answers here, which `needed`
 /// refuses, since that relay would take no one.
-fn devices_here(node: &dyn Ask, settings: crate::cloudflare::Settings, needed: bool) -> Result<crate::cloudflare::Settings> {
+fn devices_here(node: &Client, settings: crate::cloudflare::Settings, needed: bool) -> Result<crate::cloudflare::Settings> {
     let state = node.get("/v1/state").unwrap_or_default();
     let network = &state["network"];
     let admin = |user: &Value| network["users"].as_array().into_iter().flatten().any(|u| u["id"] == *user && u["role"] == "admin");

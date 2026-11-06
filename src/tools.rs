@@ -7,12 +7,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
-use one::config::CLI;
+use crate::config::CLI;
 use serde_json::{Map, Value, json};
 
-use one::cli::{Failed, agreed};
+use crate::cli::{Failed, asked_yes};
 
-use crate::{agent_from_env, get};
+use crate::api::Client;
 
 /// Files up to this size go inline, as base64, in a tool's input.
 pub const FILE_LIMIT: usize = 10 << 20;
@@ -20,19 +20,12 @@ pub const FILE_LIMIT: usize = 10 << 20;
 pub const MCP_FILE_LIMIT: usize = 1 << 20;
 
 /// A tool as `GET /v1/apps` describes it, with its app; None when no app or service here lists it.
-pub fn find(app: &str, tool: &str) -> Option<(Value, Value)> {
-    let mut apps = get("/v1/apps").ok()?.as_array()?.clone();
-    apps.extend(one::node::own::listed());
+pub fn find(node: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
+    let mut apps = node.get("/v1/apps").ok()?.as_array()?.clone();
+    apps.extend(crate::node::own::listed());
     let a = apps.iter().find(|a| a["name"] == app)?.clone();
     let o = a["ops"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
     Some((a, o))
-}
-
-/// Whether `--json` was given: what a tool gives back is printed as JSON.
-pub static JSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-pub fn json() -> bool {
-    JSON.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A command's exit code for what went wrong: 2 what was typed is wrong, 3 refused (it needs --confirm, the person
@@ -40,9 +33,9 @@ pub fn json() -> bool {
 pub fn exit_code(err: &anyhow::Error) -> i32 {
     match err.downcast_ref::<Failed>() {
         Some(Failed::Typed(_)) => 2,
-        Some(Failed::Refused(_)) => one::protocol::exit::REFUSED,
-        None => match one::protocol::Coded::of(err).as_deref() {
-            Some(one::protocol::code::REFUSED | one::protocol::code::NOT_SIGNED_IN) => one::protocol::exit::REFUSED,
+        Some(Failed::Refused(_)) => crate::protocol::exit::REFUSED,
+        None => match crate::protocol::Coded::of(err).as_deref() {
+            Some(crate::protocol::code::REFUSED | crate::protocol::code::NOT_SIGNED_IN) => crate::protocol::exit::REFUSED,
             _ => 1,
         },
     }
@@ -57,19 +50,20 @@ fn typed(err: anyhow::Error) -> anyhow::Error {
 }
 
 /// `<CLI> <app> <tool> [words] [--input value]...`: runs it and prints what it gives back.
-pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
+pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Result<()> {
+    let node = g.node;
     let (mut words, mut flags) = split(args);
     // A last word `-` asks for inputs from stdin even when none is missing; otherwise stdin is read only when one is,
     // so a command inside a `while read` loop doesn't eat the loop's input.
     let asked = words.last().is_some_and(|w| w == "-") && words.pop().is_some();
-    let spec = find(app, tool);
-    let Some((a, o)) = &spec else { return Err(Failed::Typed(unknown(app, Some(tool), true)?).into()) };
+    let spec = find(node, app, tool);
+    let Some((a, o)) = &spec else { return Err(Failed::Typed(unknown(node, app, Some(tool), Some(g.commands))?).into()) };
     if flags.contains_key("help") || flags.contains_key("h") {
         print!("{}", help(a, o));
         return Ok(());
     }
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
-    let own = one::node::own::find(app).is_some();
+    let own = crate::node::own::find(app).is_some();
     let device = if own_device(o) || own { None } else { take("device") };
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
@@ -94,48 +88,47 @@ pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
         }
     }
     check(&o["input"], &Value::Object(input.clone())).map_err(typed)?;
-    if o["confirm"] == true {
-        agreed(confirmed, &format!("{CLI} {app} {tool}"))?;
-    }
-    // The node's own tools take the person's yes as an input.
-    if confirmed && own {
-        input.insert("confirm".into(), json!(true));
-    }
-    let call = match own {
-        true => crate::dispatch(&format!("{app}_{tool}"), input, agent_from_env().as_deref(), "cli", Some((a.clone(), o.clone()))).map(|ok| json!({ "ok": ok })),
-        false => crate::post_call(json!({ "device": device, "scopes": scopes, "app": app, "op": tool, "input": input, "agent": agent_from_env(), "client": "cli" })),
-    };
-    let mut r = match call {
-        Ok(r) => r,
+    // At a terminal, the person is asked here; what they said is checked where every tool runs.
+    let confirmed = confirmed || (o["confirm"] == true && asked_yes(&format!("{CLI} {app} {tool}"))?);
+    let ran = crate::mcp::run(node, app, tool, o, input, crate::mcp::Run { device, scopes, agent: g.agent, client: "cli", confirmed, trace: g.trace });
+    let mut ok = match ran.ok {
+        Ok(ok) => ok,
         Err(e) => {
             // The trace matters most when it failed.
-            crate::print_trace();
-            let said = in_cli_words(&format!("{e:#}"));
+            print_trace(ran.trace.as_deref());
+            let said = in_cli_words(node, &format!("{e:#}"));
             return Err(match e.downcast::<Failed>() {
                 Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
                 Ok(Failed::Typed(_)) => Failed::Typed(said).into(),
-                Err(e) => one::protocol::Coded::or_plain(one::protocol::Coded::of(&e), said),
+                Err(e) => crate::protocol::Coded::or_plain(crate::protocol::Coded::of(&e), said),
             });
         }
     };
-    if let Some(none) = none_said(a, tool, &r["ok"], true).filter(|_| !json()) {
+    if let Some(none) = none_said(node, a, tool, &ok, true).filter(|_| !g.json) {
         println!("{none}");
-        crate::print_trace();
+        print_trace(ran.trace.as_deref());
         return Ok(());
     }
-    if let Some(text) = r["ok"].as_str() {
-        r["ok"] = json!(in_cli_words(text));
+    if let Some(text) = ok.as_str() {
+        ok = json!(in_cli_words(node, text));
     }
-    let shown = show(app, tool, &r["ok"], out.as_deref());
-    crate::print_trace();
+    let shown = show(app, tool, &ok, out.as_deref(), g.json);
+    print_trace(ran.trace.as_deref());
     shown
+}
+
+/// Prints a call's trace (`--trace`), after its answer, to stderr, so what's on stdout stays the answer.
+pub fn print_trace(lines: Option<&[String]>) {
+    if let Some(lines) = lines.filter(|l| !l.is_empty()) {
+        eprintln!("\ntrace:\n  {}", lines.join("\n  "));
+    }
 }
 
 /// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
 /// (`one gmail sign_in`).
-pub fn in_cli_words(text: &str) -> String {
-    let mut apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    apps.extend(one::node::own::listed());
+pub fn in_cli_words(node: &Client, text: &str) -> String {
+    let mut apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    apps.extend(crate::node::own::listed());
     let command = |word: &str| -> Option<String> {
         word.match_indices('_').find_map(|(i, _)| {
             let (app, tool) = (&word[..i], &word[i + 1..]);
@@ -169,7 +162,7 @@ pub fn named(app: &str, tool: &str, cli: bool) -> String {
 
 /// An empty list of accounts, or of the devices a service over a device runs on, in words, with what to do: screens
 /// want the list, a person or agent reading wants this.
-pub fn none_said(app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<String> {
+pub fn none_said(node: &Client, app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<String> {
     if !["accounts", "devices"].contains(&tool) || ok.as_array().is_none_or(|a| !a.is_empty()) {
         return None;
     }
@@ -181,7 +174,7 @@ pub fn none_said(app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<Strin
     // One that needs a part on a device, with none of yours running it: signing in can't work yet.
     let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
     let on_none = || {
-        let state = get("/v1/state").unwrap_or_default();
+        let state = node.get("/v1/state").unwrap_or_default();
         !state["network"]["devices"].as_array().into_iter().flatten().any(|d| d["services"].as_array().into_iter().flatten().any(|s| parts.contains(&s)))
     };
     Some(match (signs_in, app["needs"].as_str()) {
@@ -194,9 +187,11 @@ pub fn none_said(app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<Strin
 
 /// What to say for an app or tool nobody here lists, with the nearest names: `gmail has no tool serch:
 /// did you mean search?`, `no app gmial: did you mean gmail?`. On the command line, built-in commands are names too.
-pub fn unknown(app: &str, tool: Option<&str>, cli: bool) -> Result<String> {
-    let mut apps = get("/v1/apps")?.as_array().cloned().unwrap_or_default();
-    apps.extend(one::node::own::listed());
+/// `commands` are the command line's own words, when it asks.
+pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[String]>) -> Result<String> {
+    let cli = commands.is_some();
+    let mut apps = node.get("/v1/apps")?.as_array().cloned().unwrap_or_default();
+    apps.extend(crate::node::own::listed());
     let tools_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
     // One the person could add: the node lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["ops"].is_null() && a["deleted"].is_null();
@@ -227,8 +222,8 @@ pub fn unknown(app: &str, tool: Option<&str>, cli: bool) -> Result<String> {
         return Ok(format!("no app {app}: did you mean {CLI} {command}{}?", tool.map(|o| format!(" {o}")).unwrap_or_default()));
     }
     let names: Vec<String> = apps.iter().filter(|a| a["deleted"].is_null()).filter_map(|a| a["name"].as_str()).map(String::from).collect();
-    let commands = if cli { crate::command_words() } else { Vec::new() };
-    let all: Vec<&str> = names.iter().chain(&commands).map(String::as_str).collect();
+    let commands = commands.unwrap_or_default();
+    let all: Vec<&str> = names.iter().chain(commands.iter()).map(String::as_str).collect();
     Ok(match nearest(app, &all).first() {
         Some(n) if *n == app && commands.contains(n) => format!("{CLI} {app} takes more than that: {CLI} {app} --help says what"),
         Some(n) if commands.contains(n) && !names.contains(n) => format!("no command {app}: did you mean {CLI} {n}? {CLI} help says the rest"),
@@ -498,7 +493,7 @@ pub fn as_file(v: &Value) -> Option<(String, String, Vec<u8>)> {
 
 /// Prints a tool's result: text as it is, files saved (to `out`, or a temporary file named for them) and their
 /// paths printed, anything else as JSON. With `out`, a result that isn't a file is saved there instead.
-fn show(app: &str, tool: &str, ok: &Value, out: Option<&str>) -> Result<()> {
+fn show(app: &str, tool: &str, ok: &Value, out: Option<&str>, json: bool) -> Result<()> {
     let mut out = out.map(std::path::PathBuf::from);
     let mut save = |i: usize, name: &str, ty: &str, bytes: &[u8]| -> Result<String> {
         let path = match out.take() {
@@ -527,27 +522,27 @@ fn show(app: &str, tool: &str, ok: &Value, out: Option<&str>) -> Result<()> {
             }
         }
         for s in &shown {
-            match (json(), s["text"].as_str()) {
+            match (json, s["text"].as_str()) {
                 (true, _) => {}
                 (false, Some(text)) => println!("{text}"),
                 (false, None) => println!("{}", s["file"].as_str().unwrap_or("")),
             }
         }
-        if json() {
+        if json {
             println!("{}", Value::Array(shown));
         }
         return Ok(());
     }
     if let Some((name, ty, bytes)) = as_file(ok) {
         let path = save(0, &name, &ty, &bytes)?;
-        match json() {
+        match json {
             true => println!("{}", json!({ "file": path, "name": name, "type": ty, "size": bytes.len() })),
             false => println!("{path}"),
         }
         return Ok(());
     }
     let text = match ok {
-        _ if json() => serde_json::to_string(ok)?,
+        _ if json => serde_json::to_string(ok)?,
         Value::String(s) => s.clone(),
         Value::Null => return Ok(()),
         // Laid out for a person at a terminal; compact for an agent's shell or a pipe.
@@ -623,7 +618,7 @@ pub fn help(app: &Value, tool: &Value) -> String {
         }
         rows.push((flag, about.join("; ")));
     }
-    if !own_device(tool) && one::node::own::find(app["name"].as_str().unwrap_or("")).is_none() {
+    if !own_device(tool) && crate::node::own::find(app["name"].as_str().unwrap_or("")).is_none() {
         rows.push(("--device <name>".into(), device_about(app).into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
@@ -723,11 +718,11 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
         schema["properties"]["device"] = json!({ "type": "string", "description": device_about(app) });
     }
     // Every app's call runs on a device, which can say what it did; the node's own tools run here.
-    if one::node::own::find(app["name"].as_str().unwrap_or("")).is_none() {
+    if crate::node::own::find(app["name"].as_str().unwrap_or("")).is_none() {
         schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
     }
     if tool["confirm"] == true {
-        schema["properties"]["confirm"] = one::skills::confirm_input();
+        schema["properties"]["confirm"] = crate::skills::confirm_input();
     }
     schema
 }
@@ -831,40 +826,43 @@ fn distance(a: &[char], b: &[char]) -> usize {
 
 /// A tool's MCP hints, from what it says: `reads`, and `confirm`.
 pub fn mcp_annotations(tool: &Value) -> Value {
-    one::skills::hints(tool["reads"] == true, tool["confirm"] == true)
+    crate::skills::hints(tool["reads"] == true, tool["confirm"] == true)
 }
 
 /// Brings an agent's file inputs to what apps take, `{ name, type, size, base64 }`: from base64, a file id (a blob
 /// this device can get) or a public URL.
-pub fn mcp_files(tool: &Value, input: &mut Map<String, Value>) -> Result<()> {
+pub fn mcp_files(node: &Client, tool: &Value, input: &mut Map<String, Value>) -> Result<()> {
     let props = tool["input"]["properties"].as_object().cloned().unwrap_or_default();
     for (name, prop) in props {
         let (Some(list), Some(v)) = (takes_file(&prop), input.get_mut(&name)) else { continue };
         match (list, v) {
             (true, Value::Array(items)) => {
                 for item in items {
-                    *item = mcp_file(item).with_context(|| format!("{name}"))?;
+                    *item = mcp_file(node, item).with_context(|| format!("{name}"))?;
                 }
             }
-            (_, v) => *v = mcp_file(v).with_context(|| format!("{name}"))?,
+            (_, v) => *v = mcp_file(node, v).with_context(|| format!("{name}"))?,
         }
     }
     Ok(())
 }
 
-fn mcp_file(v: &Value) -> Result<Value> {
+fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
     let name = v["name"].as_str().map(str::to_string);
     let (bytes, ty, name) = if let Some(data) = v["base64"].as_str() {
         let bytes = data_encoding::BASE64.decode(data.trim().as_bytes()).context("base64 that doesn't decode")?;
         ensure!(bytes.len() <= MCP_FILE_LIMIT, "a file given as base64 is at most 1 MiB; give a file id or URL for a bigger one");
         (bytes, v["type"].as_str().or(v["mimeType"].as_str()).map(str::to_string), name)
     } else if let Some(id) = v["file"].as_str().or(v["blob"].as_str()) {
-        let mut resp = crate::to_node(crate::agent().get(format!("http://{}/v1/blobs/{id}", one::api::addr()))).call().map_err(crate::unreached)?;
-        ensure!(resp.status().is_success(), "no file {id} for you");
-        (resp.body_mut().with_config().limit(FILE_LIMIT as u64).read_to_vec()?, v["type"].as_str().map(str::to_string), name)
+        let blob = node.open(&format!("/v1/blobs/{id}"), None)?;
+        ensure!(blob.status == 200, "no file {id} for you");
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::Read::take(blob.body, FILE_LIMIT as u64 + 1), &mut bytes)?;
+        ensure!(bytes.len() <= FILE_LIMIT, "file {id} is over {} MiB", FILE_LIMIT >> 20);
+        (bytes, v["type"].as_str().map(str::to_string), name)
     } else if let Some(url) = v["url"].as_str() {
         ensure!(url.starts_with("https://") || url.starts_with("http://"), "a file's url is http or https");
-        let mut resp = fetch_file(url)?;
+        let mut resp = fetch_file(node, url)?;
         ensure!(resp.status().is_success(), "{url} answered {}", resp.status());
         let ty = resp.headers().get("content-type").and_then(|t| t.to_str().ok()).map(|t| t.split(';').next().unwrap_or(t).to_string());
         let named = url.split(['?', '#']).next().and_then(|u| u.rsplit('/').next()).filter(|n| !n.is_empty()).map(str::to_string);
@@ -880,9 +878,9 @@ fn mcp_file(v: &Value) -> Result<Value> {
 /// Gets a file an agent gave as a URL. For someone signed in elsewhere, only from the internet, each redirect too: this
 /// machine's addresses (its local API, which takes this device for its own programs), its network's and its tailnet's
 /// are its person's, not theirs.
-fn fetch_file(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
-    if !crate::signed_in() {
-        return crate::agent().get(url).call().with_context(|| format!("couldn't get {url}"));
+fn fetch_file(node: &Client, url: &str) -> Result<ureq::http::Response<ureq::Body>> {
+    if !node.elsewhere() {
+        return crate::api::agent().get(url).call().with_context(|| format!("couldn't get {url}"));
     }
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).build().into();
     let mut at = url.to_string();
@@ -978,13 +976,13 @@ fn group(n: usize) -> String {
 
 /// A result as MCP content: text, or JSON with each file in it kept as a file this device serves, given back as a
 /// reference (name, type, size, its id and a link), with images also shown.
-pub fn mcp_content(ok: &Value) -> Value {
+pub fn mcp_content(node: &Client, ok: &Value) -> Value {
     if ok["content"].is_array() {
         return ok["content"].clone();
     }
     let mut shown = Vec::new();
     let mut ok = ok.clone();
-    keep_files(&mut ok, &mut shown, 0);
+    keep_files(node, &mut ok, &mut shown, 0);
     no_pictures(&mut ok);
     let text = match &ok {
         Value::String(s) => s.clone(),
@@ -1012,11 +1010,9 @@ fn no_pictures(v: &mut Value) {
 }
 
 /// Replaces each file in `v` (to a few levels deep) with a reference to a blob that holds it.
-fn keep_files(v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
+fn keep_files(node: &Client, v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
     if let Some((name, ty, bytes)) = as_file(v) {
-        let put = crate::request(crate::to_node(crate::agent().post(format!("http://{}/v1/blobs", one::api::addr()))).send(&bytes[..]));
-        if let Ok(r) = put {
-            let id = r["blob"].as_str().unwrap_or("").to_string();
+        if let Ok(id) = node.put_blob(&bytes) {
             if ty.starts_with("image/") && bytes.len() <= MCP_FILE_LIMIT {
                 shown.push(json!({ "type": "image", "data": data_encoding::BASE64.encode(&bytes), "mimeType": ty }));
             }
@@ -1030,8 +1026,8 @@ fn keep_files(v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
         return;
     }
     match v {
-        Value::Array(items) => items.iter_mut().for_each(|i| keep_files(i, shown, depth + 1)),
-        Value::Object(map) => map.values_mut().for_each(|i| keep_files(i, shown, depth + 1)),
+        Value::Array(items) => items.iter_mut().for_each(|i| keep_files(node, i, shown, depth + 1)),
+        Value::Object(map) => map.values_mut().for_each(|i| keep_files(node, i, shown, depth + 1)),
         _ => {}
     }
 }

@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde_json::{Map, Value};
 
 use crate::config::CLI;
-use crate::node::own::Ask;
+use crate::api::Client;
 
 /// Why a command failed, when its exit code says more than 1: what was typed is wrong (2), or it was refused (3).
 #[derive(Debug)]
@@ -32,9 +32,15 @@ pub struct Given<'a> {
     pub flags: &'a Map<String, Value>,
     /// Everything typed, as typed.
     pub args: &'a [String],
-    pub node: &'a dyn Ask,
+    pub node: &'a Client,
     /// The agent running it, if one is.
     pub agent: Option<&'a str>,
+    /// What a tool gives back is printed as JSON (`--json`).
+    pub json: bool,
+    /// A call prints what it did, and where, after its answer (`--trace`).
+    pub trace: bool,
+    /// The command line's own words, for what was mistyped.
+    pub commands: &'a [String],
 }
 
 impl Given<'_> {
@@ -114,11 +120,17 @@ pub fn help(commands: &[Command]) -> String {
 /// Goes ahead with `command`, which sends or can't be undone, given --confirm; else asks at a terminal, and elsewhere
 /// (an agent, or piped) refuses.
 pub fn agreed(confirmed: bool, command: &str) -> Result<()> {
-    if confirmed {
+    if confirmed || asked_yes(command)? {
         return Ok(());
     }
+    Err(Failed::Refused(format!("{command} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action")).into())
+}
+
+/// Asks the person at a terminal whether to go ahead with `command`: false with no one there to ask, and refused if they
+/// say no.
+pub fn asked_yes(command: &str) -> Result<bool> {
     if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
-        return Err(Failed::Refused(format!("{command} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action")).into());
+        return Ok(false);
     }
     eprint!("{command} sends or can't be undone. Go ahead? [y/N] ");
     let mut answer = String::new();
@@ -126,5 +138,5 @@ pub fn agreed(confirmed: bool, command: &str) -> Result<()> {
     if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes") {
         return Err(Failed::Refused("stopped; nothing changed".into()).into());
     }
-    Ok(())
+    Ok(true)
 }

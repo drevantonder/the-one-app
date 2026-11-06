@@ -15,7 +15,7 @@ use anyhow::{Context, Result, bail};
 use one::config::{CLI, NAME};
 use serde_json::{Value, json};
 
-use crate::{agent, get, post};
+use crate::agent;
 
 /// The throwaway network for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout the
 /// current folder is in, wherever in it, as git finds it, beside the downloads every throwaway network shares: → its folder,
@@ -128,11 +128,11 @@ pub fn run(rest: &[String]) -> Result<()> {
     unsafe { std::env::set_var(format!("{}_HOME", CLI.to_uppercase()), &dir) };
     if rest.first().map(String::as_str) == Some("sign-in") {
         // As its person, with no passkey: the throwaway network's sign-in asks for none.
-        let address = get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
+        let address = crate::node().get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
         let started = one::sign_in::start(&address, None)?;
         one::sign_in::approve_on_throwaway(&address, &started.url, None)?;
         one::sign_in::finish(started)?;
-        let me = get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
+        let me = crate::node().get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
         println!("Signed in as {me}. {CLI} throwaway and {CLI} throwaway mcp act as them until {CLI} throwaway sign-out.");
         return Ok(());
     }
@@ -142,7 +142,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     if !rest.is_empty() {
         return crate::run(rest.to_vec());
     }
-    let state = get("/v1/state")?;
+    let state = crate::node().get("/v1/state")?;
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
     let address = state["network"]["settings"]["address"].as_str().unwrap_or("");
     println!(
@@ -161,7 +161,7 @@ recovery key; its Workers' settings are in {}.
 /// git is on a computer signed in to any network: this build's helper is linked in a folder of the throwaway network's, put
 /// first on git's PATH (the one the real network's CLI links is another build, reaching another node).
 fn git(dir: &Path, args: &[String]) -> Result<()> {
-    let address = get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
+    let address = crate::node().get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     let link = bin.join(crate::git_remote::helper());
@@ -634,7 +634,7 @@ fn devices(dir: &Path) -> serde_json::Map<String, Value> {
 /// One of this machine's network's Agent Devices tools (not the throwaway network's, which has none). When the node
 /// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
 fn agent_devices(tool: &str, input: Value) -> Result<Value> {
-    Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": tool, "input": input, "client": "one throwaway" })))?["ok"].clone())
+    Ok(again(|| crate::node().post("/v1/call", json!({ "app": "agent-devices", "op": tool, "input": input, "client": "one throwaway" })))?["ok"].clone())
 }
 
 /// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.

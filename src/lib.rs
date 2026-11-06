@@ -50,6 +50,14 @@ pub mod harnesses;
 pub mod api;
 #[cfg(feature = "node")]
 pub mod cli;
+#[cfg(feature = "node")]
+pub mod build;
+#[cfg(feature = "node")]
+pub mod code;
+#[cfg(feature = "node")]
+pub mod mcp;
+#[cfg(feature = "node")]
+pub mod tools;
 pub mod app;
 #[cfg(feature = "node")]
 pub mod handoff;

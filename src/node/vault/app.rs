@@ -4,7 +4,8 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::config::CLI;
-use crate::node::own::{Ask, Asked, NodeApp, text};
+use crate::api::Client;
+use crate::node::own::{Asked, NodeApp, text};
 use crate::skills::{confirm_input, hints};
 
 /// How the Vault's tools are explained, as an app's guide is.
@@ -62,7 +63,7 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
 }
 
 /// A request for an item, by its id.
-pub fn request(node: &dyn Ask, id: &str) -> Result<Value> {
+pub fn request(node: &Client, id: &str) -> Result<Value> {
     let r = node.get(&format!("/v1/vault/requests?id={id}"))?;
     Ok(r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone())
 }
@@ -105,7 +106,7 @@ fn item_said(it: &Value) -> Value {
 }
 
 /// The item `name` (its id or title) names in `scope`, if there's one.
-fn find_item(node: &dyn Ask, scope: &str, name: &str) -> Result<Option<Value>> {
+fn find_item(node: &Client, scope: &str, name: &str) -> Result<Option<Value>> {
     let items = node.get(&format!("/v1/vault?scope={scope}"))?;
     let found: Vec<Value> = items.as_array().into_iter().flatten().filter(|i| i["id"] == name || i["title"].as_str().is_some_and(|t| t.eq_ignore_ascii_case(name))).cloned().collect();
     anyhow::ensure!(found.len() < 2, "several items are called {name}: give its id");
@@ -114,7 +115,7 @@ fn find_item(node: &dyn Ask, scope: &str, name: &str) -> Result<Option<Value>> {
 
 /// Sets `field` of `item` in `scope` (a new item by that title if there's none), secret if asked or if it was.
 #[allow(clippy::too_many_arguments)]
-pub fn set(node: &dyn Ask, scope: &str, item: &str, field: &str, value: &str, secret: Option<bool>, hosts: Option<Vec<String>>, app: Option<&str>, agent: Option<&str>) -> Result<String> {
+pub fn set(node: &Client, scope: &str, item: &str, field: &str, value: &str, secret: Option<bool>, hosts: Option<Vec<String>>, app: Option<&str>, agent: Option<&str>) -> Result<String> {
     let found = find_item(node, scope, item)?;
     let was = found.as_ref().and_then(|it| it["fields"].as_array()?.iter().find(|f| f["name"] == field).map(|f| f["secret"] == true));
     let mut data = json!({ "scope": scope, "agent": agent, "fields": { field: { "value": value, "secret": secret.or(was).unwrap_or(false) } } });
@@ -154,7 +155,7 @@ pub fn set(node: &dyn Ask, scope: &str, item: &str, field: &str, value: &str, se
 }
 
 /// Switches `app` on or off for `item` in `scope`.
-pub fn switch(node: &dyn Ask, scope: &str, item: &str, app: &str, on: bool, agent: Option<&str>) -> Result<String> {
+pub fn switch(node: &Client, scope: &str, item: &str, app: &str, on: bool, agent: Option<&str>) -> Result<String> {
     let it = find_item(node, scope, item)?.with_context(|| format!("no item {item} in {scope}"))?;
     let mut apps: Vec<Value> = it["apps"].as_array().cloned().unwrap_or_default().into_iter().filter(|a| a != app).collect();
     if on {
@@ -175,7 +176,7 @@ fn vault_name(scope: &str) -> String {
 
 /// Deletes `item` in `scope`, or with `field`, one of its fields. When it's not there but is in another Vault you
 /// may change, says which and gives the command that removes it.
-pub fn remove(node: &dyn Ask, scope: &str, item: &str, field: Option<&str>) -> Result<String> {
+pub fn remove(node: &Client, scope: &str, item: &str, field: Option<&str>) -> Result<String> {
     let it = match find_item(node, scope, item)? {
         Some(it) => it,
         None => {

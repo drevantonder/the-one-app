@@ -24,6 +24,9 @@ use tokio_stream::StreamExt;
 use crate::database::scopes::Role;
 use crate::node::{CallRequest, Caller, Credential, Node};
 
+pub mod client;
+pub use client::Client;
+
 /// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
 pub fn addr() -> String {
     std::env::var(format!("{}_ADDR", crate::config::CLI.to_uppercase())).unwrap_or_else(|_| format!("127.0.0.1:{}", crate::config::PORT))
@@ -31,15 +34,6 @@ pub fn addr() -> String {
 
 pub fn router(node: Node) -> Router {
     guarded(routes(), node)
-}
-
-/// MCP over HTTP, at `/mcp` (the CLI's `mcp_http`), which this crate can't name: set once, before the node serves.
-static MCP: std::sync::OnceLock<axum::routing::MethodRouter<Node>> = std::sync::OnceLock::new();
-
-/// Serves MCP at `/mcp`, for this machine's own programs and the network's client devices over iroh: the remote MCP server,
-/// remote MCP clients' device, among them (cloudflare/mcp/).
-pub fn serve_mcp(handler: axum::routing::MethodRouter<Node>) {
-    let _ = MCP.set(handler);
 }
 
 /// The file in a node's home holding the token its machine's own programs send, in `LOCAL_TOKEN_HEADER`, to say they
@@ -57,38 +51,6 @@ pub const ENDPOINT_HEADER: &str = "x-one-endpoint";
 /// `until`): only the node puts this on a request, as an extension, which nothing a client sends can set.
 #[derive(Clone, Copy)]
 pub struct FromClient(pub crate::keys::Key, pub u64);
-
-/// The client devices whose MCP requests this node's own MCP is answering (`mcp_http`), each by a ticket made for that
-/// request alone: a random secret only this process sees, so nothing a request says names a device, and the keys
-/// handed for one are reached only as its connection proved it.
-static ASKING_AS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (crate::keys::Key, u64)>>> = std::sync::LazyLock::new(Default::default);
-
-/// What this node's own MCP asks its API with while it answers a client device's request: its ticket, until dropped.
-pub struct AskingAs(String);
-
-impl AskingAs {
-    /// For the client device `key`, whose handed keys count until `until` (`FromClient`'s).
-    pub fn new(key: crate::keys::Key, until: u64) -> AskingAs {
-        let ticket = format!("ask.{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()));
-        ASKING_AS.lock().unwrap().insert(ticket.clone(), (key, until));
-        AskingAs(ticket)
-    }
-
-    pub fn ticket(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Drop for AskingAs {
-    fn drop(&mut self) {
-        ASKING_AS.lock().unwrap().remove(&self.0);
-    }
-}
-
-/// The client device a ticket is for, and until when what it hands counts, while its request is answered.
-fn asking_as(ticket: &str) -> Option<(crate::keys::Key, u64)> {
-    ASKING_AS.lock().unwrap().get(ticket).copied()
-}
 
 /// Serves the local API on `listener`, knowing each request's peer, which `from_this_machine` checks.
 pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io::Result<()> {
@@ -209,9 +171,8 @@ impl Routes {
 /// Every route of the local API, unguarded: `guarded` lets in who each says.
 pub fn routes() -> Routes {
     use Who::*;
-    let mcp = MCP.get().cloned().unwrap_or_else(|| any(|| async { StatusCode::NOT_FOUND }));
     Routes::default()
-        .route("/mcp", Clients, mcp)
+        .route("/mcp", Clients, post(crate::mcp::http))
         .route("/llms.txt", ThisMachine, get(llms))
         .route("/skills/{name}/{*path}", ThisMachine, get(skill_file))
         .route("/v1/state", SignedIn, get(state))
@@ -390,14 +351,6 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
         return from_client(&node, key, until, who, req, next).await;
     }
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
-    // This machine's own MCP, answering a client device's request (`mcp_http`), asks as that device, by the ticket it
-    // made for that request.
-    if let Some((key, until)) = token.as_deref().and_then(asking_as) {
-        if !from_this_machine(&node, &req) {
-            return refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": "that isn't a sign-in" }))).into_response()).await;
-        }
-        return from_client(&node, key, until, who, req, next).await;
-    }
     if let Some(token) = token {
         // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `Who::SignedIn`.
         if who != Who::SignedIn && !from_this_machine(&node, &req) {

@@ -1,19 +1,13 @@
 //! The node's own apps (the Vault, Backups, Groups, Devices, Widgets): tools that search, scripts, skills, MCP and
 //! the command line show as an app's, each defined beside what it does, and run by this machine's CLI and MCP against
-//! its node's API (`Ask`), as the person, never on another device.
+//! its node's API (`api::Client`), as the person, never on another device.
 
 use anyhow::Result;
 use serde_json::{Map, Value, json};
 
-/// How a node app's tool asks this machine's node: over its local API, as whoever the CLI or MCP asks for.
-pub trait Ask {
-    fn get(&self, path: &str) -> Result<Value>;
-    fn post(&self, path: &str, body: Value) -> Result<Value>;
-}
-
 /// Who runs a node app's tool, and how.
 pub struct Asked<'a> {
-    pub node: &'a dyn Ask,
+    pub node: &'a crate::api::Client,
     /// The agent credited, if one asked.
     pub agent: Option<&'a str>,
     /// `cli` or `mcp`.

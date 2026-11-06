@@ -399,3 +399,47 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
     let mut input = asked();
     assert!(a.fill_for_service("shell", &mut input, &me, Some("notes")).await.is_err() || !input.to_string().contains("s3cret"), "a service its item doesn't name gets none of it");
 }
+
+/// A client device's MCP request (the remote MCP server's, say) is answered as its person, never as the node's own: its
+/// tools run as them, with the keys they hand, and a tool needing keys they didn't hand is answered 428 with what it
+/// needs, for them to hand and ask again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_devices_mcp_runs_as_its_person() {
+    use one::api::client::{InProcess, Via};
+    let a = start("mcp").await;
+    create(&a, "Home", "Andre").await;
+    add_notes(&a).await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    eventually("notes to run", async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
+    let secret = "the-invites-secret";
+    let sam = one::node::Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
+    let device = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let e = one::keys::Endpoint::of(&device);
+    let asks = one::node::DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Chrome".into(), user: sam.user.clone(), person: String::new(), proof: Some(one::keys::invite_proof(secret.as_bytes(), &e)), device: None, made: None, place: None, sign_in: None };
+    a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
+    // Asked as the node asks its routes for a request over iroh: as the device its connection proved.
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(one::database::HEADER, one::database::READS.into());
+    let from = InProcess::new(a.clone(), Some(one::api::FromClient(device.verifying_key().to_bytes(), u64::MAX)), None, &headers);
+    let from = std::sync::Arc::new(from);
+    let mcp = async |body: Value| {
+        let from = from.clone();
+        tokio::task::spawn_blocking(move || {
+            let answer = from.send("POST", "/mcp", &[("content-type", "application/json")], Some(body.to_string().into_bytes()), None).unwrap();
+            (answer.status, serde_json::from_reader::<_, Value>(answer.body).unwrap())
+        })
+        .await
+        .unwrap()
+    };
+
+    let (status, init) = mcp(json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "claude-ai" } } })).await;
+    assert_eq!(status, 200, "{init}");
+    let said = init["result"]["instructions"].as_str().unwrap();
+    assert!(said.contains("You act for Sam") && !said.contains("You act for Andre"), "{said}");
+    let (_, listed) = mcp(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await;
+    let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
+    assert!(names.contains(&"notes_post") && !names.contains(&"logs"), "a sign-in from elsewhere reads no device's log: {names:?}");
+    let (status, needs) = mcp(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "notes_post", "arguments": { "text": "from Sam" } } })).await;
+    assert_eq!(status, 428, "{needs}");
+    assert!(needs["need"].as_array().is_some_and(|n| !n.is_empty()), "{needs}");
+}

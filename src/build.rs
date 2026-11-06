@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
-use one::config::{CLI, TARGET};
-use one::release::Version;
+use crate::config::{CLI, TARGET};
+use crate::release::Version;
 use serde_json::{Value, json};
 
 /// A platform a release is for: what installers and nodes name it, and what Go and a person do.
@@ -69,7 +69,7 @@ fn installer_says(name: &str) -> Option<&'static str> {
 
 /// Whether install.sh, which gets releases from GitHub, installs this custom build. Only that custom build is released there.
 pub fn installer_is_ours() -> bool {
-    installer_says("cli") == Some(CLI) && installer_says("repo") == Some(one::config::REPO)
+    installer_says("cli") == Some(CLI) && installer_says("repo") == Some(crate::config::REPO)
 }
 
 /// What `build_service` made: each program by its platform, and the platforms it couldn't build for.
@@ -128,13 +128,13 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
 
 /// Has the node publish the program at `path` as a release, signed with `key`: this node's (`service` none) or that
 /// service's. → what it answered.
-pub fn publish(path: &Path, key: &ssh_key::PrivateKey, version: &Version, service: Option<&str>) -> Result<Value> {
+pub fn publish(node: &crate::api::Client, path: &Path, key: &ssh_key::PrivateKey, version: &Version, service: Option<&str>) -> Result<Value> {
     if version.commit.ends_with("+dirty") {
         bail!("that build has uncommitted changes; commit, build again, then publish");
     }
-    let signature = one::release::sign(key, &std::fs::read(path)?)?;
+    let signature = crate::release::sign(key, &std::fs::read(path)?)?;
     let body = json!({ "path": path, "commit": version.commit, "target": version.target, "committed": version.committed, "signature": signature, "service": service });
-    crate::post(if service.is_some() { "/v1/service-release" } else { "/v1/node-release" }, body)
+    node.post(if service.is_some() { "/v1/service-release" } else { "/v1/node-release" }, body)
 }
 
 /// What publishing says, from what the node answered.
@@ -254,8 +254,8 @@ mod tests {
         let installer = include_str!("../install.sh");
         // A custom build's installer is its own: when it's this build's, it names the same repo and release key.
         if installer_says("cli") == Some(CLI) {
-            assert_eq!(installer_says("repo"), Some(one::config::REPO));
-            assert_eq!(installer_says("key"), Some(one::config::RELEASE_KEY));
+            assert_eq!(installer_says("repo"), Some(crate::config::REPO));
+            assert_eq!(installer_says("key"), Some(crate::config::RELEASE_KEY));
         }
         for p in &PLATFORMS {
             let (arch, rest) = p.target.split_once('-').unwrap();
@@ -273,4 +273,50 @@ mod tests {
         assert_eq!(Platform::of_uname("Linux aarch64").unwrap().target, "aarch64-unknown-linux-gnu");
         assert!(Platform::of_uname("Linux riscv64").is_none());
     }
+}
+
+/// The app in `dir` built into a bundle, as a blob of `node`'s, with its service built here for each platform this
+/// machine can build it for, each build a blob its bundle names: → the bundle, and what was built of its service.
+pub fn built_with_service(node: &crate::api::Client, dir: &Path) -> Result<(String, String)> {
+    let mut builds = std::collections::BTreeMap::new();
+    let mut service = String::new();
+    let out = std::env::temp_dir().join(format!("{CLI}-service-{}", std::process::id()));
+    let built = build_service(dir, &built_from(&dir.join("service"), false).unwrap_or_default(), PLATFORMS.iter(), &out).and_then(|built| {
+        if let Some(built) = &built {
+            for (platform, program) in &built.made {
+                builds.insert(platform.target.to_string(), node.put_blob(&std::fs::read(program)?)?);
+            }
+        }
+        Ok(built)
+    });
+    let _ = std::fs::remove_dir_all(&out);
+    if let Some(built) = built? {
+        let said = |platforms: Vec<&Platform>| platforms.iter().map(|p| p.said).collect::<Vec<_>>().join(", ");
+        service = format!(" Its service is built for {}.", said(built.made.iter().map(|(p, _)| *p).collect()));
+        if !built.missed.is_empty() {
+            service += &format!(" Not for {}: this machine can't build it for them, so deploy it again from one that can.", said(built.missed));
+        }
+    }
+    Ok((node.put_blob(&crate::app::deploy::build(dir, &builds)?)?, service))
+}
+
+/// MCP's deploy tool's files built into a bundle on this machine, as a blob of `node`'s: for React screens and a
+/// service in Go, which only the machine that deploys builds. → the bundle, and what was built of its service.
+pub fn built_here(node: &crate::api::Client, files: &serde_json::Map<String, Value>) -> Result<(String, String)> {
+    ensure!(!files.contains_key("service/Cargo.toml"), "its service is in Rust, whose build would run its build scripts here: deploy it with {CLI} deploy <its folder>");
+    let files = crate::app::deploy::given(files)?;
+    if !files.iter().any(|(p, _)| p == "service/go.mod") {
+        return Ok((node.put_blob(&crate::app::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)?, String::new()));
+    }
+    let dir = std::env::temp_dir().join(format!("{CLI}-deploy-{}", std::process::id()));
+    let built = (|| {
+        for (path, bytes) in &files {
+            let path = dir.join(path);
+            std::fs::create_dir_all(path.parent().unwrap_or(&dir))?;
+            std::fs::write(path, bytes)?;
+        }
+        built_with_service(node, &dir)
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    built
 }
