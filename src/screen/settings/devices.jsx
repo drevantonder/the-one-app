@@ -688,10 +688,10 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
             </List>
           </Section>
         )}
-        {/* A browser gets notifications once its person says so here: asked only when they tap it. */}
+        {/* This browser, or the app, gets notifications once its person says so here: asked only when they tap it. */}
         {device.notify === "default" && (
           <Button variant="ghost" className="self-start" onClick={() => act(async () => (device.notify = await one.notify()))}>
-            <Icon name="bell" />Get Notifications in This Browser
+            <Icon name="bell" />Get Notifications Here
           </Button>
         )}
       </div>
