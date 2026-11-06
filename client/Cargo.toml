@@ -29,7 +29,7 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 # A client checks the network's signed entries itself with the nodes' own Rust (src/members.rs): who's who as they say
 # it, never as a node does, asked of the scope database they build (`one`'s `db`, SQLite) and its permissions; and a
 # new device's sign-in, before letting it in (`sign-in-proof`).
-one = { path = "..", default-features = false, features = ["db", "sign-in-proof"] }
+one = { path = "..", default-features = false, features = ["sign-in-proof"] }
 rusqlite = "0.41"
 anyhow = "1"
 serde_json = "1"

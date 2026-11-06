@@ -33,7 +33,6 @@ pub(crate) fn user_home() -> PathBuf {
 pub mod backups;
 pub mod bucket;
 pub mod call;
-#[cfg(feature = "db")]
 pub mod database;
 #[cfg(feature = "node")]
 pub mod sign_in;
@@ -41,7 +40,6 @@ pub mod sign_in_proof;
 #[cfg(feature = "node")]
 pub mod skills;
 pub mod labs;
-#[cfg(feature = "db")]
 pub mod permissions;
 pub mod rank;
 #[cfg(feature = "node")]
@@ -72,7 +70,5 @@ pub mod keys;
 pub mod push;
 pub mod screen;
 pub mod web;
-#[cfg(feature = "db")]
 pub mod state;
-#[cfg(feature = "db")]
 pub mod vault;

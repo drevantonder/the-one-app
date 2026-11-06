@@ -18,14 +18,11 @@ autotests = false
 [lib]
 doctest = false
 
-# `node`, the node on a machine; without it, only what the Cloudflare node (cloudflare/node/) and the native apps' client
-# (client/) share with it: entries, members, logs, databases and keys.
+# `node`, the node on a machine; without it, only what the Cloudflare node (cloudflare/node/) and the clients (client/)
+# share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:ureq", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "sign-in-proof", "db"]
-# `db`, apps' databases and logs (src/database/stored.rs, src/log.rs, src/vault.rs: SQLite), which nodes and native apps' client
-# have; browsers' client (client/, WebAssembly) builds this crate without it, which SQLite would make a megabyte bigger.
-db = ["dep:rusqlite"]
+node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:ureq", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "sign-in-proof"]
 # `sign-in-proof`, checking a new device's sign-in (src/sign_in_proof.rs), which nodes and every client have; the
 # Cloudflare node approves no one, so it goes without.
 sign-in-proof = ["dep:ring"]
@@ -46,8 +43,8 @@ rand = "0.8"
 blake3 = "1"
 # A scope database's steps are kept in CBOR in the bucket (src/database/steps.rs); the Cloudflare node reads them too.
 ciborium = "0.2"
-# `serialize` makes and reads an app database's copy in memory (src/database/stored.rs). Only with `db`.
-rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"], optional = true }
+# `serialize` makes and reads an app database's copy in memory (src/database/stored.rs).
+rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 serde_json = "1"
