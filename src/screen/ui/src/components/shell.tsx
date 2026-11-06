@@ -1,6 +1,7 @@
 import * as React from "react"
 import { ArrowUpRightIcon, CaretLeftIcon, CodeIcon } from "@phosphor-icons/react"
 import { AppIcon, type App } from "@/components/app-icon"
+import { Kept } from "@/components/kept"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -97,15 +98,6 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
     </SidebarProvider>
   )
   return banner ? <div className="flex h-full flex-col">{banner}{window}</div> : window
-}
-
-/// An element the client made and keeps, put here as it is: its frames go on running through every draw.
-function Kept({ element }: { element: HTMLElement }) {
-  const ref = React.useRef<HTMLDivElement>(null)
-  React.useLayoutEffect(() => {
-    if (element.parentElement !== ref.current) ref.current?.append(element)
-  }, [element])
-  return <div ref={ref} className="contents" />
 }
 
 function ShellGroup({ section, onGo }: { section: ShellSection; onGo?: (href: string) => void }) {

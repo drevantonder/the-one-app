@@ -9,6 +9,7 @@ import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Icon } from "@/components/icon"
+import { Kept } from "@/components/kept"
 import { ResponsiveDialog } from "@/components/responsive-dialog"
 import { cn } from "@/lib/utils"
 
@@ -142,17 +143,9 @@ function ScreenSheet({ open, body, title: first, done, close, titled }: {
   React.useLayoutEffect(() => titled(setTitle), [titled])
   return (
     <ResponsiveDialog open={open} onOpenChange={(o) => !o && close()} title={title} tall action={<Button variant="secondary" size="sm" onClick={close}>{done}</Button>}>
-      <KeptBody element={body} />
+      <Kept element={body} className="flex min-h-0 flex-1 flex-col" />
     </ResponsiveDialog>
   )
-}
-
-function KeptBody({ element }: { element: HTMLElement }) {
-  const ref = React.useRef<HTMLDivElement>(null)
-  React.useLayoutEffect(() => {
-    if (element.parentElement !== ref.current) ref.current?.append(element)
-  }, [element])
-  return <div ref={ref} className="flex min-h-0 flex-1 flex-col" />
 }
 
 export { showMenu, showAlert, showSheet, type MenuItem }
