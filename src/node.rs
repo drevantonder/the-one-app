@@ -456,6 +456,8 @@ pub struct Inner {
     junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
     /// `global`'s log up to its freeze's end of it, once read: what each scope's database starts from (`node::steps`).
     frozen_log: Mutex<Option<Arc<crate::database::steps::Log>>>,
+    /// The scopes whose start this device has looked for since it started (`node::steps`).
+    started: Mutex<std::collections::BTreeSet<Scope>>,
     /// When this device last tidied each database (by prefix), ms.
     tidied: Mutex<HashMap<String, u64>>,
     /// The last position this device wrote an entry of each scope at.
@@ -604,6 +606,7 @@ impl Node {
             making_keys: tokio::sync::Mutex::new(()),
             junk: Mutex::new(HashMap::new()),
             frozen_log: Mutex::new(None),
+            started: Mutex::new(Default::default()),
             tidied: Mutex::new(HashMap::new()),
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),

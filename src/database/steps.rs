@@ -402,6 +402,44 @@ pub fn scope_anchor(freeze: &Freeze, root: Option<Hash>, global: &Log, scope: &S
     ScopeDb::open(super::scope::build(&Members::default(), scope, &state)?, now)
 }
 
+/// The kind of step that starts a scope's database (not `global`'s) whose frozen log the freeze names, at position 0:
+/// `{ hash }`, with its copy, what that log's entries added up to at the freeze. Written once, by a device that holds
+/// the scope's keys (it's sealed under them, as its steps are).
+pub const START: &str = "start";
+
+/// Where a scope's database's start is: position 0, before its first step.
+pub fn start_name(scope: &Scope) -> String {
+    crate::db::step_name(&prefix(&scope.to_string()), 0)
+}
+
+/// `scope`'s start, step 0 of its database, signed by `key` as `user`, the scope at `epoch`: `db`, what its frozen log's
+/// entries add up to (`scope_anchor`).
+pub fn start(key: &SigningKey, scope: &Scope, user: &str, epoch: u32, now: u64, db: &mut ScopeDb) -> Result<Given> {
+    ensure!(*scope != Scope::Global, "global's database starts from its freeze");
+    let hash = crate::db::state_hash(db.conn())?;
+    let step = sign(key, scope, 0, user, epoch, now, Content::new(members::APP, START, json!({ "hash": hash })))?;
+    Ok(Given { step, copy: Some(db.bytes()?) })
+}
+
+/// A scope's database before its first step (not `global`'s), as `global`'s database `global` says, the freeze
+/// `freeze` among it: one with nothing in it, unless the freeze names the scope's frozen log, when it's the copy its
+/// start carries (`START`, step 0, `given`), which counts only if its copy comes to the hash it names and its signer is
+/// a device the network ever listed: it opened with the scope's keys, and was written once, by this release, so no
+/// later removal takes it back. Without one that counts, the scope can't be read yet.
+pub fn started(freeze: &Freeze, global: &ScopeDb, scope: &Scope, given: Option<&Given>, now: u64) -> Result<ScopeDb> {
+    ensure!(*scope != Scope::Global, "global's database starts from its freeze");
+    if freeze.logs.get(&scope.to_string()).is_none_or(|n| *n == 0) {
+        return ScopeDb::open(super::scope::build(&Members::default(), scope, &ScopeState::default())?, now);
+    }
+    let given = given.with_context(|| format!("{scope}'s database has no start yet: one of its devices writes it"))?;
+    let step = &given.step;
+    ensure!(step.content.app == members::APP && step.content.kind == START && step.seq() == 0 && step.scope() == *scope, "{scope}'s step 0 isn't its start");
+    ensure!(global.machine_ever(&step.author()).is_some(), "{scope}'s start isn't from one of the network's devices");
+    let copy = connection(given.copy.as_deref().context("a start carries its copy")?)?;
+    ensure!(Some(crate::db::state_hash(&copy)?.as_str()) == step.content.data["hash"].as_str(), "{scope}'s start's copy isn't what it says");
+    normalize(copy, scope, now)
+}
+
 /// The entries `scope_anchor` starts `scope`'s database from (not `global`'s): those in its log's steps up to the
 /// freeze's end of it, read from the bucket with `keys`, its log's keys by epoch. A step under an epoch above the newest
 /// of `scope` made at the freeze, as `global`, `global`'s log to the freeze's end of it (of the network at `root`), says,
@@ -1076,6 +1114,33 @@ pub(crate) mod tests {
         assert_eq!(crate::db::state_hash(Truth::welcomed(&w, &theirs, None, &after, 0).unwrap().db.conn()).unwrap(), w.hash);
         assert!(Truth::welcomed(&Welcome { hash: "0".repeat(64), ..w.clone() }, &theirs, None, &after, 0).is_err(), "nor another hash");
         assert!(Truth::welcomed(&w, &theirs, None, &[None], 0).is_err(), "nor a step held back");
+    }
+
+    /// A scope the freeze names starts from its start, step 0, as it was written, by a device the network listed, its
+    /// copy checked against its hash; without one it can't be read, and a scope the freeze doesn't name starts empty.
+    #[test]
+    fn a_scope_starts_from_its_start() {
+        let (h, mac, _, _) = two_admins();
+        let m = Members::replay(Some(h.root()), &h.entries, &Default::default());
+        let global = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
+        let scope = Scope::User(ANDRE.into());
+        let state = ScopeState { installed: ["notes".to_string()].into(), arrangements: [("user".to_string(), json!({ "items": ["notes"] }))].into(), ..Default::default() };
+        let mut db = ScopeDb::open(super::super::scope::build(&Members::default(), &scope, &state).unwrap(), 0).unwrap();
+        let freeze = Freeze { at: 2, hash: "0".repeat(64), logs: [("global".to_string(), 9), (scope.to_string(), 4)].into() };
+        let given = start(&mac, &scope, ANDRE, 1, 0, &mut db).unwrap();
+        let given = decode(&scope, 0, &encoded(&given)).unwrap();
+        let hash = |d: &ScopeDb| crate::db::state_hash(d.conn()).unwrap();
+        assert_eq!(hash(&started(&freeze, &global, &scope, Some(&given), 0).unwrap()), hash(&db));
+        assert!(started(&freeze, &global, &scope, None, 0).is_err(), "none yet: it waits for one");
+        let stranger = start(&SigningKey::from_bytes(&[9; 32]), &scope, ANDRE, 1, 0, &mut db).unwrap();
+        assert!(started(&freeze, &global, &scope, Some(&stranger), 0).is_err(), "nor one from outside the network");
+        let mut swapped = given.clone();
+        let mut c = connection(swapped.copy.as_deref().unwrap()).unwrap();
+        c.execute_batch("PRAGMA user_version = 1").unwrap();
+        swapped.copy = Some(c.serialize("main").unwrap().to_vec());
+        assert!(started(&freeze, &global, &scope, Some(&swapped), 0).is_err(), "nor a copy that isn't what it says");
+        let other = Scope::User(BOB.into());
+        assert!(started(&freeze, &global, &other, None, 0).unwrap().state().installed.is_empty(), "a scope with no frozen log starts empty");
     }
 
     #[test]
