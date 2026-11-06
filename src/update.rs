@@ -34,7 +34,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
     // Updates here take turns: they share one checkout, and each would test one commit and send out another.
     let _turn = turn()?;
-    let src = checkout()?;
+    let src = timed("fetched main", checkout)?;
     let (config, config_commit) = config(&src)?;
     let commit = git(&src, &["rev-parse", "HEAD"])?;
     let short = commit[..12].to_string();
@@ -127,10 +127,10 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let mut build = Command::new(cargo());
     build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
     // Every release carries the Cloudflare node: one without it couldn't deploy to Cloudflare.
-    build.env("CLOUDFLARE_NODE", cloudflare_node(&src, &config, "release").context("couldn't build the Cloudflare node, so nothing was sent out")?);
+    build.env("CLOUDFLARE_NODE", timed("built the Cloudflare node", || cloudflare_node(&src, &config, "release")).context("couldn't build the Cloudflare node, so nothing was sent out")?);
     // And the web client's way to nodes: one without it couldn't reach them.
-    build.env("CLIENT", client(&src, &config).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
-    run_quiet(&mut build)?;
+    build.env("CLIENT", timed("built the web client", || client(&src, &config)).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
+    timed("built the node", || run_quiet(&mut build))?;
 
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // The build devices say they run: main's commit, and a custom build's config's.
@@ -144,16 +144,16 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if !linux.is_empty() && linux.iter().all(|d| d["build"] == short) {
         println!("  every Linux device already runs {short}");
     } else {
-        crate::publish(&binary, &Default::default(), &key)?;
+        timed("published the node", || crate::publish(&binary, &Default::default(), &key))?;
     }
     let started_at = Instant::now();
-    failed |= await_builds(&linux, short, started_at, Duration::from_secs(180));
-    if let Err(err) = deploy_built_in() {
+    failed |= timed("waited for the Linux devices", || await_builds(&linux, short, started_at, Duration::from_secs(180)));
+    if let Err(err) = timed("deployed the built-in apps", deploy_built_in) {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
     }
     add_where(&moved);
-    let cloudflare_failed = deploy_cloudflare(&linux, short);
+    let cloudflare_failed = timed("deployed to Cloudflare", || deploy_cloudflare(&linux, short));
 
     let Some(tag) = tag else {
         if !macs.is_empty() {
@@ -611,6 +611,25 @@ fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
 
 /// This device's turn to update, held until it's dropped: other updates wait for it.
 fn turn() -> Result<std::fs::File> {
+    let asked = Instant::now();
+    let file = turn_waiting()?;
+    if asked.elapsed() >= Duration::from_secs(3) {
+        println!("  waited {}s for the other update", asked.elapsed().as_secs());
+    }
+    Ok(file)
+}
+
+/// `f`, saying what it was and how long it took when that was a few seconds or more: where an update's time goes.
+fn timed<T>(what: &str, f: impl FnOnce() -> T) -> T {
+    let start = Instant::now();
+    let out = f();
+    if start.elapsed() >= Duration::from_secs(3) {
+        println!("  {what}: {}s", start.elapsed().as_secs());
+    }
+    out
+}
+
+fn turn_waiting() -> Result<std::fs::File> {
     use std::os::fd::AsRawFd;
     std::fs::create_dir_all(cache())?;
     let file = std::fs::File::create(cache().join("update.lock"))?;
@@ -735,7 +754,7 @@ fn after_update() -> Result<Option<After>> {
 
 /// Waits for `after-update` to finish, and shows what it said.
 fn finish(after: Option<After>) -> Result<()> {
-    ensure!(after.is_none_or(|mut after| after.wait()), "after-update failed");
+    ensure!(timed("waited for after-update", || after.is_none_or(|mut after| after.wait())), "after-update failed");
     Ok(())
 }
 
