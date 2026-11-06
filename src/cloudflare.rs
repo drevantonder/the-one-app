@@ -166,6 +166,7 @@ fn published_key<'a>(jwks: &'a Value, header: &Value) -> Option<&'a Value> {
 }
 
 /// Whether `jwks` holds the key `token` names; nothing for what isn't a token.
+#[cfg(feature = "node")]
 fn names_published_key(jwks: &Value, token: &str) -> Option<bool> {
     let header: Value = serde_json::from_slice(&B64U.decode(token.split('.').next()?.as_bytes()).ok()?).ok()?;
     Some(published_key(jwks, &header).is_some())

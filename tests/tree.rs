@@ -16,3 +16,17 @@ fn no_file_has_a_conflict_marker_left() {
         .collect();
     assert!(left.is_empty(), "a merge's conflict markers are left in: {}", left.join(", "));
 }
+
+/// The Cloudflare node and the web client build for wasm, without the node feature, which only `one update` and
+/// `one throwaway` build otherwise: a `#[cfg]` that hides what they use shows here, not when an update fails.
+#[test]
+fn what_runs_in_wasm_builds() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let out = std::process::Command::new(cargo)
+        .args(["check", "--quiet", "--target", "wasm32-unknown-unknown", "-p", "one-cloudflare-node", "-p", "one-client"])
+        .current_dir(root)
+        .output()
+        .expect("cargo check");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
