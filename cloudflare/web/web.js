@@ -1372,8 +1372,7 @@ const h = OneUI.react.createElement;
 
   /// Asks sign-in which devices wait now, and tells the window and its screens if that changed. → them.
   async function waitingNow() {
-    // The app's client lets its person's devices in by their sign-in itself; what's left is asked of a node.
-    const now = native ? (await api("/v1/devices/requests")).map((r) => ({ ...r, key: r.code })) : await bySignIn((await device.requests()).filter((r) => !notMine.has(r.key)));
+    const now = native ? (await native.signs("GET", "/v1/devices/requests", {})).map((r) => ({ ...r, key: r.code })) : await bySignIn((await device.requests()).filter((r) => !notMine.has(r.key)));
     const changed = now.map((r) => r.key).join() !== waiting.map((r) => r.key).join();
     waiting = now;
     if (changed) {

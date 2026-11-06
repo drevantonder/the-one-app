@@ -172,7 +172,7 @@ impl Device {
         if let Stage::Off { asked: kept } = &mut *self.stage.lock().await {
             *kept = Some(asked.clone());
         }
-        let (status, out) = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(token), Some(asked)).await?;
+        let (status, out) = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(("authorization", format!("Bearer {token}"))), Some(asked)).await?;
         if status != 200 {
             return Err(failed(error(&out).unwrap_or_else(|| format!("Couldn't ask to be let in ({status})."))));
         }
@@ -185,7 +185,7 @@ impl Device {
     /// gone from sign-in is asked again unless it's in; a sign-in that's no more fails, to sign in again.
     pub async fn wait(&self, token: &str) -> Result<bool, Error> {
         let at = format!("{}/api/auth/devices/requests/{}", self.address, self.key());
-        let (status, said) = http("GET", &at, Some(token), None).await.unwrap_or((0, Value::Null));
+        let (status, said) = http("GET", &at, Some(("authorization", format!("Bearer {token}"))), None).await.unwrap_or((0, Value::Null));
         let gone = match keys::waited(status, &said) {
             Waited::SignedOut => return Err(failed("Sign in again.")),
             Waited::Waiting => return Ok(false),
@@ -207,7 +207,7 @@ impl Device {
             _ => None,
         };
         if gone && let Some(asked) = asked {
-            let _ = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(token), Some(asked)).await;
+            let _ = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(("authorization", format!("Bearer {token}"))), Some(asked)).await;
         }
         Ok(false)
     }
@@ -683,6 +683,154 @@ impl Device {
         wrote
     }
 
+    /// Asks the network's sign-in something as this device, signed with its key (`one/auth`), in `x-one-request`,
+    /// signed for `path` without its query.
+    async fn ask_sign_in(&self, method: &str, path: &str) -> Result<Value, Error> {
+        let route = format!("{method} {}", path.split('?').next().unwrap_or_default());
+        let signed = keys::signed_request(&self.key, one::protocol::SIGN_IN_DOMAIN, json!({ "route": route }), now());
+        let header = B64U.encode(&serde_json::to_vec(&signed).map_err(failed)?);
+        let (status, out) = http(method, &format!("{}{path}", self.address), Some(("x-one-request", header)), None).await?;
+        if !(200..300).contains(&status) {
+            return Err(failed(error(&out).unwrap_or_else(|| format!("{YOURS}'s sign-in answered {status}."))));
+        }
+        Ok(out)
+    }
+
+    /// Its person's other devices waiting to be let in, as sign-in says, but those taken out or turned down, each with
+    /// the code it shows ("ABCD EFGH").
+    async fn waiting(&self) -> Result<Vec<(Value, Endpoint, String)>, Error> {
+        self.keyring.read(self).await?;
+        let user = self.keyring.user().ok_or_else(refused)?;
+        let asked = self.ask_sign_in("GET", "/api/auth/devices/requests").await?;
+        let mut out = Vec::new();
+        for r in asked["requests"].as_array().into_iter().flatten() {
+            let (Ok(key), Ok(seal)) = (keys::unhex(r["key"].as_str().unwrap_or("")), keys::unhex(r["seal"].as_str().unwrap_or(""))) else { continue };
+            let gone = self.keyring.who(|who| who.machine_ever(&key).map(|m| m.is_some_and(|m| m.removed))).ok_or_else(refused)?.map_err(failed)?;
+            if r["user"] != json!(user) || key == self.me.key || r["service"].is_string() || gone {
+                continue;
+            }
+            let e = Endpoint { key, seal };
+            let code = keys::join_code(&e);
+            out.push((r.clone(), e, format!("{} {}", &code[..4], &code[4..])));
+        }
+        Ok(out)
+    }
+
+    /// The one of its person's waiting with `code`, as typed; none if none is (someone new, invited by a link a node
+    /// made, is let in by that node).
+    async fn waiting_with(&self, code: &str) -> Result<Option<(Value, Endpoint)>, Error> {
+        let code: String = code.to_uppercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        let mut found: Vec<_> = self.waiting().await?.into_iter().filter(|(_, _, c)| c.replace(' ', "") == code).collect();
+        if found.len() > 1 {
+            return Err(failed("Two devices are waiting with that code, so neither was let in. Start again on yours, for a new code."));
+        }
+        Ok(found.pop().map(|(r, e, _)| (r, e)))
+    }
+
+    /// Devices waiting that this device may let in, as Settings › Devices shows them: its person's own, and someone
+    /// new invited by a link a node made, as that node says.
+    async fn requests(&self) -> Result<Value, Error> {
+        let mut out: Vec<Value> = self.waiting().await?.into_iter().map(|(r, _, code)| json!({ "device": r["name"], "person": r["person"], "code": code, "made": r["made"], "place": r["place"], "yours": true })).collect();
+        let invited = self.json("GET", "/v1/devices/requests", None).await?;
+        out.extend(invited.as_array().into_iter().flatten().filter(|r| r["new"] == true).cloned());
+        Ok(json!(out))
+    }
+
+    /// What `r`'s sign-in shows it signed in with, checked here (`one::sign_in_proof`); none if it shows nothing
+    /// that checks out.
+    async fn signed_in_with(&self, r: &Value, e: &Endpoint) -> Option<one::sign_in_proof::Account> {
+        let proof: one::sign_in_proof::Proof = serde_json::from_value(r["sign_in"].clone()).ok()?;
+        let (root, clients) = self.keyring.who(|who| -> anyhow::Result<_> { Ok((who.root()?, who.setting(one::sign_in_proof::CLIENTS)?)) })?.ok()?;
+        let network = one::sign_in_proof::Network::new(&self.address, *root?.as_bytes(), clients.as_deref());
+        let jwks = match proof.issuer().and_then(|i| one::sign_in_proof::keys_at(&i, &self.address)) {
+            Some(at) => Some(http("GET", &at, None, None).await.ok().filter(|(s, _)| *s == 200)?.1),
+            None => None,
+        };
+        one::sign_in_proof::check(&proof, e, &network, jwks.as_ref(), now()).ok()
+    }
+
+    /// Lets in one of its person's devices that asked, as device.js `approve` does: lists it (with what it signed in
+    /// with, the device it's on and where it asked from), seals it each epoch it opens of the scopes they use, takes
+    /// their sign-in before on the same device out, lets it onto the network, and marks its request approved with where
+    /// this device read who's who to.
+    async fn approve(&self, r: &Value, e: &Endpoint) -> Result<(), Error> {
+        let user = self.keyring.user().ok_or_else(refused)?;
+        let on = r["device"].as_str().map(keys::unhex).transpose().map_err(|_| failed("The device it's on is 64 hex characters."))?;
+        let (listed, scopes, admin, before) = self
+            .keyring
+            .who(|who| -> anyhow::Result<_> {
+                let listed = who.client(&e.key)?.is_some_and(|c| c.user == user && c.seal == e.seal);
+                let scopes = who.scopes()?.into_iter().filter(|s| who.may(&user, "use", &one::database::scopes::object(s))).collect::<Vec<_>>();
+                let before: Vec<[u8; 32]> = match on {
+                    Some(on) => who.clients()?.into_iter().filter(|c| c.user == user && c.device == Some(on) && c.key != e.key && c.passkey.is_none()).map(|c| c.key).collect(),
+                    None => Vec::new(),
+                };
+                Ok((listed, scopes, who.may(&user, "invite", one::database::scopes::NETWORK), before))
+            })
+            .ok_or_else(refused)?
+            .map_err(failed)?;
+        if !listed {
+            let name = r["name"].as_str().unwrap_or("");
+            let mut content = content::device(e, &user, name, &[one::database::scopes::Kind::Client], None);
+            if let Some(on) = &on {
+                content.data["device"] = json!(hex(on));
+            }
+            if let Some(account) = self.signed_in_with(r, e).await {
+                content.data["sign_in"] = json!(account);
+            }
+            if r["place"].is_string() {
+                content.data["place"] = r["place"].clone();
+            }
+            self.write(&user, content).await?;
+        }
+        for scope in &scopes {
+            self.seal_held(scope, e).await?;
+        }
+        match self.tell(json!({ "add": hex(&e.key), "role": "client", "admin": admin })).await {
+            Err(err) if !(listed && err.code.as_deref() == Some(one::protocol::code::ALREADY)) => return Err(err),
+            _ => {}
+        }
+        for old in before {
+            self.take_out(&old).await?;
+            self.write(&user, content::remove_device(&old)).await?;
+        }
+        self.keyring.read(self).await?;
+        let root = self.keyring.who(|who| who.root()).ok_or_else(refused)?.map_err(failed)?.ok_or_else(refused)?;
+        let welcome = self.keyring.welcome().map(|w| format!("&welcome={w}")).unwrap_or_default();
+        self.ask_sign_in("DELETE", &format!("/api/auth/devices/requests/{}?approved&root={}{welcome}", hex(&e.key), root.to_hex())).await?;
+        Ok(())
+    }
+
+    /// Seals each epoch of `scope` sealed to this device to `to`, but those it has, each checked against the hash
+    /// who's who names.
+    async fn seal_held(&self, scope: &Scope, to: &Endpoint) -> Result<(), Error> {
+        let mine = self.json("GET", &format!("/v1/keys?scope={}&to={}", scope, hex(&self.me.key)), None).await?;
+        let secret = keys::seal_secret(&self.key);
+        for (n, sealed) in mine["sealed"].as_object().into_iter().flatten() {
+            let n: u32 = n.parse().map_err(failed)?;
+            let key = keys::open_sealed(&secret, &B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).map_err(failed)?).map_err(failed)?;
+            let key: [u8; 32] = key.try_into().map_err(|_| failed("A key for this didn't check out, so it wasn't used."))?;
+            if self.keyring.who(|who| who.epoch_hash(scope, n)).transpose().map_err(failed)?.flatten() != Some(keys::epoch_hash(&key)) {
+                return Err(failed("A key for this didn't check out, so it wasn't used."));
+            }
+            let body = json!({ "scope": scope.to_string(), "n": n, "to": hex(&to.key), "sealed": B64U.encode(&keys::seal_to(&to.seal, &key).map_err(failed)?) });
+            match self.json("POST", "/v1/keys", Some(body)).await {
+                Err(err) if err.code.as_deref() != Some(one::protocol::code::ALREADY) => return Err(err),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Turns down one of its person's devices waiting: a step, so none of their devices lets it in after, then its
+    /// request forgotten at sign-in.
+    async fn refuse(&self, r: &Value, e: &Endpoint) -> Result<(), Error> {
+        let user = self.keyring.user().ok_or_else(refused)?;
+        self.write(&user, content::refuse(e, r["name"].as_str().unwrap_or(""))).await?;
+        self.ask_sign_in("DELETE", &format!("/api/auth/devices/requests/{}", hex(&e.key))).await?;
+        Ok(())
+    }
+
     /// What Settings changes that this device signs itself, as its person's device (web.js `signs`, the same paths):
     /// → the answer, or `None` for a path it leaves to a node.
     pub async fn settings(&self, method: &str, path: &str, body: &Value) -> Option<Result<Value, Error>> {
@@ -705,6 +853,14 @@ impl Device {
             ("POST", "/v1/invite") => write(role(&body.get("role").cloned().unwrap_or(json!("member"))).map(|r| content::invite(&s("group"), &s("user"), r))).await,
             ("POST", "/v1/accept") => write(Ok(content::accept(&s("group")))).await,
             ("POST", "/v1/member") => write(if body["role"].is_null() { Ok(None) } else { role(&body["role"]).map(Some) }.map(|r| content::member(&s("group"), &s("user"), r))).await,
+            ("GET", "/v1/devices/requests") => self.requests().await,
+            ("POST", "/v1/devices/approve" | "/v1/devices/refuse") => match self.waiting_with(&s("code")).await {
+                Ok(None) => return None,
+                Ok(Some((r, _))) if path.ends_with("approve") && body["confirm"] != true => Ok(json!({ "device": r["name"], "person": r["person"], "new": false })),
+                Ok(Some((r, e))) if path.ends_with("approve") => self.approve(&r, &e).await.map(|()| json!({ "device": r["name"] })),
+                Ok(Some((r, e))) => self.refuse(&r, &e).await.map(|()| json!({ "device": r["name"] })),
+                Err(err) => Err(err),
+            },
             ("POST", "/v1/devices/forget-sign-in") => write(key(s("key")).map(|k| content::forget_sign_in(&k))).await,
             ("POST", "/v1/runs") => {
                 let on: Result<Vec<[u8; 32]>, Error> = body["on"].as_array().into_iter().flatten().map(|k| key(k.as_str().unwrap_or("").to_string())).collect();
@@ -803,12 +959,12 @@ fn what(path: &str, body: &[u8]) -> Value {
 }
 
 /// A request to the network's address (sign-in, the relay), JSON in and out: → its status and JSON.
-async fn http(method: &str, url: &str, token: Option<&str>, body: Option<Value>) -> Result<(u16, Value), Error> {
-    let (method, url, token) = (method.to_string(), url.to_string(), token.map(str::to_string));
+async fn http(method: &str, url: &str, header: Option<(&str, String)>, body: Option<Value>) -> Result<(u16, Value), Error> {
+    let (method, url, header) = (method.to_string(), url.to_string(), header.map(|(n, v)| (n.to_string(), v)));
     tokio::task::spawn_blocking(move || {
         let mut request = ureq::http::Request::builder().method(method.as_str()).uri(&url);
-        if let Some(token) = token {
-            request = request.header("authorization", format!("Bearer {token}"));
+        if let Some((name, value)) = header {
+            request = request.header(name, value);
         }
         let response = match body {
             Some(body) => crate::bucket::AGENT.run(request.header("content-type", "application/json").body(keys::canonical(&body)).map_err(failed)?),
