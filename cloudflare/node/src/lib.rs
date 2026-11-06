@@ -132,7 +132,7 @@ pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Re
 }
 
 /// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as a node
-/// on a machine says it (src/node/sessions.rs): every epoch from the one the database's newest copy is under to the
+/// on a machine says it (src/node/sessions.rs): every epoch from the oldest it needs (`one::keys::oldest_needed`) to the
 /// scope's current one, as the network's signed entries say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
 /// holds, where any endpoint can put a name. → `[{ scope, epoch, app, database }]`.
 #[wasm_bindgen]
@@ -145,15 +145,8 @@ pub async fn needs(bucket: JsValue, wants: String, epochs: String) -> Result<Str
         let (scope, app, database) = (w["scope"].as_str().unwrap_or(""), w["app"].as_str().unwrap_or(""), w["database"].as_str().unwrap_or(""));
         let have: Vec<u32> = serde_json::from_value(w["have"].clone()).unwrap_or_default();
         let newest = epochs.get(scope).copied().unwrap_or(1).max(1);
-        let hint = match bucket.get(&one::database::stored::newest_name(&prefix_of(scope, app, database).map_err(thrown)?)).await.map_err(thrown)? {
-            Some(o) => Some(one::database::stored::newest(&o.bytes)),
-            None => None,
-        };
-        let oldest = match hint {
-            Some((_, 0, _)) => 1,
-            Some((_, _, epoch)) => epoch.clamp(1, newest),
-            None => newest,
-        };
+        let hint = bucket.get(&one::database::stored::newest_name(&prefix_of(scope, app, database).map_err(thrown)?)).await.map_err(thrown)?;
+        let oldest = one::keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest);
         need.extend((oldest..=newest).filter(|n| !have.contains(n)).map(|epoch| json!({ "scope": scope, "epoch": epoch, "app": app, "database": database })));
     }
     Ok(Value::from(need).to_string())

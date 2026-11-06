@@ -355,10 +355,12 @@ pub fn may_hand(route: &str, need: &Need) -> bool {
 /// The oldest epoch of `database`'s key a reader needs, of a scope whose newest epoch is `newest`: the one its newest
 /// copy is under, as its newest hint (`hint`, if it has one) says, which holds all before it; every epoch from the first
 /// while it has no copy; the newest if it has no hint, being new. Blobs have neither: each is kept under the epoch it
-/// was put in, so every epoch from the first. Nodes ask for no older, and clients hand no older.
+/// was put in, so every epoch from the first. The log, a scope's steps, needs every epoch from the first too: every
+/// reader replays it from the first (`steps::Truth::read`), whatever copies there are. Nodes ask for no older, and
+/// clients hand no older.
 /// `cloudflare/shared/crypto.js`'s `oldestNeeded` is the same.
 pub fn oldest_needed(database: &str, hint: Option<&[u8]>, newest: u32) -> u32 {
-    if database == BLOBS {
+    if database == BLOBS || database == LOG {
         return 1;
     }
     let newest = newest.max(1);
