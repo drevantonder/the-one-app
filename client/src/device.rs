@@ -309,16 +309,17 @@ impl Device {
         let device = self.on.lock().unwrap().clone();
         let todo = || -> Result<_, Error> {
             self.keyring
-                .who(|who| {
-                    let me = who.machine(&self.me.key);
+                .who(|who| -> anyhow::Result<_> {
+                    let me = who.machine(&self.me.key)?;
                     let user = me.as_ref().map(|d| d.user.clone()).unwrap_or_default();
-                    let on = who.runs_until_chosen(&user);
+                    let on = who.runs_until_chosen(&user)?;
                     // Listed before sign-ins named their device: it lists itself again, naming it.
                     let unnamed = me.filter(|d| d.device.is_none() && d.passkey.is_none() && device.is_some()).map(|d| (d.name, d.roles.into_iter().collect::<Vec<_>>()));
-                    let first = who.epoch(&Scope::User(user.clone())) == 0;
-                    (!on.is_empty() || unnamed.is_some() || first).then_some((user, on, unnamed, first))
+                    let first = who.epoch(&Scope::User(user.clone()))? == 0;
+                    Ok((!on.is_empty() || unnamed.is_some() || first).then_some((user, on, unnamed, first)))
                 })
-                .ok_or_else(refused)
+                .ok_or_else(refused)?
+                .map_err(failed)
         };
         if todo()?.is_none() {
             return Ok(());
@@ -541,17 +542,18 @@ impl Device {
     async fn first_epoch(&self, scope: &Scope, user: &str) -> Result<(), Error> {
         let (recovery, to) = self
             .keyring
-            .who(|who| {
+            .who(|who| -> anyhow::Result<_> {
                 let mut to = vec![self.me];
-                to.extend(who.openers(scope).into_iter().filter(|c| c.key != self.me.key && c.seal != c.key).map(|c| Endpoint { key: c.key, seal: c.seal }));
-                (who.recovery(), to)
+                to.extend(who.openers(scope)?.into_iter().filter(|c| c.key != self.me.key && c.seal != c.key).map(|c| Endpoint { key: c.key, seal: c.seal }));
+                Ok((who.recovery()?, to))
             })
-            .ok_or_else(refused)?;
+            .ok_or_else(refused)?
+            .map_err(failed)?;
         let key: [u8; 32] = rand::random();
         let hash = keys::epoch_hash(&key);
         self.write(user, content::epoch(scope, 1, &to.iter().map(|e| e.key).collect::<Vec<_>>(), &hash)).await?;
         self.keyring.read(self).await?;
-        if self.keyring.who(|who| who.epoch_hash(scope, 1)).flatten() != Some(hash) {
+        if self.keyring.who(|who| who.epoch_hash(scope, 1)).transpose().map_err(failed)?.flatten() != Some(hash) {
             return Err(failed("Another device made new keys for this just now. Try again."));
         }
         let sealed = |to: &[u8; 32]| keys::seal_to(to, &key).map(|s| B64U.encode(&s)).map_err(failed);

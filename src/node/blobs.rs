@@ -100,9 +100,9 @@ impl Node {
             }
         }
         let Ok(named) = self.with(|i| {
-            let mut named: Vec<(Scope, String)> = i.r.db().blobs().into_iter().map(|b| (Scope::Global, b)).collect();
+            let mut named: Vec<(Scope, String)> = i.r.db().blobs()?.into_iter().map(|b| (Scope::Global, b)).collect();
             for (scope, (_, db)) in &i.scope_dbs {
-                named.extend(db.blobs().into_iter().map(|b| (scope.clone(), b)));
+                named.extend(db.blobs()?.into_iter().map(|b| (scope.clone(), b)));
             }
             Ok(named)
         }) else {
@@ -116,7 +116,7 @@ impl Node {
     }
 
     fn scopes_naming(&self, hash: &str) -> Result<Vec<Scope>> {
-        self.with(|i| Ok(steps_naming(i, hash).collect()))
+        self.with(|i| steps_naming(i, hash))
     }
 
     /// Keeps what `body` sends as a blob, read as it comes, up to `most` bytes and with at most `IDLE` between its
@@ -230,7 +230,7 @@ impl Node {
     /// scope keeps stops counting once it forgets it; one another step names (a deploy's bundle, a release's binary)
     /// never does (`ScopeDb::names_blob`).
     pub(super) fn blob_named(&self, hash: &str, holds: impl Fn(&Scope) -> bool) -> Result<bool> {
-        self.with(|i| Ok(steps_naming(i, hash).any(|s| holds(&s))))
+        self.with(|i| Ok(steps_naming(i, hash)?.into_iter().any(|s| holds(&s))))
     }
 
     /// Notes in `network/forgotten` each blob a scope forgot, `(scope, hash)`s, to take from the bucket once
@@ -310,7 +310,7 @@ impl Node {
     }
 
     pub(super) fn blob_named_for(&self, hash: &str, user: &str) -> Result<bool> {
-        let usable: Vec<Scope> = self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.db().may(user, "use", &scopes::object(s))).collect()))?;
+        let usable: Vec<Scope> = self.with(|i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.db().may(user, "use", &scopes::object(s))).collect()))?;
         self.blob_named(hash, |s| usable.contains(s))
     }
 }
@@ -347,7 +347,15 @@ impl std::error::Error for Full {}
 
 /// The scopes whose databases name a blob the scope still needs (`ScopeDb::names_blob`): `global`'s, once this device
 /// has read who's who, and each other scope's database it reads.
-fn steps_naming<'a>(i: &'a Network, hash: &'a str) -> impl Iterator<Item = Scope> + 'a {
-    let global = (i.r.freeze().is_some() && i.r.db().names_blob(hash)).then_some(Scope::Global);
-    global.into_iter().chain(i.scope_dbs.iter().filter(|(_, (_, db))| db.names_blob(hash)).map(|(s, _)| s.clone()))
+fn steps_naming(i: &Network, hash: &str) -> Result<Vec<Scope>> {
+    let mut named = Vec::new();
+    if i.r.freeze().is_some() && i.r.db().names_blob(hash)? {
+        named.push(Scope::Global);
+    }
+    for (scope, (_, db)) in &i.scope_dbs {
+        if db.names_blob(hash)? {
+            named.push(scope.clone());
+        }
+    }
+    Ok(named)
 }

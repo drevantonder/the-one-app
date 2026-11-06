@@ -175,7 +175,7 @@ impl Node {
                 let own = Scope::User(me.user.clone());
                 let rest: Vec<Scope> = all.iter().filter(|s| **s != own).cloned().collect();
                 let m = i.r.db();
-                let without = rest.len() < all.len() && !rest.is_empty() && m.runners(&me.user, &all).is_empty() && !m.runners(&me.user, &rest).is_empty();
+                let without = rest.len() < all.len() && !rest.is_empty() && m.runners(&me.user, &all)?.is_empty() && !m.runners(&me.user, &rest)?.is_empty();
                 Ok(without.then(|| rest.iter().map(ToString::to_string).collect()))
             })?;
         }
@@ -348,33 +348,51 @@ impl Node {
         // the caller's first.
         let about_here = |d: &Value| d["prefer"][req.tool.as_str()] == "here";
         // This device: its node, or a part of it (a service endpoint of oned's own).
-        let ours = |i: &Network, k: &Key| *k == self.0.id || i.r.db().machine(k).is_some_and(|m| m.device == Some(self.0.id));
+        let ours = |i: &Network, k: &Key| -> Result<bool> { Ok(*k == self.0.id || i.r.db().machine(k)?.is_some_and(|m| m.device == Some(self.0.id))) };
         let here_first = req.service.is_some()
             && self.with(|i| {
-                let part = i.peers.iter().any(|(k, p)| ours(i, k) && i.online(k) && p.services.iter().any(|d| d.0 == req.app && about_here(&d.2)));
-                Ok(part || (here && self.services_here(i).iter().any(|d| d.0 == req.app && about_here(&d.2))))
+                let mut part = false;
+                for (k, p) in i.peers.iter() {
+                    if ours(i, k)? && i.online(k) && p.services.iter().any(|d| d.0 == req.app && about_here(&d.2)) {
+                        part = true;
+                    }
+                }
+                Ok(part || (here && self.services_here(i)?.iter().any(|d| d.0 == req.app && about_here(&d.2))))
             })?;
         self.with(|i| {
             let m = i.r.db();
             let mut devices: Vec<Key> = if req.service.is_none() {
                 // Not one whose person switched its app service off.
-                m.runners(&me.user, &call_scopes(i, req, &me.user)?).into_iter().map(|s| s.key).filter(|k| !Self::off(m, k, scopes::APPS_PART)).collect()
+                let mut on = Vec::new();
+                for s in m.runners(&me.user, &call_scopes(i, req, &me.user)?)? {
+                    if !Self::off(m, &s.key, scopes::APPS_PART)? {
+                        on.push(s.key);
+                    }
+                }
+                on
             } else {
                 let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
-                if here && ((me.user == i.user && !passed) || (self.0.services.serves_everyone(&req.app) && i.r.db().serves(&self.0.id, &me.user))) {
+                if here && ((me.user == i.user && !passed) || (self.0.services.serves_everyone(&req.app) && i.r.db().serves(&self.0.id, &me.user)?)) {
                     s.push(self.0.id);
                 }
                 s
             };
-            let set = rank::set(&i.r.db().settings());
+            let set = rank::set(&i.r.db().settings()?);
             let here_load = crate::load::current();
+            // A service with an endpoint of its own is where its device is.
+            let mut at = BTreeMap::new();
+            for k in &devices {
+                at.insert(*k, i.r.db().service(k)?.and_then(|s| s.device).unwrap_or(*k));
+            }
+            let mut ours_now = BTreeMap::new();
+            for k in &devices {
+                ours_now.insert(*k, ours(i, k)?);
+            }
             let rank = |k: &Key| {
                 let here = *k == self.0.id;
                 let load = if here { Some(&here_load) } else { i.peers.get(k).and_then(|p| p.load.as_ref()) };
                 let far = !here && i.far.get(k).is_some_and(|d| *d > FAR);
-                // A service with an endpoint of its own is where its device is.
-                let at = i.r.db().service(k).and_then(|s| s.device).unwrap_or(*k);
-                (!here && !i.online(k), here_first && !ours(i, k), load.is_some_and(full), far, rank::priority(&set, &hex(&at)), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
+                (!here && !i.online(k), here_first && !ours_now[k], load.is_some_and(full), far, rank::priority(&set, &hex(&at[k])), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
             };
             devices.sort_by_cached_key(rank);
             Ok(devices)
@@ -399,7 +417,7 @@ impl Node {
         // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below), and
         // app schedules' calls pass on none.
         let service = self.is_service(&device);
-        let shared = self.with(|i| Ok(i.r.db().service(&device).is_some_and(|s| s.shared)))?;
+        let shared = self.with(|i| Ok(i.r.db().service(&device)?.is_some_and(|s| s.shared)))?;
         let token = match &me.credential {
             Credential::SignIn(token) if !service || shared => Some(token),
             _ => None,
@@ -412,7 +430,7 @@ impl Node {
             Credential::Own => true,
             Credential::Client(key) => req.service.is_some() && *key == me.key,
             _ => false,
-        } && self.with(|i| Ok(i.r.db().client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
+        } && self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
         let mut request = json!({ "app": req.app, "service": req.service, "op": req.tool, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
@@ -426,7 +444,7 @@ impl Node {
             let scopes = self.with(|i| call_scopes(i, &resolved, &me.user))?;
             let runs = self.with(|i| Ok(scopes.iter().filter(|s| i.r.db().runs_for(&device, s)).cloned().collect::<Vec<_>>()))?;
             let (keys, until) = self.passing_on(&me.credential, &runs, &resolved.app);
-            let seal = self.with(|i| Ok(i.r.db().seal_key(&device)))?.context("that device has no key to seal to")?;
+            let seal = self.with(|i| Ok(i.r.db().seal_key(&device)?))?.context("that device has no key to seal to")?;
             let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
             request = crate::keys::forwarded(&request, &me.user, req.client.as_deref().unwrap_or(""), &self.0.id, &seal, until, keys, &named)?["body"]["call"].take();
             request["me"]["key"] = json!(hex(&self.0.id));
@@ -435,7 +453,7 @@ impl Node {
         // A sign-in's keys go on only of the scopes the call reaches that the device runs.
         if token.is_some()
             && !service
-            && let Some(seal) = self.with(|i| Ok(i.r.db().seal_key(&device)))?
+            && let Some(seal) = self.with(|i| Ok(i.r.db().seal_key(&device)?))?
             && let Some(keys) = self.with(|i| Ok(call_scopes(i, &resolved, &me.user)?.into_iter().filter(|s| i.r.db().runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(&me.credential, &seal, &scopes, &resolved.app))?
         {
             request["keys"] = json!(keys);
@@ -568,7 +586,7 @@ impl Node {
             Err(why) => return Ok(Reply::Elsewhere(why)),
         };
         let deployed_here = self.0.bundles.lock().unwrap().get(&req.app).cloned();
-        let latest = self.with(|i| Ok(i.r.db().app(&req.app).and_then(|a| a.bundle.clone())))?;
+        let latest = self.with(|i| Ok(i.r.db().app(&req.app)?.and_then(|a| a.bundle.clone())))?;
         if deployed_here.is_none() || deployed_here != latest {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest version yet", req.app)));
         }
@@ -582,7 +600,7 @@ impl Node {
         // A tool of a lab that's off isn't there.
         let described = self.0.apps.describe(&req.app).await?;
         if let Some(lab) = described["ops"].as_array().into_iter().flatten().find(|o| o["name"] == req.tool.as_str()).and_then(|o| o["lab"].as_str())
-            && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings(), &crate::labs::app_key(&req.app, lab))))?
+            && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings()?, &crate::labs::app_key(&req.app, lab))))?
         {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
             return Ok(Reply::error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs.")));
@@ -712,7 +730,7 @@ impl Node {
     pub(super) fn write_insight(&self, app: &str, me: &Caller, said: status::Said) {
         let Ok(scope) = self.with(|i| {
             let m = i.r.db();
-            let owner = m.app(app).map(|a| a.owner).context("no such app")?;
+            let owner = m.app(app)?.map(|a| a.owner).context("no such app")?;
             let own = match owner {
                 Principal::User(u) => Scope::User(u),
                 Principal::Group(g) => Scope::Group(g),
@@ -735,11 +753,11 @@ impl Node {
     pub(super) fn insights_of(&self, viewer: &Caller, app: &str) -> Result<Option<Value>> {
         self.with(|i| {
             let m = i.r.db();
-            let Some(a) = m.app(app) else { return Ok(None) };
+            let Some(a) = m.app(app)? else { return Ok(None) };
             if !m.may(&viewer.user, "deploy", &scopes::app(&a.name)) {
                 return Ok(None);
             }
-            let name = |u: &str| m.user_ever(u).map(|u| u.name).unwrap_or_default();
+            let name = |u: &str| user_name(m, u);
             let mut people: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
             let mut errors: BTreeMap<(String, String), (u64, u64, u64, String)> = BTreeMap::new();
             let mut cost: BTreeMap<String, (f64, u64, u64, u64)> = BTreeMap::new();
@@ -760,7 +778,7 @@ impl Node {
                     x.1 = x.1.min(e.first);
                     if e.last >= x.2 {
                         x.2 = e.last;
-                        x.3 = name(&e.user);
+                        x.3 = name(&e.user)?;
                     }
                 }
                 for (model, c) in &ins.cost {
@@ -771,7 +789,10 @@ impl Node {
                     x.3 += c.calls;
                 }
             }
-            let mut usage: Vec<Value> = people.into_iter().map(|((u, client), (days, last, agent))| json!({ "user": name(&u), "client": client, "agent": agent, "days": days, "last": last })).collect();
+            let mut usage: Vec<Value> = Vec::new();
+            for ((u, client), (days, last, agent)) in people {
+                usage.push(json!({ "user": name(&u)?, "client": client, "agent": agent, "days": days, "last": last }));
+            }
             usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
             let mut errors: Vec<Value> = errors.into_iter().map(|((tool, error), (count, first, last, user))| json!({ "op": tool, "error": error, "count": count, "first": first, "last": last, "user": user })).collect();
             errors.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
@@ -902,7 +923,7 @@ impl Node {
     }
 
     pub(super) async fn run_service(&self, app: &str, function: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
-        let everyone = self.0.services.serves_everyone(app) && self.with(|i| Ok(i.r.db().serves(&self.0.id, &me.user)))?;
+        let everyone = self.0.services.serves_everyone(app) && self.with(|i| Ok(i.r.db().serves(&self.0.id, &me.user)?))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
         ensure!(me.user == user, "{} runs only for {}'s own user", self.service_title(app), self.device_name());
         let caller = self.me_for(me)?;
@@ -924,7 +945,7 @@ impl Node {
     pub async fn fill_for_service(&self, app: &str, input: &mut Value, me: &Caller, from: Option<&str>) -> Result<Vec<String>> {
         let used = std::sync::Mutex::new(Vec::<String>::new());
         if let Some(from) = from.filter(|_| input.to_string().contains("{{")) {
-            let scopes = self.with(|i| Ok(reachable(i, from, &me.user).into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()))?;
+            let scopes = self.with(|i| Ok(reachable(i, from, &me.user)?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()))?;
             let lookup = self.lookup(me, from, &scopes).await?;
             lookup.refuse_shut(&input.to_string())?;
             crate::vault::fill_value(input, app, &|name| {
@@ -980,7 +1001,7 @@ impl Node {
         if tripped {
             let what = if kind == "call" { "called other apps" } else { "ran its schedules" };
             let why = format!("{} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.title(app).await, self.device_name(), STOPPED_FOR / 60_000);
-            let bundle = self.with(|i| Ok(i.r.db().app(app).and_then(|a| a.bundle.clone()))).ok().flatten();
+            let bundle = self.with_or(None, |i| Ok(i.r.db().app(app)?.and_then(|a| a.bundle.clone())));
             self.0.calls.guard.lock().unwrap().stopped.insert(app.to_string(), (why.clone(), now_ms() + STOPPED_FOR, bundle));
             tracing::warn!("{why}");
         }
@@ -992,7 +1013,7 @@ impl Node {
 
     /// Why `app` is stopped here, if it is: it looped, and hasn't been deployed again or waited out its time since.
     pub(super) fn stopped(&self, app: &str) -> Option<String> {
-        let latest = self.with(|i| Ok(i.r.db().app(app).and_then(|a| a.bundle.clone()))).ok().flatten();
+        let latest = self.with_or(None, |i| Ok(i.r.db().app(app)?.and_then(|a| a.bundle.clone())));
         let mut g = self.0.calls.guard.lock().unwrap();
         let (why, until, bundle) = g.stopped.get(app)?;
         if now_ms() < *until && *bundle == latest {
@@ -1199,15 +1220,15 @@ impl Node {
                 let send: crate::push::Send = serde_json::from_slice(&body)?;
                 ok(json!({ "ok": self.push_note(&grant.caller.user, &send.note(&grant.app)?).await? }))
             }
-            ("GET", "/devices") => ok(self.state_for(&grant.caller)["network"]["devices"].take()),
+            ("GET", "/devices") => ok(self.state_for(&grant.caller)?["network"]["devices"].take()),
             // Run priority's order, as the person the call is for: only an admin changes it.
             ("GET", "/order") => {
-                let network = self.state_for(&grant.caller)["network"].take();
+                let network = self.state_for(&grant.caller)?["network"].take();
                 let mut order: Vec<Value> = network["devices"].as_array().cloned().unwrap_or_default().into_iter().map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "priority": s["priority"], "online": s["online"], "here": s["me"] })).collect();
                 if let Some(priority) = network["cloudflare_node"].get("priority") {
                     order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": priority, "online": true, "here": false }));
                 }
-                let set = self.with(|i| Ok(rank::set(&i.r.db().settings())))?;
+                let set = self.with(|i| Ok(rank::set(&i.r.db().settings()?)))?;
                 order.sort_by_cached_key(|s| (rank::priority(&set, s["key"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
                 ok(json!({ "order": order, "admin": network["role"] == "admin" }))
             }
@@ -1263,7 +1284,7 @@ impl Node {
     fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let me = self.check_caller(remote, request)?;
         ensure!(request["me"]["token"].is_null(), "a service asks with no sign-in");
-        let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote).map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this network")?;
+        let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote)?.map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this network")?;
         ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own person's node");
         let mut req: CallRequest = serde_json::from_value(crate::services::endpoint::limited(&name, request)?)?;
         let resolved = self.resolve(req.clone());
@@ -1285,7 +1306,7 @@ impl Node {
             me.credential = self.take_passed(&remote, &me.user, request, keys, true)?;
         }
         let mut req = call_in(request)?;
-        let (own, serves) = self.with(|i| Ok((!passed && i.r.db().client(&remote).is_some_and(|c| c.user == me.user), i.r.db().serves(&remote, &me.user))))?;
+        let (own, serves) = self.with(|i| Ok((!passed && i.r.db().client(&remote)?.is_some_and(|c| c.user == me.user), i.r.db().serves(&remote, &me.user)?)))?;
         // Only a node that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
         if !serves {
             (req.from, req.depth) = (None, 0);
@@ -1299,7 +1320,7 @@ impl Node {
             let named = req.scopes.clone();
             self.with(|i| {
                 let scopes: Vec<Scope> = match &named {
-                    None => reachable(i, &req.app, &me.user),
+                    None => reachable(i, &req.app, &me.user)?,
                     Some(named) => named.iter().map(|s| Scope::parse_for(s, &me.user)).collect::<Result<_>>()?,
                 };
                 let m = i.r.db();
@@ -1337,11 +1358,11 @@ impl Node {
         let passed = !token && request["keys"].is_string();
         self.with(|i| {
             let m = i.r.db();
-            let client = m.client(&remote).is_some_and(|c| c.user == user);
-            let service = m.service(&remote).is_some_and(|s| s.user == user);
+            let client = m.client(&remote)?.is_some_and(|c| c.user == user);
+            let service = m.service(&remote)?.is_some_and(|s| s.user == user);
             let allowed = match () {
-                _ if token => client || m.serves(&remote, &user),
-                _ if passed => remote == key && m.compute(&remote).is_some(),
+                _ if token => client || m.serves(&remote, &user)?,
+                _ if passed => remote == key && m.compute(&remote)?.is_some(),
                 _ => (client || service) && remote == key,
             };
             ensure!(allowed, "{} may not call as that user", short(&remote));
@@ -1352,8 +1373,8 @@ impl Node {
     }
 }
 
-pub(super) fn address(m: &ScopeDb) -> Option<String> {
-    m.setting("address").map(|a| a.trim_end_matches('/').to_string())
+pub(super) fn address(m: &ScopeDb) -> Result<Option<String>> {
+    Ok(m.setting("address")?.map(|a| a.trim_end_matches('/').to_string()))
 }
 
 /// Whether a call is one another node passed on: it runs only on what it was handed, never as this device's own person.
@@ -1368,7 +1389,7 @@ fn call_scopes(i: &Network, req: &CallRequest, user: &str) -> Result<Vec<Scope>>
     match (&req.scopes, &req.service) {
         (Some(named_), _) => named_.iter().map(named).collect(),
         (None, Some(_)) => Ok(vec![Scope::User(user.to_string())]),
-        (None, None) => Ok(reachable(i, &req.app, user)),
+        (None, None) => reachable(i, &req.app, user),
     }
 }
 
@@ -1376,17 +1397,17 @@ fn call_scopes(i: &Network, req: &CallRequest, user: &str) -> Result<Vec<Scope>>
 fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
     let m = i.r.db();
     let here = node.0.id;
-    if !m.serves(&here, &me.user) {
+    if !m.serves(&here, &me.user)? {
         return Ok(Err(format!("{} doesn't serve you", node.device_name())));
     }
-    let reach = reachable(i, &req.app, &me.user);
+    let reach = reachable(i, &req.app, &me.user)?;
     let scopes: Vec<Scope> = match &req.scopes {
         None => reach.clone(),
         Some(named) => {
             let mut out = Vec::new();
             for s in named {
                 let s = Scope::parse_for(s, &me.user)?;
-                ensure!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string()));
+                ensure!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string())?);
                 out.push(s);
             }
             out
@@ -1396,9 +1417,9 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
         bail!(crate::protocol::Coded::new(crate::protocol::code::NOT_INSTALLED, format!("{title} isn't on your pages: add it first")));
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
-        return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string()))));
+        return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string())?)));
     }
-    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None, address: address(m), handles: m.handles(), labs: crate::labs::on_keys(&m.settings()) };
+    let ctx = Context { me: node_me(node, m, me)?, now: now_ms(), scopes: handles(m, &scopes, &me.user)?, read_only: false, token: String::new(), from: None, address: address(m)?, handles: m.handles()?, labs: crate::labs::on_keys(&m.settings()?) };
     Ok(Ok((ctx, scopes)))
 }
 

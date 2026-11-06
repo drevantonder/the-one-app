@@ -59,8 +59,9 @@ impl Replica {
         let id = self.id;
         let waits = self.reader.add(sealed, keys, None, now, |_, _, changed| {
             if let Some((was, db)) = changed {
-                changed_from(&id, &was, db, &mut handled);
+                changed_from(&id, &was, db, &mut handled)?;
             }
+            Ok(())
         });
         (handled, waits)
     }
@@ -77,8 +78,7 @@ impl Replica {
 
     /// Starts again from what `keep` kept, checked against its hash (`steps::Truth::kept`), as this device started.
     pub fn restart(&mut self, kept: &serde_json::Value, now: u64) -> Result<()> {
-        self.reader.resume(Truth::kept(kept, now)?);
-        Ok(())
+        self.reader.resume(Truth::kept(kept, now)?)
     }
 
     /// `global`'s scope database as it is, to copy (`steps::written`).
@@ -101,7 +101,7 @@ impl Replica {
         let mut handled = Handled::default();
         let given = Given { step: step.clone(), copy: None };
         if let Some((was, db)) = self.reader.take(Some(&given), now)? {
-            changed_from(&self.id, &was, db, &mut handled);
+            changed_from(&self.id, &was, db, &mut handled)?;
         }
         Ok(handled)
     }
@@ -110,7 +110,7 @@ impl Replica {
     /// after the last it applied, once it would count there.
     pub fn make_step(&self, key: &SigningKey, user: &str, content: Content, now: u64) -> Result<Step> {
         let at = self.at().context("this device hasn't read who's who yet")? + 1;
-        let step = steps::sign(key, &Scope::Global, at, user, self.db().epoch(&Scope::Global), now, content)?;
+        let step = steps::sign(key, &Scope::Global, at, user, self.db().epoch(&Scope::Global)?, now, content)?;
         steps::apply(self.db(), None, &Scope::Global, &step)?;
         Ok(step)
     }
@@ -121,12 +121,12 @@ impl Replica {
     }
 
     /// `global`'s epochs' hashes by number: which key opens which of its steps.
-    pub fn global_epochs(&self) -> std::collections::BTreeMap<u32, String> {
+    pub fn global_epochs(&self) -> Result<std::collections::BTreeMap<u32, String>> {
         self.db().epoch_hashes(&Scope::Global)
     }
 
     /// The newest epoch of a scope made: a step under a newer one is junk.
-    pub fn epoch_made(&self, scope: &Scope) -> u32 {
+    pub fn epoch_made(&self, scope: &Scope) -> Result<u32> {
         self.db().epoch(scope)
     }
 
@@ -139,17 +139,18 @@ impl Replica {
 
 /// What changed for the device `id` from `was`, who's who before, to `db`: scopes it no longer holds; whether it holds
 /// one it didn't; and people who may no longer use a scope they could.
-fn changed_from(id: &Key, was: &ScopeDb, db: &ScopeDb, handled: &mut Handled) {
+fn changed_from(id: &Key, was: &ScopeDb, db: &ScopeDb, handled: &mut Handled) -> Result<()> {
     handled.members = true;
-    let (had, has) = (was.run_by(id), db.run_by(id));
+    let (had, has) = (was.run_by(id)?, db.run_by(id)?);
     handled.dropped.extend(had.iter().filter(|s| **s != Scope::Global && !has.contains(s)).map(Scope::to_string));
     handled.gained |= has.iter().any(|s| !had.contains(s));
-    let after = db.roles();
-    for ((user, scope), (_, invited)) in was.roles() {
+    let after = db.roles()?;
+    for ((user, scope), (_, invited)) in was.roles()? {
         if !invited && !after.get(&(user.clone(), scope)).is_some_and(|(_, invited)| !invited) && !handled.lost.contains(&user) {
             handled.lost.push(user);
         }
     }
+    Ok(())
 }
 
 /// `global`'s scope database of nobody, which a device answers as until it has read its freeze.

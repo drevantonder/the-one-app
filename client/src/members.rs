@@ -50,16 +50,16 @@ pub fn step_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>
 ///   `removes_people`, `removes` (the devices they may take out), and `app_schedules`: theirs on a device still
 ///   listed, `{ endpoint, scope, app, until, keys }` (each epoch's key hash), the only ones their browser renews
 pub fn view_of(db: &ScopeDb) -> Result<Value> {
-    let scopes = db.scopes();
-    let listed = db.machines().into_iter().filter(|d| !d.removed).collect::<Vec<_>>();
+    let scopes = db.scopes()?;
+    let listed = db.machines()?.into_iter().filter(|d| !d.removed).collect::<Vec<_>>();
     let mut devices: Vec<Value> = listed.iter().map(|d| json!({ "key": hex(&d.key), "seal": hex(&d.seal), "user": d.user, "name": d.name, "roles": d.roles, "passkey": d.passkey, "device": d.device.as_ref().map(hex), "since": d.since, "place": d.place })).collect();
-    let nodes = db.nodes();
-    if let Some(k) = db.cloudflare_node()
+    let nodes = db.nodes()?;
+    if let Some(k) = db.cloudflare_node()?
         && let Some((_, seal)) = nodes.iter().find(|(n, _)| *n == k)
     {
         devices.push(json!({ "key": hex(&k), "seal": hex(seal), "roles": ["compute"] }));
     }
-    let people: Vec<String> = db.users().into_iter().filter(|u| !u.removed).map(|u| u.id).collect();
+    let people: Vec<String> = db.users()?.into_iter().filter(|u| !u.removed).map(|u| u.id).collect();
     let uses = |u: &str| scopes.iter().filter(|s| db.may(u, "use", &object(s))).collect::<Vec<_>>();
     let uses: BTreeMap<&str, Vec<&Scope>> = people.iter().map(|u| (u.as_str(), uses(u))).collect();
     let mut openers = Map::new();
@@ -69,37 +69,50 @@ pub fn view_of(db: &ScopeDb) -> Result<Value> {
     }
     let runs_for: Map<String, Value> = nodes.iter().map(|(k, _)| (hex(k), json!(scopes.iter().filter(|s| db.runs_for(k, s)).map(Scope::to_string).collect::<Vec<_>>()))).collect();
     let mut epochs = Map::new();
-    for (s, n) in db.epochs() {
-        epochs.insert(s.to_string(), json!({ "n": n, "hashes": db.epoch_hashes(&s).into_iter().map(|(n, h)| (n.to_string(), json!(h))).collect::<Map<_, _>>() }));
+    for (s, n) in db.epochs()? {
+        epochs.insert(s.to_string(), json!({ "n": n, "hashes": db.epoch_hashes(&s)?.into_iter().map(|(n, h)| (n.to_string(), json!(h))).collect::<Map<_, _>>() }));
     }
-    let schedules = db.app_schedules();
+    let schedules = db.app_schedules()?;
     let mut answers = Map::new();
     for u in &people {
-        let own: Vec<Value> = schedules
-            .iter()
-            .filter(|((k, s, _), g)| g.by == *u && db.machine(k).is_some() && db.may(u, "choose-devices", &object(s)))
-            .map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "keys": g.hashes }))
-            .collect();
+        let mut own: Vec<Value> = Vec::new();
+        for ((k, s, a), g) in &schedules {
+            if g.by == *u && db.machine(k)?.is_some() && db.may(u, "choose-devices", &object(s)) {
+                own.push(json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "keys": g.hashes }));
+            }
+        }
+        let mut starts = Vec::new();
+        for s in &scopes {
+            if db.role_in(u, s)? == Some(Role::Admin) {
+                starts.push(s.to_string());
+            }
+        }
+        let mut serves = Vec::new();
+        for (k, _) in &nodes {
+            if db.serves(k, u)? {
+                serves.push(hex(k));
+            }
+        }
         answers.insert(
             u.clone(),
             json!({
                 "uses": uses[u.as_str()].iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-                "starts": scopes.iter().filter(|s| db.role_in(u, s) == Some(Role::Admin)).map(Scope::to_string).collect::<Vec<_>>(),
-                "nodes": nodes.iter().filter(|(k, _)| db.serves(k, u)).map(|(k, _)| hex(k)).collect::<Vec<_>>(),
-                "runs_until_chosen": db.runs_until_chosen(u).iter().map(hex).collect::<Vec<_>>(),
+                "starts": starts,
+                "nodes": serves,
+                "runs_until_chosen": db.runs_until_chosen(u)?.iter().map(hex).collect::<Vec<_>>(),
                 "approves": people.iter().filter(|of| db.may(u, "add-devices", &person(of))).collect::<Vec<_>>(),
                 "invites": db.may(u, "invite", NETWORK),
                 "removes_people": db.may(u, "remove", NETWORK),
                 "removes": listed.iter().filter(|d| db.may(u, "remove", &device(&d.key))).map(|d| hex(&d.key)).collect::<Vec<_>>(),
                 "app_schedules": own,
-                "sign_ins": db.sign_ins(u),
+                "sign_ins": db.sign_ins(u)?,
             }),
         );
     }
     Ok(json!({
-        "root": db.root().map(|r| r.to_hex()), "name": db.name(), "recovery": db.recovery().as_ref().map(hex),
+        "root": db.root()?.map(|r| r.to_hex()), "name": db.name()?, "recovery": db.recovery()?.as_ref().map(hex),
         "devices": devices, "openers": openers,
-        "removed": db.machines().iter().filter(|d| d.removed).map(|d| hex(&d.key)).collect::<Vec<_>>(),
-        "sign_in_clients": db.setting(one::sign_in_proof::CLIENTS), "runs_for": runs_for, "epochs": epochs, "people": answers,
+        "removed": db.machines()?.iter().filter(|d| d.removed).map(|d| hex(&d.key)).collect::<Vec<_>>(),
+        "sign_in_clients": db.setting(one::sign_in_proof::CLIENTS)?, "runs_for": runs_for, "epochs": epochs, "people": answers,
     }))
 }

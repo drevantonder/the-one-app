@@ -186,13 +186,13 @@ impl Service {
     }
 
     /// Whose service it is, once a person's device approved it.
-    pub fn owner(&self) -> Option<String> {
+    pub fn owner(&self) -> Result<Option<String>> {
         self.owner_in(&self.0.known.lock().unwrap())
     }
 
-    fn owner_in(&self, m: &ScopeDb) -> Option<String> {
+    fn owner_in(&self, m: &ScopeDb) -> Result<Option<String>> {
         // Only a listing as the person whose link it was given counts: nobody else can make it theirs.
-        m.service(&self.key()).filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.network.user).map(|s| s.user)
+        Ok(m.service(&self.key())?.filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.network.user).map(|s| s.user))
     }
 
     /// Starts it: its endpoint, through the network's relay (which lets it in once it's approved), asking to be
@@ -292,7 +292,13 @@ impl Service {
         let ask = self.0.dir.join("ask");
         loop {
             let registered = !self.0.services.describe().is_empty();
-            let listed = self.owner().is_some() && self.0.known.lock().unwrap().service(&self.key()).is_some_and(|s| s.device.is_some());
+            let listed = match (self.owner(), self.0.known.lock().unwrap().service(&self.key())) {
+                (Ok(owner), Ok(service)) => owner.is_some() && service.is_some_and(|s| s.device.is_some()),
+                (owner, service) => {
+                    tracing::warn!("reading whether {} is listed: {:#}", self.0.name, owner.err().or(service.err()).expect("one failed"));
+                    false
+                }
+            };
             if listed || !registered {
                 let _ = std::fs::remove_file(&ask);
             } else if !ask.exists() {
@@ -351,38 +357,38 @@ impl Service {
     async fn answer(&self, remote: Key, msg: &Value) -> Value {
         let body = &msg["body"];
         match msg["kind"].as_str() {
-            Some("hello") => self.hello(remote, body["steps"].as_u64().unwrap_or(0) as usize),
+            Some("hello") => self.hello(remote, body["steps"].as_u64().unwrap_or(0) as usize).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
             Some("steps") => match self.take_steps(&remote, &body["steps"]) {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
-            Some("ask") if self.is_node(&remote) => self.run(remote, &body["call"]).await,
+            Some("ask") if self.is_node(&remote) => self.run(remote, &body["call"]).await.unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
             _ => json!({ "error": format!("only {YOURS}'s devices are answered") }),
         }
     }
 
     /// A node's hello, with how many of `global`'s steps it has: → what this service offers and whom it serves, to a
     /// node of the network that may call it; that it's behind, if the node has more.
-    fn hello(&self, remote: Key, steps: usize) -> Value {
+    fn hello(&self, remote: Key, steps: usize) -> Result<Value> {
         let may = {
             let known = self.0.known.lock().unwrap();
-            known.compute(&remote).is_some() && known.service(&self.key()).is_some()
+            known.compute(&remote)?.is_some() && known.service(&self.key())?.is_some()
         };
         if steps > self.0.steps.lock().unwrap().len() {
-            return json!({ "behind": true });
+            return Ok(json!({ "behind": true }));
         }
         if !may {
-            return json!({ "error": format!("only {YOURS}'s devices are answered") });
+            return Ok(json!({ "error": format!("only {YOURS}'s devices are answered") }));
         }
         let Some(mut describe) = self.0.services.describe().into_iter().next() else {
-            return json!({ "error": format!("{} isn't running here yet", self.0.name) });
+            return Ok(json!({ "error": format!("{} isn't running here yet", self.0.name) }));
         };
         describe["runs"] = json!("service");
         let known = self.0.known.lock().unwrap();
         let m = &*known;
         // Whom it serves is what its listing says, not what the program offering it claims.
-        let users: Vec<String> = m.users().into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&self.key()))).collect();
-        json!({ "describe": describe, "users": users })
+        let users: Vec<String> = m.users()?.into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&self.key()))).collect();
+        Ok(json!({ "describe": describe, "users": users }))
     }
 
     /// Takes `global`'s scope database's steps a node of the network brought (`{ at, step }` each, as
@@ -393,7 +399,7 @@ impl Service {
         let mut known = self.0.known.lock().unwrap();
         // Anyone's while it knows of no node yet: who's who is the first freeze naming the network's root, signed by the
         // recovery key it names (`Truth::first`).
-        ensure!(known.computes().is_empty() || known.compute(remote).is_some(), "only {YOURS}'s devices bring its steps");
+        ensure!(known.computes()?.is_empty() || known.compute(remote)?.is_some(), "only {YOURS}'s devices bring its steps");
         let mut steps = self.0.steps.lock().unwrap();
         for s in given.as_array().into_iter().flatten() {
             let at = s["at"].as_u64().unwrap_or(0);
@@ -410,16 +416,20 @@ impl Service {
 
     /// Whether `key` is a node of the network, as this service knows it.
     fn is_node(&self, key: &Key) -> bool {
-        self.0.known.lock().unwrap().compute(key).is_some()
+        // Who's who that can't answer lists no one, so no one is let in.
+        self.0.known.lock().unwrap().compute(key).map(|d| d.is_some()).unwrap_or_else(|err| {
+            tracing::warn!("reading whether {} is a node: {err:#}", short(key));
+            false
+        })
     }
 
     /// Runs a call a node asked for, if it may: → `{ ok }`, `{ error }`, or `{ elsewhere }` for a call this service
     /// can't run here.
-    async fn run(&self, remote: Key, call: &Value) -> Value {
+    async fn run(&self, remote: Key, call: &Value) -> Result<Value> {
         let me = &call["me"];
         let (key, user) = match (me["key"].as_str().map(unhex), me["user"].as_str()) {
             (Some(Ok(key)), Some(user)) => (key, user.to_string()),
-            _ => return json!({ "error": "who's asking?" }),
+            _ => return Ok(json!({ "error": "who's asking?" })),
         };
         // A sign-in a node passed on counts only once this service has checked it's that person's itself.
         let signed_in = match me["token"].as_str() {
@@ -430,13 +440,13 @@ impl Service {
             let known = self.0.known.lock().unwrap();
             let m = &*known;
             if let Err(err) = may_call(m, &self.key(), &remote, &key, &user, signed_in) {
-                return json!({ "error": format!("{err:#}") });
+                return Ok(json!({ "error": format!("{err:#}") }));
             }
-            let person = m.user(&user);
+            let person = m.user(&user)?;
             crate::app::runtime::Me {
                 key: hex(&key),
                 user: user.clone(),
-                name: m.machine(&key).map(|d| d.name).unwrap_or_default(),
+                name: m.machine(&key)?.map(|d| d.name).unwrap_or_default(),
                 role: person.as_ref().map(|u| u.role),
                 user_name: person.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
                 handle: person.map(|u| u.handle).unwrap_or_default(),
@@ -445,11 +455,11 @@ impl Service {
         };
         let input = if call["input"].is_null() { json!({}) } else { call["input"].clone() };
         let from = call["from"].as_str().map(str::to_string);
-        match self.0.services.call(&self.0.name, call["op"].as_str().unwrap_or(""), input, caller, from).await {
+        Ok(match self.0.services.call(&self.0.name, call["op"].as_str().unwrap_or(""), input, caller, from).await {
             Ok(answer) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
             Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
             Err(err) => json!({ "error": format!("{err:#}") }),
-        }
+        })
     }
 
     /// Whether `token` is an access token the network's sign-in service signed for `user`, unexpired.
@@ -462,13 +472,13 @@ impl Service {
     /// Asks a node of its person's own to run a call, as them: the first that answers. A service asks only for its own
     /// app, in its person's own scope (`limited`), which their node runs with its own keys until grants land.
     pub async fn ask_node(&self, call: Value) -> Result<Value> {
-        let owner = self.owner().context("this service isn't approved yet")?;
+        let owner = self.owner()?.context("this service isn't approved yet")?;
         let mut call = limited(&self.0.name, &call)?;
         call["me"] = json!({ "key": hex(&self.key()), "user": owner });
         let nodes: Vec<Key> = {
             let known = self.0.known.lock().unwrap();
             let m = &*known;
-            m.computes().into_iter().filter(|c| c.user == owner && m.runs_for(&c.key, &crate::database::scopes::Scope::User(owner.clone()))).map(|c| c.key).collect()
+            m.computes()?.into_iter().filter(|c| c.user == owner && m.runs_for(&c.key, &crate::database::scopes::Scope::User(owner.clone()))).map(|c| c.key).collect()
         };
         let mut why = Vec::new();
         for node in nodes {
@@ -519,28 +529,31 @@ impl Service {
     }
 
     /// What `/v1/state` says here: this service as the device, and the others offering it, as far as it knows.
-    fn state(&self) -> Value {
+    fn state(&self) -> Result<Value> {
         let known = self.0.known.lock().unwrap();
         let m = &*known;
         // Whether another is on, it can't know: asked, one that isn't says so.
         // The devices it runs on, each the device it's part of there.
-        let listed = m.service(&self.key());
+        let listed = m.service(&self.key())?;
         let device = listed.as_ref().and_then(|s| s.device);
         let devices: Vec<Value> = m
-            .offering(&self.0.name)
+            .offering(&self.0.name)?
             .into_iter()
-            .filter_map(|s| m.machine(&s.device?))
+            .map(|s| s.device.map(|d| m.machine(&d)).transpose().map(Option::flatten))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
             .map(|d| json!({ "key": hex(&d.key), "name": d.name, "here": Some(d.key) == device, "online": true, "services": [self.0.name] }))
             .collect();
         // The scopes its device runs, whose part it is: a program here may reach what they hold.
-        let runs_for: Vec<String> = m.scopes().into_iter().filter(|s| device.is_some_and(|d| m.runs_for(&d, s))).map(|s| s.to_string()).collect();
-        let name = device.and_then(|d| m.machine(&d)).map(|d| d.name).unwrap_or_default();
-        json!({
+        let runs_for: Vec<String> = m.scopes()?.into_iter().filter(|s| device.is_some_and(|d| m.runs_for(&d, s))).map(|s| s.to_string()).collect();
+        let name = device.map(|d| m.machine(&d)).transpose()?.flatten().map(|d| d.name).unwrap_or_default();
+        Ok(json!({
             "device": { "key": device.map(|d| hex(&d)).unwrap_or_default(), "name": name, "runs_for": runs_for },
             "me": { "key": hex(&self.key()), "name": name },
-            "user": self.owner_in(m).map(|u| json!({ "id": u, "name": m.user(&u).map(|p| p.name) })),
-            "network": { "name": m.name(), "root": self.0.network.root, "devices": devices, "settings": crate::state::settings(&m.settings()) },
-        })
+            "user": self.owner_in(m)?.map(|u| m.user(&u).map(|p| json!({ "id": u, "name": p.map(|p| p.name) }))).transpose()?,
+            "network": { "name": m.name()?, "root": self.0.network.root, "devices": devices, "settings": crate::state::settings(&m.settings()?) },
+        }))
     }
 }
 
@@ -549,11 +562,11 @@ impl Service {
 /// own person; or, for a service that serves everyone, a node that runs their calls bringing their sign-in, which this
 /// service checked (`signed_in`). A node of someone else's, an admin's too, never calls as them otherwise.
 pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str, signed_in: bool) -> Result<()> {
-    let service = m.service(me).with_context(|| format!("this service isn't one of {YOURS}'s yet"))?;
-    let node = m.compute(remote).with_context(|| format!("only {YOURS}'s devices are answered"))?;
+    let service = m.service(me)?.with_context(|| format!("this service isn't one of {YOURS}'s yet"))?;
+    let node = m.compute(remote)?.with_context(|| format!("only {YOURS}'s devices are answered"))?;
     ensure!(m.may(user, "use", &scopes::service(me)), "{} serves only its own person", service.service.as_deref().unwrap_or("this service"));
-    let own = node.user == user && (*key == *remote || m.client(key).is_some_and(|c| c.user == user));
-    ensure!(own || (service.shared && signed_in && m.serves(remote, user)), "{} may not call as that person", short(remote));
+    let own = node.user == user && (*key == *remote || m.client(key)?.is_some_and(|c| c.user == user));
+    ensure!(own || (service.shared && signed_in && m.serves(remote, user)?), "{} may not call as that person", short(remote));
     Ok(())
 }
 
@@ -652,7 +665,10 @@ async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
     if let Err(r) = ours(&s, &headers) {
         return r;
     }
-    Json(s.state()).into_response()
+    match s.state() {
+        Ok(state) => Json(state).into_response(),
+        Err(err) => refused(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:#}")),
+    }
 }
 
 async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Value>) -> Response {

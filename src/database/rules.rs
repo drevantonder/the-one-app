@@ -36,14 +36,14 @@ fn of_global(step: &Step, scope: &Scope) -> bool {
 /// Whether `step`'s signer may write it as its person, in `scope`, by `who`, `global`'s database before it.
 pub fn signed(who: &ScopeDb, scope: &Scope, step: &Step) -> Result<()> {
     let (w, author) = (step.user(), step.author());
-    if who.recovery() == Some(author) {
+    if who.recovery()? == Some(author) {
         // The network's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would,
         // and hands over to the next recovery key.
-        ensure!(of_global(step, scope) && matches!(step.content.kind.as_str(), "device" | "recovery") && who.user(w).is_some(), "the recovery key only lets a device in");
+        ensure!(of_global(step, scope) && matches!(step.content.kind.as_str(), "device" | "recovery") && who.user(w)?.is_some(), "the recovery key only lets a device in");
         return Ok(());
     }
     ensure!(who.may(w, "use", &object(scope)), "{w} can't write in {scope}");
-    let theirs = who.client(&author).is_some_and(|c| c.user == w);
+    let theirs = who.client(&author)?.is_some_and(|c| c.user == w);
     ensure!(theirs || (!of_global(step, scope) && who.runs_for(&author, scope)), "{} can't write in {scope} for that person", crate::keys::short(&author));
     Ok(())
 }
@@ -61,7 +61,7 @@ pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Res
     }
     let c = Change { who, out, step, w: step.user(), data: &step.content.data };
     match kind {
-        "device" if who.recovery() == Some(step.author()) => c.recovered(),
+        "device" if who.recovery()? == Some(step.author()) => c.recovered(),
         "device" => c.device(),
         "refuse" => c.refuse(),
         "forget-sign-in" => c.forget_sign_in(),
@@ -150,8 +150,8 @@ impl Change<'_> {
     }
 
     /// Whether `k` is one of the network's machines that run things, or its Cloudflare node.
-    fn runs_things(&self, k: &Key) -> bool {
-        self.who.compute(k).is_some() || self.who.cloudflare_node() == Some(*k)
+    fn runs_things(&self, k: &Key) -> Result<bool> {
+        Ok(self.who.compute(k)?.is_some() || self.who.cloudflare_node()? == Some(*k))
     }
 
     fn devices_changed(&self) -> Result<()> {
@@ -160,7 +160,7 @@ impl Change<'_> {
     }
 
     fn owe(&self, scope: &Scope) -> Result<()> {
-        if self.who.epoch(scope) > 0 {
+        if self.who.epoch(scope)? > 0 {
             self.out.execute("INSERT OR IGNORE INTO owed VALUES (?)", [scope.to_string()])?;
         }
         Ok(())
@@ -170,9 +170,13 @@ impl Change<'_> {
     /// them opens, but `except` (a person's own, which removing them keeps as it is), and each one of them runs app
     /// schedules in.
     fn owe_held_by(&self, keys: &[Key], except: Option<&Scope>) -> Result<()> {
-        let opens = |s: &Scope| keys.iter().filter_map(|k| self.who.client(k)).any(|d| self.who.may(&d.user, "use", &object(s)));
-        let scheduled = self.who.app_schedules().into_keys().filter(|(k, _, _)| keys.contains(k)).map(|(_, s, _)| s);
-        for s in self.who.scopes().into_iter().filter(opens).chain(scheduled).filter(|s| Some(s) != except) {
+        let mut clients = Vec::new();
+        for k in keys {
+            clients.extend(self.who.client(k)?);
+        }
+        let opens = |s: &Scope| clients.iter().any(|d| self.who.may(&d.user, "use", &object(s)));
+        let scheduled = self.who.app_schedules()?.into_keys().filter(|(k, _, _)| keys.contains(k)).map(|(_, s, _)| s);
+        for s in self.who.scopes()?.into_iter().filter(opens).chain(scheduled).filter(|s| Some(s) != except) {
             self.owe(&s)?;
         }
         Ok(())
@@ -182,9 +186,9 @@ impl Change<'_> {
     fn recovered(&self) -> Result<()> {
         let user = self.id("user")?;
         let machine = listed(self.data, &user, self.step.time())?;
-        ensure!(user == self.w && self.who.user(&user).is_some(), "the recovery key lets in a device of someone already in");
+        ensure!(user == self.w && self.who.user(&user)?.is_some(), "the recovery key lets in a device of someone already in");
         ensure!(machine.roles == BTreeSet::from([Kind::Client]) && machine.passkey.is_none(), "the recovery key lets in a device people use");
-        ensure!(self.who.machine_ever(&machine.key).is_none(), "that key is listed already");
+        ensure!(self.who.machine_ever(&machine.key)?.is_none(), "that key is listed already");
         put(self.out, &machine)?;
         self.devices_changed()?;
         self.out.execute("UPDATE network SET recovery_used_at = ?, recovery_used_by = ?", params![self.time(), person(&user)])?;
@@ -200,15 +204,15 @@ impl Change<'_> {
         ensure!(!machine.is(Kind::Service) || theirs, "only a person's own device lists their services");
         // A machine an admin listed for someone is listed again by that person's own device to be theirs: then it runs
         // their own scope too.
-        if let Some(was) = self.who.machine_ever(&machine.key) {
+        if let Some(was) = self.who.machine_ever(&machine.key)? {
             // Or a service of theirs listed again by their own device, to name the device it's part of; or a sign-in that
             // named no device, naming the one it's on.
             let part = was.is(Kind::Service) && was.roles == machine.roles && was.service == machine.service;
             let part = part || (was.is(Kind::Client) && was.roles == machine.roles && was.device.is_none() && machine.device.is_some() && was.passkey == machine.passkey);
             ensure!(!was.removed && was.user == user && theirs && (was.by != user || part) && was.seal == machine.seal, "that key is listed already");
-        } else if self.who.user_ever(&user).is_some() {
+        } else if self.who.user_ever(&user)?.is_some() {
             let verb = if machine.is(Kind::Client) || machine.is(Kind::Service) { "add-devices" } else { "add-machines" };
-            let lists = self.who.user(&user).is_some() && self.may_make(verb, &person(&user), &person(&user), "owner", &super::scopes::device(&machine.key));
+            let lists = self.who.user(&user)?.is_some() && self.may_make(verb, &person(&user), &person(&user), "owner", &super::scopes::device(&machine.key));
             ensure!(lists, "only a person's own device lists their devices; an admin's lists compute and services");
         } else {
             let r = self.role_of("role")?;
@@ -223,7 +227,7 @@ impl Change<'_> {
     /// device of theirs lets it in, by its sign-in or its code, and nothing it writes counts.
     fn refuse(&self) -> Result<()> {
         let key = self.key("key")?;
-        ensure!(self.who.machine_ever(&key).is_none(), "that key is listed already: take it out instead");
+        ensure!(self.who.machine_ever(&key)?.is_none(), "that key is listed already: take it out instead");
         let data = json!({ "key": self.data["key"], "seal": self.data["seal"], "name": self.data["name"], "roles": [Kind::Client] });
         let mut machine = listed(&data, self.w, self.step.time())?;
         machine.removed = true;
@@ -235,7 +239,7 @@ impl Change<'_> {
     /// longer checked against it.
     fn forget_sign_in(&self) -> Result<()> {
         let key = self.key("key")?;
-        ensure!(self.who.machine(&key).context("no such device")?.user == self.w, "only its person's own device forgets what it signed in with");
+        ensure!(self.who.machine(&key)?.context("no such device")?.user == self.w, "only its person's own device forgets what it signed in with");
         self.out.execute("UPDATE devices SET sign_in = NULL WHERE key = ?", [hex(&key)])?;
         self.devices_changed()
     }
@@ -244,7 +248,7 @@ impl Change<'_> {
     /// takes from them unless they keep it.
     fn role(&self) -> Result<()> {
         let (user, to) = (self.id("user")?, self.role_of("role")?);
-        let was = self.who.user(&user).context("no such user")?.role;
+        let was = self.who.user(&user)?.context("no such user")?.role;
         let gives = self.who.may_give(self.w, &user, role(to), NETWORK);
         ensure!(gives && (to == was || self.who.may_take(self.w, &user, role(was), NETWORK)), "only admins change roles, and the last admin stays");
         set_role(self.out, &person(&user), NETWORK, Some(to))
@@ -252,9 +256,9 @@ impl Change<'_> {
 
     fn remove(&self) -> Result<()> {
         if let Ok(user) = self.id("user") {
-            let was = self.who.user(&user).context("no such user")?.role;
+            let was = self.who.user(&user)?.context("no such user")?.role;
             ensure!(self.who.may_take(self.w, &user, role(was), NETWORK), "only admins take someone out, and the last admin stays");
-            let theirs: Vec<Key> = self.who.machines().into_iter().filter(|d| d.user == user).map(|d| d.key).collect();
+            let theirs: Vec<Key> = self.who.machines()?.into_iter().filter(|d| d.user == user).map(|d| d.key).collect();
             self.owe_held_by(&theirs, Some(&Scope::User(user.clone())))?;
             // Everything they held goes with them; what they made stays.
             self.out.execute("UPDATE principals SET removed = 1 WHERE id = ?", [person(&user)])?;
@@ -262,14 +266,14 @@ impl Change<'_> {
             self.out.execute("DELETE FROM invites WHERE principal = ?", [person(&user)])?;
         } else {
             let key = self.key("key")?;
-            let gone = self.who.machine(&key).context("no such key")?;
+            let gone = self.who.machine(&key)?.context("no such key")?;
             ensure!(self.may("remove", &super::scopes::device(&key)), "only its person or an admin removes a device");
             // A device signing itself out deletes its own keys: signed by it, or by a node of its person's it asked
             // (`itself`). So does a sign-in before on a device signed in again (`Node::approve_request`). One removed
             // otherwise may still hold them.
             let author = self.step.author();
-            let itself = author == key || (self.data["itself"] == true && self.who.machine_ever(&author).is_some_and(|a| a.user == gone.user));
-            let again = gone.device.is_some() && gone.passkey.is_none() && self.who.clients().iter().any(|c| c.key != key && c.user == gone.user && c.device == gone.device && c.passkey.is_none());
+            let itself = author == key || (self.data["itself"] == true && self.who.machine_ever(&author)?.is_some_and(|a| a.user == gone.user));
+            let again = gone.device.is_some() && gone.passkey.is_none() && self.who.clients()?.iter().any(|c| c.key != key && c.user == gone.user && c.device == gone.device && c.passkey.is_none());
             if !(itself || again) {
                 self.owe_held_by(&[key], None)?;
             }
@@ -282,12 +286,14 @@ impl Change<'_> {
         let scope = Scope::parse(&self.text("scope")?)?;
         ensure!(self.may("remove", &object(&scope)), "only the scope's admins start its new epoch");
         if let Scope::Group(g) = &scope {
-            self.who.group(g).context("no such group")?;
+            self.who.group(g)?.context("no such group")?;
         }
         let n = self.data["n"].as_u64().context("no n")?;
-        ensure!(n == u64::from(self.who.epoch(&scope)) + 1, "an epoch follows the one before it");
+        ensure!(n == u64::from(self.who.epoch(&scope)?) + 1, "an epoch follows the one before it");
         let to = self.keys("to")?;
-        ensure!(to.iter().all(|k| self.who.machine(k).is_some()), "an epoch is sealed only to the network's endpoints");
+        for k in &to {
+            ensure!(self.who.machine(k)?.is_some(), "an epoch is sealed only to the network's endpoints");
+        }
         let hash = epoch_hash_of(&self.data["hash"])?;
         let s = scope.to_string();
         self.out.execute("INSERT INTO epochs VALUES (?, ?, ?)", params![s, n as i64, hash])?;
@@ -303,7 +309,9 @@ impl Change<'_> {
     /// and only the network's machines that run things, and its Cloudflare node.
     fn runs(&self) -> Result<()> {
         let on: BTreeSet<Key> = self.keys("on").context("on is a list of endpoints' keys")?.into_iter().collect();
-        ensure!(on.iter().all(|k| self.runs_things(k)), "only the network's machines that run things, and its Cloudflare node, run someone's own");
+        for k in &on {
+            ensure!(self.runs_things(k)?, "only the network's machines that run things, and its Cloudflare node, run someone's own");
+        }
         let me = person(self.w);
         self.out.execute("INSERT OR IGNORE INTO runs_chosen VALUES (?)", [&me])?;
         self.out.execute("DELETE FROM runs WHERE principal = ?", [&me])?;
@@ -325,7 +333,7 @@ impl Change<'_> {
             hashes.push((n.parse::<u32>().context("an epoch is a number")?, epoch_hash_of(h)?));
         }
         ensure!(self.may("choose-devices", &object(&scope)), "only the scope's person, or its group's admins, set app schedules in it");
-        ensure!(until == 0 || self.who.machine(&endpoint).is_some(), "no such endpoint");
+        ensure!(until == 0 || self.who.machine(&endpoint)?.is_some(), "no such endpoint");
         let row = params![hex(&endpoint), scope.to_string(), app];
         let had = self.out.execute("DELETE FROM app_schedules WHERE device = ? AND scope = ? AND app = ?", row)? > 0;
         self.out.execute("DELETE FROM app_schedule_keys WHERE device = ? AND scope = ? AND app = ?", row)?;
@@ -347,10 +355,12 @@ impl Change<'_> {
         let scope = Scope::parse(&self.text("scope")?)?;
         ensure!(self.may("choose-devices", &object(&scope)), "only the scope's person, or its admins, say which machines open its Vault");
         let n = self.data["n"].as_u64().context("no n")?;
-        ensure!(n == u64::from(self.who.vault(&scope).map_or(0, |v| v.n)) + 1, "a Vault key follows the one before it");
+        ensure!(n == u64::from(self.who.vault(&scope)?.map_or(0, |v| v.n)) + 1, "a Vault key follows the one before it");
         let public = self.key("public")?;
         let to = self.keys("to")?;
-        ensure!(to.iter().all(|k| self.runs_things(k)), "a Vault opens only on the network's machines that run things");
+        for k in &to {
+            ensure!(self.runs_things(k)?, "a Vault opens only on the network's machines that run things");
+        }
         let s = scope.to_string();
         self.out.execute("INSERT INTO vault VALUES (?, ?, ?)", params![s, n as i64, hex(&public)])?;
         self.out.execute("DELETE FROM vault_opens WHERE scope = ?", [&s])?;
@@ -364,7 +374,7 @@ impl Change<'_> {
     fn group(&self) -> Result<()> {
         ensure!(self.may("make-groups", NETWORK), "only the network's people make groups");
         let g = self.id("group")?;
-        ensure!(self.who.group(&g).is_none(), "that group exists");
+        ensure!(self.who.group(&g)?.is_none(), "that group exists");
         let name = self.text("name")?;
         self.out.execute("INSERT INTO principals VALUES (?, 'group', ?, ?, 0)", params![group(&g), name, pick_handle(self.out, &name, "group")?])?;
         set_role(self.out, &person(self.w), &group(&g), Some(Role::Admin))
@@ -372,16 +382,16 @@ impl Change<'_> {
 
     fn invite(&self) -> Result<()> {
         let (g, user, to) = (self.id("group")?, self.id("user")?, self.role_of("role")?);
-        self.who.group(&g).context("no such group")?;
+        self.who.group(&g)?.context("no such group")?;
         ensure!(self.who.may_give(self.w, &user, role(to), &group(&g)), "only the group's admins invite");
-        self.who.user(&user).context("no such user")?;
+        self.who.user(&user)?.context("no such user")?;
         self.out.execute("INSERT OR REPLACE INTO invites VALUES (?, ?, ?)", params![person(&user), group(&g), role(to)])?;
         Ok(())
     }
 
     fn accept(&self) -> Result<()> {
         let g = self.id("group")?;
-        let invited = self.who.group(&g).context("no such group")?.invited.get(self.w).copied().context("not invited")?;
+        let invited = self.who.group(&g)?.context("no such group")?.invited.get(self.w).copied().context("not invited")?;
         self.out.execute("DELETE FROM invites WHERE principal = ? AND invited_to = ?", params![person(self.w), group(&g)])?;
         set_role(self.out, &person(self.w), &group(&g), Some(invited))
     }
@@ -391,12 +401,12 @@ impl Change<'_> {
     fn member(&self) -> Result<()> {
         let (g, user) = (self.id("group")?, self.id("user")?);
         let to: Option<Role> = serde_json::from_value(self.data["role"].clone())?;
-        let grp = self.who.group(&g).context("no such group")?;
-        let was = self.who.group_role(&user, &g).or_else(|| grp.invited.get(&user).copied());
+        let grp = self.who.group(&g)?.context("no such group")?;
+        let was = self.who.group_role(&user, &g)?.or_else(|| grp.invited.get(&user).copied());
         let took = was.is_none_or(|r| Some(r) == to || self.who.may_take(self.w, &user, role(r), &group(&g)));
         let gives = to.is_none_or(|r| self.who.may_give(self.w, &user, role(r), &group(&g)));
         ensure!(took && gives, "only the group's admins change its members");
-        let member = grp.members.contains_key(&user) && self.who.user(&user).is_some();
+        let member = grp.members.contains_key(&user) && self.who.user(&user)?.is_some();
         ensure!(member || grp.invited.contains_key(&user), "not in the group");
         match to {
             Some(_) => ensure!(member, "not in the group"),
@@ -412,14 +422,14 @@ impl Change<'_> {
 
     fn rename(&self) -> Result<()> {
         let (it, row) = if let Ok(key) = self.key("key") {
-            self.who.machine(&key).context("no such key")?;
+            self.who.machine(&key)?.context("no such key")?;
             (super::scopes::device(&key), None)
         } else if let Ok(user) = self.id("user") {
-            self.who.user(&user).context("no such user")?;
+            self.who.user(&user)?.context("no such user")?;
             (person(&user), Some(Principal::User(user)))
         } else {
             let g = self.id("group")?;
-            self.who.group(&g).context("no such group")?;
+            self.who.group(&g)?.context("no such group")?;
             (group(&g), Some(Principal::Group(g)))
         };
         ensure!(self.may("rename", &it), crate::protocol::Coded::refused("not allowed to rename that"));
@@ -427,7 +437,7 @@ impl Change<'_> {
             let handle = handle.as_str().context("a handle is text")?;
             ensure!(valid_handle(handle), "a handle is lowercase letters, digits and single hyphens, up to 39, like {}", handle_from(handle, "name"));
             let mine = row.context("a handle is a person's or a group's")?;
-            ensure!(self.who.by_handle(handle).is_none_or(|p| p == mine), "{handle} is taken");
+            ensure!(self.who.by_handle(handle)?.is_none_or(|p| p == mine), "{handle} is taken");
             self.out.execute("UPDATE principals SET handle = ? WHERE id = ?", params![handle, owner(&mine)])?;
             return Ok(());
         }
@@ -454,11 +464,11 @@ impl Change<'_> {
     /// Only the recovery key itself hands over to a new one: no admin's device can, since every epoch is sealed to it,
     /// own scopes too. Unless there's none: then an admin's own device names the next.
     fn recovery(&self) -> Result<()> {
-        let now = self.who.recovery();
+        let now = self.who.recovery()?;
         let named = now.is_none() && self.may("change-settings", NETWORK);
         ensure!(now == Some(self.step.author()) || named, "only the network's recovery key changes it");
         let key = self.key("key")?;
-        ensure!(Some(key) != now && !self.who.recovery_was().contains(&key) && self.who.machine_ever(&key).is_none(), "a new recovery key is a key of its own");
+        ensure!(Some(key) != now && !self.who.recovery_was()?.contains(&key) && self.who.machine_ever(&key)?.is_none(), "a new recovery key is a key of its own");
         self.out.execute("UPDATE recovery SET set_at = NULL", [])?;
         self.out.execute("INSERT INTO recovery VALUES ((SELECT count(*) FROM recovery), ?, ?)", params![hex(&key), self.time()])?;
         Ok(())
@@ -470,7 +480,7 @@ impl Change<'_> {
         ensure!(valid_app_name(&name), "app names are lowercase words joined by -");
         let to = Principal::parse(&self.text("owner")?)?;
         let acts_for = |p: &Principal| self.may("add-apps", &owner_object(p));
-        let Some(app) = self.who.app(&name) else {
+        let Some(app) = self.who.app(&name)? else {
             let holders = match &to {
                 Principal::User(u) => person(u),
                 Principal::Group(g) => format!("{}#admin", group(g)),
@@ -499,7 +509,7 @@ impl Change<'_> {
 
     fn deploy(&self) -> Result<()> {
         let (name, bundle) = (self.text("app")?, self.text("bundle")?);
-        let app = self.who.app(&name).context("no such app")?;
+        let app = self.who.app(&name)?.context("no such app")?;
         ensure!(self.may("deploy", &super::scopes::app(&name)), "only someone acting for the app's owner deploys it");
         ensure!(app.deleted.is_none(), "it was deleted: restore it first");
         ensure!(self.step.content.blobs.contains(&bundle), "a deploy names its bundle among its blobs");
@@ -520,12 +530,12 @@ impl Change<'_> {
         let on = self.data["on"] == true;
         let scope = self.data["scope"].as_str().map(Scope::parse).transpose()?;
         let adds = |s: &Scope| self.may("add-apps", &object(s));
-        let was = self.who.switch(&device, &name).and_then(|s| s.scope.as_deref().map(Scope::parse)).and_then(Result::ok);
+        let was = self.who.switch(&device, &name)?.and_then(|s| s.scope.as_deref().map(Scope::parse)).and_then(Result::ok);
         let managed = !on && was.as_ref().is_some_and(adds);
-        if self.who.cloudflare_node() == Some(device) {
+        if self.who.cloudflare_node()? == Some(device) {
             ensure!(managed || self.may("change-settings", NETWORK), "only an admin switches what the Cloudflare node runs");
         } else {
-            self.who.machine(&device).context("no such device")?;
+            self.who.machine(&device)?.context("no such device")?;
             ensure!(managed || self.may("switch", &super::scopes::device(&device)), "only a device's person switches what it runs");
         }
         ensure!(!on || scope.as_ref().is_none_or(adds), "only who may add apps there runs its service for it");
@@ -546,7 +556,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             ensure!(manages(), crate::protocol::Coded::refused("not allowed to install there"));
             let app = data["app"].as_str().context("no app")?;
             if step.content.kind == "install" {
-                who.app(app).context("no such app")?;
+                who.app(app)?.context("no such app")?;
                 out.execute("INSERT OR REPLACE INTO installs VALUES (?, 1, ?, ?)", params![app, person(w), time])?;
             } else {
                 out.execute("UPDATE installs SET installed = 0 WHERE app = ?", [app])?;
@@ -580,7 +590,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             let app = data["app"].as_str().context("no app")?;
             // An item the node itself uses (a backup place's) is asked for as the node's, and one agents use
             // (vault_fetch) as theirs.
-            ensure!(who.app(app).is_some() || app == APP || app == AGENTS, "no such app");
+            ensure!(who.app(app)?.is_some() || app == APP || app == AGENTS, "no such app");
             let fields: Vec<(String, bool)> = data["fields"].as_object().context("no fields")?.iter().map(|(n, f)| (n.clone(), f["secret"] == true)).collect();
             let title = data["title"].as_str().unwrap_or("").trim();
             ensure!(!title.is_empty(), "a request has a title");
@@ -774,7 +784,7 @@ mod tests {
         }
 
         fn owed(&self) -> Vec<Scope> {
-            let mut owed = self.db.owed();
+            let mut owed = self.db.owed().unwrap();
             owed.sort();
             owed
         }
@@ -789,7 +799,7 @@ mod tests {
     /// What a device signed in with is recorded with its listing, for its person's next device to be checked against;
     /// a device taken out takes its record with it, and a shape this release doesn't know records nothing.
     #[test]
-    fn a_devices_sign_in_is_its_persons_while_it_is_listed() {
+    fn a_devices_sign_in_is_its_persons_while_it_is_listed() -> anyhow::Result<()> {
         let (mac, mut net) = setup();
         let google = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
         let listed = |d: &Dev, sign_in: Value| {
@@ -800,17 +810,18 @@ mod tests {
         let (phone, laptop) = (Dev::new(3), Dev::new(4));
         net.step(&mac, ANDRE, listed(&phone, google.clone()));
         net.step(&mac, ANDRE, listed(&laptop, json!({ "password": "hunter2" })));
-        assert_eq!(net.db.machine(&phone.id()).unwrap().sign_in, serde_json::from_value(google.clone()).ok());
-        assert_eq!(net.db.machine(&laptop.id()).unwrap().sign_in, None);
-        assert_eq!(net.db.sign_ins(ANDRE), vec![serde_json::from_value(google).unwrap()]);
+        assert_eq!(net.db.machine(&phone.id())?.unwrap().sign_in, serde_json::from_value(google.clone()).ok());
+        assert_eq!(net.db.machine(&laptop.id())?.unwrap().sign_in, None);
+        assert_eq!(net.db.sign_ins(ANDRE)?, vec![serde_json::from_value(google).unwrap()]);
         net.step(&mac, ANDRE, remove_device(&phone.id()));
-        assert!(net.db.machine(&phone.id()).is_none() && net.db.sign_ins(ANDRE).is_empty(), "taken out, with what it signed in with");
+        assert!(net.db.machine(&phone.id())?.is_none() && net.db.sign_ins(ANDRE)?.is_empty(), "taken out, with what it signed in with");
+        Ok(())
     }
 
     /// What a device signed in with is forgotten only by its person's own device; and a device they said isn't theirs
     /// ("Not Me") is never listed after, by them or anyone, and nothing it writes counts.
     #[test]
-    fn a_sign_in_is_forgotten_and_a_device_turned_down_stays_out() {
+    fn a_sign_in_is_forgotten_and_a_device_turned_down_stays_out() -> anyhow::Result<()> {
         let (mac, mut net) = setup();
         let google = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
         let (phone, bobs) = (Dev::new(3), Dev::new(5));
@@ -820,21 +831,22 @@ mod tests {
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
         assert!(!net.step(&bobs, BOB, forget_sign_in(&phone.id())), "only its person forgets it");
         assert!(net.step(&phone, ANDRE, forget_sign_in(&phone.id())));
-        assert_eq!(net.db.machine(&phone.id()).unwrap().sign_in, None);
+        assert_eq!(net.db.machine(&phone.id())?.unwrap().sign_in, None);
 
         let stranger = Dev::new(9);
         assert!(net.step(&mac, ANDRE, refuse(&stranger.endpoint(), "MacBook Pro")));
         assert!(!net.step(&phone, ANDRE, device(&stranger.endpoint(), ANDRE, "MacBook Pro", &[Kind::Client], None)), "turned down, it's never listed");
         assert!(!net.step(&stranger, ANDRE, setting("sneaky", Some("1"))), "and what it writes doesn't count");
-        assert!(net.db.machine(&stranger.id()).is_none() && net.db.machine_ever(&stranger.id()).unwrap().removed);
+        assert!(net.db.machine(&stranger.id())?.is_none() && net.db.machine_ever(&stranger.id())?.unwrap().removed);
         // One listed already is taken out instead, as Remove does.
         assert!(!net.step(&mac, ANDRE, refuse(&phone.endpoint(), "phone")));
+        Ok(())
     }
 
     /// A new device's sign-in is checked only against what a person's own devices recorded of their own clients: not a
     /// machine an admin listed for them, nor their first device, which the inviting admin let in.
     #[test]
-    fn only_a_persons_own_clients_say_what_they_sign_in_with() {
+    fn only_a_persons_own_clients_say_what_they_sign_in_with() -> anyhow::Result<()> {
         let (mac, mut net) = setup();
         let account = |s: &str| json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": s } });
         let with = |mut c: Content, s: &str| {
@@ -845,8 +857,9 @@ mod tests {
         net.step(&mac, ANDRE, with(device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))), "by-admin"));
         assert!(net.step(&mac, ANDRE, with(device(&box_.endpoint(), BOB, "box", &[Kind::Compute], None), "admins-machine")), "the admin lists it");
         net.step(&bobs, BOB, with(device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None), "bobs-own"));
-        assert_eq!(net.db.sign_ins(BOB), vec![serde_json::from_value(account("bobs-own")).unwrap()]);
-        assert_eq!(net.db.seal_key(&mac.id()), Some(mac.endpoint().seal), "the seal key it was listed with");
+        assert_eq!(net.db.sign_ins(BOB)?, vec![serde_json::from_value(account("bobs-own")).unwrap()]);
+        assert_eq!(net.db.seal_key(&mac.id())?, Some(mac.endpoint().seal), "the seal key it was listed with");
+        Ok(())
     }
 
     #[test]
@@ -856,7 +869,7 @@ mod tests {
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's computer", BOTH, Some(("Bob", Role::Member))));
         net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
         let (linux_id, bobs_id) = (linux.id(), bobs.id());
-        let whatsapp = |db: &ScopeDb, k: &Key| db.switch(k, "whatsapp").map(|s| (s.on, s.scope));
+        let whatsapp = |db: &ScopeDb, k: &Key| db.switch(k, "whatsapp").unwrap().map(|s| (s.on, s.scope));
         // Bob runs it on his own node for himself, not for everyone; Andre runs it on his for everyone.
         assert!(!net.step(&bobs, BOB, service(&bobs_id, "whatsapp", true, Some(&Scope::Global))));
         net.step(&bobs, BOB, service(&bobs_id, "whatsapp", true, Some(&Scope::User(BOB.into()))));
@@ -873,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_devices_person_switches_its_parts_and_lists_them_as_its_own() {
+    fn only_a_devices_person_switches_its_parts_and_lists_them_as_its_own() -> anyhow::Result<()> {
         let (mac, mut net) = setup();
         let (bobs, linux) = (Dev::new(3), Dev::new(4));
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
@@ -881,25 +894,26 @@ mod tests {
         // Bob, even with Andre's listing, switches nothing on Andre's linux; Andre's own linux does.
         let (linux_id, bobs_id, mac_id) = (linux.id(), bobs.id(), mac.id());
         assert!(!net.step(&bobs, BOB, service(&linux_id, "whatsapp", true, None)));
-        assert!(net.db.switches().is_empty());
+        assert!(net.db.switches()?.is_empty());
         net.step(&linux, ANDRE, service(&linux_id, "whatsapp", true, None));
         net.step(&mac, ANDRE, service(&linux_id, APPS_PART, false, None));
-        assert!(net.db.switch(&linux_id, "whatsapp").unwrap().on && !net.db.switch(&linux_id, APPS_PART).unwrap().on);
+        assert!(net.db.switch(&linux_id, "whatsapp")?.unwrap().on && !net.db.switch(&linux_id, APPS_PART)?.unwrap().on);
         // linux lists its part; it lists it again naming itself, which an old listing lacked; Bob's device can't.
         let part = Dev::new(8);
         let listed = |device: &Key| service_endpoint(&part.endpoint(), ANDRE, "linux", "whatsapp", false, device);
         net.step(&linux, ANDRE, listed(&mac_id));
         assert!(net.step(&linux, ANDRE, listed(&linux_id)));
         assert!(!net.step(&bobs, BOB, service_endpoint(&part.endpoint(), BOB, "linux", "whatsapp", false, &bobs_id)));
-        let p = net.db.machine(&part.id()).unwrap();
+        let p = net.db.machine(&part.id())?.unwrap();
         assert_eq!((p.user.as_str(), p.device), (ANDRE, Some(linux_id)));
         // Nor is anything but a service listed again by its person.
         assert!(!net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None)));
-        assert_eq!(net.db.machine(&linux_id).unwrap().roles.len(), 2);
+        assert_eq!(net.db.machine(&linux_id)?.unwrap().roles.len(), 2);
+        Ok(())
     }
 
     #[test]
-    fn a_step_counts_only_when_signed_by_a_device_of_its_person() {
+    fn a_step_counts_only_when_signed_by_a_device_of_its_person() -> anyhow::Result<()> {
         let (mac, mut net) = setup();
         let (bobs, linux) = (Dev::new(3), Dev::new(4));
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
@@ -908,13 +922,13 @@ mod tests {
         assert!(!net.step(&mac, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
         assert!(!net.step(&bobs, ANDRE, node("setting", json!({ "name": "a", "value": "1" }))));
         assert!(!net.step(&linux, ANDRE, node("setting", json!({ "name": "b", "value": "1" }))));
-        assert_eq!(net.db.user(BOB).unwrap().name, "Bob");
-        assert!(net.db.settings().is_empty());
+        assert_eq!(net.db.user(BOB)?.unwrap().name, "Bob");
+        assert!(net.db.settings()?.is_empty());
         // Bob's own device renames him; it can't list a device for Andre, nor Andre's list a client for Bob.
         assert!(net.step(&bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
         assert!(!net.step(&bobs, BOB, device(&Dev::new(5).endpoint(), ANDRE, "x", &[Kind::Client], None)));
         assert!(!net.step(&mac, ANDRE, device(&Dev::new(6).endpoint(), BOB, "y", &[Kind::Client], None)));
-        assert_eq!(net.db.user(BOB).unwrap().name, "Bobby");
+        assert_eq!(net.db.user(BOB)?.unwrap().name, "Bobby");
         // The node runs Andre's scope and the network's, not Bob's.
         assert!(net.db.runs_for(&linux.id(), &Scope::User(ANDRE.into())) && net.db.runs_for(&linux.id(), &Scope::Global));
         assert!(!net.db.runs_for(&linux.id(), &Scope::User(BOB.into())) && !net.db.runs_for(&bobs.id(), &Scope::User(BOB.into())));
@@ -926,14 +940,15 @@ mod tests {
         net.step(&bobs, BOB, device(&server.endpoint(), BOB, "bob's server", &[Kind::Compute], None));
         assert!(net.db.runs_for(&server.id(), &Scope::User(BOB.into())));
         assert!(!net.step(&mac, ANDRE, device(&server.endpoint(), ANDRE, "mine now", &[Kind::Compute], None)), "an admin can't take it back");
+        Ok(())
     }
 
     #[test]
-    fn a_new_epoch_counts_only_from_the_scopes_admins_and_names_its_key() {
+    fn a_new_epoch_counts_only_from_the_scopes_admins_and_names_its_key() -> anyhow::Result<()> {
         let (mac, mut net) = setup();
         let bobs = Dev::new(3);
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        assert_eq!((net.db.epoch(&Scope::Global), net.db.sealed_to(&Scope::Global)), (1, vec![mac.id()]), "global's first is its first device's");
+        assert_eq!((net.db.epoch(&Scope::Global)?, net.db.sealed_to(&Scope::Global)?), (1, vec![mac.id()]), "global's first is its first device's");
         let to = json!([hex(&mac.id())]);
         let epoch = |scope: &str, n: u32, hash: Option<String>| node("epoch", json!({ "scope": scope, "n": n, "to": to, "hash": hash }));
         assert!(!net.step(&bobs, BOB, epoch("global", 2, Some(H.repeat(64)))), "not Bob's to start");
@@ -943,9 +958,10 @@ mod tests {
         assert!(net.step(&mac, ANDRE, epoch("global", 2, Some("f".repeat(64)))));
         let bob = hex(&bobs.id());
         assert!(net.step(&bobs, BOB, node("epoch", json!({ "scope": format!("user:{BOB}"), "n": 1, "to": [bob], "hash": H.repeat(64) }))), "a person's own scope is theirs");
-        assert_eq!(net.db.epoch_hash(&Scope::Global, 2), Some("f".repeat(64)));
-        assert_eq!(net.db.epoch_hash(&Scope::Global, 1), Some(H.repeat(64)), "each epoch's hash is kept");
-        assert_eq!((net.db.epoch(&Scope::User(BOB.into())), net.db.epoch(&Scope::User(ANDRE.into()))), (1, 0));
+        assert_eq!(net.db.epoch_hash(&Scope::Global, 2)?, Some("f".repeat(64)));
+        assert_eq!(net.db.epoch_hash(&Scope::Global, 1)?, Some(H.repeat(64)), "each epoch's hash is kept");
+        assert_eq!((net.db.epoch(&Scope::User(BOB.into()))?, net.db.epoch(&Scope::User(ANDRE.into()))?), (1, 0));
+        Ok(())
     }
 
     /// A network whose recovery key is `recovery`'s, with Andre's mac and linux (a node), and Bob in with his phone.
@@ -958,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_persons_own_device_makes_their_scopes_keys_and_says_where_it_runs() {
+    fn only_a_persons_own_device_makes_their_scopes_keys_and_says_where_it_runs() -> anyhow::Result<()> {
         let (mac, linux, bobs, mut net) = with_bob(&Dev::new(9));
         let bob = Scope::User(BOB.into());
         let (mac_id, bob_id) = (mac.id(), bobs.id());
@@ -967,7 +983,7 @@ mod tests {
         net.step(&mac, ANDRE, runs(&[linux.id()]));
         assert!(!net.step(&mac, BOB, runs(&[linux.id()])), "an admin's device can't say where Bob's things run");
         assert!(net.step(&bobs, BOB, runs(&[linux.id()])));
-        assert!(net.db.runs_for(&linux.id(), &bob) && net.db.serves(&linux.id(), BOB));
+        assert!(net.db.runs_for(&linux.id(), &bob) && net.db.serves(&linux.id(), BOB)?);
         assert!(net.db.runs_for(&linux.id(), &Scope::User(ANDRE.into())), "Andre's says nothing of his own: his machines run it");
         // Only machines that run things: his phone isn't one.
         assert!(!net.step(&bobs, BOB, runs(&[linux.id(), bob_id])), "a list naming what can't run things doesn't count");
@@ -977,28 +993,30 @@ mod tests {
         assert!(!net.step(&mac, ANDRE, epoch(&bob, 1, &[mac_id], &H.repeat(64))));
         assert!(!net.step(&mac, BOB, epoch(&bob, 1, &[mac_id], &H.repeat(64))));
         assert!(net.step(&bobs, BOB, epoch(&bob, 1, &[bob_id], &"b".repeat(64))));
-        assert_eq!(net.db.epoch_hash(&bob, 1), Some("b".repeat(64)));
-        assert_eq!(net.db.openers(&bob).iter().map(|d| d.key).collect::<Vec<_>>(), vec![bobs.id()], "only Bob's own devices open it");
+        assert_eq!(net.db.epoch_hash(&bob, 1)?, Some("b".repeat(64)));
+        assert_eq!(net.db.openers(&bob)?.iter().map(|d| d.key).collect::<Vec<_>>(), vec![bobs.id()], "only Bob's own devices open it");
+        Ok(())
     }
 
     #[test]
-    fn a_removed_persons_devices_get_no_new_epoch_and_their_steps_stop() {
+    fn a_removed_persons_devices_get_no_new_epoch_and_their_steps_stop() -> anyhow::Result<()> {
         let (mac, _, bobs, mut net) = with_bob(&Dev::new(9));
         let (mac_id, bob_id) = (mac.id(), bobs.id());
         assert!(net.step(&mac, ANDRE, remove_user(BOB)));
         // A new epoch of everyone's can't be sealed to Bob's phone, and what his phone writes after doesn't count.
         assert!(!net.step(&mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id, bob_id], &"c".repeat(64))), "an epoch sealed to a removed person's device doesn't count");
         assert!(!net.step(&bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" }))));
-        assert!(net.db.client(&bobs.id()).is_none() && net.db.clients().iter().all(|c| c.user != BOB));
-        assert_eq!(net.db.user_ever(BOB).unwrap().name, "Bob");
+        assert!(net.db.client(&bobs.id())?.is_none() && net.db.clients()?.iter().all(|c| c.user != BOB));
+        assert_eq!(net.db.user_ever(BOB)?.unwrap().name, "Bob");
         assert!(net.step(&mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id], &"c".repeat(64))), "sealed to those left, it does");
-        assert!(net.db.scopes().contains(&Scope::User(BOB.into())), "their own scope is kept");
+        assert!(net.db.scopes()?.contains(&Scope::User(BOB.into())), "their own scope is kept");
+        Ok(())
     }
 
     /// The network's last admin can't be taken out or step down, nor be made a member by another; once there's
     /// another, they can.
     #[test]
-    fn the_last_admin_stays() {
+    fn the_last_admin_stays() -> anyhow::Result<()> {
         let (mac, _, bobs, mut net) = with_bob(&Dev::new(9));
         assert!(!net.step(&mac, ANDRE, role(ANDRE, Role::Member)), "the last admin doesn't step down");
         assert!(!net.step(&mac, ANDRE, remove_user(ANDRE)), "nor take themselves out");
@@ -1008,11 +1026,12 @@ mod tests {
         assert!(net.step(&mac, ANDRE, role(BOB, Role::Admin)));
         assert!(net.step(&bobs, BOB, role(ANDRE, Role::Member)), "once there's another, they can");
         assert!(!net.step(&bobs, BOB, remove_user(BOB)), "and the last again stays");
-        assert_eq!(net.db.user(ANDRE).unwrap().role, Role::Member);
+        assert_eq!(net.db.user(ANDRE)?.unwrap().role, Role::Member);
+        Ok(())
     }
 
     #[test]
-    fn a_scope_owes_a_new_epoch_once_someone_holding_its_keys_loses_the_right_until_one_counts() {
+    fn a_scope_owes_a_new_epoch_once_someone_holding_its_keys_loses_the_right_until_one_counts() -> anyhow::Result<()> {
         let (mac, linux, bobs, mut net) = with_bob(&Dev::new(9));
         let (mac_id, bob_id, linux_id) = (mac.id(), bobs.id(), linux.id());
         let (bob, work) = (Scope::User(BOB.into()), Scope::Group("c000000000000003".into()));
@@ -1032,7 +1051,7 @@ mod tests {
         assert!(net.owed().is_empty());
         // Signing itself out, a device deletes its own keys: nothing's owed.
         assert!(net.step(&laptop, BOB, remove_device(&laptop.id())));
-        assert!(net.owed().is_empty() && net.db.machine(&laptop.id()).is_none(), "signing out owes nothing");
+        assert!(net.owed().is_empty() && net.db.machine(&laptop.id())?.is_none(), "signing out owes nothing");
         // Nor one a node of its person's wrote for it, saying it signed itself out; an admin's saying so for another's
         // device is taken as removing it.
         let (asked, said) = (Dev::new(12), Dev::new(13));
@@ -1040,7 +1059,7 @@ mod tests {
         net.step(&bobs, BOB, device(&said.endpoint(), BOB, "app", &[Kind::Client], None));
         let gone = |k: &Dev| node("remove", json!({ "key": hex(&k.id()), "itself": true }));
         assert!(net.step(&bobs, BOB, gone(&asked)));
-        assert!(net.owed().is_empty() && net.db.machine(&asked.id()).is_none(), "its own node signing it out owes nothing");
+        assert!(net.owed().is_empty() && net.db.machine(&asked.id())?.is_none(), "its own node signing it out owes nothing");
         assert!(net.step(&mac, ANDRE, gone(&said)));
         assert_eq!(net.owed().len(), 3, "an admin's saying it signed itself out is a removal");
         net.step(&bobs, BOB, epoch(&bob, 2, &[bob_id], &H.repeat(64)));
@@ -1081,6 +1100,7 @@ mod tests {
         net.step(&mac, ANDRE, epoch(&work, 4, &[mac_id], &H.repeat(64)));
         net.step(&mac, ANDRE, remove_user(BOB));
         assert_eq!(net.owed(), vec![Scope::Global]);
+        Ok(())
     }
 
     /// Who may write each kind of step, as the rules say it: each step below, alone on one network, signed by each of
@@ -1286,28 +1306,29 @@ mod tests {
     }
 
     #[test]
-    fn the_recovery_key_lets_someones_device_in_as_an_admins_approval_and_is_listed() {
+    fn the_recovery_key_lets_someones_device_in_as_an_admins_approval_and_is_listed() -> anyhow::Result<()> {
         let recovery = Dev::new(9);
         let (mac, _, _, mut net) = with_bob(&recovery);
         let laptop = Dev::new(5);
-        assert!(net.db.recovery_used().is_none());
+        assert!(net.db.recovery_used()?.is_none());
         assert!(net.step(&recovery, BOB, device(&laptop.endpoint(), BOB, "bob's laptop", &[Kind::Client], None)));
-        assert_eq!(net.db.client(&laptop.id()).map(|c| c.user), Some(BOB.to_string()), "it counts as an admin's approval");
-        assert_eq!(net.db.recovery_used(), Some((net.at, BOB.to_string())), "and it's listed");
+        assert_eq!(net.db.client(&laptop.id())?.map(|c| c.user), Some(BOB.to_string()), "it counts as an admin's approval");
+        assert_eq!(net.db.recovery_used()?, Some((net.at, BOB.to_string())), "and it's listed");
         // Only a device people use, of someone already in; and nothing else.
         assert!(!net.step(&recovery, BOB, device(&Dev::new(6).endpoint(), BOB, "box", &[Kind::Compute], None)));
         assert!(!net.step(&recovery, "c000000000000003", device(&Dev::new(7).endpoint(), "c000000000000003", "new", &[Kind::Client], Some(("Cy", Role::Admin)))));
         assert!(!net.step(&recovery, ANDRE, node("setting", json!({ "name": "a", "value": "1" }))));
         assert!(!net.step(&recovery, ANDRE, role(BOB, Role::Admin)));
-        assert!(net.db.user("c000000000000003").is_none() && net.db.user(BOB).unwrap().role == Role::Member);
+        assert!(net.db.user("c000000000000003")?.is_none() && net.db.user(BOB)?.unwrap().role == Role::Member);
         // A key that isn't the network's recovery key lets nobody in.
         let other = Dev::new(8);
         assert!(!net.step(&other, BOB, device(&Dev::new(10).endpoint(), BOB, "x", &[Kind::Client], None)));
         // Only the recovery key hands over to a new one: an admin's device can't, and the old key counts no more.
         assert!(!net.step(&mac, ANDRE, node("recovery", json!({ "key": hex(&other.id()) }))), "not by an admin's device");
         assert!(net.step(&recovery, ANDRE, node("recovery", json!({ "key": hex(&other.id()) }))));
-        assert_eq!((net.db.recovery(), net.db.recovery_set(), net.db.recovery_was()), (Some(other.id()), net.at, vec![recovery.id()]));
+        assert_eq!((net.db.recovery()?, net.db.recovery_set()?, net.db.recovery_was()?), (Some(other.id()), net.at, vec![recovery.id()]));
         assert!(!net.step(&recovery, BOB, device(&Dev::new(11).endpoint(), BOB, "y", &[Kind::Client], None)), "the old recovery key lets nobody in");
+        Ok(())
     }
 
     /// Columns: andre, carol, bob, dan, linux as andre, linux as bob, linux as dan, mac as bob, bob's removed tablet,

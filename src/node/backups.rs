@@ -71,9 +71,9 @@ impl Problem {
 fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
     let m = i.r.db();
     let status = i.status.get("global").cloned().unwrap_or_default();
-    let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
+    let name = |k: &Key| machine_name(m, k);
     let mut out = Vec::new();
-    for p in places(i) {
+    for p in places(i)? {
         let runs: Vec<&BackupRun> = status.backups.iter().filter(|r| r.place == p.id).collect();
         let failing: Vec<&&BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
         if let Some(last) = failing.first() {
@@ -91,7 +91,7 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
                 Some(crate::bucket::Trouble::Disk) => "Couldn't be used",
                 None => "Couldn't back up",
             };
-            let device = name(&last.device);
+            let device = name(&last.device)?;
             let fix = match (trouble, &p.place) {
                 (_, Err(_)) if p.device.is_none() => "Fix it in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
@@ -116,18 +116,18 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
             continue;
         }
         let mut late: Option<(u64, String)> = None;
-        for scope in m.scopes() {
+        for scope in m.scopes()? {
             let log = scope.to_string();
             let backer = match p.device {
                 Some(_) => p.device.filter(|k| m.runs_for(k, &scope)),
-                None => line(m, &scope, &p.id).first().copied(),
+                None => line(m, &scope, &p.id)?.first().copied(),
             };
             let Some(backer) = backer.filter(|_| i.r.holds(&scope)) else { continue };
             let covered = status.covered.get(&(p.id.clone(), log.clone())).map_or(0, |c| c.0);
             let Some(waiting) = first_change(i, &scope, covered) else { continue };
             let since = waiting.max(p.made);
             if now.saturating_sub(since) >= LATE && late.as_ref().is_none_or(|l| since < l.0) {
-                late = Some((since, name(&backer)));
+                late = Some((since, name(&backer)?));
             }
         }
         if let Some((since, backer)) = late {
@@ -140,7 +140,7 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
     }
     // A place an admin named whose details changed since, by someone who isn't one: nothing goes there until an admin
     // saves them, which names them again (`repin_place`), so a member can't send backups somewhere else.
-    let pinned = pinned(m);
+    let pinned = pinned(m)?;
     for (id, it) in i.vault.iter().filter(|(id, it)| it.apps.contains(scopes::APP) && it.kind == b::KIND && !it.fields.contains_key("device") && pinned.get(*id).is_some_and(|h| *h != item_hash(it))) {
         out.push(Problem {
             place: id.clone(),
@@ -184,16 +184,21 @@ fn place_hash(fields: &BTreeMap<String, String>) -> String {
 }
 
 /// The S3 places `PINNED` names: id → hash.
-fn pinned(m: &ScopeDb) -> BTreeMap<String, String> {
-    m.setting(PINNED).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
+fn pinned(m: &ScopeDb) -> Result<BTreeMap<String, String>> {
+    Ok(m.setting(PINNED)?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default())
+}
+
+/// A device's name as the network lists it, or its short key if it isn't.
+fn machine_name(m: &ScopeDb, k: &Key) -> Result<String> {
+    Ok(m.machine(k)?.map(|s| s.name.clone()).unwrap_or_else(|| short(k)))
 }
 
 /// What a place's item says, read from global's items. A folder's item names only its device: where the folder is
 /// comes from that device's own file (`NetworkFile::folders`), never from an item, which anyone may write. An S3 place
 /// counts only as `PINNED` names it.
-fn places(i: &Network) -> Vec<PlaceItem> {
-    let pinned = pinned(i.r.db());
-    i.vault
+fn places(i: &Network) -> Result<Vec<PlaceItem>> {
+    let pinned = pinned(i.r.db())?;
+    Ok(i.vault
         .iter()
         .filter(|(_, it)| it.apps.contains(scopes::APP) && it.kind == b::KIND)
         .filter(|(id, it)| it.fields.contains_key("device") || pinned.get(*id).is_some_and(|h| *h == item_hash(it)))
@@ -217,14 +222,14 @@ fn places(i: &Network) -> Vec<PlaceItem> {
             };
             PlaceItem { id: id.clone(), title: it.title.clone(), place, device, shown, made: it.made }
         })
-        .collect()
+        .collect())
 }
 
 /// The devices that back up a scope to an S3 place, in the order they take it: those that run its calls, in an order
 /// the place and scope pick. Every device works it out alike.
-fn line(m: &ScopeDb, scope: &Scope, place: &str) -> Vec<Key> {
+fn line(m: &ScopeDb, scope: &Scope, place: &str) -> Result<Vec<Key>> {
     let mut devices: Vec<([u8; 32], Key)> = m
-        .computes()
+        .computes()?
         .into_iter()
         .filter(|s| m.runs_for(&s.key, scope))
         .map(|s| {
@@ -235,7 +240,7 @@ fn line(m: &ScopeDb, scope: &Scope, place: &str) -> Vec<Key> {
         })
         .collect();
     devices.sort();
-    devices.into_iter().map(|s| s.1).collect()
+    Ok(devices.into_iter().map(|s| s.1).collect())
 }
 
 /// One scope to back up to one place in a run.
@@ -279,12 +284,12 @@ impl Node {
             if !i.views.contains_key("global") {
                 return Ok((Vec::new(), Vec::new()));
             }
-            let at = line(m, &Scope::Global, "alerts").iter().position(|k| *k == me).unwrap_or(usize::MAX / 2) as u64;
+            let at = line(m, &Scope::Global, "alerts")?.iter().position(|k| *k == me).unwrap_or(usize::MAX / 2) as u64;
             let due: Vec<Problem> = problems(i, now)?
                 .into_iter()
                 .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && i.status.get("global").and_then(|s| s.alerted.get(&p.place)).is_none_or(|t| *t < p.since))
                 .collect();
-            let admins: Vec<String> = m.users().into_iter().filter(|u| !u.removed && m.may(&u.id, "change-settings", scopes::NETWORK)).map(|u| u.id).collect();
+            let admins: Vec<String> = m.users()?.into_iter().filter(|u| !u.removed && m.may(&u.id, "change-settings", scopes::NETWORK)).map(|u| u.id).collect();
             Ok((due, admins))
         })?;
         for p in due {
@@ -339,12 +344,12 @@ impl Node {
                 return Ok((String::new(), Vec::new()));
             }
             let network = i.r.root().map(|r| r.to_hex()[..16].to_string()).context("no network")?;
-            m.recovery().context("the network has no recovery key")?;
+            m.recovery()?.context("the network has no recovery key")?;
             let cache = self.0.backups.backed.lock().unwrap();
             let failed = self.0.backups.failed.lock().unwrap();
             let pruned = self.0.backups.pruned.lock().unwrap();
             let mut plan = Vec::new();
-            for p in places(i) {
+            for p in places(i)? {
                 if !force && failed.get(&p.id).is_some_and(|t| now - t < b::EVERY) {
                     continue;
                 }
@@ -353,9 +358,9 @@ impl Node {
                     continue;
                 }
                 // Every device prunes each scope it holds the key of, so pruning needs no one device.
-                let prune = (force || pruned.get(&p.id).is_none_or(|t| now - t >= PRUNE_EVERY)).then(|| (keys.clone(), release_blobs(m).0));
+                let prune = (force || pruned.get(&p.id).is_none_or(|t| now - t >= PRUNE_EVERY)).then(|| release_blobs(m).map(|(all, _)| (keys.clone(), all))).transpose()?;
                 let mut due = Vec::new();
-                let mut logs: Vec<String> = m.scopes().iter().map(Scope::to_string).collect();
+                let mut logs: Vec<String> = m.scopes()?.iter().map(Scope::to_string).collect();
                 logs.sort_by_key(|l| l != "global");
                 for log in logs {
                     let Ok(scope) = Scope::parse(&log) else { continue };
@@ -363,7 +368,7 @@ impl Node {
                         continue;
                     }
                     if !folder {
-                        let line = line(m, &scope, &p.id);
+                        let line = line(m, &scope, &p.id)?;
                         let Some(at) = line.iter().position(|k| *k == me) else { continue };
                         // A device further down the line takes a scope's changes only once they've waited for each
                         // device before it.
@@ -451,7 +456,7 @@ impl Node {
 
     /// Every epoch's key of each scope this device holds, by its name, of those it opens.
     async fn held_epochs(&self) -> BTreeMap<String, crate::database::stored::Keys> {
-        let scopes = self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
+        let scopes = self.with_or(Default::default(), |i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()));
         let mut out = BTreeMap::new();
         for scope in scopes {
             match self.epoch_keys(&scope, false).await {
@@ -474,10 +479,13 @@ impl Node {
         let cached = self.0.backups.backed.lock().unwrap().get(&(place_id.to_string(), d.scope.clone())).filter(|s| s.1 == b::key_id(&key)).map(|s| s.0.clone());
         let blobs = self.with(|i| {
             // What its database names, of the releases only the newest of each.
-            let (releases, newest) = release_blobs(i.r.db());
+            let (releases, newest) = release_blobs(i.r.db())?;
             let named = match &scope {
-                Scope::Global => i.r.db().blobs(),
-                _ => i.scope_dbs.get(&scope).map(|(_, db)| db.blobs()).unwrap_or_default(),
+                Scope::Global => i.r.db().blobs()?,
+                _ => match i.scope_dbs.get(&scope) {
+                    Some((_, db)) => db.blobs()?,
+                    None => BTreeSet::new(),
+                },
             };
             Ok(named.into_iter().filter(|b| !releases.contains(b) || newest.contains(b)).collect::<BTreeSet<String>>())
         })?;
@@ -525,12 +533,12 @@ impl Node {
     pub fn backups(&self) -> Result<Value> {
         self.with(|i| {
             let m = i.r.db();
-            let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
+            let name = |k: &Key| machine_name(m, k);
             let runs = i.status.get("global").map(|s| s.backups.clone()).unwrap_or_default();
             let checks = i.status.get("global").map(|s| s.checks.clone()).unwrap_or_default();
             let problems = problems(i, now_ms())?;
             let mut out = Vec::new();
-            for p in places(i) {
+            for p in places(i)? {
                 let mine: Vec<&BackupRun> = runs.iter().filter(|r| r.place == p.id).collect();
                 let last_ok = mine.iter().rev().find(|r| r.error.is_none());
                 let (kind, place_where, endpoint) = match &p.place {
@@ -544,13 +552,13 @@ impl Node {
                     "kind": kind,
                     "where": place_where,
                     "endpoint": endpoint,
-                    "device": p.device.map(|k| name(&k)),
+                    "device": p.device.map(|k| name(&k)).transpose()?,
                     "problem": problems.iter().find(|q| q.place == p.id).map(Problem::json),
-                    "last": last_ok.map(|r| json!({ "time": r.time, "device": name(&r.device) })),
-                    "checked": checks.iter().rev().find(|c| c.place == p.id).map(|c| json!({ "time": c.time, "device": name(&c.device), "error": c.error })),
+                    "last": last_ok.map(|r| Ok::<_, anyhow::Error>(json!({ "time": r.time, "device": name(&r.device)? }))).transpose()?,
+                    "checked": checks.iter().rev().find(|c| c.place == p.id).map(|c| Ok::<_, anyhow::Error>(json!({ "time": c.time, "device": name(&c.device)?, "error": c.error }))).transpose()?,
                 }));
             }
-            let titles: BTreeMap<String, String> = places(i).into_iter().map(|p| (p.id, p.title)).collect();
+            let titles: BTreeMap<String, String> = places(i)?.into_iter().map(|p| (p.id, p.title)).collect();
             // The network's snapshots, newest first: the runs of each minute, whichever devices and places, as one.
             let mut moments: Vec<(u64, BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> = Vec::new();
             for r in runs.iter().rev().filter(|r| !r.snapshots.is_empty() && titles.contains_key(&r.place)) {
@@ -562,9 +570,11 @@ impl Node {
                     moments.push((r.time, BTreeSet::new(), BTreeSet::new(), BTreeSet::new()));
                 }
                 let m = moments.last_mut().expect("just pushed");
-                m.1.insert(name(&r.device));
+                m.1.insert(name(&r.device)?);
                 m.2.insert(titles[&r.place].clone());
-                m.3.extend(r.snapshots.iter().map(|s| scope_name(i, &s.scope)));
+                for s in &r.snapshots {
+                    m.3.insert(scope_name(i, &s.scope)?);
+                }
             }
             let snapshots: Vec<Value> = moments
                 .into_iter()
@@ -641,11 +651,11 @@ impl Node {
 
     /// Stops backing up to a place: deletes its item. What's in the place stays there.
     pub async fn remove_place(&self, caller: &Caller, id: &str) -> Result<()> {
-        let known = self.with(|i| Ok(places(i).iter().any(|p| p.id == id)))?;
+        let known = self.with(|i| Ok(places(i)?.iter().any(|p| p.id == id)))?;
         ensure!(known, "That place was already removed: there's no place {id}");
         self.set_item(caller, &Scope::Global, json!({ "id": id, "deleted": true })).await?;
         self.keep_folder(id, None)?;
-        if self.with(|i| Ok(pinned(i.r.db()).contains_key(id)))? {
+        if self.with(|i| Ok(pinned(i.r.db())?.contains_key(id)))? {
             self.pin_place(caller, id, None).await?;
         }
         Ok(())
@@ -656,7 +666,7 @@ impl Node {
     pub(super) async fn repin_place(&self, caller: &Caller, id: &str) -> Result<()> {
         let fields = self.with(|i| {
             let m = i.r.db();
-            let pinned = pinned(m);
+            let pinned = pinned(m)?;
             let stale = pinned.get(id).zip(i.vault.get(id)).filter(|(h, it)| m.may(&caller.user, "change-settings", scopes::NETWORK) && !it.fields.contains_key("device") && **h != item_hash(it));
             Ok(stale.map(|(_, it)| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect::<BTreeMap<_, _>>()))
         })?;
@@ -668,7 +678,7 @@ impl Node {
 
     /// Names an S3 place the network backs up to in `PINNED` (or with `None`, stops naming it), for an admin.
     pub(super) async fn pin_place(&self, caller: &Caller, id: &str, fields: Option<&BTreeMap<String, String>>) -> Result<()> {
-        let mut now = self.with(|i| Ok(pinned(i.r.db())))?;
+        let mut now = self.with(|i| pinned(i.r.db()))?;
         match fields {
             Some(fields) => drop(now.insert(id.to_string(), place_hash(fields))),
             None => drop(now.remove(id)),
@@ -688,19 +698,19 @@ impl Node {
         let due: Vec<String> = self.with(|i| {
             let m = i.r.db();
             let Some(status) = i.status.get("global") else { return Ok(Vec::new()) };
-            Ok(places(i)
-                .into_iter()
-                .filter(|p| status.covered.keys().any(|(place, _)| *place == p.id))
-                .filter(|p| {
-                    let last = status.checks.iter().rev().find(|c| c.place == p.id);
-                    let next = last.map_or(0, |c| c.time + if c.error.is_some() { CHECK_AGAIN } else { CHECK_EVERY });
-                    match p.device {
-                        Some(d) => d == me && now >= next,
-                        None => line(m, &Scope::Global, &format!("{}/check", p.id)).iter().position(|k| *k == me).is_some_and(|at| now >= next && b::takes_over(at, Some(next), 0, now)),
-                    }
-                })
-                .map(|p| p.id)
-                .collect())
+            let mut due = Vec::new();
+            for p in places(i)?.into_iter().filter(|p| status.covered.keys().any(|(place, _)| *place == p.id)) {
+                let last = status.checks.iter().rev().find(|c| c.place == p.id);
+                let next = last.map_or(0, |c| c.time + if c.error.is_some() { CHECK_AGAIN } else { CHECK_EVERY });
+                let is_due = match p.device {
+                    Some(d) => d == me && now >= next,
+                    None => line(m, &Scope::Global, &format!("{}/check", p.id))?.iter().position(|k| *k == me).is_some_and(|at| now >= next && b::takes_over(at, Some(next), 0, now)),
+                };
+                if is_due {
+                    due.push(p.id);
+                }
+            }
+            Ok(due)
         })?;
         if !due.is_empty() {
             self.check_places(Some(&due)).await?;
@@ -719,7 +729,7 @@ impl Node {
         let epochs = self.held_epochs().await;
         let (network, places, root) = self.with(|i| {
             ensure!(i.views.contains_key("global"), "no network");
-            let places: Vec<(String, String, Place)> = places(i).into_iter().filter(|p| only.is_none_or(|o| o.contains(&p.id))).filter_map(|p| Some((p.id, p.title, p.place.ok()?))).filter(|(_, _, p)| p.present()).collect();
+            let places: Vec<(String, String, Place)> = places(i)?.into_iter().filter(|p| only.is_none_or(|o| o.contains(&p.id))).filter_map(|p| Some((p.id, p.title, p.place.ok()?))).filter(|(_, _, p)| p.present()).collect();
             Ok((i.r.root().map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root()))
         })?;
         let bucket = self.bucket().ok();
@@ -739,7 +749,7 @@ impl Node {
                         problems.extend(b::check_databases(&place, &network, &r.snapshot, keys, bucket.as_ref()).await.into_iter().map(Value::from));
                     }
                     // Each says whose data it's about by its scope; people read their names.
-                    let named: Vec<(String, String)> = self.with(|i| Ok(epochs.keys().map(|s| (s.clone(), scope_name(i, s))).collect()))?;
+                    let named: Vec<(String, String)> = self.with(|i| epochs.keys().map(|s| Ok((s.clone(), scope_name(i, s)?))).collect())?;
                     for p in problems.iter_mut() {
                         let t = p.as_str().unwrap_or("");
                         let renamed = named.iter().find(|(s, _)| t.strip_prefix(s.as_str()).is_some_and(|r| r.starts_with([' ', ':']))).map(|(s, n)| format!("{n}{}", &t[s.len()..]));
@@ -753,9 +763,9 @@ impl Node {
                     });
                     report["problems"] = json!(problems);
                     let unchecked: Vec<String> = report["unchecked"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-                    report["unchecked"] = json!(self.with(|i| Ok(unchecked.iter().map(|s| scope_name(i, s)).collect::<Vec<_>>()))?);
+                    report["unchecked"] = json!(self.with(|i| unchecked.iter().map(|s| scope_name(i, s)).collect::<Result<Vec<_>>>())?);
                     for s in report["scopes"].as_array_mut().into_iter().flatten() {
-                        s["name"] = json!(self.with(|i| Ok(scope_name(i, s["scope"].as_str().unwrap_or(""))))?);
+                        s["name"] = json!(self.with(|i| scope_name(i, s["scope"].as_str().unwrap_or("")))?);
                     }
                     (report, error)
                 }
@@ -796,10 +806,10 @@ impl Node {
 /// The blobs `global`'s releases name (`ScopeDb::releases`): every one, which a backup needn't keep, since releases can
 /// be fetched again from where they're published; and the newest of each platform's (and each service's), which it
 /// keeps, so a custom build with no published releases can still recover.
-fn release_blobs(db: &ScopeDb) -> (BTreeSet<String>, BTreeSet<String>) {
+fn release_blobs(db: &ScopeDb) -> Result<(BTreeSet<String>, BTreeSet<String>)> {
     let mut newest: BTreeMap<String, (u64, String)> = BTreeMap::new();
     let mut all = BTreeSet::new();
-    for (c, _, time) in db.releases() {
+    for (c, _, time) in db.releases()? {
         all.extend(c.blobs.iter().cloned());
         let target = format!("{} {}", c.data["target"].as_str().unwrap_or(""), c.data["service"].as_str().unwrap_or(""));
         if let Some(blob) = c.blobs.first()
@@ -808,7 +818,7 @@ fn release_blobs(db: &ScopeDb) -> (BTreeSet<String>, BTreeSet<String>) {
             newest.insert(target, (time, blob.clone()));
         }
     }
-    (all, newest.into_values().map(|(_, b)| b).collect())
+    Ok((all, newest.into_values().map(|(_, b)| b).collect()))
 }
 
 /// The disks plugged into this machine, where a folder place could go: each one's name, folder and free space.

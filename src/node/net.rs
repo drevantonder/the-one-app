@@ -135,7 +135,7 @@ impl Node {
             return;
         }
         self.tell_removed();
-        let wanted = self.with(|i| Ok(i.r.db().compute(&self.0.id).and(i.r.db().setting("address")))).ok().flatten();
+        let wanted = self.with_or(None, |i| Ok(i.r.db().compute(&self.0.id)?.and(i.r.db().setting("address")?)));
         let mut task = self.0.net.task.lock().unwrap();
         if task.as_ref().map(|(a, _)| a) == wanted.as_ref() {
             return;
@@ -215,7 +215,7 @@ impl Node {
             return;
         }
         let Some((since, n)) = *self.0.net.bound.lock().unwrap() else { return };
-        let Ok((others, heard)) = self.with(|i| Ok((i.r.db().computes().iter().filter(|c| c.key != self.0.id).count(), i.peers.values().map(|p| p.seen).max()))) else { return };
+        let Ok((others, heard)) = self.with(|i| Ok((i.r.db().computes()?.iter().filter(|c| c.key != self.0.id).count(), i.peers.values().map(|p| p.seen).max()))) else { return };
         if heard.is_some_and(|h| h > since) {
             if n > 0 {
                 tracing::info!("this device hears from other devices again");
@@ -572,16 +572,16 @@ impl Node {
     }
 
     fn is_device(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.db().compute(key).is_some())).unwrap_or(false)
+        self.with_or(false, |i| Ok(i.r.db().compute(key)?.is_some()))
     }
 
     pub(super) fn is_service(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.db().service(key).is_some())).unwrap_or(false)
+        self.with_or(false, |i| Ok(i.r.db().service(key)?.is_some()))
     }
 
     /// Whether `key` is the network's Cloudflare node's endpoint, as `cloudflare node deploy` set it.
     fn is_cloudflare_node(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.db().setting(crate::database::scopes::CLOUDFLARE_NODE).is_some_and(|k| k == hex(key)))).unwrap_or(false)
+        self.with_or(false, |i| Ok(i.r.db().setting(crate::database::scopes::CLOUDFLARE_NODE)?.is_some_and(|k| k == hex(key))))
     }
 
     /// Closes the connections of devices the network no longer lists: client devices' to the local API, and those
@@ -592,8 +592,22 @@ impl Node {
             .with(|i| {
                 let m = i.r.db();
                 // A session's endpoint, listed nowhere, is cut off at its next request instead.
-                Ok((clients.into_iter().filter(|k| m.machine_ever(k).is_some() && m.client(k).is_none()).collect(), held.into_iter().filter(|k| m.compute(k).is_none() && m.service(k).is_none() && m.setting(crate::database::scopes::CLOUDFLARE_NODE).is_none_or(|s| s != hex(k))).collect()))
+                let mut gone_clients = Vec::new();
+                for k in clients {
+                    if m.machine_ever(&k)?.is_some() && m.client(&k)?.is_none() {
+                        gone_clients.push(k);
+                    }
+                }
+                let mut gone_held = Vec::new();
+                for k in held {
+                    if m.compute(&k)?.is_none() && m.service(&k)?.is_none() && m.setting(crate::database::scopes::CLOUDFLARE_NODE)?.is_none_or(|s| s != hex(&k)) {
+                        gone_held.push(k);
+                    }
+                }
+                Ok((gone_clients, gone_held))
             })
+            // What can't be read closes nothing; the next look tries again.
+            .inspect_err(|err| tracing::warn!("closing removed devices' connections: {err:#}"))
             .unwrap_or_default();
         for key in gone_clients {
             for (conn, _) in self.0.net.clients.lock().unwrap().remove(&key).unwrap_or_default() {
@@ -733,7 +747,7 @@ impl Node {
             loop {
                 let read = crate::database::steps::read(&bucket, &keys, &Scope::Global, steps.len() as u64).await?;
                 steps.extend(read.steps.iter().cloned());
-                if !read.junk_at_end(self.with(|i| Ok(i.r.epoch_made(&Scope::Global)))?) {
+                if !read.junk_at_end(self.with(|i| i.r.epoch_made(&Scope::Global))?) {
                     break;
                 }
                 steps.push(None);
@@ -808,8 +822,8 @@ impl Node {
     fn tell_removed(&self) {
         let Ok(removed) = self.with(|i| {
             let m = i.r.db();
-            let mine = m.machine(&self.0.id).is_some_and(|me| m.may(&me.user, "invite", scopes::NETWORK));
-            Ok(if mine { m.machines().into_iter().filter(|d| d.removed).map(|d| d.key).collect::<Vec<Key>>() } else { Vec::new() })
+            let mine = m.machine(&self.0.id)?.is_some_and(|me| m.may(&me.user, "invite", scopes::NETWORK));
+            Ok(if mine { m.machines()?.into_iter().filter(|d| d.removed).map(|d| d.key).collect::<Vec<Key>>() } else { Vec::new() })
         }) else {
             return;
         };
@@ -824,7 +838,7 @@ impl Node {
     /// Tells the relay at the network's address something, signed by this device: a device it admitted (`add`), or a
     /// pairing code it made (`pairing`, the hash of its ticket, and `until`). Tried a few times, in the background.
     pub(super) fn tell_relay(&self, fields: Value) {
-        let Some(address) = self.with(|i| Ok(i.r.db().setting("address"))).ok().flatten() else {
+        let Some(address) = self.with_or(None, |i| Ok(i.r.db().setting("address")?)) else {
             return tracing::debug!("telling the relay: {YOURS} has no address yet");
         };
         let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());

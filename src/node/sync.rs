@@ -10,7 +10,7 @@ impl Node {
     /// Reads what each scope this device holds has in the bucket after what it last read, `global` first, until it
     /// holds no scope it didn't.
     pub(super) async fn read_scopes(&self) -> Result<()> {
-        let held = || self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<Scope>>()));
+        let held = || self.with(|i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<Scope>>()));
         let mut read: Vec<Scope> = Vec::new();
         loop {
             let mut scopes: Vec<Scope> = held()?.into_iter().filter(|s| !read.contains(s)).collect();
@@ -46,7 +46,7 @@ impl Node {
                 self.first_global_read().await?;
             }
             self.read_steps_now().await?;
-        } else if self.with(|i| Ok(i.r.db().epoch(scope)))? > 0 {
+        } else if self.with(|i| Ok(i.r.db().epoch(scope)?))? > 0 {
             self.read_scope_steps_now(scope).await?;
         }
         Ok(())
@@ -55,7 +55,7 @@ impl Node {
     /// The keys a scope's database's steps are sealed with in the bucket, by epoch. Of one this
     /// device runs but doesn't open, those a caller who does handed it.
     pub(super) async fn step_keys(&self, scope: &Scope) -> Result<crate::database::stored::Keys> {
-        if !self.with(|i| Ok(self.opens(i.r.db(), scope)))? {
+        if !self.with(|i| self.opens(i.r.db(), scope))? {
             return self.handed_step_keys(scope).await;
         }
         self.database_keys(scope, scopes::APP, crate::database::steps::NAME, false).await
@@ -73,7 +73,7 @@ impl Node {
     pub(super) fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
         let Ok(devices) = self.with(|i| {
             let m = i.r.db();
-            Ok(m.computes().into_iter().filter(|s| s.key != self.0.id && m.runs_for(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
+            Ok(m.computes()?.into_iter().filter(|s| s.key != self.0.id && m.runs_for(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
         }) else {
             return;
         };
@@ -204,8 +204,8 @@ impl Node {
     /// the round trip iroh measures to it.
     pub(super) fn say_hello(&self) {
         let Ok((devices, services, parts)) = self.with(|i| {
-            let devices: Vec<Key> = i.r.db().computes().into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((devices, self.services_here(i), self.parts_here(i)))
+            let devices: Vec<Key> = i.r.db().computes()?.into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect();
+            Ok((devices, self.services_here(i)?, self.parts_here(i)?))
         }) else {
             return;
         };
@@ -229,10 +229,16 @@ impl Node {
         // serves everyone, those the device serves.
         self.with(|i| {
             let m = i.r.db();
-            let owner = m.compute(from).map(|c| c.user).unwrap_or_default();
+            let owner = m.compute(from)?.map(|c| c.user).unwrap_or_default();
             for (_, users, describe) in &mut services {
                 let everyone = describe["serves"] == "everyone";
-                users.retain(|u| *u == owner || (everyone && m.serves(from, u)));
+                let mut serves = Vec::new();
+                for u in users.iter() {
+                    if *u == owner || (everyone && m.serves(from, u)?) {
+                        serves.push(u.clone());
+                    }
+                }
+                *users = serves;
             }
             Ok(())
         })?;
@@ -263,7 +269,15 @@ impl Node {
     /// Says hello to each service endpoint of the network, which says what it offers and whom it serves: it's listed
     /// as a device offering that service, as another device's hello lists those there.
     pub(super) fn hello_services(&self) {
-        let Ok(services) = self.with(|i| Ok(i.r.db().machines().into_iter().filter(|m| i.r.db().service(&m.key).is_some()).map(|m| (m.key, m.service.clone().unwrap_or_default())).collect::<Vec<_>>())) else {
+        let Ok(services) = self.with(|i| {
+            let mut services = Vec::new();
+            for m in i.r.db().machines()? {
+                if i.r.db().service(&m.key)?.is_some() {
+                    services.push((m.key, m.service.clone().unwrap_or_default()));
+                }
+            }
+            Ok(services)
+        }) else {
             return;
         };
         for (key, _) in services {
@@ -278,7 +292,7 @@ impl Node {
     /// answered as one that takes this device's calls.
     pub(super) async fn hello_service_now(&self, key: &Key) -> bool {
         let key = *key;
-        let Some(name) = self.with(|i| Ok(i.r.db().machine_ever(&key).and_then(|m| m.service.clone()))).ok().flatten() else { return false };
+        let Some(name) = self.with_or(None, |i| Ok(i.r.db().machine_ever(&key)?.and_then(|m| m.service.clone()))) else { return false };
         let offers = match self.hello_service(key).await {
             Ok(Some(offers)) => offers,
             Ok(None) => {
@@ -292,7 +306,7 @@ impl Node {
         };
         let (describe, _) = offers;
         // Whom it serves is what its listing says, never what it says of itself.
-        let users: Vec<String> = self.with(|i| { let m = i.r.db(); Ok(m.users().into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&key))).collect()) }).unwrap_or_default();
+        let users: Vec<String> = self.with_or(Default::default(), |i| { let m = i.r.db(); Ok(m.users()?.into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&key))).collect()) });
         self.learn_app(&name).await;
         let services: Vec<Service> = vec![(name.clone(), users, self.listed_as_app(&name, describe))];
         let far = self.round_trip(&key);

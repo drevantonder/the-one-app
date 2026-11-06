@@ -8,16 +8,16 @@ const BADGE_LIMIT: Duration = Duration::from_secs(5);
 
 impl Node {
     pub(super) fn me_for(&self, caller: &Caller) -> Result<Me> {
-        self.with(|i| Ok(node_me(self, i.r.db(), caller)))
+        self.with(|i| node_me(self, i.r.db(), caller))
     }
 
     /// The context a widget, hook or screen of `app` gets for `viewer`: every scope it may reach that's here.
     pub(super) fn read_context(&self, app: &str, viewer: &Caller) -> Result<Context> {
         let me = self.me_for(viewer)?;
         self.with(|i| {
-            let reach = reachable(i, app, &viewer.user);
+            let reach = reachable(i, app, &viewer.user)?;
             let scopes: Vec<Scope> = reach.into_iter().filter(|s| i.r.holds(s)).collect();
-            Ok(Context { me, now: now_ms(), scopes: handles(i.r.db(), &scopes, &viewer.user), read_only: true, token: String::new(), from: None, address: super::calls::address(i.r.db()), handles: i.r.db().handles(), labs: crate::labs::on_keys(&i.r.db().settings()) })
+            Ok(Context { me, now: now_ms(), scopes: handles(i.r.db(), &scopes, &viewer.user)?, read_only: true, token: String::new(), from: None, address: super::calls::address(i.r.db())?, handles: i.r.db().handles()?, labs: crate::labs::on_keys(&i.r.db().settings()?) })
         })
     }
 
@@ -137,7 +137,7 @@ impl Node {
     /// An app screen as a whole page: the app's HTML with the design kit, the bridge, and who's looking.
     /// `scope` is the page a shell opened it from, a hint the app may follow or not.
     pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>, linked: bool) -> Result<String> {
-        let deployed = self.with(|i| Ok(i.r.db().app(app).is_some_and(|a| a.bundle.is_some())))?;
+        let deployed = self.with(|i| Ok(i.r.db().app(app)?.is_some_and(|a| a.bundle.is_some())))?;
         // A screen the app doesn't have (an old or mistyped link), or an app not deployed here, is a page that says so.
         let body = if deployed { self.0.apps.screen(app, name).await?.unwrap_or_default() } else { String::new() };
         self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, false, linked)

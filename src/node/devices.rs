@@ -44,9 +44,9 @@ pub(super) struct Owed {
 /// client or a service only from their own devices (`add-devices`), a machine that runs calls also by an admin
 /// (`add-machines`), which runs only what that admin's listing may, never their own scope. The rows give the verbs;
 /// which kind of device takes which is its rule's.
-pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[scopes::Kind]) -> bool {
+pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[scopes::Kind]) -> Result<bool> {
     let theirs = kinds.iter().any(|k| matches!(k, scopes::Kind::Client | scopes::Kind::Service));
-    db.user(user).is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::person(user))
+    Ok(db.user(user)?.is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::person(user)))
 }
 
 /// How often a client of its person's looks for their new devices whose sign-in lets them in.
@@ -66,8 +66,12 @@ pub(super) struct SignIns {
 }
 
 /// Whether `user` may start a scope's new epoch: they may `remove` from it, and it's a group that's there.
-fn starts_epochs(db: &ScopeDb, user: &str, scope: &Scope) -> bool {
-    !matches!(scope, Scope::Group(g) if db.group(g).is_none()) && db.may(user, "remove", &scopes::object(scope))
+fn starts_epochs(db: &ScopeDb, user: &str, scope: &Scope) -> Result<bool> {
+    let gone = match scope {
+        Scope::Group(g) => db.group(g)?.is_none(),
+        _ => false,
+    };
+    Ok(!gone && db.may(user, "remove", &scopes::object(scope)))
 }
 
 impl Node {
@@ -133,16 +137,16 @@ impl Node {
                     let db = i.r.db();
                     ensure!(db.may(&caller.user, "use", &scopes::object(scope)), "you don't use {scope}");
                     ensure!(n >= 1 && n <= newest + 1, "{scope} has no epoch {n}: its newest is {newest}");
-                    ensure!(n <= newest || starts_epochs(db, &caller.user, scope), "only {scope}'s admins start its new epoch");
+                    ensure!(n <= newest || starts_epochs(db, &caller.user, scope)?, "only {scope}'s admins start its new epoch");
                     match to {
-                        "recovery" => ensure!(starts_epochs(db, &caller.user, scope), "only {scope}'s admins seal its keys to the recovery key"),
+                        "recovery" => ensure!(starts_epochs(db, &caller.user, scope)?, "only {scope}'s admins seal its keys to the recovery key"),
                         to => {
                             let key = crate::keys::unhex(to)?;
                             // A scope's epochs are its people's client devices' alone: a node is handed a call's keys,
                             // and a service holds none, reading nothing and asking its person's node to write.
-                            let listed = db.client(&key).context("a scope's keys are sealed only to client devices and the recovery key")?;
+                            let listed = db.client(&key)?.context("a scope's keys are sealed only to client devices and the recovery key")?;
                             ensure!(db.may(&listed.user, "use", &scopes::object(scope)), "that endpoint's person doesn't use {scope}");
-                            ensure!(db.service(&key).is_none(), "a service is sealed no keys");
+                            ensure!(db.service(&key)?.is_none(), "a service is sealed no keys");
                         }
                     }
                     Ok(())
@@ -167,7 +171,7 @@ impl Node {
                 self.with(|i| {
                     let db = i.r.db();
                     ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
-                    ensure!(db.machine(&key).is_some(), "that endpoint isn't one of the network's");
+                    ensure!(db.machine(&key)?.is_some(), "that endpoint isn't one of the network's");
                     Ok(())
                 })?;
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
@@ -263,7 +267,7 @@ fn code_of(typed: &str) -> String {
 impl Node {
     /// The network's address, where people sign in.
     pub fn address(&self) -> Result<String> {
-        self.with(|i| Ok(super::calls::address(i.r.db())))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
+        self.with(|i| super::calls::address(i.r.db()))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
     }
 
     /// Asks the network's sign-in something as this device, signed with its key (`one/auth`): a POST's body is
@@ -295,9 +299,9 @@ impl Node {
     pub(super) fn follow_recovery(&self) {
         let told = self.with(|i| {
             let db = i.r.db();
-            let admins = db.machine(&self.0.id).is_some_and(|d| db.may(&d.user, "invite", scopes::NETWORK));
-            let was = db.recovery_was();
-            Ok(db.recovery().filter(|_| admins && !was.is_empty()).map(|now| (now, was)))
+            let admins = db.machine(&self.0.id)?.is_some_and(|d| db.may(&d.user, "invite", scopes::NETWORK));
+            let was = db.recovery_was()?;
+            Ok(db.recovery()?.filter(|_| admins && !was.is_empty()).map(|now| (now, was)))
         });
         let Ok(Some((now, was))) = told else { return };
         let mut done = self.0.recovery_told.lock().unwrap();
@@ -458,25 +462,25 @@ impl Node {
     pub async fn approve_with_recovery(&self, caller: &Caller, code: &str, recovery: &ed25519_dalek::SigningKey, confirm: bool) -> Result<Value> {
         ensure!(self.this_machine(caller), "the recovery key is used only on the machine it's kept on");
         let at = recovery.verifying_key().to_bytes();
-        ensure!(self.with(|i| Ok(i.r.db().recovery() == Some(at)))?, "that isn't {YOURS}'s recovery key");
+        ensure!(self.with(|i| Ok(i.r.db().recovery()? == Some(at)))?, "that isn't {YOURS}'s recovery key");
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("sign-in's requests aren't requests")?;
         let r = waiting(asked, &code)?;
         ensure!(r.proof.is_none(), "the recovery key lets in a device of someone already in {YOURS}");
-        let person = self.with(|i| Ok(i.r.db().user(&r.user).map(|u| u.name)))?.with_context(|| format!("the recovery key lets in a device of someone already in {YOURS}"))?;
+        let person = self.with(|i| Ok(i.r.db().user(&r.user)?.map(|u| u.name)))?.with_context(|| format!("the recovery key lets in a device of someone already in {YOURS}"))?;
         if !confirm {
             return Ok(json!({ "device": r.name, "person": person, "recovery": true }));
         }
         let endpoint = r.endpoint()?;
         self.read_scope_now(&Scope::Global).await?;
         // Listed already by an approval that didn't finish: the rest is done again, each step once.
-        if !self.with(|i| Ok(i.r.db().client(&endpoint.key).is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))? {
+        if !self.with(|i| Ok(i.r.db().client(&endpoint.key)?.is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))? {
             self.write_step_as(recovery, &r.user, content::device(&endpoint, &r.user, &r.name, &[scopes::Kind::Client], None)).await?;
         }
         let relay = self.tell_relay_as(recovery.clone(), json!({ "add": r.key, "role": "client" })).await.err().map(|err| format!("{err:#}"));
-        let scopes: Vec<Scope> = self.with(|i| Ok(i.r.db().may_scopes(&r.user, "use")))?;
+        let scopes: Vec<Scope> = self.with(|i| Ok(i.r.db().may_scopes(&r.user, "use")?))?;
         let (mut sealed, mut not) = (Vec::new(), Vec::new());
         for scope in scopes {
             match self.seal_from_recovery(&scope, recovery, &endpoint).await {
@@ -506,7 +510,7 @@ impl Node {
     /// → how many it opened.
     async fn seal_from_recovery(&self, scope: &Scope, recovery: &ed25519_dalek::SigningKey, to: &crate::keys::Endpoint) -> Result<usize> {
         let (bucket, name) = (self.bucket()?, scope.to_string());
-        let hashes: BTreeMap<u32, String> = self.with(|i| Ok(i.r.db().epoch_hashes(scope)))?;
+        let hashes: BTreeMap<u32, String> = self.with(|i| Ok(i.r.db().epoch_hashes(scope)?))?;
         let secret = crate::keys::seal_secret(recovery);
         let mut opened = 0;
         for (n, hash) in hashes {
@@ -589,7 +593,7 @@ impl Node {
             listed.data["place"] = json!(place);
         }
         // Approved before, but its request wasn't marked so (the device still waits on it): what's left is done again.
-        let already = self.with(|i| Ok(i.r.db().client(&endpoint.key).is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))?;
+        let already = self.with(|i| Ok(i.r.db().client(&endpoint.key)?.is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))?;
         if !already {
             self.member_content(caller, listed).await?;
         }
@@ -597,7 +601,7 @@ impl Node {
         // keep their keys.
         if let Some(on) = on {
             let before: Vec<Key> = self.with(|i| {
-                Ok(i.r.db().clients().into_iter().filter(|c| c.user == r.user && c.device == Some(on) && c.key != endpoint.key && c.passkey.is_none()).map(|c| c.key).collect())
+                Ok(i.r.db().clients()?.into_iter().filter(|c| c.user == r.user && c.device == Some(on) && c.key != endpoint.key && c.passkey.is_none()).map(|c| c.key).collect())
             })?;
             for old in before {
                 if let Err(err) = self.tell_relay_now(json!({ "remove": hex(&old) })).await {
@@ -614,7 +618,7 @@ impl Node {
         }
         let scopes: Vec<Scope> = self.with(|i| {
             let db = i.r.db();
-            Ok(db.may_scopes(&r.user, "use").into_iter().filter(|s| invite.is_none() || *s != Scope::User(r.user.clone())).collect())
+            Ok(db.may_scopes(&r.user, "use")?.into_iter().filter(|s| invite.is_none() || *s != Scope::User(r.user.clone())).collect())
         })?;
         let (mut sealed, mut not) = (Vec::new(), Vec::new());
         for scope in scopes {
@@ -659,13 +663,13 @@ impl Node {
         let address = self.address()?;
         self.with(|i| {
             let root = i.r.root().with_context(|| format!("this device isn't in {YOURS} yet"))?;
-            Ok(crate::sign_in_proof::Network::new(&address, *root.as_bytes(), i.r.db().setting(crate::sign_in_proof::CLIENTS).as_deref()))
+            Ok(crate::sign_in_proof::Network::new(&address, *root.as_bytes(), i.r.db().setting(crate::sign_in_proof::CLIENTS)?.as_deref()))
         })
     }
 
     /// Whether `key` was listed and taken out, or turned down before it was: never let in again.
     fn taken_out(&self, key: &Key) -> Result<bool> {
-        self.with(|i| Ok(i.r.db().machine_ever(key).is_some_and(|m| m.removed)))
+        self.with(|i| Ok(i.r.db().machine_ever(key)?.is_some_and(|m| m.removed)))
     }
 
     /// Forgets what one of `caller`'s devices (`key`, hex) signed in with: a new device's sign-in is no longer checked
@@ -673,7 +677,7 @@ impl Node {
     pub async fn forget_sign_in(&self, caller: &Caller, key: &str) -> Result<()> {
         ensure!(caller.user == self.user()?, "{} isn't one of your devices, so do this on one that is", self.device_name());
         let key = crate::keys::unhex(key).context("a device's key is 64 hex characters")?;
-        let theirs = self.with(|i| Ok(i.r.db().machine(&key).is_some_and(|m| m.user == caller.user && m.sign_in.is_some())))?;
+        let theirs = self.with(|i| Ok(i.r.db().machine(&key)?.is_some_and(|m| m.user == caller.user && m.sign_in.is_some())))?;
         ensure!(theirs, "that isn't one of your devices with a sign-in to forget");
         self.member_content(caller, content::forget_sign_in(&key)).await
     }
@@ -707,7 +711,7 @@ impl Node {
     }
 
     async fn approve_by_sign_in(&self) -> Result<()> {
-        let me = self.with(|i| Ok(i.r.db().client(&self.0.id).map(|c| c.user)))?;
+        let me = self.with(|i| Ok(i.r.db().client(&self.0.id)?.map(|c| c.user)))?;
         let Some(user) = me else { return Ok(()) };
         if self.address().is_err() {
             return Ok(());
@@ -716,7 +720,7 @@ impl Node {
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("sign-in's requests aren't requests")?;
         let theirs = asked.into_iter().filter(|r| r.user == user && r.proof.is_none() && r.sign_in.is_some());
         for r in theirs {
-            let accounts = self.with(|i| Ok(i.r.db().sign_ins(&user)))?;
+            let accounts = self.with(|i| Ok(i.r.db().sign_ins(&user)?))?;
             // Checked once against the accounts they have now, and again if those change.
             let tried = format!("{} {}", r.key, json!(accounts));
             let done = self.0.refused.lock().unwrap().contains(&r.key) || self.0.sign_ins.lock().unwrap().refused.contains(&tried) || r.endpoint().ok().is_none_or(|d| self.taken_out(&d.key).unwrap_or(true));
@@ -757,8 +761,8 @@ impl Node {
         let caller = Caller::own(self.0.id, user.clone());
         let listed = self.with(|i| {
             let db = i.r.db();
-            ensure!(db.service(&endpoint.key).is_some() || db.machine_ever(&endpoint.key).is_none(), "that key is listed already, and not as a service");
-            Ok(db.service(&endpoint.key).map(|s| s.device == Some(self.0.id)))
+            ensure!(db.service(&endpoint.key)?.is_some() || db.machine_ever(&endpoint.key)?.is_none(), "that key is listed already, and not as a service");
+            Ok(db.service(&endpoint.key)?.map(|s| s.device == Some(self.0.id)))
         })?;
         if listed.is_none() {
             // Told first: a service the relay won't let in is never reached.
@@ -802,14 +806,14 @@ impl Node {
     /// data, WhatsApp's link among them), then stops. Removing it next takes it out. → what's erasing.
     pub async fn erase(&self, caller: &Caller, device: &str) -> Result<Value> {
         let key = self.find_machine(device)?;
-        let name = self.with(|i| Ok(i.r.db().machine(&key).map(|d| d.name).unwrap_or_default()))?;
+        let name = self.with(|i| Ok(i.r.db().machine(&key)?.map(|d| d.name).unwrap_or_default()))?;
         if key != self.0.id {
             ensure!(self.with(|i| Ok(i.online(&key)))?, "{name} isn't on, so it can't erase what it keeps");
             return Err(super::calls::Elsewhere { why: format!("only {name} erases what it keeps"), nodes: vec![hex(&key)] }.into());
         }
         self.with(|i| {
             let db = i.r.db();
-            ensure!(caller.key != self.0.id && db.client(&caller.key).is_some() && db.may(&caller.user, "remove", &scopes::device(&key)), "only {name}'s person or an admin erases it, from another of their devices");
+            ensure!(caller.key != self.0.id && db.client(&caller.key)?.is_some() && db.may(&caller.user, "remove", &scopes::device(&key)), "only {name}'s person or an admin erases it, from another of their devices");
             Ok(())
         })?;
         tracing::warn!("asked to erase what {name} keeps: its oned does, then stops");
@@ -829,11 +833,15 @@ impl Node {
         let key = self.find_machine(device)?;
         let (gone, keys, scopes) = self.with(|i| {
             let db = i.r.db();
-            let d = db.machine(&key).context("no such device")?;
+            let d = db.machine(&key)?.context("no such device")?;
             ensure!(db.may(&caller.user, "remove", &scopes::device(&key)), "only its person or an admin removes a device");
-            let keys: Vec<Key> = std::iter::once(key).chain(db.machines().into_iter().filter(|e| e.device == Some(key) && e.key != key && !e.removed).map(|e| e.key)).collect();
-            let opens = |s: &Scope| keys.iter().filter_map(|k| db.machine(k)).any(|d| d.is(scopes::Kind::Client) && db.may(&d.user, "use", &scopes::object(s)));
-            Ok((d.name, keys.clone(), db.scopes().into_iter().filter(opens).collect::<Vec<_>>()))
+            let keys: Vec<Key> = std::iter::once(key).chain(db.machines()?.into_iter().filter(|e| e.device == Some(key) && e.key != key && !e.removed).map(|e| e.key)).collect();
+            let mut listed = Vec::new();
+            for k in &keys {
+                listed.extend(db.machine(k)?);
+            }
+            let opens = |s: &Scope| listed.iter().any(|d| d.is(scopes::Kind::Client) && db.may(&d.user, "use", &scopes::object(s)));
+            Ok((d.name, keys.clone(), db.scopes()?.into_iter().filter(opens).collect::<Vec<_>>()))
         })?;
         ensure!(!keys.contains(&self.0.id), "{gone} is this device: remove it from another of your devices");
         // A device taking itself out (signing out) is told last: off the relay, it hears no answer, so everything else is done.
@@ -872,10 +880,10 @@ impl Node {
             let db = i.r.db();
             ensure!(db.may(&caller.user, "remove", scopes::NETWORK), "only admins remove someone");
             ensure!(user != caller.user, "you can't remove yourself: another admin can");
-            let name = db.user(&user).context("no such person")?.name;
-            let keys: Vec<Key> = db.machines().into_iter().filter(|d| d.user == user && !d.removed).map(|d| d.key).collect();
+            let name = db.user(&user)?.context("no such person")?.name;
+            let keys: Vec<Key> = db.machines()?.into_iter().filter(|d| d.user == user && !d.removed).map(|d| d.key).collect();
             let mut scopes = vec![Scope::Global];
-            scopes.extend(db.groups_of(&user).into_keys().map(Scope::Group));
+            scopes.extend(db.groups_of(&user)?.into_keys().map(Scope::Group));
             Ok((name, keys, scopes))
         })?;
         ensure!(!keys.contains(&self.0.id), "this device is {name}'s: remove them from another");
@@ -894,7 +902,7 @@ impl Node {
     async fn renew(&self, caller: &Caller, scopes: Vec<Scope>) -> (Vec<Value>, Vec<String>) {
         let (mut renewed, mut left) = (Vec::new(), Vec::new());
         for scope in scopes {
-            if !self.with(|i| Ok(starts_epochs(i.r.db(), &caller.user, &scope))).unwrap_or(false) {
+            if !self.with_or(false, |i| starts_epochs(i.r.db(), &caller.user, &scope)) {
                 left.push(self.whose(&scope));
                 continue;
             }
@@ -913,19 +921,36 @@ impl Node {
     /// once one has been owed at two looks in a row, so a removal's own new epoch, and every seal, goes first.
     pub(super) fn start_owed_keys(&self) {
         let Ok(me) = self.user() else { return };
-        let (mut owed, listed, vaults) = self
+        let owing = self
             .with(|i| {
                 let db = i.r.db();
-                if db.client(&self.0.id).is_none_or(|c| c.user != me) {
+                if db.client(&self.0.id)?.is_none_or(|c| c.user != me) {
                     return Ok(Default::default());
                 }
-                let owed: BTreeSet<Owing> = db.owed().into_iter().filter(|s| starts_epochs(db, &me, s)).map(Owing::Epoch).collect();
-                let epochs = db.epochs().into_iter().filter(|(s, _)| db.sealed_to(s).contains(&self.0.id) && starts_epochs(db, &me, s)).map(|(s, n)| (Owing::Epoch(s), n));
-                let vaults: BTreeMap<Scope, (u32, Vec<Key>)> = db.vaults().into_iter().filter(|(s, v)| v.to.contains(&self.0.id) && db.may(&me, "choose-devices", &scopes::object(s))).map(|(s, v)| (s, (v.n, v.to))).collect();
-                let listed: Vec<(Owing, u32)> = epochs.chain(vaults.iter().map(|(s, (n, _))| (Owing::Vault(s.clone()), *n))).collect();
-                Ok((owed, listed, (vaults, db.recovery())))
-            })
-            .unwrap_or_default();
+                let mut owed = BTreeSet::new();
+                for s in db.owed()? {
+                    if starts_epochs(db, &me, &s)? {
+                        owed.insert(Owing::Epoch(s));
+                    }
+                }
+                let mut epochs = Vec::new();
+                for (s, n) in db.epochs()? {
+                    if db.sealed_to(&s)?.contains(&self.0.id) && starts_epochs(db, &me, &s)? {
+                        epochs.push((Owing::Epoch(s), n));
+                    }
+                }
+                let vaults: BTreeMap<Scope, (u32, Vec<Key>)> = db.vaults()?.into_iter().filter(|(s, v)| v.to.contains(&self.0.id) && db.may(&me, "choose-devices", &scopes::object(s))).map(|(s, v)| (s, (v.n, v.to))).collect();
+                let listed: Vec<(Owing, u32)> = epochs.into_iter().chain(vaults.iter().map(|(s, (n, _))| (Owing::Vault(s.clone()), *n))).collect();
+                Ok((owed, listed, (vaults, db.recovery()?)))
+            });
+        // A failed look is tried again at the next, which comes on its own.
+        let (mut owed, listed, vaults) = match owing {
+            Ok(owing) => owing,
+            Err(err) => {
+                tracing::warn!("looking for epochs this device owes: {err:#}");
+                return;
+            }
+        };
         let (due, unsure) = {
             let mut held = self.0.owed.lock().unwrap();
             owed.extend(held.unsealed.iter().filter(|e| listed.contains(e)).map(|(o, _)| o.clone()));
@@ -982,10 +1007,10 @@ impl Node {
             let todo = node.with(|i| {
                 let db = i.r.db();
                 let me = i.user.clone();
-                if db.client(&node.0.id).is_none_or(|c| c.user != me) || db.epoch(&Scope::User(me.clone())) > 0 {
+                if db.client(&node.0.id)?.is_none_or(|c| c.user != me) || db.epoch(&Scope::User(me.clone()))? > 0 {
                     return Ok(None);
                 }
-                Ok(Some((me.clone(), db.runs_until_chosen(&me))))
+                Ok(Some((me.clone(), db.runs_until_chosen(&me)?)))
             });
             let Ok(Some((me, on))) = todo else { return };
             if !on.is_empty()
@@ -1004,8 +1029,8 @@ impl Node {
         self.with(|i| {
             Ok(match scope {
                 Scope::Global => "everyone's".to_string(),
-                Scope::User(u) => format!("{}'s own", Some(super::whose(i.r.db(), scope)).filter(|n| !n.is_empty()).unwrap_or(u.clone())),
-                Scope::Group(g) => format!("{}'s", Some(super::whose(i.r.db(), scope)).filter(|n| !n.is_empty()).unwrap_or(g.clone())),
+                Scope::User(u) => format!("{}'s own", Some(super::whose(i.r.db(), scope)?).filter(|n| !n.is_empty()).unwrap_or(u.clone())),
+                Scope::Group(g) => format!("{}'s", Some(super::whose(i.r.db(), scope)?).filter(|n| !n.is_empty()).unwrap_or(g.clone())),
             })
         })
         .unwrap_or_default()
@@ -1018,12 +1043,12 @@ impl Node {
         let newest = self.newest_epoch(scope).await?;
         ensure!(newest >= 1, "{scope} has no keys yet");
         let n = newest + 1;
-        let (recovery, to) = self.with(|i| Ok((i.r.db().recovery(), i.r.db().openers(scope))))?;
+        let (recovery, to) = self.with(|i| Ok((i.r.db().recovery()?, i.r.db().openers(scope)?)))?;
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let key: [u8; 32] = rand::random();
         let hash = crate::keys::epoch_hash(&key);
         self.member_content(caller, content::epoch(scope, n, &to.iter().map(|c| c.key).collect::<Vec<_>>(), &hash)).await?;
-        ensure!(self.with(|i| Ok(i.r.db().epoch_hash(scope, n).as_deref() == Some(hash.as_str())))?, "another device started {scope}'s epoch {n} just now");
+        ensure!(self.with(|i| Ok(i.r.db().epoch_hash(scope, n)?.as_deref() == Some(hash.as_str())))?, "another device started {scope}'s epoch {n} just now");
         // Not while there's none (the one there was forked `global`), until an admin names the next: a removal still
         // takes keys away from whoever it removes.
         if let Some(recovery) = recovery

@@ -182,7 +182,7 @@ fn a_step_is_signed_the_same_for_its_position() {
 /// `bucketSteps`), opened and applied by the client (its WebAssembly's `Global`, `cloudflare/web/net-worker.js`); and
 /// from a Welcome, sign-in's word passed on as JavaScript reads it.
 #[test]
-fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() {
+fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<()> {
     let formats = Formats::start();
     let js = |body: Value| formats.js(body);
 
@@ -217,7 +217,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() {
     let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
     // As a browser gives them (client/src/wasm.rs `Global`).
     let step_keys = one_client::members::step_keys(&epochs, &apps);
-    let add = |r: &mut Reader, given: &serde_json::Value| r.add(&steps::Sealed::from_json(given), &step_keys, Some(&epochs), 0, |_, _, _| {});
+    let add = |r: &mut Reader, given: &serde_json::Value| r.add(&steps::Sealed::from_json(given), &step_keys, Some(&epochs), 0, |_, _, _| Ok(()));
     let frozen = |r: &Reader| r.truth().is_some();
     // A freeze an admin's device signed is nothing.
     let mut client = Reader::new(Some(root));
@@ -229,7 +229,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() {
     add(&mut client, &read).unwrap();
     assert!(frozen(&client) && client.at() == 4, "frozen, the browser's step taken and the junk passed over");
     let who = &client.truth().unwrap().db;
-    assert_eq!(who.setting("greeting").as_deref(), Some("hi"), "the step a browser signed counts");
+    assert_eq!(who.setting("greeting")?.as_deref(), Some("hi"), "the step a browser signed counts");
     // Another network's freeze: nothing to a device of this one.
     let mut elsewhere = Reader::new(Some(Hash::from_bytes(rand::random())));
     add(&mut elsewhere, &read).unwrap();
@@ -252,6 +252,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() {
     let mut fresh = Reader::new(Some(root));
     add(&mut fresh, &json!({ "steps": [junk, sealed(2, &first.step, first.copy.as_deref())] })).unwrap();
     assert_eq!(fresh.at(), 2, "a browser reads past junk");
+    Ok(())
 }
 
 /// The content of steps for who can do what (`src/database/content.rs`), as the web client builds what a browser signs

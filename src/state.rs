@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use anyhow::Result;
 use serde_json::{Map, Value, json};
 
 use crate::database::scopes::{NETWORK, ScopeDb, object};
@@ -35,24 +36,25 @@ pub struct Here<'a> {
     /// manage passkeys at its address, a Google one's too: its admins sign in only with one.
     pub throwaway: bool,
     /// What it knows of each device now: `kind` (as it last said), and whatever else it says of it.
-    pub device_now: &'a dyn Fn(&Machine) -> Map<String, Value>,
+    pub device_now: &'a dyn Fn(&Machine) -> Result<Map<String, Value>>,
     /// What it knows of each client now.
     pub client_now: &'a dyn Fn(&Machine) -> Map<String, Value>,
 }
 
 /// The network as `user` sees it, with `here` from the node answering; None for `network` if it has none.
-pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
-    let settings = settings(&m.map(ScopeDb::settings).unwrap_or_default());
-    let network = m.map(|m| network(m, user, &settings, &here));
+pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<Value> {
+    let settings = settings(&m.map(ScopeDb::settings).transpose()?.unwrap_or_default());
+    let network = m.map(|m| network(m, user, &settings, &here)).transpose()?;
     let address = settings.get("address").and_then(|a| a.as_str()).filter(|a| !a.is_empty());
     let passkeys = address.filter(|_| !here.throwaway).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
-    let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""), passkeys.as_deref())).unwrap_or_default();
+    let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""), passkeys.as_deref())).transpose()?.unwrap_or_default();
+    let me = m.map(|m| m.user(user)).transpose()?.flatten();
     let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "store": settings["store"], "install": install_line() });
     let mut state = json!({
         "config": config,
         "me": here.me,
         "device": here.device,
-        "user": m.and_then(|m| m.user(user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role })),
+        "user": me.map(|u| json!({ "id": u.id, "name": u.name, "role": u.role })),
         "network": network,
         // Requests for an item waiting for this user to answer (see GET /v1/vault/requests).
         "vault_requests": here.waiting,
@@ -68,34 +70,30 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
     if let Some(client) = here.client {
         state["client"] = client;
     }
-    state
+    Ok(state)
 }
 
-fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
-    let set = rank::set(&m.settings());
-    let switches = m.switches();
+fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) -> Result<Value> {
+    let set = rank::set(&m.settings()?);
+    let switches = m.switches()?;
     // Only devices: a service with an endpoint of its own is part of one, and its device says it runs it.
-    let mut devices: Vec<Value> = m
-        .machines()
-        .iter()
-        .filter(|s| !s.removed && s.is(Kind::Compute))
-        .map(|s| {
-            let mut now = (here.device_now)(s);
-            // A device that hasn't said what it is, as one that's always on.
-            let kind = now.remove("kind").and_then(|k| k.as_str().filter(|k| !k.is_empty()).map(str::to_string)).unwrap_or_else(|| "always_on".into());
-            let mut device = json!({
-                "kind": kind, "priority": rank::priority(&set, &hex(&s.key)).to_value(), "far": false, "since": s.since,
-                "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
-                "roles": s.roles, "serves_me": m.serves(&s.key, me),
-                "runs_for": m.run_by(&s.key).iter().map(|scope| scope.to_string()).collect::<Vec<_>>(),
-                "build": null, "target": null, "services": [], "installed_services": [],
-                "off_services": switches.iter().filter(|((k, _), d)| *k == s.key && !d.on).map(|((_, name), d)| json!({ "name": name, "time": d.time })).collect::<Vec<_>>(),
-                "load": null,
-            });
-            device.as_object_mut().unwrap().extend(now);
-            device
-        })
-        .collect();
+    let mut devices: Vec<Value> = Vec::new();
+    for s in m.machines()?.iter().filter(|s| !s.removed && s.is(Kind::Compute)) {
+        let mut now = (here.device_now)(s)?;
+        // A device that hasn't said what it is, as one that's always on.
+        let kind = now.remove("kind").and_then(|k| k.as_str().filter(|k| !k.is_empty()).map(str::to_string)).unwrap_or_else(|| "always_on".into());
+        let mut device = json!({
+            "kind": kind, "priority": rank::priority(&set, &hex(&s.key)).to_value(), "far": false, "since": s.since,
+            "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
+            "roles": s.roles, "serves_me": m.serves(&s.key, me)?,
+            "runs_for": m.run_by(&s.key)?.iter().map(|scope| scope.to_string()).collect::<Vec<_>>(),
+            "build": null, "target": null, "services": [], "installed_services": [],
+            "off_services": switches.iter().filter(|((k, _), d)| *k == s.key && !d.on).map(|((_, name), d)| json!({ "name": name, "time": d.time })).collect::<Vec<_>>(),
+            "load": null,
+        });
+        device.as_object_mut().unwrap().extend(now);
+        devices.push(device);
+    }
     // Each device's place in run priority's order, 0 first, for services that pick one themselves; on the same number,
     // by name.
     let mut by_order: Vec<usize> = (0..devices.len()).collect();
@@ -108,7 +106,7 @@ fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
     }
     // Devices that also run calls are listed with the devices.
     let clients: Vec<Value> = m
-        .clients()
+        .clients()?
         .iter()
         .filter(|c| !c.is(Kind::Compute))
         .map(|c| {
@@ -121,46 +119,57 @@ fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
             client
         })
         .collect();
-    let users: Vec<Value> = m.users().iter().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "handle": u.handle, "role": u.role, "me": u.id == me })).collect();
-    let groups: Vec<Value> = m
-        .groups()
-        .iter()
-        .map(|g| {
-            let members: Vec<Value> = g.members.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
-            let invited: Vec<Value> = g.invited.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
-            json!({ "id": g.id, "name": g.name, "handle": g.handle, "role": m.group_role(me, &g.id), "members": members, "invited": invited })
-        })
-        .collect();
-    json!({
-        "name": m.name(), "root": m.root().map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
+    let users: Vec<Value> = m.users()?.iter().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "handle": u.handle, "role": u.role, "me": u.id == me })).collect();
+    let mut groups: Vec<Value> = Vec::new();
+    for g in m.groups()? {
+        let members: Vec<Value> = g.members.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
+        let invited: Vec<Value> = g.invited.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
+        groups.push(json!({ "id": g.id, "name": g.name, "handle": g.handle, "role": m.group_role(me, &g.id)?, "members": members, "invited": invited }));
+    }
+    let mut epochs = Map::new();
+    for (s, n) in m.epochs()?.into_iter().filter(|(s, _)| m.may(me, "use", &object(s))) {
+        let hashes: Map<String, Value> = m.epoch_hashes(&s)?.into_iter().map(|(n, h)| (n.to_string(), json!(h))).collect();
+        epochs.insert(s.to_string(), json!({ "n": n, "hashes": hashes }));
+    }
+    let mut app_schedules = Vec::new();
+    for ((k, s, a), g) in m.app_schedules()? {
+        if m.may(me, "choose-devices", &object(&s)) && m.machine(&k)?.is_some() && m.may(&g.by, "choose-devices", &object(&s)) {
+            app_schedules.push(json!({ "endpoint": hex(&k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes }));
+        }
+    }
+    let cloudflare_node = match m.cloudflare_node()? {
+        Some(key) => {
+            let mut parts = vec![json!({ "name": scopes::APPS_PART, "on": true, "fixed": true })];
+            for (name, _) in crate::config::CLOUDFLARE_SERVICES.iter() {
+                parts.push(json!({ "name": name, "on": m.switch(&key, name)?.is_some_and(|s| s.on) }));
+            }
+            Some(json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key)?.iter().map(crate::database::scopes::Scope::to_string).collect::<Vec<_>>(), "parts": parts }))
+        }
+        None => None,
+    };
+    Ok(json!({
+        "name": m.name()?, "root": m.root()?.map(|r| r.to_hex()), "user": me, "role": m.user(me)?.map(|u| u.role),
         // What a device seals a scope's new epoch to, beside its devices' seal keys.
-        "recovery": m.recovery().as_ref().map(hex),
+        "recovery": m.recovery()?.as_ref().map(hex),
         // Each scope's newest epoch the viewer may use, and its epochs' hashes, which a key from the bucket must match.
-        "epochs": m.epochs().into_iter().filter(|(s, _)| m.may(me, "use", &object(s))).map(|(s, n)| {
-            let hashes: Map<String, Value> = m.epoch_hashes(&s).into_iter().map(|(n, h)| (n.to_string(), json!(h))).collect();
-            (s.to_string(), json!({ "n": n, "hashes": hashes }))
-        }).collect::<Map<String, Value>>(),
+        "epochs": epochs,
         // Where the viewer's own things run, as their own device chose: the machines' keys, or null if it hasn't yet.
-        "runs": m.runs(me).map(|on| on.iter().map(hex).collect::<Vec<_>>()),
+        "runs": m.runs(me)?.map(|on| on.iter().map(hex).collect::<Vec<_>>()),
         // When the network's recovery key last let a device in, and whose.
-        "recovery_used": m.recovery_used().map(|(time, user)| json!({ "time": time, "user": user })),
-        "recovery_set": m.recovery_set(),
+        "recovery_used": m.recovery_used()?.map(|(time, user)| json!({ "time": time, "user": user })),
+        "recovery_set": m.recovery_set()?,
         "member": here.member,
-        "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at(), "clients": clients,
+        "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at()?, "clients": clients,
         // App schedules in the scopes this person may set them in: which endpoint runs which app's schedules in which
         // scope, until when, and who set them. Ones whose endpoint is gone, or whose setter may set them no more, are
         // over.
-        "app_schedules": m.app_schedules().iter().filter(|((k, s, _), g)| m.may(me, "choose-devices", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "choose-devices", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
+        "app_schedules": app_schedules,
         "steps": here.steps, "settings": settings,
         // The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets it).
         // Its parts, as a device's oned lists its own: it always runs apps, and an admin switches on each service built
         // for it that it carries (a built-in app's `service/cloudflare.js`).
-        "cloudflare_node": m.cloudflare_node().map(|key| {
-            let mut parts = vec![json!({ "name": scopes::APPS_PART, "on": true, "fixed": true })];
-            parts.extend(crate::config::CLOUDFLARE_SERVICES.iter().map(|(name, _)| json!({ "name": name, "on": m.switch(&key, name).is_some_and(|s| s.on) })));
-            json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key).iter().map(crate::database::scopes::Scope::to_string).collect::<Vec<_>>(), "parts": parts })
-        }),
-    })
+        "cloudflare_node": cloudflare_node,
+    }))
 }
 
 /// The network's settings: the custom build's defaults (config.toml's `[settings]`), and what its admins set over them
@@ -191,20 +200,20 @@ pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
 
 /// What Settings shows `user`, in order, with a badge on Requests for `items_asked` and their other requests, and on
 /// Backups when `backups` are failing. Passkeys opens `passkeys` in a browser, where they're kept.
-fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, store: &str, passkeys: Option<&str>) -> Vec<Value> {
-    let Some(me) = m.user(user) else { return Vec::new() };
+fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, store: &str, passkeys: Option<&str>) -> Result<Vec<Value>> {
+    let Some(me) = m.user(user)? else { return Ok(Vec::new()) };
     let item = |name: &str, title: &str, icon: &str, color: &str| json!({ "name": name, "title": title, "icon": icon, "color": color });
     let with = |mut item: Value, key: &str, value: Value| {
         item[key] = value;
         item
     };
-    let invites = m.groups().iter().filter(|g| g.invited.contains_key(user)).count();
+    let invites = m.groups()?.iter().filter(|g| g.invited.contains_key(user)).count();
     let mut out: Vec<Value> = passkeys.map(|url| with(item("passkeys", "Passkeys", "key", "#8e8e93"), "url", json!(url))).into_iter().collect();
     let requests = invites + items_asked;
     if requests > 0 {
         out.push(with(item("requests", "Requests", "tray", "#ff2d55"), "badge", json!(requests)));
     }
-    if m.app(store).is_some_and(|a| !a.erased && a.deleted.is_none()) {
+    if m.app(store)?.is_some_and(|a| !a.erased && a.deleted.is_none()) {
         out.push(with(item("store", "App Store", "squares-four", "#007aff"), "app", json!(store)));
     }
     out.extend([
@@ -221,6 +230,6 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, st
         out.push(item("labs", "Labs", "flask", "#af52de"));
         out.push(item("developer", "Developer", "code", "#8e8e93"));
     }
-    out
+    Ok(out)
 }
 

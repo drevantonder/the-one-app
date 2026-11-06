@@ -18,12 +18,12 @@ impl Node {
     }
 
     pub(super) fn deployed(&self, app: &str) -> bool {
-        self.with(|i| Ok(i.r.db().app(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(false)
+        self.with_or(false, |i| Ok(i.r.db().app(app)?.is_some_and(|a| a.bundle.is_some())))
     }
 
     /// Whether `app` is in Recently Deleted (or erased): it doesn't run, show or run its schedules until restored.
     pub(super) fn deleted(&self, app: &str) -> bool {
-        self.with(|i| Ok(i.r.db().app(app).is_some_and(|a| a.deleted.is_some() || a.erased))).unwrap_or(false)
+        self.with_or(false, |i| Ok(i.r.db().app(app)?.is_some_and(|a| a.deleted.is_some() || a.erased)))
     }
 
     /// Deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`), for someone acting for
@@ -45,7 +45,7 @@ impl Node {
         out.extend(self.catalog(viewer, false).await?);
         let mut services = Vec::new();
         if viewer.user == self.user()? {
-            services.extend(self.with(|i| Ok(self.services_here(i)))?.into_iter().map(|d| d.2));
+            services.extend(self.with(|i| self.services_here(i))?.into_iter().map(|d| d.2));
         }
         let remote = self.with(|i| {
             let mut d: Vec<Value> = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
@@ -76,7 +76,7 @@ impl Node {
     pub async fn labs(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let on = self.with(|i| {
             ensure!(i.r.db().may(&viewer.user, "change-settings", scopes::NETWORK), "Only admins change Labs.");
-            Ok(crate::labs::on_keys(&i.r.db().settings()))
+            Ok(crate::labs::on_keys(&i.r.db().settings()?))
         })?;
         let lab = |setting: String, name: &str, l: &Value| json!({ "title": l["title"].as_str().unwrap_or(name), "description": l["description"].as_str().unwrap_or(""), "on": on.contains(&setting), "setting": setting });
         let mut out: Vec<Value> = Vec::new();
@@ -93,7 +93,7 @@ impl Node {
             }
         }
         let mut services: Vec<Value> = self.with(|i| {
-            let here = self.services_here(i).into_iter().map(|d| d.2);
+            let here = self.services_here(i)?.into_iter().map(|d| d.2);
             Ok(here.chain(i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter().map(|d| d.2.clone()))).collect())
         })?;
         services.sort_by_key(|d| d["title"].as_str().or(d["name"].as_str()).unwrap_or("").to_lowercase());
@@ -169,13 +169,12 @@ impl Node {
     pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
             let m = i.r.db();
-            let apps = m.apps();
-            let switches = m.switches();
-            let parts_here = self.parts_here(i);
-            Ok(apps
-                .iter()
+            let apps = m.apps()?;
+            let switches = m.switches()?;
+            let parts_here = self.parts_here(i)?;
+            apps.iter()
                 .filter(|a| !a.erased)
-                .map(|a| {
+                .map(|a| -> Result<_> {
                     let mut installed: Vec<String> = i
                         .views
                         .iter()
@@ -183,10 +182,10 @@ impl Node {
                         .map(|(scope, _)| scope.clone())
                         .collect();
                     installed.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
-                    let reach = reachable(i, &a.name, &viewer.user);
+                    let reach = reachable(i, &a.name, &viewer.user)?;
                     let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
                     let forks: Vec<&String> = apps.iter().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
-                    let runs_on = runs_on(self, i, &switches, &parts_here, &a.name, &installed, &viewer.user);
+                    let runs_on = runs_on(self, i, &switches, &parts_here, &a.name, &installed, &viewer.user)?;
                     let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed, "runs_on": runs_on });
                     if let Some(bundle) = self.built_in(a) {
                         info["built_in"] = json!(bundle);
@@ -199,15 +198,23 @@ impl Node {
                     // A deleted app leaves every page; its owners see it in Recently Deleted.
                     if let Some((time, by)) = &a.deleted {
                         info["installed"] = json!([]);
-                        info["deleted"] = json!({ "time": time, "by": m.user_ever(by).map(|u| u.name), "yours": m.may(&viewer.user, "delete", &scopes::app(&a.name)) });
-                        return (a.name.clone(), info, false);
+                        info["deleted"] = json!({ "time": time, "by": m.user_ever(by)?.map(|u| u.name), "yours": m.may(&viewer.user, "delete", &scopes::app(&a.name)) });
+                        return Ok((a.name.clone(), info, false));
                     }
-                    (a.name.clone(), info, !reach.is_empty())
+                    Ok((a.name.clone(), info, !reach.is_empty()))
                 })
-                .collect::<Vec<_>>())
+                .collect::<Result<Vec<_>>>()
         })?;
         let missing: Vec<Value> = if not_added {
-            self.with(|i| Ok(self.0.built_in.iter().filter(|(name, _)| i.r.db().app(name).is_none()).map(|(name, bundle)| json!({ "name": name, "owner": "admins", "from": null, "forks": [], "deploys": 0, "bundle": null, "history": [], "installed": [], "built_in": bundle, "source": built_in_source(name) })).collect()))?
+            self.with(|i| {
+                let mut missing = Vec::new();
+                for (name, bundle) in self.0.built_in.iter() {
+                    if i.r.db().app(name)?.is_none() {
+                        missing.push(json!({ "name": name, "owner": "admins", "from": null, "forks": [], "deploys": 0, "bundle": null, "history": [], "installed": [], "built_in": bundle, "source": built_in_source(name) }));
+                    }
+                }
+                Ok(missing)
+            })?
         } else {
             Vec::new()
         };
@@ -231,7 +238,7 @@ impl Node {
                 }
                 // A tool of a lab that's off isn't there.
                 if let Some(ops) = info["ops"].as_array_mut() {
-                    let on = self.with(|i| Ok(crate::labs::on_keys(&i.r.db().settings())))?;
+                    let on = self.with(|i| Ok(crate::labs::on_keys(&i.r.db().settings()?)))?;
                     ops.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&crate::labs::app_key(&name, lab))));
                 }
                 if mine {
@@ -275,13 +282,13 @@ impl Node {
                 _ => "linux",
             };
             let mut nodes: Vec<String> = m
-                .machines()
+                .machines()?
                 .into_iter()
                 .filter(|d| !d.removed && d.user == viewer.user && d.is(scopes::Kind::Compute))
                 .filter(|d| platforms.as_ref().is_none_or(|p| i.builds.get(&d.key).is_some_and(|b| p.contains(&platform_of(&b.target)))))
                 .map(|d| d.name)
                 .collect();
-            if platforms.as_ref().is_some_and(|p| p.contains(&"cloudflare")) && m.cloudflare_node().is_some() && m.may(&viewer.user, "change-settings", scopes::NETWORK) {
+            if platforms.as_ref().is_some_and(|p| p.contains(&"cloudflare")) && m.cloudflare_node()?.is_some() && m.may(&viewer.user, "change-settings", scopes::NETWORK) {
                 nodes.push(crate::rank::CLOUDFLARE.to_string());
             }
             Ok(nodes)
@@ -334,7 +341,7 @@ impl Node {
     /// Adds a built-in app the network doesn't have yet, owned by admins, as this release has it. Admins only.
     pub(super) async fn bring_in(&self, caller: &Caller, app: &str) -> Result<()> {
         let Some(bundle) = self.0.built_in.get(app) else { return Ok(()) };
-        let (present, admin) = self.with(|i| Ok((i.r.db().app(app).is_some(), i.r.db().may(&caller.user, "add-apps", scopes::NETWORK))))?;
+        let (present, admin) = self.with(|i| Ok((i.r.db().app(app)?.is_some(), i.r.db().may(&caller.user, "add-apps", scopes::NETWORK))))?;
         if present {
             return Ok(());
         }
@@ -352,7 +359,7 @@ impl Node {
     async fn runs_latest(&self, app: &str, within: Duration) -> bool {
         let started = Instant::now();
         loop {
-            let latest = self.with(|i| Ok(i.r.db().app(app).and_then(|a| a.bundle.clone()))).ok().flatten();
+            let latest = self.with_or(None, |i| Ok(i.r.db().app(app)?.and_then(|a| a.bundle.clone())));
             if latest.is_none() || self.0.bundles.lock().unwrap().get(app) == latest.as_ref() {
                 return true;
             }
@@ -389,20 +396,20 @@ impl Node {
         let services = self.uses(app).await.1;
         self.with(|i| {
             let m = i.r.db();
-            let named = scope_name(i, &scope.to_string());
+            let named = scope_name(i, &scope.to_string())?;
             ensure!(m.may(&caller.user, "add-apps", &scopes::object(scope)), "You can't add apps to {named}.");
             ensure!(i.r.holds(scope), "This device can't open {named} yet.");
             let here = i.views.get(&scope.to_string()).map(|s| s.installed.clone()).unwrap_or_default();
             let mut out = Vec::new();
             for (n, name) in wanted.iter().enumerate().rev() {
-                ensure!(m.app(name).is_some(), "no app named {name}{}", if n > 0 { format!(", which {app} uses") } else { String::new() });
+                ensure!(m.app(name)?.is_some(), "no app named {name}{}", if n > 0 { format!(", which {app} uses") } else { String::new() });
                 if n == 0 || !here.contains(name) {
                     out.push((scope.clone(), content::node(if installed { "install" } else { "uninstall" }, json!({ "app": name }))));
                 }
             }
             // Where each service runs for this scope now: stopped where it no longer should, started where it should.
             let ours = |s: &scopes::Switch| s.on && s.scope.as_deref() == Some(scope.to_string().as_str());
-            let switches = m.switches();
+            let switches = m.switches()?;
             for service in &services {
                 let running: Vec<Key> = switches.iter().filter(|((_, n), s)| n == service && ours(s)).map(|((k, _), _)| *k).collect();
                 let to = match node.filter(|_| installed) {
@@ -435,8 +442,8 @@ impl Node {
     pub async fn fork(&self, caller: &Caller, app: &str, name: &str, owner: Option<&str>) -> Result<()> {
         let bundle = self.with(|i| {
             let m = i.r.db();
-            ensure!(m.app(name).is_none(), "there's already an app called {name}");
-            m.app(app).with_context(|| format!("no app named {app}"))?.bundle.with_context(|| format!("{app} has no deploy to fork"))
+            ensure!(m.app(name)?.is_none(), "there's already an app called {name}");
+            m.app(app)?.with_context(|| format!("no app named {app}"))?.bundle.with_context(|| format!("{app} has no deploy to fork"))
         })?;
         let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
         let builds = crate::app::bundle::services(&self.blob(&bundle).await?).into_values();
@@ -450,7 +457,7 @@ impl Node {
     pub async fn deploy(&self, caller: &Caller, app: &str, bundle: &str, wait: bool) -> Result<bool> {
         let bundle = self.with(|i| {
             let m = i.r.db();
-            let a = m.app(app).with_context(|| format!("no app named {app}"))?;
+            let a = m.app(app)?.with_context(|| format!("no app named {app}"))?;
             ensure!(m.may(&caller.user, "deploy", &scopes::app(app)), "only someone acting for {app}'s owner ({}) deploys it", a.owner);
             ensure!(a.deleted.is_none(), "{app} is in Recently Deleted: apps_restore {app} brings it back to deploy to, apps_erase {app} frees its name for good, or give this app another name");
             Ok(match a.history.iter().find(|(h, ..)| bundle.len() >= 8 && h.starts_with(bundle)) {
@@ -478,7 +485,7 @@ impl Node {
     pub async fn deploy_making(&self, caller: &Caller, app: &str, bundle: &str, owner: Option<&str>, wait: bool) -> Result<Value> {
         let before = self.with(|i| {
             let m = i.r.db();
-            Ok(match m.app(app) {
+            Ok(match m.app(app)? {
                 Some(a) => {
                     ensure!(m.may(&caller.user, "deploy", &scopes::app(app)), "there's already an app called {app}, and it isn't yours: give yours another name, or fork it");
                     Some(a.bundle)
@@ -492,7 +499,7 @@ impl Node {
             self.member_as(caller, "app", json!({ "name": app, "owner": owner })).await?;
         }
         let here = self.deploy(caller, app, bundle, wait).await?;
-        let bundle = self.with(|i| Ok(i.r.db().app(app).and_then(|a| a.bundle.clone())))?;
+        let bundle = self.with(|i| Ok(i.r.db().app(app)?.and_then(|a| a.bundle.clone())))?;
         let mut out = json!({ "bundle": bundle, "made": before.is_none(), "before": before.flatten(), "here": here });
         if here {
             match self.0.apps.describe(app).await {
@@ -506,7 +513,7 @@ impl Node {
     /// An app's code as deployed, its latest or an earlier deploy's: its files, or one of them. A built-in app no one
     /// has added gives the release's. Everyone may read every app's code.
     pub async fn source(&self, app: &str, bundle: Option<&str>, path: Option<&str>) -> Result<Value> {
-        let history = self.with(|i| Ok(i.r.db().app(app).map(|a| a.history)))?;
+        let history = self.with(|i| Ok(i.r.db().app(app)?.map(|a| a.history)))?;
         let built_in = self.0.built_in.get(app);
         ensure!(history.is_some() || built_in.is_some(), "no app named {app}");
         let history = history.unwrap_or_default();
@@ -531,15 +538,20 @@ fn built_in_source(app: &str) -> Option<String> {
 
 /// Where `app`'s service runs for the scopes `installed` names, and for `user` on their own nodes: `{ scope, node,
 /// name, online, problem }` each, `name` none once that node was removed, `problem` what its node said went wrong.
-fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, parts_here: &[Value], app: &str, installed: &[String], user: &str) -> Vec<Value> {
+fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::Switch>, parts_here: &[Value], app: &str, installed: &[String], user: &str) -> Result<Vec<Value>> {
     let m = i.r.db();
-    let cloudflare = m.cloudflare_node();
-    switches
-        .iter()
-        .filter(|((k, n), s)| n == app && s.on && s.scope.as_ref().map_or(m.machine(k).is_some_and(|d| d.user == user), |s| installed.contains(s)))
-        .map(|((k, _), s)| {
+    let cloudflare = m.cloudflare_node()?;
+    let mut out = Vec::new();
+    for ((k, n), s) in switches {
+        let on = n == app
+            && s.on
+            && match &s.scope {
+                Some(s) => installed.contains(s),
+                None => m.machine(k)?.is_some_and(|d| d.user == user),
+            };
+        if on {
             let here = *k == node.0.id;
-            let name = if Some(*k) == cloudflare { Some(crate::rank::CLOUDFLARE.to_string()) } else { m.machine(k).filter(|d| !d.removed).map(|d| d.name) };
+            let name = if Some(*k) == cloudflare { Some(crate::rank::CLOUDFLARE.to_string()) } else { m.machine(k)?.filter(|d| !d.removed).map(|d| d.name) };
             let parts = if here { Some(Value::from(parts_here.to_vec())) } else { i.peers.get(k).and_then(|p| p.parts.clone()) };
             let part = parts.and_then(|p| match p {
                 Value::Array(list) => list.into_iter().find(|v| v["name"] == app),
@@ -547,7 +559,8 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
                 _ => None,
             });
             let online = here || Some(*k) == cloudflare || i.online(k);
-            json!({ "scope": s.scope, "node": hex(k), "name": name, "online": online, "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) })
-        })
-        .collect()
+            out.push(json!({ "scope": s.scope, "node": hex(k), "name": name, "online": online, "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) }));
+        }
+    }
+    Ok(out)
 }

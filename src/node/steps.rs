@@ -187,7 +187,7 @@ impl Node {
         let read = read.context("global's log isn't frozen")?;
         let from = from.min(read);
         let mut out = steps::fetch(&self.bucket()?, from, welcome.filter(|w| w.at <= read).as_ref()).await?.to_json(from);
-        out["epoch"] = json!(self.with(|i| Ok(i.r.db().epoch(&Scope::Global)))?);
+        out["epoch"] = json!(self.with(|i| Ok(i.r.db().epoch(&Scope::Global)?))?);
         Ok(out)
     }
 
@@ -218,7 +218,7 @@ impl Node {
             let more = steps::read(&bucket, &keys, scope, from).await?;
             read.extend(more.steps.iter().cloned());
             // Its epochs are made in `global`, so one above them all is junk.
-            if !more.junk_at_end(self.with(|i| Ok(i.r.db().epoch(scope)))?) {
+            if !more.junk_at_end(self.with(|i| Ok(i.r.db().epoch(scope)?))?) {
                 break;
             }
             read.push(None);
@@ -227,7 +227,7 @@ impl Node {
             let (at, db) = i.scope_dbs.remove(scope).context("no database")?;
             let steps::TookScope { at, mut db, newer } = steps::take_scope(at, db, i.r.db(), scope, &read, now_ms())?;
             let was = i.views.get(&scope.to_string()).map(|s| s.forgotten.clone()).unwrap_or_default();
-            let state = db.state();
+            let state = db.state()?;
             // The blobs its steps said its apps no longer need, as `forget` entries did.
             let forgotten: Vec<(String, String)> = state.forgotten.iter().filter(|b| !was.contains(*b)).map(|b| (scope.to_string(), b.clone())).collect();
             i.views.insert(scope.to_string(), state);
@@ -256,7 +256,7 @@ impl Node {
             self.read_scope_steps_now(scope).await?;
             let (step, at) = self.with(|i| {
                 let (at, db) = i.scope_dbs.get(scope).context("this device can't read that yet: try again")?;
-                let step = steps::sign(&i.r.key, scope, at + 1, user, i.r.db().epoch(scope), now_ms(), content.clone())?;
+                let step = steps::sign(&i.r.key, scope, at + 1, user, i.r.db().epoch(scope)?, now_ms(), content.clone())?;
                 steps::apply(db, Some(i.r.db()), scope, &step)?;
                 Ok((step, at + 1))
             })?;

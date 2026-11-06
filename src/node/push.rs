@@ -52,7 +52,7 @@ impl Node {
 
     /// A person's own devices that might get pushes, as the network's signed steps list them: (key, seal key, name).
     fn devices_of(&self, user: &str) -> Result<Vec<(Key, Key, String)>> {
-        self.with(|i| Ok(i.r.db().clients().into_iter().filter(|m| m.user == user && !m.removed && m.passkey.is_none()).map(|m| (m.key, m.seal, m.name)).collect()))
+        self.with(|i| Ok(i.r.db().clients()?.into_iter().filter(|m| m.user == user && !m.removed && m.passkey.is_none()).map(|m| (m.key, m.seal, m.name)).collect()))
     }
 
     /// Asks the push Worker something as this device, signed with its key (`one/push`). → its answer.

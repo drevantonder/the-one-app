@@ -34,7 +34,7 @@ impl Node {
             let m = i.r.db();
             let mut due = Vec::new();
             let mut seen = BTreeSet::new();
-            for ((_, scope, app), _) in m.app_schedules_at(now).into_iter().filter(|((k, ..), _)| *k == self.0.id) {
+            for ((_, scope, app), _) in m.app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == self.0.id) {
                 let Some(state) = i.views.get(&scope.to_string()).filter(|s| s.installed.contains(&app)) else { continue };
                 let Some((_, list)) = declared.iter().find(|(a, _)| *a == app) else { continue };
                 for s in list.iter().filter_map(|s| s.as_ref().ok()) {
@@ -110,18 +110,18 @@ impl Node {
     pub async fn failing_schedules(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let apps: Vec<String> = self.with(|i| {
             let m = i.r.db();
-            Ok(m.apps()
-                .into_iter()
-                .filter(|a| !a.erased && a.deleted.is_none())
-                .filter(|a| {
-                    reachable(i, &a.name, &viewer.user).iter().any(|scope| {
-                        let installed = i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(&a.name));
-                        let failed = i.status.get(&scope.to_string()).is_some_and(|st| st.runs.iter().any(|((app, _), runs)| app == &a.name && runs.last().is_some_and(|r| !r.ok)));
-                        installed && failed && m.may(&viewer.user, "add-apps", &scopes::object(&scope))
-                    })
-                })
-                .map(|a| a.name)
-                .collect())
+            let mut failing = Vec::new();
+            for a in m.apps()?.into_iter().filter(|a| !a.erased && a.deleted.is_none()) {
+                let fails = reachable(i, &a.name, &viewer.user)?.iter().any(|scope| {
+                    let installed = i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(&a.name));
+                    let failed = i.status.get(&scope.to_string()).is_some_and(|st| st.runs.iter().any(|((app, _), runs)| app == &a.name && runs.last().is_some_and(|r| !r.ok)));
+                    installed && failed && m.may(&viewer.user, "add-apps", &scopes::object(scope))
+                });
+                if fails {
+                    failing.push(a.name);
+                }
+            }
+            Ok(failing)
         })?;
         let mut out = Vec::new();
         for app in apps.into_iter().filter(|a| self.0.apps.has(a)) {
@@ -143,17 +143,17 @@ impl Node {
         let now = now_ms();
         self.with(|i| {
             let m = i.r.db();
-            let user_name = |u: &str| m.user_ever(u).map(|u| u.name).unwrap_or_default();
+            let user_name = |u: &str| user_name(m, u);
             let (mut list, mut activity) = (Vec::new(), Vec::new());
-            for scope in reachable(i, app, &viewer.user) {
+            for scope in reachable(i, app, &viewer.user)? {
                 let Some(state) = i.views.get(&scope.to_string()) else { continue };
                 if !state.installed.contains(app) {
                     continue;
                 }
                 let status = i.status.get(&scope.to_string()).cloned().unwrap_or_default();
-                let scope_name = handles(m, std::slice::from_ref(&scope), &viewer.user).remove(0).name;
+                let scope_name = whose(m, &scope)?;
                 // The devices that run its schedules there: none, and they don't run.
-                let run_by: Vec<String> = m.app_schedules_at(now).into_iter().filter(|((_, s, a), _)| *s == scope && a == app).filter_map(|((k, ..), _)| m.machine(&k).map(|d| d.name)).collect();
+                let run_by: Vec<String> = m.app_schedules_at(now)?.into_iter().filter(|((_, s, a), _)| *s == scope && a == app).map(|((k, ..), _)| m.machine(&k)).collect::<Result<Vec<_>>>()?.into_iter().flatten().map(|d| d.name).collect();
                 let base = |name: &str| {
                     let key = (app.to_string(), name.to_string());
                     let runs = status.runs.get(&key);
@@ -171,8 +171,8 @@ impl Node {
                             v["when"] = json!(s.say());
                             v["op"] = json!(s.tool);
                             v["on"] = json!(switched.is_none_or(|(on, ..)| *on));
-                            v["switched"] = json!(switched.map(|(on, by, t)| json!({ "on": on, "by": user_name(by), "time": t })));
-                            v["runs_as"] = json!(user.as_deref().map(user_name));
+                            v["switched"] = json!(switched.map(|(on, by, t)| user_name(by).map(|by| json!({ "on": on, "by": by, "time": t }))).transpose()?);
+                            v["runs_as"] = json!(user.as_deref().map(user_name).transpose()?);
                             v["next"] = json!(user.filter(|_| !run_by.is_empty()).and(s.next(now)));
                             v
                         }
@@ -200,7 +200,7 @@ impl Node {
                 }
                 for ((_, name), runs) in status.runs.iter().filter(|((a, _), _)| a == app) {
                     for r in runs {
-                        activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "device": m.machine_ever(&r.device).map(|s| s.name.clone()), "user": user_name(&r.user) }));
+                        activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "device": m.machine_ever(&r.device)?.map(|s| s.name.clone()), "user": user_name(&r.user)? }));
                     }
                 }
             }

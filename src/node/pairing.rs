@@ -65,13 +65,13 @@ impl Node {
         let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = i.r.db();
-            ensure!(m.compute(&self.0.id).is_some(), "this device isn't in {} yet", crate::config::YOURS);
+            ensure!(m.compute(&self.0.id)?.is_some(), "this device isn't in {} yet", crate::config::YOURS);
             let kinds = if user.as_ref().is_none_or(|u| *u == asker.user) { MACHINE } else { &[scopes::Kind::Compute][..] };
-            ensure!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds), "only admins pair other people's machines");
-            ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.device_name());
+            ensure!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds)?, "only admins pair other people's machines");
+            ensure!(m.serves(&self.0.id, &asker.user)?, "{} doesn't serve you", self.device_name());
             Ok(())
         })?;
-        let address = self.with(|i| Ok(i.r.db().setting("address")))?.with_context(|| format!("a computer joins through {YOURS}'s address, and it has none yet: an admin sets it with cloudflare use"))?;
+        let address = self.with(|i| Ok(i.r.db().setting("address")?))?.with_context(|| format!("a computer joins through {YOURS}'s address, and it has none yet: an admin sets it with cloudflare use"))?;
         let joins_as = user.clone().unwrap_or_else(|| asker.user.clone());
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
@@ -151,7 +151,7 @@ impl Node {
         let admitted = self.admit_with(key, &request, &pairing).await;
         if admitted.is_err() {
             // Once it's listed, the code is that machine's to finish with; before, anyone's who has it.
-            if self.with(|i| Ok(i.r.db().machine(&key).is_some()))? {
+            if self.with(|i| Ok(i.r.db().machine(&key)?.is_some()))? {
                 pairing.tried = Some(hex(&key));
             }
             let _ = self.keep_pairing(request.secret, pairing);
@@ -176,7 +176,7 @@ impl Node {
         // lists it again (`scope::derive`'s runners).
         let roles = if user == pairing.user { MACHINE } else { &[scopes::Kind::Compute][..] };
         // Listed already by a join with this code that didn't finish: only the relay's left.
-        if !self.with(|i| Ok(i.r.db().machine(&key).is_some_and(|m| m.user == user)))? {
+        if !self.with(|i| Ok(i.r.db().machine(&key)?.is_some_and(|m| m.user == user)))? {
             let listed = content::device(&endpoint, &user, &request.name, roles, None);
             self.member_content(&Caller::own(by.unwrap_or(self.0.id), pairing.user.clone()), listed).await.context("this device can no longer admit that machine")?;
         }

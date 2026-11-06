@@ -284,7 +284,7 @@ pub fn may(owner: &str, handle: Option<u32>, user: &str, asks: &str, types: &str
         Some(h) => OPEN.with(|o| o.borrow().1.get(&h).map(|(_, db)| one::database::scopes::app_relations(db.connection()))).context("that database isn't open").map_err(thrown)?,
         None => Vec::new(),
     };
-    replayed(owner, &[], |r| Value::from(r.global().app_may(user, &asks, &types, &rows, now as u64)).to_string()).map_err(thrown)
+    replayed(owner, &[], |r| Ok(Value::from(r.global().app_may(user, &asks, &types, &rows, now as u64)).to_string())).map_err(thrown)
 }
 
 /// Writes a call's statements (JSON, `[[sql, params, check]]`) as one step: → its position, or 0 if they changed
@@ -433,7 +433,10 @@ impl Held {
 
     /// The newest epoch of `scope` made, as `global`'s steps say: any, before it's read the freeze.
     fn made(global: &Held, scope: &Scope) -> Result<u32> {
-        Ok(global.truth()?.map_or(u32::MAX, |t| t.db.epoch(scope)))
+        Ok(match global.truth()? {
+            Some(t) => t.db.epoch(scope)?,
+            None => u32::MAX,
+        })
     }
 }
 
@@ -582,7 +585,7 @@ pub fn pin_root(root: &str) -> Result<(), JsError> {
 pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
     use one::database::steps;
     let bucket = Js(bucket);
-    let (people, epoch) = replayed(&owner, &[], |r| (r.global().may(&user, "use", one::database::scopes::NETWORK), r.global().epoch(&Scope::Global))).map_err(failed)?;
+    let (people, epoch) = replayed(&owner, &[], |r| Ok((r.global().may(&user, "use", one::database::scopes::NETWORK), r.global().epoch(&Scope::Global)?))).map_err(failed)?;
     if !people {
         return Err(failed(anyhow!("you aren't one of this network's people")));
     }
@@ -601,7 +604,7 @@ fn now() -> u64 {
 
 /// `global`'s database and each of `scopes`', from the steps `owner`'s object read (`read_scope`), built again only
 /// once what was read of them changed.
-fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) -> Result<R> {
+fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> Result<R>) -> Result<R> {
     touch(owner);
     LOGS.with(|logs| {
         let logs = logs.borrow();
@@ -628,7 +631,7 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) ->
                     r.insert(id.clone(), Replayed { at, db });
                 }
             }
-            Ok(f(&Replays(read.iter().map(|s| (s.clone(), &r[&(owner.to_string(), s.clone())].db)).collect())))
+            f(&Replays(read.iter().map(|s| (s.clone(), &r[&(owner.to_string(), s.clone())].db)).collect()))
         })
     })
 }
@@ -636,7 +639,7 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) ->
 /// The groups `user` is in, as scopes: whose steps to read next.
 #[wasm_bindgen]
 pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
-    let groups = replayed(owner, &[], |r| r.global().groups_of(user).into_keys().map(|g| format!("group:{g}")).collect::<Vec<_>>()).map_err(thrown)?;
+    let groups = replayed(owner, &[], |r| Ok(r.global().groups_of(user)?.into_keys().map(|g| format!("group:{g}")).collect::<Vec<_>>())).map_err(thrown)?;
     Ok(json!(groups).to_string())
 }
 
@@ -648,12 +651,17 @@ pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsErro
     let key = one::keys::unhex(device).ok();
     let out = replayed(owner, &[], |r| {
         let m = r.global();
-        let scopes: Vec<Scope> = m.scopes().into_iter().filter(|s| m.may(user, "use", &object(s))).collect();
-        let device = key.and_then(|k| m.client(&k)).filter(|d| d.user == user).map(|d| d.name);
-        let runs: Vec<String> = scopes.iter().filter(|s| m.cloudflare_node().is_some_and(|k| m.runs_for(&k, s))).map(Scope::to_string).collect();
+        let scopes: Vec<Scope> = m.scopes()?.into_iter().filter(|s| m.may(user, "use", &object(s))).collect();
+        let device = match key {
+            Some(k) => m.client(&k)?,
+            None => None,
+        };
+        let device = device.filter(|d| d.user == user).map(|d| d.name);
+        let cloudflare = m.cloudflare_node()?;
+        let runs: Vec<String> = scopes.iter().filter(|s| cloudflare.is_some_and(|k| m.runs_for(&k, s))).map(Scope::to_string).collect();
         let scopes: Vec<String> = scopes.iter().map(Scope::to_string).collect();
-        let removed = m.user_ever(user).is_some_and(|u| u.removed);
-        json!({ "scopes": scopes, "joined": m.user(user).is_some(), "removed": removed, "device": device, "runs": runs })
+        let removed = m.user_ever(user)?.is_some_and(|u| u.removed);
+        Ok(json!({ "scopes": scopes, "joined": m.user(user)?.is_some(), "removed": removed, "device": device, "runs": runs }))
     })
     .map_err(thrown)?;
     Ok(out.to_string())
@@ -665,7 +673,13 @@ pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsErro
 pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;
     let out = replayed(owner, &[], |r| {
-        scopes.iter().filter_map(|s| Some((s.clone(), Value::from(r.global().epoch(&Scope::parse(s).ok()?).max(1))))).collect::<serde_json::Map<_, _>>()
+        let mut epochs = serde_json::Map::new();
+        for s in &scopes {
+            if let Ok(scope) = Scope::parse(s) {
+                epochs.insert(s.clone(), Value::from(r.global().epoch(&scope)?.max(1)));
+            }
+        }
+        Ok(epochs)
     })
     .map_err(thrown)?;
     Ok(Value::Object(out).to_string())
@@ -677,7 +691,7 @@ pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
 pub fn runners(owner: &str, user: &str, scopes: &str) -> Result<String, JsError> {
     let scopes = serde_json::from_str::<Vec<String>>(scopes)?.iter().map(|s| Scope::parse(s)).collect::<Result<Vec<_>>>().map_err(thrown)?;
     let out = replayed(owner, &[], |r| {
-        r.global().runners(user, &scopes).iter().map(|r| json!({ "key": one::keys::hex(&r.key), "seal": one::keys::hex(&r.seal) })).collect::<Vec<_>>()
+        Ok(r.global().runners(user, &scopes)?.iter().map(|r| json!({ "key": one::keys::hex(&r.key), "seal": one::keys::hex(&r.seal) })).collect::<Vec<_>>())
     })
     .map_err(thrown)?;
     Ok(Value::from(out).to_string())
@@ -706,7 +720,7 @@ pub fn network(owner: &str, user: &str, client: &str, scopes: &str, now: f64) ->
     Ok(out.to_string())
 }
 
-fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
+fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
     let m = r.global();
     // Requests for an item waiting for `me` to answer, as src/node.rs's `item_requests` counts them.
     let since = i64::try_from(now).unwrap_or(i64::MAX) - 86_400_000;
@@ -730,7 +744,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
         one::state::Here {
             me: json!({ "key": "", "name": client, "user": me }),
             client: Some(json!({ "key": "", "name": client })),
-            device: json!({ "key": m.cloudflare_node().map(|k| one::keys::hex(&k)).unwrap_or_default(), "name": "Cloudflare", "ready": true, "guide": null }),
+            device: json!({ "key": m.cloudflare_node()?.map(|k| one::keys::hex(&k)).unwrap_or_default(), "name": "Cloudflare", "ready": true, "guide": null }),
             member: false,
             steps: 0,
             waiting: waiting as usize,
@@ -739,26 +753,40 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
             guide: None,
             // No throwaway network has a Cloudflare node.
             throwaway: false,
-            device_now: &|_| Default::default(),
+            device_now: &|_| Ok(Default::default()),
             client_now: &|_| Default::default(),
         },
-    );
-    let me_user = m.user(me);
-    let installed_in = |app: &str, scope: &Scope| r.get(scope).is_some_and(|d| d.installed().contains(app));
-    let handle = |s: &Scope| {
-        let name = match s {
-            Scope::Global => m.name(),
-            Scope::Group(g) => m.group(g).map(|g| g.name).unwrap_or_default(),
-            Scope::User(u) => m.user_ever(u).map(|u| u.name).unwrap_or_default(),
-        };
-        json!({ "id": s.to_string(), "name": name, "role": m.role_in(me, s) })
+    )?;
+    let me_user = m.user(me)?;
+    let installed_in = |app: &str, scope: &Scope| -> Result<bool> {
+        Ok(match r.get(scope) {
+            Some(d) => d.installed()?.contains(app),
+            None => false,
+        })
     };
-    let every = m.apps();
+    let handle = |s: &Scope| -> Result<Value> {
+        let name = match s {
+            Scope::Global => m.name()?,
+            Scope::Group(g) => m.group(g)?.map(|g| g.name).unwrap_or_default(),
+            Scope::User(u) => m.user_ever(u)?.map(|u| u.name).unwrap_or_default(),
+        };
+        Ok(json!({ "id": s.to_string(), "name": name, "role": m.role_in(me, s)? }))
+    };
+    let every = m.apps()?;
+    let cloudflare = m.cloudflare_node()?;
     let apps: Vec<Value> = every
         .iter()
         .filter(|a| !a.erased)
-        .map(|a| {
-            let mut installed: Vec<String> = r.0.keys().filter(|s| Scope::parse(s).is_ok_and(|s| installed_in(&a.name, &s) && m.may(me, "use", &object(&s)))).cloned().collect();
+        .map(|a| -> Result<Value> {
+            let mut installed: Vec<String> = Vec::new();
+            for key in r.0.keys() {
+                if let Ok(s) = Scope::parse(key)
+                    && installed_in(&a.name, &s)?
+                    && m.may(me, "use", &object(&s))
+                {
+                    installed.push(key.clone());
+                }
+            }
             installed.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
             let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
             let forks: Vec<&String> = every.iter().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
@@ -768,15 +796,21 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
             }
             if let Some((time, by)) = &a.deleted {
                 info["installed"] = json!([]);
-                info["deleted"] = json!({ "time": time, "by": m.user_ever(by).map(|u| u.name), "yours": m.may(me, "delete", &app(&a.name)) });
+                info["deleted"] = json!({ "time": time, "by": m.user_ever(by)?.map(|u| u.name), "yours": m.may(me, "delete", &app(&a.name)) });
                 info["reach"] = json!([]);
-                return info;
+                return Ok(info);
             }
             // As a node on a machine reaches them (src/node.rs: `reachable`), of the scopes read here.
-            let global = installed_in(&a.name, &Scope::Global);
-            let mut reach: Vec<Scope> = m.groups_of(me).into_keys().map(Scope::Group).filter(|s| r.get(s).is_some() && (global || installed_in(&a.name, s))).collect();
+            let global = installed_in(&a.name, &Scope::Global)?;
+            let mut reach: Vec<Scope> = Vec::new();
+            for g in m.groups_of(me)?.into_keys() {
+                let s = Scope::Group(g);
+                if r.get(&s).is_some() && (global || installed_in(&a.name, &s)?) {
+                    reach.push(s);
+                }
+            }
             let own = Scope::User(me.into());
-            if global || installed_in(&a.name, &own) || !reach.is_empty() {
+            if global || installed_in(&a.name, &own)? || !reach.is_empty() {
                 reach.insert(0, own);
             }
             if global {
@@ -784,17 +818,17 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
             }
             // Only those this node runs, if it runs some, as a node on a machine leaves out a person's own scope that
             // no node running the rest runs (src/node/calls.rs: `reaching`): their own, until they choose this one.
-            let runs = |s: &Scope| m.cloudflare_node().is_some_and(|k| m.runs_for(&k, s));
+            let runs = |s: &Scope| cloudflare.is_some_and(|k| m.runs_for(&k, s));
             if reach.iter().any(runs) {
                 reach.retain(runs);
             }
-            info["reach"] = Value::from(reach.iter().map(handle).collect::<Vec<_>>());
-            info
+            info["reach"] = Value::from(reach.iter().map(handle).collect::<Result<Vec<_>>>()?);
+            Ok(info)
         })
-        .collect();
+        .collect::<Result<_>>()?;
     let me_ = json!({ "key": "", "user": me, "name": client, "role": me_user.as_ref().map(|u| u.role), "user_name": me_user.as_ref().map(|u| u.name.clone()).unwrap_or_default(), "handle": me_user.as_ref().map(|u| u.handle.clone()), "agent": null });
     let erased: Vec<&String> = every.iter().filter(|a| a.erased).map(|a| &a.name).collect();
-    json!({ "state": state, "apps": apps, "me": me_, "erased": erased, "handles": m.handles() })
+    Ok(json!({ "state": state, "apps": apps, "me": me_, "erased": erased, "handles": m.handles()? }))
 }
 
 /// A deploy's bundle from the bucket (`bucket::blob_name`), opened with the keys of the node's `blobs` database in

@@ -29,7 +29,7 @@ impl Node {
         ensure!(me.user == self.user()?, "{} sets app schedules only for its own person", self.device_name());
         let endpoint = self.find_device(device)?;
         let (title, name) = (self.title_of(app).await, self.name_of(&endpoint));
-        ensure!(self.with(|i| Ok(i.r.db().app(app).is_some()))?, "no app called {app}");
+        ensure!(self.with(|i| Ok(i.r.db().app(app)?.is_some()))?, "no app called {app}");
         let until = match days {
             0 => 0,
             days => now_ms() + days.min(APP_SCHEDULES_DAYS) * DAY,
@@ -48,7 +48,7 @@ impl Node {
     async fn write_app_schedules(&self, endpoint: Key, app: &str, scope: &Scope, until: u64) -> Result<()> {
         let (seal, mine, may) = self.with(|i| {
             let m = i.r.db();
-            Ok((m.seal_key(&endpoint), m.client(&self.0.id).is_some(), m.may(&i.user, "choose-devices", &scopes::object(&scope))))
+            Ok((m.seal_key(&endpoint)?, m.client(&self.0.id)?.is_some(), m.may(&i.user, "choose-devices", &scopes::object(&scope))))
         })?;
         ensure!(mine, "{} isn't one of its person's own devices, which are what set app schedules", self.device_name());
         ensure!(may, "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
@@ -84,11 +84,18 @@ impl Node {
         let ended: Vec<(Key, Scope, String)> = self
             .with(|i| {
                 let m = i.r.db();
-                if m.client(&self.0.id).is_none_or(|c| c.user != me) {
+                if m.client(&self.0.id)?.is_none_or(|c| c.user != me) {
                     return Ok(Vec::new());
                 }
-                Ok(m.app_schedules().into_iter().filter(|((k, s, _), g)| g.by == me && g.until != 0 && g.until <= now && m.machine(k).is_some() && m.may(&me, "choose-devices", &scopes::object(s))).map(|(id, _)| id).collect())
+                let mut ended = Vec::new();
+                for (id, g) in m.app_schedules()? {
+                    if g.by == me && g.until != 0 && g.until <= now && m.machine(&id.0)?.is_some() && m.may(&me, "choose-devices", &scopes::object(&id.1)) {
+                        ended.push(id);
+                    }
+                }
+                Ok(ended)
             })
+            .inspect_err(|err| tracing::warn!("looking for app schedules that ran out: {err:#}"))
             .unwrap_or_default();
         for id in ended {
             if !self.0.app_schedules.renewing.lock().unwrap().insert(id.clone()) {
@@ -116,12 +123,18 @@ impl Node {
         let due: Vec<(Key, Scope)> = self
             .with(|i| {
                 let m = i.r.db();
-                if me.user != i.user || m.client(&self.0.id).is_none() {
+                if me.user != i.user || m.client(&self.0.id)?.is_none() {
                     return Ok(Vec::new());
                 }
-                let due = |s: &Scope, g: &scopes::AppSchedules| g.until < now + (APP_SCHEDULES_DAYS - 1) * DAY || g.hashes.keys().next_back().copied().unwrap_or(0) < m.epoch(s);
-                Ok(m.app_schedules_at(now).into_iter().filter(|((_, s, a), g)| a == app && g.by == i.user && due(s, g)).map(|((k, s, _), _)| (k, s)).collect())
+                let mut due = Vec::new();
+                for ((k, s, a), g) in m.app_schedules_at(now)? {
+                    if a == app && g.by == i.user && (g.until < now + (APP_SCHEDULES_DAYS - 1) * DAY || g.hashes.keys().next_back().copied().unwrap_or(0) < m.epoch(&s)?) {
+                        due.push((k, s));
+                    }
+                }
+                Ok(due)
             })
+            .inspect_err(|err| tracing::warn!("looking for app schedules to renew: {err:#}"))
             .unwrap_or_default();
         for (endpoint, scope) in due {
             let id = (endpoint, scope.clone(), app.to_string());
@@ -142,7 +155,7 @@ impl Node {
     /// bucket: each sealed to this device whose hash is the one they name, the rest passed over. → until when it lasts.
     pub(super) async fn app_schedules_keys(&self, scope: &Scope, app: &str) -> Result<u64> {
         let now = now_ms();
-        let found = self.with(|i| Ok(i.r.db().app_schedules_at(now).into_iter().find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map(|(_, g)| (g.until, g.hashes))))?;
+        let found = self.with(|i| Ok(i.r.db().app_schedules_at(now)?.into_iter().find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map(|(_, g)| (g.until, g.hashes))))?;
         let (until, hashes) = found.with_context(|| format!("{} doesn't run {app}'s schedules in {scope}", self.device_name()))?;
         let id = (scope.clone(), app.to_string());
         let had = self.0.app_schedules.keys.lock().unwrap().get(&id).cloned().unwrap_or_default();
@@ -199,13 +212,13 @@ impl Node {
     /// Until when `app`'s schedules in `scope` here last: 0 once they're over.
     pub(super) fn app_schedules_until(&self, scope: &Scope, app: &str) -> u64 {
         let now = now_ms();
-        self.with(|i| Ok(i.r.db().app_schedules_at(now).into_iter().find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map_or(0, |(_, g)| g.until))).unwrap_or(0)
+        self.with_or(0, |i| Ok(i.r.db().app_schedules_at(now)?.into_iter().find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map_or(0, |(_, g)| g.until)))
     }
 
     /// Forgets the keys of app schedules no longer in force here, and the databases they had open.
     pub(super) fn forget_app_schedules(&self) {
         let now = now_ms();
-        let held: std::collections::HashSet<(Scope, String)> = self.with(|i| Ok(i.r.db().app_schedules_at(now).into_iter().filter(|((k, ..), _)| *k == self.0.id).map(|((_, s, a), _)| (s, a)).collect())).unwrap_or_default();
+        let held: std::collections::HashSet<(Scope, String)> = self.with_or(Default::default(), |i| Ok(i.r.db().app_schedules_at(now)?.into_iter().filter(|((k, ..), _)| *k == self.0.id).map(|((_, s, a), _)| (s, a)).collect()));
         let gone: Vec<(Scope, String)> = {
             let mut kept = self.0.app_schedules.keys.lock().unwrap();
             let gone = kept.keys().filter(|id| !held.contains(*id)).cloned().collect();

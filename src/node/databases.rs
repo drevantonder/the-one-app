@@ -114,7 +114,7 @@ impl Node {
             let newest = kept.keys().next_back().copied().unwrap_or(0);
             return Ok((kept, newest));
         }
-        let hashes = self.with(|i| Ok(if *scope == Scope::Global { i.r.global_epochs() } else { i.r.db().epoch_hashes(scope) }))?;
+        let hashes = self.with(|i| Ok(if *scope == Scope::Global { i.r.global_epochs()? } else { i.r.db().epoch_hashes(scope)? }))?;
         let newest = hashes.keys().next_back().copied().unwrap_or(0);
         // Kept only while each is still the one its entry made.
         let mut keys: crate::database::stored::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&crate::keys::epoch_hash(k))).collect();
@@ -169,11 +169,11 @@ impl Node {
     /// If two are made at once all the same, the one first in causal order counts, and the other's key is dropped.
     async fn make_first_epoch(&self, scope: &Scope) -> Result<crate::database::stored::Keys> {
         let _making = self.0.making_keys.lock().await;
-        if self.with(|i| Ok(i.r.db().epoch(scope)))? > 0 {
+        if self.with(|i| Ok(i.r.db().epoch(scope)?))? > 0 {
             return Box::pin(self.epoch_keys(scope, false)).await;
         }
         // A scope's first keys are its admins' to make, as they choose where its apps' schedules run.
-        let (may, recovery) = self.with(|i| Ok((i.r.db().may(&i.user, "choose-devices", &scopes::object(scope)), i.r.db().recovery())))?;
+        let (may, recovery) = self.with(|i| Ok((i.r.db().may(&i.user, "choose-devices", &scopes::object(scope)), i.r.db().recovery()?)))?;
         ensure!(may, NotGiven(scope.clone(), self.device_name()));
         let recovery = recovery.context("the network has no recovery key to seal its keys to")?;
         let key: [u8; 32] = rand::random();
@@ -184,16 +184,16 @@ impl Node {
             for _ in 0..50 {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 self.read_scope(&Scope::Global).await?;
-                if self.with(|i| Ok(i.r.db().epoch(scope)))? > 0 {
+                if self.with(|i| Ok(i.r.db().epoch(scope)?))? > 0 {
                     return self.settled_first_epoch(scope).await;
                 }
             }
             tracing::warn!("{scope}'s first epoch was begun but no entry made it: making it here");
         }
-        let to = self.with(|i| Ok(i.r.db().openers(scope)))?;
+        let to = self.with(|i| Ok(i.r.db().openers(scope)?))?;
         let hash = crate::keys::epoch_hash(&key);
         self.append(&Scope::Global, content::node("epoch", json!({ "scope": name, "n": 1, "to": to.iter().map(|c| hex(&c.key)).collect::<Vec<_>>(), "hash": hash }))).await?;
-        if self.with(|i| Ok(i.r.db().epoch_hash(scope, 1).as_deref() != Some(hash.as_str())))? {
+        if self.with(|i| Ok(i.r.db().epoch_hash(scope, 1)?.as_deref() != Some(hash.as_str())))? {
             tracing::info!("another device made {scope}'s first epoch first: its key is used");
             return self.settled_first_epoch(scope).await;
         }
@@ -234,7 +234,7 @@ impl Node {
     async fn seal_epoch(&self, scope: &Scope, keys: &crate::database::stored::Keys) -> Result<()> {
         use crate::bucket::Bucket;
         let bucket = self.bucket()?;
-        let to = self.with(|i| Ok(i.r.db().openers(scope).into_iter().filter(|c| c.key != self.0.id).collect::<Vec<_>>()))?;
+        let to = self.with(|i| Ok(i.r.db().openers(scope)?.into_iter().filter(|c| c.key != self.0.id).collect::<Vec<_>>()))?;
         for (n, key) in keys {
             for c in &to {
                 let name = crate::keys::epoch_name(&scope.to_string(), *n, &hex(&c.key));
@@ -347,10 +347,10 @@ impl Node {
     /// epoch's (true), since its entry is written before anything is sealed under it; or, if no entry made it, junk
     /// (false), which every read of it here passes over from now on.
     async fn judge_ahead(&self, scope: &Scope, prefix: &str, ahead: &crate::database::stored::Ahead) -> Result<bool> {
-        if self.with(|i| Ok(i.r.epoch_made(scope)))? < ahead.epoch {
+        if self.with(|i| i.r.epoch_made(scope))? < ahead.epoch {
             tokio::time::timeout(Duration::from_secs(10), self.read_scope(&Scope::Global)).await.map_err(|_| anyhow!("global's entries didn't come in time to say what {prefix}'s step {} is", ahead.at))??;
         }
-        if self.with(|i| Ok(i.r.epoch_made(scope)))? >= ahead.epoch {
+        if self.with(|i| i.r.epoch_made(scope))? >= ahead.epoch {
             return Ok(true);
         }
         tracing::warn!("{prefix}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);

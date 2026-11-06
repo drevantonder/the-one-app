@@ -519,11 +519,11 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
     };
     let bytes: u64 = place.objects(&format!("{network}/objects"))?.iter().map(|o| o.2).sum();
     let report = json!({
-        "network": m.name(),
+        "network": m.name()?,
         "bytes": bytes,
         "scopes": scopes,
-        "people": m.users().into_iter().filter(|u| !u.removed).map(|u| u.name).collect::<Vec<_>>(),
-        "apps": m.apps().into_iter().filter(|a| !a.erased && a.bundle.is_some()).map(|a| a.name).collect::<Vec<_>>(),
+        "people": m.users()?.into_iter().filter(|u| !u.removed).map(|u| u.name).collect::<Vec<_>>(),
+        "apps": m.apps()?.into_iter().filter(|a| !a.erased && a.bundle.is_some()).map(|a| a.name).collect::<Vec<_>>(),
         "problems": problems,
         "unchecked": unchecked,
     });
@@ -557,7 +557,7 @@ fn who(place: &Place, network: &str, root: Option<crate::keys::Hash>, keys: &[[u
         sealed.steps.insert(at, step);
     }
     let mut reader = steps::Reader::new(root);
-    reader.add(&sealed, &step_keys, None, crate::node::now_ms(), |_, _, _| {})?;
+    reader.add(&sealed, &step_keys, None, crate::node::now_ms(), |_, _, _| Ok(()))?;
     Ok(reader.into_truth().context("its who's who has no freeze")?.db)
 }
 

@@ -116,19 +116,12 @@ impl ScopeDb {
         &self.db
     }
 
-    fn rows<T>(&self, sql: &str, p: impl rusqlite::Params, f: impl FnMut(&rusqlite::Row) -> rusqlite::Result<T>) -> Vec<T> {
-        let read = || -> rusqlite::Result<Vec<T>> { self.db.prepare_cached(sql)?.query_map(p, f)?.collect() };
-        read().unwrap_or_else(|err| {
-            tracing::warn!("reading the scope database: {err}");
-            Vec::new()
-        })
+    fn rows<T>(&self, sql: &str, p: impl rusqlite::Params, f: impl FnMut(&rusqlite::Row) -> rusqlite::Result<T>) -> Result<Vec<T>> {
+        Ok(self.db.prepare_cached(sql).and_then(|mut q| q.query_map(p, f)?.collect::<rusqlite::Result<Vec<T>>>()).context("reading the scope database")?)
     }
 
-    fn row<T>(&self, sql: &str, p: impl rusqlite::Params, f: impl FnOnce(&rusqlite::Row) -> rusqlite::Result<T>) -> Option<T> {
-        self.db.prepare_cached(sql).and_then(|mut q| q.query_row(p, f).optional()).unwrap_or_else(|err| {
-            tracing::warn!("reading the scope database: {err}");
-            None
-        })
+    fn row<T>(&self, sql: &str, p: impl rusqlite::Params, f: impl FnOnce(&rusqlite::Row) -> rusqlite::Result<T>) -> Result<Option<T>> {
+        Ok(self.db.prepare_cached(sql).and_then(|mut q| q.query_row(p, f).optional()).context("reading the scope database")?)
     }
 
     /// Whether `user` may do `verb` to `object` (`object(scope)`, `group(id)`, `device(key)`, …). Unknown means no, and
@@ -201,107 +194,106 @@ impl ScopeDb {
     }
 
     /// What `principal` may do `verb` to (`permissions::objects`), to ask of many at once.
-    fn objects(&self, principal: &str, verb: &str) -> Vec<String> {
-        permissions::objects(&self.db, principal, verb, self.now).unwrap_or_else(|err| {
-            tracing::warn!("asking what may be {verb}: {err:#}");
-            Vec::new()
-        })
+    fn objects(&self, principal: &str, verb: &str) -> Result<Vec<String>> {
+        permissions::objects(&self.db, principal, verb, self.now).with_context(|| format!("asking what may be {verb}"))
     }
 
-    pub fn may_scopes(&self, user: &str, verb: &str) -> Vec<Scope> {
-        let may = self.objects(&person(user), verb);
-        self.scopes().into_iter().filter(|s| permissions::allows(&may, &object(s))).collect()
+    pub fn may_scopes(&self, user: &str, verb: &str) -> Result<Vec<Scope>> {
+        let may = self.objects(&person(user), verb)?;
+        Ok(self.scopes()?.into_iter().filter(|s| permissions::allows(&may, &object(s))).collect())
     }
 
-    pub fn run_by(&self, key: &Key) -> Vec<Scope> {
-        let runs = self.objects(&device(key), "run");
-        self.scopes().into_iter().filter(|s| permissions::allows(&runs, &object(s))).collect()
+    pub fn run_by(&self, key: &Key) -> Result<Vec<Scope>> {
+        let runs = self.objects(&device(key), "run")?;
+        Ok(self.scopes()?.into_iter().filter(|s| permissions::allows(&runs, &object(s))).collect())
     }
 
     /// Whether `key` runs any of `user`'s calls: some scope they may use.
-    pub fn serves(&self, key: &Key, user: &str) -> bool {
-        let uses = self.objects(&person(user), "use");
-        self.user(user).is_some() && self.run_by(key).iter().any(|s| permissions::allows(&uses, &object(s)))
+    pub fn serves(&self, key: &Key, user: &str) -> Result<bool> {
+        let uses = self.objects(&person(user), "use")?;
+        Ok(self.user(user)?.is_some() && self.run_by(key)?.iter().any(|s| permissions::allows(&uses, &object(s))))
     }
 
     /// The devices a call of `user`'s reaching `scopes` may be passed on to: each runs every one of them, all of which
     /// `user` may use, so none is handed a call, or its keys, that isn't theirs to run.
-    pub fn runners(&self, user: &str, scopes: &[Scope]) -> Vec<Machine> {
-        let uses = self.objects(&person(user), "use");
-        if self.user(user).is_none() || !scopes.iter().all(|s| permissions::allows(&uses, &object(s))) {
-            return Vec::new();
+    pub fn runners(&self, user: &str, scopes: &[Scope]) -> Result<Vec<Machine>> {
+        let uses = self.objects(&person(user), "use")?;
+        if self.user(user)?.is_none() || !scopes.iter().all(|s| permissions::allows(&uses, &object(s))) {
+            return Ok(Vec::new());
         }
-        let all: Vec<String> = self.scopes().iter().map(object).collect();
-        self.computes()
-            .into_iter()
-            .filter(|m| {
-                let runs = self.objects(&device(&m.key), "run");
-                all.iter().any(|o| permissions::allows(&uses, o) && permissions::allows(&runs, o)) && scopes.iter().all(|s| permissions::allows(&runs, &object(s)))
-            })
-            .collect()
+        let all: Vec<String> = self.scopes()?.iter().map(object).collect();
+        let mut out = Vec::new();
+        for m in self.computes()? {
+            let runs = self.objects(&device(&m.key), "run")?;
+            if all.iter().any(|o| permissions::allows(&uses, o) && permissions::allows(&runs, o)) && scopes.iter().all(|s| permissions::allows(&runs, &object(s))) {
+                out.push(m);
+            }
+        }
+        Ok(out)
     }
 
     /// Whom a scope's epochs are sealed to, besides the recovery key: the client devices of everyone who may use it,
     /// never a machine that only runs calls.
-    pub fn openers(&self, scope: &Scope) -> Vec<Machine> {
-        self.clients().into_iter().filter(|c| self.may(&c.user, "use", &object(scope))).collect()
+    pub fn openers(&self, scope: &Scope) -> Result<Vec<Machine>> {
+        Ok(self.clients()?.into_iter().filter(|c| self.may(&c.user, "use", &object(scope))).collect())
     }
 
     /// The nodes that run calls, each with the key what's handed it is sealed to: the devices listed as compute, and
     /// the Cloudflare node, whose seal key is its key's twin.
-    pub fn nodes(&self) -> Vec<(Key, Key)> {
-        let mut out: Vec<(Key, Key)> = self.computes().into_iter().map(|d| (d.key, d.seal)).collect();
-        if let Some(k) = self.cloudflare_node()
+    pub fn nodes(&self) -> Result<Vec<(Key, Key)>> {
+        let mut out: Vec<(Key, Key)> = self.computes()?.into_iter().map(|d| (d.key, d.seal)).collect();
+        if let Some(k) = self.cloudflare_node()?
             && let Ok(seal) = crate::keys::twin_public(&k)
         {
             out.push((k, seal));
         }
-        out
+        Ok(out)
     }
 
     /// Where `user`'s own things run besides their own machines until they choose: others' machines that run
     /// everyone's; nowhere new once they have.
-    pub fn runs_until_chosen(&self, user: &str) -> Vec<Key> {
-        if self.runs(user).is_some() {
-            return Vec::new();
+    pub fn runs_until_chosen(&self, user: &str) -> Result<Vec<Key>> {
+        if self.runs(user)?.is_some() {
+            return Ok(Vec::new());
         }
-        self.computes().into_iter().filter(|c| c.user != user && self.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect()
+        Ok(self.computes()?.into_iter().filter(|c| c.user != user && self.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect())
     }
 
-    pub fn name(&self) -> String {
-        self.row("SELECT name FROM network", [], |r| r.get(0)).unwrap_or_default()
+    pub fn name(&self) -> Result<String> {
+        Ok(self.row("SELECT name FROM network", [], |r| r.get(0))?.unwrap_or_default())
     }
 
-    pub fn root(&self) -> Option<Hash> {
-        self.row("SELECT root FROM network", [], |r| r.get::<_, Option<String>>(0)).flatten().and_then(|h| Hash::from_hex(&h).ok())
+    pub fn root(&self) -> Result<Option<Hash>> {
+        Ok(self.row("SELECT root FROM network", [], |r| r.get::<_, Option<String>>(0))?.flatten().and_then(|h| Hash::from_hex(&h).ok()))
     }
 
-    pub fn devices_at(&self) -> u64 {
-        self.row("SELECT devices_at FROM network", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as u64
+    pub fn devices_at(&self) -> Result<u64> {
+        Ok(self.row("SELECT devices_at FROM network", [], |r| r.get::<_, i64>(0))?.unwrap_or(0) as u64)
     }
 
     /// When the recovery key last let a device in, and whose.
-    pub fn recovery_used(&self) -> Option<(u64, String)> {
-        self.row("SELECT recovery_used_at, recovery_used_by FROM network", [], |r| Ok(r.get::<_, Option<i64>>(0)?.zip(r.get::<_, Option<String>>(1)?)))
+    pub fn recovery_used(&self) -> Result<Option<(u64, String)>> {
+        Ok(self
+            .row("SELECT recovery_used_at, recovery_used_by FROM network", [], |r| Ok(r.get::<_, Option<i64>>(0)?.zip(r.get::<_, Option<String>>(1)?)))?
             .flatten()
-            .map(|(t, u)| (t as u64, id(&u)))
+            .map(|(t, u)| (t as u64, id(&u))))
     }
 
-    pub fn recovery(&self) -> Option<Key> {
-        self.row("SELECT key FROM recovery WHERE set_at IS NOT NULL ORDER BY n DESC LIMIT 1", [], |r| r.get::<_, String>(0)).map(|k| key(&k))
+    pub fn recovery(&self) -> Result<Option<Key>> {
+        Ok(self.row("SELECT key FROM recovery WHERE set_at IS NOT NULL ORDER BY n DESC LIMIT 1", [], |r| r.get::<_, String>(0))?.map(|k| key(&k)))
     }
 
-    pub fn recovery_set(&self) -> u64 {
-        self.row("SELECT set_at FROM recovery WHERE set_at IS NOT NULL ORDER BY n DESC LIMIT 1", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as u64
+    pub fn recovery_set(&self) -> Result<u64> {
+        Ok(self.row("SELECT set_at FROM recovery WHERE set_at IS NOT NULL ORDER BY n DESC LIMIT 1", [], |r| r.get::<_, i64>(0))?.unwrap_or(0) as u64)
     }
 
     /// The recovery keys before the network's, which the relay lets in no more.
-    pub fn recovery_was(&self) -> Vec<Key> {
-        self.rows("SELECT key FROM recovery WHERE set_at IS NULL ORDER BY n", [], |r| r.get::<_, String>(0)).iter().map(|k| key(k)).collect()
+    pub fn recovery_was(&self) -> Result<Vec<Key>> {
+        Ok(self.rows("SELECT key FROM recovery WHERE set_at IS NULL ORDER BY n", [], |r| r.get::<_, String>(0))?.iter().map(|k| key(k)).collect())
     }
 
     /// Everyone who's been in the network, removed people too, by id.
-    pub fn users(&self) -> Vec<User> {
+    pub fn users(&self) -> Result<Vec<User>> {
         self.rows(
             "SELECT p.id, p.name, p.handle, p.removed, coalesce((SELECT min(relation) FROM relations WHERE subject = p.id AND object = ?1), 'member')
              FROM principals p WHERE p.kind = 'person' ORDER BY p.id",
@@ -311,7 +303,7 @@ impl ScopeDb {
     }
 
     /// A person of the network, not removed.
-    pub fn user(&self, user: &str) -> Option<User> {
+    pub fn user(&self, user: &str) -> Result<Option<User>> {
         self.row(
             "SELECT p.name, p.handle, coalesce((SELECT min(relation) FROM relations WHERE subject = p.id AND object = ?2), 'member')
              FROM principals p WHERE p.id = ?1 AND p.removed = 0",
@@ -321,67 +313,76 @@ impl ScopeDb {
     }
 
     /// A person as they were last in the network, removed or not.
-    pub fn user_ever(&self, user: &str) -> Option<User> {
-        self.user(user).or_else(|| {
-            self.row("SELECT name, handle FROM principals WHERE id = ?1 AND kind = 'person'", [person(user)], |r| {
-                Ok(User { id: user.to_string(), name: r.get(0)?, handle: r.get(1)?, removed: true, role: Role::Member })
-            })
+    pub fn user_ever(&self, user: &str) -> Result<Option<User>> {
+        if let Some(u) = self.user(user)? {
+            return Ok(Some(u));
+        }
+        self.row("SELECT name, handle FROM principals WHERE id = ?1 AND kind = 'person'", [person(user)], |r| {
+            Ok(User { id: user.to_string(), name: r.get(0)?, handle: r.get(1)?, removed: true, role: Role::Member })
         })
     }
 
     /// Every group, by id, with who's in it and who's invited.
-    pub fn groups(&self) -> Vec<Group> {
-        let ids = self.rows("SELECT id FROM principals WHERE kind = 'group' ORDER BY id", [], |r| r.get::<_, String>(0));
-        ids.iter().filter_map(|g| self.group(&id(g))).collect()
+    pub fn groups(&self) -> Result<Vec<Group>> {
+        let ids = self.rows("SELECT id FROM principals WHERE kind = 'group' ORDER BY id", [], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for g in ids {
+            out.extend(self.group(&id(&g))?);
+        }
+        Ok(out)
     }
 
-    pub fn group(&self, g: &str) -> Option<Group> {
-        let (name, handle) = self.row("SELECT name, handle FROM principals WHERE id = ?1 AND kind = 'group'", [group(g)], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    pub fn group(&self, g: &str) -> Result<Option<Group>> {
+        let Some((name, handle)) = self.row("SELECT name, handle FROM principals WHERE id = ?1 AND kind = 'group'", [group(g)], |r| Ok((r.get(0)?, r.get(1)?)))? else {
+            return Ok(None);
+        };
         let members = self
             .rows(
                 "SELECT subject, min(relation) FROM relations WHERE object = ?1 AND substr(subject, 1, 7) = 'person:' AND relation IN ('admin', 'member') GROUP BY subject",
                 [group(g)],
                 |r| Ok((id(&r.get::<_, String>(0)?), role_of(&r.get::<_, String>(1)?))),
-            )
+            )?
             .into_iter()
             .collect();
-        let invited = self.rows("SELECT principal, role FROM invites WHERE invited_to = ?1", [group(g)], |r| Ok((id(&r.get::<_, String>(0)?), role_of(&r.get::<_, String>(1)?)))).into_iter().collect();
-        Some(Group { id: g.to_string(), name, handle, members, invited })
+        let invited = self.rows("SELECT principal, role FROM invites WHERE invited_to = ?1", [group(g)], |r| Ok((id(&r.get::<_, String>(0)?), role_of(&r.get::<_, String>(1)?))))?.into_iter().collect();
+        Ok(Some(Group { id: g.to_string(), name, handle, members, invited }))
     }
 
-    pub fn group_role(&self, user: &str, g: &str) -> Option<Role> {
-        self.row(
-            "SELECT min(relation) FROM relations WHERE subject = ?1 AND object = ?2 AND relation IN ('admin', 'member') HAVING count(*) > 0",
-            params![person(user), group(g)],
-            |r| r.get::<_, String>(0),
-        )
-        .map(|r| role_of(&r))
+    pub fn group_role(&self, user: &str, g: &str) -> Result<Option<Role>> {
+        Ok(self
+            .row(
+                "SELECT min(relation) FROM relations WHERE subject = ?1 AND object = ?2 AND relation IN ('admin', 'member') HAVING count(*) > 0",
+                params![person(user), group(g)],
+                |r| r.get::<_, String>(0),
+            )?
+            .map(|r| role_of(&r)))
     }
 
-    pub fn groups_of(&self, user: &str) -> BTreeMap<String, Role> {
-        self.rows(
-            "SELECT object, min(relation) FROM relations WHERE subject = ?1 AND substr(object, 1, 6) = 'group:' AND relation IN ('admin', 'member') GROUP BY object",
-            [person(user)],
-            |r| Ok((id(&r.get::<_, String>(0)?), role_of(&r.get::<_, String>(1)?))),
-        )
-        .into_iter()
-        .collect()
+    pub fn groups_of(&self, user: &str) -> Result<BTreeMap<String, Role>> {
+        Ok(self
+            .rows(
+                "SELECT object, min(relation) FROM relations WHERE subject = ?1 AND substr(object, 1, 6) = 'group:' AND relation IN ('admin', 'member') GROUP BY object",
+                [person(user)],
+                |r| Ok((id(&r.get::<_, String>(0)?), role_of(&r.get::<_, String>(1)?))),
+            )?
+            .into_iter()
+            .collect())
     }
 
     /// A person's role in a scope: in the network, in a group, and admin of their own.
-    pub fn role_in(&self, user: &str, scope: &Scope) -> Option<Role> {
-        match scope {
-            Scope::Global => self.user(user).map(|u| u.role),
-            Scope::Group(g) => self.group_role(user, g),
-            Scope::User(u) => (u == user && self.user(user).is_some()).then_some(Role::Admin),
-        }
+    pub fn role_in(&self, user: &str, scope: &Scope) -> Result<Option<Role>> {
+        Ok(match scope {
+            Scope::Global => self.user(user)?.map(|u| u.role),
+            Scope::Group(g) => self.group_role(user, g)?,
+            Scope::User(u) => (u == user && self.user(user)?.is_some()).then_some(Role::Admin),
+        })
     }
 
     /// Everyone's role in each scope they may use, and in each group they're invited to: (role, invited). `role_in` of
     /// each, at once.
-    pub fn roles(&self) -> BTreeMap<(String, Scope), (Role, bool)> {
+    pub fn roles(&self) -> Result<BTreeMap<(String, Scope), (Role, bool)>> {
         let mut out = BTreeMap::new();
-        for u in self.users().into_iter().filter(|u| !u.removed) {
+        for u in self.users()?.into_iter().filter(|u| !u.removed) {
             out.insert((u.id.clone(), Scope::User(u.id.clone())), (Role::Admin, false));
             out.insert((u.id.clone(), Scope::Global), (u.role, false));
         }
@@ -390,214 +391,233 @@ impl ScopeDb {
              WHERE substr(r.subject, 1, 7) = 'person:' AND r.relation IN ('admin', 'member') GROUP BY r.subject, r.object",
             [],
             |r| Ok((id(&r.get::<_, String>(0)?), id(&r.get::<_, String>(1)?), role_of(&r.get::<_, String>(2)?))),
-        );
+        )?;
         for (user, g, role) in in_groups {
             out.insert((user, Scope::Group(g)), (role, false));
         }
         let invited = self.rows("SELECT i.principal, i.invited_to, i.role FROM invites i JOIN principals g ON g.id = i.invited_to AND g.kind = 'group'", [], |r| {
             Ok((id(&r.get::<_, String>(0)?), id(&r.get::<_, String>(1)?), role_of(&r.get::<_, String>(2)?)))
-        });
+        })?;
         for (user, g, role) in invited {
             out.entry((user, Scope::Group(g))).or_insert((role, true));
         }
-        out
+        Ok(out)
     }
 
     /// Whose a handle is: a person's (removed people keep theirs) or a group's.
-    pub fn by_handle(&self, handle: &str) -> Option<Principal> {
-        self.row("SELECT id FROM principals WHERE handle = ?1 ORDER BY kind DESC LIMIT 1", [handle], |r| r.get::<_, String>(0)).map(|p| owner_of(&p))
+    pub fn by_handle(&self, handle: &str) -> Result<Option<Principal>> {
+        Ok(self.row("SELECT id FROM principals WHERE handle = ?1 ORDER BY kind DESC LIMIT 1", [handle], |r| r.get::<_, String>(0))?.map(|p| owner_of(&p)))
     }
 
     /// Everyone's and every group's handle, as apps get them (`ctx.handles`): `{ handle, id, name }`, `id` being
     /// `user:<id>` or `group:<id>`; a removed person's with `removed`, and a group's with its `members`' roles by id.
-    pub fn handles(&self) -> Value {
-        let users = self.users().into_iter().map(|u| {
+    pub fn handles(&self) -> Result<Value> {
+        let users = self.users()?.into_iter().map(|u| {
             let mut v = json!({ "handle": u.handle, "id": format!("user:{}", u.id), "name": u.name });
             if u.removed {
                 v["removed"] = json!(true);
             }
             v
         });
-        let groups = self.groups().into_iter().map(|g| json!({ "handle": g.handle, "id": format!("group:{}", g.id), "name": g.name, "members": g.members }));
-        Value::Array(users.chain(groups).collect())
+        let groups = self.groups()?.into_iter().map(|g| json!({ "handle": g.handle, "id": format!("group:{}", g.id), "name": g.name, "members": g.members }));
+        Ok(Value::Array(users.chain(groups).collect()))
     }
 
     /// Every scope there is: `global`, each group's and each person's (removed people's too: removing deletes nothing).
-    pub fn scopes(&self) -> Vec<Scope> {
+    pub fn scopes(&self) -> Result<Vec<Scope>> {
         let mut out = vec![Scope::Global];
-        out.extend(self.rows("SELECT id FROM principals WHERE kind = 'group' ORDER BY id", [], |r| r.get::<_, String>(0)).iter().map(|g| Scope::Group(id(g))));
-        out.extend(self.rows("SELECT id FROM principals WHERE kind = 'person' ORDER BY id", [], |r| r.get::<_, String>(0)).iter().map(|u| Scope::User(id(u))));
-        out
+        out.extend(self.rows("SELECT id FROM principals WHERE kind = 'group' ORDER BY id", [], |r| r.get::<_, String>(0))?.iter().map(|g| Scope::Group(id(g))));
+        out.extend(self.rows("SELECT id FROM principals WHERE kind = 'person' ORDER BY id", [], |r| r.get::<_, String>(0))?.iter().map(|u| Scope::User(id(u))));
+        Ok(out)
     }
 
     /// Every device ever listed, removed ones too, by key.
-    pub fn machines(&self) -> Vec<Machine> {
+    pub fn machines(&self) -> Result<Vec<Machine>> {
         self.rows(&format!("{MACHINE} ORDER BY d.key"), [], machine)
     }
 
     /// A device of the network: listed, not removed, and its person not removed.
-    pub fn machine(&self, k: &Key) -> Option<Machine> {
-        self.machine_ever(k).filter(|m| !m.removed)
+    pub fn machine(&self, k: &Key) -> Result<Option<Machine>> {
+        Ok(self.machine_ever(k)?.filter(|m| !m.removed))
     }
 
     /// A device as it was last listed, removed or not.
-    pub fn machine_ever(&self, k: &Key) -> Option<Machine> {
+    pub fn machine_ever(&self, k: &Key) -> Result<Option<Machine>> {
         self.row(&format!("{MACHINE} WHERE d.key = ?1"), [hex(k)], machine)
     }
 
-    fn listed(&self, kind: Kind) -> Vec<Machine> {
-        self.machines().into_iter().filter(|m| !m.removed && m.is(kind)).collect()
+    fn listed(&self, kind: Kind) -> Result<Vec<Machine>> {
+        Ok(self.machines()?.into_iter().filter(|m| !m.removed && m.is(kind)).collect())
     }
 
     /// One of a person's own devices, which signs for them.
-    pub fn client(&self, k: &Key) -> Option<Machine> {
-        self.machine(k).filter(|m| m.is(Kind::Client))
+    pub fn client(&self, k: &Key) -> Result<Option<Machine>> {
+        Ok(self.machine(k)?.filter(|m| m.is(Kind::Client)))
     }
 
     /// A device that runs apps' calls: a node.
-    pub fn compute(&self, k: &Key) -> Option<Machine> {
-        self.machine(k).filter(|m| m.is(Kind::Compute))
+    pub fn compute(&self, k: &Key) -> Result<Option<Machine>> {
+        Ok(self.machine(k)?.filter(|m| m.is(Kind::Compute)))
     }
 
-    pub fn service(&self, k: &Key) -> Option<Machine> {
-        self.machine(k).filter(|m| m.is(Kind::Service))
+    pub fn service(&self, k: &Key) -> Result<Option<Machine>> {
+        Ok(self.machine(k)?.filter(|m| m.is(Kind::Service)))
     }
 
     /// What `user` signs in with, as their own devices recorded it of their clients listed now: what a new device's
     /// sign-in is checked against. Not what an admin's device recorded, of a machine or of their first device.
-    pub fn sign_ins(&self, user: &str) -> Vec<crate::sign_in_proof::Account> {
-        let mut out: Vec<_> = self.machines().into_iter().filter(|m| !m.removed && m.user == user && m.by == user && m.is(Kind::Client)).filter_map(|m| m.sign_in).collect();
+    pub fn sign_ins(&self, user: &str) -> Result<Vec<crate::sign_in_proof::Account>> {
+        let mut out: Vec<_> = self.machines()?.into_iter().filter(|m| !m.removed && m.user == user && m.by == user && m.is(Kind::Client)).filter_map(|m| m.sign_in).collect();
         out.dedup();
-        out
+        Ok(out)
     }
 
-    pub fn clients(&self) -> Vec<Machine> {
+    pub fn clients(&self) -> Result<Vec<Machine>> {
         self.listed(Kind::Client)
     }
 
-    pub fn computes(&self) -> Vec<Machine> {
+    pub fn computes(&self) -> Result<Vec<Machine>> {
         self.listed(Kind::Compute)
     }
 
     /// The service endpoints offering `name`.
-    pub fn offering(&self, name: &str) -> Vec<Machine> {
-        self.listed(Kind::Service).into_iter().filter(|m| m.service.as_deref() == Some(name)).collect()
+    pub fn offering(&self, name: &str) -> Result<Vec<Machine>> {
+        Ok(self.listed(Kind::Service)?.into_iter().filter(|m| m.service.as_deref() == Some(name)).collect())
     }
 
-    pub fn seal_key(&self, k: &Key) -> Option<Key> {
-        self.machine(k).map(|m| m.seal)
+    pub fn seal_key(&self, k: &Key) -> Result<Option<Key>> {
+        Ok(self.machine(k)?.map(|m| m.seal))
     }
 
     /// The Cloudflare node, as an admin's `CLOUDFLARE_NODE` setting names it.
-    pub fn cloudflare_node(&self) -> Option<Key> {
-        self.setting(CLOUDFLARE_NODE).and_then(|k| unhex(&k).ok())
+    pub fn cloudflare_node(&self) -> Result<Option<Key>> {
+        Ok(self.setting(CLOUDFLARE_NODE)?.and_then(|k| unhex(&k).ok()))
     }
 
     /// Where a person's own things run besides their own machines, as their own device last said, if it has.
-    pub fn runs(&self, user: &str) -> Option<BTreeSet<Key>> {
-        self.row("SELECT 1 FROM runs_chosen WHERE principal = ?1", [person(user)], |_| Ok(()))?;
-        Some(self.rows("SELECT device FROM runs WHERE principal = ?1", [person(user)], |r| r.get::<_, String>(0)).iter().map(|k| key(k)).collect())
+    pub fn runs(&self, user: &str) -> Result<Option<BTreeSet<Key>>> {
+        if self.row("SELECT 1 FROM runs_chosen WHERE principal = ?1", [person(user)], |_| Ok(()))?.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(self.rows("SELECT device FROM runs WHERE principal = ?1", [person(user)], |r| r.get::<_, String>(0))?.iter().map(|k| key(k)).collect()))
     }
 
     /// The parts of each device its person switched on or off, by (device, part), each service's with the scope whose
     /// added app it runs for. A copy from before services named their scope reads as naming none.
-    pub fn switches(&self) -> BTreeMap<(Key, String), Switch> {
-        let scoped = self.row("SELECT 1 FROM pragma_table_info('services') WHERE name = 'scope'", [], |_| Ok(())).is_some();
+    pub fn switches(&self) -> Result<BTreeMap<(Key, String), Switch>> {
+        let scoped = self.row("SELECT 1 FROM pragma_table_info('services') WHERE name = 'scope'", [], |_| Ok(()))?.is_some();
         let sql = format!("SELECT device, name, switched_on, switched_by, switched_at, {} FROM services", if scoped { "scope" } else { "NULL" });
-        self.rows(&sql, [], |r| {
+        Ok(self.rows(&sql, [], |r| {
             Ok(((key(&r.get::<_, String>(0)?), r.get::<_, String>(1)?), Switch { on: r.get(2)?, by: id(&r.get::<_, String>(3)?), time: r.get::<_, i64>(4)? as u64, scope: r.get(5)? }))
-        })
+        })?
         .into_iter()
-        .collect()
+        .collect())
     }
 
-    pub fn switch(&self, k: &Key, name: &str) -> Option<Switch> {
-        self.switches().remove(&(*k, name.to_string()))
+    pub fn switch(&self, k: &Key, name: &str) -> Result<Option<Switch>> {
+        Ok(self.switches()?.remove(&(*k, name.to_string())))
     }
 
     /// A scope's current epoch: 0 while it has none yet.
-    pub fn epoch(&self, scope: &Scope) -> u32 {
-        self.row("SELECT max(epoch) FROM epochs WHERE scope = ?1", [scope.to_string()], |r| r.get::<_, Option<u32>>(0)).flatten().unwrap_or(0)
+    pub fn epoch(&self, scope: &Scope) -> Result<u32> {
+        Ok(self.row("SELECT max(epoch) FROM epochs WHERE scope = ?1", [scope.to_string()], |r| r.get::<_, Option<u32>>(0))?.flatten().unwrap_or(0))
     }
 
-    pub fn epoch_hashes(&self, scope: &Scope) -> BTreeMap<u32, String> {
-        self.rows("SELECT epoch, key_hash FROM epochs WHERE scope = ?1", [scope.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).into_iter().collect()
+    pub fn epoch_hashes(&self, scope: &Scope) -> Result<BTreeMap<u32, String>> {
+        Ok(self.rows("SELECT epoch, key_hash FROM epochs WHERE scope = ?1", [scope.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))?.into_iter().collect())
     }
 
     /// The hash of a scope's epoch `n`, if an entry that counts made it.
-    pub fn epoch_hash(&self, scope: &Scope, n: u32) -> Option<String> {
+    pub fn epoch_hash(&self, scope: &Scope, n: u32) -> Result<Option<String>> {
         self.row("SELECT key_hash FROM epochs WHERE scope = ?1 AND epoch = ?2", params![scope.to_string(), n], |r| r.get(0))
     }
 
-    pub fn epochs(&self) -> BTreeMap<Scope, u32> {
-        self.rows("SELECT scope, max(epoch) FROM epochs GROUP BY scope", [], |r| Ok((r.get::<_, String>(0)?, r.get(1)?)))
+    pub fn epochs(&self) -> Result<BTreeMap<Scope, u32>> {
+        Ok(self
+            .rows("SELECT scope, max(epoch) FROM epochs GROUP BY scope", [], |r| Ok((r.get::<_, String>(0)?, r.get(1)?)))?
             .into_iter()
             .filter_map(|(s, n)| Some((Scope::parse(&s).ok()?, n)))
-            .collect()
+            .collect())
     }
 
     /// The devices a scope's current epoch was first sealed to.
-    pub fn sealed_to(&self, scope: &Scope) -> Vec<Key> {
-        self.rows("SELECT device FROM sealed WHERE scope = ?1 AND epoch = (SELECT max(epoch) FROM epochs WHERE scope = ?1)", [scope.to_string()], |r| r.get::<_, String>(0))
+    pub fn sealed_to(&self, scope: &Scope) -> Result<Vec<Key>> {
+        Ok(self
+            .rows("SELECT device FROM sealed WHERE scope = ?1 AND epoch = (SELECT max(epoch) FROM epochs WHERE scope = ?1)", [scope.to_string()], |r| r.get::<_, String>(0))?
             .iter()
             .map(|k| key(k))
-            .collect()
+            .collect())
     }
 
-    pub fn owed(&self) -> Vec<Scope> {
-        self.rows("SELECT scope FROM owed", [], |r| r.get::<_, String>(0)).iter().filter_map(|s| Scope::parse(s).ok()).collect()
+    pub fn owed(&self) -> Result<Vec<Scope>> {
+        Ok(self.rows("SELECT scope FROM owed", [], |r| r.get::<_, String>(0))?.iter().filter_map(|s| Scope::parse(s).ok()).collect())
     }
 
     /// All app schedules, by (device, scope, app), as their latest `app-schedules` step said: whether in force is `app_schedules_at`'s.
-    pub fn app_schedules(&self) -> BTreeMap<(Key, Scope, String), AppSchedules> {
+    pub fn app_schedules(&self) -> Result<BTreeMap<(Key, Scope, String), AppSchedules>> {
         let rows = self.rows("SELECT device, scope, app, principal, until FROM app_schedules", [], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, id(&r.get::<_, String>(3)?), r.get::<_, i64>(4)? as u64))
-        });
-        rows.into_iter()
-            .filter_map(|(k, s, a, by, until)| {
-                let scope = Scope::parse(&s).ok()?;
-                let hashes = self
-                    .rows("SELECT epoch, key_hash FROM app_schedule_keys WHERE device = ?1 AND scope = ?2 AND app = ?3", params![k, s, a], |r| Ok((r.get(0)?, r.get(1)?)))
-                    .into_iter()
-                    .collect();
-                Some(((key(&k), scope, a), AppSchedules { by, until, hashes }))
-            })
-            .collect()
+        })?;
+        let mut out = BTreeMap::new();
+        for (k, s, a, by, until) in rows {
+            let Ok(scope) = Scope::parse(&s) else { continue };
+            let hashes = self.rows("SELECT epoch, key_hash FROM app_schedule_keys WHERE device = ?1 AND scope = ?2 AND app = ?3", params![k, s, a], |r| Ok((r.get(0)?, r.get(1)?)))?.into_iter().collect();
+            out.insert((key(&k), scope, a), AppSchedules { by, until, hashes });
+        }
+        Ok(out)
     }
 
     /// The app schedules in force at `now`: not over, on a device still listed, by someone who may still set them there.
-    pub fn app_schedules_at(&self, now: u64) -> Vec<((Key, Scope, String), AppSchedules)> {
-        self.app_schedules().into_iter().filter(|((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.may(&g.by, "choose-devices", &object(s))).collect()
+    pub fn app_schedules_at(&self, now: u64) -> Result<Vec<((Key, Scope, String), AppSchedules)>> {
+        let mut out = Vec::new();
+        for (at, g) in self.app_schedules()? {
+            if g.until > now && self.machine(&at.0)?.is_some() && self.may(&g.by, "choose-devices", &object(&at.1)) {
+                out.push((at, g));
+            }
+        }
+        Ok(out)
     }
 
-    pub fn vault(&self, scope: &Scope) -> Option<VaultKey> {
-        let (n, public) = self.row("SELECT n, public FROM vault WHERE scope = ?1 ORDER BY n DESC LIMIT 1", [scope.to_string()], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?;
-        let to = self.rows("SELECT device FROM vault_opens WHERE scope = ?1", [scope.to_string()], |r| r.get::<_, String>(0)).iter().map(|k| key(k)).collect();
-        Some(VaultKey { n, public: key(&public), to })
+    pub fn vault(&self, scope: &Scope) -> Result<Option<VaultKey>> {
+        let Some((n, public)) = self.row("SELECT n, public FROM vault WHERE scope = ?1 ORDER BY n DESC LIMIT 1", [scope.to_string()], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))? else {
+            return Ok(None);
+        };
+        let to = self.rows("SELECT device FROM vault_opens WHERE scope = ?1", [scope.to_string()], |r| r.get::<_, String>(0))?.iter().map(|k| key(k)).collect();
+        Ok(Some(VaultKey { n, public: key(&public), to }))
     }
 
-    pub fn vaults(&self) -> BTreeMap<Scope, VaultKey> {
-        let scopes = self.rows("SELECT DISTINCT scope FROM vault", [], |r| r.get::<_, String>(0));
-        scopes.iter().filter_map(|s| Scope::parse(s).ok()).filter_map(|s| Some((s.clone(), self.vault(&s)?))).collect()
+    pub fn vaults(&self) -> Result<BTreeMap<Scope, VaultKey>> {
+        let scopes = self.rows("SELECT DISTINCT scope FROM vault", [], |r| r.get::<_, String>(0))?;
+        let mut out = BTreeMap::new();
+        for s in scopes.iter().filter_map(|s| Scope::parse(s).ok()) {
+            if let Some(v) = self.vault(&s)? {
+                out.insert(s, v);
+            }
+        }
+        Ok(out)
     }
 
-    pub fn vault_publics(&self, scope: &Scope) -> BTreeMap<u32, Key> {
-        self.rows("SELECT n, public FROM vault WHERE scope = ?1", [scope.to_string()], |r| Ok((r.get(0)?, key(&r.get::<_, String>(1)?)))).into_iter().collect()
+    pub fn vault_publics(&self, scope: &Scope) -> Result<BTreeMap<u32, Key>> {
+        Ok(self.rows("SELECT n, public FROM vault WHERE scope = ?1", [scope.to_string()], |r| Ok((r.get(0)?, key(&r.get::<_, String>(1)?))))?.into_iter().collect())
     }
 
     /// Whether `k` opens `scope`'s Vault now: its newest key lists it, and it's still listed.
-    pub fn opens_vault(&self, k: &Key, scope: &Scope) -> bool {
-        self.vault(scope).is_some_and(|v| v.to.contains(k)) && self.machine(k).is_some()
+    pub fn opens_vault(&self, k: &Key, scope: &Scope) -> Result<bool> {
+        Ok(self.vault(scope)?.is_some_and(|v| v.to.contains(k)) && self.machine(k)?.is_some())
     }
 
     /// Every app ever made, erased ones too, by name.
-    pub fn apps(&self) -> Vec<App> {
-        let names = self.rows("SELECT name FROM apps ORDER BY name", [], |r| r.get::<_, String>(0));
-        names.iter().filter_map(|n| self.app(n)).collect()
+    pub fn apps(&self) -> Result<Vec<App>> {
+        let names = self.rows("SELECT name FROM apps ORDER BY name", [], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for n in names {
+            out.extend(self.app(&n)?);
+        }
+        Ok(out)
     }
 
-    pub fn app(&self, name: &str) -> Option<App> {
-        let mut app = self.row("SELECT name, owner, forked_from, bundle, deploys, deleted_at, deleted_by, erased, source FROM apps WHERE name = ?1", [name], |r| {
+    pub fn app(&self, name: &str) -> Result<Option<App>> {
+        let Some(mut app) = self.row("SELECT name, owner, forked_from, bundle, deploys, deleted_at, deleted_by, erased, source FROM apps WHERE name = ?1", [name], |r| {
             let deleted = r.get::<_, Option<i64>>(5)?.zip(r.get::<_, Option<String>>(6)?).map(|(t, u)| (t as u64, id(&u)));
             Ok(App {
                 name: r.get(0)?,
@@ -610,48 +630,52 @@ impl ScopeDb {
                 erased: r.get(7)?,
                 source: r.get(8)?,
             })
-        })?;
-        app.history = self.rows("SELECT bundle, deployed_at, deployed_by FROM deploys WHERE app = ?1 ORDER BY n", [name], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, id(&r.get::<_, String>(2)?))));
-        Some(app)
+        })?
+        else {
+            return Ok(None);
+        };
+        app.history = self.rows("SELECT bundle, deployed_at, deployed_by FROM deploys WHERE app = ?1 ORDER BY n", [name], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, id(&r.get::<_, String>(2)?))))?;
+        Ok(Some(app))
     }
 
-    pub fn settings(&self) -> BTreeMap<String, String> {
-        self.rows("SELECT name, value FROM settings", [], |r| Ok((r.get(0)?, r.get(1)?))).into_iter().collect()
+    pub fn settings(&self) -> Result<BTreeMap<String, String>> {
+        Ok(self.rows("SELECT name, value FROM settings", [], |r| Ok((r.get(0)?, r.get(1)?)))?.into_iter().collect())
     }
 
-    pub fn setting(&self, name: &str) -> Option<String> {
+    pub fn setting(&self, name: &str) -> Result<Option<String>> {
         self.row("SELECT value FROM settings WHERE name = ?1", [name], |r| r.get(0))
     }
 
-    pub fn installed(&self) -> BTreeSet<String> {
-        self.rows("SELECT app FROM installs WHERE installed = 1", [], |r| r.get(0)).into_iter().collect()
+    pub fn installed(&self) -> Result<BTreeSet<String>> {
+        Ok(self.rows("SELECT app FROM installs WHERE installed = 1", [], |r| r.get(0))?.into_iter().collect())
     }
 
     /// The releases steps said (`steps`), oldest first, as entries of their author's (`release::latest` reads them as
     /// it reads the log's): their content, author and time.
-    pub fn releases(&self) -> Vec<(crate::database::content::Content, Key, u64)> {
-        self.rows("SELECT content, author, time FROM releases ORDER BY at", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))
+    pub fn releases(&self) -> Result<Vec<(crate::database::content::Content, Key, u64)>> {
+        Ok(self
+            .rows("SELECT content, author, time FROM releases ORDER BY at", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?
             .into_iter()
             .filter_map(|(c, a, t)| Some((serde_json::from_str(&c).ok()?, key(&a), t as u64)))
-            .collect()
+            .collect())
     }
 
     /// Whether a step named `blob` and the scope still needs it: forgotten, only if a node entry other than a keep
     /// named it; or it's a deploy's bundle, which is never forgotten.
-    pub fn names_blob(&self, blob: &str) -> bool {
-        let named = self.row("SELECT pinned OR NOT EXISTS (SELECT 1 FROM forgotten WHERE blob = ?1) FROM blobs WHERE blob = ?1", [blob], |r| r.get::<_, bool>(0)).unwrap_or(false);
-        named || self.row("SELECT 1 FROM deploys WHERE bundle = ?1", [blob], |_| Ok(())).is_some()
+    pub fn names_blob(&self, blob: &str) -> Result<bool> {
+        let named = self.row("SELECT pinned OR NOT EXISTS (SELECT 1 FROM forgotten WHERE blob = ?1) FROM blobs WHERE blob = ?1", [blob], |r| r.get::<_, bool>(0))?.unwrap_or(false);
+        Ok(named || self.row("SELECT 1 FROM deploys WHERE bundle = ?1", [blob], |_| Ok(()))?.is_some())
     }
 
-    pub fn blobs(&self) -> BTreeSet<String> {
-        self.rows("SELECT blob FROM blobs WHERE pinned OR blob NOT IN (SELECT blob FROM forgotten) UNION SELECT bundle FROM deploys", [], |r| r.get(0)).into_iter().collect()
+    pub fn blobs(&self) -> Result<BTreeSet<String>> {
+        Ok(self.rows("SELECT blob FROM blobs WHERE pinned OR blob NOT IN (SELECT blob FROM forgotten) UNION SELECT bundle FROM deploys", [], |r| r.get(0))?.into_iter().collect())
     }
 
-    pub fn state(&self) -> ScopeState {
+    pub fn state(&self) -> Result<ScopeState> {
         let mut s = ScopeState::default();
         for (app, installed, by, at) in self.rows("SELECT app, installed, installed_by, installed_at FROM installs", [], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, id(&r.get::<_, String>(2)?), r.get::<_, i64>(3)? as u64))
-        }) {
+        })? {
             if installed {
                 s.installed.insert(app.clone());
             }
@@ -659,7 +683,7 @@ impl ScopeDb {
         }
         for (app, schedule, on, by, at) in self.rows("SELECT app, schedule, switched_on, switched_by, switched_at FROM schedules", [], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?, id(&r.get::<_, String>(3)?), r.get::<_, i64>(4)? as u64))
-        }) {
+        })? {
             s.switches.insert((app, schedule), (on, by, at));
         }
         let requests = self.rows("SELECT id, app, title, fields, hosts, why, need, asked_by, agent, asked_at, answer, answered_by, answered_at FROM vault_requests", [], |r| {
@@ -684,13 +708,13 @@ impl ScopeDb {
                     answer,
                 },
             ))
-        });
+        })?;
         s.requests = requests.into_iter().collect();
-        for (page, arrangement) in self.rows("SELECT page, arrangement FROM pages", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
+        for (page, arrangement) in self.rows("SELECT page, arrangement FROM pages", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
             s.arrangements.insert(page, serde_json::from_str(&arrangement).unwrap_or_default());
         }
-        s.forgotten = self.rows("SELECT blob FROM forgotten", [], |r| r.get(0)).into_iter().collect();
-        s
+        s.forgotten = self.rows("SELECT blob FROM forgotten", [], |r| r.get(0))?.into_iter().collect();
+        Ok(s)
     }
 }
 

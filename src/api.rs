@@ -614,11 +614,11 @@ async fn keys_post(State(node): State<Node>, me: Me, Body(body): Body<SealedKey>
     Ok(Json(node.seal_key(&me.caller, &scope, body.n, body.to.as_deref(), body.app.as_deref(), given(&body.sealed, "sealed")?).await?))
 }
 
-async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {
-    Json(match signed_in {
-        Some(me) => node.state_for_sign_in(&me.caller, me.sign_in.as_deref().unwrap_or_default()),
-        None => node.state(),
-    })
+async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Reply {
+    Ok(Json(match signed_in {
+        Some(me) => node.state_for_sign_in(&me.caller, me.sign_in.as_deref().unwrap_or_default())?,
+        None => node.state()?,
+    }))
 }
 
 /// What a client that picks the node it asks itself says with each request (client/src/lib.rs): a call this node can't

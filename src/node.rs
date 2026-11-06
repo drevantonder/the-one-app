@@ -538,7 +538,7 @@ impl Node {
             if let Err(err) = node.bucket().and_then(|b| b.forget_sent()) {
                 tracing::warn!("forgetting steps other devices sent: {err:#}");
             }
-            node.with(|i| Ok(update_views(i)))?;
+            node.with(update_views)?;
             node.keep_alone_here()?;
             node.read_own_items();
             node.follow_net();
@@ -657,6 +657,17 @@ impl Node {
         f(network.as_mut().context("this device is in no network yet: create one, or join with a pairing code")?)
     }
 
+    /// `with`, for what answers a plain yes or no, or a list, and can't fail: `default` when it's in no network yet, or
+    /// when its who's who couldn't be read, which the log says.
+    fn with_or<R>(&self, default: R, f: impl FnOnce(&mut Network) -> Result<R>) -> R {
+        self.with(f).unwrap_or_else(|err| {
+            if self.has_network() {
+                tracing::warn!("reading who's who: {err:#}");
+            }
+            default
+        })
+    }
+
     pub fn has_network(&self) -> bool {
         self.0.network.lock().is_ok_and(|i| i.is_some())
     }
@@ -677,7 +688,16 @@ impl Node {
     pub fn event_for(&self, event: Event, user: &str) -> Event {
         match event {
             Event::Changed { apps } => {
-                let apps = self.with(|i| Ok(apps.into_iter().filter(|a| !reachable(i, a, user).is_empty()).collect())).unwrap_or_default();
+                // An event that can't be checked is told to no one.
+                let apps = self.with_or(Vec::new(), |i| {
+                    let mut told = Vec::new();
+                    for a in apps {
+                        if !reachable(i, &a, user)?.is_empty() {
+                            told.push(a);
+                        }
+                    }
+                    Ok(told)
+                });
                 Event::Changed { apps }
             }
             other => other,
@@ -710,7 +730,7 @@ impl Node {
 
     /// A network made before it kept its data in a bucket, with no device but this one: it keeps it in a folder here.
     fn keep_alone_here(&self) -> Result<()> {
-        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.db().computes().iter().all(|s| s.key == self.0.id)))?;
+        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.db().computes()?.iter().all(|s| s.key == self.0.id)))?;
         if !alone {
             return Ok(());
         }
@@ -751,7 +771,8 @@ impl Node {
     /// network isn't being read (never waiting on it, so it's asked for anywhere); else as it last was.
     pub fn device_name(&self) -> String {
         let network = self.0.network.0.try_lock().ok();
-        let listed = network.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.db().machine(&self.0.id).map(|m| m.name));
+        // A name that can't be read from the network now is the last one, so the error is the log's.
+        let listed = network.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.db().machine(&self.0.id).inspect_err(|err| tracing::warn!("reading this device's name: {err:#}")).ok().flatten().map(|m| m.name));
         drop(network);
         let mut name = self.0.name.lock().unwrap();
         if let Some(listed) = listed {
@@ -834,7 +855,7 @@ impl Node {
     /// A scope's first epoch, before anything is written there, made outside this device's writes, since its entry is
     /// one: a scope with none has nothing to read or write until it has.
     async fn first_epoch(&self, scope: &Scope) -> Result<()> {
-        if *scope != Scope::Global && self.with(|i| Ok(i.r.db().epoch(scope)))? == 0 {
+        if *scope != Scope::Global && self.with(|i| Ok(i.r.db().epoch(scope)?))? == 0 {
             self.epoch_keys(scope, true).await?;
         }
         Ok(())
@@ -850,7 +871,13 @@ impl Node {
         let forgotten_now = self.with(|i| {
             if handled.members {
                 let db = i.r.db();
-                i.peers.retain(|peer, _| db.compute(peer).is_some() || db.service(peer).is_some());
+                let mut listed = BTreeSet::new();
+                for peer in i.peers.keys() {
+                    if db.compute(peer)?.is_some() || db.service(peer)?.is_some() {
+                        listed.insert(*peer);
+                    }
+                }
+                i.peers.retain(|peer, _| listed.contains(peer));
             }
             for log in &handled.dropped {
                 i.views.remove(log);
@@ -858,7 +885,7 @@ impl Node {
             if handled.members {
                 note_change(i, &Scope::Global);
             }
-            update_views(i);
+            update_views(i)?;
             Ok(i.views.get("global").map(|s| s.forgotten.clone()).unwrap_or_default())
         })?;
         self.close_dbs(|scope, _| handled.dropped.contains(&scope.to_string()));
@@ -903,9 +930,14 @@ impl Node {
     async fn settle(&self) -> Result<()> {
         let _settling = self.0.settling.lock().await;
         let Ok((wanted, unadded, author)) = self.with(|i| {
-            let wanted: BTreeMap<String, String> = i.r.db().apps().into_iter().filter(|a| !a.erased).filter_map(|a| Some((a.name, a.bundle?))).collect();
-            let unadded: BTreeMap<String, String> = self.0.built_in.iter().filter(|(name, _)| i.r.db().app(name).is_none()).map(|(n, b)| (n.clone(), b.clone())).collect();
-            Ok((wanted, unadded, i.r.db().compute(&self.0.id).is_some()))
+            let wanted: BTreeMap<String, String> = i.r.db().apps()?.into_iter().filter(|a| !a.erased).filter_map(|a| Some((a.name, a.bundle?))).collect();
+            let mut unadded = BTreeMap::new();
+            for (name, bundle) in self.0.built_in.iter() {
+                if i.r.db().app(name)?.is_none() {
+                    unadded.insert(name.clone(), bundle.clone());
+                }
+            }
+            Ok((wanted, unadded, i.r.db().compute(&self.0.id)?.is_some()))
         }) else {
             return Ok(());
         };
@@ -976,8 +1008,8 @@ impl Node {
 
     pub fn ready(&self) -> bool {
         self.with(|i| {
-            let alone = i.r.db().computes().iter().all(|s| s.key == self.0.id);
-            Ok(i.r.db().compute(&self.0.id).is_some() && (i.read || alone))
+            let alone = i.r.db().computes()?.iter().all(|s| s.key == self.0.id);
+            Ok(i.r.db().compute(&self.0.id)?.is_some() && (i.read || alone))
         })
         .unwrap_or(false)
     }
@@ -1007,10 +1039,11 @@ impl Node {
 
 /// `global`'s state, as its scope database says it: each other scope's is its own database's
 /// (`Node::read_scope_steps_now`).
-fn update_views(i: &mut Network) {
+fn update_views(i: &mut Network) -> Result<()> {
     if i.r.freeze().is_some() {
-        i.views.insert("global".to_string(), i.r.db().state());
+        i.views.insert("global".to_string(), i.r.db().state()?);
     }
+    Ok(())
 }
 
 fn note_change(i: &mut Network, scope: &Scope) {
@@ -1021,12 +1054,12 @@ fn note_change(i: &mut Network, scope: &Scope) {
 /// The scopes a call of `app` as `user` may reach: their own if it's installed for them at all, each of their groups
 /// it's installed for (in the group or in `global`; a group whose installs this device can't see counts), and `global`
 /// if it's installed there.
-fn reachable(i: &Network, app: &str, user: &str) -> Vec<Scope> {
+fn reachable(i: &Network, app: &str, user: &str) -> Result<Vec<Scope>> {
     let db = i.r.db();
     let installed = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|st| st.installed.contains(app));
     let global = installed(&Scope::Global);
     let mut out = Vec::new();
-    for g in db.groups_of(user).keys() {
+    for g in db.groups_of(user)?.keys() {
         let s = Scope::Group(g.clone());
         if global || installed(&s) || !i.r.holds(&s) {
             out.push(s);
@@ -1039,26 +1072,31 @@ fn reachable(i: &Network, app: &str, user: &str) -> Vec<Scope> {
     if global {
         out.push(Scope::Global);
     }
-    out
+    Ok(out)
 }
 
-fn handles(db: &ScopeDb, scopes: &[Scope], user: &str) -> Vec<ScopeHandle> {
-    scopes.iter().map(|s| ScopeHandle { id: s.to_string(), name: whose(db, s), role: db.role_in(user, s) }).collect()
+fn handles(db: &ScopeDb, scopes: &[Scope], user: &str) -> Result<Vec<ScopeHandle>> {
+    scopes.iter().map(|s| Ok(ScopeHandle { id: s.to_string(), name: whose(db, s)?, role: db.role_in(user, s)? })).collect()
 }
 
 /// A scope's name: the network's, a group's, or a person's, removed people's too.
-fn whose(db: &ScopeDb, scope: &Scope) -> String {
-    match scope {
-        Scope::Global => db.name(),
-        Scope::Group(g) => db.group(g).map(|g| g.name).unwrap_or_default(),
-        Scope::User(u) => db.user_ever(u).map(|u| u.name).unwrap_or_default(),
-    }
+fn whose(db: &ScopeDb, scope: &Scope) -> Result<String> {
+    Ok(match scope {
+        Scope::Global => db.name()?,
+        Scope::Group(g) => db.group(g)?.map(|g| g.name).unwrap_or_default(),
+        Scope::User(u) => db.user_ever(u)?.map(|u| u.name).unwrap_or_default(),
+    })
 }
 
-fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Me {
-    let name = if caller.key == node.0.id { node.device_name() } else { db.machine(&caller.key).map(|k| k.name).unwrap_or_default() };
-    let user = db.user(&caller.user);
-    Me {
+/// A person's name in the network, removed people's too; none if it never knew them.
+fn user_name(db: &ScopeDb, user: &str) -> Result<String> {
+    Ok(db.user_ever(user)?.map(|u| u.name).unwrap_or_default())
+}
+
+fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Result<Me> {
+    let name = if caller.key == node.0.id { node.device_name() } else { db.machine(&caller.key)?.map(|k| k.name).unwrap_or_default() };
+    let user = db.user(&caller.user)?;
+    Ok(Me {
         key: hex(&caller.key),
         user: caller.user.clone(),
         name,
@@ -1066,7 +1104,7 @@ fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Me {
         user_name: user.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
         handle: user.map(|u| u.handle).unwrap_or_default(),
         agent: caller.agent.clone(),
-    }
+    })
 }
 
 /// Checks one of a call's appends: into a scope it named, which the caller may write. `title` is what people call
@@ -1085,7 +1123,7 @@ fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, titl
         }
         Append::Retire { app: name, how } => {
             let db = i.r.db();
-            let a = db.app(&name).with_context(|| format!("no app named {name}"))?;
+            let a = db.app(&name)?.with_context(|| format!("no app named {name}"))?;
             ensure!(db.may(&me.user, "delete", &scopes::app(&name)), "Only {title}'s owners can delete, restore or erase it.");
             let mut data = json!({ "name": name, "owner": a.owner.to_string() });
             match how.as_str() {
@@ -1099,7 +1137,7 @@ fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, titl
         }
         Append::Source { app: name, link } => {
             let db = i.r.db();
-            let a = db.app(&name).filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
+            let a = db.app(&name)?.filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
             ensure!(db.may(&me.user, "deploy", &scopes::app(&name)), "Only {title}'s owners can set where its code is kept.");
             let link = scopes::source_link(&json!(link))?;
             (Scope::Global, content::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
@@ -1107,7 +1145,7 @@ fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, titl
         Append::Service { device, name, on, scope } => {
             let scope = match scope {
                 Some(s) => Some(Scope::parse_for(&s, &me.user)?),
-                None if on => added_scope(i, &me.user, &name),
+                None if on => added_scope(i, &me.user, &name)?,
                 None => None,
             };
             (Scope::Global, service_entry(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
@@ -1123,15 +1161,15 @@ fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, s
     if let Some(s) = scope.filter(|_| on) {
         ensure!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
     }
-    let managed = |k: &Key| !on && db.switch(k, name).and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)));
+    let managed = |k: &Key| -> Result<bool> { Ok(!on && db.switch(k, name)?.and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)))) };
     // The Cloudflare node, by its name in run priority or its key: its admins switch its parts.
-    if let Some(k) = db.cloudflare_node().filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
-        ensure!(managed(&k) || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
+    if let Some(k) = db.cloudflare_node()?.filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
+        ensure!(managed(&k)? || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
         // It always runs apps; what else it can run is the services built for it that it carries.
         ensure!(!on || crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
         return Ok(content::service(&k, name, on, scope));
     }
-    let mut found: Vec<scopes::Machine> = db.machines().into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+    let mut found: Vec<scopes::Machine> = db.machines()?.into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     // A machine's services are named for it: by its name, it's its node.
     if found.len() > 1 {
         found.retain(|s| s.is(scopes::Kind::Compute));
@@ -1139,38 +1177,43 @@ fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, s
     let key = match found.as_slice() {
         [s] => s.key,
         // A node that was removed still has its records, which who added the app may switch off.
-        _ => match unhex(device).ok().filter(|k| managed(k)) {
-            Some(k) => k,
-            None => bail!("no one device called {device}"),
+        _ => match unhex(device).ok() {
+            Some(k) if managed(&k)? => k,
+            _ => bail!("no one device called {device}"),
         },
     };
-    ensure!(managed(&key) || db.may(user, "switch", &scopes::device(&key)), "only {device}'s person switches what it runs");
+    ensure!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s person switches what it runs");
     Ok(content::service(&key, name, on, scope))
 }
 
 /// The scope whose added app `name` is, as `user` sees it, for a service switched on with none said: their own, if
 /// it's added there, then everyone's, then one of their groups'.
-fn added_scope(i: &Network, user: &str, name: &str) -> Option<Scope> {
+fn added_scope(i: &Network, user: &str, name: &str) -> Result<Option<Scope>> {
     let added = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|v| v.installed.contains(name));
     let own = Scope::User(user.to_string());
     let db = i.r.db();
-    let groups = db.groups().into_iter().filter(|g| db.group_role(user, &g.id).is_some()).map(|g| Scope::Group(g.id));
-    [own, Scope::Global].into_iter().chain(groups).find(|s| added(s) && db.may(user, "add-apps", &scopes::object(s)))
+    let mut groups = Vec::new();
+    for g in db.groups()? {
+        if db.group_role(user, &g.id)?.is_some() {
+            groups.push(Scope::Group(g.id));
+        }
+    }
+    Ok([own, Scope::Global].into_iter().chain(groups).find(|s| added(s) && db.may(user, "add-apps", &scopes::object(s))))
 }
 
-fn scope_name(i: &Network, scope: &str) -> String {
+fn scope_name(i: &Network, scope: &str) -> Result<String> {
     let db = i.r.db();
-    match Scope::parse(scope) {
+    Ok(match Scope::parse(scope) {
         Ok(Scope::Global) => "Everyone".to_string(),
-        Ok(Scope::User(u)) => db.user(&u).map(|u| u.name).unwrap_or(u),
-        Ok(Scope::Group(g)) => db.group(&g).map(|g| g.name).unwrap_or(g),
+        Ok(Scope::User(u)) => db.user(&u)?.map(|u| u.name).unwrap_or(u),
+        Ok(Scope::Group(g)) => db.group(&g)?.map(|g| g.name).unwrap_or(g),
         Err(_) => scope.to_string(),
-    }
+    })
 }
 
 /// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
 fn switch_entry(i: &Network, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
-    let name = scope_name(i, &scope.to_string());
+    let name = scope_name(i, &scope.to_string())?;
     ensure!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
     ensure!(i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(app)), "{title} isn't on {name}.");
     ensure!(i.r.holds(scope), "This device can't open {name} yet.");

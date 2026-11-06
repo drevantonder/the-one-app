@@ -124,7 +124,7 @@ impl Keyring {
         let (epochs, steps) = match had {
             Some((kept, steps)) if reader.restart(&kept, now).is_ok() => {
                 reader.read(bucket, &steps, now).await.map_err(failed)?;
-                let newest = reader.truth().map_or(0, |t| t.db.epoch(&Scope::Global));
+                let newest = reader.truth().map(|t| t.db.epoch(&Scope::Global)).transpose().map_err(failed)?.unwrap_or(0);
                 match steps.keys().next_back().is_some_and(|n| *n >= newest) {
                     true => (BTreeMap::new(), steps),
                     false => one::database::steps::read_sealed_to(bucket, &mut reader, &me, &self.opens, &mut None, now).await.map_err(failed)?,
@@ -149,11 +149,16 @@ impl Keyring {
             on.put(ROOT, root.to_hex().as_bytes()).await.map_err(failed)?;
         }
         let who = &reader.truth().ok_or_else(|| not_let_in("This device isn't listed yet."))?.db;
-        let user = who.client(&self.key).map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
+        let user = who.client(&self.key).map_err(failed)?.map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
         // The nodes that run something of its person's, and the Cloudflare node, which runs anyone's calls.
-        let cloudflare_node = who.cloudflare_node();
-        let nodes: HashMap<[u8; 32], [u8; 32]> = who.nodes().into_iter().filter(|(key, _)| Some(*key) == cloudflare_node || who.serves(key, &user)).collect();
-        let set = one::rank::set(&who.settings());
+        let cloudflare_node = who.cloudflare_node().map_err(failed)?;
+        let mut nodes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
+        for (key, seal) in who.nodes().map_err(failed)? {
+            if Some(key) == cloudflare_node || who.serves(&key, &user).map_err(failed)? {
+                nodes.insert(key, seal);
+            }
+        }
+        let set = one::rank::set(&who.settings().map_err(failed)?);
         let ranks = nodes
             .keys()
             .map(|k| {
@@ -235,7 +240,7 @@ impl Keyring {
             }
             let sent_with = self.needs_of(&kind.name);
             let opening = fetches.is_some().then(Notes::new);
-            let handed = self.handed(client, on, sent_with.as_ref(), opening.as_ref()).await;
+            let handed = self.handed(client, on, sent_with.as_ref(), opening.as_ref()).await?;
             let again = Request { method: request.method.clone(), path: request.path.clone(), headers: request.headers.clone(), body: request.body.clone() };
             let sent = self.send(client, again, &handed, until).await;
             if let Some(fetches) = fetches.as_deref_mut() {
@@ -327,16 +332,16 @@ impl Keyring {
 
     /// The keys a kind of request needed last time (`needs`), opened: none it can't open. Each node it's sent to is
     /// handed only those of the scopes it runs (`sealed_for`).
-    async fn handed(&self, client: &Client, on: &(impl Address + Keep), needs: Option<&(String, Vec<Need>)>, notes: Option<&Notes>) -> Vec<Handed> {
-        let Some((_, needs)) = needs else { return Vec::new() };
-        self.fetch_keys(client, needs, notes).await;
+    async fn handed(&self, client: &Client, on: &(impl Address + Keep), needs: Option<&(String, Vec<Need>)>, notes: Option<&Notes>) -> Result<Vec<Handed>, Error> {
+        let Some((_, needs)) = needs else { return Ok(Vec::new()) };
+        self.fetch_keys(client, needs, notes).await?;
         let mut handed = Vec::new();
         for n in needs {
             if let Ok(key) = self.database_key(client, on, n).await {
                 handed.push(Handed { key, scope: n.scope.clone(), epoch: n.epoch, app: n.app.clone(), database: n.database.clone() });
             }
         }
-        handed
+        Ok(handed)
     }
 
     /// A node's 428, taken only from the node that answered (`node`), naming itself, asking only keys of scopes who's
@@ -377,11 +382,12 @@ impl Keyring {
             async move { one::bucket::Bucket::get(bucket, &name).await }
         }));
         // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
-        let (hints, ()) = n0_future::future::zip(noted(notes, json!({ "step": "newest", "databases": each.len() }), asked), self.fetch_keys(client, &need, notes)).await;
+        let (hints, fetched) = n0_future::future::zip(noted(notes, json!({ "step": "newest", "databases": each.len() }), asked), self.fetch_keys(client, &need, notes)).await;
+        fetched?;
         let mut oldest: BTreeMap<String, u32> = BTreeMap::new();
         for ((p, scope), hint) in each.iter().zip(hints) {
             let hint = hint.map_err(failed)?;
-            let newest = self.who(|who| who.epoch(scope)).unwrap_or(0);
+            let newest = self.who(|who| who.epoch(scope)).transpose().map_err(failed)?.unwrap_or(0);
             let database = p.rsplit('/').next().unwrap_or_default();
             oldest.insert(p.clone(), keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest));
         }
@@ -411,7 +417,7 @@ impl Keyring {
     /// What `need`'s keys are opened from that this device hasn't opened yet, asked for all at once: each scope's epochs
     /// sealed to it, and each app's keys in them, one request each. What doesn't open here is left for `database_key`,
     /// which asks again, one at a time.
-    async fn fetch_keys(&self, client: &Client, need: &[Need], notes: Option<&Notes>) {
+    async fn fetch_keys(&self, client: &Client, need: &[Need], notes: Option<&Notes>) -> Result<(), Error> {
         let scopes: BTreeSet<&str> = need.iter().filter(|n| !self.epochs.lock().unwrap().contains_key(&(n.scope.clone(), n.epoch))).map(|n| n.scope.as_str()).collect();
         let apps: BTreeSet<(&str, &str)> = need.iter().filter(|n| !self.app_keys.lock().unwrap().contains_key(&(n.scope.clone(), n.app.clone(), n.epoch))).map(|n| (n.scope.as_str(), n.app.as_str())).collect();
         let me = hex(&self.key);
@@ -421,7 +427,7 @@ impl Keyring {
         let (epochs, sealed) = n0_future::future::zip(epochs, sealed).await;
         for (scope, kept) in scopes.iter().zip(epochs) {
             if let Ok(kept) = kept {
-                self.open_epochs(scope, &kept);
+                self.open_epochs(scope, &kept)?;
             }
         }
         for ((scope, app), kept) in apps.iter().zip(sealed) {
@@ -434,12 +440,13 @@ impl Keyring {
                 }
             }
         }
+        Ok(())
     }
 
     /// Opens each of a scope's epochs in `kept` (what `/v1/keys` gave, sealed to this device) whose hash is the one
     /// who's who names.
-    fn open_epochs(&self, scope: &str, kept: &Value) {
-        let Ok(parsed) = Scope::parse(scope) else { return };
+    fn open_epochs(&self, scope: &str, kept: &Value) -> Result<(), Error> {
+        let Ok(parsed) = Scope::parse(scope) else { return Ok(()) };
         let opened: Vec<(u32, [u8; 32])> = kept["sealed"]
             .as_object()
             .into_iter()
@@ -451,10 +458,12 @@ impl Keyring {
             })
             .collect();
         for (m, key) in opened {
-            if self.who(|who| who.epoch_hash(&parsed, m)).flatten() == Some(keys::epoch_hash(&key)) {
+            let made = self.who(|who| who.epoch_hash(&parsed, m)).transpose().map_err(failed)?.flatten();
+            if made == Some(keys::epoch_hash(&key)) {
                 self.epochs.lock().unwrap().insert((scope.to_string(), m), key);
             }
         }
+        Ok(())
     }
 
     /// A database's key in an epoch.
@@ -497,7 +506,7 @@ impl Keyring {
             if fresh {
                 self.read(on).await?;
             }
-            self.open_epochs(scope, &kept);
+            self.open_epochs(scope, &kept)?;
             if let Some(key) = self.epochs.lock().unwrap().get(&(scope.to_string(), n)) {
                 return Ok(*key);
             }

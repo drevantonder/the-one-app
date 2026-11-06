@@ -194,7 +194,7 @@ impl Global {
             let epochs = steps["epochs"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, key(k.as_str()?).ok()?))).collect();
             let apps = steps["apps"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, data_encoding::BASE64URL_NOPAD.decode(k.as_str()?.as_bytes()).ok()?))).collect();
             let sealed = one::database::steps::Sealed::from_json(&steps["given"]);
-            g.add(&sealed, &crate::members::step_keys(&epochs, &apps), Some(&epochs), now, |_, _, _| {}).map_err(js)?;
+            g.add(&sealed, &crate::members::step_keys(&epochs, &apps), Some(&epochs), now, |_, _, _| Ok(())).map_err(js)?;
         }
         let members = match g.truth() {
             Some(t) => crate::members::view_of(&t.db),

@@ -399,7 +399,7 @@ pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
 /// who as `start` says it (`content::first`), the network `root`. → the step, and its copy.
 pub fn first_freeze(recovery: &SigningKey, root: Hash, start: &Value, user: &str, now: u64) -> Result<Given> {
     let mut db = first(root, start, now)?;
-    ensure!(db.recovery() == Some(recovery.verifying_key().to_bytes()), "a network's first freeze is signed by the recovery key it names");
+    ensure!(db.recovery()? == Some(recovery.verifying_key().to_bytes()), "a network's first freeze is signed by the recovery key it names");
     let freeze = Freeze { at: 1, hash: crate::database::stored::state_hash(db.conn())?, logs: [("global".to_string(), 1)].into() };
     let step = sign(recovery, &Scope::Global, 1, user, 1, now, freeze.content())?;
     Ok(Given { step, copy: Some(db.bytes()?) })
@@ -445,7 +445,7 @@ pub fn started(freeze: &Freeze, global: &ScopeDb, scope: &Scope, given: Option<&
     let given = given.with_context(|| format!("{scope}'s database has no start yet: one of its devices writes it"))?;
     let step = &given.step;
     ensure!(step.content.app == scopes::APP && step.content.kind == START && step.seq() == 0 && step.scope() == *scope, "{scope}'s step 0 isn't its start");
-    ensure!(global.machine_ever(&step.author()).is_some(), "{scope}'s start isn't from one of the network's devices");
+    ensure!(global.machine_ever(&step.author())?.is_some(), "{scope}'s start isn't from one of the network's devices");
     let copy = connection(given.copy.as_deref().context("a start carries its copy")?)?;
     ensure!(Some(crate::database::stored::state_hash(&copy)?.as_str()) == step.content.data["hash"].as_str(), "{scope}'s start's copy isn't what it says");
     normalize(copy, scope, now)
@@ -478,7 +478,7 @@ impl Truth {
     pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, now: u64) -> Result<Option<Truth>> {
         let Some(g) = given.filter(|g| g.step.content.app == scopes::APP && g.step.content.kind == FREEZE) else { return Ok(None) };
         match Truth::of_freeze(g, at, now) {
-            Ok(t) if t.db.recovery() == Some(g.step.author()) && root.is_none_or(|r| t.db.root() == Some(r)) => Ok(Some(t)),
+            Ok(t) if t.db.recovery()? == Some(g.step.author()) && root.map_or(Ok(true), |r| t.db.root().map(|n| n == Some(r)))? => Ok(Some(t)),
             Ok(_) => Ok(None),
             Err(err) if err.is::<Newer>() => Err(err.context(format!("{YOURS}'s freeze at step {at} is a newer release's: this device reads who's who no further"))),
             Err(err) => {
@@ -722,11 +722,12 @@ impl Reader {
     }
 
     /// Starts from `truth`, unless it's read the freeze itself: as kept (`Truth::kept`) or worked out from a Welcome.
-    pub fn resume(&mut self, truth: Truth) {
+    pub fn resume(&mut self, truth: Truth) -> Result<()> {
         if self.truth.is_none() {
-            self.root = self.root.or(truth.db.root());
+            self.root = self.root.or(truth.db.root()?);
             self.truth = Some(truth);
         }
+        Ok(())
     }
 
     /// Where it read to, to keep and start again from (`restart`): `{ truth, looked }`.
@@ -755,7 +756,7 @@ impl Reader {
                 self.looked = at;
                 match &self.truth {
                     Some(t) => {
-                        self.root = t.db.root();
+                        self.root = t.db.root()?;
                         Some(ScopeDb::empty(&Scope::Global, now)?)
                     }
                     None => None,
@@ -767,9 +768,17 @@ impl Reader {
 
     /// `keys`, each step key by epoch, that it opens a step with now: before it's read the freeze, any; after, with
     /// `epochs`, the epochs' own keys they came from, only those whose hash who's who says that epoch has.
-    fn usable(&self, keys: &crate::database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>) -> crate::database::stored::Keys {
-        let (Some(t), Some(epochs)) = (&self.truth, epochs) else { return keys.clone() };
-        keys.iter().filter(|(e, _)| epochs.get(e).is_some_and(|k| t.db.epoch_hash(&Scope::Global, **e) == Some(crate::keys::epoch_hash(k)))).map(|(e, k)| (*e, *k)).collect()
+    fn usable(&self, keys: &crate::database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>) -> Result<crate::database::stored::Keys> {
+        let (Some(t), Some(epochs)) = (&self.truth, epochs) else { return Ok(keys.clone()) };
+        let mut out = crate::database::stored::Keys::new();
+        for (e, k) in keys {
+            if let Some(opens) = epochs.get(e)
+                && t.db.epoch_hash(&Scope::Global, *e)? == Some(crate::keys::epoch_hash(opens))
+            {
+                out.insert(*e, *k);
+            }
+        }
+        Ok(out)
     }
 
     /// Takes `sealed`'s steps from the next on, opened with `keys` (`usable`), as of `now`, calling `each` with each
@@ -779,27 +788,30 @@ impl Reader {
     /// one made, as the steps before it leave it (before the freeze, above every key it has); it stops at one under an
     /// epoch made whose key it hasn't, and at the first position missing, failing if the step after it is one: a step
     /// gone was deleted, and reading on would pass over what it changed. → the epoch it stopped at, if it did.
-    pub fn add(&mut self, sealed: &Sealed, keys: &crate::database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>, now: u64, mut each: impl FnMut(u64, Option<&Given>, Option<(ScopeDb, &ScopeDb)>)) -> Result<Option<u32>> {
+    pub fn add(&mut self, sealed: &Sealed, keys: &crate::database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>, now: u64, mut each: impl FnMut(u64, Option<&Given>, Option<(ScopeDb, &ScopeDb)>) -> Result<()>) -> Result<Option<u32>> {
         if self.truth.is_none()
             && let Some(w) = &sealed.welcome
         {
             match self.welcomed(w, sealed, keys, epochs, now) {
-                Ok(t) => self.resume(t),
+                Ok(t) => self.resume(t)?,
                 Err(err) => tracing::info!("where this device was welcomed to ({w}): {err:#}: it reads from the freeze"),
             }
         }
         loop {
             let at = self.at() + 1;
             let Some(bytes) = sealed.steps.get(&at) else { break };
-            let keys = self.usable(keys, epochs);
-            let made = self.truth.as_ref().map_or_else(|| keys.keys().next_back().copied().unwrap_or(0), |t| t.db.epoch(&Scope::Global));
+            let keys = self.usable(keys, epochs)?;
+            let made = match &self.truth {
+                Some(t) => t.db.epoch(&Scope::Global)?,
+                None => keys.keys().next_back().copied().unwrap_or(0),
+            };
             let given = match open(&keys, made, &Scope::Global, at, bytes) {
                 Opened::Step(g) => Some(g),
                 Opened::Junk => None,
                 Opened::Waits(e) => return Ok(Some(e)),
             };
             let changed = self.take(given.as_ref(), now)?;
-            each(at, given.as_ref(), changed);
+            each(at, given.as_ref(), changed)?;
         }
         let next = self.at() + 1;
         if let Some(bytes) = sealed.steps.get(&(next + 1)) {
@@ -810,7 +822,7 @@ impl Reader {
 
     pub async fn read(&mut self, bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, now: u64) -> Result<Option<u32>> {
         let sealed = fetch(bucket, self.at(), None).await?;
-        self.add(&sealed, keys, None, now, |_, _, _| {})
+        self.add(&sealed, keys, None, now, |_, _, _| Ok(()))
     }
 
     /// Who's who as `welcome` says it, from `sealed`: its freeze's step, and the copy at `Welcome::copy` with the steps
@@ -841,7 +853,7 @@ impl Reader {
             }
         };
         for (e, epoch) in epochs.into_iter().flatten() {
-            ensure!(truth.db.epoch_hash(&Scope::Global, *e).is_none_or(|h| h == crate::keys::epoch_hash(epoch)), "a key for this didn't check out, so it wasn't used");
+            ensure!(truth.db.epoch_hash(&Scope::Global, *e)?.is_none_or(|h| h == crate::keys::epoch_hash(epoch)), "a key for this didn't check out, so it wasn't used");
         }
         Ok(truth)
     }
@@ -858,7 +870,10 @@ pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Re
     let (mut epochs, mut tried, mut keys) = (BTreeMap::new(), std::collections::BTreeSet::new(), crate::database::stored::Keys::new());
     let mut fetched = true;
     loop {
-        let made = reader.truth.as_ref().map(|t| t.db.epoch_hashes(&Scope::Global).into_keys().collect::<Vec<_>>()).unwrap_or_default();
+        let made = match &reader.truth {
+            Some(t) => t.db.epoch_hashes(&Scope::Global)?.into_keys().collect::<Vec<_>>(),
+            None => Vec::new(),
+        };
         let wanted: Vec<u32> = sealed.epochs().into_iter().chain(made).filter(|n| tried.insert(*n)).collect();
         if wanted.is_empty() && !fetched {
             break;
@@ -873,7 +888,7 @@ pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Re
         if !wanted.is_empty() {
             keys = crate::keys::database_keys(bucket, "global", scopes::APP, NAME, &epochs, false).await?;
         }
-        let added = reader.add(&sealed, &keys, Some(&epochs), now, |_, _, _| {});
+        let added = reader.add(&sealed, &keys, Some(&epochs), now, |_, _, _| Ok(()));
         fetched = sealed.welcome.is_some() && reader.truth.is_none();
         if fetched {
             *welcome = None;
@@ -882,7 +897,17 @@ pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Re
             added?;
         }
     }
-    epochs.retain(|n, k| reader.truth.as_ref().is_some_and(|t| t.db.epoch_hash(&Scope::Global, *n) == Some(crate::keys::epoch_hash(k))));
+    if let Some(t) = &reader.truth {
+        let mut kept = BTreeMap::new();
+        for (n, k) in epochs {
+            if t.db.epoch_hash(&Scope::Global, n)? == Some(crate::keys::epoch_hash(&k)) {
+                kept.insert(n, k);
+            }
+        }
+        epochs = kept;
+    } else {
+        epochs.clear();
+    }
     keys.retain(|n, _| epochs.contains_key(n));
     Ok((epochs, keys))
 }
@@ -900,7 +925,7 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Step)
         return defaults(db, who, scope, step);
     }
     ensure!(version(db.conn())? <= READS, Newer);
-    ensure!(step.epoch() <= who.epoch(scope), "it names an epoch its scope hasn't reached");
+    ensure!(step.epoch() <= who.epoch(scope)?, "it names an epoch its scope hasn't reached");
     super::rules::signed(who, scope, step)?;
     let out = super::scope::fresh(db.conn(), scope)?;
     super::rules::apply(who, &out, scope, step)?;
@@ -1003,7 +1028,7 @@ pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
 /// the database had; the network's own roles stay.
 fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Step) -> Result<Applied> {
     // Whose it is first: one that doesn't count is passed over, whatever release it names.
-    ensure!(who.client(&step.author()).is_some_and(|c| c.user == step.user()), "only a person's own device writes for them");
+    ensure!(who.client(&step.author())?.is_some_and(|c| c.user == step.user()), "only a person's own device writes for them");
     ensure!(who.may(step.user(), "change-roles", scopes::NETWORK), "only the network's admins say the release's roles");
     let reads = u32::try_from(step.content.data["reads"].as_u64().context("a release's roles name its version")?)?;
     ensure!(reads <= READS, Newer);
@@ -1097,7 +1122,7 @@ pub(crate) mod tests {
     /// as is one whose copy isn't what it says, or another network's; one a newer release wrote stops the reader there,
     /// never passed over. A device let in starts from its Welcome, whose hash pins it.
     #[test]
-    fn a_reader_takes_only_the_recovery_key_s_freeze() {
+    fn a_reader_takes_only_the_recovery_key_s_freeze() -> anyhow::Result<()> {
         let (h, mac, _, recovery) = two_admins();
         let key = recovery.verifying_key().to_bytes();
         let theirs = first_freeze(&recovery, ROOT, &h.start, ANDRE, 0).unwrap();
@@ -1107,7 +1132,7 @@ pub(crate) mod tests {
         let at2 = Given { step: sign(&recovery, &Scope::Global, 2, ANDRE, 1, 0, theirs.step.content.clone()).unwrap(), copy: theirs.copy.clone() };
         let t = Truth::read(&[Some(admins), Some(at2.clone())], Some(ROOT), 0).unwrap().unwrap();
         assert_eq!(t.at, 2);
-        assert_eq!(t.db.recovery(), Some(key));
+        assert_eq!(t.db.recovery()?, Some(key));
         assert!(Truth::read(&[Some(theirs.clone())], Some(Hash::from_bytes([6; 32])), 0).unwrap().is_none(), "nor another network's");
         assert!(Truth::read(&[Some(theirs.clone())], None, 0).unwrap().is_some(), "though a reader that pins none takes the first");
         let mut swapped = at2;
@@ -1128,6 +1153,7 @@ pub(crate) mod tests {
         assert_eq!(crate::database::stored::state_hash(Truth::welcomed(&w, &theirs, None, &after, 0).unwrap().db.conn()).unwrap(), w.hash);
         assert!(Truth::welcomed(&Welcome { hash: "0".repeat(64), ..w.clone() }, &theirs, None, &after, 0).is_err(), "nor another hash");
         assert!(Truth::welcomed(&w, &theirs, None, &[None], 0).is_err(), "nor a step held back");
+        Ok(())
     }
 
     #[test]
@@ -1145,7 +1171,7 @@ pub(crate) mod tests {
     /// A scope the freeze names starts from its start, step 0, as it was written, by a device the network listed, its
     /// copy checked against its hash; without one it can't be read, and a scope the freeze doesn't name starts empty.
     #[test]
-    fn a_scope_starts_from_its_start() {
+    fn a_scope_starts_from_its_start() -> anyhow::Result<()> {
         let (h, mac, _, _) = two_admins();
         let global = global_of(&h);
         let scope = Scope::User(ANDRE.into());
@@ -1166,7 +1192,8 @@ pub(crate) mod tests {
         swapped.copy = Some(c.serialize("main").unwrap().to_vec());
         assert!(started(&freeze, &global, &scope, Some(&swapped), 0).is_err(), "nor a copy that isn't what it says");
         let other = Scope::User(BOB.into());
-        assert!(started(&freeze, &global, &other, None, 0).unwrap().state().installed.is_empty(), "a scope with no frozen log starts empty");
+        assert!(started(&freeze, &global, &other, None, 0).unwrap().state()?.installed.is_empty(), "a scope with no frozen log starts empty");
+        Ok(())
     }
 
     #[test]
@@ -1205,7 +1232,7 @@ pub(crate) mod tests {
             assert!(read(&bucket, &keys, &Scope::Global, 0).await.unwrap().steps.is_empty(), "nor junk after a position with nothing");
             bucket.create(&crate::database::stored::step_name(&prefix, 2), &step(2)).await.unwrap();
             assert!(read(&bucket, &keys, &Scope::Global, 0).await.is_err(), "but a step after one with nothing stops it: that one was written");
-            let add = async |r: &mut Reader| r.add(&fetch(&bucket, r.at(), None).await.unwrap(), &keys, None, 0, |_, _, _| {});
+            let add = async |r: &mut Reader| r.add(&fetch(&bucket, r.at(), None).await.unwrap(), &keys, None, 0, |_, _, _| Ok(()));
             assert!(add(&mut Reader::new(None)).await.is_err(), "as it stops who's who's reader");
             // Junk at 1, under an epoch no one made.
             let junk = crate::database::stored::step_name(&prefix, 1);
@@ -1277,7 +1304,7 @@ pub(crate) mod tests {
     /// Who may write what as a step, by the rows at that step: a member makes a group but changes no setting, a removed
     /// device's next step counts for nothing, nor one naming an epoch not reached.
     #[test]
-    fn a_step_counts_only_if_its_signer_may_make_that_change_there() {
+    fn a_step_counts_only_if_its_signer_may_make_that_change_there() -> anyhow::Result<()> {
         use crate::keys::Endpoint;
         use crate::database::content::{device, group, node, remove_device, setting};
         use crate::database::scopes::Kind;
@@ -1303,9 +1330,10 @@ pub(crate) mod tests {
         assert!(!step(&mut db, &mac, ANDRE, 2, setting("name", Some("Ours"))), "nor names an epoch not reached");
         assert!(step(&mut db, &mac, ANDRE, 1, remove_device(&laptop.verifying_key().to_bytes())));
         assert!(!step(&mut db, &laptop, BOB, 1, node("rename", json!({ "user": BOB, "name": "Robert" }))), "a removed device's next step counts for nothing");
-        assert!(db.group("c000000000000003").is_some() && db.setting("name").is_none());
+        assert!(db.group("c000000000000003")?.is_some() && db.setting("name")?.is_none());
         // Signed for one place, it's nowhere else.
         let s = sign(&mac, &Scope::Global, 9, ANDRE, 1, 0, setting("name", Some("x"))).unwrap();
         assert!(decode(&Scope::Global, 10, &encode(&s, None)).is_err() && decode(&Scope::User(ANDRE.into()), 9, &encode(&s, None)).is_err());
+        Ok(())
     }
 }

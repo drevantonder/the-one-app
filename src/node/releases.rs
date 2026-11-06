@@ -61,7 +61,7 @@ impl Node {
 
     /// The newest release for this node's platform, if it's one this node should take and hasn't yet.
     pub(super) fn wanted_release(&self) -> Option<Release> {
-        let (r, _) = self.with(|i| Ok(release::latest_said(crate::config::RELEASE_KEY, &release::said(&i.r.db().releases()), crate::config::TARGET, None))).ok()??;
+        let (r, _) = self.with_or(None, |i| Ok(release::latest_said(crate::config::RELEASE_KEY, &release::said(&i.r.db().releases()?), crate::config::TARGET, None)))?;
         let taken = std::fs::read_to_string(self.0.dir.join("release")).is_ok_and(|m| m.trim() == r.blob);
         (release::wanted(&r, crate::config::BUILD, crate::config::COMMITTED) && !taken).then_some(r)
     }
@@ -78,7 +78,7 @@ impl Node {
 
     /// The newest release of `service`'s program for this device's platform, signed with the release key.
     pub fn service_release(&self, service: &str) -> Option<Release> {
-        let (r, _) = self.with(|i| Ok(release::latest_said(crate::config::RELEASE_KEY, &release::said(&i.r.db().releases()), crate::config::TARGET, Some(service)))).ok()??;
+        let (r, _) = self.with_or(None, |i| Ok(release::latest_said(crate::config::RELEASE_KEY, &release::said(&i.r.db().releases()?), crate::config::TARGET, Some(service))))?;
         Some(r)
     }
 
@@ -96,7 +96,7 @@ impl Node {
     /// (`bundle::SERVICES`), else its newest release signed with the release key, as built-in apps' services come.
     pub async fn service_builds(&self) -> BTreeMap<String, Build> {
         let mut builds: BTreeMap<String, Build> = self.service_releases().into_iter().map(|(n, r)| (n, Build::Released(r))).collect();
-        let bundles = self.with(|i| Ok(i.r.db().apps().into_iter().filter(|a| a.deleted.is_none()).filter_map(|a| Some((a.name, a.bundle?))).collect::<Vec<_>>())).unwrap_or_default();
+        let bundles = self.with_or(Default::default(), |i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.deleted.is_none()).filter_map(|a| Some((a.name, a.bundle?))).collect::<Vec<_>>()));
         for (app, bundle) in bundles {
             match self.blob(&bundle).await {
                 Ok(bytes) => match crate::app::bundle::services(&bytes).remove(crate::config::TARGET) {
@@ -120,7 +120,7 @@ impl Node {
 
     /// The newest release of each service's program for this device's platform, signed with the release key.
     pub fn service_releases(&self) -> BTreeMap<String, Release> {
-        let said = self.with(|i| Ok(release::said(&i.r.db().releases()))).unwrap_or_default();
+        let said = self.with_or(Default::default(), |i| Ok(release::said(&i.r.db().releases()?)));
         let names: std::collections::BTreeSet<String> = said.iter().filter(|(c, _)| c.kind == release::SERVICE_KIND).filter_map(|(c, _)| c.data["service"].as_str().map(str::to_string)).collect();
         names.into_iter().filter_map(|n| Some((n.clone(), release::latest_said(crate::config::RELEASE_KEY, &said, crate::config::TARGET, Some(&n))?.0))).collect()
     }

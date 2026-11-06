@@ -15,7 +15,7 @@ pub const STORAGE: &str = "storage";
 
 /// The network's bucket as its `storage` setting says, if it has one: S3's address alone, never a folder's path.
 fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {
-    let Some(value) = m.setting(STORAGE) else { return Ok(None) };
+    let Some(value) = m.setting(STORAGE)? else { return Ok(None) };
     let fields: BTreeMap<String, String> = serde_json::from_str(&value).context("the storage setting isn't an S3 address")?;
     ensure!(fields.keys().all(|k| ["endpoint", "bucket", "region"].contains(&k.as_str())), "the storage setting names only S3's endpoint, bucket and region");
     ensure!(fields.contains_key("endpoint") && fields.contains_key("bucket"), "the storage setting names S3's endpoint and bucket");
@@ -42,7 +42,7 @@ impl Node {
         let joined = fields.get("address").cloned();
         let address: crate::bucket::Address = Arc::new(move || {
             let node = Node(node.upgrade().context("this device stopped")?);
-            node.with(|i| Ok(i.r.db().setting("address")))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets one with cloudflare use"))
+            node.with(|i| Ok(i.r.db().setting("address")?))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets one with cloudflare use"))
         });
         Place::network(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
     }
