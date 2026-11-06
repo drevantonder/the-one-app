@@ -79,7 +79,7 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
       <SidebarInset className="min-w-0 overflow-hidden">
         <header data-slot="shell-bar" className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <SidebarTrigger />
-          <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
+          {(back || title) && <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />}
           {back && (
             <Button variant="ghost" size="icon" className="size-7" onClick={onBack} aria-label="Back">
               <CaretLeftIcon />
