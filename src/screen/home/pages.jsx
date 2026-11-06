@@ -489,7 +489,7 @@ function Folder({ apps, size }) {
   const mini = (size * 0.64) / 3
   return (
     <span
-      className="grid content-start bg-linear-to-b from-zinc-400/15 to-zinc-500/30 shadow-[0_1px_2px_rgb(0_0_0/0.08),inset_0_0_0_0.5px_rgb(0_0_0/0.08),inset_0_1px_0_rgb(255_255_255/0.5)] backdrop-blur-xl backdrop-saturate-150 dark:from-zinc-300/20 dark:to-zinc-400/12 dark:shadow-[0_1px_2px_rgb(0_0_0/0.4),inset_0_0_0_0.5px_rgb(255_255_255/0.12),inset_0_1px_0_rgb(255_255_255/0.08)]"
+      className="grid content-start bg-linear-to-b from-zinc-400/15 to-zinc-500/30 shadow-[0_1px_2px_rgb(0_0_0/0.08),inset_0_0_0_0.5px_rgb(0_0_0/0.08),inset_0_1px_0_rgb(255_255_255/0.5)] backdrop-blur-xl backdrop-saturate-150 dark:from-zinc-300/35 dark:to-zinc-400/25 dark:shadow-[0_1px_2px_rgb(0_0_0/0.4),inset_0_0_0_0.5px_rgb(255_255_255/0.18),inset_0_1px_0_rgb(255_255_255/0.12)]"
       style={{ width: size, height: size, borderRadius: size * 0.225, gridTemplateColumns: `repeat(3, ${mini}px)`, gridAutoRows: `${mini}px`, gap: size * 0.05, padding: size * 0.13 }}
     >
       {apps.slice(0, 9).map((a) => <AppIcon key={a.name} app={a} size={mini} />)}
