@@ -559,7 +559,7 @@ impl Node {
             Ok(request) => self.admit(remote, request).await.and_then(|r| Ok(serde_json::to_value(r)?)),
             Err(err) => Err(err.into()),
         };
-        joined.unwrap_or_else(|err| json!({ "error": format!("{err:#}") }))
+        joined.unwrap_or_else(|err| json!({ "error": format!("{err:#}"), "code": crate::protocol::Coded::of(&err) }))
     }
 
     /// Another device's `changed`, that something changed: `{ scope, app?, database?, at?, step?, sig? }`, `step` the sealed step written

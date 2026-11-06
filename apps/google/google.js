@@ -74,7 +74,7 @@ const tokens = new Map(); // `${user}/${email}` → { value, expires }, for this
 /// `api(ctx, email, method, path, options)` (a call to Google's API), with the `str`, `accountInput` and `withAccount`
 /// its tools' inputs are made of.
 export function google({ app, title, scopes, base }) {
-  const noClient = () => new Error(`No Google sign-in is set up yet: vault_request (app ${app}, need client) asks for it. An admin sets it once, for everyone; for anyone else it says which admin to ask, which is all to tell them`);
+  const noClient = () => Object.assign(new Error(`No Google sign-in is set up yet: vault_request (app ${app}, need client) asks for it. An admin sets it once, for everyone; for anyone else it says which admin to ask, which is all to tell them`), { code: "no_client" });
 
   async function account(ctx, name) {
     const all = await accounts(ctx);
@@ -144,7 +144,7 @@ export function google({ app, title, scopes, base }) {
     const p = state ? waiting.find((w) => w.state === state) : waiting.length === 1 ? waiting[0] : null;
     if (!p) {
       if (!state && waiting.length > 1) throw new Error("More than one sign-in is waiting: give the whole address the browser came back to, not just its code.");
-      throw new Error(`Start signing in again: no sign-in is waiting for that address; ${app}_sign_in starts one`);
+      throw Object.assign(new Error(`Start signing in again: no sign-in is waiting for that address; ${app}_sign_in starts one`), { code: "not_waiting" });
     }
     const refused = params?.get("error");
     if (refused) return failed(ctx, p.state, `Google didn't sign you in (${refused}). Try again: ${app}_sign_in starts again.`);

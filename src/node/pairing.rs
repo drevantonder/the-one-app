@@ -1,8 +1,12 @@
 //! Pairing: a code that lets a new device join the network, and admitting it.
 
 use crate::config::YOURS;
-use crate::protocol::PAIRING_LIFE;
+use crate::protocol::{code, Coded, PAIRING_LIFE};
 use super::*;
+
+fn used() -> anyhow::Error {
+    Coded::error(code::PAIRING_USED, "this pairing code was already used or has expired")
+}
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Pairing {
@@ -107,13 +111,13 @@ impl Node {
 
     /// Joins the network a pairing code is for, as a device.
     pub async fn join(&self, code: &str) -> Result<()> {
-        let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
-        let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
+        let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).map_err(|err| Coded::error(code::BAD_PAIRING_CODE, format!("that isn't a pairing code: {err}")))?;
+        let code: PairingCode = ciborium::from_reader(bytes.as_slice()).map_err(|err| Coded::error(code::BAD_PAIRING_CODE, format!("that isn't a pairing code: {err}")))?;
         self.ensure_no_network()?;
         let request = JoinRequest { secret: code.secret, name: self.device_name(), as_: "device".into() };
-        let reply = self.ask_to_join(&code.address, &net::pairing_ticket(&code.secret), code.from, serde_json::to_value(&request)?).await.context("couldn't reach the device that made the pairing code")?;
+        let reply = self.ask_to_join(&code.address, &net::pairing_ticket(&code.secret), code.from, serde_json::to_value(&request)?).await.map_err(|err| Coded::error(code::UNREACHABLE, format!("couldn't reach the device that made the pairing code: {err:#}")))?;
         if let Some(err) = reply.get("error") {
-            bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
+            return Err(Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("the pairing code was refused")));
         }
         let reply: JoinReply = serde_json::from_value(reply)?;
         // A folder on another machine isn't here: it's this network's bucket only if it says so. S3 is reached through
@@ -142,10 +146,10 @@ impl Node {
     /// Joins a machine with a pairing code: used up once it's in, and kept for that machine alone when its join didn't
     /// finish, so trying again with the same code finishes it rather than finding it listed already.
     pub(super) async fn admit(&self, key: Key, request: JoinRequest) -> Result<JoinReply> {
-        let mut pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms()).context("this pairing code was already used or has expired")?;
+        let mut pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms()).ok_or_else(used)?;
         if pairing.tried.as_ref().is_some_and(|t| *t != hex(&key)) {
             self.keep_pairing(request.secret, pairing);
-            bail!("this pairing code was already used or has expired");
+            return Err(used());
         }
         let admitted = self.admit_with(key, &request, &pairing).await;
         if admitted.is_err() {

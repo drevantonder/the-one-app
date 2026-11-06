@@ -33,7 +33,7 @@ async function profile(ctx, name) {
   const found = all.find((i) => i.id === name || i.title.toLowerCase() === want);
   if (found) return found;
   if (name === undefined || name === null) return null;
-  throw new Error(`No browser profile ${name}: ${all.length ? `there's ${all.map((i) => i.title).join(", ")}` : "there are none yet"}. The person adds them in the Vault.`);
+  throw Object.assign(new Error(`No browser profile ${name}: ${all.length ? `there's ${all.map((i) => i.title).join(", ")}` : "there are none yet"}. The person adds them in the Vault.`), { code: "no_profile" });
 }
 
 /// A profile as the service takes it: its key is a placeholder the node fills in, for the service only.

@@ -445,7 +445,7 @@ impl Node {
     /// Refuses a second network: a custom build holds one network, and another context is another custom build.
     fn ensure_no_network(&self) -> Result<()> {
         if self.has_network() {
-            bail!("this device already belongs to a network, and {} holds one; for another, network that context's own app", crate::config::NAME);
+            return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY_IN_NETWORK, format!("this device already belongs to a network, and {} holds one; for another, network that context's own app", crate::config::NAME)));
         }
         Ok(())
     }

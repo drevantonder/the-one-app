@@ -1135,7 +1135,7 @@ const h = OneUI.react.createElement;
     await joined;
     const answered = () => ((f.busy = Math.max(0, f.busy - 1)), (f.quiet = Date.now()));
     const reply = (ok) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*"));
-    const fail = (err) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err) }, "*"));
+    const fail = (err) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err), code: err?.code }, "*"));
     try {
       reply(await oneHost.answer(m, {
         frame: f.frame,

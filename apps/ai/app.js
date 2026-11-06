@@ -17,7 +17,7 @@ async function settings(ctx) {
   return out;
 }
 
-const limit = (when) => new Error(when === "day" ? "AI limit: day. Today's AI is used up; more tomorrow." : "AI limit: minute. Try again in a minute.");
+const limit = (when) => Object.assign(new Error(when === "day" ? "AI limit: day. Today's AI is used up; more tomorrow." : "AI limit: minute. Try again in a minute."), { code: "limit" });
 
 async function gemini(ctx, s, body) {
   const ask = async (tier) => {
@@ -33,7 +33,7 @@ async function gemini(ctx, s, body) {
   };
   // Flex is Gemini's half-price tier, which may be busy; a failure gets one more go on the standard tier. Limits don't.
   return ask("flex").catch(async (e) => {
-    if (/AI limit/.test(e.message)) throw e;
+    if (e.code === "limit") throw e;
     return ask("standard");
   });
 }

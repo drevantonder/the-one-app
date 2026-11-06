@@ -18,7 +18,7 @@ async function use(ctx, app, tool, input) {
   try {
     return await ctx.apps[app][tool](input);
   } catch (err) {
-    throw new Error(`agent devices ${tool}: ${err.message}`);
+    throw Object.assign(new Error(`agent devices ${tool}: ${err.message}`), { code: err.code });
   }
 }
 
@@ -672,7 +672,7 @@ export default {
         try {
           got = await ask();
         } catch (err) {
-          if (!String(err.message).includes("No browser profile")) throw err;
+          if (err.code !== "no_profile") throw err;
           await use(ctx, "agent-devices", "add_profile", { profile });
           got = await ask();
         }

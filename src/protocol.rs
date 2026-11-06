@@ -76,6 +76,22 @@ pub mod code {
     pub const ALREADY: &str = "already";
     /// A device or key to take out that the network doesn't list.
     pub const NOT_LISTED: &str = "not_listed";
+    /// A pairing code that was used already or has expired.
+    pub const PAIRING_USED: &str = "pairing_used";
+    /// Not a pairing code: copied in part, or not one.
+    pub const BAD_PAIRING_CODE: &str = "bad_pairing_code";
+    /// A device that already belongs to a network, asked to join another.
+    pub const ALREADY_IN_NETWORK: &str = "already_in_network";
+    /// The device a pairing code is for couldn't be reached.
+    pub const UNREACHABLE: &str = "unreachable";
+    /// An app's sign-in needs the Vault's `client` first (Google's OAuth client), which an admin sets once.
+    pub const NO_CLIENT: &str = "no_client";
+    /// A sign-in to finish that nothing is waiting for: it finished already, or was never started.
+    pub const NOT_WAITING: &str = "not_waiting";
+    /// A limit of what the person's plan gives (AI's, by the minute or the day), which asking again later gets past.
+    pub const LIMIT: &str = "limit";
+    /// A browser profile an app asked an agent device for that isn't there.
+    pub const NO_PROFILE: &str = "no_profile";
 }
 
 /// An error that says what kind it is, as `{ error, code }` on the wire: the node's answers, and what a device passes
@@ -211,7 +227,7 @@ pub fn javascript() -> String {
         blobs = json!(crate::bucket::BLOBS),
         fallback = json!(NOTE_FALLBACK),
         yours = json!(crate::config::YOURS),
-        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notAdded": code::NOT_ADDED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED }),
+        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notAdded": code::NOT_ADDED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED, "pairingUsed": code::PAIRING_USED, "badPairingCode": code::BAD_PAIRING_CODE, "alreadyInNetwork": code::ALREADY_IN_NETWORK, "unreachable": code::UNREACHABLE, "noClient": code::NO_CLIENT, "notWaiting": code::NOT_WAITING, "limit": code::LIMIT, "noProfile": code::NO_PROFILE }),
         update = json!(UPDATE_REFUSAL),
     )
 }

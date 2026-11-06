@@ -497,7 +497,7 @@ export class Relay extends DurableObject {
       return { error: String(e.message || e) };
     }
     if (fields.bind !== true || typeof name !== "string" || !name || name.length > 256) return { error: "a binding is a key's signed bind, to an object's name" };
-    if (!this.key(fields.by)) return { error: "that key isn't one of the network's: a device of its person approves it" };
+    if (!this.key(fields.by)) return { error: "that key isn't one of the network's: a device of its person approves it", code: CODES.notLetIn };
     if (this.sockets.has(fields.by)) return { error: "that key is connected here itself" };
     const until = Date.now() + 3_600_000;
     const ticket = hex.encode(crypto.getRandomValues(new Uint8Array(32)));

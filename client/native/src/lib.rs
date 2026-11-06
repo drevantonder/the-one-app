@@ -574,23 +574,20 @@ async fn pair(code: String) -> Result<String, String> {
     }
     let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
     let said = tauri::async_runtime::spawn_blocking(move || local("/v1/join", Some(json!({ "code": code })), 60)).await.map_err(|e| e.to_string())?;
+    // An answer from the node says why by its code; none came when its own answer didn't (it was too slow: the device that made the code is off).
     let failed = match said {
         Ok((true, _)) => None,
-        Ok((false, out)) => Some(out["error"].as_str().unwrap_or_default().to_lowercase()),
-        Err(e) => Some(e.to_lowercase()),
+        Ok((false, out)) => Some(out["code"].as_str().unwrap_or_default().to_string()),
+        Err(_) => Some(one::protocol::code::UNREACHABLE.to_string()),
     };
-    if let Some(e) = failed {
-        let has = |words: &[&str]| words.iter().any(|w| e.contains(w));
-        return Err(if has(&["already used", "expired", "refused"]) {
-            "That pairing code was used or has expired. Make a new one on your other device.".into()
-        } else if has(&["already belongs"]) {
-            format!("This device is already in another {}. Remove it there first.", one::config::NAME.trim_start_matches("The "))
-        } else if has(&["decode", "invalid", "base", "parse", "bad"]) {
-            "That isn’t a whole pairing code. Copy it again, all of it.".into()
-        } else if has(&["timed out", "timeout", "connect", "unreachable", "no route", "network"]) {
-            "Couldn’t reach the device that made the code. Check both are online, then try again.".into()
-        } else {
-            "Couldn’t join. Make a new pairing code on your other device and try again.".into()
+    if let Some(why) = failed {
+        use one::protocol::code;
+        return Err(match why.as_str() {
+            code::PAIRING_USED => "That pairing code was used or has expired. Make a new one on your other device.".into(),
+            code::ALREADY_IN_NETWORK => format!("This device is already in another {}. Remove it there first.", one::config::NAME.trim_start_matches("The ")),
+            code::BAD_PAIRING_CODE => "That isn’t a whole pairing code. Copy it again, all of it.".into(),
+            code::UNREACHABLE => "Couldn’t reach the device that made the code. Check both are online, then try again.".into(),
+            _ => "Couldn’t join. Make a new pairing code on your other device and try again.".into(),
         });
     }
     // Its network's address, which the person signs in to here.

@@ -20,7 +20,7 @@ export function GoogleSettings({ title, blurb }) {
     try {
       url = (await one.call("sign_in", account ? { account } : {})).url
     } catch (e) {
-      if (/No Google sign-in/.test(e.message) && one.vault) {
+      if (e.code === "no_client" && one.vault) {
         try {
           if (await one.vault("client")) return start(account)
         } catch (err) {
@@ -43,7 +43,7 @@ export function GoogleSettings({ title, blurb }) {
       if (r?.signed_in === false) throw new Error(r.why)
     } catch (e) {
       // Finished already: this screen opened again at the same address.
-      if (/no sign-in is waiting/.test(e.message)) return stop(), reload()
+      if (e.code === "not_waiting") return stop(), reload()
       return setStep({ why: failureSentence(e), retry: () => start() })
     }
     stop()

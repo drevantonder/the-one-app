@@ -269,7 +269,7 @@ export class Client extends DurableObject {
       } catch (err) {
         // Taken out since it was approved: the relay no longer lets its key in, nor the network lists it.
         this.isApproved = false;
-        return answerAll(body, err.notLetIn || /isn't one of the network's/.test(err.message) ? approve : `${device.name} couldn't start: ${err.message}`);
+        return answerAll(body, err.notLetIn || err.code === CODES.notLetIn ? approve : `${device.name} couldn't start: ${err.message}`);
       }
       if (!nodes.length) nodes = await this.reorder(me);
       if (!nodes.length) return answerAll(body, "None of your devices is on right now.");
@@ -348,7 +348,7 @@ export class Client extends DurableObject {
       bound = await this.relay().bind(await signedRequest(me.seed, hex.decode(me.key), RELAY, { bind: true }, at), name);
       return bound?.error ? bound : null;
     });
-    if (!bound?.ticket) throw new Error(`the relay didn't take its key: ${bound?.error}`);
+    if (!bound?.ticket) throw Object.assign(new Error(`the relay didn't take its key: ${bound?.error}`), { code: bound?.code });
     run.ticket = bound.ticket;
     run.until = Number(bound.until) || Date.now() + BOUND - 60_000;
     await this.ctx.storage.put("bound", { key: run.key, ticket: bound.ticket });
