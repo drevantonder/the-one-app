@@ -102,7 +102,9 @@ impl Signer {
         let items: Vec<Value> = match crate::database::stored::position(ask.name) {
             Some((prefix, at)) => {
                 let sigs = (at..=at + ahead).filter(|_| crate::database::stored::signed_beside(prefix)).map(|n| json!(crate::database::stored::sig_name(prefix, n)));
-                std::iter::once(json!({ "steps": prefix, "from": at, "to": at + ahead })).chain(sigs).collect()
+                // A signature asked of a database that has none beside its steps is asked as itself, so it's answered (none).
+                let asked = ask.name.ends_with(".sig") && !crate::database::stored::signed_beside(prefix);
+                std::iter::once(json!({ "steps": prefix, "from": at, "to": at + ahead })).chain(sigs).chain(asked.then(|| json!(ask.name))).collect()
             }
             None => vec![json!(ask.name)],
         };

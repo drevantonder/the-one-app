@@ -263,7 +263,7 @@ fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database
     for at in std::iter::once(hinted).chain(copies).filter(|c| *c > above) {
         let Some(copy) = bucket.get(&crate::database::stored::copy_name(prefix, at))? else { continue };
         let step = bucket.get(&crate::database::stored::step_name(prefix, at))?;
-        let beside = bucket.get(&crate::database::stored::sig_name(prefix, at))?;
+        let beside = if crate::database::stored::signed_beside(prefix) { bucket.get(&crate::database::stored::sig_name(prefix, at))? } else { None };
         if crate::database::stored::sealed_copy_holds(prefix, &keys, at, &copy, step.as_deref(), beside.as_deref()) {
             return Ok(at);
         }
