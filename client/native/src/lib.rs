@@ -77,14 +77,7 @@ fn env(name: &str) -> Option<String> {
 /// one runs here (as the Mac app's was); else the machine's own id, hashed: Linux's machine-id, or Windows' MachineGuid,
 /// which outlives reinstalling Windows' apps (as the Windows app's was).
 fn this_device() -> Option<String> {
-    let token = std::fs::read_to_string(one::home().join("local-token")).ok();
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(2))).build().into();
-    let node = token.and_then(|t| {
-        let mut r = agent.get(format!("http://127.0.0.1:{}/v1/state", one::config::PORT)).header("x-one-local-token", t.trim()).call().ok()?;
-        let state: Value = r.body_mut().read_json().ok()?;
-        state["device"]["key"].as_str().map(str::to_string)
-    });
-    node.or_else(|| {
+    local_node().or_else(|| {
         use sha2::{Digest, Sha256};
         #[cfg(windows)]
         let id = windows::machine_guid()?;
@@ -92,6 +85,15 @@ fn this_device() -> Option<String> {
         let id = ["/etc/machine-id", "/var/lib/dbus/machine-id"].iter().find_map(|p| std::fs::read_to_string(p).ok())?;
         Some(data_encoding::HEXLOWER.encode(&Sha256::digest(format!("this device {}", id.trim()).as_bytes())))
     })
+}
+
+/// This computer's own node's key, where one runs here.
+fn local_node() -> Option<String> {
+    let token = std::fs::read_to_string(one::home().join("local-token")).ok()?;
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(2))).build().into();
+    let mut r = agent.get(format!("http://127.0.0.1:{}/v1/state", one::config::PORT)).header("x-one-local-token", token.trim()).call().ok()?;
+    let state: Value = r.body_mut().read_json().ok()?;
+    state["device"]["key"].as_str().map(str::to_string)
 }
 
 /// A response's body the page reads, and what stops a read waiting on it once the page cancels.
@@ -192,6 +194,10 @@ fn keep_widgets() {
 /// package's helper, which has the Windows App SDK), since a channel lasts 30 days.
 fn let_in() {
     keep_widgets();
+    // The panel, drawn before this device was in (signed out), draws again.
+    if let Some(p) = app().handle.get_webview_window("panel") {
+        let _ = p.eval("location.reload()");
+    }
     #[cfg(windows)]
     windows::register_push();
 }
@@ -244,6 +250,8 @@ fn native() -> Value {
         "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": platform(), "device": device_name(), "client": client_name(),
         "address": address, "signedIn": signed_in, "user": if signed_in { a.kept("user") } else { None },
         "opened": opened,
+        // This computer's own node, where one runs here: "This device" in the panel.
+        "node": local_node(),
         // Open at login: whether it's on, where the app switches it (none where it can't yet).
         "login": login_now(&a.handle),
     })
@@ -786,6 +794,9 @@ pub fn run() {
                 opened: Mutex::default(),
                 page: Default::default(),
             });
+            // What runs beside the window asks it, while it runs, rather than starting a client of its own.
+            #[cfg(desktop)]
+            headless::serve(|| APP.get().and_then(|a| a.device().ok()));
             #[cfg(target_os = "linux")]
             if let Err(e) = launcher(app) {
                 eprintln!("the launcher's entry: {e}");

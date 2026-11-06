@@ -44,9 +44,10 @@ const host = (p) => ({
 
 /// The person's devices, this one first.
 function devices() {
-  const state = home.data.state, me = state?.user?.id, here = state?.device?.key
+  // This device: the computer's own node, as the app says (`here`), not whichever node answered.
+  const state = home.data.state, me = state?.user?.id, here = one.params?.here
   const mine = (state?.network?.devices || []).filter((d) => !d.user || d.user === me)
-  return mine.map((d) => ({ key: d.key, name: String(d.name || "").replace(/\.local$/, ""), online: d.online === true, here: d.here === true || d.key === here }))
+  return mine.map((d) => ({ key: d.key, name: String(d.name || "").replace(/\.local$/, ""), online: d.online === true, here: !!here && d.key === here }))
     .sort((a, b) => b.here - a.here || a.name.localeCompare(b.name))
 }
 

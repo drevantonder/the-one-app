@@ -289,12 +289,12 @@ var u = (e) => ({
 	}
 });
 function d() {
-	let e = c.data.state, t = e?.user?.id, n = e?.device?.key;
+	let e = c.data.state, t = e?.user?.id, n = one.params?.here;
 	return (e?.network?.devices || []).filter((e) => !e.user || e.user === t).map((e) => ({
 		key: e.key,
 		name: String(e.name || "").replace(/\.local$/, ""),
 		online: e.online === !0,
-		here: e.here === !0 || e.key === n
+		here: !!n && e.key === n
 	})).sort((e, t) => t.here - e.here || e.name.localeCompare(t.name));
 }
 var f = () => {};

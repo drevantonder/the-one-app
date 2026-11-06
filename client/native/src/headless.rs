@@ -8,8 +8,15 @@
 //! - `--answer-join <code> approve|refuse`: a device asking to join, let in or turned down → `{ "ok": null }`
 //! - `--register-push <via> <address>`: this device's push address (a WNS channel, from Windows' helper) registered
 //!   with the push Worker, which carries its notes → `{ "ok": null }`
+//!
+//! While the app runs (in the tray), it answers these itself with its own client, already connected (`serve`): the
+//! command asks it over a loopback port its folder names, with a token only this user can read there, and starts the
+//! client itself only when no app answers.
 
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -32,9 +39,58 @@ pub fn answer(args: &[String]) -> bool {
     let Some(what) = args.get(1).filter(|a| a.starts_with("--") && ["--call", "--widgets", "--open-note", "--answer-join", "--register-push"].contains(&a.as_str())) else {
         return false;
     };
-    let out = tauri::async_runtime::block_on(run(what, &args[2..])).unwrap_or_else(|e| json!({ "error": e }));
+    let out = running(&args[1..]).unwrap_or_else(|| tauri::async_runtime::block_on(run(what, &args[2..], None)).unwrap_or_else(|e| json!({ "error": e })));
     println!("{out}");
     true
+}
+
+/// The running app's answer to `args`, if one runs here and answers.
+fn running(args: &[String]) -> Option<Value> {
+    let said = std::fs::read_to_string(data().join("headless")).ok()?;
+    let (port, token) = said.trim().split_once(' ')?;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port.parse().ok()?));
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(120))).ok()?;
+    writeln!(stream, "{}", json!({ "token": token, "args": args })).ok()?;
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).ok()?;
+    serde_json::from_str(&line).ok()
+}
+
+/// The running app answering these for what runs beside it (`running`): a loopback port, and a token, in `headless` in
+/// its folder, which only this user reads.
+pub fn serve(device: impl Fn() -> Option<Arc<one_client::Device>> + Send + Sync + 'static) {
+    let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) else { return };
+    let Ok(port) = listener.local_addr().map(|a| a.port()) else { return };
+    let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>());
+    let file = data().join("headless");
+    let _ = std::fs::create_dir_all(data());
+    let _ = std::fs::write(&file, format!("{port} {token}"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
+    }
+    let device = Arc::new(device);
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let (token, device) = (token.clone(), device.clone());
+            tauri::async_runtime::spawn(async move {
+                let mut line = String::new();
+                let mut reader = BufReader::new(&stream);
+                if reader.read_line(&mut line).is_err() {
+                    return;
+                }
+                let asked: Value = serde_json::from_str(&line).unwrap_or_default();
+                let args: Vec<String> = asked["args"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_string)).collect();
+                let out = match (asked["token"].as_str() == Some(token.as_str()), args.split_first()) {
+                    (true, Some((what, rest))) => run(what, rest, device()).await.unwrap_or_else(|e| json!({ "error": e })),
+                    _ => json!({ "error": "Not this app's." }),
+                };
+                let _ = writeln!(&stream, "{out}");
+            });
+        }
+    });
 }
 
 /// The person signed in here, and this device's key for them.
@@ -68,19 +124,29 @@ async fn post(device: &one_client::Device, path: &str, body: Value) -> Result<Va
     }
 }
 
-async fn run(what: &str, rest: &[String]) -> Result<Value, String> {
+/// One of them, with `mine`, the running app's device, or else one started here.
+async fn run(what: &str, rest: &[String], mine: Option<Arc<one_client::Device>>) -> Result<Value, String> {
     let data = data();
+    let device = |data: &std::path::Path| {
+        let (mine, data) = (mine.clone(), data.to_path_buf());
+        async move {
+            match mine {
+                Some(d) => Ok(d),
+                None => device(&data).await.map(Arc::new),
+            }
+        }
+    };
     let arg = |i: usize| rest.get(i).cloned().ok_or_else(|| format!("{what} wants more: see client/native/src/headless.rs"));
     match what {
         "--call" => {
             let input: Value = serde_json::from_str(&rest.get(2).cloned().unwrap_or_else(|| "{}".into())).map_err(|e| e.to_string())?;
             let id = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>());
-            let out = post(&device(&data).await?, "/v1/call", json!({ "id": id, "app": arg(0)?, "op": arg(1)?, "input": input, "client": crate::client_name() })).await?;
+            let out = post(&*device(&data).await?, "/v1/call", json!({ "id": id, "app": arg(0)?, "op": arg(1)?, "input": input, "client": crate::client_name() })).await?;
             Ok(json!({ "ok": out["ok"] }))
         }
         "--widgets" => {
             let dir = data.join("widgets");
-            crate::widgets::refresh(&device(&data).await?, &dir).await?;
+            crate::widgets::refresh(&*device(&data).await?, &dir).await?;
             Ok(json!({ "dir": dir }))
         }
         "--open-note" => {

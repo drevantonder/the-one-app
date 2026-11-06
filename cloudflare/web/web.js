@@ -716,7 +716,7 @@ const h = OneUI.react.createElement;
         row(signedIn ? `Open ${config().name}` : "Sign In…", () => native.main()),
         about.login != null && row("Open at Login", async () => ((about.login = await native.login(!about.login)), drawPanel()), about.login),
         row("Quit", () => native.quit()))));
-    if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel"));
+    if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", { here: about.node || "" }));
   }
 
   /// Where a route is as a link the app opens in its window (`opened`), for the panel.
