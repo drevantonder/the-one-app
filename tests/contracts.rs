@@ -579,11 +579,11 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
     let address = subscription.address(endpoint);
     let phone_seal = one::keys::Endpoint::of(&phone).seal;
-    let register = push::register_request(&phone, &phone_seal, &address, now()).unwrap();
+    let register = push::register_request(&phone, &phone_seal, &address, None, now()).unwrap();
     assert_eq!(post("/push/register", register.clone()), (200, json!({ "registered": true })), "the install's device registers");
     assert_eq!(post("/push/register", register).0, 403, "a request is taken once");
     let stranger = SigningKey::from_bytes(&rand::random());
-    assert_eq!(post("/push/register", push::register_request(&stranger, &phone_seal, &address, now()).unwrap()).0, 403, "only the install's devices register");
+    assert_eq!(post("/push/register", push::register_request(&stranger, &phone_seal, &address, None, now()).unwrap()).0, 403, "only the install's devices register");
 
     // The node seals a note to the phone and sends it.
     let note = Note { id: "0123456789abcdef".into(), title: "Board".into(), body: "Sam posted".into(), app: "board".into(), screen: "main".into(), ..Default::default() };

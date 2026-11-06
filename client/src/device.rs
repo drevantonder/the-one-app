@@ -583,9 +583,11 @@ impl Device {
 
     /// Registers where a push service reaches it (`one::push::Address`) with the install's push Worker
     /// (`<address>/push/register`), signed with its key and naming its seal key, which each note pushed to it is sealed
-    /// to. Once it's out of the install, the Worker forgets it.
+    /// to, and its person as its entries list it, so sign-in pushes it when another device of theirs asks to join. Once
+    /// it's out of the install, the Worker forgets it.
     pub async fn register_push(&self, address: &one::push::Address) -> Result<(), Error> {
-        let body = one::push::register_request(&self.key, &self.me.seal, address, now()).map_err(failed)?;
+        let user = self.known.lock().unwrap().as_ref().map(|k| k.user.clone());
+        let body = one::push::register_request(&self.key, &self.me.seal, address, user.as_deref(), now()).map_err(failed)?;
         let (status, out) = http("POST", &format!("{}/push/register", self.address), None, Some(body)).await?;
         if status != 200 {
             return Err(failed(error(&out).unwrap_or_else(|| format!("Your One App's push service didn't take this device ({status})."))));

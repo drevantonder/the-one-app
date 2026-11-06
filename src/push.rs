@@ -108,10 +108,14 @@ pub struct Address {
 }
 
 /// What a device sends the push Worker to register `address` (`POST <address>/push/register`): signed with its key,
-/// naming its seal key `seal`, which only the install's own Workers seal to.
-pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, at: u64) -> Result<Value> {
+/// naming its seal key `seal`, which only the install's own Workers seal to, and its person `user`, as its own entries
+/// list it, whom sign-in pushes about their devices joining.
+pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, user: Option<&str>, at: u64) -> Result<Value> {
     let mut fields = serde_json::to_value(address)?;
     fields["seal"] = json!(HEXLOWER.encode(seal));
+    if let Some(user) = user {
+        fields["user"] = json!(user);
+    }
     fields["route"] = json!("POST /push/register");
     Ok(crate::keys::signed_request(key, DOMAIN, fields, at))
 }

@@ -41,8 +41,9 @@
 // It pushes (`PUSH`, the push Worker's entrypoint for the install's own Workers) to the person's devices, never the one asking: "<device>
 // wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`; and
 // "<device> joined · <place>" once one is approved, opening Settings › Devices. It knows a person's devices as those that
-// asked to join as them here, or said they're theirs as they asked which wait (`devices`): only for whom to push to,
-// since a device opens a note, and acts on its code, only as the install's signed entries say.
+// asked to join as them here, or said they're theirs as they asked which wait (`devices`), and those that registered
+// with the push Worker as theirs, by a request each signed (`PUSH.theirs`): only for whom to push to, since a device
+// opens a note, and acts on its code, only as the install's signed entries say.
 //
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
 // /api/auth/invites"`), is taken once, and counts only from one of the install's endpoints, as the relay's list says
@@ -603,11 +604,12 @@ export class Auth extends DurableObject {
   /// Devices. Never fails what it's said with.
   async push(r, note) {
     if (!this.env.PUSH) return;
-    const to = this.ctx.storage.sql.exec("select key from devices where user = ? and key != ? order by at desc limit ?", r.user, r.key, PUSHED_TO).toArray();
-    if (!to.length) return;
+    const known = this.ctx.storage.sql.exec("select key from devices where user = ? order by at desc limit ?", r.user, PUSHED_TO).toArray().map((d) => d.key);
     const plain = { id: hex16(), app: "settings", screen: "devices", ...note };
     try {
-      await this.env.PUSH.send(to.map(({ key }) => ({ to: key, plain })));
+      const registered = await this.env.PUSH.theirs(r.user, PUSHED_TO);
+      const to = [...new Set([...registered, ...known])].filter((key) => key !== r.key).slice(0, PUSHED_TO);
+      if (to.length) await this.env.PUSH.send(to.map((key) => ({ to: key, plain })));
     } catch (err) {
       console.error(`pushing "${note.title}": ${err.stack || err}`);
     }

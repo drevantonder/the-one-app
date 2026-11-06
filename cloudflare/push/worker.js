@@ -8,7 +8,8 @@
 // the install's endpoints: `{ via, address, env?, topic?, keys?, seal }`, `via` one of apns (address: the APNs token,
 // hex; topic: the app's bundle id, one of `APNS_TOPICS`; env: sandbox or production), fcm (its FCM token), wns (its
 // channel URI) or webpush (its subscription's endpoint, with `keys: { p256dh, auth }`), and `seal`, its seal key (hex),
-// which only the install's own Workers seal to (below). `POST /push/unregister` forgets it.
+// which only the install's own Workers seal to (below); and `user`, its person, as its own entries list it, which an
+// older device doesn't say. `POST /push/unregister` forgets it.
 //
 // One of the install's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }],
 // legacy? }`, each `note` base64url bytes sealed to `to`'s seal key by the sender, which takes that key from the
@@ -22,7 +23,9 @@
 // replaces it.
 //
 // The install's own Workers send through the `Sender` entrypoint, by binding: sign-in, for a device asking to join, whose
-// note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`).
+// note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`); and asks
+// which devices registered as a person's (`theirs`), whom it pushes about their devices joining. That is only where to
+// send: a device names its person unchecked, so one that lies gets notes sealed to itself, which let no one in.
 //
 // Sends are limited: each sender `SENDS` requests a minute, each device `NOTES` notes a minute.
 //
@@ -77,6 +80,11 @@ export class Sender extends WorkerEntrypoint {
   send(notes) {
     return push(this.env).send("workers", notes, null);
   }
+
+  /// The keys of the devices that registered as `user`'s, the newest first, at most `most`.
+  theirs(user, most = 20) {
+    return push(this.env).theirs(user, most);
+  }
 }
 
 /// Which push services this install has what it needs for.
@@ -89,6 +97,8 @@ export class Push extends DurableObject {
     super(ctx, env);
     const sql = ctx.storage.sql;
     sql.exec("create table if not exists devices (key text primary key, via text not null, address text not null, env text not null default '', topic text not null default '', keys text, seal text not null, at integer not null)");
+    // Its person, as the device said, if it did.
+    if (!sql.exec("pragma table_info(devices)").toArray().some((c) => c.name === "user")) sql.exec("alter table devices add column user text");
     sql.exec("create table if not exists legacy (token text primary key, user text not null, env text not null, name text not null default '', by text not null, at integer not null)");
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     /// Sends and notes counted this minute, by sender and by device.
@@ -120,10 +130,11 @@ export class Push extends DurableObject {
     return this.send(by, fields.notes, fields.legacy);
   }
 
-  register(by, { via, address, env = "", topic = "", keys, seal }) {
+  register(by, { via, address, env = "", topic = "", keys, seal, user }) {
     if (!VIAS.includes(via)) fail(400, `via is one of ${VIAS.join(", ")}`);
     if (typeof address !== "string" || !address || address.length > 1024) fail(400, "say its address");
     if (!isKey(seal)) fail(400, "seal is its seal key, hex");
+    if (user != null && !(typeof user === "string" && /^[\w-]{1,64}$/.test(user))) fail(400, "user is its person's id");
     if (via === "apns") {
       if (!/^[0-9a-f]{16,200}$/.test(address)) fail(400, "an APNs token is hex");
       if (!["sandbox", "production"].includes(env)) fail(400, "env is sandbox or production");
@@ -143,12 +154,16 @@ export class Push extends DurableObject {
     }
     const sql = this.ctx.storage.sql;
     sql.exec(
-      "insert or replace into devices (key, via, address, env, topic, keys, seal, at) values (?, ?, ?, ?, ?, ?, ?, ?)",
-      by, via, address, env, topic, via === "webpush" ? JSON.stringify({ p256dh: keys.p256dh, auth: keys.auth }) : null, seal, Date.now(),
+      "insert or replace into devices (key, via, address, env, topic, keys, seal, at, user) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      by, via, address, env, topic, via === "webpush" ? JSON.stringify({ p256dh: keys.p256dh, auth: keys.auth }) : null, seal, Date.now(), user ?? null,
     );
     // A phone that registered the old way, registering itself now: only the new way from here.
     if (via === "apns") sql.exec("delete from legacy where token = ?", address);
     return { registered: true };
+  }
+
+  theirs(user, most) {
+    return this.ctx.storage.sql.exec("select key from devices where user = ? order by at desc limit ?", String(user), most).toArray().map((r) => r.key);
   }
 
   unregister(by) {

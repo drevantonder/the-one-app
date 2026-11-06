@@ -4,7 +4,7 @@ Andre's decision, 2026-11-05. Built on 2026-11-05 but for what's left below: the
 
 Left:
 - Push: a silent push that wakes the phone to check. Sign-in pushes "wants in" (with the action `{ "join": "<code>" }`, which the apps show with Approve and Not Me: `apple/Shared/Notes.swift`, `android/…/Push.kt`, `windows/Notes.cs`) when nothing let a device in within 10 seconds, and "joined" once one is; a phone woken by "wants in" approves only through its normal approval path.
-- Auth knows whom to push to as the devices that asked to join as that person, and browsers that say they're theirs as they look for devices waiting. Native apps that joined before 2026-11-05's pushes aren't known until they sign in again.
+- Sign-in knows whom to push to as the devices that asked to join as that person, browsers that say they're theirs as they look for devices waiting, and every device whose push registration (signed by its key) names its person, as each app and browser does when it registers from 2026-11-06's build (the Apple apps at each launch). An app on an older build is known only once it takes that build. Not yet seen on a real phone: APNs, FCM and WNS wait on the Apple, Firebase and Entra accounts.
 - A passkey's public key is recorded from what sign-in holds when a device that signed in with it is approved by its code, so a tampered sign-in then could slip in its own: as with a tampered sign-in deploy, "joined · Remove" is what shows it.
 
 ## Today
