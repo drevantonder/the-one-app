@@ -1,5 +1,7 @@
 # Sourced by the Mac's and iPhone's build scripts: config.toml's fields (or $CONFIG's), the build's commit and number,
 # the Apple team, and `session`, which runs what needs the keychain in the logged-in session.
+# An ssh session starts with 256 open files, which a build of the iOS crates (sccache hashing thousands of sources) runs out of.
+ulimit -n 10240 2>/dev/null || true
 native=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$native/../.." && pwd)
 config=$(cd "$(dirname "${CONFIG:-$root/config.toml}")" && pwd)/$(basename "${CONFIG:-config.toml}")
