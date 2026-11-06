@@ -12,6 +12,11 @@ use super::*;
 
 /// How long reaching a device may take.
 const CONNECT: Duration = Duration::from_secs(10);
+/// How long a device that hasn't said hello lately (`Network::online`) is waited for: it may have just started, but
+/// mostly it's off, and a call, or a service asking for every device's answer, shouldn't wait out `CONNECT` for it.
+const UNSEEN_CONNECT: Duration = Duration::from_secs(3);
+/// How long after one like that couldn't be reached it isn't tried again, unless it says hello first.
+const DOWN_FOR: Duration = Duration::from_secs(20);
 /// How long a notice waits to be taken before it's sent again on a new connection.
 const NOTICE_WAIT: Duration = Duration::from_millis(500);
 /// The most an ask or its answer may carry: an email of a claim's receipts, base64, fits.
@@ -46,6 +51,8 @@ pub(super) struct Net {
     task: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
     /// A connection to each device, opened by either end; each held while it's being opened.
     conns: Mutex<HashMap<Key, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
+    /// When each device that hadn't said hello lately couldn't be reached (`DOWN_FOR`).
+    down: Mutex<HashMap<Key, Instant>>,
     /// How many computers that aren't the network's are connected, asking to join.
     joining: std::sync::atomic::AtomicUsize,
     /// The removed devices this device told the relay to take out.
@@ -569,18 +576,35 @@ impl Node {
         if let Some(conn) = held.as_ref().filter(|c| !fresh && c.close_reason().is_none()) {
             return Ok(conn.clone());
         }
+        // One that hasn't said hello lately is mostly off: it isn't waited for as long, nor tried again for a while.
+        let seen = self.with(|i| Ok(i.online(to))).unwrap_or(true);
+        if !seen && self.0.net.down.lock().unwrap().get(to).is_some_and(|at| at.elapsed() < DOWN_FOR) {
+            bail!(NotThere(format!("{} isn't connected", short(to))));
+        }
+        let wait = if seen { CONNECT } else { UNSEEN_CONNECT };
         // Off the relay, a device is reached only on a connection it opened: one just started waits to be on it.
+        let waiting = std::time::Instant::now();
         if tokio::time::timeout(CONNECT, endpoint.online()).await.is_err() {
             bail!(NotThere(format!("this device isn't connected to {YOURS}'s relay")));
         }
+        trace::note(json!({ "step": "online" }), waiting.elapsed());
         let (url, _) = relay(&address, None)?;
         let addr = EndpointAddr::new(PublicKey::from_bytes(to)?).with_relay_url(url);
         let alpn = if self.is_service(to) { service_alpn() } else { alpn() };
-        let conn = match tokio::time::timeout(CONNECT, endpoint.connect(addr, &alpn)).await {
+        let connecting = std::time::Instant::now();
+        let conn = match tokio::time::timeout(wait, endpoint.connect(addr, &alpn)).await {
             Ok(Ok(conn)) => conn,
-            Ok(Err(err)) => bail!(NotThere(format!("{} couldn't be reached: {err:#}", short(to)))),
-            Err(_) => bail!(NotThere(format!("{} isn't connected", short(to)))),
+            Ok(Err(err)) => {
+                self.0.net.down.lock().unwrap().insert(*to, Instant::now());
+                bail!(NotThere(format!("{} couldn't be reached: {err:#}", short(to))))
+            }
+            Err(_) => {
+                self.0.net.down.lock().unwrap().insert(*to, Instant::now());
+                bail!(NotThere(format!("{} isn't connected", short(to))))
+            }
         };
+        self.0.net.down.lock().unwrap().remove(to);
+        trace::note(json!({ "step": "connect", "to": short(to) }), connecting.elapsed());
         *held = Some(conn.clone());
         if !self.is_service(to) {
             // The other end asks on it too, once it keeps it for its asks (take_conn).

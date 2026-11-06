@@ -154,6 +154,14 @@ fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
                     _ => out.push(format!("{lane} fetched {} of {} from the bucket: {ms} ms", s["found"], s["asks"])),
                 }
             }
+            "online" if ms >= 5 => {
+                listed += ms;
+                out.push(format!("{lane} waited to be on the relay: {ms} ms"));
+            }
+            "connect" => {
+                listed += ms;
+                out.push(format!("{lane} connected to {}: {ms} ms", s["to"].as_str().unwrap_or("a device")));
+            }
             "lease" => {
                 listed += ms;
                 out.push(format!("{lane} took the call's lease: {ms} ms"));
