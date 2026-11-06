@@ -16,53 +16,11 @@ var j = (() => {
 		widgets: {},
 		badges: {},
 		failed: /* @__PURE__ */ new Set()
-	}, t = () => e.state?.user, n = () => e.state?.network, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => e?.tools?.find((e) => e.accounts)?.name, l = (e) => (e.added || []).map((e) => e.startsWith("user:") ? "user" : e), u = (e) => e === t()?.id ? "You" : n()?.users.find((t) => t.id === e)?.name || "Someone", d = (e) => e.slice().sort((e, n) => (e === t()?.id) - (n === t()?.id) || u(e).localeCompare(u(n))).map((e) => e === t()?.id ? "you" : u(e)), f = (e) => e.length < 2 ? e.join("") : `${e.slice(0, -1).join(", ")} and ${e.at(-1)}`, p = (e, n) => e.length === 1 && e[0] === t()?.id ? "" : `${e.length <= 3 ? f(d(e)).replace(/^y/, "Y") : `${e.length} people`} · ${m(n)}`;
-	function m(e) {
-		let t = d(e);
-		return t.length ? t.length === 1 ? `apps chosen by ${t[0]}` : t.length === 2 ? `apps chosen by ${t[0]} and ${t[1]}` : `apps chosen by ${t.length} admins` : "apps chosen by admins";
-	}
-	function h() {
-		let e = n(), r = t();
-		if (!e || !r) return [];
-		let i = [{
-			scope: "user",
-			title: "You",
-			subtitle: ""
-		}];
-		for (let t of e.groups.filter((e) => e.members.some((e) => e.user === r.id)).sort((e, t) => e.name.localeCompare(t.name))) {
-			let e = t.members.filter((e) => e.role === "admin").map((e) => e.user);
-			i.push({
-				scope: `group:${t.id}`,
-				title: t.name,
-				subtitle: p(t.members.map((e) => e.user), e)
-			});
-		}
-		return i.push({
-			scope: "global",
-			title: "Everyone",
-			subtitle: p(e.users.map((e) => e.id), e.users.filter((e) => e.role === "admin").map((e) => e.id))
-		}), i;
-	}
-	function g() {
-		let t = e.state?.arrangements?.user?.pages;
-		return {
-			order: t?.order || [],
-			hidden: t?.hidden || []
-		};
-	}
-	function _() {
-		let e = h(), { order: t, hidden: n } = g(), r = (n) => t.includes(n.scope) ? t.indexOf(n.scope) : t.length + e.indexOf(n), i = e.filter((e) => e.scope.startsWith("group:") && !n.includes(e.scope)).sort((e, t) => r(e) - r(t));
-		return [
-			...e.filter((e) => e.scope === "user"),
-			...i,
-			...e.filter((e) => e.scope === "global")
-		];
-	}
-	let v = (e) => h().find((t) => t.scope === e);
-	function y(e) {
+	}, t = () => e.state?.user, n = () => e.state?.network, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => e?.tools?.find((e) => e.accounts)?.name, l = (e) => (e.added || []).map((e) => e.startsWith("user:") ? "user" : e), u = () => e.state?.pages || [], d = () => u().filter((e) => !e.hidden), f = (e) => u().find((t) => t.scope === e);
+	function p(e) {
 		return e === "user" ? !0 : e === "global" ? r() : (n()?.groups.find((t) => `group:${t.id}` === e))?.members.some((e) => e.user === t()?.id && e.role === "admin") || !1;
 	}
-	function b(e) {
+	function m(e) {
 		let i = e.owner, a = t();
 		if (!i || !a) return !1;
 		if (i === "admins") return r();
@@ -70,36 +28,36 @@ var j = (() => {
 		let o = i.startsWith("group:") && n()?.groups.find((e) => e.id === i.slice(6));
 		return !!o && o.members.some((e) => e.user === a.id && e.role === "admin");
 	}
-	let x = (t) => e.apps.filter((e) => s(e) && l(e).includes(t.scope)), S = (t) => e.apps.filter((e) => c(e) && l(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), C = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
-	function w(t) {
+	let h = (t) => e.apps.filter((e) => s(e) && l(e).includes(t.scope)), g = (t) => e.apps.filter((e) => c(e) && l(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), _ = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
+	function v(t) {
 		let n = new Set(e.apps.filter((e) => l(e).includes(t.scope)).map((e) => e.name));
 		return (e.widgets[t.scope] || []).filter((e) => n.has(e.app));
 	}
-	let T = (t) => !e.widgets[t.scope] || e.failed.has(t.scope), E = [
+	let y = (t) => !e.widgets[t.scope] || e.failed.has(t.scope), b = [
 		"small",
 		"medium",
 		"large",
 		"xl"
-	], D = (e) => E.filter((t) => !e.sizes || e.sizes[t]), O = (e, t) => e.sizes?.[t] || e.root;
-	function k(e, t) {
+	], x = (e) => b.filter((t) => !e.sizes || e.sizes[t]), S = (e, t) => e.sizes?.[t] || e.root;
+	function C(e, t) {
 		let n = {
 			...e,
 			instance: t.id,
 			sizes: { ...e.sizes || {} }
 		};
-		t.size && D(e).includes(t.size) && (n.size = t.size);
+		t.size && x(e).includes(t.size) && (n.size = t.size);
 		let r = t.id && e.placed?.[t.id];
 		return r?.sizes && Object.assign(n.sizes, r.sizes), r?.error && (n.error = r.error), n;
 	}
-	function A(t) {
-		let n = x(t), r = w(t), i = e.state?.arrangements?.[t.scope];
+	function w(t) {
+		let n = h(t), r = v(t), i = e.state?.arrangements?.[t.scope];
 		if (!i) return n.map((e) => ({ app: e }));
 		let a = [], o = /* @__PURE__ */ new Set();
 		for (let s of i.items || []) if (s.widget) {
 			let n = r.find((e) => e.app === s.app && e.widget === s.widget);
-			if (!s.id || o.has(`widget:${s.id}`) || !n && !(T(t) && e.apps.some((e) => e.name === s.app && l(e).includes(t.scope)))) continue;
+			if (!s.id || o.has(`widget:${s.id}`) || !n && !(y(t) && e.apps.some((e) => e.name === s.app && l(e).includes(t.scope)))) continue;
 			o.add(`widget:${s.id}`), a.push(n ? {
-				widget: k(n, s),
+				widget: C(n, s),
 				kept: s
 			} : {
 				pending: !0,
@@ -112,47 +70,47 @@ var j = (() => {
 		let s = new Set(i.hidden || []);
 		return a.concat(n.filter((e) => !o.has(`app:${e.name}`) && !s.has(e.name)).map((e) => ({ app: e })));
 	}
-	function j() {
+	function T() {
 		let t = a(e.state?.config?.store);
-		return t && s(t) && _().some((e) => l(t).includes(e.scope)) ? t : null;
+		return t && s(t) && d().some((e) => l(t).includes(e.scope)) ? t : null;
 	}
-	let M = (e, t, n = "main", r = {}) => () => one.open(n, r, e.name, t ? { scope: t.scope } : {}), N = (e, t, n) => o(e, "settings") ? M(e, t, "settings", n ? { add: !0 } : {}) : null, P = (e) => j() && o(j(), "app") && (e.deploys || 0) > 0 ? M(j(), null, "app", { app: e.name }) : null, F = () => j() ? M(j(), null, "main", { accounts: !0 }) : null, I = () => j() && M(j(), null)();
-	async function L(e, t, n = {}) {
+	let E = (e, t, n = "main", r = {}) => () => one.open(n, r, e.name, t ? { scope: t.scope } : {}), D = (e, t, n) => o(e, "settings") ? E(e, t, "settings", n ? { add: !0 } : {}) : null, O = (e) => T() && o(T(), "app") && (e.deploys || 0) > 0 ? E(T(), null, "app", { app: e.name }) : null, k = () => T() ? E(T(), null, "main", { accounts: !0 }) : null, A = () => T() && E(T(), null)();
+	async function j(e, t, n = {}) {
 		return (await one.api("POST", "/v1/call", {
 			app: e,
 			tool: t,
 			input: n
 		})).ok;
 	}
-	let R = (e) => one.alert({
+	let M = (e) => one.alert({
 		title: "Couldn’t Do That",
 		text: one.plain(e).title
 	});
-	async function z(t, n) {
+	async function N(t, n) {
 		let r = e.apps;
 		n && (e.apps = n(e.apps), e.redraw?.());
 		try {
-			await t(), await H(e.redraw);
+			await t(), await I(e.redraw);
 		} catch (t) {
-			n && (e.apps = r, e.redraw?.()), R(t);
+			n && (e.apps = r, e.redraw?.()), M(t);
 		}
 	}
-	function B(e, t) {
+	function P(e, t) {
 		let n = [];
-		return N(e, t) && n.push({
+		return D(e, t) && n.push({
 			title: "Settings",
 			icon: "gear-six",
-			run: N(e, t)
-		}), P(e) && n.push({
+			run: D(e, t)
+		}), O(e) && n.push({
 			title: "Open in App Store",
 			icon: "bag",
-			run: P(e)
-		}), y(t.scope) && (e.deploys || 0) > 0 && n.push({
+			run: O(e)
+		}), p(t.scope) && (e.deploys || 0) > 0 && n.push({
 			title: `Remove from ${t.title}`,
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => z(() => one.api("POST", "/v1/add", {
+			run: () => N(() => one.api("POST", "/v1/add", {
 				app: e.name,
 				scope: t.scope,
 				added: !1
@@ -160,7 +118,7 @@ var j = (() => {
 				...n,
 				added: (n.added || []).filter((e) => (e.startsWith("user:") ? "user" : e) !== t.scope)
 			} : n))
-		}), b(e) && (e.deploys || 0) > 0 && n.push({
+		}), m(e) && (e.deploys || 0) > 0 && n.push({
 			title: "Delete App…",
 			icon: "trash",
 			danger: !0,
@@ -170,14 +128,14 @@ var j = (() => {
 					action: "Delete App",
 					danger: !0,
 					text: `${i(e)} leaves every page, for everyone. Restore it from Recently Deleted in the App Store.`
-				}) && z(() => one.api("POST", "/v1/retire", {
+				}) && N(() => one.api("POST", "/v1/retire", {
 					app: e.name,
 					how: "deleted"
 				}), (t) => t.filter((t) => t.name !== e.name));
 			}
 		}), n;
 	}
-	async function V(e, t) {
+	async function F(e, t) {
 		if (!e.length) return;
 		t instanceof Event && (t = {
 			x: t.clientX,
@@ -186,24 +144,24 @@ var j = (() => {
 		let n = await one.menu(e, t).catch(() => null);
 		n != null && e[n]?.run();
 	}
-	async function H(t) {
-		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await U(null, t);
+	async function I(t) {
+		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await L(null, t);
 	}
-	async function U(t, n) {
+	async function L(t, n) {
 		let r = (e) => `scope=${encodeURIComponent(e.scope)}`;
-		await Promise.all(h().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((n) => {
+		await Promise.all(u().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((n) => {
 			e.widgets[t.scope] = n, e.failed.delete(t.scope);
 		}, () => void e.failed.add(t.scope)).then(() => n?.()), one.api("GET", `/v1/badges?${r(t)}`).then((n) => {
 			e.badges[t.scope] = n;
 		}, () => {}).then(() => n?.())]));
 	}
-	let W = (t) => h().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
-	function G(t) {
+	let R = (t) => u().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
+	function z(t) {
 		let n, r, i = !1, a = /* @__PURE__ */ new Set(), o = (r) => {
 			r ? r.forEach((e) => a.add(e)) : i = !0, clearTimeout(n), n = setTimeout(() => {
-				let n = i ? H(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
+				let n = i ? I(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
 					e.apps = t;
-				}), U([...a], t)]);
+				}), L([...a], t)]);
 				i = !1, a.clear(), n.then(() => {
 					t(), l(), c();
 				}).catch(() => {});
@@ -215,10 +173,10 @@ var j = (() => {
 			let t = [], n = (e) => {
 				e && typeof e == "object" && (e.next && t.push(e.next), (e.c || []).forEach(n));
 			};
-			Object.values(e.widgets).flat().forEach((e) => Object.values(e.sizes || { root: e.root }).forEach(n)), t.length && (r = setTimeout(() => o(h().map((e) => e.scope)), Math.min(9e5, Math.max(6e4, Math.min(...t) - Date.now()))));
+			Object.values(e.widgets).flat().forEach((e) => Object.values(e.sizes || { root: e.root }).forEach(n)), t.length && (r = setTimeout(() => o(u().map((e) => e.scope)), Math.min(9e5, Math.max(6e4, Math.min(...t) - Date.now()))));
 		};
 		one.on("changed", (e) => {
-			e.type === "changed" && e.apps?.length ? o(W(e.apps)) : [
+			e.type === "changed" && e.apps?.length ? o(R(e.apps)) : [
 				"changed",
 				"devices",
 				"network"
@@ -233,34 +191,33 @@ var j = (() => {
 		app: a,
 		has: o,
 		hasScreens: s,
-		allPages: h,
-		pageChoices: g,
-		pages: _,
-		page: v,
-		canArrange: y,
-		appsOn: x,
-		accountsOn: S,
+		allPages: u,
+		pages: d,
+		page: f,
+		canArrange: p,
+		appsOn: h,
+		accountsOn: g,
 		accountsTool: c,
-		badge: C,
-		widgetsOn: w,
-		waiting: T,
-		items: A,
-		supported: D,
-		tree: O,
-		store: j,
-		open: M,
-		settings: N,
-		inStore: P,
-		addAccountApp: F,
-		openStore: I,
-		call: L,
-		failed: R,
-		change: z,
-		actions: B,
-		menu: V,
-		load: H,
-		loadWidgets: U,
-		watch: G
+		badge: _,
+		widgetsOn: v,
+		waiting: y,
+		items: w,
+		supported: x,
+		tree: S,
+		store: T,
+		open: E,
+		settings: D,
+		inStore: O,
+		addAccountApp: k,
+		openStore: A,
+		call: j,
+		failed: M,
+		change: N,
+		actions: P,
+		menu: F,
+		load: I,
+		loadWidgets: L,
+		watch: z
 	};
 })(), { scope: M, swipe: N } = one.params || {}, P = "settings", F = {
 	small: [2, 2],
@@ -297,7 +254,7 @@ var j = (() => {
 function Y() {
 	U || H?.ready || H?.resize || V.render();
 }
-var X = () => ({
+var ee = () => ({
 	phase: V.phase,
 	problem: V.problem,
 	editing: V.editing,
@@ -306,7 +263,7 @@ var X = () => ({
 	refreshing: [...V.refreshing],
 	view: V.phase === "ready" ? oe() : [],
 	attention: V.phase === "ready" && (j.data.state?.settings_items || []).some((e) => e.badge)
-}), ee = () => N ? [...j.pages().map((e) => e.scope), P] : [M || "user"], Z = (e) => e === P ? "Settings" : j.page(e)?.title || "", Q = (e, t) => ({
+}), X = () => N ? [...j.pages().map((e) => e.scope), P] : [M || "user"], Z = (e) => e === P ? "Settings" : j.page(e)?.title || "", Q = (e, t) => ({
 	slot: e,
 	kind: "app",
 	...t
@@ -428,7 +385,7 @@ var ae = () => ({
 	}))
 });
 function oe() {
-	return ee().map((e) => e === P ? ae() : j.page(e) ? ie(j.page(e)) : {
+	return X().map((e) => e === P ? ae() : j.page(e) ? ie(j.page(e)) : {
 		scope: e,
 		missing: !0,
 		list: []
@@ -486,7 +443,7 @@ async function pe(e, t, n = le(e), { reload: r = !1 } = {}) {
 			...o.pages ? { pages: o.pages } : {}
 		}), r && (await j.loadWidgets([e.scope]), Y()), fe();
 	} catch (e) {
-		j.data.state.arrangements === s && (j.data.state.arrangements = a, Y()), j.failed(e);
+		j.data.state.arrangements === s && (j.data.state.arrangements = a, j.data.state.pages = listed, Y()), j.failed(e);
 	}
 }
 var me = (e, t, n) => pe(e, ce(e).map((e) => e.widget && e.id === t.id ? {
@@ -569,7 +526,7 @@ function ye() {
 	}, V.render();
 }
 function be(e) {
-	let t = j.data.state, n = t.arrangements, r = n?.user, i = r?.items || ce(j.page("user") || { scope: "user" });
+	let t = j.data.state, n = t.arrangements, r = n?.user, i = r?.items || ce(j.page("user") || { scope: "user" }), a = t.pages;
 	t.arrangements = {
 		...n || {},
 		user: {
@@ -578,15 +535,22 @@ function be(e) {
 			hidden: r?.hidden || [],
 			pages: e
 		}
-	};
-	let a = t.arrangements;
+	}, t.pages = [
+		a[0],
+		...e.order.map((t) => ({
+			...a.find((e) => e.scope === t),
+			hidden: e.hidden.includes(t)
+		})),
+		a.at(-1)
+	];
+	let o = t.arrangements;
 	Y(), one.api("POST", "/v1/arrange", {
 		page: "user",
 		items: i,
 		hidden: r?.hidden || [],
 		pages: e
 	}).then(fe, (e) => {
-		j.data.state.arrangements === a && (j.data.state.arrangements = n, Y()), j.failed(e);
+		j.data.state.arrangements === o && (j.data.state.arrangements = n, j.data.state.pages = a, Y()), j.failed(e);
 	});
 }
 function $(e) {
@@ -1256,26 +1220,26 @@ function Ge(t) {
 	}, n[27] = f, n[28] = r, n[29] = q) : q = n[29];
 	let J;
 	n[30] !== p || n[31] !== r ? (J = j.tree(r, p), n[30] = p, n[31] = r, n[32] = J) : J = n[32];
-	let Y = `scale(${N})`, X;
-	n[33] !== M || n[34] !== Y || n[35] !== O ? (X = {
+	let Y = `scale(${N})`, ee;
+	n[33] !== M || n[34] !== Y || n[35] !== O ? (ee = {
 		width: O,
 		height: M,
 		transform: Y,
 		transformOrigin: "0 0"
-	}, n[33] = M, n[34] = Y, n[35] = O, n[36] = X) : X = n[36];
-	let ee;
-	n[37] !== q || n[38] !== J || n[39] !== X ? (ee = /* @__PURE__ */ k(T, {
+	}, n[33] = M, n[34] = Y, n[35] = O, n[36] = ee) : ee = n[36];
+	let X;
+	n[37] !== q || n[38] !== J || n[39] !== ee ? (X = /* @__PURE__ */ k(T, {
 		w: q,
 		host: I,
 		tree: J,
-		style: X
-	}), n[37] = q, n[38] = J, n[39] = X, n[40] = ee) : ee = n[40];
+		style: ee
+	}), n[37] = q, n[38] = J, n[39] = ee, n[40] = X) : X = n[40];
 	let Z;
-	n[41] !== K || n[42] !== ee ? (Z = /* @__PURE__ */ k("div", {
+	n[41] !== K || n[42] !== X ? (Z = /* @__PURE__ */ k("div", {
 		className: "pointer-events-none mx-auto py-1",
 		style: K,
-		children: ee
-	}), n[41] = K, n[42] = ee, n[43] = Z) : Z = n[43];
+		children: X
+	}), n[41] = K, n[42] = X, n[43] = Z) : Z = n[43];
 	let Q;
 	n[44] === R ? Q = n[45] : (Q = /* @__PURE__ */ k(l, {
 		variant: "secondary",
@@ -1307,57 +1271,57 @@ function qe(e) {
 function Je() {}
 async function Ye() {}
 function Xe({ groups: e, close: t }) {
-	let n = j.pageChoices(), [a, o] = i(() => [...e].sort((t, r) => (n.order.includes(t.scope) ? n.order.indexOf(t.scope) : n.order.length + e.indexOf(t)) - (n.order.includes(r.scope) ? n.order.indexOf(r.scope) : n.order.length + e.indexOf(r))).map((e) => e.scope)), [s, c] = i(() => new Set(n.hidden)), [u, f] = i(null), p = r(null), h = (t) => e.find((e) => e.scope === t)?.title;
-	function g(e, t) {
+	let [n, a] = i(() => e.map((e) => e.scope)), [o, s] = i(() => new Set(e.filter((e) => e.hidden).map((e) => e.scope))), [c, u] = i(null), f = r(null), p = (t) => e.find((e) => e.scope === t)?.title;
+	function h(e, t) {
 		e.preventDefault();
-		let n = () => [...p.current.children], r = e.clientY, i = a.indexOf(t), s = a;
-		f({
+		let r = () => [...f.current.children], i = e.clientY, o = n.indexOf(t), s = n;
+		u({
 			scope: t,
 			dy: 0
 		}), one.tap("medium");
 		let c = (e) => {
-			let a = n(), c = a[i - 1], l = a[i + 1];
-			l && e.clientY > l.getBoundingClientRect().top + l.offsetHeight / 2 ? (r += l.offsetHeight, s = s.slice(), s.splice(i, 1), s.splice(i + 1, 0, t), i++, o(s), one.tap()) : c && e.clientY < c.getBoundingClientRect().bottom - c.offsetHeight / 2 && (r -= c.offsetHeight, s = s.slice(), s.splice(i, 1), s.splice(i - 1, 0, t), i--, o(s), one.tap()), f({
+			let n = r(), c = n[o - 1], l = n[o + 1];
+			l && e.clientY > l.getBoundingClientRect().top + l.offsetHeight / 2 ? (i += l.offsetHeight, s = s.slice(), s.splice(o, 1), s.splice(o + 1, 0, t), o++, a(s), one.tap()) : c && e.clientY < c.getBoundingClientRect().bottom - c.offsetHeight / 2 && (i -= c.offsetHeight, s = s.slice(), s.splice(o, 1), s.splice(o - 1, 0, t), o--, a(s), one.tap()), u({
 				scope: t,
-				dy: e.clientY - r
+				dy: e.clientY - i
 			});
 		}, l = () => {
-			f(null), removeEventListener("pointermove", c), removeEventListener("pointerup", l), removeEventListener("pointercancel", l);
+			u(null), removeEventListener("pointermove", c), removeEventListener("pointerup", l), removeEventListener("pointercancel", l);
 		};
 		addEventListener("pointermove", c), addEventListener("pointerup", l), addEventListener("pointercancel", l);
 	}
-	function _() {
+	function g() {
 		t();
-		let e = {
-			order: a,
-			hidden: a.filter((e) => s.has(e))
+		let r = {
+			order: n,
+			hidden: n.filter((e) => o.has(e))
 		};
-		JSON.stringify(e) !== JSON.stringify({
-			order: n.order,
-			hidden: n.hidden
-		}) && be(e);
+		JSON.stringify(r) !== JSON.stringify({
+			order: e.map((e) => e.scope),
+			hidden: e.filter((e) => e.hidden).map((e) => e.scope)
+		}) && be(r);
 	}
 	return /* @__PURE__ */ k(m, {
 		open: !0,
-		onOpenChange: (e) => !e && _(),
+		onOpenChange: (e) => !e && g(),
 		title: "Pages",
 		action: /* @__PURE__ */ k(l, {
 			size: "sm",
-			onClick: _,
+			onClick: g,
 			children: "Done"
 		}),
 		children: /* @__PURE__ */ A("div", {
 			className: "flex flex-col overflow-y-auto",
 			children: [/* @__PURE__ */ k("div", {
-				ref: p,
+				ref: f,
 				className: "divide-y",
-				children: a.map((e) => /* @__PURE__ */ A("div", {
-					className: E("relative flex min-h-12 touch-none items-center gap-3 bg-background px-4", u?.scope === e && "z-10 shadow-lg"),
-					style: u?.scope === e ? { transform: `translateY(${u.dy}px)` } : void 0,
+				children: n.map((e) => /* @__PURE__ */ A("div", {
+					className: E("relative flex min-h-12 touch-none items-center gap-3 bg-background px-4", c?.scope === e && "z-10 shadow-lg"),
+					style: c?.scope === e ? { transform: `translateY(${c.dy}px)` } : void 0,
 					children: [
 						/* @__PURE__ */ k("span", {
 							className: "cursor-grab text-xl text-muted-foreground",
-							onPointerDown: (t) => g(t, e),
+							onPointerDown: (t) => h(t, e),
 							children: /* @__PURE__ */ k(d, {
 								name: "dots-six-vertical",
 								className: "size-5"
@@ -1365,13 +1329,13 @@ function Xe({ groups: e, close: t }) {
 						}),
 						/* @__PURE__ */ k("span", {
 							className: "min-w-0 flex-1 truncate text-sm",
-							children: h(e)
+							children: p(e)
 						}),
 						/* @__PURE__ */ k(x, {
-							"aria-label": `Show ${h(e)}`,
-							checked: !s.has(e),
+							"aria-label": `Show ${p(e)}`,
+							checked: !o.has(e),
 							onCheckedChange: (t) => {
-								c((n) => {
+								s((n) => {
 									let r = new Set(n);
 									return t ? r.delete(e) : r.add(e), r;
 								}), one.tap();
@@ -1438,7 +1402,7 @@ function et() {
 	o[1] === Symbol.for("react.memo_cache_sentinel") ? (C = () => {
 		V.render = (e) => {
 			N && V.editing && V.at === P && (V.editing = !1);
-			let t = X();
+			let t = ee();
 			V.view = t.view, e ? a(() => u(t)) : u(t);
 		}, V.render();
 	}, w = [], o[1] = C, o[2] = w) : (C = o[1], w = o[2]), n(C, w);

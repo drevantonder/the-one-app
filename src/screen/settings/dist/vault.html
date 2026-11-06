@@ -36,20 +36,8 @@ var w = {
 	color: "#8e8e93"
 };
 function L(e) {
-	return [
-		{
-			scope: "user",
-			title: "You"
-		},
-		...((e.network || {}).groups || []).filter((e) => e.role === "admin").sort((e, t) => e.name.localeCompare(t.name)).map((e) => ({
-			scope: `group:${e.id}`,
-			title: e.name
-		})),
-		...e.user?.role === "admin" ? [{
-			scope: "global",
-			title: "Everyone"
-		}] : []
-	];
+	let t = (t) => t === "user" || (t === "global" ? e.user?.role === "admin" : e.network?.groups.find((e) => `group:${e.id}` === t)?.role === "admin");
+	return (e.pages || []).filter((e) => t(e.scope));
 }
 function R(e) {
 	let t = (t) => T(e, t), n = (e) => t(e)?.title || e, r = (e) => new Intl.ListFormat(void 0, { type: "conjunction" }).format(e.map(n));

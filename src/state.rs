@@ -57,6 +57,8 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<Value> {
         "device": here.device,
         "user": me.map(|u| json!({ "id": u.id, "name": u.name, "role": u.role })),
         "network": network,
+        // The pages this user can read, as every client lists them (see `pages`).
+        "pages": m.map(|m| pages(m, user, &here.arrangements)).transpose()?.unwrap_or_default(),
         // Requests for an item waiting for this user to answer (see GET /v1/vault/requests).
         "vault_requests": here.waiting,
         // How this user arranged each of their pages (see `arrange`).
@@ -72,6 +74,58 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<Value> {
         state["client"] = client;
     }
     Ok(state)
+}
+
+/// The pages `user` can read, as every client lists them, each `{ scope, title, subtitle, hidden }`: theirs, their
+/// groups' in the order they chose (Edit Pages…: any they haven't ordered after, by name), everyone's last. `hidden` is
+/// a group's page they switched off; whoever lists pages to show leaves it out. `subtitle` says who a page is for and
+/// who chooses its apps: a few people by name, more as how many; for only them, nothing.
+fn pages(m: &ScopeDb, user: &str, arrangements: &Value) -> Result<Vec<Value>> {
+    let users = m.users()?;
+    let name = |id: &str| if id == user { "You".to_string() } else { users.iter().find(|u| u.id == id && !u.removed).map_or("Someone".to_string(), |u| u.name.clone()) };
+    // People by name, you last, as "you".
+    let named = |ids: &[&str]| {
+        let mut ids = ids.to_vec();
+        ids.sort_by_cached_key(|id| (*id == user, name(id).to_lowercase()));
+        ids.into_iter().map(|id| if id == user { "you".to_string() } else { name(id) }).collect::<Vec<_>>()
+    };
+    let and = |names: Vec<String>| match names.as_slice() {
+        [] | [_] => names.join(""),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let chosen_by = |admins: &[&str]| match named(admins).as_slice() {
+        [] => "apps chosen by admins".to_string(),
+        [one] => format!("apps chosen by {one}"),
+        [a, b] => format!("apps chosen by {a} and {b}"),
+        many => format!("apps chosen by {} admins", many.len()),
+    };
+    let whose = |ids: &[&str], admins: &[&str]| {
+        if ids == [user] {
+            return String::new();
+        }
+        let who = if ids.len() <= 3 { and(named(ids)) } else { format!("{} people", ids.len()) };
+        let who = who.strip_prefix('y').map_or(who.clone(), |rest| format!("Y{rest}"));
+        format!("{who} · {}", chosen_by(admins))
+    };
+    let kept = &arrangements["user"]["pages"];
+    let strings = |k: &str| kept[k].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect::<Vec<_>>();
+    let (order, hidden) = (strings("order"), strings("hidden"));
+    let mut groups: Vec<_> = m.groups()?.into_iter().filter(|g| g.members.contains_key(user)).collect();
+    groups.sort_by_cached_key(|g| g.name.to_lowercase());
+    let rank = |scope: &str, by_name: usize| order.iter().position(|s| s == scope).unwrap_or(order.len() + by_name);
+    let mut ranked: Vec<_> = groups.iter().enumerate().map(|(n, g)| (rank(&format!("group:{}", g.id), n), g)).collect();
+    ranked.sort_by_key(|(r, _)| *r);
+    let mut out = vec![json!({ "scope": "user", "title": "You", "subtitle": "", "hidden": false })];
+    for (_, g) in ranked {
+        let scope = format!("group:{}", g.id);
+        let ids: Vec<&str> = g.members.keys().map(String::as_str).collect();
+        let admins: Vec<&str> = g.members.iter().filter(|(_, r)| **r == scopes::Role::Admin).map(|(u, _)| u.as_str()).collect();
+        out.push(json!({ "hidden": hidden.contains(&scope), "scope": scope, "title": g.name, "subtitle": whose(&ids, &admins) }));
+    }
+    let everyone: Vec<&str> = users.iter().filter(|u| !u.removed).map(|u| u.id.as_str()).collect();
+    let admins: Vec<&str> = users.iter().filter(|u| !u.removed && u.role == scopes::Role::Admin).map(|u| u.id.as_str()).collect();
+    out.push(json!({ "scope": "global", "title": "Everyone", "subtitle": whose(&everyone, &admins), "hidden": false }));
+    Ok(out)
 }
 
 fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) -> Result<Value> {

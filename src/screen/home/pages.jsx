@@ -181,7 +181,7 @@ async function save(p, items, hidden = hiddenOf(p), { reload = false } = {}) {
     keep()
   } catch (err) {
     // Unless something newer was drawn meanwhile.
-    if (home.data.state.arrangements === after) home.data.state.arrangements = before, draw()
+    if (home.data.state.arrangements === after) home.data.state.arrangements = before, home.data.state.pages = listed, draw()
     home.failed(err)
   }
 }
@@ -235,11 +235,14 @@ function editPages() {
 function keepPages(pages) {
   const state = home.data.state, before = state.arrangements, mine = before?.user
   const items = mine?.items || keptOf(home.page("user") || { scope: "user" })
+  const listed = state.pages
   state.arrangements = { ...(before || {}), user: { ...(mine || {}), items, hidden: mine?.hidden || [], pages } }
+  // The list as the node will say it: theirs first, their groups' as ordered (hidden marked), everyone's last.
+  state.pages = [listed[0], ...pages.order.map((scope) => ({ ...listed.find((p) => p.scope === scope), hidden: pages.hidden.includes(scope) })), listed.at(-1)]
   const after = state.arrangements
   draw()
   one.api("POST", "/v1/arrange", { page: "user", items, hidden: mine?.hidden || [], pages }).then(keep, (err) => {
-    if (home.data.state.arrangements === after) home.data.state.arrangements = before, draw()
+    if (home.data.state.arrangements === after) home.data.state.arrangements = before, home.data.state.pages = listed, draw()
     home.failed(err)
   })
 }
@@ -798,9 +801,8 @@ function Addable({ w, sizes, p, close }) {
 
 /// Edit Pages…'s rows: dragged into order by their grips, each switched off to hide it.
 function EditPages({ groups, close }) {
-  const kept = home.pageChoices()
-  const [order, setOrder] = useState(() => [...groups].sort((a, b) => (kept.order.includes(a.scope) ? kept.order.indexOf(a.scope) : kept.order.length + groups.indexOf(a)) - (kept.order.includes(b.scope) ? kept.order.indexOf(b.scope) : kept.order.length + groups.indexOf(b))).map((p) => p.scope))
-  const [hidden, setHidden] = useState(() => new Set(kept.hidden))
+  const [order, setOrder] = useState(() => groups.map((p) => p.scope))
+  const [hidden, setHidden] = useState(() => new Set(groups.filter((p) => p.hidden).map((p) => p.scope)))
   const [moving, setMoving] = useState(null)
   const list = useRef(null)
   const title = (scope) => groups.find((g) => g.scope === scope)?.title
@@ -839,7 +841,7 @@ function EditPages({ groups, close }) {
   function done() {
     close()
     const pages = { order, hidden: order.filter((s) => hidden.has(s)) }
-    if (JSON.stringify(pages) !== JSON.stringify({ order: kept.order, hidden: kept.hidden })) keepPages(pages)
+    if (JSON.stringify(pages) !== JSON.stringify({ order: groups.map((p) => p.scope), hidden: groups.filter((p) => p.hidden).map((p) => p.scope) })) keepPages(pages)
   }
   return (
     <ResponsiveDialog open onOpenChange={(open) => !open && done()} title="Pages" action={<Button size="sm" onClick={done}>Done</Button>}>

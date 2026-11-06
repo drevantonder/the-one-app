@@ -22,18 +22,10 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     let state = crate::node(device, "GET", "/v1/state", None).await?;
     let apps = crate::node(device, "GET", "/v1/apps", None).await?;
     let apps: Vec<Value> = apps.as_array().cloned().unwrap_or_default();
-    let Some(me) = state["user"]["id"].as_str() else { return Ok(()) };
-    let mut pages = vec![("user".to_string(), "You".to_string())];
-    let mut groups: Vec<(String, String)> = state["network"]["groups"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|g| g["members"].as_array().is_some_and(|m| m.iter().any(|m| m["user"] == me)))
-        .map(|g| (format!("group:{}", g["id"].as_str().unwrap_or_default()), g["name"].as_str().unwrap_or_default().to_string()))
-        .collect();
-    groups.sort_by(|a, b| a.1.cmp(&b.1));
-    pages.extend(groups);
-    pages.push(("global".into(), "Everyone".into()));
+    if state["user"]["id"].is_null() {
+        return Ok(());
+    }
+    let pages: Vec<(String, String)> = state["pages"].as_array().into_iter().flatten().map(|p| (p["scope"].as_str().unwrap_or_default().to_string(), p["title"].as_str().unwrap_or_default().to_string())).collect();
 
     let kept: Value = std::fs::read(dir.join("widgets.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let mut answered = true;

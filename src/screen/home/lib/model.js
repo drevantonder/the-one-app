@@ -13,49 +13,10 @@ export const home = (() => {
   // The tool that lists an app's accounts, the one it says does (`accounts: true`): none for an app without.
   const accountsTool = (a) => a?.tools?.find((o) => o.accounts)?.name;
   const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
-  const userName = (id) => (id === me()?.id ? "You" : network()?.users.find((u) => u.id === id)?.name || "Someone");
-  // People by name, you last, as "you".
-  const named = (ids) => ids.slice().sort((a, b) => (a === me()?.id) - (b === me()?.id) || userName(a).localeCompare(userName(b)))
-    .map((id) => (id === me()?.id ? "you" : userName(id)));
-  const and = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
-  // Who a page is for, and who chooses its apps: a few people by name, more as how many; with only you, nothing.
-  const whose = (ids, admins) =>
-    ids.length === 1 && ids[0] === me()?.id ? "" : `${ids.length <= 3 ? and(named(ids)).replace(/^y/, "Y") : `${ids.length} people`} · ${chosenBy(admins)}`;
-
-  function chosenBy(admins) {
-    const names = named(admins);
-    if (!names.length) return "apps chosen by admins";
-    if (names.length === 1) return `apps chosen by ${names[0]}`;
-    if (names.length === 2) return `apps chosen by ${names[0]} and ${names[1]}`;
-    return `apps chosen by ${names.length} admins`;
-  }
-
-  /// Every page this person can read: theirs, their groups', then everyone's.
-  function allPages() {
-    const i = network(), u = me();
-    if (!i || !u) return [];
-    const out = [{ scope: "user", title: "You", subtitle: "" }];
-    for (const g of i.groups.filter((g) => g.members.some((m) => m.user === u.id)).sort((a, b) => a.name.localeCompare(b.name))) {
-      const admins = g.members.filter((m) => m.role === "admin").map((m) => m.user);
-      out.push({ scope: `group:${g.id}`, title: g.name, subtitle: whose(g.members.map((m) => m.user), admins) });
-    }
-    out.push({ scope: "global", title: "Everyone", subtitle: whose(i.users.map((x) => x.id), i.users.filter((x) => x.role === "admin").map((x) => x.id)) });
-    return out;
-  }
-  /// How this person ordered their groups' pages and which they hid (Edit Pages…), kept with their own page's arrangement.
-  function pageChoices() {
-    const kept = h.state?.arrangements?.user?.pages;
-    return { order: kept?.order || [], hidden: kept?.hidden || [] };
-  }
-
-  /// The pages this person shows, in their order: theirs first, then their groups' as they ordered them (any they
-  /// haven't ordered after, by name), everyone's last.
-  function pages() {
-    const all = allPages(), { order, hidden } = pageChoices();
-    const rank = (p) => (order.includes(p.scope) ? order.indexOf(p.scope) : order.length + all.indexOf(p));
-    const groups = all.filter((p) => p.scope.startsWith("group:") && !hidden.includes(p.scope)).sort((a, b) => rank(a) - rank(b));
-    return [...all.filter((p) => p.scope === "user"), ...groups, ...all.filter((p) => p.scope === "global")];
-  }
+  /// Every page this person can read, as the node lists them (`pages` in `/v1/state`): theirs, their groups' in the
+  /// order they chose, everyone's last. The ones they hid are marked, and left out of `pages`.
+  const allPages = () => h.state?.pages || [];
+  const pages = () => allPages().filter((p) => !p.hidden);
   const page = (scope) => allPages().find((p) => p.scope === scope);
 
   /// Whether this person may add apps to a scope: their own, a group they admin, or everyone's as an admin.
@@ -260,7 +221,7 @@ export const home = (() => {
   }
 
   return {
-    data: h, me, network, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, accountsOn, accountsTool, badge, widgetsOn, waiting, items,
+    data: h, me, network, label, app, has, hasScreens, allPages, pages, page, canArrange, appsOn, accountsOn, accountsTool, badge, widgetsOn, waiting, items,
     supported, tree, store, open, settings, inStore, addAccountApp, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
   };
 })();

@@ -31,9 +31,8 @@ const KEY = { name: "Item", icon: "key", color: "#8e8e93" }
 
 // The pages this person keeps items on: theirs, the groups they're an admin of, and everyone's as an admin.
 function pagesFrom(state) {
-  const i = state.network || {}
-  const groups = (i.groups || []).filter((g) => g.role === "admin").sort((a, b) => a.name.localeCompare(b.name))
-  return [{ scope: "user", title: "You" }, ...groups.map((g) => ({ scope: `group:${g.id}`, title: g.name })), ...(state.user?.role === "admin" ? [{ scope: "global", title: "Everyone" }] : [])]
+  const admin = (scope) => scope === "user" || (scope === "global" ? state.user?.role === "admin" : state.network?.groups.find((g) => `group:${g.id}` === scope)?.role === "admin")
+  return (state.pages || []).filter((p) => admin(p.scope))
 }
 
 // What the screen knows of the apps: each by name, and what they say about items.

@@ -429,13 +429,8 @@ const h = OneUI.react.createElement;
   const keepsAccounts = (a) => !!a?.tools?.some((t) => t.accounts);
   const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
 
-  /// Every page this person can read, as the sidebar lists them: theirs, their groups', then everyone's.
-  function pages() {
-    const i = network(), u = me();
-    if (!i || !u) return [];
-    const groups = i.groups.filter((g) => g.members.some((m) => m.user === u.id)).sort((a, b) => a.name.localeCompare(b.name));
-    return [{ scope: "user", title: "You", whose: "For you only" }, ...groups.map((g) => ({ scope: `group:${g.id}`, title: g.name, whose: `For ${g.name}` })), { scope: "global", title: "Everyone", whose: "For everyone" }];
-  }
+  /// Every page this person can read, as the sidebar lists them: the node's (`pages` in `/v1/state`).
+  const pages = () => store.state?.pages || [];
   const page = (scope) => pages().find((p) => p.scope === scope);
   const appsOn = (p) => store.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
   const accountsOn = (p) => store.apps.filter((a) => keepsAccounts(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
@@ -445,7 +440,7 @@ const h = OneUI.react.createElement;
   function lastWindow() {
     try {
       const kept = JSON.parse(localStorage.getItem(LAST) || "null");
-      if (!kept?.state?.network) return false;
+      if (!kept?.state?.pages) return false;
       Object.assign(store, kept);
       return true;
     } catch {
