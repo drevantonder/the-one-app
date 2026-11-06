@@ -989,3 +989,35 @@ fn keep_files(node: &Client, v: &mut Value, shown: &mut Vec<Value>, depth: usize
         _ => {}
     }
 }
+
+/// Any app's tools on the command line, after every built-in command.
+pub fn commands() -> crate::cli::Command {
+    crate::cli::Command {
+        help: vec![
+            ("<app>".into(), "an app's tools".into()),
+            ("<app> <tool> [words] [--input value]".into(), format!("run a tool, e.g. {CLI} repos list; --help says what it takes. Words fill its main inputs in order (--help shows which), lists repeat a flag, required inputs not given are read as JSON from stdin (a last word - reads it anyway), --file <input>=<path> gives a file and --out <path> saves what it gives back. --device <name> runs it on that device; --trace prints, after its answer (or why it failed), what it did: the devices tried, the one that ran it, each wait in ms, where its data came from, and the total")),
+        ],
+        run: |g| {
+            let args = g.args;
+            match g.words().as_slice() {
+                [app] if !app.starts_with('-') => {
+                    let apps = g.node.apps()?;
+                    let Some(found) = apps.iter().find(|a| a["name"] == *app) else { anyhow::bail!("{}", unknown(g.node, app, None, Some(g.commands))?) };
+                    println!("{} ({app})", found["title"].as_str().unwrap_or(app));
+                    if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
+                        println!("\n{i}\n");
+                    }
+                    list(std::slice::from_ref(found)).iter().for_each(|l| println!("{l}"));
+                    println!("\n{CLI} {app} <tool> --help says what a tool takes.");
+                }
+                [app, tool, ..] => {
+                    let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
+                    run(g, app, tool, &args[at(tool, at(app, 0))..])?
+                }
+                [first, ..] => anyhow::bail!("{}", unknown(g.node, first, None, Some(g.commands))?),
+                _ => return Ok(false),
+            }
+            Ok(true)
+        },
+    }
+}

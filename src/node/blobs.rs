@@ -5,6 +5,7 @@
 use super::*;
 
 pub(crate) mod routes;
+pub mod cli;
 
 /// How long a blob a scope forgot stays in the bucket, in case an entry another device wrote names it again.
 const FORGOTTEN_KEPT: Duration = Duration::from_secs(600);

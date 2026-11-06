@@ -138,3 +138,14 @@ pub fn asked_yes(command: &str) -> Result<bool> {
     }
     Ok(true)
 }
+
+/// How long ago `ms` (since 1970) was, for people: "just now", "5m ago", "3h ago", "2d ago".
+pub fn ago(ms: u64) -> String {
+    let s = crate::node::now_ms().saturating_sub(ms) / 1000;
+    match s {
+        0..60 => "just now".into(),
+        60..3600 => format!("{}m ago", s / 60),
+        3600..86400 => format!("{}h ago", s / 3600),
+        _ => format!("{}d ago", s / 86400),
+    }
+}

@@ -524,3 +524,17 @@ pub fn run(node: &Client, app: &str, tool: &str, spec: &Value, input: Map<String
     }
     node.call(&json!({ "device": how.device, "scopes": how.scopes, "app": app, "tool": tool, "input": input, "agent": how.agent, "client": how.client }), how.trace)
 }
+
+/// `mcp` on the command line: this server, over stdio.
+pub fn commands() -> crate::cli::Command {
+    crate::cli::Command {
+        help: vec![("mcp [--code]".into(), "the local MCP server, over stdio, for agents: every tool, or with --code, search and execute".into())],
+        run: |g| {
+            if g.words() != ["mcp"] {
+                return Ok(false);
+            }
+            stdio(g.node.again(), if g.has("code") { Mode::Code } else { Mode::All })?;
+            Ok(true)
+        },
+    }
+}

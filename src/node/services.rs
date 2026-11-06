@@ -5,6 +5,7 @@ use crate::config::YOURS;
 use super::*;
 
 pub(crate) mod routes;
+pub mod cli;
 
 /// What registered with this device before, in its home.
 const OFFERED: &str = "offered.json";

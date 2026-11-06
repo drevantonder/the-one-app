@@ -3,6 +3,7 @@
 use super::*;
 
 pub(crate) mod routes;
+pub mod cli;
 
 impl Node {
     /// What people call `app`, for what they read: its title, or its service's, else its name.

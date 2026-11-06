@@ -13,6 +13,34 @@ use serde_json::{Value, json};
 
 use crate::build::{self, PLATFORMS, Platform, cargo, git, quietly, show, succeeds};
 
+/// `update`, `release` and `publish`, and putting your checkout's build of a service on a device.
+pub fn commands() -> one::cli::Command {
+    one::cli::Command {
+        help: vec![
+            ("update".into(), "build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere".into()),
+            ("release <vX.Y.Z>".into(), "the same, signed off and published on GitHub for the installer".into()),
+            ("publish [binary]".into(), "sign and publish a build you made; every device on its platform updates".into()),
+            ("services try apps/<name> [--device <name>]".into(), "put your checkout's build of an app's service on a device of yours (here by default, else over ssh by its name) and switch it on, until a newer one is published".into()),
+        ],
+        run: |g| {
+            match g.words().as_slice() {
+                ["update"] => run(None)?,
+                ["release", tag] => run(Some(tag))?,
+                ["publish", rest @ ..] => {
+                    let path = match rest {
+                        [path] => std::fs::canonicalize(path)?,
+                        _ => std::env::current_exe()?,
+                    };
+                    publish(g.node, &path, g.flags, &release_key()?)?;
+                }
+                ["services", "try", dir] => try_service(Path::new(dir), g.flag("device"))?,
+                _ => return Ok(false),
+            }
+            Ok(true)
+        },
+    }
+}
+
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
 /// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
@@ -1179,6 +1207,22 @@ fn await_mac(mac: &Value) -> Result<(Vec<(String, String)>, Vec<String>)> {
 fn blob(hash: &str) -> Result<Vec<u8>> {
     let mut resp = crate::agent().get(format!("http://{}/v1/blobs/{hash}", one::api::addr())).call()?;
     Ok(resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)
+}
+
+/// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform
+/// (--target <triple> --commit <hash> --committed <seconds>), or a service's program (--service <name>, with those).
+fn publish(node: &one::api::Client, path: &Path, flags: &serde_json::Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
+    // The binary knows what it is; ask it, unless it's for another platform and can't run here, or a service's.
+    let service = flags.get("service").and_then(Value::as_str);
+    let version = if service.is_none() { Version::of(path) } else { None };
+    let flag = |name: &str| flags.get(name).and_then(Value::as_str).map(str::to_string);
+    let version = Version {
+        committed: flags.get("committed").and_then(Value::as_u64).or(version.as_ref().map(|v| v.committed)).context("say when the commit was made with --committed (seconds since 1970)")?,
+        commit: flag("commit").or(version.as_ref().map(|v| v.commit.clone())).context("say which commit this is with --commit")?,
+        target: flag("target").or(version.as_ref().map(|v| v.target.clone())).context("say which platform this is for with --target")?,
+    };
+    println!("{}", build::published_said(&build::publish(node, path, key, &version, service)?, service));
+    Ok(())
 }
 
 #[cfg(test)]

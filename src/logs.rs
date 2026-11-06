@@ -270,3 +270,32 @@ mod tests {
         std::fs::remove_dir_all(&home).unwrap();
     }
 }
+
+/// `logs <device>` on the command line: what MCP's `logs` gives (`mcp::logs_read`), printed.
+pub fn commands() -> crate::cli::Command {
+    crate::cli::Command {
+        help: vec![("logs <device> [--service <name>] [--since <10m>] [--grep <text>] [--lines <n>]".into(), "a device's node log, or one of its services', read over the network, newest last, capped (the last 200 lines, at most 1000 or 48 KiB); only its person and the network's admins read them. --since takes s, m, h or d".into())],
+        run: |g| {
+            let words = g.words();
+            let ["logs", device] = words.as_slice() else { return Ok(false) };
+            g.takes_only(&["service", "since", "grep", "lines"])?;
+            let mut input = g.flags.clone();
+            input.insert("device".into(), json!(device));
+            let read = crate::mcp::logs_read(g.node, &input, g.agent, "cli", g.trace);
+            if read.ok.is_err() {
+                crate::tools::print_trace(read.trace.as_deref());
+            }
+            let trace = read.trace;
+            let (lines, note) = crate::mcp::logs_said(&read.ok.map_err(|e| anyhow::anyhow!(crate::tools::in_cli_words(g.node, &format!("{e:#}"))))?, device);
+            match g.json {
+                true => println!("{}", serde_json::to_string_pretty(&lines)?),
+                false => {
+                    lines.as_array().into_iter().flatten().filter_map(Value::as_str).for_each(|l| println!("{l}"));
+                    note.iter().for_each(|n| eprintln!("{n}"));
+                }
+            }
+            crate::tools::print_trace(trace.as_deref());
+            Ok(true)
+        },
+    }
+}
