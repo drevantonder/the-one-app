@@ -175,11 +175,8 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             .map(|(p, t)| (p.to_string(), t.to_string()))
             .collect();
     }
-    skills.push(app_skill(&vault_app()));
-    skills.push(app_skill(&backups_app()));
-    skills.push(app_skill(&groups_app()));
-    skills.push(app_skill(&devices_app()));
-    skills.extend(apps.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["ops"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
+    // The node's own apps first, then the person's, each with a guide and tools.
+    skills.extend(crate::node::own::listed().iter().chain(apps).filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["ops"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
 
@@ -256,40 +253,6 @@ fn command(app: &str, tool: &Value) -> String {
     line
 }
 
-/// How the Vault's tools are explained, as an app's guide is.
-const VAULT_GUIDE: &str = "The Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask leaving out app, then call vault_fetch with {{<field>}} where it goes: a machine that opens the Vault fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.";
-
-/// The Vault's tools as an app's tools, as search, scripts and its skill see them.
-pub fn vault_app() -> Value {
-    node_app("vault", "Vault", "Keys, sign-ins and accounts, used without being seen", VAULT_GUIDE, crate::vault::tools())
-}
-
-/// How backups' tools are explained, as an app's guide is.
-const BACKUPS_GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; Once a week each place's newest backup is restored into a throwaway copy and checked (entries, databases, blobs); a failed check shows on Backups like a failed backup. backups_check runs that check now and says what came back.";
-
-/// Backups' tools as an app's tools.
-pub fn backups_app() -> Value {
-    node_app("backups", "Backups", "Encrypted copies of everything, to a disk or S3-compatible storage", BACKUPS_GUIDE, crate::backups::tools())
-}
-
-/// How the groups' tool is explained, as an app's guide is.
-fn groups_guide() -> String {
-    format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined. Each person and group has a handle, like andre or family, unique among them, which apps call them by (Repos' addresses are <handle>/<repo>); groups_handle changes yours, or a group's you're an admin of.")
-}
-
-/// The groups' tool as an app's tools.
-pub fn groups_app() -> Value {
-    node_app("groups", "Groups", &format!("Who's in {YOURS}, and in each of its groups"), &groups_guide(), groups_tools())
-}
-
-/// The groups' MCP tools.
-pub fn groups_tools() -> Vec<Value> {
-    vec![
-        json!({ "name": "groups_list", "description": format!("The people in {YOURS}, you first, each with their handle, as admin or member; then every group with its handle: who's in it and who's invited but hasn't joined yet."), "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
-        json!({ "name": "groups_handle", "description": "Change your handle, or a group's you're an admin of: what every app calls you or it by, like Repos' addresses <handle>/<repo>, which move with it.", "inputSchema": { "type": "object", "required": ["handle"], "properties": { "handle": { "type": "string", "description": "lowercase letters, digits and single hyphens, up to 39, not taken by anyone or any group, like andre-v" }, "group": { "type": "string", "description": "a group's name or id, from groups_list; omit for your own" } } }, "annotations": hints(false, false) }),
-    ]
-}
-
 /// An MCP tool's hints, all three always, since a client takes one left out as the worst: whether it only reads (so it
 /// can run beside others and be asked again), and whether it sends or can't be undone (a tool's `confirm`).
 pub fn hints(reads: bool, confirm: bool) -> Value {
@@ -299,39 +262,6 @@ pub fn hints(reads: bool, confirm: bool) -> Value {
 /// The input that says the person agreed, on what sends or can't be undone.
 pub fn confirm_input() -> Value {
     json!({ "type": "boolean", "description": "true once the person agreed to this very action: it sends or can't be undone" })
-}
-
-fn devices_guide() -> String {
-    format!("A new device signs in, then shows a code of 8 letters and digits. devices_approve with that code, run on one of the person's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, from any of the inviting admin's devices. devices_remove takes a device out, or a person with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in with devices_approve's recovery_key: a file holding {YOURS}'s recovery key, never the key in the chat. An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys alone, and devices_stop_schedules stops them.")
-}
-
-/// The devices' tools as an app's tools.
-pub fn devices_app() -> Value {
-    node_app("devices", "Devices", "Set up a new laptop, phone or computer and let it in, take one out, run an app's schedules on one, and invite someone", &devices_guide(), devices_tools())
-}
-
-/// The devices' MCP tools, which run on this machine as its person.
-pub fn devices_tools() -> Vec<Value> {
-    let confirm = json!({ "type": "boolean", "description": "true once the person has said yes to this very device" });
-    vec![
-        json!({ "name": "devices_requests", "description": "Devices waiting to join that you may approve: your own new devices, and the first device of each person you invited.", "inputSchema": { "type": "object", "properties": {} }, "annotations": { "readOnlyHint": true } }),
-        json!({ "name": "devices_approve", "description": "Approve the new device showing this code. Without confirm, says whose device it is; with confirm: true, lets it in. With recovery_key, lets back in someone who lost all their devices.", "inputSchema": { "type": "object", "properties": { "code": { "type": "string", "description": "the 8 letters and digits the new device shows" }, "confirm": confirm, "recovery_key": { "type": "string", "description": format!("the path of a file on this machine holding {YOURS}'s recovery key (- reads it from stdin on the command line); never the key itself") } }, "required": ["code"] } }),
-        json!({ "name": "devices_remove", "description": "Take a device out, by its name, or a person, with all their devices: they open nothing made after. Their own data stays.", "inputSchema": { "type": "object", "properties": { "device": { "type": "string", "description": "a device's name" }, "user": { "type": "string", "description": "a person's name, to remove them" } } }, "annotations": { "destructiveHint": true } }),
-        json!({ "name": "devices_run_schedules", "description": "Run an app's schedules on one of your devices: the device holds only that app's keys in that place, for 30 days and longer as you use the app. Settings › Devices lists them under App Schedules, with Stop.", "inputSchema": { "type": "object", "properties": { "app": { "type": "string", "description": "the app's name" }, "device": { "type": "string", "description": "the device that runs them, by name" }, "scope": { "type": "string", "description": "where: user (yours, the default), a group by its name, or global" }, "days": { "type": "integer", "description": "how long, at most 30" } }, "required": ["app", "device"] } }),
-        json!({ "name": "devices_stop_schedules", "description": "Stop an app's schedules on a device: they no longer run there, and it no longer opens that app's data.", "inputSchema": { "type": "object", "properties": { "app": { "type": "string" }, "device": { "type": "string" }, "scope": { "type": "string", "description": "user (the default), a group by its name, or global" } }, "required": ["app", "device"] } }),
-        json!({ "name": "devices_invite", "description": "A link for someone new to join, once, for a few days. Give it to them yourself; it sends nothing.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "their name" }, "admin": { "type": "boolean", "description": "make them an admin" } }, "required": ["name"] } }),
-    ]
-}
-
-/// The node's own tools, shown as an app's tools are, to search, scripts and skills.
-pub fn node_app(name: &str, title: &str, description: &str, guide: &str, tools: Vec<Value>) -> Value {
-    json!({
-        "name": name, "title": title, "description": description, "instructions": guide,
-        "ops": tools.into_iter().map(|t| {
-            let confirm = t["annotations"]["destructiveHint"] == true;
-            json!({ "name": t["name"].as_str().unwrap_or("").trim_start_matches(&format!("{name}_")), "description": t["description"], "input": t["inputSchema"], "reads": t["annotations"]["readOnlyHint"] == true, "confirm": confirm })
-        }).collect::<Vec<_>>(),
-    })
 }
 
 /// A JSON Schema as a TypeScript type, as code mode's signatures show it.

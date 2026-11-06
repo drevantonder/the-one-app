@@ -30,11 +30,11 @@ use crate::schedules::{self, Schedule};
 use crate::replica::{Handled, Replica};
 
 mod apps;
-mod backups;
+pub mod backups;
 mod blobs;
 mod calls;
 mod databases;
-mod devices;
+pub mod devices;
 mod sync;
 mod net;
 mod pairing;
@@ -55,9 +55,12 @@ pub use app_schedules::APP_SCHEDULES_DAYS;
 mod state;
 mod status;
 mod steps;
-mod storage;
+pub(crate) mod storage;
 pub mod trace;
-mod vault;
+pub mod vault;
+pub mod own;
+pub mod groups;
+pub mod widgets;
 
 /// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);

@@ -7,6 +7,8 @@
 use crate::config::YOURS;
 use super::*;
 
+pub(crate) mod routes;
+
 /// The setting that says where the network keeps its data: S3's `endpoint`, `bucket` and `region`, as JSON.
 pub const STORAGE: &str = "storage";
 
@@ -139,14 +141,6 @@ impl Node {
         tracing::info!("the network's data is kept in {} now", self.storage()?["where"].as_str().unwrap_or(""));
         self.emit(Event::Changed { apps: Vec::new() });
         Ok(())
-    }
-
-    pub async fn storage_route(&self, me: &Caller, method: &str, path: &str, body: &Value) -> Result<Option<Value>> {
-        Ok(Some(match (method, path) {
-            ("GET", "/v1/storage") => self.storage()?,
-            ("POST", "/v1/storage") => self.set_storage(me, body).await?,
-            _ => return Ok(None),
-        }))
     }
 }
 

@@ -29,7 +29,7 @@ pub fn catalog() -> Result<Vec<Value>> {
 /// What a search looks through: `catalog`'s apps, then the apps the person could add, which have no tools for
 /// them yet: those not added where they are, nor deleted.
 pub fn catalogs() -> Result<(Vec<Value>, Vec<Value>)> {
-    let mut apps = vec![one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app(), one::skills::devices_app()];
+    let mut apps = one::node::own::listed();
     let mut addable = Vec::new();
     for mut app in get("/v1/apps")?.as_array().cloned().unwrap_or_default() {
         let tools: Vec<Value> = app["ops"]

@@ -258,16 +258,6 @@ pub fn routes() -> Routes {
         .route("/v1/service", SignedIn, post(service))
         .route("/v1/fork", ThisMachine, post(fork))
         .route("/v1/source/{app}", ThisMachine, get(source))
-        .route("/v1/storage", ThisMachine, get(storage_get).post(storage_post))
-        .route("/v1/storage/{op}", ThisMachine, post(storage_post))
-        .route("/v1/backups", SignedIn, get(backups_get))
-        .route("/v1/backups/{op}", SignedIn, post(backups_post))
-        .route("/v1/vault", SignedIn, get(vault_get).post(vault_post))
-        .route("/v1/vault/requests", SignedIn, get(vault_get))
-        .route("/v1/vault/request", SignedIn, post(vault_post))
-        .route("/v1/vault/answer", SignedIn, post(vault_post))
-        .route("/v1/vault/fetch", SignedIn, post(vault_post))
-        .route("/v1/vault/grant", ThisMachine, post(vault_post))
         .route("/v1/node-release", ThisMachine, post(release))
         .route("/v1/service-release", ThisMachine, post(service_release))
         .route("/v1/blobs", SignedIn, post(put_blob))
@@ -282,6 +272,9 @@ pub fn routes() -> Routes {
         .route("/v1/services/{app}/calls/{id}/vault", ThisMachine, post(fill))
         // An app's own requests, run as its tool `_http` for its person, whose checks are the app's: git's, to Repos.
         .route(APP_ROUTE, SignedIn, any(app_http))
+        .merge(crate::node::vault::routes::routes())
+        .merge(crate::node::backups::routes::routes())
+        .merge(crate::node::storage::routes::routes())
 }
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.
@@ -555,7 +548,7 @@ async fn sandboxed(mut resp: Response) -> Response {
     resp
 }
 
-struct Error(anyhow::Error);
+pub(crate) struct Error(pub(crate) anyhow::Error);
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
@@ -588,22 +581,22 @@ impl<E: Into<anyhow::Error>> From<E> for Error {
     }
 }
 
-type Reply = Result<Json<Value>, Error>;
+pub(crate) type Reply = Result<Json<Value>, Error>;
 
-fn done() -> Reply {
+pub(crate) fn done() -> Reply {
     Ok(Json(json!({})))
 }
 
-fn local(node: &Node) -> Result<Caller, Error> {
+pub(crate) fn local(node: &Node) -> Result<Caller, Error> {
     Ok(Caller { key: node.id(), user: node.user()?, agent: None, token: None })
 }
 
 /// Who asked: this machine's own user, or someone signed in at the network's address, whom this device acts for.
 #[derive(Clone)]
-struct Me {
-    caller: Caller,
+pub(crate) struct Me {
+    pub(crate) caller: Caller,
     /// A sign-in's client's name; none for this machine's own programs.
-    sign_in: Option<String>,
+    pub(crate) sign_in: Option<String>,
 }
 
 impl axum::extract::FromRequestParts<Node> for Me {
@@ -671,14 +664,14 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
 
 /// Refuses a body with anything but `keys`, so a word a route doesn't take (one renamed, say) fails rather than being
 /// passed over: a call or service meant for one device running on another.
-fn only(body: &Value, keys: &[&str]) -> Result<(), Error> {
+pub(crate) fn only(body: &Value, keys: &[&str]) -> Result<(), Error> {
     match body.as_object().and_then(|o| o.keys().find(|k| !keys.contains(&k.as_str()))) {
         Some(other) => Err(anyhow::anyhow!("{other} isn't something this takes: {}", keys.join(", ")).into()),
         None => Ok(()),
     }
 }
 
-fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
+pub(crate) fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
     body[key].as_str().filter(|s| !s.trim().is_empty()).map(str::trim).ok_or_else(|| anyhow::anyhow!("give {key}").into())
 }
 
@@ -1052,35 +1045,6 @@ async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-/// Where the network keeps its data, `/v1/storage…`.
-async fn storage_get(State(node): State<Node>, uri: axum::http::Uri) -> Reply {
-    Ok(Json(node.storage_route(&local(&node)?, "GET", uri.path(), &json!({})).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
-}
-
-async fn storage_post(State(node): State<Node>, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
-    Ok(Json(node.storage_route(&local(&node)?, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
-}
-
-/// Backups' routes, `/v1/backups…`.
-async fn backups_get(State(node): State<Node>, me: Me, uri: axum::http::Uri) -> Reply {
-    Ok(Json(node.backups_route(&me.caller, "GET", uri.path(), &json!({})).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
-}
-
-async fn backups_post(State(node): State<Node>, me: Me, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
-    Ok(Json(node.backups_route(&me.caller, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
-}
-
-/// The Vault's routes, `/v1/vault…`: a GET's query goes to the node as a
-/// POST's body does.
-async fn vault_get(State(node): State<Node>, me: Me, uri: axum::http::Uri, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
-    let input: serde_json::Map<String, Value> = q.into_iter().map(|(k, v)| (k, json!(v))).collect();
-    Ok(Json(node.vault_route(&me.caller, "GET", uri.path(), &json!(input)).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
-}
-
-async fn vault_post(State(node): State<Node>, me: Me, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
-    Ok(Json(node.vault_route(&me.caller, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
-}
-
 /// For agent harnesses' prompt hooks: the body is the hook's JSON, the reply is plain text to show the agent.
 async fn prompt(State(node): State<Node>, body: String) -> Response {
     let event: Value = serde_json::from_str(&body).unwrap_or_default();
@@ -1296,9 +1260,11 @@ mod tests {
             ("/v1/fork", ThisMachine),
             ("/v1/source/{app}", ThisMachine),
             ("/v1/storage", ThisMachine),
-            ("/v1/storage/{op}", ThisMachine),
             ("/v1/backups", SignedIn),
-            ("/v1/backups/{op}", SignedIn),
+            ("/v1/backups/now", SignedIn),
+            ("/v1/backups/place", SignedIn),
+            ("/v1/backups/request", SignedIn),
+            ("/v1/backups/check", SignedIn),
             ("/v1/vault", SignedIn),
             ("/v1/vault/requests", SignedIn),
             ("/v1/vault/request", SignedIn),

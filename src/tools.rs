@@ -20,22 +20,10 @@ pub const MCP_FILE_LIMIT: usize = 1 << 20;
 /// A tool as `GET /v1/apps` describes it, with its app; None when no app or service here lists it.
 pub fn find(app: &str, tool: &str) -> Option<(Value, Value)> {
     let mut apps = get("/v1/apps").ok()?.as_array()?.clone();
-    apps.extend(node_apps());
+    apps.extend(one::node::own::listed());
     let a = apps.iter().find(|a| a["name"] == app)?.clone();
     let o = a["ops"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
     Some((a, o))
-}
-
-/// The node's own tools, as apps: what search lists, which run here rather than as an app's call; and widgets_show,
-/// which MCP has too (src/mcp_apps.rs), as text here.
-pub fn node_apps() -> [Value; 5] {
-    let widgets = crate::mcp_apps::tools().into_iter().filter(|t| t["name"] == "widgets_show").collect();
-    [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app(), one::skills::devices_app(), one::skills::node_app("widgets", "Widgets", "Your widgets, as text", "", widgets)]
-}
-
-/// Whether an app is one of the node's own tools, which run here, as the person: never on another device.
-pub fn node_app(app: &str) -> bool {
-    ["vault", "backups", "groups", "devices", "widgets"].contains(&app)
 }
 
 /// Whether `--json` was given: what a tool gives back is printed as JSON.
@@ -96,7 +84,8 @@ pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
         return Ok(());
     }
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
-    let device = if own_device(o) || node_app(app) { None } else { take("device") };
+    let own = one::node::own::find(app).is_some();
+    let device = if own_device(o) || own { None } else { take("device") };
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some() || flags.remove("yes").is_some();
@@ -124,10 +113,10 @@ pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
         agreed(confirmed, &format!("{CLI} {app} {tool}"))?;
     }
     // The node's own tools take the person's yes as an input.
-    if confirmed && node_app(app) {
+    if confirmed && own {
         input.insert("confirm".into(), json!(true));
     }
-    let call = match node_app(app) {
+    let call = match own {
         true => crate::dispatch(&format!("{app}_{tool}"), input, agent_from_env().as_deref(), "cli", Some((a.clone(), o.clone()))).map(|ok| json!({ "ok": ok })),
         false => crate::post_call(json!({ "device": device, "scopes": scopes, "app": app, "op": tool, "input": input, "agent": agent_from_env(), "client": "cli" })),
     };
@@ -161,7 +150,7 @@ pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
 /// (`one gmail sign_in`).
 pub fn in_cli_words(text: &str) -> String {
     let mut apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    apps.extend(node_apps());
+    apps.extend(one::node::own::listed());
     let command = |word: &str| -> Option<String> {
         word.match_indices('_').find_map(|(i, _)| {
             let (app, tool) = (&word[..i], &word[i + 1..]);
@@ -222,7 +211,7 @@ pub fn none_said(app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<Strin
 /// did you mean search?`, `no app gmial: did you mean gmail?`. On the command line, built-in commands are names too.
 pub fn unknown(app: &str, tool: Option<&str>, cli: bool) -> Result<String> {
     let mut apps = get("/v1/apps")?.as_array().cloned().unwrap_or_default();
-    apps.extend(node_apps());
+    apps.extend(one::node::own::listed());
     let tools_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
     // One the person could add: the node lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["ops"].is_null() && a["deleted"].is_null();
@@ -671,7 +660,7 @@ pub fn help(app: &Value, tool: &Value) -> String {
         }
         rows.push((flag, about.join("; ")));
     }
-    if !own_device(tool) && !node_app(app["name"].as_str().unwrap_or("")) {
+    if !own_device(tool) && one::node::own::find(app["name"].as_str().unwrap_or("")).is_none() {
         rows.push(("--device <name>".into(), device_about(app).into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
@@ -771,7 +760,7 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
         schema["properties"]["device"] = json!({ "type": "string", "description": device_about(app) });
     }
     // Every app's call runs on a device, which can say what it did; the node's own tools run here.
-    if !node_app(app["name"].as_str().unwrap_or("")) {
+    if one::node::own::find(app["name"].as_str().unwrap_or("")).is_none() {
         schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
     }
     if tool["confirm"] == true {

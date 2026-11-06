@@ -2,6 +2,9 @@
 //! each run went, written in `global` so every device shows it. The format and the places are `crate::backups`.
 
 use super::*;
+
+pub mod app;
+pub(crate) mod routes;
 use super::status::{BackedUp, BackupRun, CheckRun, Said};
 use std::collections::BTreeSet;
 
@@ -762,33 +765,14 @@ impl Node {
         Ok(json!(out))
     }
 
-    /// The backups' routes, `/v1/backups…`, for the local API.
-    pub async fn backups_route(&self, me: &Caller, method: &str, path: &str, body: &Value) -> Result<Option<Value>> {
-        let me = &Caller { agent: body["agent"].as_str().map(str::to_string).or(me.agent.clone()), ..me.clone() };
-        Ok(Some(match (method, path) {
-            ("GET", "/v1/backups") => self.backups()?,
-            ("POST", "/v1/backups/now") => {
-                self.with(|i| {
-                    ensure!(i.r.db().may(&me.user, "use", &scopes::object(&Scope::Global)), "You aren't a member here, so you can't back up.");
-                    Ok(())
-                })?;
-                self.back_up_now();
-                json!({})
-            }
-            ("POST", "/v1/backups/place") => match body["deleted"] == true {
-                true => {
-                    self.remove_place(me, body["id"].as_str().unwrap_or("")).await?;
-                    json!({})
-                }
-                false => {
-                    ensure!(me.agent.is_none() || body["secret"].is_null(), "agents never handle a place's key: ask the person with request");
-                    self.add_place(me, body).await?
-                }
-            },
-            ("POST", "/v1/backups/request") => self.request_place(me, body).await?,
-            ("POST", "/v1/backups/check") => self.check_backups().await?,
-            _ => return Ok(None),
-        }))
+    /// Backs up now, for a member of the network.
+    pub fn back_up_now_for(&self, me: &Caller) -> Result<()> {
+        self.with(|i| {
+            ensure!(i.r.db().may(&me.user, "use", &scopes::object(&Scope::Global)), "You aren't a member here, so you can't back up.");
+            Ok(())
+        })?;
+        self.back_up_now();
+        Ok(())
     }
 }
 

@@ -143,9 +143,6 @@ fn every_command() -> String {
                                        a device's node log, or one of its services', read over the network, newest
                                        last, capped (the last 200 lines, at most 1000 or 48 KiB); only its person and
                                        the network's admins read them. --since takes s, m, h or d
-  {CLI} devices run_schedules|stop_schedules <app> on <device> [--scope user|global|<group>] [--days <n>]
-                                       run an app's schedules on one of your devices (with that app's keys alone, for
-                                       30 days and longer as you use it), or stop them
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's tools
@@ -422,7 +419,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["groups"] | ["group"] | ["groups", "list"] => {
             takes_only(&flags, &[])?;
-            print!("{}", groups_said(&get("/v1/state")?));
+            print!("{}", one::node::groups::said(&get("/v1/state")?));
             println!("\n{CLI} group create <name>, {CLI} group invite <group> <user> [--admin], {CLI} group accept <group> and {CLI} group remove <group> <user> change them.");
         }
         ["group", "create", name @ ..] if !name.is_empty() => {
@@ -585,7 +582,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let email = flags.get("email").and_then(Value::as_str);
             // Someone new is invited by this machine's node, which keeps the secret for their first device's approval.
             if user.is_none() && email.is_none() {
-                println!("{}", invited_said(name, &post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
+                println!("{}", one::node::devices::app::invited_said(name, &post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
             } else {
                 let key = one::node::device_key(&one::home())?;
                 let invite = one::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;
@@ -684,10 +681,8 @@ fn run(args: Vec<String>) -> Result<()> {
         ["backups", "place", "remove", place] => {
             takes_only(&flags, &["confirm"])?;
             tools::agreed(flags.contains_key("confirm"), &format!("{CLI} backups place remove"))?;
-            let places = get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
-            let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}; {CLI} backups lists them"))?;
-            post("/v1/backups/place", json!({ "id": p["id"], "deleted": true }))?;
-            println!("No longer backing up to {}. What's there stays.", p["title"].as_str().unwrap_or(""));
+            let asked = one::node::own::Asked { node: &Local, agent: None, client: "cli", confirmed: true };
+            println!("No longer backing up to {}. What's there stays.", one::node::backups::app::remove_place(&asked, place)?);
         }
         ["backups", "check"] => {
             takes_only(&flags, &["folder"])?;
@@ -703,7 +698,7 @@ fn run(args: Vec<String>) -> Result<()> {
             takes_only(&flags, &["scope"])?;
             let scope = flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
             for it in get(&format!("/v1/vault{scope}"))?.as_array().into_iter().flatten() {
-                println!("{}", item_line(it));
+                println!("{}", one::node::vault::app::item_line(it));
             }
         }
         ["vault", "set", item, field] => {
@@ -723,12 +718,12 @@ fn run(args: Vec<String>) -> Result<()> {
             anyhow::ensure!(!value.is_empty(), "give the value on stdin");
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             let hosts = flags.get("hosts").and_then(Value::as_str).map(|h| h.split(',').map(|h| h.trim().to_string()).collect());
-            println!("{}", vault_set(scope, item, field, &value, flags.get("secret").map(|_| true), hosts, flags.get("app").and_then(Value::as_str), agent_from_env().as_deref())?);
+            println!("{}", one::node::vault::app::set(&Local, scope, item, field, &value, flags.get("secret").map(|_| true), hosts, flags.get("app").and_then(Value::as_str), agent_from_env().as_deref())?);
         }
         ["vault", "use", item, app] => {
             takes_only(&flags, &["scope", "off"])?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            println!("{}", vault_use(scope, item, app, !flags.contains_key("off"), agent_from_env().as_deref())?);
+            println!("{}", one::node::vault::app::switch(&Local, scope, item, app, !flags.contains_key("off"), agent_from_env().as_deref())?);
         }
         ["vault", "grant", device] => {
             takes_only(&flags, &["scope", "off"])?;
@@ -751,7 +746,7 @@ fn run(args: Vec<String>) -> Result<()> {
             takes_only(&flags, &["scope", "confirm"])?;
             tools::agreed(flags.contains_key("confirm"), &format!("{CLI} vault remove"))?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            println!("{}", vault_remove(scope, item, positional.get(3).map(String::as_str))?);
+            println!("{}", one::node::vault::app::remove(&Local, scope, item, positional.get(3).map(String::as_str))?);
         }
         ["vault", "request", app @ ..] if app.len() < 2 => {
             takes_only(&flags, &["scope", "need", "title", "fields", "secret-fields", "hosts", "why"])?;
@@ -767,8 +762,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["vault", "status", id] => {
             takes_only(&flags, &[])?;
-            let r = get(&format!("/v1/vault/requests?id={id}"))?;
-            let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
+            let r = one::node::vault::app::request(&Local, id)?;
             println!("{} for {} in {}: {}", r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
         }
         ["vault", "requests"] => {
@@ -786,8 +780,7 @@ fn run(args: Vec<String>) -> Result<()> {
             } else if let Some(item) = flags.get("item").and_then(Value::as_str) {
                 body["item"] = json!(item);
             } else {
-                let r = get(&format!("/v1/vault/requests?id={id}"))?;
-                let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
+                let r = one::node::vault::app::request(&Local, id)?;
                 let mut text = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
                 let text = text.trim_end_matches(['\n', '\r']);
@@ -885,13 +878,6 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
-        ["devices", tool @ ("run_schedules" | "stop_schedules"), app, "on", device] => {
-            takes_only(&flags, &["scope", "days"])?;
-            let mut input = flags.clone();
-            input.insert("app".into(), json!(app));
-            input.insert("device".into(), json!(device));
-            println!("{}", devices_tool(tool, &input, "cli")?.as_str().unwrap_or(""));
-        }
         ["schedule", on @ ("on" | "off"), app, name] => {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
@@ -945,7 +931,7 @@ fn run(args: Vec<String>) -> Result<()> {
         [app] if !app.starts_with('-') => {
             // The node's own apps (Devices, Widgets) aren't in its app list, but read the same.
             let apps = get("/v1/apps")?;
-            let own = tools::node_apps();
+            let own = one::node::own::listed();
             let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", tools::unknown(app, None, true)?) };
             println!("{} ({app})", found["title"].as_str().unwrap_or(app));
             if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
@@ -1084,7 +1070,7 @@ fn command_help(words: &[String]) -> Option<String> {
     };
     let commands: Vec<&String> = words.iter().take_while(|w| !w.starts_with('-')).collect();
     let out = (1..=commands.len()).rev().map(|n| lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" "))).find(|o| !o.is_empty()).unwrap_or_default();
-    let app = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
+    let app = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().chain(&one::node::own::listed()).any(|a| a["name"] == first.as_str());
     match (app, out.is_empty()) {
         (true, _) if words.len() > 1 => None,
         (true, true) => None,
@@ -1294,6 +1280,19 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
+/// This machine's node, as `get` and `post` ask it, for the node's own apps.
+struct Local;
+
+impl one::node::own::Ask for Local {
+    fn get(&self, path: &str) -> Result<Value> {
+        get(path)
+    }
+
+    fn post(&self, path: &str, body: Value) -> Result<Value> {
+        post(path, body)
+    }
+}
+
 fn get(path: &str) -> Result<Value> {
     request(to_node(agent().get(format!("http://{}{path}", addr()))).call())
 }
@@ -1327,7 +1326,7 @@ fn logs_read(input: &Map<String, Value>) -> Result<Value> {
 fn logs_said(r: &Value, device: &str) -> (Value, Option<String>) {
     let (shown, matched) = (r["shown"].as_u64().unwrap_or(0), r["matched"].as_u64().unwrap_or(0));
     let note = if shown == 0 {
-        let from = r["oldest"].as_u64().map(|ms| format!("; its log goes back to {}", say_time(ms))).unwrap_or_default();
+        let from = r["oldest"].as_u64().map(|ms| format!("; its log goes back to {}", one::node::own::say_time(ms))).unwrap_or_default();
         Some(format!("{device}'s {} log has no lines like that{from}.", r["log"].as_str().unwrap_or("node")))
     } else if matched > shown {
         Some(format!("{shown} of the {matched} lines that match, the newest: narrow it with --since or --grep."))
@@ -1460,53 +1459,6 @@ fn is_browser(name: &str) -> bool {
 fn is_phone(name: &str) -> bool {
     let name = name.to_lowercase();
     ["phone", "ipad", "tablet", "android", "pixel", "galaxy"].iter().any(|w| name.contains(w))
-}
-
-/// The people in the One App, you first, each with their role; then every group in words: its people with their
-/// roles, and who's invited.
-/// A person or group as groups_list says them: their name, then their handle (`Andre @andre`).
-fn handled(v: &Value) -> String {
-    match v["handle"].as_str() {
-        Some(h) => format!("{} @{h}", v["name"].as_str().unwrap_or("")),
-        None => v["name"].as_str().unwrap_or("").to_string(),
-    }
-}
-
-fn groups_said(state: &Value) -> String {
-    let i = &state["network"];
-    let names: std::collections::HashMap<&str, String> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, handled(u)))).collect();
-    let me = i["user"].as_str();
-    let mut users: Vec<&Value> = i["users"].as_array().into_iter().flatten().collect();
-    users.sort_by_key(|u| u["me"] != true);
-    let everyone: Vec<String> = users.iter().map(|u| {
-        let (name, role) = (handled(u), u["role"].as_str().unwrap_or("member"));
-        if u["me"] == true { format!("{name} (you, {role})") } else { format!("{name} ({role})") }
-    }).collect();
-    let mut out = format!("People in {YOURS}: {}.\n", everyone.join(", "));
-    let people = |list: &Value| -> Vec<String> {
-        list.as_array().into_iter().flatten().map(|m| {
-            let id = m["user"].as_str().unwrap_or("");
-            let (name, role) = (names.get(id).map_or(id, String::as_str), m["role"].as_str().unwrap_or("member"));
-            match me == Some(id) {
-                true => format!("{name} (you, {role})"),
-                false => format!("{name} ({role})"),
-            }
-        }).collect()
-    };
-    let groups = i["groups"].as_array().cloned().unwrap_or_default();
-    if groups.is_empty() {
-        out.push_str("No groups yet.\n");
-        return out;
-    }
-    out.push_str("Groups:\n");
-    for g in &groups {
-        out.push_str(&format!("  {}: {}\n", handled(g), people(&g["members"]).join(", ")));
-        let invited = people(&g["invited"]);
-        if !invited.is_empty() {
-            out.push_str(&format!("    invited, not joined yet: {}\n", invited.join(", ")));
-        }
-    }
-    out
 }
 
 /// How long ago `ms` (milliseconds since 1970) was, roughly.
@@ -1868,7 +1820,7 @@ fn call_and_tell(params: &Value, agent: Option<&str>, mode: Mode, stdio: bool) -
     let name = params["name"].as_str().unwrap_or("");
     let apps = (mode == Mode::All && name != "search").then(|| get("/v1/apps").ok()).flatten();
     let reads = |apps: &Value| match name.split_once('_') {
-        Some((a, o)) => tools::node_app(a) || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
+        Some((a, o)) => one::node::own::find(a).is_some() || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
         None => name == "search",
     };
     let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
@@ -1998,151 +1950,6 @@ fn instructions(mode: Mode) -> String {
     one::skills::instructions(mode, &apps, state["user"]["name"].as_str())
 }
 
-/// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go and
-/// the apps switched on for it.
-fn item_line(it: &Value) -> String {
-    let fields: Vec<String> = it["fields"].as_array().into_iter().flatten().map(|f| match f["secret"] == true {
-        true => format!("{} ••••", f["name"].as_str().unwrap_or("")),
-        false => format!("{} = {}", f["name"].as_str().unwrap_or(""), f["value"].as_str().unwrap_or("")),
-    }).collect();
-    let list = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
-    format!(
-        "{}  {}{}  [{}]  {}{}{}",
-        it["id"].as_str().unwrap_or(""),
-        it["title"].as_str().unwrap_or(""),
-        it["type"].as_str().filter(|t| !t.is_empty()).map(|t| format!(" ({t})")).unwrap_or_default(),
-        it["scope_name"].as_str().unwrap_or(""),
-        fields.join(", "),
-        Some(list(&it["hosts"])).filter(|h| !h.is_empty()).map(|h| format!("  → {h}")).unwrap_or_default(),
-        Some(list(&it["apps"])).filter(|a| !a.is_empty()).map(|a| format!("  used by: {a}")).unwrap_or_default(),
-    )
-}
-
-/// An item as an agent reads it: names, not scope ids or pictures, and when it last changed, in ISO 8601.
-fn item_said(it: &Value) -> Value {
-    let mut out = json!({
-        "id": it["id"], "title": it["title"], "page": it["scope_name"], "fields": it["fields"], "hosts": it["hosts"], "apps": it["apps"], "wanted_by": it["wanted_by"],
-        "changed": it["time"].as_i64().and_then(|ms| jiff::Timestamp::from_second(ms / 1000).ok()).map(|t| t.to_string()), "by": it["user"],
-    });
-    for k in ["type", "domain", "app"] {
-        if let Some(v) = it[k].as_str().filter(|v| !v.is_empty()) {
-            out[k] = json!(v);
-        }
-    }
-    if it["account"] == true {
-        out["account"] = json!(true);
-    }
-    out
-}
-
-/// The item `name` (its id or title) names in `scope`, if there's one.
-fn find_item(scope: &str, name: &str) -> Result<Option<Value>> {
-    let items = get(&format!("/v1/vault?scope={scope}"))?;
-    let found: Vec<Value> = items.as_array().into_iter().flatten().filter(|i| i["id"] == name || i["title"].as_str().is_some_and(|t| t.eq_ignore_ascii_case(name))).cloned().collect();
-    anyhow::ensure!(found.len() < 2, "several items are called {name}: give its id");
-    Ok(found.into_iter().next())
-}
-
-/// Sets `field` of `item` in `scope` (a new item by that title if there's none), secret if asked or if it was.
-fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<bool>, hosts: Option<Vec<String>>, app: Option<&str>, agent: Option<&str>) -> Result<String> {
-    let found = find_item(scope, item)?;
-    let was = found.as_ref().and_then(|it| it["fields"].as_array()?.iter().find(|f| f["name"] == field).map(|f| f["secret"] == true));
-    let mut data = json!({ "scope": scope, "agent": agent, "fields": { field: { "value": value, "secret": secret.or(was).unwrap_or(false) } } });
-    if let Some(hosts) = hosts {
-        data["hosts"] = json!(hosts);
-    }
-    let made = match &found {
-        Some(it) => {
-            data["id"] = it["id"].clone();
-            if let Some(app) = app {
-                let mut apps: Vec<Value> = it["apps"].as_array().cloned().unwrap_or_default();
-                if !apps.contains(&json!(app)) {
-                    apps.push(json!(app));
-                }
-                data["apps"] = json!(apps);
-            }
-            false
-        }
-        None => {
-            data["title"] = json!(item);
-            data["apps"] = json!(app.into_iter().collect::<Vec<_>>());
-            true
-        }
-    };
-    let id = post("/v1/vault", data)?["id"].as_str().unwrap_or("").to_string();
-    let done = match made {
-        true => format!("Made {item} ({id}) in {}, with {field}.", vault_name(scope)),
-        false => format!("Set {item}'s {field}."),
-    };
-    // Whether an agent may use it now, since only the person lets agents use an item.
-    let agents = found.as_ref().is_some_and(|it| it["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == one::database::scopes::AGENTS))) || app == Some(one::database::scopes::AGENTS);
-    Ok(match (agents, app) {
-        (true, _) => format!("{done} Agents use it with vault_fetch, as {{{{{id}:{field}}}}}."),
-        (false, None) => format!("{done} Agents may not use it yet: vault_request, leaving out app, asks the person to let you, and they pick it."),
-        (false, Some(_)) => done,
-    })
-}
-
-/// Switches `app` on or off for `item` in `scope`.
-fn vault_use(scope: &str, item: &str, app: &str, on: bool, agent: Option<&str>) -> Result<String> {
-    let it = find_item(scope, item)?.with_context(|| format!("no item {item} in {scope}"))?;
-    let mut apps: Vec<Value> = it["apps"].as_array().cloned().unwrap_or_default().into_iter().filter(|a| a != app).collect();
-    if on {
-        apps.push(json!(app));
-    }
-    post("/v1/vault", json!({ "scope": scope, "id": it["id"], "apps": apps, "agent": agent }))?;
-    Ok(format!("{app} is switched {} for {}.", if on { "on" } else { "off" }, it["title"].as_str().unwrap_or(item)))
-}
-
-/// A scope's Vault as a person calls it: your Vault, Everyone's Vault, <name>'s Vault.
-fn vault_name(scope: &str) -> String {
-    match scope {
-        "user" => "your Vault".to_string(),
-        "global" => "Everyone's Vault".to_string(),
-        group => format!("{group}'s Vault"),
-    }
-}
-
-/// Deletes `item` in `scope`, or with `field`, one of its fields. When it's not there but is in another Vault you
-/// may change, says which and gives the command that removes it.
-fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> {
-    let it = match find_item(scope, item)? {
-        Some(it) => it,
-        None => {
-            let all = get("/v1/vault")?.as_array().cloned().unwrap_or_default();
-            let where_it: Vec<String> = all
-                .iter()
-                .filter(|i| i["id"] == item || i["title"].as_str().is_some_and(|t| t.eq_ignore_ascii_case(item)))
-                .map(|it| {
-                    let s = it["scope"].as_str().unwrap_or("");
-                    let (flag, vault) = match s {
-                        s if s.starts_with("user:") => ("user".to_string(), vault_name("user")),
-                        s if s.starts_with("group:") => (s.to_string(), vault_name(it["scope_name"].as_str().unwrap_or(s))),
-                        _ => (s.to_string(), vault_name(s)),
-                    };
-                    format!("in {vault}: {CLI} vault remove {}{} --scope {flag}", it["id"].as_str().unwrap_or(item), field.map(|f| format!(" {f}")).unwrap_or_default())
-                })
-                .collect();
-            let there = match where_it.is_empty() {
-                true => String::new(),
-                false => format!("; it's {}", where_it.join(", and ")),
-            };
-            bail!("no item {item} in {}{there}", vault_name(scope));
-        }
-    };
-    let title = it["title"].as_str().unwrap_or(item);
-    match field {
-        Some(field) => {
-            post("/v1/vault", json!({ "scope": scope, "id": it["id"], "fields": { field: null } }))?;
-            Ok(format!("Removed {title}'s {field}."))
-        }
-        None => {
-            post("/v1/vault", json!({ "scope": scope, "id": it["id"], "deleted": true }))?;
-            Ok(format!("Deleted {title}."))
-        }
-    }
-}
-
 /// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, or else the Workers' own (their .env.local's), for the account
 /// `--account` names or the token's only one.
 /// Makes this device the Workers' home, or refuses (exit 3, which `one update` passes over) where it isn't.
@@ -2188,7 +1995,7 @@ fn backups_said(r: &Value) -> String {
         return format!("Nothing is backed up yet: add a place with {CLI} backups place add.\n");
     }
     for p in &places {
-        let when = |t: &Value| t.as_u64().map(|t| say_time(t)).unwrap_or_default();
+        let when = |t: &Value| t.as_u64().map(|t| one::node::own::say_time(t)).unwrap_or_default();
         let last = match &p["last"] {
             Value::Null => "not backed up yet".to_string(),
             l => format!("backed up {} by {}", when(&l["time"]), l["device"].as_str().unwrap_or("")),
@@ -2230,7 +2037,7 @@ fn checked_said(r: &Value) -> String {
             unchecked => format!("{place}: not checked here, without their keys: {unchecked}\n"),
         };
     }
-    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} databases, {} blobs, from {})", s["name"].as_str().or(s["scope"].as_str()).unwrap_or(""), s["databases"], s["blobs"], say_time(s["time"].as_u64().unwrap_or(0)))).collect();
+    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} databases, {} blobs, from {})", s["name"].as_str().or(s["scope"].as_str()).unwrap_or(""), s["databases"], s["blobs"], one::node::own::say_time(s["time"].as_u64().unwrap_or(0)))).collect();
     let mut out = format!(
         "{}: {} came back, checked, from {:.1} MB there\n  ✓ who's who from its steps, every blob as its hash says: {}\n",
         place,
@@ -2265,158 +2072,6 @@ fn check_folder(folder: &str) -> Result<Value> {
     Ok(json!(out))
 }
 
-/// A time, for people: today's as its hour, else its date.
-fn say_time(ms: u64) -> String {
-    let Ok(t) = jiff::Timestamp::from_millisecond(ms as i64) else { return String::new() };
-    let tz = jiff::tz::TimeZone::system();
-    let (t, today) = (t.to_zoned(tz.clone()), jiff::Timestamp::now().to_zoned(tz));
-    match t.date() == today.date() {
-        true => t.strftime("today at %H:%M").to_string(),
-        false => t.strftime("%-d %b at %H:%M").to_string(),
-    }
-}
-
-fn backups_tool(tool: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
-    match tool {
-        "status" => get("/v1/backups"),
-        "now" => post("/v1/backups/now", json!({ "agent": agent })).map(|_| json!("Backing up now; backups_status says how it went.")),
-        "add_place" => {
-            let r = post("/v1/backups/request", json!({ "endpoint": input.get("endpoint"), "title": input.get("title"), "agent": agent }))?;
-            Ok(json!(format!("Asked. Give the person this link: {}\nThey type the bucket and its key into a sheet on their own device, and you never see it. Once they have, backups_status shows its first backup.", r["link"].as_str().unwrap_or(""))))
-        }
-        "remove_place" => {
-            let place = input.get("place").and_then(Value::as_str).context("give place")?;
-            let places = get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
-            let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}"))?;
-            post("/v1/backups/place", json!({ "id": p["id"], "deleted": true, "agent": agent }))?;
-            Ok(json!("Removed. What's there stays."))
-        }
-        "check" => post("/v1/backups/check", json!({})),
-        other => anyhow::bail!("no tool backups_{other}"),
-    }
-}
-
-/// The devices' tools, as this machine's person.
-fn devices_tool(tool: &str, input: &Map<String, Value>, client: &str) -> Result<Value> {
-    let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
-    match tool {
-        "requests" => get("/v1/devices/requests"),
-        "approve" => {
-            let mut body = json!({ "code": text("code")?, "confirm": input.get("confirm") == Some(&json!(true)) });
-            if let Some(at) = input.get("recovery_key").and_then(Value::as_str) {
-                body["recovery"] = json!(recovery_key_from(at, client)?);
-            }
-            post("/v1/devices/approve", body).map(|r| json!(approved_said(&r)))
-        }
-        "remove" => {
-            let what = match (input.get("device").and_then(Value::as_str), input.get("user").and_then(Value::as_str)) {
-                (Some(device), None) => json!({ "key": device }),
-                (None, Some(user)) => json!({ "user": user }),
-                _ => anyhow::bail!("give device (one device) or user (a person, with all their devices)"),
-            };
-            anyhow::ensure!(input.get("confirm") == Some(&json!(true)), "devices_remove can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very device or person");
-            post("/v1/remove", what).map(|r| json!(removed_said(&r)))
-        }
-        "run_schedules" | "stop_schedules" => {
-            let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
-            let days = if tool == "stop_schedules" { json!(0) } else { input.get("days").cloned().unwrap_or(Value::Null) };
-            post("/v1/app-schedules", json!({ "app": text("app")?, "device": text("device")?, "scope": scope, "days": days })).map(|r| r["said"].clone())
-        }
-        "invite" => post("/v1/invite-link", json!({ "name": text("name")?, "admin": input.get("admin") == Some(&json!(true)) })).map(|r| json!(invited_said(text("name").unwrap_or(""), &r))),
-        other => anyhow::bail!("no tool devices_{other}"),
-    }
-}
-
-/// The network's recovery key, from the file at `at` on this machine, or stdin for `-` on the command line: never
-/// typed into a chat, and never printed.
-fn recovery_key_from(at: &str, client: &str) -> Result<String> {
-    let looks_like_key = |t: &str| t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit());
-    anyhow::ensure!(!looks_like_key(at.trim()), "give the file the recovery key is in, never the key itself");
-    let text = match at {
-        "-" => {
-            anyhow::ensure!(client == "cli", "- reads the recovery key from stdin on the command line: give a file's path instead");
-            std::io::read_to_string(std::io::stdin())?
-        }
-        path => std::fs::read_to_string(path).with_context(|| format!("couldn't read {path}"))?,
-    };
-    let key = text.trim().to_ascii_lowercase();
-    anyhow::ensure!(looks_like_key(&key), "that file doesn't hold a recovery key: 64 hex characters");
-    Ok(key)
-}
-
-/// What approving said, in words: whose device it is, or what it was given.
-fn approved_said(r: &Value) -> String {
-    let s = |k: &str| r[k].as_str().unwrap_or("").to_string();
-    if let Some(service) = r["service"].as_str() {
-        return match r.get("approved") {
-            Some(_) => format!("{service} on {} is in: it answers your devices' calls.", s("device")),
-            None => format!("{service} on {} wants to be yours. Approve it only if that's the code it shows.", s("device")),
-        };
-    }
-    if r.get("sealed").is_none() && r["recovery"] == true {
-        return format!("{} is {}'s device. Approve it with the recovery key only if they lost all their devices and say it's theirs.", s("device"), s("person"));
-    }
-    if r.get("sealed").is_none() {
-        let new = if r["new"] == true { ", who you invited" } else { "" };
-        return format!("{} is {}'s device{new}. Approve it only if they say it's theirs.", s("device"), s("person"));
-    }
-    let mut out = format!("{} is in.", s("device"));
-    if r["recovery"] == true {
-        out = format!("{} is in, let in with the recovery key: {} can open what they could before.", s("device"), s("person"));
-    }
-    if let Some(relay) = r["relay"].as_str() {
-        out.push_str(&format!(" The network didn't take it yet: {relay}."));
-    }
-    for n in r["not_sealed"].as_array().into_iter().flatten() {
-        out.push_str(&format!(" It wasn't given {}'s keys: {}.", n["scope"].as_str().unwrap_or(""), n["why"].as_str().unwrap_or("")));
-    }
-    out
-}
-
-/// What removing said, in words.
-fn removed_said(r: &Value) -> String {
-    let mut out = format!("Removed {}.", r["removed"].as_str().unwrap_or("it"));
-    let left: Vec<&str> = r["not_renewed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-    if !left.is_empty() {
-        out.push_str(&format!(" New keys for {} come from one of their own devices, or their admins'.", left.join(", ")));
-    }
-    out
-}
-
-/// An invite's link, in words.
-fn invited_said(name: &str, r: &Value) -> String {
-    let days = one::cloudflare::INVITE_DAYS;
-    format!("Send {name} this link. It works once, for {days} days: opening it, they join. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
-}
-
-fn vault_tool(tool: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
-    let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
-    let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
-    match tool {
-        "list" => Ok(json!(get(&format!("/v1/vault?scope={scope}"))?.as_array().into_iter().flatten().map(item_said).collect::<Vec<_>>())),
-        "set" => {
-            let hosts = input.get("hosts").and_then(Value::as_array).map(|h| h.iter().filter_map(Value::as_str).map(str::to_string).collect());
-            Ok(json!(vault_set(scope, text("item")?, text("field")?, text("value")?, input.get("secret").and_then(Value::as_bool), hosts, input.get("app").and_then(Value::as_str), agent)?))
-        }
-        "use" => Ok(json!(vault_use(scope, text("item")?, text("app")?, input.get("on") != Some(&json!(false)), agent)?)),
-        "grant" => Ok(post("/v1/vault/grant", json!({ "scope": scope, "device": text("device")?, "on": input.get("on") != Some(&json!(false)) }))?["said"].clone()),
-        "fetch" => post("/v1/vault/fetch", json!({ "url": text("url")?, "method": input.get("method"), "headers": input.get("headers"), "body": input.get("body"), "agent": agent })),
-        "remove" => Ok(json!(vault_remove(scope, text("item")?, input.get("field").and_then(Value::as_str))?)),
-        "request" => {
-            // With no app, it's for agents: the person's own, with vault_fetch.
-            let app = input.get("app").and_then(Value::as_str).unwrap_or("agents");
-            let r = post("/v1/vault/request", json!({ "scope": scope, "app": app, "need": input.get("need"), "title": input.get("title"), "fields": input.get("fields"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;
-            Ok(json!(format!("Asked. Give the person this link: {}\nIt's also waiting in their Settings, under Requests. Tell them; check vault_status with id {} when they say they've done it.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))))
-        }
-        "status" => {
-            let id = text("id")?;
-            let r = get(&format!("/v1/vault/requests?id={id}"))?;
-            let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
-            Ok(json!({ "state": r["state"], "app": r["app"], "title": r["title"], "answered": r["answered"] }))
-        }
-        other => anyhow::bail!("no tool vault_{other}"),
-    }
-}
 
 /// MCP's `deploy`, `{CLI} deploy` for an agent with no shell: the app's files as text, built where it's asked.
 fn deploy_tool() -> Value {
@@ -2477,12 +2132,10 @@ fn tools() -> Result<Vec<Value>, Value> {
     if !signed_in() {
         tools.push(logs_tool());
     }
-    tools.extend(one::vault::tools());
-    tools.extend(one::skills::groups_tools());
-    // Backups are this machine's to run: a sign-in from elsewhere can't.
-    if !signed_in() {
-        tools.extend(one::backups::tools());
-        tools.extend(one::skills::devices_tools());
+    // What only this machine's person runs, a sign-in from elsewhere can't; and MCP Apps' own version of a tool wins.
+    let drawn: Vec<Value> = mcp_apps::tools().iter().map(|t| t["name"].clone()).collect();
+    for app in one::node::own::all().into_iter().filter(|a| a.elsewhere || !signed_in()) {
+        tools.extend(app.tools.into_iter().filter(|t| !drawn.contains(&t["name"])));
     }
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
@@ -2587,7 +2240,7 @@ fn with_trace(mut out: Value) -> Value {
 /// What to say for a tool nobody here lists: an app's tools when the app is right, else the nearest tools.
 fn unknown_tool(name: &str) -> Result<String> {
     if let Some((app, tool)) = name.split_once('_')
-        && get("/v1/apps")?.as_array().into_iter().flatten().chain(&tools::node_apps()).any(|a| a["name"] == app)
+        && get("/v1/apps")?.as_array().into_iter().flatten().chain(&one::node::own::listed()).any(|a| a["name"] == app)
     {
         return tools::unknown(app, Some(tool), false);
     }
@@ -2610,7 +2263,8 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     // Checked as MCP lists it, before anything runs: a wrong input says what's wrong, never runs as something else.
     tools::check(&tools::mcp_schema(&a, &spec), &Value::Object(input.clone()))?;
     let spec = Some(spec);
-    let device = if tools::node_app(app) || spec.as_ref().is_some_and(tools::own_device) { None } else { input.remove("device") };
+    let own = one::node::own::find(app);
+    let device = if own.is_some() || spec.as_ref().is_some_and(tools::own_device) { None } else { input.remove("device") };
     let confirmed = input.remove("confirm") == Some(json!(true));
     // `trace: true` gives, beside the answer, what the call did and where (`one <app> <tool> --trace`).
     let traced = input.remove("trace") == Some(json!(true));
@@ -2618,34 +2272,9 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     if let Some(spec) = &spec {
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
     }
-    if app == "vault" {
-        return vault_tool(tool, &input, agent);
-    }
-    if app == "backups" {
-        return backups_tool(tool, &input, agent);
-    }
-    if app == "devices" {
-        // Its approve and remove read the person's yes themselves.
-        if confirmed {
-            input.insert("confirm".into(), json!(true));
-        }
-        return devices_tool(tool, &input, client);
-    }
-    if name == "groups_list" {
-        return Ok(json!(groups_said(&get("/v1/state")?)));
-    }
-    if name == "groups_handle" {
-        let handle = input.get("handle").and_then(Value::as_str).context("give the new handle")?;
-        post("/v1/handle", json!({ "handle": handle, "group": input.get("group") }))?;
-        return Ok(json!(match input.get("group").and_then(Value::as_str) {
-            Some(group) => format!("{group}'s handle is now {handle}."),
-            None => format!("Your handle is now {handle}."),
-        }));
-    }
-    if name == "widgets_show" {
-        let out = mcp_apps::call(name, &Value::Object(input)).unwrap_or_default();
-        anyhow::ensure!(out["isError"] != true, "{}", out["content"][0]["text"].as_str().unwrap_or(""));
-        return Ok(out);
+    if let Some(own) = own {
+        anyhow::ensure!(own.elsewhere || !signed_in(), "{} is this machine's own person's to use, not someone signed in from elsewhere", own.title);
+        return (own.run)(tool, &input, &one::node::own::Asked { node: &Local, agent, client, confirmed });
     }
     if let Some(spec) = spec {
         tools::mcp_files(&spec, &mut input)?;

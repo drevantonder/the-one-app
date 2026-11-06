@@ -10,6 +10,9 @@ use crate::vault::{Items, Lookup};
 
 use super::*;
 
+pub mod app;
+pub(crate) mod routes;
+
 /// The node's database of a scope's items.
 const VAULT: (&str, &str) = (scopes::APP, crate::vault::DATABASE);
 
@@ -689,36 +692,5 @@ impl Node {
             let waiting = |s: &Scope| i.views.get(&s.to_string()).map_or(0, |st| st.requests.values().filter(|r| r.answer.is_none() && now.saturating_sub(r.time) <= REQUEST_LIFE).count());
             Ok(scopes.iter().map(waiting).sum())
         })
-    }
-
-    /// The Vault's routes, `/v1/vault…`, for the local API; `body` is a GET's query or a POST's body.
-    /// None for another path.
-    pub async fn vault_route(&self, me: &Caller, method: &str, path: &str, body: &Value) -> Result<Option<Value>> {
-        let scope = |default: Option<&str>| body["scope"].as_str().or(default).map(|s| self.scope_for(me, s)).transpose();
-        let me = &Caller { agent: body["agent"].as_str().map(str::to_string).or(me.agent.clone()), ..me.clone() };
-        Ok(Some(match (method, path) {
-            ("GET", "/v1/vault") => json!(self.vault(me, scope(None)?.as_ref()).await?),
-            ("POST", "/v1/vault") => {
-                let scope = scope(Some("user"))?.unwrap();
-                let mut data = body.clone();
-                data.as_object_mut().context("an item is an object")?.remove("scope");
-                json!({ "id": self.set_item(me, &scope, data).await? })
-            }
-            ("GET", "/v1/vault/requests") => json!(self.item_requests(me, scope(None)?.as_ref(), body["id"].as_str()).await?),
-            ("POST", "/v1/vault/request") => {
-                let scope = scope(Some("user"))?.unwrap();
-                self.request_item(me, &scope, body["app"].as_str().unwrap_or(""), body["need"].as_str(), body, body["why"].as_str().unwrap_or("")).await?
-            }
-            ("POST", "/v1/vault/answer") => {
-                self.answer_request(me, &scope(Some("user"))?.unwrap(), body["id"].as_str().unwrap_or(""), body).await?;
-                json!({})
-            }
-            ("POST", "/v1/vault/fetch") => self.vault_fetch(me, body).await?,
-            ("POST", "/v1/vault/grant") => {
-                let scope = scope(Some("user"))?.unwrap();
-                self.vault_grant(me, &scope, body["device"].as_str().context("give device")?, body["on"] != false).await?
-            }
-            _ => return Ok(None),
-        }))
     }
 }
