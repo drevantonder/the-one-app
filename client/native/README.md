@@ -133,8 +133,11 @@ Group `group.app.<cli>.phone`, which is also its Keychain group:
       reads them as before (checked, the simulator: the files; the widget itself not added, which needs a touch)
 - [ ] Sign-in in the system's sheet (ASWebAuthenticationSession, Safari's passkeys, back at `<cli>://signed-in/`):
       built; the throwaway signs in by the loopback instead, so not seen
-- [ ] The old app's sign-in taken over (`apple::take_over`, the same Keychain items in the group): no new sign-in on
-      the paired iPhone
+- [x] The old app's sign-in taken over (`apple::take_over`, the same Keychain items in the group): no new sign-in
+      (checked on the paired iPhone, installed over the Swift app: its address, sign-in client and client folder taken
+      over, its refresh token refreshed, back in as the same device with no request to approve)
+- [x] `one update` builds it (`iphone/build.sh device`) and installs it on the paired iPhone, as the old app's (built
+      and installed by hand on the Mac the first time, the Mac's node being away; Release, signed by the team)
 - [ ] Touch and hold lifts an icon or widget on the pages with its menu, and moving the finger carries it (`Lift`,
       `__oneLifts`, `__oneDrag`); haptics; the document camera (`one.scan`); the share sheet and Quick Look for
       `one.save` / `one.preview`: built; not tried (the simulator takes no touches from here, and has no camera)
