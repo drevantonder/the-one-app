@@ -25,15 +25,13 @@
 //! their own types (`repo`) the same way. Who holds what through them is worked out once the rows are written
 //! (`close`), so each check is a lookup. It works out holdings only for principals some row names as its subject,
 //! which is enough while the release's `@` rules are only `person:*`'s: an `@` rule of another type needs it to work
-//! them out for that type's objects too. Five checks read them:
+//! them out for that type's objects too. Four checks read them:
 //! - `may`: whether a principal holds a permission on an object, now.
 //! - `may_give`: no escalation. You give a role only where you may `invite`, only one you hold there yourself (or
 //!   that a role of yours gives), and for no longer than you hold both.
 //! - `may_take`: taking a role takes `remove`, or `leave` for your own; and the network's last admin stays.
 //! - `may_make`: the first row of a new object (a device, a Vault item, a service, an app), which nobody holds a role
 //!   on yet to give: by whoever the verb that makes it lets, to themselves, its container, or a role on the container.
-//! - `may_change_role`: a network's own role is changed by whoever has `change-roles`, and widened only by someone
-//!   who already holds what it adds wherever it's held. The release's own roles change only with the release.
 //!
 //! Which object a call or a step is about, and who signed it, is the caller's to say: this only answers. So is moving
 //! an app to another owner, which a step's rule allows only someone who may `delete` it and may `add-apps` where it goes.
@@ -122,10 +120,10 @@ insert or replace into roles (type, name, permissions, builtin) values
     ('vault', 'owner', '["use","change","invite","remove"]', 1),
     ('vault', 'user', '["use","leave"]', 1),
     ('app', 'owner', '["deploy","delete"]', 1);
--- the network's admins, who manage every group (`rules`' `manages`) and add people to it, but
--- open none
+-- the network's admins, who manage every group (`rules`' `manages`) and add people to it, or make someone its admin
+-- (so a group whose admins have all gone gets a new one), but open none
 insert or replace into roles (type, name, permissions, gives, builtin) values
-    ('group', 'manager', '["invite","remove","rename","run"]', '["member"]', 1);
+    ('group', 'manager', '["invite","remove","rename","run"]', '["member","admin"]', 1);
 
 delete from relations where substr(subject, 1, 1) in ('#', '@') or instr(subject, '*') > 0 or instr(object, '*') > 0;
 insert into relations (subject, relation, object, until) values
@@ -138,21 +136,6 @@ insert into relations (subject, relation, object, until) values
     ('network:global#admin', 'admin', 'person:*', null),
     ('network:global#admin', 'admin', 'device:*', null);
 "#;
-
-/// Whether the network's admins make someone a group's admin, as they always could (`rules`' `manages`), so
-/// a group whose admins have all gone gets a new one: their `manager` role then gives a group's `admin` as well as its
-/// `member`. Not decided yet (the plan's open question on default roles): flip it here, and nowhere else.
-pub const NETWORK_ADMINS_MAKE_GROUP_ADMINS: bool = true;
-
-/// The release's types, roles and rules (`DEFAULTS`), with `NETWORK_ADMINS_MAKE_GROUP_ADMINS`'s rule: run on a database
-/// `SCHEMA` made, after it.
-pub fn defaults(conn: &Connection) -> Result<()> {
-    conn.execute_batch(DEFAULTS)?;
-    if NETWORK_ADMINS_MAKE_GROUP_ADMINS {
-        conn.execute("update roles set gives = '[\"member\",\"admin\"]' where type = 'group' and name = 'manager' and builtin = 1", [])?;
-    }
-    Ok(())
-}
 
 /// The type of an object (`group` of `group:…`), if it's one: a principal or object is `<type>:<id>`, and never a
 /// userset (`#`).
@@ -413,34 +396,6 @@ pub fn may_make(conn: &Connection, maker: &str, verb: &str, container: &str, sub
     Ok(ours && !named && role(conn, ty, relation)?.is_some() && may(conn, maker, verb, container, now)?)
 }
 
-/// Whether `who` may make the network's own role `name` on `ty` have `permissions`: they may `change-roles`, each is
-/// one of the type's, it isn't one the release ships, and they hold whatever it adds on every object it's held on.
-/// A network's own role gives no other (`gives` counts only on the release's).
-pub fn may_change_role(conn: &Connection, who: &str, ty: &str, name: &str, permissions: &[&str], now: u64) -> Result<bool> {
-    let known: Option<String> = conn.query_row("select permissions from types where name = ?1", [ty], |r| r.get(0)).optional()?;
-    let Some(known) = known.map(|k| serde_json::from_str::<Vec<String>>(&k)).transpose()? else {
-        return Ok(false);
-    };
-    let was = match role(conn, ty, name)? {
-        Some((_, true)) => return Ok(false),
-        Some((perms, false)) => perms,
-        None => Vec::new(),
-    };
-    if !permissions.iter().all(|p| known.iter().any(|k| k == p)) || !may(conn, who, "change-roles", NETWORK, now)? {
-        return Ok(false);
-    }
-    let mut held = conn.prepare("select distinct object from relations where relation = ?1 and substr(object, 1, instr(object, ':') - 1) = ?2")?;
-    let objects = held.query_map(params![name, ty], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    for object in &objects {
-        for p in permissions.iter().filter(|p| !was.iter().any(|w| w == *p)) {
-            if !may(conn, who, p, object, now)? {
-                return Ok(false);
-            }
-        }
-    }
-    Ok(true)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,8 +408,8 @@ mod tests {
     fn who_may_do_what() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA).unwrap();
-        defaults(&conn).unwrap();
-        defaults(&conn).unwrap();
+        conn.execute_batch(DEFAULTS).unwrap();
+        conn.execute_batch(DEFAULTS).unwrap();
         conn.execute_batch(
             r#"insert into roles values ('group', 'host', '["use","invite","leave"]', '[]', 0);
             insert into roles values ('rocket', 'admin', '["use"]', '[]', 0);
@@ -572,7 +527,7 @@ mod tests {
             ("person:gina", "person:erin", "member", "group:g", None, false),
             // the network's admins add people to every group, and make someone its admin only as the release says
             ("person:alice", "person:erin", "member", "group:g", None, true),
-            ("person:alice", "person:erin", "admin", "group:g", None, NETWORK_ADMINS_MAKE_GROUP_ADMINS),
+            ("person:alice", "person:erin", "admin", "group:g", None, true),
             ("person:alice", "person:erin", "member", "group:h", None, true),
             ("person:hana", "person:erin", "member", "group:h", None, false),
             ("person:hana", "person:erin", "member", "group:h", Some(2000), true),
@@ -644,20 +599,5 @@ mod tests {
         for (maker, verb, container, subject, role, object, expected) in make_cases {
             assert_eq!(may_make(&conn, maker, verb, container, subject, role, object, now).unwrap(), *expected, "may_make({maker}, {verb}, {container}, {subject}, {object})");
         }
-
-        // A network's own roles: made by its admins, widened only by someone who holds what it adds where it's held.
-        assert!(may_change_role(&conn, "person:alice", "group", "editor", &["use"], now).unwrap());
-        assert!(!may_change_role(&conn, "person:carol", "group", "editor", &["use"], now).unwrap());
-        assert!(!may_change_role(&conn, "person:alice", "group", "editor", &["fly"], now).unwrap());
-        assert!(!may_change_role(&conn, "person:alice", "group", "member", &["use", "invite"], now).unwrap());
-        assert!(!may_change_role(&conn, "person:alice", "café", "barista", &["use", "run"], now).unwrap());
-        conn.execute("insert into roles values ('group', 'editor', '[\"use\"]', '[]', 0)", []).unwrap();
-        conn.execute("insert into relations values ('person:frank', 'editor', 'group:g', null)", []).unwrap();
-        close(&conn, None).unwrap();
-        assert!(may(&conn, "person:frank", "use", "group:g", now).unwrap());
-        assert!(!may_change_role(&conn, "person:alice", "group", "editor", &["use", "add-apps"], now).unwrap());
-        conn.execute("insert into relations values ('person:alice', 'admin', 'group:g', null)", []).unwrap();
-        close(&conn, None).unwrap();
-        assert!(may_change_role(&conn, "person:alice", "group", "editor", &["use", "add-apps"], now).unwrap());
     }
 }

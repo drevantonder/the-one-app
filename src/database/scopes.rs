@@ -967,27 +967,6 @@ pub struct VaultRequest {
     pub answer: Option<(String, String, u64)>,
 }
 
-/// How people's roles changed from `before` to `after` (`ScopeDb::roles`), as the network's vault hears it: (user,
-/// role, invited, scopes) each. None, in every scope they may no longer use or were invited to; otherwise their role
-/// in each they're newly in, invited to, or an admin of no longer or now. Not someone joining the network (their
-/// invite link opens Everyone's to them), their own scope, nor a group just made (the vault made its key with it).
-pub fn roles_changed(before: &BTreeMap<(String, Scope), (Role, bool)>, after: &BTreeMap<(String, Scope), (Role, bool)>) -> Vec<(String, Option<Role>, bool, Vec<Scope>)> {
-    let mut out: BTreeMap<(String, Option<Role>, bool), Vec<Scope>> = BTreeMap::new();
-    for key in before.keys().chain(after.keys().filter(|k| !before.contains_key(*k))) {
-        let (user, scope) = key;
-        let (role, invited) = match (before.get(key), after.get(key)) {
-            (Some(_), None) => (None, false),
-            (b, Some(a)) if b == Some(a) => continue,
-            (_, Some(_)) if matches!(scope, Scope::User(_)) || !before.keys().any(|(_, s)| s == scope) => continue,
-            (None, Some((Role::Member, false))) if *scope == Scope::Global => continue,
-            (_, Some((role, invited))) => (Some(*role), *invited),
-            (None, None) => continue,
-        };
-        out.entry((user.clone(), role, invited)).or_default().push(scope.clone());
-    }
-    out.into_iter().map(|((user, role, invited), scopes)| (user, role, invited, scopes)).collect()
-}
-
 /// A page a person arranges: their own (`user`), a group's (`group:<id>`) or everyone's (`global`).
 pub fn valid_page(page: &str) -> bool {
     page == "user" || page == "global" || page.strip_prefix("group:").is_some_and(is_id)
@@ -1014,7 +993,7 @@ pub(crate) mod tests {
     fn app_may() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(permissions::SCHEMA).unwrap();
-        permissions::defaults(&db).unwrap();
+        db.execute_batch(permissions::DEFAULTS).unwrap();
         for (s, r, o) in [
             ("person:alice", "member", NETWORK),
             ("person:bob", "member", NETWORK),

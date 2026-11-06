@@ -281,7 +281,7 @@ const KEPT: &[&str] = &["blobs", "releases", "types", "roles", "relations"];
 /// A scope's database with nothing in it yet: its tables, and this release's types, roles and rules.
 pub fn empty(scope: &Scope) -> Result<Connection> {
     let db = bare()?;
-    permissions::defaults(&db)?;
+    db.execute_batch(permissions::DEFAULTS)?;
     if *scope == Scope::Global {
         db.execute("INSERT INTO network VALUES (0, NULL, '', 0, NULL, NULL)", [])?;
     }

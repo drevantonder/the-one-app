@@ -752,7 +752,7 @@ impl std::error::Error for Newer {}
 pub fn release_defaults() -> Result<Content> {
     let db = Connection::open_in_memory()?;
     db.execute_batch(permissions::SCHEMA)?;
-    permissions::defaults(&db)?;
+    db.execute_batch(permissions::DEFAULTS)?;
     let mut data = rules_of(&db)?;
     data["reads"] = json!(READS);
     Ok(Content::new(scopes::APP, DEFAULTS, data))
