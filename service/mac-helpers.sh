@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds each Mac service in Swift (apps/<name>/service/Package.swift, on service/swift) into a helper app of its own,
+# Builds each Mac service in Swift (the apps/<name>/service/ with an Info.plist, on service/swift) into a helper app of its own,
 # in target/mac-helpers: "<its CFBundleName> — <the app's name>.app", id app.<cli>.mac.<name>, with its own Info.plist
 # and entitlements, signed with the identity SIGN names (ad hoc without), so macOS asks for and records its permission
 # under its own name. The Mac app copies them into its Contents/Helpers before it's signed itself, where oned finds
@@ -14,10 +14,24 @@ out=$root/target/mac-helpers
 rm -rf "$out" && mkdir -p "$out"
 sign=(codesign --force --options runtime --sign "${SIGN:--}")
 [ -z "${SIGN:-}" ] || sign+=(--timestamp)
-for package in "$root"/apps/*/service/Package.swift; do
-	[ -e "$package" ] || continue
-	dir=$(dirname "$package")
+for plist in "$root"/apps/*/service/Info.plist; do
+	[ -e "$plist" ] || continue
+	dir=$(dirname "$plist")
 	service=$(basename "$(dirname "$dir")")
+	# Each one's package and entry point differ only by its name and its Service's struct, so they are written here (git ignores them).
+	entry=$(sed -n 's/^struct \([A-Za-z]*\): Service.*/\1/p' "$dir"/*.swift)
+	cat > "$dir/Package.swift" <<PACKAGE
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "$service",
+    platforms: [.macOS("26.0")],
+    dependencies: [.package(path: "../../../service/swift")],
+    targets: [.executableTarget(name: "$service", dependencies: [.product(name: "Helper", package: "swift")], path: ".", exclude: ["Package.swift", "Info.plist", "Helper.entitlements"])]
+)
+PACKAGE
+	printf 'import Helper\n\nserve(%s())\n' "$entry" > "$dir/main.swift"
 	swift build -c release --arch arm64 --package-path "$dir" -q
 	bin=$(swift build -c release --arch arm64 --package-path "$dir" --show-bin-path)
 	title=$(plutil -extract CFBundleName raw "$dir/Info.plist")

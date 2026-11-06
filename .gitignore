@@ -5,3 +5,7 @@ __pycache__/
 .build/
 .swiftpm/
 Package.resolved
+
+# Written by service/mac-helpers.sh for each Mac service in Swift.
+/apps/*/service/Package.swift
+/apps/*/service/main.swift

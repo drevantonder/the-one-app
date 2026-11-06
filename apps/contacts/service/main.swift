@@ -1,3 +1,0 @@
-import Helper
-
-serve(ContactsApp())
