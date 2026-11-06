@@ -5,7 +5,7 @@ import settings from "./dist/settings.html" with { type: "text" };
 import { google } from "./google/google.js";
 
 const APP = "docs";
-const TITLE = "Google Docs"; // also export default's title, a plain string there for the App Store to read
+const TITLE = "Google Docs";
 const SCOPES = "openid email https://www.googleapis.com/auth/documents";
 const API = "https://docs.googleapis.com/v1/";
 const { account, token, forget, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES });

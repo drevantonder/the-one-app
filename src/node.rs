@@ -962,9 +962,10 @@ impl Node {
     /// says which build it runs.
     async fn settle(&self) -> Result<()> {
         let _settling = self.0.settling.lock().await;
-        let Ok((wanted, author)) = self.with(|i| {
+        let Ok((wanted, unadded, author)) = self.with(|i| {
             let wanted: BTreeMap<String, String> = i.r.db().apps().into_iter().filter(|a| !a.erased).filter_map(|a| Some((a.name, a.bundle?))).collect();
-            Ok((wanted, i.r.db().compute(&self.0.id).is_some()))
+            let unadded: BTreeMap<String, String> = self.0.built_in.iter().filter(|(name, _)| i.r.db().app(name).is_none()).map(|(n, b)| (n.clone(), b.clone())).collect();
+            Ok((wanted, unadded, i.r.db().compute(&self.0.id).is_some()))
         }) else {
             return Ok(());
         };
@@ -992,21 +993,29 @@ impl Node {
                 used.insert(app.clone(), bundle.clone());
             }
         }
+        // The built-in apps no one has added run no calls: they're there to be described, for the App Store to list.
+        let mut waiting = Vec::new();
+        for (app, bundle) in unadded.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
+            if let Ok(module) = self.blob(bundle).await.and_then(|b| crate::app::bundle::module(&b)) {
+                waiting.push((app.clone(), module));
+            }
+        }
         self.0.unfetched.store(unfetched, std::sync::atomic::Ordering::Relaxed);
         let changed: Vec<String> = modules.iter().map(|(a, _)| a.clone()).filter(|a| ran.get(a) != used.get(a)).collect();
-        if !changed.is_empty() || modules.len() != self.0.apps.names().len() {
+        if !changed.is_empty() || modules.len() != self.0.apps.names().len() || waiting.iter().map(|(a, _)| a).ne(self.0.apps.unadded().iter()) {
             // Writes wait for the new deploys, so what's written next runs on them.
             let _write = self.0.writes.lock().await;
             // An app whose code doesn't start is left out, so the rest run.
-            while let Err(err) = self.0.apps.load(modules.clone()).await {
+            while let Err(err) = self.0.apps.load(modules.clone(), waiting.clone()).await {
                 let Some(broken) = err.downcast_ref::<crate::app::runtime::Broken>() else { return Err(err) };
                 tracing::warn!("{broken}: it's left out until it's deployed again");
-                if let Some(bundle) = used.get(&broken.app) {
+                if let Some(bundle) = used.get(&broken.app).or(unadded.get(&broken.app)) {
                     self.0.broken.lock().unwrap().insert(broken.app.clone(), bundle.clone());
                 }
-                let before = modules.len();
+                let before = modules.len() + waiting.len();
                 modules.retain(|(a, _)| *a != broken.app);
-                ensure!(modules.len() < before, "{err:#}");
+                waiting.retain(|(a, _)| *a != broken.app);
+                ensure!(modules.len() + waiting.len() < before, "{err:#}");
             }
             *self.0.bundles.lock().unwrap() = modules.iter().map(|(a, _)| (a.clone(), used[a].clone())).collect();
             // Read again, so each is brought to its new deploy's schema.

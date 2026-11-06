@@ -55,62 +55,16 @@ function namer(ctx) {
   };
 }
 
-/// A bundle's files: a plain ustar tar.
-function untar(bytes) {
-  const files = [];
-  const text = (from, to) => new TextDecoder().decode(bytes.subarray(from, to)).replace(/\0.*$/s, "").trim();
-  for (let at = 0; at + 512 <= bytes.length; ) {
-    if (bytes.subarray(at, at + 512).every((b) => b === 0)) break;
-    const name = text(at, at + 100), prefix = text(at + 345, at + 500);
-    const size = parseInt(text(at + 124, at + 136), 8) || 0;
-    const type = String.fromCharCode(bytes[at + 156] || 48);
-    if (type === "0") files.push({ path: prefix ? `${prefix}/${name}` : name, bytes: bytes.subarray(at + 512, at + 512 + size) });
-    at += 512 + Math.ceil(size / 512) * 512;
-  }
-  return files;
-}
-
-/// What a built-in app the network hasn't added says about itself: nothing runs it yet, so its code says (the first
-/// `title`, `icon`, `color`, `tagline` and `description` after the line starting `export default` given as plain strings, as the built-in
-/// apps give them before their tools; `advanced: true` too, which the store lists after the rest).
-async function described(ctx, bundle) {
-  const file = untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
-  const all = file ? new TextDecoder().decode(file.bytes) : "";
-  const code = all.slice(Math.max(0, all.search(/^export default/m)));
-  const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
-  const list = (kind) => code.match(new RegExp(`\\buses:\\s*\\{[^}]*\\b${kind}:\\s*\\[([^\\]]*)\\]`))?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
-  const platforms = code.match(/\bservice:\s*\{[^}]*\bplatforms:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1));
-  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: list("apps"), services: list("services") }, ...(platforms ? { service: { platforms } } : {}) };
-}
-
-/// What an app offers besides its tools: screens (a main screen or a widget, so it has a place on a home page), and
-/// accounts (an `accounts` tool: what it signs in to, which Accounts lists). What it says about itself where it's
-/// installed for the caller; elsewhere, its code.
-async function offers(ctx, a) {
-  if (a.ops) return { screens: (a.screens || []).some((x) => x.name === "main") || !!(a.widgets || []).length, accounts: a.ops.some((o) => o.name === "accounts") };
-  const bundle = a.bundle || a.built_in;
-  const file = bundle && untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
-  const code = file ? new TextDecoder().decode(file.bytes) : "";
-  return { screens: /\bmain:\s*\{/.test(code) || /\bwidgets:\s*\{\s*[\w"]/.test(code), accounts: /^\s*accounts:\s*\{/m.test(code) };
-}
-
-/// The platform a device's build is for, as an app's service names them.
-const platformOf = (target) => (/apple|darwin/.test(target || "") ? "mac" : /windows/.test(target || "") ? "windows" : /linux/.test(target || "") ? "linux" : null);
-
 /// Whether an app has a service.
-const hasService = (a) => !!(a.service || a.uses?.services?.length);
+const hasService = (a) => !!a.nodes;
 
 /// Where an app's service runs, and where it may: `runs_on` (each node it runs on for a place where it's added, by
-/// `name`, none once that node was removed, with `scope`, `online` and `problem`); `nodes`, the names of the caller's
-/// own nodes on a platform its service is built for, and the Cloudflare node's for an admin when it's built for it; and
-/// `problem`, its one problem box when no node it runs on is on and well, with `move` true when moving it fixes that.
+/// `name`, none once that node was removed, with `scope`, `online` and `problem`); `nodes`, as the catalog gives them;
+/// and `problem`, its one problem box when no node it runs on is on and well, with `move` true when moving it fixes that.
 /// Null for an app with no service.
-async function where(ctx, a) {
+function where(a) {
   if (!hasService(a)) return null;
-  const platforms = a.service?.platforms;
-  const devices = await ctx.devices();
-  const nodes = devices.filter((d) => d.user === ctx.me.user && (!platforms || platforms.includes(platformOf(d.target)))).map((d) => d.name);
-  if (platforms?.includes("cloudflare") && ctx.me.role === "admin") nodes.push("cloudflare");
+  const nodes = a.nodes;
   const runs_on = a.runs_on || [];
   const title = a.title || a.name;
   let problem = null;
@@ -124,8 +78,8 @@ async function where(ctx, a) {
 
 /// The node an app added in `scope` runs its service on: `node` if given, or the only one it may; none for an app with
 /// no service. Asks where when there's a choice.
-async function nodeFor(ctx, a, node) {
-  const w = await where(ctx, a);
+function nodeFor(a, node) {
+  const w = where(a);
   if (!w) return undefined;
   if (node) {
     if (!w.nodes.some((n) => n.toLowerCase() === String(node).toLowerCase())) throw new Error(`${a.title || a.name} can't run on ${node}: it can run on ${w.nodes.join(", ") || "none of your nodes"}`);
@@ -144,7 +98,7 @@ async function usedWithService(ctx, a) {
     const name = next.shift();
     if (seen.has(name)) continue;
     seen.add(name);
-    const used = await withService(ctx, await find(ctx, name).catch(() => null) || { name });
+    const used = await find(ctx, name).catch(() => ({ name }));
     next.push(...(used.uses?.apps || []));
     if (hasService(used)) out.push(used);
   }
@@ -166,31 +120,24 @@ async function listed(ctx, { full, gone }) {
   const name = namer(ctx);
   const every = await ctx.catalog();
   const all = every.filter((a) => full || !!a.deleted === !!gone);
-  const offered = await Promise.all(all.map((a) => offers(ctx, a).catch(() => ({ screens: true, accounts: false }))));
-  const apps = await Promise.all(all.map(async (a, i) => {
+  const apps = all.map((a) => {
     const added = a.deploys > 0;
-    const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
     return {
-      name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, ...(full ? { image: a.image || null, image_kind: a.image_kind || null } : {}),
-      tagline: d.tagline || a.tagline || null, description: d.description || a.description || null,
+      name: a.name, title: a.title || a.name, icon: a.icon || null, color: a.color || null, ...(full ? { image: a.image || null, image_kind: a.image_kind || null } : {}),
+      tagline: a.tagline || null, description: a.description || null,
       owner: a.owner, owner_name: name(a.owner),
       from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
-      installed_names: (a.installed || []).map(name), uses: d.uses || a.uses || { apps: [], services: [] }, service: d.service || a.service || null, runs_on: a.runs_on || [],
-      advanced: !!(d.advanced || a.advanced), built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
-      source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: offered[i].screens, keeps_accounts: offered[i].accounts,
+      installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], services: [] }, service: a.service || null, runs_on: a.runs_on || [],
+      advanced: !!a.advanced, built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
+      source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: !!a.offers?.screens, keeps_accounts: !!a.offers?.accounts,
     };
-  }));
+  });
   apps.sort((a, b) => a.advanced - b.advanced || a.title.localeCompare(b.title));
   return { apps, deleted: every.filter((a) => a.deleted).length };
 }
 
 const APP = { type: "string", description: "an app's name, from apps_list, like gmail" };
 const NODE = { type: "string", description: "the node that runs its service: one of yours by name, or cloudflare, as apps_devices lists them" };
-
-/// An app with what its code says of its service, for one not added yet that nothing runs.
-async function withService(ctx, a) {
-  return a.uses || a.service || !a.built_in ? a : { ...a, ...(await described(ctx, a.built_in).catch(() => ({}))) };
-}
 
 /// Times in what `health` gives, ms since 1970, as ISO 8601.
 function iso(v) {
@@ -235,17 +182,17 @@ export default {
       description: "Install an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page. An app with a service runs it on node, one of your nodes it can run on (apps_devices lists them), or for everyone's or a group's, the Cloudflare node; asked when there's a choice.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput, node: NODE } },
       async run(ctx, { app, scope, node }) {
-        const a = await withService(ctx, await find(ctx, app));
+        const a = await find(ctx, app);
         const place = placeOf(ctx, scope);
         // Each app it uses whose service runs nowhere for this place yet runs it on node too if it can, or on the one
         // node it can; with a choice, its page asks where.
         for (const used of await usedWithService(ctx, a)) {
-          const w = await where(ctx, used);
+          const w = where(used);
           if (used.runs_on?.some((r) => r.scope === (place === "user" ? `user:${ctx.me.user}` : place))) continue;
           const on = w.nodes.find((n) => node && n.toLowerCase() === String(node).toLowerCase()) || (w.nodes.length === 1 ? w.nodes[0] : undefined);
           if (on) ctx.install(used.name, place, true, on);
         }
-        ctx.install(app, place, true, await nodeFor(ctx, a, node));
+        ctx.install(app, place, true, nodeFor(a, node));
         return `Added ${a.title || app}.`;
       },
     },
@@ -254,11 +201,11 @@ export default {
       description: "Move an app's service to another node, for a place it's added to (by default where it runs now): it stops on the node it ran on and starts afresh on this one. apps_devices lists the nodes it can run on.",
       input: { type: "object", required: ["app", "node"], properties: { app: APP, node: NODE, scope: placeInput } },
       async run(ctx, { app, node, scope }) {
-        const a = await withService(ctx, await find(ctx, app));
+        const a = await find(ctx, app);
         if (!hasService(a)) throw new Error(`${a.title || app} has no service to move`);
         const place = scope ? placeOf(ctx, scope) : a.runs_on?.find((r) => r.scope)?.scope || a.installed?.find((s) => places(ctx).some((p) => p.may && p.id === s));
         if (!place) throw new Error(`${a.title || app} isn't added anywhere you may move it: apps_add adds it`);
-        ctx.install(app, place === `user:${ctx.me.user}` ? "user" : place, true, await nodeFor(ctx, a, node));
+        ctx.install(app, place === `user:${ctx.me.user}` ? "user" : place, true, nodeFor(a, node));
         return `${a.title || app} runs on ${node}.`;
       },
     },
@@ -359,7 +306,7 @@ export default {
       description: "Where an app's service runs (runs_on: each node, whether it's on, and what went wrong), the nodes it can run on (nodes, for apps_add and apps_move), and its problem when it runs on no node that's on.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "the name of an app with a service, like whatsapp" } } },
       async run(ctx, { app }) {
-        return where(ctx, await withService(ctx, await find(ctx, app)));
+        return where(await find(ctx, app));
       },
     },
     code: {
@@ -367,14 +314,8 @@ export default {
       description: "An app's code as deployed: its files and their sizes, or with path one of them as text. Everyone may read every app's code: start a new app from one that's close.",
       input: { type: "object", required: ["app"], properties: { app: APP, path: { type: "string", description: "a file's path, from apps_code without path, like app.js or src/app.js" } } },
       async run(ctx, { app, path }) {
-        const a = await find(ctx, app);
-        const bundle = a.bundle || a.built_in;
-        if (!bundle) throw new Error(`${app} has no deploy yet`);
-        const files = untar(await ctx.blob.get(bundle));
-        if (!path) return { bundle, files: files.map((f) => ({ path: f.path, size: f.bytes.length })) };
-        const file = files.find((f) => f.path === path);
-        if (!file) throw new Error(`${app} has no ${path}: it has ${files.map((f) => f.path).join(", ")}`);
-        return { path, text: new TextDecoder().decode(file.bytes) };
+        await find(ctx, app);
+        return ctx.code(app, path);
       },
     },
   },

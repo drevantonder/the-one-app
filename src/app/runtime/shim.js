@@ -244,6 +244,9 @@ function context(ask, body, appends, later) {
     },
     /// Every app in the network, as `GET /v1/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
+    /// An app's code as deployed (the release's, for a built-in app no one has added): `{ files: [{ path, size }] }`, or
+    /// with `path`, `{ path, text }` for that file.
+    code: async (app, path) => (await ask("code", { method: "POST", body: JSON.stringify({ app, path }) })).json(),
     /// The schedules the caller may switch, of the apps they may use, that are on and failed their last run, each as
     /// `catalog` gives an app's `schedules`, with its `app`.
     failing: async () => (await ask("failing")).json(),

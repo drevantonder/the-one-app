@@ -1240,6 +1240,10 @@ impl Node {
                 ok(json!({}))
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
+            ("POST", "/code") => {
+                let req: Value = serde_json::from_slice(&body)?;
+                ok(self.source(req["app"].as_str().unwrap_or_default(), None, req["path"].as_str()).await?)
+            }
             ("GET", "/failing") => ok(json!(self.failing_schedules(&grant.caller).await?)),
             // A push to the caller's devices, from this app, through the network's push Worker.
             ("POST", "/notify") => {

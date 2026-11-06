@@ -167,7 +167,9 @@ impl Node {
     /// Every app in the network: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
     /// title and icon, and for one built in, the bundle this release has of it; for those installed for them, what it
     /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the network hasn't
-    /// added yet, with no deploys.
+    /// added yet, with no deploys, each as its own code describes it. Every app that says what it is has `offers` (a
+    /// `screens` page or widget, `accounts`), and, with a service, `nodes`: the names of the viewer's own nodes it can
+    /// run on, and `cloudflare` for an admin when it's built for that.
     pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
             let m = i.r.db();
@@ -215,32 +217,39 @@ impl Node {
             Vec::new()
         };
         let mut out = Vec::new();
-        for (name, mut info, mine) in listed {
-            if self.0.apps.has(&name) {
-                if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
-                    // A fork's module may still give its first name; the network's name for it is the one that counts.
-                    let declared = Schedule::all(&Value::Object(d.clone()));
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "service" | "needs" | "advanced" | "labs"))) {
-                        info[k] = v;
-                    }
-                    // A tool of a lab that's off isn't there.
-                    if let Some(ops) = info["ops"].as_array_mut() {
-                        let on = self.with(|i| Ok(crate::labs::on_keys(&i.r.db().settings())))?;
-                        ops.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&crate::labs::app_key(&name, lab))));
-                    }
-                    if mine {
-                        let (list, activity) = self.schedules_of(viewer, &name, &declared)?;
-                        info["schedules"] = json!(list);
-                        info["activity"] = json!(activity);
-                    }
-                    if let Some(insights) = self.insights_of(viewer, &name)? {
-                        info["insights"] = insights;
-                    }
+        for (name, mut info, mine) in listed.into_iter().chain(missing.into_iter().map(|info| (info["name"].as_str().unwrap_or_default().to_string(), info, false))) {
+            let here = self.0.apps.has(&name);
+            let described = if here { self.0.apps.describe(&name).await } else { self.0.apps.describe_unadded(&name).await };
+            if let Ok(Value::Object(d)) = described {
+                let described = Value::Object(d.clone());
+                info["offers"] = json!({
+                    "screens": d["screens"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == "main")) || d["widgets"].as_array().is_some_and(|w| !w.is_empty()),
+                    "accounts": d["ops"].as_array().is_some_and(|o| o.iter().any(|o| o["name"] == "accounts")),
+                });
+                if let Some(nodes) = self.nodes_for(viewer, &described) {
+                    info["nodes"] = json!(nodes);
+                }
+                // A fork's module may still give its first name; the network's name for it is the one that counts.
+                let declared = Schedule::all(&described);
+                for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "service" | "needs" | "advanced" | "labs"))) {
+                    info[k] = v;
+                }
+                // A tool of a lab that's off isn't there.
+                if let Some(ops) = info["ops"].as_array_mut() {
+                    let on = self.with(|i| Ok(crate::labs::on_keys(&i.r.db().settings())))?;
+                    ops.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&crate::labs::app_key(&name, lab))));
+                }
+                if mine {
+                    let (list, activity) = self.schedules_of(viewer, &name, &declared)?;
+                    info["schedules"] = json!(list);
+                    info["activity"] = json!(activity);
+                }
+                if let Some(insights) = self.insights_of(viewer, &name)?.filter(|_| here) {
+                    info["insights"] = insights;
                 }
             }
             out.push(info);
         }
-        out.extend(missing);
         for info in &mut out {
             if let Some(image) = info["bundle"].as_str().or(info["built_in"].as_str()).and_then(|b| self.image(b)) {
                 (info["image"], info["image_kind"]) = (json!(image), json!("icon"));
@@ -251,6 +260,38 @@ impl Node {
             }
         }
         Ok(out)
+    }
+
+    /// Where an app that `described` itself runs its service for `viewer`, if it has one (its own, or one it uses): the
+    /// names of their own nodes on a platform the service is built for, and `cloudflare` for an admin when it's built
+    /// for that.
+    fn nodes_for(&self, viewer: &Caller, described: &Value) -> Option<Vec<String>> {
+        let platforms: Option<Vec<&str>> = described["service"]["platforms"].as_array().map(|p| p.iter().filter_map(Value::as_str).collect());
+        let uses_service = described["uses"]["services"].as_array().is_some_and(|s| !s.is_empty());
+        if described["service"].is_null() && !uses_service {
+            return None;
+        }
+        self.with(|i| {
+            let m = i.r.db();
+            let platform_of = |target: &str| match target {
+                t if t.contains("apple") => "mac",
+                t if t.contains("windows") => "windows",
+                t if t.contains("android") => "android",
+                _ => "linux",
+            };
+            let mut nodes: Vec<String> = m
+                .machines()
+                .into_iter()
+                .filter(|d| !d.removed && d.user == viewer.user && d.is(scopes::Kind::Compute))
+                .filter(|d| platforms.as_ref().is_none_or(|p| i.builds.get(&d.key).is_some_and(|b| p.contains(&platform_of(&b.target)))))
+                .map(|d| d.name)
+                .collect();
+            if platforms.as_ref().is_some_and(|p| p.contains(&"cloudflare")) && m.cloudflare_node().is_some() && m.may(&viewer.user, "change-settings", scopes::NETWORK) {
+                nodes.push(crate::rank::CLOUDFLARE.to_string());
+            }
+            Ok(nodes)
+        })
+        .ok()
     }
 
     /// The logo of `domain`, the site `app` connects to, as a data URL, once this device has fetched it. Fetches it
@@ -471,13 +512,16 @@ impl Node {
         Ok(out)
     }
 
-    /// An app's code as deployed, its latest or an earlier deploy's: its files, or one of them. Everyone may read
-    /// every app's code.
+    /// An app's code as deployed, its latest or an earlier deploy's: its files, or one of them. A built-in app no one
+    /// has added gives the release's. Everyone may read every app's code.
     pub async fn source(&self, app: &str, bundle: Option<&str>, path: Option<&str>) -> Result<Value> {
-        let history = self.with(|i| Ok(i.r.db().app(app).with_context(|| format!("no app named {app}"))?.history))?;
+        let history = self.with(|i| Ok(i.r.db().app(app).map(|a| a.history)))?;
+        let built_in = self.0.built_in.get(app);
+        ensure!(history.is_some() || built_in.is_some(), "no app named {app}");
+        let history = history.unwrap_or_default();
         let bundle = match bundle {
             Some(b) => history.iter().find(|(h, ..)| h.starts_with(b)).with_context(|| format!("{app} has no deploy {b}"))?.0.clone(),
-            None => history.last().with_context(|| format!("{app} has no deploy yet"))?.0.clone(),
+            None => history.last().map(|h| &h.0).or(built_in).with_context(|| format!("{app} has no deploy yet"))?.clone(),
         };
         let mut out = crate::app::deploy::show(&self.blob(&bundle).await?, path)?;
         out["app"] = json!(app);

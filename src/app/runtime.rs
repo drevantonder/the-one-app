@@ -97,8 +97,9 @@ struct Runtime {
     base: String,
     /// The node's port that apps' requests go out through.
     outbound: u16,
-    /// The apps loaded, (name, module source), and how many times the runtime was configured.
-    loaded: Mutex<(Vec<(String, String)>, u64)>,
+    /// The apps loaded, (name, module source); the built-in apps the network hasn't added, loaded only to be described;
+    /// and how many times the runtime was configured.
+    loaded: Mutex<(Vec<(String, String)>, Vec<(String, String)>, u64)>,
     /// The port workerd serves, held for as long as the node runs and handed to each that serves it.
     listener: std::net::TcpListener,
     /// What each loaded app says it is, once asked.
@@ -119,7 +120,7 @@ impl Apps {
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         write_config(dir, &[], port, outbound, 0)?;
-        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), listener, described: Mutex::new(Default::default()) });
+        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), Vec::new(), 0)), listener, described: Mutex::new(Default::default()) });
         if APART.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(Apps(runtime));
         }
@@ -138,21 +139,23 @@ impl Apps {
         Ok(command)
     }
 
-    /// Runs exactly these apps, (name, module source), restarting the runtime if they changed.
-    pub async fn load(&self, apps: Vec<(String, String)>) -> Result<()> {
+    /// Runs exactly these apps, (name, module source), restarting the runtime if they changed. `unadded` are built-in
+    /// apps no one has added: they run no calls, but `describe_unadded` asks them what they are.
+    pub async fn load(&self, apps: Vec<(String, String)>, unadded: Vec<(String, String)>) -> Result<()> {
         let runtime = self.0.clone();
         tokio::task::spawn_blocking(move || {
             let generation = {
                 let mut loaded = runtime.loaded.lock().unwrap();
-                if loaded.0 == apps {
+                if loaded.0 == apps && loaded.1 == unadded {
                     return Ok(());
                 }
-                loaded.1 += 1;
+                loaded.2 += 1;
                 let port = runtime.base.rsplit(':').next().unwrap().parse()?;
-                write_config(&runtime.dir, &apps, port, runtime.outbound, loaded.1)?;
+                write_config(&runtime.dir, &[apps.as_slice(), unadded.as_slice()].concat(), port, runtime.outbound, loaded.2)?;
                 loaded.0 = apps;
+                loaded.1 = unadded;
                 runtime.described.lock().unwrap().clear();
-                loaded.1
+                loaded.2
             };
             // Stopped, the runtime starts with this config: there's no one to wait for.
             if !runtime.restart() && APART.load(std::sync::atomic::Ordering::SeqCst) {
@@ -176,6 +179,11 @@ impl Apps {
         self.0.loaded.lock().unwrap().0.iter().any(|(n, _)| n == app)
     }
 
+    /// The built-in apps loaded that no one has added.
+    pub fn unadded(&self) -> Vec<String> {
+        self.0.loaded.lock().unwrap().1.iter().map(|(n, _)| n.clone()).collect()
+    }
+
     async fn ask(&self, app: &str, what: &str, body: Value) -> Result<Value> {
         self.ask_for(app, what, body, TIME_LIMIT).await
     }
@@ -185,6 +193,10 @@ impl Apps {
         if !self.has(app) {
             bail!("no app named {app} runs here");
         }
+        self.send(app, what, body, limit).await
+    }
+
+    async fn send(&self, app: &str, what: &str, body: Value, limit: Duration) -> Result<Value> {
         let url = format!("{}/{app}/{what}", self.0.base);
         let runtime = self.0.clone();
         let reply: Value = tokio::task::spawn_blocking(move || -> Result<Value> {
@@ -256,9 +268,23 @@ impl Apps {
         if let Some(d) = self.0.described.lock().unwrap().get(app) {
             return Ok(d.clone());
         }
-        let generation = self.0.loaded.lock().unwrap().1;
-        let d = self.ask(app, "describe", json!({})).await?["ok"].clone();
-        if self.0.loaded.lock().unwrap().1 == generation {
+        self.describing(app, self.ask(app, "describe", json!({}))).await
+    }
+
+    /// What a built-in app no one has added says it is and does: it describes itself, touching no data.
+    pub async fn describe_unadded(&self, app: &str) -> Result<Value> {
+        if let Some(d) = self.0.described.lock().unwrap().get(app) {
+            return Ok(d.clone());
+        }
+        ensure!(self.unadded().iter().any(|n| n == app), "no app named {app} waits to be added here");
+        self.describing(app, self.send(app, "describe", json!({}), TIME_LIMIT)).await
+    }
+
+    /// Asks for `app`'s description, keeping it unless the runtime was configured again meanwhile.
+    async fn describing(&self, app: &str, asking: impl std::future::Future<Output = Result<Value>>) -> Result<Value> {
+        let generation = self.0.loaded.lock().unwrap().2;
+        let d = asking.await?["ok"].clone();
+        if self.0.loaded.lock().unwrap().2 == generation {
             self.0.described.lock().unwrap().insert(app.to_string(), d.clone());
         }
         Ok(d)
