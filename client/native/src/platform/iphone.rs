@@ -6,7 +6,7 @@
 
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::Arc;
 use std::time::Duration;
 
 use objc2::rc::Retained;
@@ -14,42 +14,112 @@ use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
 use objc2_foundation::NSString;
 use serde_json::{Value, json};
-use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
+use tauri::Manager;
+use tauri::plugin::{Builder, TauriPlugin};
+use tauri_plugin_opener::OpenerExt;
+
+pub use super::mobile::*;
 
 tauri::ios_plugin_binding!(init_plugin_one);
 
-static PLUGIN: OnceLock<PluginHandle<tauri::Wry>> = OnceLock::new();
+/// What a call says it came from (as the iPhone app's did), and the platform as people say it.
+pub const CLIENT: &str = "phone";
+pub const LABEL: &str = "iPhone";
 
-pub fn plugin() -> TauriPlugin<tauri::Wry> {
-    Builder::new("one")
+/// The Swift plugin, and the system's file dialogs and opener.
+pub fn plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    let plugin: TauriPlugin<tauri::Wry> = Builder::new("one")
         .setup(|_, api| {
-            let _ = PLUGIN.set(api.register_ios_plugin(init_plugin_one)?);
+            super::mobile::registered(api.register_ios_plugin(init_plugin_one)?);
             Ok(())
         })
-        .build()
+        .build();
+    builder.plugin(plugin).plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init())
 }
 
-/// Asks the Swift side and waits for its answer, which it gives on the main thread: so never from there.
-pub fn ask(method: &str, args: Value) -> Result<Value, String> {
-    PLUGIN.get().ok_or("The app hasn't started yet.")?.run_mobile_plugin(method, args).map_err(|e| e.to_string())
+/// Every command comes from the window's own page: WKWebView gives a screen's frame none of the app's.
+pub fn ours(_: &tauri::ipc::Invoke<tauri::Wry>) -> bool {
+    true
 }
 
-pub async fn ask_off(method: &'static str, args: Value) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || ask(method, args)).await.map_err(|e| e.to_string())?
+/// An id of its own in its Keychain, which outlives signing out (as the iPhone app's was), hashed.
+pub fn this_device() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    crate::secrets::this_device().ok().map(|id| data_encoding::HEXLOWER.encode(&Sha256::digest(id)))
 }
 
-/// Tells the Swift side, not waiting.
-pub fn tell(method: &'static str, args: Value) {
-    std::thread::spawn(move || {
-        if let Err(e) = ask(method, args) {
-            eprintln!("{method}: {e}");
-        }
-    });
+pub fn data(app: &tauri::App) -> Result<PathBuf, String> {
+    app.path().app_local_data_dir().map_err(|e| e.to_string())
+}
+
+/// Tauri's app local data folder, found with no window.
+pub fn data_without_window() -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support").join(crate::identifier()))
+}
+
+/// The App Group, which the widgets share.
+pub fn widgets_dir() -> PathBuf {
+    group().unwrap_or_else(super::mobile::widgets_dir)
+}
+
+/// The home-screen widgets, drawn again.
+pub fn redraw_widgets() {
+    tell("reload", json!({}));
+}
+
+/// The count on the app's icon; none at 0.
+pub fn badge(count: u32) {
+    tell("badge", json!({ "count": count }));
+}
+
+pub fn can_scan() -> bool {
+    true
+}
+
+/// Signs in in the system's sign-in sheet, which comes back to the app's own link; a test's prints the link, to the
+/// loopback.
+pub fn sign_in(auth: &crate::signin::Auth, join: &str, print: bool) -> Result<(), String> {
+    if print {
+        return auth.sign_in(join, |u| Ok(println!("Sign in: {u}")));
+    }
+    auth.sign_in_here(join, |u| signed_in_at(u, true))
+}
+
+/// In a build with pushes (Info.plist's `Push`), once it's let in: asks the person the first time, and gives the push
+/// Worker this iPhone's token, each start, as a token can change. Its notification extension opens each one.
+pub fn let_in(device: Arc<one_client::Device>) {
+    if super::apple::info_true("Push") {
+        push(device, |token| one::push::Address { via: "apns".into(), address: token, env: environment().into(), topic: crate::identifier().into(), keys: None });
+    }
+}
+
+/// A screen's menu while a touch and hold has lifted what it's for out of the page: shown with it, as the Home Screen's
+/// → `{ index }` (null if none was chosen); else `{ lifted: false }`, and the page shows its own.
+pub async fn menu(items: Value) -> Value {
+    ask_off("menu", json!({ "items": items })).await.unwrap_or_else(|_| json!({ "lifted": false }))
+}
+
+pub async fn notify(ask: bool) -> Option<String> {
+    Some(ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string)).unwrap_or_else(|| "default".into()))
+}
+
+pub fn open(url: String) -> Result<(), String> {
+    crate::app().handle.opener().open_url(url, None::<&str>).map_err(|_| "Couldn’t open your browser.".to_string())
+}
+
+/// Shared from the app's own temporary folder (Quick Look shows it).
+pub async fn save(name: String, data: Vec<u8>, preview: bool) -> Result<(), String> {
+    give(std::env::temp_dir().join("screen-files"), name, data, preview).await
+}
+
+/// What the old iPhone app kept, taken over once.
+pub fn start(_: &tauri::App) {
+    super::apple::take_over(&crate::app().data);
 }
 
 /// The App Group's folder (Info.plist's `AppGroup`), which the widgets and the notification extension share.
-pub fn group() -> Option<PathBuf> {
-    let group = NSString::from_str(&crate::apple::info("AppGroup")?);
+fn group() -> Option<PathBuf> {
+    let group = NSString::from_str(&super::apple::info("AppGroup")?);
     let manager: Retained<AnyObject> = unsafe { msg_send![class!(NSFileManager), defaultManager] };
     let url: Option<Retained<AnyObject>> = unsafe { msg_send![&manager, containerURLForSecurityApplicationGroupIdentifier: &*group] };
     let path: Option<Retained<NSString>> = unsafe { msg_send![&url?, path] };
@@ -71,13 +141,6 @@ pub fn text_scale() -> f64 {
     (scaled / 17.0).clamp(0.5, 3.0)
 }
 
-/// Signs in in the system's sign-in sheet (ASWebAuthenticationSession, sharing Safari's passkeys and sign-ins) at
-/// `url` → where it came back to, the app's own `<cli>://signed-in/…`.
-pub fn sign_in(url: String) -> Result<String, String> {
-    let out = ask("signIn", json!({ "url": url, "scheme": one::config::CLI }))?;
-    out["url"].as_str().map(str::to_string).ok_or_else(|| "Sign in again.".into())
-}
-
 /// Which APNs service this build's pushes come through: what its provisioning profile says, as a build installed
 /// from Xcode is signed for development; with none, the App Store's.
 fn environment() -> &'static str {
@@ -90,25 +153,6 @@ fn environment() -> &'static str {
         None if cfg!(debug_assertions) => "sandbox",
         None => "production",
     }
-}
-
-/// In a build with pushes (Info.plist's `Push`), once it's let in: asks the person the first time, and gives the push
-/// Worker this iPhone's token, each start, as a token can change. Its notification extension opens each one.
-pub fn push(device: std::sync::Arc<one_client::Device>) {
-    if !crate::apple::info_true("Push") {
-        return;
-    }
-    tauri::async_runtime::spawn(async move {
-        let token = match ask_off("push", json!({})).await {
-            Ok(out) => out["token"].as_str().map(str::to_string),
-            Err(e) => return eprintln!("push: no token: {e}"),
-        };
-        let Some(token) = token else { return };
-        let address = one::push::Address { via: "apns".into(), address: token, env: environment().into(), topic: crate::identifier().into(), keys: None };
-        if let Err(e) = device.register_push(&address).await {
-            eprintln!("push: can't register: {e}");
-        }
-    });
 }
 
 /// The app, once it's started: the system may start it in the background for a widget's button.

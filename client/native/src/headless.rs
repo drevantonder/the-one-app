@@ -25,26 +25,10 @@ use serde_json::{Value, json};
 
 /// Where the window keeps what it keeps (Tauri's app local data folder), found with no window.
 pub fn data() -> PathBuf {
-    if let Some(app) = crate::APP.get() {
-        return app.data.clone();
+    match crate::APP.get() {
+        Some(app) => app.data.clone(),
+        None => crate::platform::data_without_window().unwrap_or_else(|| PathBuf::from(".")),
     }
-    // Android's: the app's own folder, which Kotlin says.
-    #[cfg(target_os = "android")]
-    if let Some(files) = crate::android::files() {
-        return files;
-    }
-    dirs_local().unwrap_or_else(|| PathBuf::from(".")).join(crate::identifier())
-}
-
-fn dirs_local() -> Option<PathBuf> {
-    #[cfg(windows)]
-    return std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
-    #[cfg(target_os = "macos")]
-    return std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"));
-    #[cfg(target_os = "android")]
-    return None;
-    #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
-    return std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
 }
 
 /// Answers `args` if they ask for one of these (`--headless <kind> <json>`) → whether they did.
@@ -148,14 +132,14 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<one_client::Device>>) -
         "call" => {
             let device = device(mine).await?;
             let id = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>());
-            let asked = json!({ "id": id, "app": text("app")?, "tool": text("tool")?, "input": input["input"], "client": crate::client_name() });
+            let asked = json!({ "id": id, "app": text("app")?, "tool": text("tool")?, "input": input["input"], "client": crate::platform::CLIENT });
             let out = crate::node(&device, "POST", "/v1/call", Some(asked)).await?;
             // What a tool did shows on the widgets.
             crate::widgets_changed(&device).await;
             Ok(json!({ "ok": out["ok"] }))
         }
         "widgets" => {
-            let dir = crate::widgets_dir();
+            let dir = crate::platform::widgets_dir();
             crate::widgets::refresh(&*device(mine).await?, &dir).await?;
             Ok(json!({ "dir": dir }))
         }

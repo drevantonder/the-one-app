@@ -68,7 +68,7 @@ class MainActivity : TauriActivity() {
         page = webView
         backFirst()
         // The token the app's commands need goes to the page's own frame alone: a screen's sandboxed frame, whose origin is
-        // none, is not answered (src/android.rs `ours`).
+        // none, is not answered (src/platform/android.rs `ours`).
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(webView, "oneBridge", setOf("https://tauri.localhost")) { _, _, _, isMainFrame, reply ->
                 if (isMainFrame) reply.postMessage(Host.token)

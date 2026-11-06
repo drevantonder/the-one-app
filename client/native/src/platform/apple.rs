@@ -55,7 +55,7 @@ pub fn take_over(data: &Path) {
         if defaults().boolForKey(&NSString::from_str("loginItemSet")) {
             let _ = std::fs::write(data.join("opened-at-login"), "");
         }
-        // The widgets they hid from the menu bar (src/menubar.rs).
+        // The widgets they hid from the menu bar (menubar.rs).
         if let Some(hidden) = defaults().stringArrayForKey(&NSString::from_str("hiddenWidgets")) {
             let kinds: Vec<String> = hidden.iter().map(|k| k.to_string()).collect();
             let _ = std::fs::write(data.join("menubar-hidden"), kinds.join("\n"));

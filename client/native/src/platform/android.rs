@@ -9,17 +9,23 @@
 //!   Tauri plugin `OnePlugin` (what needs the window's activity: the Custom Tab, the scanner, the share sheet).
 
 use std::ffi::c_void;
-use std::sync::OnceLock;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use jni::objects::{GlobalRef, JClass, JString, JValue};
 use jni::sys::{JNI_VERSION_1_6, jint, jstring};
 use jni::{JNIEnv, JavaVM};
 use serde_json::{Value, json};
-use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
+use tauri::plugin::{Builder, TauriPlugin};
+
+pub use super::mobile::*;
+
+/// What a call says it came from, and the platform as people say it.
+pub const CLIENT: &str = "android";
+pub const LABEL: &str = "Android";
 
 static VM: OnceLock<JavaVM> = OnceLock::new();
 static HOST: OnceLock<GlobalRef> = OnceLock::new();
-static PLUGIN: OnceLock<PluginHandle<tauri::Wry>> = OnceLock::new();
 
 /// Found as the library loads, on a thread that sees the app's classes: a thread of Rust's own can't find them.
 #[unsafe(no_mangle)]
@@ -34,31 +40,16 @@ pub extern "system" fn JNI_OnLoad(vm: JavaVM, _: *mut c_void) -> jint {
     JNI_VERSION_1_6
 }
 
-pub fn plugin() -> TauriPlugin<tauri::Wry> {
-    Builder::new("one")
+/// Kotlin's plugin. A phone's notifications are its own (Push.kt), which Tauri's plugin would take from it, and it saves
+/// and opens what screens give with its own share sheet.
+pub fn plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    let plugin: TauriPlugin<tauri::Wry> = Builder::new("one")
         .setup(|_, api| {
-            let _ = PLUGIN.set(api.register_android_plugin("app.client", "OnePlugin")?);
+            super::mobile::registered(api.register_android_plugin("app.client", "OnePlugin")?);
             Ok(())
         })
-        .build()
-}
-
-/// Asks the plugin (the window's activity) and waits for its answer: never from the main thread.
-pub fn ask(method: &str, args: Value) -> Result<Value, String> {
-    PLUGIN.get().ok_or("The app hasn't started yet.")?.run_mobile_plugin(method, args).map_err(|e| e.to_string())
-}
-
-pub async fn ask_off(method: &'static str, args: Value) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || ask(method, args)).await.map_err(|e| e.to_string())?
-}
-
-/// Tells the plugin, not waiting.
-pub fn tell(method: &'static str, args: Value) {
-    std::thread::spawn(move || {
-        if let Err(e) = ask(method, args) {
-            eprintln!("{method}: {e}");
-        }
-    });
+        .build();
+    builder.plugin(plugin)
 }
 
 /// Asks `Host`, which needs no window: `{ "ok": … }` or `{ "error": "…" }`, as one string.
@@ -95,14 +86,65 @@ pub fn ours(invoke: &tauri::ipc::Invoke<tauri::Wry>) -> bool {
 
 /// The app's own folder, where it keeps what isn't secret (Kotlin's `filesDir`): the same for the window and for what
 /// runs with none.
-pub fn files() -> Option<std::path::PathBuf> {
+pub fn data_without_window() -> Option<PathBuf> {
     host("files", json!({})).ok()?.as_str().map(Into::into)
+}
+
+pub fn data(_: &tauri::App) -> Result<PathBuf, String> {
+    data_without_window().ok_or_else(|| "Kotlin gave no folder for the app.".into())
+}
+
+/// Where what screens give is shared from, which its share sheet is let read (android/.../res/xml/files.xml).
+fn given() -> PathBuf {
+    crate::app().data.join("given")
+}
+
+/// What the old Kotlin app kept, taken over once; and what screens gave to be shared, shown or saved is gone with the
+/// last run.
+pub fn start(_: &tauri::App) {
+    take_over();
+    let _ = std::fs::remove_dir_all(given());
+}
+
+pub async fn save(name: String, data: Vec<u8>, preview: bool) -> Result<(), String> {
+    give(given(), name, data, preview).await
+}
+
+/// The home-screen widgets, drawn again.
+pub fn redraw_widgets() {
+    let _ = host("reload", json!({}));
+}
+
+/// An Android launcher counts what notifications it shows, not what the app says.
+pub fn badge(_: u32) {}
+
+/// Whether this build shows notifications, asking the person first if `ask`; none where it has no pushes to show (no
+/// Firebase project in its config.toml), so Settings has no row for it.
+pub async fn notify(ask: bool) -> Option<String> {
+    ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string))
+}
+
+/// The network's own pages open in a Custom Tab, as signed in there as the browser is; others in the app for them.
+pub fn open(url: String) -> Result<(), String> {
+    let own = crate::app().address().is_some_and(|a| url.starts_with(&a));
+    ask("open", json!({ "url": url, "own": own })).map(drop).map_err(|_| "Couldn’t open your browser.".to_string())
+}
+
+/// Signs in in a Chrome Custom Tab, which comes back to the app's own link; a test's prints the link and waits for it
+/// to be opened.
+pub fn sign_in(auth: &crate::signin::Auth, join: &str, print: bool) -> Result<(), String> {
+    auth.sign_in_here(join, |u| {
+        if print {
+            println!("Sign in: {u}");
+        }
+        signed_in_at(u, !print)
+    })
 }
 
 /// What the Kotlin app kept, taken over once (Kotlin's `Host.takeOver`, which reads its SharedPreferences and Keystore
 /// key): its address, an invite's secret, its sign-in's client and who's signed in, into this folder, and its refresh
 /// token into the secret store as this app keeps it. Its device keys are kept where they were.
-pub fn take_over() {
+fn take_over() {
     if let Err(e) = host("takeOver", json!({ "scheme": one::config::CLI })) {
         eprintln!("taking over the old app's sign-in: {e}");
     }
@@ -129,27 +171,12 @@ pub fn text_scale() -> f64 {
     host("textScale", json!({})).ok().and_then(|v| v.as_f64()).unwrap_or(1.0)
 }
 
-/// Signs in in a Chrome Custom Tab at `url` (or, in a test, waiting only for the link): comes back to the app's own link,
-/// `<cli>://signed-in/…`, which Android opens the app on → where it came back to.
-pub fn sign_in(url: String, open: bool) -> Result<String, String> {
-    let out = ask("signIn", json!({ "url": url, "scheme": one::config::CLI, "open": open }))?;
-    out["url"].as_str().map(str::to_string).ok_or_else(|| "Sign in again.".into())
-}
-
-/// Once let in, in a build with pushes (a Firebase project in its config.toml): gives the push Worker this phone's FCM token,
-/// as it starts and whenever it changes (`push`). Notes are opened with the device's key by Kotlin's `PushService`.
-pub fn push(device: std::sync::Arc<one_client::Device>) {
-    tauri::async_runtime::spawn(async move {
-        let token = match ask_off("push", json!({})).await {
-            Ok(out) => out["token"].as_str().map(str::to_string),
-            Err(e) => return eprintln!("push: no token: {e}"),
-        };
-        let Some(token) = token else { return };
-        let address = one::push::Address { via: "fcm".into(), address: token, ..Default::default() };
-        if let Err(e) = device.register_push(&address).await {
-            eprintln!("push: can't register: {e}");
-        }
-    });
+/// Once let in, in a build with pushes (a Firebase project in its config.toml): gives the push Worker this phone's FCM
+/// token, as it starts and whenever it changes (`register-push`); and asks the person, once, whether it may show
+/// notifications. Notes are opened with the device's key by Kotlin's `PushService`.
+pub fn let_in(device: Arc<one_client::Device>) {
+    push(device, |token| one::push::Address { via: "fcm".into(), address: token, ..Default::default() });
+    tell("notify", json!({ "ask": true, "once": true }));
 }
 
 /// # Safety

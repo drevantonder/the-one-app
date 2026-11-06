@@ -54,7 +54,7 @@ rand = "0.8"
 url = "2"
 tokio = { version = "1", features = ["sync", "time", "macros"] }
 
-# Windows' own, beside the window (src/windows.rs): the taskbar button's count (BadgeUpdateManager), opening at login
+# Windows' own, beside the window (src/platform/windows.rs): the taskbar button's count (BadgeUpdateManager), opening at login
 # (StartupTask), the links to the network's address (AppUriHandler), and the machine's id in the registry. Both already built for Tauri and iroh.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "ApplicationModel", "System", "Win32_Foundation", "Win32_Graphics_Dwm"] }
@@ -62,11 +62,11 @@ windows-collections = "0.3"
 windows-registry = "0.6"
 
 # The OS's secret store for the device key and the refresh token: the Secret Service, the Credential Manager (Android's
-# is its Keystore, through Kotlin: src/android.rs).
+# is its Keystore, through Kotlin: src/platform/android.rs).
 [target.'cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))'.dependencies]
 keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
 
-# Apple's own (src/secrets.rs, src/mac.rs): the Keychain in the group the extensions read, Info.plist, and the Mac's
+# Apple's own (src/secrets.rs, src/platform/mac.rs): the Keychain in the group the extensions read, Info.plist, and the Mac's
 # login item, node and defaults. All already built for Tauri (wry, tao) and keyring.
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 security-framework = { version = "3", features = ["OSX_10_15"] }
@@ -74,16 +74,16 @@ core-foundation = "0.10"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSUserDefaults", "NSString", "NSObject", "NSArray"] }
 
-# Notifications, but on a phone, whose are its own (src/iphone.rs, src/android.rs): the plugin's would take them from it.
+# Notifications, but on a phone, whose are its own (src/platform/iphone.rs, src/platform/android.rs): the plugin's would take them from it.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 tauri-plugin-notification = "2"
 
-# Where a file a screen gives is saved, and links opened outside; Android's are its own (src/android.rs).
+# Where a file a screen gives is saved, and links opened outside; Android's are its own (src/platform/android.rs).
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 
-# Android's own (src/android.rs): Kotlin's Keystore, widgets and pushes call the app's library, and it calls them back,
+# Android's own (src/platform/android.rs): Kotlin's Keystore, widgets and pushes call the app's library, and it calls them back,
 # through JNI. Tauri already builds it (wry).
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

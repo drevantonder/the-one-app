@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 
-/** What the window's activity does for the app (client/native/src/android.rs): signing in in a Chrome Custom Tab, which comes
+/** What the window's activity does for the app (client/native/src/platform/android.rs): signing in in a Chrome Custom Tab, which comes
  *  back to the app's own link; links, files and the document scanner; haptics; notifications' permission and this
  *  phone's FCM token; and the system bars, which follow light or dark. */
 @TauriPlugin

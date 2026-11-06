@@ -6,7 +6,7 @@ import UserNotifications
 import WebKit
 import WidgetKit
 
-/// The app's Rust (src/iphone.rs `one_ios`): what happened here, which it acts on → its answer. It waits, so it's
+/// The app's Rust (src/platform/iphone.rs `one_ios`): what happened here, which it acts on → its answer. It waits, so it's
 /// called off the main thread.
 @_silgen_name("one_ios") func oneIOS(_ kind: UnsafePointer<CChar>, _ json: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
 @_silgen_name("one_ios_free") func oneIOSFree(_ s: UnsafeMutablePointer<CChar>?)

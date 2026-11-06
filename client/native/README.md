@@ -14,7 +14,7 @@ on a desktop.
 ## Each platform
 
 Each keeps the old app's identity, so it installed over it in place and kept its sign-in: the Mac's `app.<cli>.mac`
-(Developer ID team, same designated requirement, its Keychain items and defaults, taken over by `apple::take_over`), the
+(Developer ID team, same designated requirement, its Keychain items and defaults, taken over by `platform::apple::take_over`), the
 iPhone's `app.<cli>.phone` with `.widgets`, `.notifications` and the App Group `group.app.<cli>.phone` (also its
 Keychain group), Android's `app.<cli>.android` signed with the debug key it was signed with (`Host.takeOver`), Windows'
 package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a device would sign in again as a new one.
@@ -27,7 +27,7 @@ package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a de
   Tauri plugin of the app's own, `Widget/` the home-screen widget, `Notifications/` the notification extension.
 - Android: `android/build.sh`, Kotlin only where it must be (`android/app/src/main/kotlin/app/client`); only throwaways
   build it, as nothing built the old one. Android gives screens' frames Tauri's `ipc`, so each command carries a token
-  only the page's own frame has (`android::ours`).
+  only the page's own frame has (`ours` in src/platform/android.rs).
 - Windows: MSIX, cross-built on Linux and packaged with the C# helper (Widgets board, toasts) in the Windows VM by
   `windows/build.sh`.
 

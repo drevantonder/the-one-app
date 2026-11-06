@@ -40,7 +40,7 @@ mod store {
         if !service.ends_with(" device") {
             return None;
         }
-        GROUP.get_or_init(|| crate::apple::info("KeychainGroup")).clone()
+        GROUP.get_or_init(|| crate::platform::apple::info("KeychainGroup")).clone()
     }
 
     /// The item's query: in its group (`shared`), or where an older build kept it.
@@ -109,16 +109,16 @@ mod store {
     }
 
     pub fn get(service: &str, account: &str) -> Option<Vec<u8>> {
-        let said = crate::android::host("get", json!({ "name": name(service, account) })).ok()?;
+        let said = crate::platform::host("get", json!({ "name": name(service, account) })).ok()?;
         BASE64.decode(said.as_str()?.as_bytes()).ok()
     }
 
     pub fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
-        crate::android::host("set", json!({ "name": name(service, account), "value": BASE64.encode(value) })).map(drop)
+        crate::platform::host("set", json!({ "name": name(service, account), "value": BASE64.encode(value) })).map(drop)
     }
 
     pub fn delete(service: &str, account: &str) {
-        let _ = crate::android::host("delete", json!({ "name": name(service, account) }));
+        let _ = crate::platform::host("delete", json!({ "name": name(service, account) }));
     }
 }
 

@@ -37,7 +37,7 @@ pub fn set_hidden(kind: &str, hide: bool) {
 /// The widgets, each kind once, in the kept cache's order (as arranged on the pages): `(kind, title, app, app's title,
 /// line)`, the line its headline's first, at most 40 characters.
 pub fn widgets() -> Vec<(String, String, String, String, String)> {
-    let cache: Value = std::fs::read(crate::widgets_dir().join("widgets.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let cache: Value = std::fs::read(super::widgets_dir().join("widgets.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for w in cache["widgets"].as_array().into_iter().flatten() {
@@ -103,7 +103,7 @@ fn made(handle: &AppHandle, kind: &str, label: &str, app: &str) -> tauri::Result
         .show_menu_on_left_click(false)
         .on_tray_icon_event(move |_, e| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = e {
-                crate::toggle_widget(&clicked, rect);
+                toggle_widget(&clicked, rect);
             }
         })
         .on_menu_event(|_, e| {
@@ -124,4 +124,32 @@ fn made(handle: &AppHandle, kind: &str, label: &str, app: &str) -> tauri::Result
         }
     });
     Ok(tray)
+}
+
+/// A widget's menu bar item clicked: the widget under it (the panel's page, showing only that widget, in a window of
+/// its own), or gone if it shows.
+fn toggle_widget(kind: &str, at: tauri::Rect) {
+    let handle = &app().handle;
+    let page = format!("index.html?panel&widget={}", url::form_urlencoded::byte_serialize(kind.as_bytes()).collect::<String>());
+    let window = match handle.get_webview_window("widget") {
+        Some(w) => {
+            if !w.url().is_ok_and(|u| u.as_str().ends_with(&page)) {
+                let _ = w.hide();
+                let _ = w.navigate(tauri::Url::parse(&format!("https://tauri.localhost/{page}")).unwrap());
+            }
+            w
+        }
+        None => match crate::popup(handle, "widget", &page) {
+            Ok(w) => w,
+            Err(e) => return eprintln!("the widget's window: {e}"),
+        },
+    };
+    crate::toggle_under(&window, Some(at));
+}
+
+/// One of the app menu's commands, to the window's page, which does it: "sidebar" (fold it or unfold it), "join".
+fn command(name: &str) {
+    if let Some(w) = app().handle.get_webview_window("main") {
+        let _ = w.eval(format!("window.__oneNative?.command({})", json!(name)));
+    }
 }

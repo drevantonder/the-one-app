@@ -15,7 +15,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** What the app's library asks of Android that needs no window (src/android.rs's `host`): the Keystore this device's keys
+/** What the app's library asks of Android that needs no window (src/platform/android.rs's `host`): the Keystore this device's keys
  *  are sealed by, its folder, its name, and the widgets drawn again. `call` answers `{ "ok": … }` or `{ "error": … }`. */
 object Host {
     private val context get() = ClientApp.context

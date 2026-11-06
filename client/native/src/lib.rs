@@ -7,22 +7,11 @@
 
 #[macro_use]
 mod commands;
-#[cfg(target_os = "android")]
-mod android;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-mod apple;
 mod headless;
-#[cfg(target_os = "ios")]
-mod iphone;
-#[cfg(target_os = "macos")]
-mod mac;
-#[cfg(target_os = "macos")]
-mod menubar;
+mod platform;
 mod secrets;
 mod signin;
 mod widgets;
-#[cfg(windows)]
-mod windows;
 
 pub use headless::answer as headless;
 
@@ -35,56 +24,26 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_clipboard_manager::ClipboardExt;
-#[cfg(desktop)]
-use tauri_plugin_dialog::DialogExt;
-#[cfg(desktop)]
-use tauri_plugin_notification::{NotificationExt, PermissionState};
-#[cfg(not(target_os = "android"))]
-use tauri_plugin_opener::OpenerExt;
 
-/// What a call says it came from: the platform, an iPhone as "phone", as the iPhone app's did.
-fn client_name() -> String {
-    std::env::consts::OS.replace("macos", "mac").replace("ios", "phone")
-}
-
-/// The app's id, as build.rs names it for this platform: `app.<cli>.<platform>` (a throwaway's, `….throwaway`).
+/// The app's id, as build.rs names it for this platform: `app.<cli>.<platform>` (a throwaway's, `….throwaway`). Android
+/// names nothing by it: Kotlin gives its folder.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn identifier() -> &'static str {
     env!("IDENTIFIER")
 }
 
 /// What the person calls this device, as their other devices list it.
 fn device_name() -> String {
-    // A Mac, as it's named in its settings ("Andre's MacBook Air"), as the Mac app named it.
-    #[cfg(target_os = "macos")]
-    if let Some(name) = std::process::Command::new("/usr/sbin/scutil").args(["--get", "ComputerName"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|n| !n.is_empty()) {
-        return name;
-    }
-    #[cfg(target_os = "ios")]
-    if let Some(name) = iphone::name() {
-        return name;
-    }
-    #[cfg(target_os = "android")]
-    if let Some(name) = android::name() {
-        return name;
-    }
-    // Windows names it in COMPUTERNAME.
-    let host = std::env::var("HOSTNAME").ok().or_else(|| std::env::var("COMPUTERNAME").ok()).or_else(|| std::fs::read_to_string("/etc/hostname").ok()).map(|h| h.trim().to_string()).filter(|h| !h.is_empty());
-    host.unwrap_or_else(|| platform().into())
+    platform::name().unwrap_or_else(|| platform::LABEL.into())
 }
 
 /// The platform, as people say it (in a debug build, `PLATFORM` for a test: a phone's look on a computer).
-fn platform() -> &'static str {
+fn label() -> &'static str {
     #[cfg(debug_assertions)]
     if let Some(p) = env("PLATFORM") {
         return if p == "iPhone" { "iPhone" } else if p == "Android" { "Android" } else { "Linux" };
     }
-    match std::env::consts::OS {
-        "macos" => "Mac",
-        "windows" => "Windows",
-        "ios" => "iPhone",
-        "android" => "Android",
-        _ => "Linux",
-    }
+    platform::LABEL
 }
 
 /// A setting for a test from its environment, named by the CLI's name (`ONE_ADDRESS`): `ADDRESS`, the network's;
@@ -92,34 +51,6 @@ fn platform() -> &'static str {
 /// there); `CONTROL`, in a debug build, a loopback port an agent drives the window by.
 fn env(name: &str) -> Option<String> {
     std::env::var(format!("{}_{name}", one::config::CLI.to_uppercase())).ok().filter(|v| !v.is_empty())
-}
-
-/// The device this app is on, which signing in again replaces its sign-in under: the computer's own node's key, where
-/// one runs here (as the Mac app's was); else the machine's own id, hashed: Linux's machine-id, or Windows' MachineGuid,
-/// which outlives reinstalling Windows' apps (as the Windows app's was); on an iPhone, an id of its own in its Keychain,
-/// which outlives signing out (as the iPhone app's was); on an Android phone, its Android ID for this app.
-fn this_device() -> Option<String> {
-    #[cfg(not(target_os = "android"))]
-    use sha2::{Digest, Sha256};
-    #[cfg(target_os = "ios")]
-    return secrets::this_device().ok().map(|id| data_encoding::HEXLOWER.encode(&Sha256::digest(id)));
-    // An Android phone's own id, which outlives reinstalling (as the Kotlin app's was).
-    #[cfg(target_os = "android")]
-    return android::this_device();
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    local_node().or_else(|| {
-        #[cfg(windows)]
-        let id = windows::machine_guid()?;
-        #[cfg(not(windows))]
-        let id = ["/etc/machine-id", "/var/lib/dbus/machine-id"].iter().find_map(|p| std::fs::read_to_string(p).ok())?;
-        Some(data_encoding::HEXLOWER.encode(&Sha256::digest(format!("this device {}", id.trim()).as_bytes())))
-    })
-}
-
-/// This computer's own node's key, where one runs here.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-fn local_node() -> Option<String> {
-    local_state()?["device"]["key"].as_str().map(str::to_string)
 }
 
 /// What this computer's own node says of itself, where one runs here.
@@ -240,22 +171,13 @@ async fn node(device: &one_client::Device, method: &str, path: &str, body: Optio
     }
 }
 
-/// Where the platform's own widgets read the pages' widgets (`widgets`): on an iPhone, the App Group they share.
-fn widgets_dir() -> PathBuf {
-    #[cfg(target_os = "ios")]
-    if let Some(group) = iphone::group() {
-        return group;
-    }
-    headless::data().join("widgets")
-}
-
 /// The widgets kept for the platform's own again, and drawn again where the app runs.
 async fn widgets_changed(device: &one_client::Device) {
-    if let Err(e) = widgets::refresh(device, &widgets_dir()).await {
+    if let Err(e) = widgets::refresh(device, &platform::widgets_dir()).await {
         eprintln!("widgets: {e}");
     }
     if APP.get().is_some() {
-        redraw_widgets();
+        platform::redraw_widgets();
     }
 }
 
@@ -273,23 +195,12 @@ fn keep_widgets() {
     });
 }
 
-/// Let in, now or as it starts: the platform's own widgets kept, and its pushes registered: on Windows its channel (by
-/// the package's helper, which has the Windows App SDK), since a channel lasts 30 days; on an iPhone or Android phone its
-/// token.
+/// Let in, now or as it starts: the platform's own widgets kept, and its pushes registered.
 fn let_in() {
     keep_widgets();
-    #[cfg(target_os = "ios")]
     if let Ok(device) = app().device() {
-        iphone::push(device);
+        platform::let_in(device);
     }
-    // An Android phone asks the person, once, whether it may show notifications (in a build with pushes).
-    #[cfg(target_os = "android")]
-    if let Ok(device) = app().device() {
-        android::push(device);
-        android::tell("notify", json!({ "ask": true, "once": true }));
-    }
-    #[cfg(windows)]
-    windows::register_push();
 }
 
 /// The panel, drawn before this device was in (signed out), drawn again now it is.
@@ -306,33 +217,10 @@ fn changed() {
     tauri::async_runtime::spawn(async move { widgets_changed(&device).await });
 }
 
-/// The platform's own widgets drawn again from what's kept for them: a Mac's menu bar items, an iPhone's or Android
-/// phone's home-screen widgets.
-fn redraw_widgets() {
-    #[cfg(target_os = "macos")]
-    menubar::update();
-    #[cfg(target_os = "ios")]
-    iphone::tell("reload", json!({}));
-    #[cfg(target_os = "android")]
-    let _ = android::host("reload", json!({}));
-}
-
-/// What waits for the person (every app's badge on every page, and Settings'), counted on the app's icon: Windows'
-/// taskbar button (BadgeUpdateManager, by the package's identity), elsewhere what Tauri sets (the dock's, the
-/// launcher's); none at 0.
+/// What waits for the person (every app's badge on every page, and Settings'), counted on the app's icon; none at 0.
 #[tauri::command]
 fn badge(count: u32) {
-    #[cfg(windows)]
-    windows::badge(count);
-    #[cfg(all(desktop, not(windows)))]
-    if let Some(w) = app().handle.get_webview_window("main") {
-        let _ = w.set_badge_count((count > 0).then_some(count as i64));
-    }
-    #[cfg(target_os = "ios")]
-    iphone::tell("badge", json!({ "count": count }));
-    // An Android launcher counts what notifications it shows, not what the app says.
-    #[cfg(target_os = "android")]
-    let _ = count;
+    platform::badge(count);
 }
 
 /// An access token, from the refresh token in the secret store (a request to auth, so off the async threads).
@@ -353,55 +241,30 @@ fn native() -> Value {
     a.page.store(true, Ordering::Relaxed);
     let opened = a.opened.lock().unwrap().take();
     let local = local_state();
-    let unpaired = cfg!(target_os = "macos") && local.as_ref().is_some_and(|s| s["network"].is_null());
-    #[cfg(target_os = "macos")]
-    mac::menu_now(signed_in, unpaired);
+    let unpaired = platform::unpaired(local.as_ref());
+    platform::menus(signed_in, unpaired);
     json!({
-        "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": platform(), "device": device_name(), "client": client_name(),
+        "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": label(), "device": device_name(), "client": platform::CLIENT,
         "address": address, "signedIn": signed_in, "user": if signed_in { a.kept("user") } else { None },
         "opened": opened,
         // This computer's own node, where one runs here: "This device" in the panel.
         "node": local.as_ref().and_then(|s| s["device"]["key"].as_str().map(str::to_string)),
         // A Mac whose own node is in no network yet joins one with a pairing code (`pair`), as the Mac app did.
         "unpaired": unpaired,
-        // Open at login: whether it's on, where the app switches it (none where it can't yet).
-        "login": login_now(&a.handle),
+        // Open at login: whether it's on, where the app switches it (none where it can't).
+        "login": platform::login(),
         // Let Agents Use This Mac, on a Mac (Computer Use's helper reads it).
-        "computerUse": computer_use_now(),
+        "computerUse": platform::computer_use(),
         // A Mac's widgets hidden from the menu bar (their own items), which its panel shows again.
-        "menubar": menubar_hidden(),
-        // An iPhone's: the document camera, and touch and hold lifting what's held with its menu (`menu`).
-        "scan": cfg!(target_os = "ios") || can_scan(),
+        "menubar": platform::menubar_hidden(),
+        // The document camera, where there's one (an iPhone's, Android's scanner).
+        "scan": platform::can_scan(),
+        // An iPhone's touch and hold lifting what's held with its menu (`menu`).
         "lifts": cfg!(target_os = "ios"),
-        // How much bigger than usual the person has made text (a phone's: Android's font size, an iPhone's Dynamic Type), for the
-        // window to be zoomed by.
-        "textScale": text_scale(),
+        // How much bigger than usual the person has made text (a phone's: Android's font size, an iPhone's Dynamic Type),
+        // for the window to be zoomed by.
+        "textScale": platform::text_scale(),
     })
-}
-
-fn can_scan() -> bool {
-    #[cfg(target_os = "android")]
-    return android::can_scan();
-    #[cfg(not(target_os = "android"))]
-    false
-}
-
-fn text_scale() -> f64 {
-    #[cfg(target_os = "android")]
-    return android::text_scale();
-    #[cfg(target_os = "ios")]
-    return iphone::text_scale();
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    1.0
-}
-
-/// Links to the network's address open this app (Windows' app links), as of the address it signs in to.
-fn claim() {
-    #[cfg(windows)]
-    {
-        let address = app().address();
-        std::thread::spawn(move || windows::claim(address.as_deref()));
-    }
 }
 
 /// Takes what the person typed: an address, or an invite link (`<address>/invite#…`), whose secret goes with this
@@ -426,7 +289,7 @@ fn address_of(typed: &str) -> Result<String, String> {
     a.keep("address", Some(&origin));
     let invite = (url.path() == "/invite").then(|| url.fragment().unwrap_or_default().to_string()).filter(|s| !s.is_empty());
     a.keep("invite", invite.as_deref());
-    claim();
+    platform::claim(a.address());
     Ok(origin)
 }
 
@@ -438,43 +301,12 @@ async fn sign_in() -> Result<(), String> {
     a.address().ok_or("Enter your address first.")?;
     let join = one_client::join_of(secrets::signing_in()?);
     let auth = a.auth()?;
-    #[cfg(not(target_os = "android"))]
-    let handle = a.handle.clone();
     let print = env("SIGN_IN_PRINT").is_some();
-    tauri::async_runtime::spawn_blocking(move || {
-        // An iPhone signs in in the system's sheet, which comes back to the app's own link; a test's prints the link.
-        #[cfg(target_os = "ios")]
-        if !print {
-            return auth.sign_in_here(&join, iphone::sign_in);
-        }
-        // An Android phone signs in in a Chrome Custom Tab, which comes back to the app's own link; a test's prints the
-        // link and waits for it to be opened.
-        #[cfg(target_os = "android")]
-        return auth.sign_in_here(&join, |u| {
-            if print {
-                println!("Sign in: {u}");
-            }
-            android::sign_in(u, !print)
-        });
-        #[cfg(not(target_os = "android"))]
-        auth.sign_in(&join, |u| {
-            if print {
-                println!("Sign in: {u}");
-                return Ok(());
-            }
-            handle.opener().open_url(u, None::<&str>).map_err(|e| e.to_string())
-        })
-    })
-        .await
-        .map_err(|e| e.to_string())??;
+    tauri::async_runtime::spawn_blocking(move || platform::sign_in(&auth, &join, print)).await.map_err(|e| e.to_string())??;
     let token = token().await?;
     a.keep("user", Some(&signin::Auth::subject(&token)));
     // Back in front of the browser it signed in with.
-    #[cfg(desktop)]
-    if let Some(w) = a.handle.get_webview_window("main") {
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    platform::show();
     Ok(())
 }
 
@@ -497,7 +329,7 @@ async fn join() -> Result<Value, String> {
             Some(d) => d.clone(),
             None => {
                 let new = Arc::new(client(&a.data, &address, &id, secret));
-                if let Some(on) = this_device() {
+                if let Some(on) = platform::this_device() {
                     new.on(&on);
                 }
                 *d = Some(new.clone());
@@ -525,7 +357,7 @@ async fn join() -> Result<Value, String> {
     let name = if cfg!(desktop) { format!("{} on {}", one::config::NAME, device_name()) } else { device_name() };
     device.ask(&token, &name, invite.as_deref()).await.map_err(|e| e.to_string())?;
     println!("Code: {}", device.code());
-    approve_here(device.code());
+    platform::approve_here(device.code());
     Ok(json!({ "code": device.code(), "invited": invite.is_some() }))
 }
 
@@ -615,8 +447,8 @@ async fn sign_out() -> Result<(), String> {
         secrets::forget_device(&format!("{address} {user}"));
     }
     a.keep("user", None);
-    widgets::forget(&widgets_dir());
-    redraw_widgets();
+    widgets::forget(&platform::widgets_dir());
+    platform::redraw_widgets();
     badge(0);
     Ok(())
 }
@@ -625,24 +457,7 @@ async fn sign_out() -> Result<(), String> {
 /// where a phone's build has no pushes to show (no Firebase project in its config.toml), so Settings has no row for it.
 #[tauri::command]
 async fn notify(ask: bool) -> Option<String> {
-    #[cfg(target_os = "ios")]
-    return Some(iphone::ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string)).unwrap_or_else(|| "default".into()));
-    #[cfg(target_os = "android")]
-    return android::ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string));
-    #[cfg(desktop)]
-    {
-        let n = app().handle.notification();
-        let state = match n.permission_state() {
-            Ok(PermissionState::Granted) => PermissionState::Granted,
-            Ok(s) if !ask => s,
-            _ => n.request_permission().unwrap_or(PermissionState::Denied),
-        };
-        Some(match state {
-            PermissionState::Granted => "granted".into(),
-            PermissionState::Denied => "denied".into(),
-            _ => "default".into(),
-        })
-    }
+    platform::notify(ask).await
 }
 
 #[tauri::command]
@@ -656,11 +471,7 @@ fn open(url: String) -> Result<(), String> {
     if !["https://", "http://", "mailto:", "tel:"].iter().any(|p| url.starts_with(p)) {
         return Err("That isn’t a link this can open.".into());
     }
-    // On Android, the network's own pages open in a Custom Tab, as signed in there as the browser is.
-    #[cfg(target_os = "android")]
-    return android::ask("open", json!({ "url": url, "own": app().address().is_some_and(|a| url.starts_with(&a)) })).map(drop).map_err(|_| "Couldn’t open your browser.".to_string());
-    #[cfg(not(target_os = "android"))]
-    app().handle.opener().open_url(url, None::<&str>).map_err(|_| "Couldn’t open your browser.".to_string())
+    platform::open(url)
 }
 
 /// A file a screen gives (`data`, base64): saved where the person chooses, or with `preview`, opened in the app for it.
@@ -669,136 +480,43 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
     let data = data_encoding::BASE64.decode(data.as_bytes()).map_err(|e| e.to_string())?;
     let name: String = name.chars().filter(|c| !matches!(c, '/' | '\\' | '\0')).collect();
     let name = if name.trim().is_empty() { "file".to_string() } else { name };
-    // A phone shares it (the share sheet, which saves to Files too), or shows it (Quick Look; what views its type).
-    #[cfg(any(target_os = "ios", target_os = "android"))]
-    {
-        // An Android phone's, in its own folder, where its share sheet is let read (android/.../res/xml/files.xml).
-        #[cfg(target_os = "android")]
-        let base = app().data.join("given");
-        #[cfg(not(target_os = "android"))]
-        let base = std::env::temp_dir().join("screen-files");
-        let dir = base.join(app().next.fetch_add(1, Ordering::Relaxed).to_string());
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let path = dir.join(&name);
-        std::fs::write(&path, data).map_err(|e| e.to_string())?;
-        #[cfg(target_os = "ios")]
-        return iphone::ask_off("give", json!({ "path": path, "preview": preview })).await.map(drop);
-        #[cfg(target_os = "android")]
-        return android::ask_off("give", json!({ "path": path, "preview": preview })).await.map(drop);
-    }
-    #[cfg(desktop)]
-    if preview {
-        let dir = std::env::temp_dir().join(format!("{}-{}", one::config::CLI, app().next.fetch_add(1, Ordering::Relaxed)));
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let path = dir.join(&name);
-        std::fs::write(&path, data).map_err(|e| e.to_string())?;
-        return app().handle.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string());
-    }
-    #[cfg(desktop)]
-    let handle = app().handle.clone();
-    #[cfg(desktop)]
-    tauri::async_runtime::spawn_blocking(move || {
-        let Some(path) = handle.dialog().file().set_file_name(&name).blocking_save_file() else { return Ok(()) };
-        let path = path.into_path().map_err(|e| e.to_string())?;
-        std::fs::write(path, data).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    platform::save(name, data, preview).await
 }
 
 /// A phone's haptic: "selection" (a press), "medium" (a long press), "success" or "error"; elsewhere, nothing.
 #[tauri::command]
 fn haptic(style: String) {
-    #[cfg(target_os = "ios")]
-    iphone::tell("haptic", json!({ "style": style }));
-    #[cfg(target_os = "android")]
-    android::tell("haptic", json!({ "style": style }));
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let _ = style;
+    platform::haptic(style);
 }
 
 /// The document camera, where there's one (an iPhone's, or Android's scanner): each page found, straightened and cropped, as a JPEG
 /// `{ name, type, size, base64 }`; none if the person cancels.
 #[tauri::command]
 async fn scan() -> Result<Value, String> {
-    #[cfg(target_os = "ios")]
-    return iphone::ask_off("scan", json!({})).await.map(|v| v["files"].clone());
-    #[cfg(target_os = "android")]
-    return android::ask_off("scan", json!({})).await.map(|v| v["files"].clone());
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    Err("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.".into())
+    platform::scan().await
 }
 
-/// A screen's menu while a touch and hold has lifted what it's for out of the page (an iPhone's): shown with it, as the
-/// Home Screen's → `{ index }` (null if none was chosen); else `{ lifted: false }`, and the page shows its own.
+/// A screen's menu, while a touch and hold has lifted what it's for out of the page (an iPhone's) → `{ index }` (null if
+/// none was chosen); else `{ lifted: false }`, and the page shows its own.
 #[tauri::command]
 async fn menu(items: Value) -> Value {
-    #[cfg(target_os = "ios")]
-    return iphone::ask_off("menu", json!({ "items": items })).await.unwrap_or_else(|_| json!({ "lifted": false }));
-    #[cfg(not(target_os = "ios"))]
-    {
-        let _ = items;
-        json!({ "lifted": false })
-    }
+    platform::menu(items).await
 }
 
-/// Light, dark or automatic, as the person chose: kept by the app too, so its next start draws in it from its first
-/// frame, and a phone's system bars follow it.
+/// Light, dark or automatic, as the person chose: the app starts in it from its first frame, and a phone's system bars
+/// follow it.
 #[tauri::command]
 fn appearance(value: String) {
-    #[cfg(target_os = "ios")]
-    iphone::tell("appearance", json!({ "value": value }));
-    #[cfg(target_os = "android")]
-    android::tell("appearance", json!({ "value": value }));
-    #[cfg(desktop)]
-    {
-        app().keep("appearance", Some(&value).filter(|v| *v != "automatic").map(String::as_str));
-        app().handle.webview_windows().values().for_each(appear);
-    }
-}
-
-/// A window in the person's light or dark (the system's, for automatic): its title bar, and the colour it shows before
-/// its page draws, so a start in dark has no white frame.
-#[cfg(desktop)]
-fn appear(window: &tauri::WebviewWindow) {
-    let theme = match app().kept("appearance").as_deref() {
-        Some("dark") => Some(tauri::Theme::Dark),
-        Some("light") => Some(tauri::Theme::Light),
-        _ => None,
-    };
-    let _ = window.set_theme(theme);
-    // @one/ui's --background.
-    let dark = theme.or_else(|| window.theme().ok()) == Some(tauri::Theme::Dark);
-    let _ = window.set_background_color(Some(if dark { tauri::window::Color(10, 10, 10, 255) } else { tauri::window::Color(255, 255, 255, 255) }));
+    platform::appearance(value);
 }
 
 /// A widget's own menu bar item shown again, or hidden (a Mac's) → the kinds hidden now.
 #[tauri::command]
 fn menubar(kind: String, show: bool) -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    {
-        menubar::set_hidden(&kind, !show);
-        tray_menu(&app().handle);
-        return menubar::hidden();
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (kind, show);
-        Vec::new()
-    }
+    platform::menubar(kind, show)
 }
 
 // MARK: The menu bar panel
-
-#[cfg(desktop)]
-fn login_now(app: &AppHandle) -> Option<bool> {
-    Some(login::on(app))
-}
-
-#[cfg(not(desktop))]
-fn login_now(_: &AppHandle) -> Option<bool> {
-    None
-}
 
 /// The window, in front, the panel gone, and at `link` if given (`<cli>://…`).
 #[tauri::command]
@@ -806,7 +524,7 @@ fn main(link: Option<String>) {
     if let Some(p) = app().handle.get_webview_window("panel") {
         let _ = p.hide();
     }
-    show();
+    platform::show();
     if let Some(link) = link {
         opened(&link);
     }
@@ -815,24 +533,8 @@ fn main(link: Option<String>) {
 /// Open at login, switched → whether it's on.
 #[tauri::command]
 fn login(on: bool) -> Option<bool> {
-    #[cfg(desktop)]
-    login::set(&app().handle, on);
-    let _ = on;
-    login_now(&app().handle)
-}
-
-fn menubar_hidden() -> Option<Vec<String>> {
-    #[cfg(target_os = "macos")]
-    return Some(menubar::hidden());
-    #[cfg(not(target_os = "macos"))]
-    None
-}
-
-fn computer_use_now() -> Option<bool> {
-    #[cfg(target_os = "macos")]
-    return Some(mac::computer_use());
-    #[cfg(not(target_os = "macos"))]
-    None
+    platform::set_login(on);
+    platform::login()
 }
 
 /// This computer's own node joins a network with a pairing code another of its person's computers made (as `<cli>
@@ -871,22 +573,10 @@ async fn pair(code: String) -> Result<String, String> {
 /// Let Agents Use This Mac, switched → whether it's on.
 #[tauri::command]
 fn computer_use(on: bool) -> Option<bool> {
-    #[cfg(target_os = "macos")]
-    mac::set_computer_use(on);
-    let _ = on;
+    platform::set_computer_use(on);
     #[cfg(desktop)]
     tray_menu(&app().handle);
-    computer_use_now()
-}
-
-/// On a Mac, its own node approves the window by its code, as one of the Mac's own programs, if it's a device of the
-/// same person (as the Mac app's did): else the code waits for another of theirs.
-fn approve_here(code: String) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let code = device_code(&code);
-    std::thread::spawn(move || local("/v1/devices/approve", Some(json!({ "code": code, "confirm": true })), 30));
+    platform::computer_use()
 }
 
 /// The panel this tall, as its screen is: under its item it grows down, over one (a taskbar) up.
@@ -938,10 +628,7 @@ fn toggle_under(p: &tauri::WebviewWindow, at: Option<tauri::Rect>) {
     // Its size as last fitted to its screen; a window never shown yet says none, so as made.
     let size = p.outer_size().ok().filter(|s| s.width > 0 && s.height > 0).unwrap_or(tauri::PhysicalSize::new((PANEL.0 * scale) as u32, (PANEL.1 * scale) as u32));
     // What shows of it is what's placed: Windows' window reaches past it, invisibly.
-    #[cfg(windows)]
-    let (left, top, right, bottom) = windows::unseen(p);
-    #[cfg(not(windows))]
-    let (left, top, right, bottom) = (0, 0, 0, 0);
+    let (left, top, right, bottom) = platform::unseen(p);
     let seen = ((size.width as i32 - left - right).max(1) as u32, (size.height as i32 - top - bottom).max(1) as u32);
     let item = at.map(|at| (at.position.to_physical::<f64>(scale), at.size.to_physical::<f64>(scale)));
     let place = flyout(m.work_area(), (m.position().x, m.position().y, m.size().width, m.size().height), seen, item.map(|(p, s)| (p.x, p.y, s.width, s.height)), scale);
@@ -951,6 +638,7 @@ fn toggle_under(p: &tauri::WebviewWindow, at: Option<tauri::Rect>) {
 }
 
 /// The bar the tray is on: which side of the screen it takes from the work area.
+#[cfg(desktop)]
 #[derive(Clone, Copy, PartialEq)]
 enum Bar {
     Top,
@@ -966,7 +654,7 @@ enum Bar {
 /// is off the bar, so it goes in the corner, as Windows' own flyouts do.
 #[cfg(desktop)]
 fn flyout(work: &tauri::PhysicalRect<i32, u32>, screen: (i32, i32, u32, u32), size: (u32, u32), item: Option<(f64, f64, f64, f64)>, scale: f64) -> (i32, i32) {
-    let gap = scale * if cfg!(target_os = "macos") { 5.0 } else if cfg!(windows) { 12.0 } else { 8.0 };
+    let gap = scale * platform::FLYOUT_GAP;
     let (wx, wy, ww, wh) = (work.position.x as f64, work.position.y as f64, work.size.width as f64, work.size.height as f64);
     let (sx, sy, sw, sh) = (screen.0 as f64, screen.1 as f64, screen.2 as f64, screen.3 as f64);
     let (w, h) = (size.0 as f64, size.1 as f64);
@@ -981,7 +669,7 @@ fn flyout(work: &tauri::PhysicalRect<i32, u32>, screen: (i32, i32, u32, u32), si
         Bar::Right
     } else if let Some((_, iy, _, _)) = item {
         if iy < sy + sh / 2.0 { Bar::Top } else { Bar::Bottom }
-    } else if cfg!(windows) {
+    } else if platform::TRAY_AT_BOTTOM {
         Bar::Bottom
     } else {
         Bar::Top
@@ -1007,9 +695,6 @@ fn flyout(work: &tauri::PhysicalRect<i32, u32>, screen: (i32, i32, u32, u32), si
     (x.clamp(min_x, max_x).round() as i32, y.clamp(min_y, max_y).round() as i32)
 }
 
-#[cfg(not(desktop))]
-fn toggle_panel(_: Option<()>) {}
-
 // MARK: Starting
 
 /// A window like a menu bar item's popover, of this page at `page`: hidden until its item's clicked, gone when it loses
@@ -1030,9 +715,8 @@ fn popup(handle: &AppHandle, label: &str, page: &str) -> tauri::Result<tauri::We
         // Windows' system shadow, as its flyouts have.
         .shadow(true)
         .build()?;
-    appear(&window);
-    #[cfg(windows)]
-    windows::round(&window);
+    platform::appear(&window);
+    platform::round(&window);
     let hide = window.clone();
     window.on_window_event(move |e| {
         if let tauri::WindowEvent::Focused(false) = e {
@@ -1049,11 +733,11 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
     // Open at login from the first start, as the Mac app was; the person's choice after that. Never a test's build.
     let first = app.path().app_data_dir()?.join("opened-at-login");
     if !first.exists() && !identifier().ends_with(".throwaway") {
-        login::set(app.handle(), true);
+        platform::set_login(true);
         let _ = std::fs::create_dir_all(first.parent().unwrap());
         let _ = std::fs::write(&first, "");
     }
-    let mut tray = tauri::tray::TrayIconBuilder::with_id("main")
+    let tray = tauri::tray::TrayIconBuilder::with_id("main")
         .tooltip(one::config::NAME)
         // A click shows the panel; the menu is a right click's (Linux's tray items show only their menu).
         .show_menu_on_left_click(cfg!(target_os = "linux"))
@@ -1063,32 +747,21 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
             }
         })
         .on_menu_event(move |app, e| match e.id().as_ref() {
-            "open" => show(),
+            "open" => platform::show(),
             "login" => {
-                login::set(app, !login::on(app));
+                platform::set_login(!platform::login().unwrap_or(true));
                 tray_menu(app);
             }
-            "computer-use" => drop(computer_use(!computer_use_now().unwrap_or(true))),
+            "computer-use" => drop(computer_use(!platform::computer_use().unwrap_or(true))),
             "quit" => app.exit(0),
-            #[cfg(target_os = "macos")]
+            // A widget's own menu bar item shown again (a Mac's).
             id => {
                 if let Some(kind) = id.strip_prefix("show ") {
-                    menubar::set_hidden(kind, false);
+                    platform::menubar(kind.into(), true);
                 }
             }
-            #[cfg(not(target_os = "macos"))]
-            _ => {}
         });
-    // The Mac's menu bar mark: the custom build's (build.rs), a template macOS tints for the menu bar.
-    #[cfg(target_os = "macos")]
-    {
-        tray = tray.icon(tauri::image::Image::from_bytes(include_bytes!(concat!(env!("OUT_DIR"), "/menubar.png")))?).icon_as_template(true);
-    }
-    #[cfg(not(target_os = "macos"))]
-    if let Some(icon) = app.default_window_icon() {
-        tray = tray.icon(icon.clone());
-    }
-    tray.build(app)?;
+    platform::tray_icon(app, tray)?.build(app)?;
     tray_menu(app.handle());
     Ok(())
 }
@@ -1101,20 +774,16 @@ fn tray_menu(app: &AppHandle) {
     let made = || -> tauri::Result<Menu<tauri::Wry>> {
         let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = vec![
             Box::new(MenuItem::with_id(app, "open", format!("Open {}", one::config::NAME), true, None::<&str>)?),
-            Box::new(CheckMenuItem::with_id(app, "login", "Open at Login", true, login::on(app), None::<&str>)?),
+            Box::new(CheckMenuItem::with_id(app, "login", "Open at Login", true, platform::login().unwrap_or(false), None::<&str>)?),
         ];
-        if let Some(on) = computer_use_now() {
+        if let Some(on) = platform::computer_use() {
             items.push(Box::new(CheckMenuItem::with_id(app, "computer-use", "Let Agents Use This Mac", true, on, None::<&str>)?));
         }
-        #[cfg(target_os = "macos")]
-        {
-            let hidden = menubar::hidden();
-            let widgets: Vec<_> = menubar::widgets().into_iter().filter(|w| hidden.contains(&w.0)).collect();
-            if !widgets.is_empty() {
-                items.push(Box::new(PredefinedMenuItem::separator(app)?));
-                for (kind, title, ..) in widgets {
-                    items.push(Box::new(MenuItem::with_id(app, format!("show {kind}"), format!("Show {title} in the Menu Bar"), true, None::<&str>)?));
-                }
+        let hidden = platform::hidden_widgets();
+        if !hidden.is_empty() {
+            items.push(Box::new(PredefinedMenuItem::separator(app)?));
+            for (kind, title) in hidden {
+                items.push(Box::new(MenuItem::with_id(app, format!("show {kind}"), format!("Show {title} in the Menu Bar"), true, None::<&str>)?));
             }
         }
         items.push(Box::new(PredefinedMenuItem::separator(app)?));
@@ -1128,36 +797,6 @@ fn tray_menu(app: &AppHandle) {
     }
 }
 
-/// A widget's menu bar item clicked: the widget under it (the panel's page, showing only that widget, in a window of
-/// its own), or gone if it shows.
-#[cfg(target_os = "macos")]
-fn toggle_widget(kind: &str, at: tauri::Rect) {
-    let handle = &app().handle;
-    let page = format!("index.html?panel&widget={}", url::form_urlencoded::byte_serialize(kind.as_bytes()).collect::<String>());
-    let window = match handle.get_webview_window("widget") {
-        Some(w) => {
-            if !w.url().is_ok_and(|u| u.as_str().ends_with(&page)) {
-                let _ = w.hide();
-                let _ = w.navigate(tauri::Url::parse(&format!("https://tauri.localhost/{page}")).unwrap());
-            }
-            w
-        }
-        None => match popup(handle, "widget", &page) {
-            Ok(w) => w,
-            Err(e) => return eprintln!("the widget's window: {e}"),
-        },
-    };
-    toggle_under(&window, Some(at));
-}
-
-/// One of the app menu's commands, to the window's page, which does it: "sidebar" (fold it or unfold it), "join".
-#[cfg(target_os = "macos")]
-fn command(name: &str) {
-    if let Some(w) = app().handle.get_webview_window("main") {
-        let _ = w.eval(format!("window.__oneNative?.command({})", json!(name)));
-    }
-}
-
 /// A link the app was opened with (`<cli>://…`, or one to the network's address, which Windows hands it): to the page,
 /// which goes there, or kept for it until it asks.
 fn opened(url: &str) {
@@ -1167,92 +806,10 @@ fn opened(url: &str) {
     if !own {
         return;
     }
-    show();
+    platform::show();
     match a.handle.get_webview_window("main").filter(|_| a.page.load(Ordering::Relaxed)) {
         Some(w) => drop(w.eval(format!("window.__oneNative?.opened({})", json!(url)))),
         None => *a.opened.lock().unwrap() = Some(url.to_string()),
-    }
-}
-
-/// Opening at login. Linux: an XDG autostart entry, where XDG_CONFIG_HOME says; Windows: the package's startup task; a
-/// Mac: its login item (SMAppService's main app).
-#[cfg(desktop)]
-mod login {
-    use tauri::AppHandle;
-    #[cfg(target_os = "linux")]
-    use tauri::Manager;
-
-    #[cfg(target_os = "linux")]
-    fn entry(app: &AppHandle) -> Option<std::path::PathBuf> {
-        Some(app.path().config_dir().ok()?.join("autostart").join(format!("{}.desktop", app.config().identifier)))
-    }
-
-    pub fn on(app: &AppHandle) -> bool {
-        #[cfg(target_os = "linux")]
-        return entry(app).is_some_and(|e| e.exists());
-        #[cfg(windows)]
-        return {
-            let _ = app;
-            crate::windows::login()
-        };
-        #[cfg(target_os = "macos")]
-        return {
-            let _ = app;
-            crate::mac::login()
-        };
-    }
-
-    pub fn set(app: &AppHandle, on: bool) {
-        #[cfg(target_os = "linux")]
-        if let (Some(entry), Ok(exe)) = (entry(app), std::env::current_exe()) {
-            if !on {
-                let _ = std::fs::remove_file(entry);
-                return;
-            }
-            let _ = std::fs::create_dir_all(entry.parent().unwrap());
-            let _ = std::fs::write(entry, format!("[Desktop Entry]\nType=Application\nName={}\nExec=\"{}\"\nTerminal=false\n", one::config::NAME, exe.display()));
-        }
-        #[cfg(windows)]
-        crate::windows::set_login(on);
-        #[cfg(target_os = "macos")]
-        crate::mac::set_login(on);
-        let _ = (app, on);
-    }
-}
-
-/// On Linux, the app in the desktop's launcher, with its icon, and as what opens `<cli>://` links: written each start,
-/// so it names the program where it is now.
-#[cfg(target_os = "linux")]
-fn launcher(app: &tauri::App) -> Result<(), String> {
-    let id = &app.config().identifier;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let data = app.path().data_dir().map_err(|e| e.to_string())?;
-    let icon = data.join("icons/hicolor/1024x1024/apps").join(format!("{id}.png"));
-    std::fs::create_dir_all(icon.parent().unwrap()).map_err(|e| e.to_string())?;
-    if let Some(bytes) = one::web::files().into_iter().find_map(|(path, bytes)| (path == "icon.png").then_some(bytes)) {
-        std::fs::write(&icon, bytes).map_err(|e| e.to_string())?;
-    }
-    let entry = format!(
-        "[Desktop Entry]\nType=Application\nName={name}\nExec=\"{exe}\" %u\nIcon={id}\nTerminal=false\nCategories=Office;Network;\nMimeType=x-scheme-handler/{cli};\nStartupWMClass={cli}\n",
-        name = one::config::NAME,
-        exe = exe.display(),
-        cli = one::config::CLI,
-    );
-    let apps = data.join("applications");
-    std::fs::create_dir_all(&apps).map_err(|e| e.to_string())?;
-    std::fs::write(apps.join(format!("{id}.desktop")), entry).map_err(|e| e.to_string())?;
-    // And it's what opens `<cli>://`, in mimeapps.list where XDG_CONFIG_HOME says.
-    let _ = std::process::Command::new("xdg-mime").args(["default", &format!("{id}.desktop"), &format!("x-scheme-handler/{}", one::config::CLI)]).status();
-    Ok(())
-}
-
-/// The window, in front.
-fn show() {
-    #[cfg(desktop)]
-    if let Some(w) = app().handle.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
     }
 }
 
@@ -1309,34 +866,13 @@ fn commands() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default();
-    // First, so a second start goes to the first before anything else runs.
-    #[cfg(desktop)]
-    let builder = builder
-        .plugin(tauri_plugin_single_instance::init(|_, argv, _| {
-            show();
-            argv.iter().for_each(|a| opened(a));
-        }))
-        // The window as it was left; the panel shows only when its item is clicked.
-        .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["panel"]).build());
-    // A phone's notifications are its own (iphone.rs, android.rs), which the plugin's would take from it.
-    #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_notification::init());
-    #[cfg(target_os = "ios")]
-    let builder = builder.plugin(iphone::plugin());
-    #[cfg(target_os = "android")]
-    let builder = builder.plugin(android::plugin());
-    #[cfg(not(target_os = "android"))]
-    let builder = builder.plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init());
-    builder
+    platform::plugins(tauri::Builder::default())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler({
             let commands = commands();
             move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
-                // Android's web view gives screens' frames the app's commands too: only the page's own frame has the token.
-                #[cfg(target_os = "android")]
-                if !android::ours(&invoke) {
+                if !platform::ours(&invoke) {
                     invoke.resolver.reject("That isn’t for a screen to ask.");
                     return true;
                 }
@@ -1344,36 +880,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
-            #[cfg(not(target_os = "android"))]
-            let data = app.path().app_local_data_dir()?;
-            // The app's own folder, where what runs with no window finds it too.
-            #[cfg(target_os = "android")]
-            let data = android::files().ok_or("The app's folder.")?;
-            // What the old Mac or iPhone app kept, taken over once.
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            apple::take_over(&data);
-            // The Kotlin app's, taken over once: its sign-in and address.
-            #[cfg(target_os = "android")]
-            {
-                android::take_over();
-                // What screens gave to be shared, shown or saved is gone with the last run.
-                let _ = std::fs::remove_dir_all(data.join("given"));
-            }
-            // This Mac's node kept running; the Mac app's menus, with its keys.
-            #[cfg(target_os = "macos")]
-            {
-                mac::start_node();
-                app.set_menu(mac::menu(app.handle())?)?;
-                app.on_menu_event(|_, e| match e.id().as_ref() {
-                    "sidebar" | "join" => {
-                        show();
-                        command(e.id().as_ref());
-                    }
-                    "pair" => main(Some(format!("{}://settings/devices?add=1", one::config::CLI))),
-                    _ => {}
-                });
-            }
+            let data = platform::data(app)?;
             #[cfg(debug_assertions)]
             if let Some(port) = env("CONTROL").and_then(|p| p.parse().ok()) {
                 control(port);
@@ -1388,19 +895,10 @@ pub fn run() {
                 opened: Mutex::default(),
                 page: Default::default(),
             });
-            // What runs beside the window asks it, while it runs, rather than starting a client of its own.
-            claim();
-            #[cfg(desktop)]
-            headless::serve();
-            #[cfg(target_os = "linux")]
-            if let Err(e) = launcher(app) {
-                eprintln!("the launcher's entry: {e}");
-            }
+            platform::start(app);
+            platform::claim(crate::app().address());
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                // Windows learns the app opens `<cli>://` as it runs (Linux by `launcher`); elsewhere its bundle says so.
-                #[cfg(windows)]
-                let _ = app.deep_link().register_all();
                 for url in app.deep_link().get_current().ok().flatten().unwrap_or_default() {
                     opened(url.as_str());
                 }
@@ -1422,7 +920,7 @@ pub fn run() {
             #[cfg_attr(mobile, allow(unused_variables))]
             let window = window.build()?;
             #[cfg(desktop)]
-            appear(&window);
+            platform::appear(&window);
             // On a computer, closing the window leaves the app running, in the tray or menu bar, where Open shows it
             // again (or starting it again does); Quit quits.
             #[cfg(desktop)]
@@ -1435,9 +933,6 @@ pub fn run() {
                     }
                 });
                 tray(app)?;
-                // The widgets' own items, as last kept, until the node's answer redraws them.
-                #[cfg(target_os = "macos")]
-                menubar::update();
                 // The panel: this page in panel mode, hidden until the tray item's clicked, gone when it loses focus.
                 popup(app.handle(), "panel", "index.html?panel")?;
             }

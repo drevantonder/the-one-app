@@ -2,7 +2,7 @@ import AppIntents
 import Foundation
 
 #if !WIDGET
-/// The app's Rust (src/iphone.rs `one_ios`), which runs a widget's tool as the person, then draws the widgets again.
+/// The app's Rust (src/platform/iphone.rs `one_ios`), which runs a widget's tool as the person, then draws the widgets again.
 @_silgen_name("one_ios") private func oneIOS(_ kind: UnsafePointer<CChar>, _ json: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
 @_silgen_name("one_ios_free") private func oneIOSFree(_ s: UnsafeMutablePointer<CChar>?)
 #endif

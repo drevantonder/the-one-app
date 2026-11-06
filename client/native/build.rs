@@ -49,7 +49,7 @@ fn main() {
         println!("cargo:rerun-if-changed={}", mark.display());
         std::fs::copy(&mark, Path::new(&std::env::var("OUT_DIR").unwrap()).join("menubar.png")).unwrap_or_else(|e| panic!("{}: {e}", mark.display()));
     }
-    // The iPhone's Swift (iphone/), a plugin of the app's own (src/iphone.rs), built and linked into it as Tauri's own
+    // The iPhone's Swift (iphone/), a plugin of the app's own (src/platform/iphone.rs), built and linked into it as Tauri's own
     // plugins are, against Tauri's Swift, copied beside it as theirs is.
     if platform == "phone" {
         iphone_swift();
