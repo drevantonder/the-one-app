@@ -991,8 +991,13 @@ impl Members {
                 let device = key_of("device")?;
                 let name = text("name")?;
                 ensure!(valid_app_name(&name), "service names are lowercase words joined by -");
-                let owner = self.machine(&device).context("no such device")?.user.clone();
-                ensure!(w == owner, "only a device's person switches what it runs");
+                // The Cloudflare node is a node of the install's, not a person's device: its admins switch its parts.
+                if self.cloudflare_node() == Some(device) {
+                    ensure!(self.is_admin(&w), "only an admin switches what the Cloudflare node runs");
+                } else {
+                    let owner = self.machine(&device).context("no such device")?.user.clone();
+                    ensure!(w == owner, "only a device's person switches what it runs");
+                }
                 self.services.insert((device, name), Switch { on: data["on"] == true, by: w, time: e.time() });
             }
             "install" | "uninstall" | "node-release" | "service-release" => {}

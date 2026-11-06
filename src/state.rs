@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 
 use crate::database::scopes::{INSTALL, ScopeDb, object};
 use crate::entry::hex;
-use crate::members::{Kind, Machine};
+use crate::members::{self, Kind, Machine};
 use crate::rank;
 
 /// What the node answering knows that the scope database doesn't.
@@ -154,7 +154,13 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "grants": m.keeps().iter().filter(|((k, s, _), g)| m.may(me, "keep", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "keep", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets `serverless`, which clients read here by that name).
-        "serverless": m.cloudflare_node().map(|key| json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key).iter().map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
+        // Its parts, as a device's oned lists its own: it always runs apps, and an admin switches on each service built
+        // for it that it carries (a built-in app's `service/cloudflare.js`).
+        "serverless": m.cloudflare_node().map(|key| {
+            let mut parts = vec![json!({ "name": members::APPS_PART, "on": true, "fixed": true })];
+            parts.extend(crate::config::CLOUDFLARE_SERVICES.iter().map(|(name, _)| json!({ "name": name, "on": m.switch(&key, name).is_some_and(|s| s.on) })));
+            json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key).iter().map(crate::entry::Scope::to_string).collect::<Vec<_>>(), "parts": parts })
+        }),
     })
 }
 

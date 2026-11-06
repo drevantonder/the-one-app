@@ -263,6 +263,15 @@ for admins:
 Check: the throwaway network's Cloudflare node runs in local workerd, so app runtime and Worker Loader services are
 checked there; Workers AI only on the real account.
 
+Done (2026-11-06): an admin switches the Cloudflare node's services in Settings › Devices or `one services on <name>
+--device cloudflare` (a `service` entry naming its key, an admin's to write); the app runtime is always on there. A
+built-in app's `service/cloudflare.js` is its service built for Cloudflare, which the Cloudflare node carries and runs
+with its `AI` binding; Models' answers with the account's Workers AI models (`@cf/...`, each one's price in models_here)
+and passes any other model on to a device. Left: a network's own app's service built for Cloudflare (Worker Loader,
+built by the deploying machine) waits for someone to need one; a call a node on a machine runs doesn't reach Workers AI,
+since nodes never ask the Cloudflare node (only the Cloudflare node first in run priority does); AI Usage doesn't show
+Workers AI's spend.
+
 ## Order and owners
 
 Phases 1, 2 and 3 can run in parallel (different folders). 4 needs 2. 5 needs 1. 6 needs 5 and the storage plan's

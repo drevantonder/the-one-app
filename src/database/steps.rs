@@ -1247,7 +1247,10 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
             }
         }
         (members::APP, "deploy") => may("deploy", &scopes::app(&text("app")?)),
-        (members::APP, "service") => may("switch", &scopes::device(&unhex(&text("device")?)?)),
+        (members::APP, "service") => match unhex(&text("device")?)? {
+            k if db.cloudflare_node() == Some(k) => may("change-settings", scopes::INSTALL),
+            k => may("switch", &scopes::device(&k)),
+        },
         (members::APP, "install" | "uninstall" | "schedule" | "vault-request") => may("add-apps", &scopes::object(scope)) || runs_it(db, scope, step),
         (members::APP, "keep" | "forget") => may("use", &scopes::object(scope)) || runs_it(db, scope, step),
         // A release, which every node checks is signed with the release key before it takes it.

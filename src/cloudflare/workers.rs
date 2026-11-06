@@ -438,7 +438,7 @@ impl Settings {
     }
 
     /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service,
-    /// `object:<name>:<class>` another service's Durable Object class, `loader:` Worker Loader, and `r2:<bucket>` an R2
+    /// `object:<name>:<class>` another service's Durable Object class, `loader:` Worker Loader, `ai:` Workers AI, and `r2:<bucket>` an R2
     /// bucket of the account's.
     pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
         // The gateway holds no secrets.
@@ -491,6 +491,8 @@ impl Settings {
                 ("AUTH".into(), "service:auth".into(), false),
                 ("SIGNER".into(), "service:signer".into(), false),
                 ("LOADER".into(), "loader:".into(), false),
+                // Workers AI, for the services built for Cloudflare that use it.
+                ("AI".into(), "ai:".into(), false),
                 ("ADDRESS".into(), self.address.clone(), false),
                 ("NAME".into(), self.name.clone(), false),
                 ("NODE_KEY".into(), self.cloudflare_node_key.clone(), true),
@@ -1001,8 +1003,8 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
             bindings.push(format!("(name = \"ASSETS\", service = {})", quote(&format!("{}-assets", s.name))));
         }
         for (name, value) in &s.bindings {
-            // An R2 bucket is bound only on Cloudflare; here the URL signer reaches it by URL.
-            if value.starts_with("r2:") {
+            // An R2 bucket is bound only on Cloudflare, where the URL signer here reaches it by URL; Workers AI is only there.
+            if value.starts_with("r2:") || value == "ai:" {
                 continue;
             }
             let object = value.strip_prefix("object:").and_then(|o| o.split_once(':'));
@@ -1272,6 +1274,7 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrati
                 }
             }
             None if value == "loader:" => bindings.push(json!({ "type": "worker_loader", "name": name })),
+            None if value == "ai:" => bindings.push(json!({ "type": "ai", "name": name })),
             None => match value.strip_prefix("r2:") {
                 Some(bucket) => bindings.push(json!({ "type": "r2_bucket", "name": name, "bucket_name": bucket })),
                 None => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),

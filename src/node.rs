@@ -1345,6 +1345,13 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, titl
 /// The `service` entry that switches a part of a device's oned on or off, the device found by name or key prefix; for
 /// the device's person.
 fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool) -> Result<Content> {
+    // The Cloudflare node, by its name in run priority or its key: its admins switch its parts.
+    if let Some(k) = db.cloudflare_node().filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
+        ensure!(db.may(user, "change-settings", scopes::INSTALL), "only an admin switches what the Cloudflare node runs");
+        // It always runs apps; what else it can run is the services built for it that it carries.
+        ensure!(crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
+        return Ok(members::service(&k, name, on));
+    }
     let mut found: Vec<members::Machine> = db.machines().into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     // A machine's services are named for it: by its name, it's its node.
     if found.len() > 1 {

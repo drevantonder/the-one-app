@@ -130,7 +130,8 @@ fn every_command() -> String {
   {CLI} services on|off <name> [--device <name>]
                                        switch a service on or off on a device of yours (here by default), which its
                                        oned starts or stops, fetching its program as it's published (a Mac app
-                                       carries its own); apps is its app service
+                                       carries its own); apps is its app service. An admin's --device cloudflare
+                                       switches a service built for Cloudflare on the Cloudflare node (Models: Workers AI)
   {CLI} services sandbox | sudo sh    let this machine run services in their sandbox, each as its own user (Linux;
                                        the installer does it)
   {CLI} services try apps/<name> [--device <name>]
@@ -865,6 +866,13 @@ fn run(args: Vec<String>) -> Result<()> {
                     println!("  {}  switched off {}", d["name"].as_str().unwrap_or(""), ago(d["time"].as_u64().unwrap_or(0)));
                 }
             }
+            // The Cloudflare node, whose services an admin switches (`--device cloudflare`).
+            if let Some(parts) = state["install"]["serverless"]["parts"].as_array() {
+                println!("Cloudflare");
+                for p in parts {
+                    println!("  {}  {}", p["name"].as_str().unwrap_or(""), if p["on"] == true { "on" } else { "off" });
+                }
+            }
         }
         // What lets this machine's person start services in their sandbox, for root to run once: `| sudo sh`.
         ["services", "sandbox"] => print!("{}", one::sandbox::setup_script()?),
@@ -874,6 +882,7 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
             let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
             match (*how, *name == one::members::APPS_PART) {
+                _ if device.is_some_and(|d| d.eq_ignore_ascii_case(one::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
                 ("off", true) => println!("Apps' calls no longer run {there}."),
                 (_, true) => println!("Apps' calls run {there} again."),
                 ("off", _) => println!("{name} is switched off {there}: its oned stops it."),

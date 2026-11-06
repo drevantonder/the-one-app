@@ -24,13 +24,19 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
 /// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
 pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, Vec<u8>)> {
     let shim = include_str!("../runtime/shim.js");
-    let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(crate::apps::COMPATIBILITY_DATE));
-    vec![
+    // And the services built for Cloudflare it carries, each `service-<app>.js`, by their app's name.
+    let services = crate::config::CLOUDFLARE_SERVICES;
+    let imports: String = services.iter().enumerate().map(|(i, (name, _))| format!("import s{i} from {};\n", json!(format!("./service-{name}.js")))).collect();
+    let named: Vec<String> = services.iter().enumerate().map(|(i, (name, _))| format!("{}: s{i}", json!(name))).collect();
+    let built_js = format!("{imports}export const shim = {};\nexport const compatibilityDate = {};\nexport const services = {{ {} }};\n", json!(shim), json!(crate::apps::COMPATIBILITY_DATE), named.join(", "));
+    let mut out = vec![
         ("worker.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/node/worker.js").to_vec()),
         ("one_cloudflare_node.js".into(), "application/javascript+module", glue),
         ("one_cloudflare_node_bg.wasm".into(), "application/wasm", wasm),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
-    ]
+    ];
+    out.extend(services.iter().map(|(name, bytes)| (format!("service-{name}.js"), "application/javascript+module", bytes.to_vec())));
+    out
 }
 
 /// It as the workerd that runs the install's Workers here runs it, from `modules`, beside them.

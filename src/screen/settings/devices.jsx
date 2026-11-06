@@ -185,10 +185,15 @@ function model(x, again) {
     return { cols: numbers.map((n) => entries.filter((e) => e.p !== "last" && rank(e.p) === n)), last: entries.filter((e) => e.p === "last") }
   }
 
-  /// Their own devices that can run something, and Cloudflare, which runs apps, each with what it can run.
+  /// Their own devices that can run something, and Cloudflare, each with what it can run: Cloudflare always runs
+  /// apps, and runs the services built for it that an admin switches on, for the apps in the install.
   function gridColumns() {
     const cols = drawn.cards.filter((c) => c.user === me && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, parts: partsOf(c) }))
-    if (cols.length && state.install?.serverless) cols.push({ c: null, name: "Cloudflare", icon: CLOUDFLARE, parts: [{ name: "apps", on: true, fixed: true }] })
+    const s = state.install?.serverless
+    if ((cols.length || admin) && s) {
+      const parts = (s.parts || [{ name: "apps", on: true, fixed: true }]).filter((p) => p.name === "apps" || appOf(p.name))
+      cols.push({ c: null, name: "Cloudflare", icon: CLOUDFLARE, parts: parts.map((p) => (p.fixed || !admin ? { ...p, fixed: true } : { ...p, part: { device: s.key, name: p.name } })) })
+    }
     return cols
   }
 

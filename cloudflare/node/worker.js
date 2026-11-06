@@ -26,12 +26,13 @@
 //
 // Bindings: SIGNER (the URL signer), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its endpoint's
 // key, a secret), RELAY (the relay's `ServerlessNode` entrypoint), LOCATION (where objects are made), ADDRESS (the
-// install's) and NAME (its name). `built.js`, made when it's deployed, is the shim.
+// install's), NAME (its name) and AI (Workers AI). `built.js`, made when it's deployed, is the shim, and the services built
+// for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
 import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, global_entries, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
-import { shim, compatibilityDate } from "./built.js";
+import { shim, compatibilityDate, services } from "./built.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -723,7 +724,7 @@ class Run {
     if (depth > 8) refuse(400, "apps called each other too deep");
     const p = this.person;
     const d = await p.describe(this.who, app);
-    if (d.uses?.services?.length) refuse(503, needsDevice(d, app.name));
+    if (!servedHere(this.view, d)) refuse(503, needsDevice(d, app.name));
     if (!scopes.length) refuse(403, `${d.title || app.name} isn't on any of your pages`);
     const writes = what === "call";
     const call = new Call(p, this.who, app, scopes.map((h) => h.id), this.view);
@@ -808,7 +809,7 @@ class Run {
     const out = {};
     await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
       const d = await this.person.describe(this.who, app).catch(keysFirst);
-      if (d?.badge !== true || d.uses?.services?.length) return;
+      if (d?.badge !== true || !servedHere(this.view, d)) return;
       const n = await this.run(app, "badge", {}, scopes).catch(() => 0);
       if (n > 0) out[app.name] = n;
     }));
@@ -840,8 +841,39 @@ const keysFirst = (err) => {
   return null;
 };
 
-/// Whether an app keeps to its own data: it uses no other app, service or Vault item.
-const plain = (d) => !d.uses?.apps?.length && !d.uses?.services?.length && !d.vault;
+/// Whether an app keeps to its own data: it uses no other app or Vault item, and its service, if it has one, runs here.
+const plain = (d, view) => !d.uses?.apps?.length && servedHere(view, d) && !d.vault;
+
+/// Whether the service `name`, built for Cloudflare, runs here: an admin switched it on (src/state.rs:
+/// `serverless.parts`), and this node carries its build.
+const onHere = (view, name) => Object.hasOwn(services, name) && (view.state.install.serverless?.parts || []).some((p) => p.name === name && p.on);
+
+/// Whether every service an app uses runs here.
+const servedHere = (view, d) => (d?.uses?.services || []).every((s) => onHere(view, s));
+
+/// A function of a service built for Cloudflare, run here: → `{ ok }`, or null when it can't answer here (it gave
+/// nothing, as for a model it doesn't have), for a device to.
+async function hereCall(env, name, op, input) {
+  const fn = services[name]?.[op];
+  if (typeof fn !== "function" || !env.AI) return null;
+  const ok = await fn(input ?? {}, { ai: env.AI });
+  return ok === undefined ? null : { ok };
+}
+
+/// A call of an app's own service, from the app running here: here when it can, else on a device that runs it; with
+/// device "all", every device's answer and this node's, as "Cloudflare".
+async function ownService(run, q, d) {
+  const cloudflare = String(q.device || "").toLowerCase() === "cloudflare";
+  if (q.device === "all") {
+    const here = await hereCall(run.env, q.app, q.op, q.input).catch((err) => ({ ok: { error: err.message } }));
+    const there = await machineCall(run, q, d).catch(() => ({ ok: {} }));
+    return { ok: { ...there.ok, ...(here ? { Cloudflare: here.ok } : {}) } };
+  }
+  const here = !q.device || cloudflare ? await hereCall(run.env, q.app, q.op, q.input) : null;
+  if (here) return here;
+  if (cloudflare) refuse(400, `the Cloudflare node can't do that for ${d?.title || q.app}`);
+  return machineCall(run, q, d);
+}
 
 /// What a person reads when an app needs a service on a device and none is on.
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
@@ -892,12 +924,13 @@ class ForCall extends RpcTarget {
           // Only to the apps it says it uses, and never to a service: a service is its app's alone, and an app with one
           // runs on a machine, never here. A service, or an app this node can't run, goes to a node on a machine.
           const mine = await person.describe(who, this.app);
+          if (q.service && q.app === this.app.name && onHere(view, q.app)) return Response.json(await ownService(this.run, q, mine));
           if (q.service || q.device === "all") refuse(403, `${this.app.name} can't call the ${q.app} service: a service is only its own app's, so call the ${q.app} app's tools with ctx.apps`);
           if (!mine?.uses?.apps?.includes(q.app)) refuse(403, `${this.app.name} doesn't use ${q.app}`);
           const callee = deployed(view, q.app);
           if (!callee) refuse(404, `no app named ${q.app}`);
           const d = q.device ? null : await person.describe(who, callee);
-          if (!d || d.uses?.services?.length) return Response.json(await machineCall(this.run, q, d));
+          if (!d || !servedHere(view, d)) return Response.json(await machineCall(this.run, q, d));
           return Response.json(await this.run.call({ app: q.app, op: q.op, input: q.input }, this.app.name, this.depth + 1));
         }
         case "GET vault":
@@ -963,10 +996,10 @@ async function route(p, request) {
     const app = !req.service && !req.device && deployed(run.view, req.app);
     const d = app && (await p.describe(who, app));
     // An app that keeps to its own data runs here; the rest on a machine, when one answers.
-    if (d && plain(d)) return json(await run.call(req));
+    if (d && plain(d, run.view)) return json(await run.call(req));
     const r = await p.onMachine(who, run.view, req, 120_000);
     if (r) return json(r, r.ok !== undefined ? 200 : 400);
-    if (!d || d.uses?.services?.length) refuse(503, needsDevice(d, req.app));
+    if (!d || !servedHere(run.view, d)) refuse(503, needsDevice(d, req.app));
     return json(await run.call(req));
   }
   const screenAt = path.match(/^\/v1\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);
@@ -975,7 +1008,7 @@ async function route(p, request) {
     const view = await p.installFor(who);
     const app = deployed(view, screenAt[1]);
     const d = app && (await p.describe(who, app));
-    if (!d || d.uses?.services?.length) refuse(503, needsDevice(d, screenAt[1]));
+    if (!d || !servedHere(view, d)) refuse(503, needsDevice(d, screenAt[1]));
     return screenOf(request, p, who, view, app, screenAt[2], JSON.parse(url.searchParams.get("params") || "{}"), url.searchParams.get("scope"));
   }
   // A scope's keys, as sealed in the bucket, where every endpoint the relay lets in may read them anyway.

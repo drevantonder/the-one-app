@@ -186,17 +186,30 @@ function W(e, t) {
 			name: e.name,
 			icon: e.icon,
 			parts: _(e)
-		}));
-		return e.length && n.install?.serverless && e.push({
-			c: null,
-			name: "Cloudflare",
-			icon: z,
-			parts: [{
+		})), t = n.install?.serverless;
+		if ((e.length || c) && t) {
+			let n = (t.parts || [{
 				name: "apps",
 				on: !0,
 				fixed: !0
-			}]
-		}), e;
+			}]).filter((e) => e.name === "apps" || l(e.name));
+			e.push({
+				c: null,
+				name: "Cloudflare",
+				icon: z,
+				parts: n.map((e) => e.fixed || !c ? {
+					...e,
+					fixed: !0
+				} : {
+					...e,
+					part: {
+						device: t.key,
+						name: e.name
+					}
+				})
+			});
+		}
+		return e;
 	}
 	function S() {
 		let e = Date.now() - 864e5;
