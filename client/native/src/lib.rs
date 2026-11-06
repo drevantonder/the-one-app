@@ -377,15 +377,27 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
 
 // MARK: Starting
 
-/// The tray item (the menu bar's, on a Mac): Open, Quit.
+/// The tray item (the menu bar's, on a Mac): Open, Open at Login, Quit.
 #[cfg(desktop)]
 fn tray(app: &tauri::App) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem};
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem};
+    // Open at login from the first start, as the Mac app was; the person's choice after that.
+    let first = app.path().app_data_dir()?.join("opened-at-login");
+    if !first.exists() {
+        login::set(app.handle(), true);
+        let _ = std::fs::create_dir_all(first.parent().unwrap());
+        let _ = std::fs::write(&first, "");
+    }
     let open = MenuItem::with_id(app, "open", format!("Open {}", one::config::NAME), true, None::<&str>)?;
+    let login = CheckMenuItem::with_id(app, "login", "Open at Login", true, login::on(app.handle()), None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
-    let mut tray = tauri::tray::TrayIconBuilder::with_id("main").tooltip(one::config::NAME).menu(&menu).on_menu_event(|app, e| match e.id().as_ref() {
+    let menu = Menu::with_items(app, &[&open, &login, &quit])?;
+    let mut tray = tauri::tray::TrayIconBuilder::with_id("main").tooltip(one::config::NAME).menu(&menu).on_menu_event(move |app, e| match e.id().as_ref() {
         "open" => show(),
+        "login" => {
+            login::set(app, !login::on(app));
+            let _ = login.set_checked(login::on(app));
+        }
         "quit" => app.exit(0),
         _ => {}
     });
@@ -407,6 +419,66 @@ fn opened(url: &str) {
         Some(w) => drop(w.eval(format!("window.__oneNative?.opened({})", json!(url)))),
         None => *a.opened.lock().unwrap() = Some(url.to_string()),
     }
+}
+
+/// Opening at login. Linux: an XDG autostart entry, where XDG_CONFIG_HOME says.
+#[cfg(desktop)]
+mod login {
+    use tauri::{AppHandle, Manager};
+
+    #[cfg(target_os = "linux")]
+    fn entry(app: &AppHandle) -> Option<std::path::PathBuf> {
+        Some(app.path().config_dir().ok()?.join("autostart").join(format!("{}.desktop", app.config().identifier)))
+    }
+
+    pub fn on(app: &AppHandle) -> bool {
+        #[cfg(target_os = "linux")]
+        return entry(app).is_some_and(|e| e.exists());
+        #[cfg(not(target_os = "linux"))]
+        return {
+            let _ = app;
+            false
+        };
+    }
+
+    pub fn set(app: &AppHandle, on: bool) {
+        #[cfg(target_os = "linux")]
+        if let (Some(entry), Ok(exe)) = (entry(app), std::env::current_exe()) {
+            if !on {
+                let _ = std::fs::remove_file(entry);
+                return;
+            }
+            let _ = std::fs::create_dir_all(entry.parent().unwrap());
+            let _ = std::fs::write(entry, format!("[Desktop Entry]\nType=Application\nName={}\nExec=\"{}\"\nTerminal=false\n", one::config::NAME, exe.display()));
+        }
+        let _ = (app, on);
+    }
+}
+
+/// On Linux, the app in the desktop's launcher, with its icon, and as what opens `<cli>://` links: written each start,
+/// so it names the program where it is now.
+#[cfg(target_os = "linux")]
+fn launcher(app: &tauri::App) -> Result<(), String> {
+    let id = &app.config().identifier;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let data = app.path().data_dir().map_err(|e| e.to_string())?;
+    let icon = data.join("icons/hicolor/1024x1024/apps").join(format!("{id}.png"));
+    std::fs::create_dir_all(icon.parent().unwrap()).map_err(|e| e.to_string())?;
+    if let Some(bytes) = one::web::files().into_iter().find_map(|(path, bytes)| (path == "icon.png").then_some(bytes)) {
+        std::fs::write(&icon, bytes).map_err(|e| e.to_string())?;
+    }
+    let entry = format!(
+        "[Desktop Entry]\nType=Application\nName={name}\nExec=\"{exe}\" %u\nIcon={id}\nTerminal=false\nCategories=Office;Network;\nMimeType=x-scheme-handler/{cli};\nStartupWMClass={cli}\n",
+        name = one::config::NAME,
+        exe = exe.display(),
+        cli = one::config::CLI,
+    );
+    let apps = data.join("applications");
+    std::fs::create_dir_all(&apps).map_err(|e| e.to_string())?;
+    std::fs::write(apps.join(format!("{id}.desktop")), entry).map_err(|e| e.to_string())?;
+    // And it's what opens `<cli>://`, in mimeapps.list where XDG_CONFIG_HOME says.
+    let _ = std::process::Command::new("xdg-mime").args(["default", &format!("{id}.desktop"), &format!("x-scheme-handler/{}", one::config::CLI)]).status();
+    Ok(())
 }
 
 /// The window, in front.
@@ -485,10 +557,14 @@ pub fn run() {
                 opened: Mutex::default(),
                 page: Default::default(),
             });
+            #[cfg(target_os = "linux")]
+            if let Err(e) = launcher(app) {
+                eprintln!("the launcher's entry: {e}");
+            }
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                // Linux and Windows learn the app opens `<cli>://` as it runs; elsewhere its bundle says so.
-                #[cfg(any(windows, target_os = "linux"))]
+                // Windows learns the app opens `<cli>://` as it runs (Linux by `launcher`); elsewhere its bundle says so.
+                #[cfg(windows)]
                 let _ = app.deep_link().register_all();
                 for url in app.deep_link().get_current().ok().flatten().unwrap_or_default() {
                     opened(url.as_str());
