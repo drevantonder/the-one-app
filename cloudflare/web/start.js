@@ -2,6 +2,15 @@
 // starts this browser's one client (net-worker.js, by the name one-files gives it) with whoever is signed in here, so
 // its WebAssembly and the relay's socket are on their way while the page draws. net.js talks to it.
 (() => {
+  // Light or dark as the person chose, where it isn't the system's: the page's own colour now, and nothing drawn until
+  // web.js has switched its rules to it (`schemed`), so no frame is the other's. Shown anyway after a second.
+  const look = localStorage.getItem("one.appearance");
+  if (look === "light" || look === "dark") {
+    const root = document.documentElement;
+    root.style.colorScheme = look;
+    root.style.visibility = "hidden";
+    setTimeout(() => (root.style.visibility = ""), 1000);
+  }
   const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.content || "";
   const client = meta("one-client");
   const named = meta("one-files").split(" ").find((f) => f.startsWith("net-worker.js="));

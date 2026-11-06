@@ -1688,6 +1688,7 @@ const h = OneUI.react.createElement;
 
   async function start() {
     schemed(document, appearance());
+    document.documentElement.style.visibility = "";
     if (native) {
       about = await native.about();
       // The app draws its next start in it from the first frame (one kept before the app kept it too).
