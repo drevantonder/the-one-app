@@ -337,7 +337,7 @@ impl Node {
             sealed = Bucket::get(&bucket, &crate::database::stored::copy_name(&prefix, copy)).await?.map(|o| (crate::database::stored::copy_name(&prefix, copy), o.bytes));
         }
         // From the last step anyone said is there, or this device read, on to the last there is.
-        let read = self.with(|i| Ok(i.scope_dbs.get(scope).map_or(0, |(at, _)| *at)))?;
+        let read = self.with(|i| Ok(i.scope_dbs.get(scope).map_or(0, |r| r.at)))?;
         let mut top = at.max(read);
         for _ in 0..STEPS_CHECKED {
             match Bucket::get(&bucket, &crate::database::stored::step_name(&prefix, top + 1)).await? {

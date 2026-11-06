@@ -93,12 +93,7 @@ impl Node {
                 continue;
             }
             let Some(kept) = self.kept_scope_db(&scope) else { continue };
-            let opened = (|| -> Result<(u64, ScopeDb)> {
-                let bytes = data_encoding::BASE64.decode(kept["db"].as_str().context("no database")?.as_bytes())?;
-                let conn = steps::connection(&bytes)?;
-                ensure!(Some(crate::database::stored::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "it isn't what it was");
-                Ok((kept["at"].as_u64().context("no position")?, steps::normalize(conn, &scope, now_ms())?))
-            })();
+            let opened = steps::ScopeReader::kept(&kept, &scope, now_ms());
             match opened {
                 Ok(db) => drop(self.with(|i| Ok(i.scope_dbs.insert(scope.clone(), db)))),
                 Err(err) => tracing::warn!("{scope}'s database this device kept: {err:#}: it's read again from the bucket"),
@@ -200,51 +195,35 @@ impl Node {
         }
         let keys = self.step_keys(scope).await?;
         let bucket = self.bucket()?;
-        let freeze = self.with(|i| Ok(i.r.freeze().cloned()))?.context("global's log isn't frozen")?;
         if !self.with(|i| Ok(i.scope_dbs.contains_key(scope)))? {
-            let start = match crate::bucket::Bucket::get(&bucket, &steps::start_name(scope)).await? {
-                Some(o) => match steps::open(&keys, u32::MAX, scope, 0, &o.bytes) {
-                    steps::Opened::Step(given) => Some(given),
-                    _ => None,
-                },
-                None => None,
-            };
-            let db = self.with(|i| steps::started(&freeze, i.r.db(), scope, start.as_ref(), now_ms()))?;
-            self.with(|i| Ok(i.scope_dbs.insert(scope.clone(), (0, db))))?;
+            let start = steps::ScopeReader::fetch_start(&bucket, &keys, scope).await?;
+            let reader = self.with(|i| steps::ScopeReader::start(i.r.truth().context("global's log isn't frozen")?, scope, start.as_ref(), now_ms()))?;
+            self.with(|i| Ok(i.scope_dbs.insert(scope.clone(), reader)))?;
         }
-        let mut read = Vec::new();
-        loop {
-            let from = self.with(|i| Ok(i.scope_dbs.get(scope).map_or(0, |(at, _)| *at)))? + read.len() as u64;
-            let more = steps::read(&bucket, &keys, scope, from).await?;
-            read.extend(more.steps.iter().cloned());
-            // Its epochs are made in `global`, so one above them all is junk.
-            if !more.junk_at_end(self.with(|i| Ok(i.r.db().epoch(scope)?))?) {
-                break;
-            }
-            read.push(None);
-        }
-        let (kept, newer, forgotten) = self.with(|i| {
-            let (at, db) = i.scope_dbs.remove(scope).context("no database")?;
-            let steps::TookScope { at, mut db, newer } = steps::take_scope(at, db, i.r.db(), scope, &read, now_ms())?;
+        let (from, made) = self.with(|i| Ok((i.scope_dbs.get(scope).map_or(0, |r| r.at), i.r.db().epoch(scope)?)))?;
+        let read = steps::read(&bucket, &keys, scope, from, made).await?;
+        let (kept, took, forgotten) = self.with(|i| {
+            let mut reader = i.scope_dbs.remove(scope).context("no database")?;
+            let took = reader.take(from, &read, i.r.db(), scope, now_ms());
             let was = i.views.get(&scope.to_string()).map(|s| s.forgotten.clone()).unwrap_or_default();
-            let state = db.state()?;
+            let state = reader.db.state()?;
             // The blobs its steps said its apps no longer need, as `forget` entries did.
             let forgotten: Vec<(String, String)> = state.forgotten.iter().filter(|b| !was.contains(*b)).map(|b| (scope.to_string(), b.clone())).collect();
             i.views.insert(scope.to_string(), state);
-            if !read.is_empty() {
+            if !read.steps.is_empty() {
                 note_change(i, scope);
             }
-            let kept = json!({ "at": at, "hash": crate::database::stored::state_hash(db.conn())?, "db": data_encoding::BASE64.encode(&db.bytes()?) });
-            i.scope_dbs.insert(scope.clone(), (at, db));
-            Ok((kept, newer, forgotten))
+            let kept = reader.keep()?;
+            i.scope_dbs.insert(scope.clone(), reader);
+            Ok((kept, took, forgotten))
         })?;
         self.keep_scope_db(scope, &kept);
         if !forgotten.is_empty() {
             self.delete_forgotten(forgotten);
         }
         // A newer release's step: this device reads no further until it's updated.
-        ensure!(!newer, steps::Newer);
-        Ok(!read.is_empty())
+        took?;
+        Ok(!read.steps.is_empty())
     }
 
     /// Writes `content` to a scope's own database (not `global`'s) as a step this device signs as `user`, once
@@ -255,10 +234,10 @@ impl Node {
         for _ in 0..50 {
             self.read_scope_steps_now(scope).await?;
             let (step, at) = self.with(|i| {
-                let (at, db) = i.scope_dbs.get(scope).context("this device can't read that yet: try again")?;
-                let step = steps::sign(&i.r.key, scope, at + 1, user, i.r.db().epoch(scope)?, now_ms(), content.clone())?;
-                steps::apply(db, Some(i.r.db()), scope, &step)?;
-                Ok((step, at + 1))
+                let r = i.scope_dbs.get(scope).context("this device can't read that yet: try again")?;
+                let step = steps::sign(&i.r.key, scope, r.at + 1, user, i.r.db().epoch(scope)?, now_ms(), content.clone())?;
+                steps::apply(&r.db, Some(i.r.db()), scope, &step)?;
+                Ok((step, r.at + 1))
             })?;
             for blob in &step.content.blobs {
                 self.share_blob(scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
@@ -267,7 +246,7 @@ impl Node {
             let name = crate::database::stored::step_name(&steps::prefix(&scope.to_string()), at);
             if crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(&step, None))?).await? {
                 self.read_scope_steps_now(scope).await?;
-                let copy = self.with(|i| i.scope_dbs.get_mut(scope).map(|(_, d)| d.bytes()).transpose())?;
+                let copy = self.with(|i| i.scope_dbs.get_mut(scope).map(|r| r.db.bytes()).transpose())?;
                 if let Some(bytes) = copy
                     && let Err(err) = steps::written(&self.bucket()?, &keys, scope, at, bytes).await
                 {

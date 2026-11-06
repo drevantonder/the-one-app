@@ -112,7 +112,7 @@ struct Network {
     builds: HashMap<Key, release::Running>,
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.
-    scope_dbs: HashMap<Scope, (u64, ScopeDb)>,
+    scope_dbs: HashMap<Scope, crate::database::steps::ScopeReader>,
     /// Each scope's rows of how things went, as this device last read them.
     status: HashMap<String, status::Status>,
     /// Each scope's own state, as its database says it.

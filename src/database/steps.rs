@@ -286,35 +286,28 @@ pub fn open(keys: &crate::database::stored::Keys, made: u32, scope: &Scope, at: 
 }
 
 /// What `read` read: the steps by position, none for one that will never be a step; and the epoch of the one it stopped
-/// at, if it's under one it has no key for.
+/// at, if it's under one that was made whose key it has not.
 #[derive(Default)]
 pub struct Read {
     pub steps: Vec<Option<Given>>,
     pub waits: Option<u32>,
 }
 
-impl Read {
-    /// Whether the step it stopped at is junk: under an epoch above `made`, the newest of its scope made as the steps
-    /// before it leave it (`open`), so its reader passes it over and reads on, rather than wait for it for good.
-    pub fn junk_at_end(&self, made: u32) -> bool {
-        self.waits.is_some_and(|e| e > made)
-    }
-}
-
 /// Reads `scope`'s steps after `from` from the bucket, opened with the keys of its log by epoch: each by position, none
-/// for one that will never be a step. Stops at the first position with nothing, or one under an epoch it has no key
-/// for (`Read::waits`), which its reader takes once it's applied those before (`Read::junk_at_end`); fails at a
-/// position with nothing that a later step says was written, rather than read on as if the steps ended there.
-pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, scope: &Scope, from: u64) -> Result<Read> {
+/// for one that will never be a step (`open`, under `made`, the newest epoch of the scope `global`'s steps made). Stops
+/// at the first position with nothing, or one under an epoch made it has no key for (`Read::waits`); fails at a
+/// position with nothing that a later step says was written (`gap`), rather than read on as if the steps ended there.
+pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, scope: &Scope, from: u64, made: u32) -> Result<Read> {
     let prefix = prefix(&scope.to_string());
     let mut out = Read::default();
     loop {
         let at = from + out.steps.len() as u64 + 1;
         let Some(o) = bucket.get(&crate::database::stored::step_name(&prefix, at)).await? else {
-            missing(bucket, keys, scope, at).await?;
+            let after = bucket.get(&crate::database::stored::step_name(&prefix, at + 1)).await?;
+            gap(keys, scope, at, after.as_ref().map(|o| &o.bytes[..]))?;
             break;
         };
-        match open(keys, u32::MAX, scope, at, &o.bytes) {
+        match open(keys, made, scope, at, &o.bytes) {
             Opened::Step(given) => out.steps.push(Some(given)),
             Opened::Junk => out.steps.push(None),
             Opened::Waits(epoch) => {
@@ -326,16 +319,14 @@ pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::database::s
     Ok(out)
 }
 
-/// Fails if step `at` of `scope`'s database, which isn't in the bucket, was written: the next is a step (it opens with
-/// `keys` and is signed for its place). Steps are written one after another, so one gone is one deleted, and reading
-/// on as if it never was would pass over whatever it and those after it changed. Anything else there is anyone's to
-/// write (the URL signer creates a position only after the one before it, but an older one didn't), so it says
-/// nothing: the steps end at `at`, and the next writer writes there. Nor does the newest hint.
-pub async fn missing(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, scope: &Scope, at: u64) -> Result<()> {
-    let later = match bucket.get(&crate::database::stored::step_name(&prefix(&scope.to_string()), at + 1)).await? {
-        Some(o) => matches!(open(keys, u32::MAX, scope, at + 1, &o.bytes), Opened::Step(_)),
-        None => false,
-    };
+/// Fails if step `at` of `scope`'s database, which isn't in the bucket, was written: the one after it, `after` as the
+/// bucket holds it, is a step (it opens with `keys` and is signed for its place). Steps are written one after another,
+/// so one gone is one deleted, and reading on as if it never was would pass over whatever it and those after it
+/// changed. Anything else there is anyone's to write (the URL signer creates a position only after the one before it,
+/// but an older one didn't), so it says nothing: the steps end at `at`, and the next writer writes there. Nor does the
+/// newest hint.
+fn gap(keys: &crate::database::stored::Keys, scope: &Scope, at: u64, after: Option<&[u8]>) -> Result<()> {
+    let later = after.is_some_and(|b| matches!(open(keys, u32::MAX, scope, at + 1, b), Opened::Step(_)));
     ensure!(!later, "step {at} of {scope}'s database isn't in the bucket, though later ones were written: this device reads no further until it's back");
     Ok(())
 }
@@ -830,9 +821,7 @@ impl Reader {
             each(at, given.as_ref(), changed)?;
         }
         let next = self.at() + 1;
-        if let Some(bytes) = sealed.steps.get(&(next + 1)) {
-            ensure!(!matches!(open(keys, u32::MAX, &Scope::Global, next + 1, bytes), Opened::Step(_)), "global's step {next} isn't in the bucket, though later ones were written: this device reads no further until it's back");
-        }
+        gap(keys, &Scope::Global, next, sealed.steps.get(&(next + 1)).map(Vec::as_slice))?;
         Ok(None)
     }
 
@@ -952,30 +941,65 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Step)
     Ok(Applied { db: out })
 }
 
-/// A scope's database (not `global`'s) as `take_scope` left it: the last position it applied or passed over, the
-/// database there, and whether it stopped at the step after, a newer release's (`Newer`).
-pub struct TookScope {
+/// A scope's own database (not `global`'s) as one reader reads it, step by step: from its start (`ScopeReader::start`),
+/// the last position it applied or passed over, and the database there. Every node reads a scope with one.
+pub struct ScopeReader {
     pub at: u64,
     pub db: ScopeDb,
-    pub newer: bool,
 }
 
-/// Takes `read`, `scope`'s steps after `at` by position (none for one that will never be a step), into `db`, its
-/// database there (not `global`'s): each applied if it counts with `global`, `global`'s database as it is now, passed
-/// over if not. A newer release's step stops it before it, as it stops `global`'s readers (`Truth::take`): it's never
-/// passed over, which a reader of that release wouldn't do.
-pub fn take_scope(mut at: u64, mut db: ScopeDb, global: &ScopeDb, scope: &Scope, read: &[Option<Given>], now: u64) -> Result<TookScope> {
-    for step in read {
-        if let Some(given) = step {
-            match apply(&db, Some(global), scope, &given.step) {
-                Ok(a) => db = ScopeDb::open(a.db, now)?,
-                Err(err) if err.is::<Newer>() => return Ok(TookScope { at, db, newer: true }),
-                Err(err) => tracing::info!("{scope}'s step {} doesn't count: {err:#}", at + 1),
-            }
-        }
-        at += 1;
+impl ScopeReader {
+    /// The start of `scope`'s database, step 0, as the bucket holds it, opened with `keys`: none if there's none, or it
+    /// doesn't open.
+    pub async fn fetch_start(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, scope: &Scope) -> Result<Option<Given>> {
+        Ok(match bucket.get(&start_name(scope)).await? {
+            Some(o) => match open(keys, u32::MAX, scope, 0, &o.bytes) {
+                Opened::Step(given) => Some(given),
+                _ => None,
+            },
+            None => None,
+        })
     }
-    Ok(TookScope { at, db, newer: false })
+
+    /// Before its first step: its database from its start (`started`), with who's who `truth`.
+    pub fn start(truth: &Truth, scope: &Scope, start: Option<&Given>, now: u64) -> Result<ScopeReader> {
+        Ok(ScopeReader { at: 0, db: started(&truth.freeze, &truth.db, scope, start, now)? })
+    }
+
+    /// Takes the steps of `read` after its own position, `read` read from `from` on (`read`): each applied if it counts
+    /// with `global`, `global`'s database as it is now, passed over if not. A newer release's step stops it before it
+    /// (`Newer`), as it stops `global`'s readers (`Truth::take`): it's never passed over, which a reader of that release
+    /// wouldn't do. → whether it took any.
+    pub fn take(&mut self, from: u64, read: &Read, global: &ScopeDb, scope: &Scope, now: u64) -> Result<bool> {
+        let skip = usize::try_from(self.at.saturating_sub(from)).unwrap_or(usize::MAX);
+        ensure!(from <= self.at, "{scope}'s steps from {from} skip some after {}", self.at);
+        let mut took = false;
+        for step in read.steps.iter().skip(skip) {
+            if let Some(given) = step {
+                match apply(&self.db, Some(global), scope, &given.step) {
+                    Ok(a) => self.db = ScopeDb::open(a.db, now)?,
+                    Err(err) if err.is::<Newer>() => return Err(err),
+                    Err(err) => tracing::info!("{scope}'s step {} doesn't count: {err:#}", self.at + 1),
+                }
+            }
+            self.at += 1;
+            took = true;
+        }
+        Ok(took)
+    }
+
+    /// As a reader keeps it, to start from again (`kept`): `{ at, hash, db }`, the database's bytes base64.
+    pub fn keep(&mut self) -> Result<Value> {
+        Ok(json!({ "at": self.at, "hash": crate::database::stored::state_hash(self.db.conn())?, "db": data_encoding::BASE64.encode(&self.db.bytes()?) }))
+    }
+
+    /// What `keep` kept, checked against the hash it kept with it, in this release's form.
+    pub fn kept(kept: &Value, scope: &Scope, now: u64) -> Result<ScopeReader> {
+        let bytes = data_encoding::BASE64.decode(kept["db"].as_str().context("no database")?.as_bytes())?;
+        let conn = connection(&bytes)?;
+        ensure!(Some(crate::database::stored::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "it isn't what it was");
+        Ok(ScopeReader { at: kept["at"].as_u64().context("no position")?, db: normalize(conn, scope, now)? })
+    }
 }
 
 /// The kind of step that moves a database on to a newer release's types, roles, rules and tables
@@ -1221,10 +1245,11 @@ pub(crate) mod tests {
         let mut newer = release_defaults().unwrap();
         newer.data["reads"] = json!(READS + 1);
         let newer = Some(Given { step: sign(&mac, &scope, 2, ANDRE, 1, 0, newer).unwrap(), copy: None });
-        let took = take_scope(0, db(), &global, &scope, &[None, newer, None], 0).unwrap();
-        assert!(took.newer && took.at == 1, "stopped before it");
-        let took = take_scope(0, db(), &global, &scope, &[None, None], 0).unwrap();
-        assert!(!took.newer && took.at == 2);
+        let read = |steps| Read { steps, waits: None };
+        let mut r = ScopeReader { at: 0, db: db() };
+        assert!(r.take(0, &read(vec![None, newer, None]), &global, &scope, 0).err().unwrap().is::<Newer>() && r.at == 1, "stopped before it");
+        let mut r = ScopeReader { at: 0, db: db() };
+        assert!(r.take(0, &read(vec![None, None]), &global, &scope, 0).unwrap() && r.at == 2);
     }
 
     /// A newest hint is anyone's to write: one far above the last step jams no reader, which reads on to the steps'
@@ -1243,20 +1268,22 @@ pub(crate) mod tests {
         };
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             bucket.create(&crate::database::stored::newest_name(&prefix), br#"{"at": 1000000000, "copy": 0, "epoch": 1}"#).await.unwrap();
-            assert!(read(&bucket, &keys, &Scope::Global, 0).await.unwrap().steps.is_empty(), "nothing written, nothing read, and no failure");
+            assert!(read(&bucket, &keys, &Scope::Global, 0, 1).await.unwrap().steps.is_empty(), "nothing written, nothing read, and no failure");
             bucket.create(&crate::database::stored::step_name(&prefix, 3), b"x").await.unwrap();
-            assert!(read(&bucket, &keys, &Scope::Global, 0).await.unwrap().steps.is_empty(), "nor junk after a position with nothing");
+            assert!(read(&bucket, &keys, &Scope::Global, 0, 1).await.unwrap().steps.is_empty(), "nor junk after a position with nothing");
             bucket.create(&crate::database::stored::step_name(&prefix, 2), &step(2)).await.unwrap();
-            assert!(read(&bucket, &keys, &Scope::Global, 0).await.is_err(), "but a step after one with nothing stops it: that one was written");
+            assert!(read(&bucket, &keys, &Scope::Global, 0, 1).await.is_err(), "but a step after one with nothing stops it: that one was written");
             let add = async |r: &mut Reader| r.add(&fetch(&bucket, r.at(), None).await.unwrap(), &keys, None, 0, |_, _, _| Ok(()));
             assert!(add(&mut Reader::new(None)).await.is_err(), "as it stops who's who's reader");
             // Junk at 1, under an epoch no one made.
             let junk = crate::database::stored::step_name(&prefix, 1);
             bucket.create(&junk, &crate::keys::seal(0xFFFF_FFFF, &[3; 32], &junk, b"junk")).await.unwrap();
-            let r = read(&bucket, &keys, &Scope::Global, 0).await.unwrap();
-            assert!(r.steps.is_empty() && r.junk_at_end(1) && !r.junk_at_end(u32::MAX), "it waits only for an epoch that was made");
+            let r = read(&bucket, &keys, &Scope::Global, 0, u32::MAX).await.unwrap();
+            assert!(r.steps.is_empty() && r.waits == Some(u32::MAX), "it waits only for an epoch that was made");
+            let r = read(&bucket, &keys, &Scope::Global, 0, 1).await.unwrap();
+            assert!(r.steps.len() == 3 && r.steps[0].is_none() && r.waits.is_none(), "and passes over one above every epoch made");
             assert!(matches!(open(&keys, 1, &Scope::Global, 1, &bucket.get(&junk).await.unwrap().unwrap().bytes), Opened::Junk));
-            let r = read(&bucket, &keys, &Scope::Global, 1).await.unwrap();
+            let r = read(&bucket, &keys, &Scope::Global, 1, 1).await.unwrap();
             assert!(r.steps.len() == 2 && r.steps[0].is_some() && r.steps[1].is_none(), "and reads on past it, passing over the junk after");
             let mut reader = Reader::new(None);
             assert!(add(&mut reader).await.unwrap().is_none() && reader.at() == 3, "who's who's reader, before its freeze, passes over junk under an epoch above every key it has");

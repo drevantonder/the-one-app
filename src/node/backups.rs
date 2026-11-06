@@ -483,7 +483,7 @@ impl Node {
             let named = match &scope {
                 Scope::Global => i.r.db().blobs()?,
                 _ => match i.scope_dbs.get(&scope) {
-                    Some((_, db)) => db.blobs()?,
+                    Some(r) => r.db.blobs()?,
                     None => BTreeSet::new(),
                 },
             };

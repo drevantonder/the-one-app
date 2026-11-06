@@ -102,7 +102,7 @@ impl Node {
         }
         let Ok(named) = self.with(|i| {
             let mut named: Vec<(Scope, String)> = i.r.db().blobs()?.into_iter().map(|b| (Scope::Global, b)).collect();
-            for (scope, (_, db)) in &i.scope_dbs {
+            for (scope, db) in i.scope_dbs.iter().map(|(s, r)| (s, &r.db)) {
                 named.extend(db.blobs()?.into_iter().map(|b| (scope.clone(), b)));
             }
             Ok(named)
@@ -356,7 +356,7 @@ fn steps_naming(i: &Network, hash: &str) -> Result<Vec<Scope>> {
     if i.r.freeze().is_some() && i.r.db().names_blob(hash)? {
         named.push(Scope::Global);
     }
-    for (scope, (_, db)) in &i.scope_dbs {
+    for (scope, db) in i.scope_dbs.iter().map(|(s, r)| (s, &r.db)) {
         if db.names_blob(hash)? {
             named.push(scope.clone());
         }

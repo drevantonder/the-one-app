@@ -114,7 +114,7 @@ impl Node {
             let newest = kept.keys().next_back().copied().unwrap_or(0);
             return Ok((kept, newest));
         }
-        let hashes = self.with(|i| Ok(if *scope == Scope::Global { i.r.global_epochs()? } else { i.r.db().epoch_hashes(scope)? }))?;
+        let hashes = self.with(|i| i.r.db().epoch_hashes(scope))?;
         let newest = hashes.keys().next_back().copied().unwrap_or(0);
         // Kept only while each is still the one its entry made.
         let mut keys: crate::database::stored::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&crate::keys::epoch_hash(k))).collect();
@@ -349,10 +349,10 @@ impl Node {
     /// epoch's (true), since its entry is written before anything is sealed under it; or, if no entry made it, junk
     /// (false), which every read of it here passes over from now on.
     async fn judge_ahead(&self, scope: &Scope, prefix: &str, ahead: &crate::database::stored::Ahead) -> Result<bool> {
-        if self.with(|i| i.r.epoch_made(scope))? < ahead.epoch {
+        if self.with(|i| i.r.db().epoch(scope))? < ahead.epoch {
             tokio::time::timeout(Duration::from_secs(10), self.read_scope(&Scope::Global)).await.map_err(|_| anyhow!("global's entries didn't come in time to say what {prefix}'s step {} is", ahead.at))??;
         }
-        if self.with(|i| i.r.epoch_made(scope))? >= ahead.epoch {
+        if self.with(|i| i.r.db().epoch(scope))? >= ahead.epoch {
             return Ok(true);
         }
         tracing::warn!("{prefix}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);

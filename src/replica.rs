@@ -47,6 +47,11 @@ impl Replica {
         self.reader.truth().map(|t| &t.freeze)
     }
 
+    /// Who's who, once this device has read the freeze.
+    pub fn truth(&self) -> Option<&Truth> {
+        self.reader.truth()
+    }
+
     /// The last of `global`'s steps this device took, or looked at before its freeze.
     pub fn looked(&self) -> u64 {
         self.reader.at()
@@ -118,16 +123,6 @@ impl Replica {
     /// `global`'s scope database: who's who, and who may do what.
     pub fn db(&self) -> &ScopeDb {
         self.reader.truth().map_or(&self.nobody, |t| &t.db)
-    }
-
-    /// `global`'s epochs' hashes by number: which key opens which of its steps.
-    pub fn global_epochs(&self) -> Result<std::collections::BTreeMap<u32, String>> {
-        self.db().epoch_hashes(&Scope::Global)
-    }
-
-    /// The newest epoch of a scope made: a step under a newer one is junk.
-    pub fn epoch_made(&self, scope: &Scope) -> Result<u32> {
-        self.db().epoch(scope)
     }
 
     /// Whether this device holds `scope`: `global`, and each scope whose calls it runs. Until it sees itself listed it

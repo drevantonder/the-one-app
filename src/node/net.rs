@@ -759,14 +759,8 @@ impl Node {
         let mut steps = Vec::new();
         if self.frozen() {
             let (bucket, keys) = (self.bucket()?, self.step_keys(&Scope::Global).await?);
-            loop {
-                let read = crate::database::steps::read(&bucket, &keys, &Scope::Global, steps.len() as u64).await?;
-                steps.extend(read.steps.iter().cloned());
-                if !read.junk_at_end(self.with(|i| i.r.epoch_made(&Scope::Global))?) {
-                    break;
-                }
-                steps.push(None);
-            }
+            let made = self.with(|i| Ok(i.r.db().epoch(&Scope::Global)?))?;
+            steps = crate::database::steps::read(&bucket, &keys, &Scope::Global, 0, made).await?.steps;
         }
         let hello = json!({ "steps": steps.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
