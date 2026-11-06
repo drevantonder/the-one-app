@@ -145,37 +145,12 @@ const deletedOf = (r) => (r.deleted ? { time: r.deleted, by: r.deleted_by } : nu
 
 function global(ctx) {
   if (!ctx.global) throw new Error("repos lives in global: install it there");
-  // Phase 3: delete once every node has may (7952b8cb). One from before answers as Repos did then, from its own rows.
-  ctx.global.may ??= (verb, obj) => (Array.isArray(verb) ? mayHere(ctx, verb) : mayHere(ctx, [[verb, obj]]).then(([ok]) => ok));
   return ctx.global;
-}
-
-/// Whether the caller may do each of `asks` ([verb, repo object]), in order, by the repos' owners and `relations`: a
-/// repo's owner and its group's admins manage it and push, and its group's members and its collaborators push.
-async function mayHere(ctx, asks) {
-  const g = ctx.global;
-  const ids = [...new Set(asks.map(([, obj]) => obj.slice(5)))];
-  const owners = ids.length ? Object.fromEntries((await g.query(`select id, owner from repos where id in (${ids.map(() => "?").join(", ")})`, ids)).map((r) => [r.id, r.owner])) : {};
-  const added = new Set((await g.query("select object from relations where subject = ? and relation = 'collaborator'", [`person:${ctx.me.user}`])).map((r) => r.object));
-  return asks.map(([verb, obj]) => {
-    const owner = owners[obj.slice(5)];
-    if (!owner) return false;
-    const role = owner.startsWith("group:") ? byId(ctx, owner)?.members?.[ctx.me.user] : null;
-    if (owner === `user:${ctx.me.user}` || role === "admin") return true;
-    return verb === "push" && (!!role || added.has(obj));
-  });
-}
-
-/// Whether the caller may do each of `asks` ([verb, object]), in order, asked of the node at once.
-async function mays(g, asks) {
-  // Phase 3: just g.may(asks), once every node takes a list (it answers one with false, or refuses it).
-  const all = await g.may(asks).catch(() => null);
-  return Array.isArray(all) ? all : Promise.all(asks.map(([verb, obj]) => g.may(verb, obj)));
 }
 
 /// Whether the caller manages `r` (`yours`) and pushes to it (`push`), asked at once.
 async function rights(g, r) {
-  const [yours, push] = await mays(g, [["manage", object(r)], ["push", object(r)]]);
+  const [yours, push] = await g.may([["manage", object(r)], ["push", object(r)]]);
   return { yours, push };
 }
 
@@ -210,7 +185,7 @@ async function ownList(ctx) {
        from repos r order by coalesce(updated, r.created) desc`,
   );
   const from = await paths(ctx, g, repos.map((r) => r.from));
-  const may = await mays(g, repos.flatMap((r) => [["manage", object(r)], ["push", object(r)]]));
+  const may = await g.may(repos.flatMap((r) => [["manage", object(r)], ["push", object(r)]]));
   return iso(repos.map((r, i) => ({
     repo: pathOf(ctx, r), name: r.name, owner: who(ctx, r.owner), from: from[r.from] ?? null, branch: r.branch, branches: r.branches,
     created: r.created, updated: r.updated, open_issues: r.open_issues, deleted: deletedOf(r), yours: may[2 * i], push: may[2 * i + 1],

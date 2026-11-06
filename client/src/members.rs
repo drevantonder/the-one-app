@@ -437,8 +437,6 @@ fn now() -> u64 {
 ///   that run their calls), `runs_until_chosen`, `approves` (whose new devices they let in), `invites` (someone new),
 ///   `removes_people`, `removes` (the devices they may take out), and `keeps`: their app schedules on a device still
 ///   listed (named so for older clients), `{ endpoint, scope, app, until, keys }` (each epoch's key hash), the only ones their browser renews
-/// - `roles` and `runs`, as an older release's tabs read them (each scope's people's roles, and the machines each
-///   person who chose runs their things on): kept for those tabs, which share this record; phase 3 removes them
 pub fn view(m: &Members) -> Result<Value> {
     view_of(&who(m)?)
 }
@@ -492,21 +490,11 @@ pub fn view_of(db: &ScopeDb) -> Result<Value> {
             }),
         );
     }
-    // For an older release's tabs, which read these and stop working without them. Phase 3 removes them.
-    let mut roles = Map::new();
-    for s in &scopes {
-        let of: Map<String, Value> = people.iter().filter_map(|u| Some((u.clone(), json!(db.role_in(u, s)?)))).collect();
-        if !of.is_empty() {
-            roles.insert(s.to_string(), json!(of));
-        }
-    }
-    let runs: Map<String, Value> = people.iter().filter_map(|u| Some((u.clone(), json!(db.runs(u)?.iter().map(hex).collect::<Vec<_>>())))).collect();
     Ok(json!({
         "root": db.root().map(|r| r.to_hex()), "name": db.name(), "recovery": db.recovery().as_ref().map(hex),
         "devices": devices, "openers": openers,
         "removed": db.machines().iter().filter(|d| d.removed).map(|d| hex(&d.key)).collect::<Vec<_>>(),
         "sign_in_clients": db.setting(one::sign_in_proof::CLIENTS), "runs_for": runs_for, "epochs": epochs, "people": answers,
-        "roles": roles, "runs": runs,
     }))
 }
 

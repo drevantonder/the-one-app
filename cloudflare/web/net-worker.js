@@ -70,16 +70,10 @@ export function server(version) {
   const code = Promise.all([import("/shared/crypto.js"), import("/kept.js")]);
   /// Of `keys`, the nodes the install's signed entries, as this browser last checked them (`global`), list as running
   /// something of `user`'s: all of them before it's checked any. A node the relay or a node names besides isn't asked.
-  /// What an older release's tab kept, without `people`, is filtered as that release did, by its own `roles` and
-  /// `runs_for` (phase 3 removes this, with them).
   async function theirs(user, keys, kept) {
     const k = (kept === undefined ? await (await code)[1].get(`global:${user}`) : kept)?.members;
     if (!k) return keys;
-    if (!k.people) {
-      const uses = Object.keys(k.roles || {}).filter((s) => k.roles[s][user]);
-      return keys.filter((key) => (k.runs_for?.[key] || []).some((s) => uses.includes(s)));
-    }
-    const theirs = k.people[user]?.nodes || [];
+    const theirs = k.people?.[user]?.nodes || [];
     return keys.filter((key) => theirs.includes(key));
   }
 
