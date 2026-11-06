@@ -5,9 +5,12 @@
 //! browser. What the app adds is what a page can't do: this device's key in the OS's secret store, signing in through
 //! the system's browser, notifications, the clipboard, files, and links outside.
 
+mod headless;
 mod secrets;
 mod signin;
 mod widgets;
+
+pub use headless::answer as headless;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -25,6 +28,18 @@ use tauri_plugin_opener::OpenerExt;
 /// What a call says it came from.
 fn client_name() -> String {
     std::env::consts::OS.replace("macos", "mac")
+}
+
+/// The app's id, as build.rs names it for this platform: `app.<cli>.<platform>`.
+fn identifier() -> String {
+    let platform = match std::env::consts::OS {
+        "macos" => "mac",
+        "ios" => "phone",
+        "windows" => "windows",
+        "android" => "android",
+        _ => "linux",
+    };
+    format!("app.{}.{platform}", one::config::CLI)
 }
 
 /// What the person calls this device, as their other devices list it.
@@ -595,7 +610,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed])
         .setup(|app| {
-            let data = app.path().app_data_dir()?;
+            // Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
+            let data = app.path().app_local_data_dir()?;
             #[cfg(debug_assertions)]
             if let Some(port) = env("CONTROL").and_then(|p| p.parse().ok()) {
                 control(port);
