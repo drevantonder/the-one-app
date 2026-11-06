@@ -258,7 +258,7 @@ export class Client extends DurableObject {
     // Its name is the client's own, so where its sign-in goes is shown beside it: a name says nothing a client can't.
     const about = await this.env.AUTH.fetch(`${origin(this.env)}/sign-in/about?client_id=${encodeURIComponent(client)}`).then((r) => (r.ok ? r.json() : {}), () => ({}));
     const called = String(about.client || "MCP client").slice(0, 40);
-    device.name = (about.goes ? `${called} (${String(about.goes).slice(0, 20)})` : called).slice(0, 64);
+    device.name = (about.goes ? `${called} (${about.goes})` : called).slice(0, 64);
     device.code = await joinCode(hex.decode(device.key), hex.decode(device.seal));
     await this.end();
     const was = await this.ctx.storage.get("device");
