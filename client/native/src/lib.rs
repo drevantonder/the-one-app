@@ -210,6 +210,8 @@ fn native() -> Value {
         "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": platform(), "device": device_name(), "client": client_name(),
         "address": address, "signedIn": signed_in, "user": if signed_in { a.kept("user") } else { None },
         "opened": opened,
+        // Open at login: whether it's on, where the app switches it (none where it can't yet).
+        "login": login_now(&a.handle),
     })
 }
 
@@ -443,6 +445,75 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+// MARK: The menu bar panel
+
+#[cfg(desktop)]
+fn login_now(app: &AppHandle) -> Option<bool> {
+    login::supported().then(|| login::on(app))
+}
+
+#[cfg(not(desktop))]
+fn login_now(_: &AppHandle) -> Option<bool> {
+    None
+}
+
+/// The window, in front, the panel gone, and at `link` if given (`<cli>://…`).
+#[tauri::command]
+fn main(link: Option<String>) {
+    if let Some(p) = app().handle.get_webview_window("panel") {
+        let _ = p.hide();
+    }
+    show();
+    if let Some(link) = link {
+        opened(&link);
+    }
+}
+
+/// Open at login, switched → whether it's on.
+#[tauri::command]
+fn login(on: bool) -> Option<bool> {
+    #[cfg(desktop)]
+    login::set(&app().handle, on);
+    let _ = on;
+    login_now(&app().handle)
+}
+
+#[tauri::command]
+fn quit() {
+    app().handle.exit(0);
+}
+
+/// The panel, shown under the menu bar or tray item at `at` (its place and size on the screen, physical), or hidden if
+/// it shows; with none, at the top right.
+#[tauri::command]
+fn panel() {
+    toggle_panel(None);
+}
+
+#[cfg(desktop)]
+fn toggle_panel(at: Option<tauri::Rect>) {
+    let Some(p) = app().handle.get_webview_window("panel") else { return };
+    if p.is_visible().unwrap_or(false) {
+        let _ = p.hide();
+        return;
+    }
+    let size = p.outer_size().unwrap_or_default();
+    if let Some(at) = at {
+        let scale = p.scale_factor().unwrap_or(1.0);
+        let (pos, item) = (at.position.to_physical::<f64>(scale), at.size.to_physical::<f64>(scale));
+        let x = pos.x + item.width / 2.0 - size.width as f64 / 2.0;
+        // Under an item at the top of the screen (a Mac's menu bar), over one at the bottom (a Windows taskbar).
+        let top = p.current_monitor().ok().flatten().map(|m| (m.position().y as f64 + m.size().height as f64 / 2.0) > pos.y).unwrap_or(true);
+        let y = if top { pos.y + item.height } else { pos.y - size.height as f64 };
+        let _ = p.set_position(tauri::PhysicalPosition::new(x.max(0.0), y.max(0.0)));
+    }
+    let _ = p.show();
+    let _ = p.set_focus();
+}
+
+#[cfg(not(desktop))]
+fn toggle_panel(_: Option<()>) {}
+
 // MARK: Starting
 
 /// The tray item (the menu bar's, on a Mac): Open, Open at Login, Quit.
@@ -460,7 +531,17 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
     let login = CheckMenuItem::with_id(app, "login", "Open at Login", true, login::on(app.handle()), None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &login, &quit])?;
-    let mut tray = tauri::tray::TrayIconBuilder::with_id("main").tooltip(one::config::NAME).menu(&menu).on_menu_event(move |app, e| match e.id().as_ref() {
+    let mut tray = tauri::tray::TrayIconBuilder::with_id("main")
+        .tooltip(one::config::NAME)
+        .menu(&menu)
+        // A click shows the panel; the menu is a right click's (Linux's tray items show only their menu).
+        .show_menu_on_left_click(cfg!(target_os = "linux"))
+        .on_tray_icon_event(|_, e| {
+            if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, button_state: tauri::tray::MouseButtonState::Up, rect, .. } = e {
+                toggle_panel(Some(rect));
+            }
+        })
+        .on_menu_event(move |app, e| match e.id().as_ref() {
         "open" => show(),
         "login" => {
             login::set(app, !login::on(app));
@@ -497,6 +578,11 @@ mod login {
     #[cfg(target_os = "linux")]
     fn entry(app: &AppHandle) -> Option<std::path::PathBuf> {
         Some(app.path().config_dir().ok()?.join("autostart").join(format!("{}.desktop", app.config().identifier)))
+    }
+
+    /// Whether the app switches it on this platform yet.
+    pub fn supported() -> bool {
+        cfg!(target_os = "linux")
     }
 
     pub fn on(app: &AppHandle) -> bool {
@@ -608,7 +694,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed])
+        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, quit, panel])
         .setup(|app| {
             // Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
             let data = app.path().app_local_data_dir()?;
@@ -667,6 +753,24 @@ pub fn run() {
                     }
                 });
                 tray(app)?;
+                // The panel: this page in panel mode, hidden until the tray item's clicked, gone when it loses focus.
+                let panel = WebviewWindowBuilder::new(app, "panel", WebviewUrl::App("index.html?panel".into()))
+                    .title(one::config::NAME)
+                    .initialization_script(include_str!("native.js"))
+                    .use_https_scheme(true)
+                    .inner_size(340.0, 560.0)
+                    .resizable(false)
+                    .decorations(false)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .visible(false)
+                    .build()?;
+                let hide = panel.clone();
+                panel.on_window_event(move |e| {
+                    if let tauri::WindowEvent::Focused(false) = e {
+                        let _ = hide.hide();
+                    }
+                });
             }
             Ok(())
         })

@@ -37,6 +37,11 @@ Shared, every platform:
       `<cli>://settings[/<item>]`, `<cli>://open?scope=`, links to the address's own pages (web.js `opened`)
 - [x] Closing the window leaves it running in the tray (menu bar), with Open and Quit (built; no tray host to see it
       under Xvfb)
+- [x] The menu bar panel, the Mac app's, for every computer: a click on the tray item opens it under the item (over it,
+      on a taskbar at the bottom), gone when it loses focus: the network's name, the client screen `panel` (your
+      devices, which are on, this one; your pages' widgets each once, running and opening as on the pages), then Open,
+      Open at Login (✓), Quit (checked, Linux, opened by its command: Linux's tray items show only their menu)
+- [ ] Per-widget menu bar items (Mac), "Let Agents Use This Mac" in the panel (Mac)
 - [ ] Window size and place kept (tauri-plugin-window-state, built, unchecked); sidebar state (web's, kept)
 - [ ] Keyboard shortcuts of the old apps
 - [x] Offline: last window shown at once, "Can't Reach Your Devices", trying again; a screen's kept page shown at once

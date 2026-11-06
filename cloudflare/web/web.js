@@ -23,6 +23,9 @@ const ui = OneUI["@one/ui"];
 const native = window.__oneNative;
 /// What the app says of itself and who's signed in there (`native.about`), once the page starts.
 let about = null;
+/// The app's menu bar (tray) panel, a small window of its own: this page showing only the client's own `panel` screen,
+/// with the app's rows under it.
+const panel = !!native && new URLSearchParams(location.search).has("panel");
 const h = OneUI.react.createElement;
 
 (() => {
@@ -680,6 +683,7 @@ const h = OneUI.react.createElement;
   function render() {
     if (!store.state || joining) return;
     if (!network()) return void ((windowShown = false), show(message("Not Set Up Yet", "Set it up on one of your computers first.")));
+    if (panel) return drawPanel();
     const r = route(), key = JSON.stringify(r);
     // The screen where the window is, kept as it is while the rest redraws around it.
     const fresh = !(shown === key && frames.some((f) => !f.sheet && f.into.isConnected));
@@ -687,6 +691,35 @@ const h = OneUI.react.createElement;
     if (fresh) (shown = key), (barTitle = r.kind === "own" && r.name === "pages" ? "" : titleOf(r));
     drawWindow();
     if (fresh) screen.show(detail, r);
+  }
+
+  /// The panel: the network's name, the `panel` screen (your devices, your widgets), and the app's rows under it, or with
+  /// no one signed in here, Sign In… in the window. Each row closes it, as a menu's item does.
+  function drawPanel() {
+    const row = (label, run, checked) => h(ui.Button, { key: label, variant: "ghost", className: "w-full justify-between px-3 font-normal", onClick: run }, label, checked ? h(ui.Icon, { name: "check", className: "size-4" }) : null);
+    const signedIn = !!store.state && !!network();
+    const name = network()?.name || config().name;
+    windowShown = true;
+    show(h("div", { className: "panel" },
+      h("div", { className: "panel-head" }, h("img", { src: "/logo.png", alt: "" }), h("span", null, name)),
+      signedIn ? h("div", { className: "panel-screen", ref: (el) => el && detail.parentElement !== el && el.append(detail) }) : h("p", { className: "panel-note" }, "Signed out"),
+      h("div", { className: "panel-rows" },
+        row(signedIn ? `Open ${config().name}` : "Sign In…", () => native.main()),
+        about.login != null && row("Open at Login", async () => ((about.login = await native.login(!about.login)), drawPanel()), about.login),
+        row("Quit", () => native.quit()))));
+    if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel"));
+  }
+
+  /// Where a route is as a link the app opens in its window (`opened`), for the panel.
+  function linkOf(r) {
+    const q = new URLSearchParams();
+    if (r.kind === "screen") {
+      for (const [k, v] of Object.entries({ app: r.app, screen: r.screen, params: r.params, scope: r.scope })) if (v) q.set(k, v);
+      return `${about.cli}://open?${q}`;
+    }
+    const params = JSON.parse(r.params || "{}");
+    if (r.name === "pages") return params.scope === "settings" ? `${about.cli}://settings` : `${about.cli}://open?scope=${encodeURIComponent(params.scope || "user")}`;
+    return `${about.cli}://settings/${encodeURIComponent(r.name)}`;
   }
 
   /// The sidebar's open or closed on a computer's width, as the person left it.
@@ -1125,6 +1158,7 @@ const h = OneUI.react.createElement;
             : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
             : mine ? { kind: "own", name: String(m.screen || ""), params }
             : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
+          if (panel) return void native.main(linkOf(to));
           if (m.sheet) return openSheet(to);
           // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,
           // Backups in Settings) opens as if picked there, with no Back; only what's deeper than it is pushed.
@@ -1392,6 +1426,7 @@ const h = OneUI.react.createElement;
   // MARK: Starting
 
   function showSignedOut(error, note) {
+    if (panel) return drawPanel();
     const name = config().name;
     document.title = name;
     windowShown = false;
@@ -1628,6 +1663,7 @@ const h = OneUI.react.createElement;
     await refreshApps().catch(() => {});
     if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
     listen();
+    if (panel) return;
     watchWaiting();
     notifications(false).catch((err) => console.warn("notifications:", err));
   }

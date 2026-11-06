@@ -26,6 +26,10 @@
     join: () => invoke("join"),
     wait: () => invoke("wait"),
     removed: () => invoke("removed"),
+    /// The window in front (at a `<cli>://` link, if given), from the menu bar panel; Open at Login switched; Quit.
+    main: (link) => invoke("main", { link: link ?? null }),
+    login: (on) => invoke("login", { on }),
+    quit: () => invoke("quit"),
     /// Something changed on the person's devices: the app's own widgets are drawn again.
     changed: () => invoke("changed").catch(() => {}),
     signOut: () => invoke("sign_out"),
