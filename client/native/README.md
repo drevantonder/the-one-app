@@ -74,8 +74,9 @@ Windows VM by `windows/build.sh`; `one throwaway client windows`). The package k
 
 - [ ] Toasts from pushes (WNS through the helper, `--open-note`, `--register-push`), Approve / Not Me with no window
       (`--answer-join`): built as the old app's, not checked: The One App has no WNS app (`wns_app`/`wns_object` empty)
-- [ ] A link to the address while signed out (`<address>/invite#…`, which the address's web-links file hands the app)
-      is ignored, as the page takes invites only from what's typed; the old app took it, and the Welcome offered it
+- [x] A link to the address while signed out (`<address>/invite#…`, which the address's web-links file hands the app)
+      is taken as if typed on the welcome, as the old app took it: opened in the browser for its passkey, then "Made
+      your passkey? Sign in with it." (web.js `opened`, e768aea5; not checked on Windows: the throwaway's address is http)
 
 Mac (`apple/Mac`, `apple/Shared`), iPhone (`apple/Phone`, `Notifications`, `Widget`), Android (`android/`): each old
 app's full inventory lands here before that platform is written.
