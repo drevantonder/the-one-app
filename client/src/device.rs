@@ -22,7 +22,7 @@ use ed25519_dalek::SigningKey;
 use one::keys::{Hash, hex};
 use one::database::scopes::Scope;
 use one::keys::{self, Endpoint, Handed, Handoff, Need, Waited};
-use one::database::{content, scopes};
+use one::database::content;
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
@@ -125,32 +125,6 @@ pub struct Device {
     /// The last answer of each call that only reads, for its app's screens (`kept`): a native app's keeps them
     /// (`keeping`), the CLI's doesn't.
     answers: Option<Answers>,
-}
-
-/// `global`'s epochs sealed to the device whose key is `key`, opened, by number, and its log's key in each, from
-/// `bucket`.
-async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32, [u8; 32]>, one::database::stored::Keys), Error> {
-    let me = hex(&key.verifying_key().to_bytes());
-    let opens = keys::seal_secret(key);
-    let mut epochs: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
-    let mut n = 1;
-    loop {
-        let read = async |n: u32| -> Result<Option<[u8; 32]>, Error> {
-            let Some(o) = one::bucket::Bucket::get(bucket, &keys::epoch_name("global", n, &me)).await.map_err(failed)? else { return Ok(None) };
-            one::keys::open_sealed(&opens, &o.bytes).ok().and_then(|k| k.try_into().ok()).map(Some).ok_or_else(|| failed("A key for this didn't open."))
-        };
-        match read(n).await? {
-            Some(key) => drop(epochs.insert(n, key)),
-            None if epochs.is_empty() && n < 8 => {}
-            None => break,
-        }
-        n += 1;
-        if n > 8 && epochs.is_empty() {
-            return Err(failed(format!("This device hasn't been given {YOURS}'s keys yet.")));
-        }
-    }
-    let step_keys = keys::database_keys(bucket, "global", scopes::APP, one::database::steps::NAME, &epochs, false).await.map_err(failed)?;
-    Ok((epochs, step_keys))
 }
 
 impl Device {
@@ -395,33 +369,29 @@ impl Device {
     /// keys. The network's root is kept the first time, and must be the same after.
     async fn read_members(&self) -> Result<HashMap<[u8; 32], [u8; 32]>, Error> {
         let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
-        let (epochs, log_keys) = global_keys(&bucket, &self.key).await?;
         let pinned = self.dir.join("root");
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
-        let mut global = crate::members::Global::new(kept);
+        let mut reader = one::database::steps::Reader::new(kept);
         // From where the device that let it in read who's who to, if it said (its Welcome), else from the first.
-        let welcome = std::fs::read_to_string(self.dir.join("welcome")).ok().and_then(|w| one::database::steps::Welcome::parse(w.trim()));
-        if let Some(welcome) = welcome {
-            match one::database::steps::welcomed(&bucket, &log_keys, &welcome, now()).await {
-                Ok(truth) => global.welcomed(truth),
-                Err(_) => drop(std::fs::remove_file(self.dir.join("welcome"))),
-            }
+        let mut welcome = std::fs::read_to_string(self.dir.join("welcome")).ok().and_then(|w| one::database::steps::Welcome::parse(w.trim()));
+        let had_welcome = welcome.is_some();
+        let (epochs, _) = one::database::steps::read_sealed_to(&bucket, &mut reader, &hex(&self.me.key), &keys::seal_secret(&self.key), &mut welcome, now()).await.map_err(failed)?;
+        if had_welcome && welcome.is_none() {
+            let _ = std::fs::remove_file(self.dir.join("welcome"));
         }
-        global.read_steps(&bucket, &log_keys).await.map_err(failed)?;
-        let who = global.who().map_err(failed)?;
+        if epochs.is_empty() {
+            return Err(failed(format!("This device hasn't been given {YOURS}'s keys yet.")));
+        }
         if kept.is_none()
-            && let Some(root) = global.root()
+            && let Some(root) = reader.root()
         {
             let _ = std::fs::create_dir_all(&self.dir);
             let _ = std::fs::write(&pinned, root.to_hex());
         }
-        // Every epoch it was sealed must be the one the entries made.
         for (n, key) in &epochs {
-            if who.epoch_hash(&Scope::Global, *n) != Some(keys::epoch_hash(key)) {
-                return Err(failed("A key for this didn't check out, so it wasn't used."));
-            }
             self.epochs.lock().unwrap().insert(("global".into(), *n), *key);
         }
+        let who = reader.into_truth().map(|t| t.db).ok_or_else(|| failed("This device isn't listed yet."))?;
         let user = who.machine(&self.me.key).map(|d| d.user).ok_or_else(|| failed("This device isn't listed yet."))?;
         // The nodes that run something of its person's, and the Cloudflare node, which runs anyone's calls.
         let cloudflare_node = who.cloudflare_node();

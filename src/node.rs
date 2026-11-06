@@ -1,7 +1,6 @@
 //! A node: this device's network (a custom build holds one), its replica and views, its socket to the relay, and where
 //! calls run.
 
-use crate::config::YOURS;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1067,7 +1066,7 @@ impl Node {
 /// `global`'s state, as its scope database says it: each other scope's is its own database's
 /// (`Node::read_scope_steps_now`).
 fn update_views(i: &mut Network) {
-    if i.r.frozen.is_some() {
+    if i.r.freeze().is_some() {
         i.views.insert("global".to_string(), i.r.db().state());
     }
 }

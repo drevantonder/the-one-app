@@ -28,8 +28,6 @@ pub(super) struct State {
 const TRIES: usize = 20;
 /// How often each database open here is tidied (`stored::tidy`).
 const TIDY_EVERY: u64 = 24 * 60 * 60 * 1000;
-/// How many epochs in a row `first_global_read` passes that aren't sealed to it before taking the last as the newest.
-const GAPS_PASSED: u32 = 2;
 
 /// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
 #[derive(Debug)]
@@ -157,52 +155,14 @@ impl Node {
     }
 
     /// `global`'s epochs, for a device that has read nothing of who's who yet, so knows no epoch's hash: those sealed
-    /// to it in the bucket, each kept only once who's who, from the network's first freeze (`Truth::first`), says it's
-    /// theirs.
+    /// to it in the bucket, each kept only once who's who, from the network's first freeze, says it's theirs
+    /// (`steps::read_sealed_to`).
     pub(super) async fn first_global_read(&self) -> Result<crate::database::stored::Keys> {
-        let (bucket, me, secret, root) = (self.bucket()?, hex(&self.0.id), self.seal_secret(), self.with(|i| Ok(i.r.root))?);
-        let mut candidates = crate::database::stored::Keys::new();
-        // Past a gap or two: an epoch whose device stopped before sealing it is sealed to nobody, and the next one is.
-        let mut missing = 0;
-        for n in 1..=crate::database::stored::EPOCHS_MAX {
-            let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::keys::epoch_name("global", n, &me)).await? else {
-                missing += 1;
-                if missing > GAPS_PASSED {
-                    break;
-                }
-                continue;
-            };
-            missing = 0;
-            if let Some(key) = crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
-                candidates.insert(n, key);
-            }
-        }
-        loop {
-            ensure!(!candidates.is_empty(), NotGiven(Scope::Global, self.device_name()));
-            let log_keys = self.step_keys_of(&candidates).await?;
-            // Who's who as the steps say it, from the network's first freeze: the epochs' hashes each key sealed to this
-            // device must have.
-            let mut steps = Vec::new();
-            let who = loop {
-                let more = crate::database::steps::read(&bucket, &log_keys, &Scope::Global, steps.len() as u64).await?;
-                steps.extend(more.steps.iter().cloned());
-                let who = crate::database::steps::Truth::read(&steps, root, now_ms())?.with_context(|| format!("{YOURS}'s who's who has no freeze yet"))?.db;
-                if !more.junk_at_end(who.epoch(&Scope::Global)) {
-                    break who;
-                }
-                steps.push(None);
-            };
-            let hashes = who.epoch_hashes(&Scope::Global);
-            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| hashes.get(*n) != Some(&crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
-            if wrong.is_empty() {
-                self.0.databases.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
-                return Ok(candidates);
-            }
-            tracing::warn!("global's epochs {wrong:?} sealed to {} aren't the keys who's who made: passed over", self.device_name());
-            for n in wrong {
-                candidates.remove(&n);
-            }
-        }
+        let mut reader = crate::database::steps::Reader::new(self.with(|i| Ok(i.r.root()))?);
+        let (epochs, _) = crate::database::steps::read_sealed_to(&self.bucket()?, &mut reader, &hex(&self.0.id), &self.seal_secret(), &mut None, now_ms()).await?;
+        ensure!(!epochs.is_empty(), NotGiven(Scope::Global, self.device_name()));
+        self.0.databases.epochs.lock().unwrap().insert(Scope::Global, epochs.clone());
+        Ok(epochs)
     }
 
     /// A scope's first epoch, made here: its `epoch` entry first, naming its key's hash, then the key sealed to the

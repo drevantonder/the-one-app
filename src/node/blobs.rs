@@ -351,6 +351,6 @@ impl std::error::Error for Full {}
 /// The scopes whose databases name a blob the scope still needs (`ScopeDb::names_blob`): `global`'s, once this device
 /// has read who's who, and each other scope's database it reads.
 fn steps_naming<'a>(i: &'a Network, hash: &'a str) -> impl Iterator<Item = Scope> + 'a {
-    let global = (i.r.frozen.is_some() && i.r.db().names_blob(hash)).then_some(Scope::Global);
+    let global = (i.r.freeze().is_some() && i.r.db().names_blob(hash)).then_some(Scope::Global);
     global.into_iter().chain(i.scope_dbs.iter().filter(|(_, (_, db))| db.names_blob(hash)).map(|(s, _)| s.clone()))
 }

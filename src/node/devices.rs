@@ -498,7 +498,7 @@ impl Node {
     /// the only one that device then takes, and once `global`'s log is frozen, where this device read its scope database
     /// to, which that device starts from (`steps::Welcome`).
     fn approved_path(&self, key: &str) -> Result<String> {
-        let (root, welcome) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()), i.r.welcome()?)))?;
+        let (root, welcome) = self.with(|i| Ok((i.r.root().map(|r| r.to_hex()), i.r.welcome()?)))?;
         let root = root.with_context(|| format!("this device isn't in {YOURS} yet"))?;
         let welcome = welcome.map(|w| format!("&welcome={w}")).unwrap_or_default();
         Ok(format!("/api/auth/devices/requests/{key}?approved&root={root}{welcome}"))
@@ -660,7 +660,7 @@ impl Node {
     fn sign_in_network(&self) -> Result<crate::sign_in_proof::Network> {
         let address = self.address()?;
         self.with(|i| {
-            let root = i.r.root.with_context(|| format!("this device isn't in {YOURS} yet"))?;
+            let root = i.r.root().with_context(|| format!("this device isn't in {YOURS} yet"))?;
             Ok(crate::sign_in_proof::Network::new(&address, *root.as_bytes(), i.r.db().setting(crate::sign_in_proof::CLIENTS).as_deref()))
         })
     }

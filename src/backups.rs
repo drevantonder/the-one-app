@@ -555,37 +555,35 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
     Ok((report, restored))
 }
 
-/// Who's who as `global`'s scope database's steps the place's copy of the bucket holds say it (`database::steps`), from
+/// Who's who as `global`'s scope database's steps the place's copy of the bucket holds say it (`steps::Reader`), from
 /// its first freeze, of the network `root` (or for none, the one there), opened with `keys`, its epochs' keys.
 fn who(place: &Place, network: &str, root: Option<crate::keys::Hash>, keys: &[[u8; 32]]) -> Result<ScopeDb> {
     use crate::database::steps;
-    // The steps' key in each epoch: the node's app key there, opened with whichever of the epochs' keys does.
+    let bucket = |name: &str| place.get(&format!("{network}/bucket/{name}"));
+    // The steps' key in each epoch the place holds: the node's app key there, opened with whichever of the epochs' keys does.
     let mut step_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
-    for n in 1..=(keys.len() as u32 + 8) {
-        let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::keys::app_key_name("global", crate::database::scopes::APP, n)))? else { continue };
+    for name in place.list(&format!("{network}/bucket/{}", crate::keys::app_keys_folder("global", crate::database::scopes::APP)))? {
+        let Ok(n) = name.parse::<u32>() else { continue };
+        let Some(sealed) = bucket(&crate::keys::app_key_name("global", crate::database::scopes::APP, n))? else { continue };
         if let Some(key) = keys.iter().find_map(|k| crate::keys::open_database_key(k, crate::database::scopes::APP, steps::NAME, &sealed).ok()) {
             step_keys.insert(n, key);
         }
     }
+    // As `steps::fetch` fetches them, from the place rather than the bucket.
     let prefix = steps::prefix("global");
-    let now = crate::node::now_ms();
-    let mut read = Vec::new();
+    let mut sealed = steps::Sealed::default();
     for at in 1.. {
-        let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::database::stored::step_name(&prefix, at)))? else { break };
-        match steps::open(&step_keys, u32::MAX, &crate::database::scopes::Scope::Global, at, &sealed) {
-            steps::Opened::Step(given) => read.push(Some(given)),
-            steps::Opened::Junk => read.push(None),
-            steps::Opened::Waits(epoch) => {
-                // Junk, under an epoch above every one made by the steps before it.
-                let held = steps::Truth::read(&read, root, now)?.map_or(0, |t| t.db.epoch(&crate::database::scopes::Scope::Global));
-                if epoch <= held {
-                    break;
-                }
-                read.push(None);
+        let Some(step) = bucket(&crate::database::stored::step_name(&prefix, at))? else {
+            if let Some(after) = bucket(&crate::database::stored::step_name(&prefix, at + 1))? {
+                sealed.steps.insert(at + 1, after);
             }
-        }
+            break;
+        };
+        sealed.steps.insert(at, step);
     }
-    Ok(steps::Truth::read(&read, root, now)?.context("its who's who has no freeze")?.db)
+    let mut reader = steps::Reader::new(root);
+    reader.add(&sealed, &step_keys, None, crate::node::now_ms(), |_, _, _| {})?;
+    Ok(reader.into_truth().context("its who's who has no freeze")?.db)
 }
 
 /// A place's copy of the network's bucket (`<network>/bucket/`), read as the bucket is, so a database restores from it

@@ -475,15 +475,11 @@ impl Truth {
     /// network's first freeze (`first`), each step after taken. None before there's one. Fails there if it's a newer
     /// release's.
     pub fn read(steps: &[Option<Given>], root: Option<Hash>, now: u64) -> Result<Option<Truth>> {
-        let mut truth: Option<Truth> = None;
-        for (i, given) in steps.iter().enumerate() {
-            let at = i as u64 + 1;
-            match &mut truth {
-                Some(t) => drop(t.take(at, given.as_ref().map(|g| &g.step))?),
-                None => truth = Truth::first(at, given.as_ref(), root, now)?,
-            }
+        let mut reader = Reader::new(root);
+        for given in steps {
+            reader.take(given.as_ref(), now)?;
         }
-        Ok(truth)
+        Ok(reader.truth)
     }
 
     /// Step `at` of `global`'s database before its first freeze: the freeze, if its copy comes to the hash it names,
@@ -511,23 +507,21 @@ impl Truth {
         Ok(Truth { freeze, at, db: normalize(copy, &Scope::Global, now)? })
     }
 
-    /// Takes step `at`, the next: applied if it counts, passed over if not (or none). → whether it counted.
-    pub fn take(&mut self, at: u64, step: Option<&Step>) -> Result<bool> {
+    /// Takes step `at`, the next, as of `now`: applied if it counts, passed over if not (or none). → the database before
+    /// it, if it counted.
+    pub fn take(&mut self, at: u64, step: Option<&Step>, now: u64) -> Result<Option<ScopeDb>> {
         ensure!(at == self.at + 1, "step {at} isn't the next");
         self.at = at;
-        let Some(step) = step else { return Ok(false) };
+        let Some(step) = step else { return Ok(None) };
         match apply(&self.db, None, &Scope::Global, step) {
-            Ok(a) => {
-                self.db = ScopeDb::open(a.db, self.db.now())?;
-                Ok(true)
-            }
+            Ok(a) => Ok(Some(std::mem::replace(&mut self.db, ScopeDb::open(a.db, now)?))),
             Err(err) if err.is::<Newer>() => {
                 self.at = at - 1;
                 Err(err)
             }
             Err(err) => {
                 tracing::info!("global's step {at} doesn't count: {err:#}");
-                Ok(false)
+                Ok(None)
             }
         }
     }
@@ -617,58 +611,295 @@ impl Truth {
         ensure!(after.len() as u64 == welcome.at - at, "not every step up to where it was welcomed is here");
         let mut t = Truth { freeze: anchored.freeze, at, db };
         for given in after {
-            t.take(t.at + 1, given.as_ref().map(|g| &g.step))?;
+            t.take(t.at + 1, given.as_ref().map(|g| &g.step), now)?;
         }
         ensure!(crate::database::stored::state_hash(t.db.conn())? == welcome.hash, "who's who from that copy isn't what the device that let this one in said");
         Ok(t)
     }
 }
 
-/// Who's who as `welcome` says it, read from the bucket with `keys`, `global`'s log's keys by epoch (`Truth::welcomed`):
-/// from the copy before the Welcome's step, or, if that one isn't there or doesn't come to its hash, from its freeze's.
-pub async fn welcomed(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, welcome: &Welcome, now: u64) -> Result<Truth> {
-    async fn step(bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, at: u64) -> Result<Option<Given>> {
-        let o = bucket.get(&crate::database::stored::step_name(&prefix("global"), at)).await?.with_context(|| format!("global's step {at} isn't there"))?;
-        // Opened only with keys it was given, so any epoch it wasn't is junk.
-        let made = keys.keys().next_back().copied().unwrap_or(0);
-        Ok(match open(keys, made, &Scope::Global, at, &o.bytes) {
-            Opened::Step(g) => Some(g),
-            Opened::Junk => None,
-            Opened::Waits(e) => bail!("global's step {at} is under epoch {e}, whose key this device wasn't given"),
-        })
+/// `global`'s steps as the bucket holds them, sealed, by position: what a reader takes (`Reader::add`), fetched from the
+/// bucket itself (`fetch`) or passed on by a node (`to_json`, `from_json`). With a Welcome, the step at its freeze's
+/// position and the copy at `Welcome::copy` (`start`), when the bucket has them.
+#[derive(Default)]
+pub struct Sealed {
+    pub welcome: Option<Welcome>,
+    pub freeze: Option<Vec<u8>>,
+    pub start: Option<(u64, Vec<u8>)>,
+    pub steps: BTreeMap<u64, Vec<u8>>,
+}
+
+impl Sealed {
+    /// As a node passes them on, and a browser gives them: `{ steps: [{ at, sealed }], welcome, freeze: { at, sealed },
+    /// start: { at, sealed } }`, base64url. One whose bytes don't decode isn't there.
+    pub fn from_json(v: &Value) -> Sealed {
+        let bytes = |s: &Value| data_encoding::BASE64URL_NOPAD.decode(s["sealed"].as_str()?.as_bytes()).ok();
+        let welcome = v["welcome"].as_str().and_then(Welcome::parse);
+        let freeze = welcome.as_ref().and_then(|w| v.get("freeze").filter(|f| f["at"].as_u64() == Some(w.freeze))).and_then(bytes);
+        let start = v.get("start").and_then(|s| Some((s["at"].as_u64()?, bytes(s)?)));
+        let steps = v["steps"].as_array().into_iter().flatten().filter_map(|s| Some((s["at"].as_u64()?, bytes(s)?))).collect();
+        Sealed { welcome, freeze, start, steps }
     }
-    let prefix = prefix("global");
-    let freeze = step(bucket, keys, welcome.freeze).await?.context("the step it was welcomed with isn't a freeze")?;
-    let mut tried = None;
-    if let Some(c) = welcome.copy() {
-        let name = crate::database::stored::copy_name(&prefix, c);
-        let copy = async {
-            let o = bucket.get(&name).await?.context("no copy")?;
-            let key = keys.get(&crate::keys::epoch_of(&o.bytes)?).context("its copy is under a key this device wasn't given")?;
-            crate::keys::open(key, &name, &o.bytes)
-        };
-        match copy.await {
-            Ok(bytes) => {
-                let mut after = Vec::new();
-                for at in c + 1..=welcome.at {
-                    after.push(step(bucket, keys, at).await?);
-                }
-                match Truth::welcomed(welcome, &freeze, Some(&bytes), &after, now) {
-                    Ok(t) => return Ok(t),
-                    Err(err) => tried = Some(err),
-                }
+
+    /// As `from_json` reads them, with `at`, the last position there from the first fetched.
+    pub fn to_json(&self, from: u64) -> Value {
+        let sealed = |at: u64, b: &[u8]| json!({ "at": at, "sealed": data_encoding::BASE64URL_NOPAD.encode(b) });
+        let mut out = json!({});
+        if let (Some(w), Some(f)) = (&self.welcome, &self.freeze) {
+            out = json!({ "welcome": w.to_string(), "freeze": sealed(w.freeze, f) });
+            if let Some((c, b)) = &self.start {
+                out["start"] = sealed(*c, b);
             }
-            Err(err) => tried = Some(err),
+        }
+        let mut at = self.start.as_ref().map(|(c, _)| *c).or(self.freeze.as_ref().and(self.welcome.as_ref().map(|w| w.freeze))).unwrap_or(from);
+        while self.steps.contains_key(&(at + 1)) {
+            at += 1;
+        }
+        out["at"] = json!(at);
+        out["steps"] = json!(self.steps.iter().map(|(n, b)| sealed(*n, b)).collect::<Vec<_>>());
+        out
+    }
+
+    /// The epochs they're sealed under.
+    pub fn epochs(&self) -> std::collections::BTreeSet<u32> {
+        let all = self.steps.values().chain(&self.freeze).chain(self.start.as_ref().map(|(_, b)| b));
+        all.filter_map(|b| crate::keys::epoch_of(b).ok()).collect()
+    }
+}
+
+/// `global`'s steps in `bucket` after `from`, up to the first position with nothing, and the one after that if it's
+/// there, which says whether the one missing was written (`Reader::add`). With `welcome`, from its freeze's step and
+/// the copy before its step instead, if the freeze's is there.
+pub async fn fetch(bucket: &impl crate::bucket::Bucket, from: u64, welcome: Option<&Welcome>) -> Result<Sealed> {
+    let prefix = prefix("global");
+    let get = async |name: String| Ok::<_, anyhow::Error>(bucket.get(&name).await?.map(|o| o.bytes));
+    let mut out = Sealed::default();
+    let mut at = from;
+    if let Some(w) = welcome
+        && let Some(freeze) = get(crate::database::stored::step_name(&prefix, w.freeze)).await?
+    {
+        (out.welcome, out.freeze, at) = (Some(w.clone()), Some(freeze), w.freeze);
+        if let Some(c) = w.copy()
+            && let Some(copy) = get(crate::database::stored::copy_name(&prefix, c)).await?
+        {
+            (out.start, at) = (Some((c, copy)), c);
         }
     }
-    if let Some(err) = tried {
-        tracing::info!("global's copy before step {}: {err:#}: read from its freeze", welcome.at);
+    loop {
+        at += 1;
+        let Some(step) = get(crate::database::stored::step_name(&prefix, at)).await? else {
+            if let Some(after) = get(crate::database::stored::step_name(&prefix, at + 1)).await? {
+                out.steps.insert(at + 1, after);
+            }
+            return Ok(out);
+        };
+        out.steps.insert(at, step);
     }
-    let mut after = Vec::new();
-    for at in welcome.freeze + 1..=welcome.at {
-        after.push(step(bucket, keys, at).await?);
+}
+
+/// `global`'s scope database as one reader reads it, step by step: before it's read the network's first freeze
+/// (`Truth::first`) of the network `root`, the last step it looked at; after, who's who as the steps up to there leave
+/// it (`Truth`). Every device reads who's who with one, so every device passes over and counts the same steps.
+pub struct Reader {
+    root: Option<Hash>,
+    truth: Option<Truth>,
+    looked: u64,
+}
+
+impl Reader {
+    /// For the network whose root is `root`, or for none, the first freeze there is.
+    pub fn new(root: Option<Hash>) -> Reader {
+        Reader { root, truth: None, looked: 0 }
     }
-    Truth::welcomed(welcome, &freeze, None, &after, now)
+
+    /// The network's root, once known.
+    pub fn root(&self) -> Option<Hash> {
+        self.root
+    }
+
+    /// Who's who, once it's read the freeze.
+    pub fn truth(&self) -> Option<&Truth> {
+        self.truth.as_ref()
+    }
+
+    pub fn truth_mut(&mut self) -> Option<&mut Truth> {
+        self.truth.as_mut()
+    }
+
+    pub fn into_truth(self) -> Option<Truth> {
+        self.truth
+    }
+
+    /// The last step taken.
+    pub fn at(&self) -> u64 {
+        self.truth.as_ref().map_or(self.looked, |t| t.at)
+    }
+
+    /// Starts from `truth`, unless it's read the freeze itself: as kept (`Truth::kept`) or worked out from a Welcome.
+    pub fn resume(&mut self, truth: Truth) {
+        if self.truth.is_none() {
+            self.root = self.root.or(truth.db.root());
+            self.truth = Some(truth);
+        }
+    }
+
+    /// Where it read to, to keep and start again from (`restart`): `{ truth, looked }`.
+    pub fn kept(&mut self) -> Result<Value> {
+        Ok(json!({ "truth": self.truth.as_mut().map(Truth::keep).transpose()?, "looked": self.looked }))
+    }
+
+    /// Starts again from what `kept` kept: who's who, checked against its hash, or where it looked to before.
+    pub fn restart(&mut self, kept: &Value, now: u64) -> Result<()> {
+        match kept.get("truth").filter(|t| !t.is_null()) {
+            Some(t) => self.truth = Some(Truth::kept(t, now)?),
+            None => self.looked = kept["looked"].as_u64().unwrap_or(0),
+        }
+        Ok(())
+    }
+
+    /// Takes the next step as this reader opened it (none for one that will never be a step), as of `now`: before it's
+    /// read the freeze, the network's first freeze or nothing; after, applied if it counts. Fails at a newer release's,
+    /// which is never passed over. → who's who before it, and after, if it changed (before the freeze, one of nobody).
+    pub fn take(&mut self, given: Option<&Given>, now: u64) -> Result<Option<(ScopeDb, &ScopeDb)>> {
+        let at = self.at() + 1;
+        let was = match &mut self.truth {
+            Some(t) => t.take(at, given.map(|g| &g.step), now)?,
+            None => {
+                self.truth = Truth::first(at, given, self.root, now)?;
+                self.looked = at;
+                match &self.truth {
+                    Some(t) => {
+                        self.root = t.db.root();
+                        Some(ScopeDb::empty(&Scope::Global, now)?)
+                    }
+                    None => None,
+                }
+            }
+        };
+        Ok(was.zip(self.truth.as_ref().map(|t| &t.db)))
+    }
+
+    /// `keys`, each step key by epoch, that it opens a step with now: before it's read the freeze, any; after, with
+    /// `epochs`, the epochs' own keys they came from, only those whose hash who's who says that epoch has.
+    fn usable(&self, keys: &crate::database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>) -> crate::database::stored::Keys {
+        let (Some(t), Some(epochs)) = (&self.truth, epochs) else { return keys.clone() };
+        keys.iter().filter(|(e, _)| epochs.get(e).is_some_and(|k| t.db.epoch_hash(&Scope::Global, **e) == Some(crate::keys::epoch_hash(k)))).map(|(e, k)| (*e, *k)).collect()
+    }
+
+    /// Takes `sealed`'s steps from the next on, opened with `keys` (`usable`), as of `now`, calling `each` with each
+    /// one's position, what it was, and who's who before and after it if it changed (`take`). With a Welcome, before
+    /// it's read the freeze, it starts from there (`welcomed`); one that doesn't check out is passed over, and it reads
+    /// from where it was. A step is junk, passed over, if it doesn't open or isn't one, or is under an epoch above every
+    /// one made, as the steps before it leave it (before the freeze, above every key it has); it stops at one under an
+    /// epoch made whose key it hasn't, and at the first position missing, failing if the step after it is one: a step
+    /// gone was deleted, and reading on would pass over what it changed. → the epoch it stopped at, if it did.
+    pub fn add(&mut self, sealed: &Sealed, keys: &crate::database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>, now: u64, mut each: impl FnMut(u64, Option<&Given>, Option<(ScopeDb, &ScopeDb)>)) -> Result<Option<u32>> {
+        if self.truth.is_none()
+            && let Some(w) = &sealed.welcome
+        {
+            match self.welcomed(w, sealed, keys, epochs, now) {
+                Ok(t) => self.resume(t),
+                Err(err) => tracing::info!("where this device was welcomed to ({w}): {err:#}: it reads from the freeze"),
+            }
+        }
+        loop {
+            let at = self.at() + 1;
+            let Some(bytes) = sealed.steps.get(&at) else { break };
+            let keys = self.usable(keys, epochs);
+            let made = self.truth.as_ref().map_or_else(|| keys.keys().next_back().copied().unwrap_or(0), |t| t.db.epoch(&Scope::Global));
+            let given = match open(&keys, made, &Scope::Global, at, bytes) {
+                Opened::Step(g) => Some(g),
+                Opened::Junk => None,
+                Opened::Waits(e) => return Ok(Some(e)),
+            };
+            let changed = self.take(given.as_ref(), now)?;
+            each(at, given.as_ref(), changed);
+        }
+        let next = self.at() + 1;
+        if let Some(bytes) = sealed.steps.get(&(next + 1)) {
+            ensure!(!matches!(open(keys, u32::MAX, &Scope::Global, next + 1, bytes), Opened::Step(_)), "global's step {next} isn't in the bucket, though later ones were written: this device reads no further until it's back");
+        }
+        Ok(None)
+    }
+
+    /// `global`'s steps after the last taken, from `bucket` (`fetch`, `add`).
+    pub async fn read(&mut self, bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, now: u64) -> Result<Option<u32>> {
+        let sealed = fetch(bucket, self.at(), None).await?;
+        self.add(&sealed, keys, None, now, |_, _, _| {})
+    }
+
+    /// Who's who as `welcome` says it, from `sealed`: its freeze's step, and the copy at `Welcome::copy` with the steps
+    /// after it up to the Welcome's, or, if that copy isn't there or doesn't come to its hash, every step after the
+    /// freeze's up to there (`Truth::welcomed`), each opened with `keys`, unchecked, so each of `epochs` who's who there
+    /// made must be the one it made.
+    fn welcomed(&self, welcome: &Welcome, sealed: &Sealed, keys: &crate::database::stored::Keys, epochs: Option<&BTreeMap<u32, [u8; 32]>>, now: u64) -> Result<Truth> {
+        let made = keys.keys().next_back().copied().unwrap_or(0);
+        let opened = |at: u64, bytes: &[u8]| match open(keys, made, &Scope::Global, at, bytes) {
+            Opened::Step(g) => Ok(Some(g)),
+            Opened::Junk => Ok(None),
+            Opened::Waits(e) => bail!("global's step {at} is under epoch {e}, whose key this device wasn't given"),
+        };
+        let after = |from: u64| (from + 1..=welcome.at).map(|at| opened(at, sealed.steps.get(&at).with_context(|| format!("global's step {at} wasn't given"))?)).collect::<Result<Vec<_>>>();
+        let freeze = opened(welcome.freeze, sealed.freeze.as_deref().context("no freeze")?)?.context("the step it was welcomed with isn't a freeze")?;
+        let from_copy = sealed.start.as_ref().filter(|(c, _)| Some(*c) == welcome.copy()).map(|(c, bytes)| {
+            let name = crate::database::stored::copy_name(&prefix("global"), *c);
+            let key = keys.get(&crate::keys::epoch_of(bytes)?).context("its copy is under a key this device wasn't given")?;
+            Truth::welcomed(welcome, &freeze, Some(&crate::keys::open(key, &name, bytes)?), &after(*c)?, now)
+        });
+        let truth = match from_copy {
+            Some(Ok(t)) => t,
+            tried => {
+                if let Some(Err(err)) = tried {
+                    tracing::info!("global's copy before step {}: {err:#}: read from its freeze", welcome.at);
+                }
+                Truth::welcomed(welcome, &freeze, None, &after(welcome.freeze)?, now)?
+            }
+        };
+        for (e, epoch) in epochs.into_iter().flatten() {
+            ensure!(truth.db.epoch_hash(&Scope::Global, *e).is_none_or(|h| h == crate::keys::epoch_hash(epoch)), "a key for this didn't check out, so it wasn't used");
+        }
+        Ok(truth)
+    }
+}
+
+/// Who's who read from `bucket` into `reader`, from where it is, by a device that holds no key of `global`'s yet but
+/// those sealed to it there (`to`, its key in hex, opened with `secret`): each epoch its steps are sealed under, and
+/// each who's who made, sealed to it. With `welcome`, from there, or if that doesn't check out (then none), from the
+/// first.
+/// → the epochs, each only once who's who says it's the one it made (none before it's read the freeze), and the steps'
+/// key in each.
+pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Reader, to: &str, secret: &[u8; 32], welcome: &mut Option<Welcome>, now: u64) -> Result<(BTreeMap<u32, [u8; 32]>, crate::database::stored::Keys)> {
+    let mut sealed = fetch(bucket, reader.at(), welcome.as_ref().filter(|_| reader.truth.is_none())).await?;
+    let (mut epochs, mut tried, mut keys) = (BTreeMap::new(), std::collections::BTreeSet::new(), crate::database::stored::Keys::new());
+    let mut fetched = true;
+    loop {
+        let made = reader.truth.as_ref().map(|t| t.db.epoch_hashes(&Scope::Global).into_keys().collect::<Vec<_>>()).unwrap_or_default();
+        let wanted: Vec<u32> = sealed.epochs().into_iter().chain(made).filter(|n| tried.insert(*n)).collect();
+        if wanted.is_empty() && !fetched {
+            break;
+        }
+        for n in &wanted {
+            if let Some(o) = bucket.get(&crate::keys::epoch_name("global", *n, to)).await?
+                && let Some(key) = crate::keys::open_sealed(secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok())
+            {
+                epochs.insert(*n, key);
+            }
+        }
+        if !wanted.is_empty() {
+            keys = crate::keys::database_keys(bucket, "global", scopes::APP, NAME, &epochs, false).await?;
+        }
+        let added = reader.add(&sealed, &keys, Some(&epochs), now, |_, _, _| {});
+        fetched = sealed.welcome.is_some() && reader.truth.is_none();
+        if fetched {
+            *welcome = None;
+            sealed = fetch(bucket, reader.at(), None).await?;
+        } else {
+            added?;
+        }
+    }
+    epochs.retain(|n, k| reader.truth.as_ref().is_some_and(|t| t.db.epoch_hash(&Scope::Global, *n) == Some(crate::keys::epoch_hash(k))));
+    keys.retain(|n, _| epochs.contains_key(n));
+    Ok((epochs, keys))
 }
 
 /// What a step that counts made of the database it was applied to: the database it leaves.
@@ -1034,7 +1265,7 @@ pub(crate) mod tests {
         // A Welcome's hash pins who's who, whoever signed the freeze it names.
         let mut t = Truth::read(&[Some(theirs.clone())], Some(ROOT), 0).unwrap().unwrap();
         let step = sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content::setting("name", Some("Ours"))).unwrap();
-        assert!(t.take(2, Some(&step)).unwrap());
+        assert!(t.take(2, Some(&step), 0).unwrap().is_some());
         let w = t.welcome().unwrap();
         let after = [Some(Given { step, copy: None })];
         assert_eq!(crate::database::stored::state_hash(Truth::welcomed(&w, &theirs, None, &after, 0).unwrap().db.conn()).unwrap(), w.hash);
@@ -1117,6 +1348,8 @@ pub(crate) mod tests {
             assert!(read(&bucket, &keys, &Scope::Global, 0).await.unwrap().steps.is_empty(), "nor junk after a position with nothing");
             bucket.create(&crate::database::stored::step_name(&prefix, 2), &step(2)).await.unwrap();
             assert!(read(&bucket, &keys, &Scope::Global, 0).await.is_err(), "but a step after one with nothing stops it: that one was written");
+            let add = async |r: &mut Reader| r.add(&fetch(&bucket, r.at(), None).await.unwrap(), &keys, None, 0, |_, _, _| {});
+            assert!(add(&mut Reader::new(None)).await.is_err(), "as it stops who's who's reader");
             // Junk at 1, under an epoch no one made.
             let junk = crate::database::stored::step_name(&prefix, 1);
             bucket.create(&junk, &crate::keys::seal(0xFFFF_FFFF, &[3; 32], &junk, b"junk")).await.unwrap();
@@ -1125,6 +1358,8 @@ pub(crate) mod tests {
             assert!(matches!(open(&keys, 1, &Scope::Global, 1, &bucket.get(&junk).await.unwrap().unwrap().bytes), Opened::Junk));
             let r = read(&bucket, &keys, &Scope::Global, 1).await.unwrap();
             assert!(r.steps.len() == 2 && r.steps[0].is_some() && r.steps[1].is_none(), "and reads on past it, passing over the junk after");
+            let mut reader = Reader::new(None);
+            assert!(add(&mut reader).await.unwrap().is_none() && reader.at() == 3, "who's who's reader, before its freeze, passes over junk under an epoch above every key it has");
         });
     }
 

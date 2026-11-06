@@ -5,27 +5,19 @@
 use anyhow::{Context, Result, ensure};
 use ed25519_dalek::SigningKey;
 
-use crate::database::scopes::ScopeDb;
-use crate::database::steps::{self, Freeze, Given, Truth};
 use crate::database::content::Content;
-use crate::database::steps::Step;
+use crate::database::scopes::{Scope, ScopeDb};
+use crate::database::steps::{self, Freeze, Given, Reader, Sealed, Step, Truth};
 use crate::keys::{Hash, Key};
-use crate::database::scopes::Scope;
 
 /// What one device holds and knows.
 pub struct Replica {
     pub key: SigningKey,
     pub id: Key,
-    /// The network's root, its id, once this device created or joined it: who's who is its first freeze
-    /// (`Truth::first`).
-    pub root: Option<Hash>,
-    /// `global`'s scope database: one of nobody until this device has read its freeze.
-    db: ScopeDb,
-    /// Once this device has read the freeze: it, and the last of the scope database's steps applied to `db` (or
-    /// passed over).
-    pub frozen: Option<(Freeze, u64)>,
-    /// Before then, the last of the scope database's steps this device looked at that wasn't its freeze.
-    pub looked: u64,
+    /// `global`'s scope database as this device read it, of the network's root, once this device created or joined it.
+    reader: Reader,
+    /// Who's who until this device has read the freeze: nobody.
+    nobody: ScopeDb,
 }
 
 /// What reading the bucket changed here.
@@ -44,81 +36,74 @@ pub struct Handled {
 impl Replica {
     pub fn new(key: SigningKey, root: Option<Hash>, now: u64) -> Replica {
         let id = key.verifying_key().to_bytes();
-        Replica { key, id, root, db: nobody(now), frozen: None, looked: 0 }
+        Replica { key, id, reader: Reader::new(root), nobody: nobody(now) }
     }
 
-    /// Step `at` of `global`'s scope database before this device has read its freeze, the next it looks at: if it's
-    /// the network's first freeze (`Truth::first`), who's who from here. One a newer release wrote fails, so this
-    /// device looks at it again and never past it.
-    pub fn take_first(&mut self, at: u64, given: Option<&Given>, now: u64) -> Result<Handled> {
-        ensure!(self.frozen.is_none() && at == self.looked + 1, "step {at} isn't the next");
+    /// The network's root, its id.
+    pub fn root(&self) -> Option<Hash> {
+        self.reader.root()
+    }
+
+    /// The freeze, once this device has read it.
+    pub fn freeze(&self) -> Option<&Freeze> {
+        self.reader.truth().map(|t| &t.freeze)
+    }
+
+    /// The last of `global`'s steps this device took, or looked at before its freeze.
+    pub fn looked(&self) -> u64 {
+        self.reader.at()
+    }
+
+    /// Takes `sealed`'s steps from the next on (`steps::Reader::add`). → what that changed here, also when it then
+    /// failed, and the epoch it stopped at, if it did.
+    pub fn add(&mut self, sealed: &Sealed, keys: &crate::database::stored::Keys, now: u64) -> (Handled, Result<Option<u32>>) {
         let mut handled = Handled::default();
-        let truth = Truth::first(at, given, self.root, now)?;
-        self.looked = at;
-        if let Some(t) = truth {
-            self.frozen = Some((t.freeze, at));
-            let was = std::mem::replace(&mut self.db, t.db);
-            handled.members = true;
-            self.changed(&was, &mut handled)?;
-        }
-        Ok(handled)
+        let id = self.id;
+        let waits = self.reader.add(sealed, keys, None, now, |_, _, changed| {
+            if let Some((was, db)) = changed {
+                changed_from(&id, &was, db, &mut handled);
+            }
+        });
+        (handled, waits)
     }
 
     /// Where this device is in `global`'s scope database, to keep and start again from (`restart`).
     pub fn keep(&mut self) -> Result<Option<serde_json::Value>> {
-        let Some((freeze, at)) = self.frozen.clone() else { return Ok(None) };
-        let mut t = Truth { freeze, at, db: std::mem::replace(&mut self.db, nobody(0)) };
-        let kept = t.keep();
-        self.db = t.db;
-        kept.map(Some)
+        self.reader.truth_mut().map(Truth::keep).transpose()
     }
 
     /// Where this device has read `global`'s scope database to, for a device it lets in to start from.
     pub fn welcome(&self) -> Result<Option<steps::Welcome>> {
-        let Some((freeze, at)) = &self.frozen else { return Ok(None) };
-        Ok(Some(steps::Welcome { freeze: freeze.at, at: *at, hash: crate::database::stored::state_hash(self.db.conn())? }))
+        self.reader.truth().map(Truth::welcome).transpose()
     }
 
     /// Starts again from what `keep` kept, checked against its hash (`steps::Truth::kept`), as this device started.
     pub fn restart(&mut self, kept: &serde_json::Value, now: u64) -> Result<()> {
-        let t = Truth::kept(kept, now)?;
-        self.frozen = Some((t.freeze, t.at));
-        self.db = t.db;
+        self.reader.resume(Truth::kept(kept, now)?);
         Ok(())
     }
 
     /// `global`'s scope database as it is, to copy (`steps::written`).
     pub fn db_mut(&mut self) -> &mut ScopeDb {
-        &mut self.db
+        match self.reader.truth_mut() {
+            Some(t) => &mut t.db,
+            None => &mut self.nobody,
+        }
     }
 
     /// The position of `global`'s scope database this device has applied its steps to.
     pub fn at(&self) -> Option<u64> {
-        self.frozen.as_ref().map(|(_, at)| *at)
+        self.reader.truth().map(|t| t.at)
     }
 
-    /// A step of `global`'s scope database another device wrote, at the position after the last this device applied:
-    /// applied if it counts, passed over if not; either way its position is taken.
-    pub fn take_step(&mut self, at: u64, step: Option<&Step>, now: u64) -> Result<Handled> {
-        let (freeze, last) = self.frozen.clone().context("this device hasn't read who's who yet")?;
-        ensure!(at == last + 1, "step {at} isn't the next");
+    /// A step of `global`'s scope database this device wrote, at the position after the last it applied: applied if it
+    /// counts, passed over if not; either way its position is taken.
+    pub fn take_step(&mut self, at: u64, step: &Step, now: u64) -> Result<Handled> {
+        ensure!(self.at().context("this device hasn't read who's who yet")? + 1 == at, "step {at} isn't the next");
         let mut handled = Handled::default();
-        let applied = step.map(|s| steps::apply(&self.db, None, &Scope::Global, s));
-        // A newer release's: this device reads no further until it's updated.
-        if let Some(Err(err)) = &applied
-            && err.is::<steps::Newer>()
-        {
-            anyhow::bail!("{err}");
-        }
-        self.frozen = Some((freeze, at));
-        match applied {
-            Some(Ok(a)) => {
-                let was = std::mem::replace(&mut self.db, ScopeDb::open(a.db, now)?);
-                self.changed(&was, &mut handled)?;
-                handled.members = true;
-            }
-            Some(Err(err)) => tracing::info!("global's step {at} doesn't count: {err:#}"),
-            None => tracing::debug!("global's step {at} isn't one: passed over"),
+        let given = Given { step: step.clone(), copy: None };
+        if let Some((was, db)) = self.reader.take(Some(&given), now)? {
+            changed_from(&self.id, &was, db, &mut handled);
         }
         Ok(handled)
     }
@@ -127,24 +112,24 @@ impl Replica {
     /// after the last it applied, once it would count there.
     pub fn make_step(&self, key: &SigningKey, user: &str, content: Content, now: u64) -> Result<Step> {
         let at = self.at().context("this device hasn't read who's who yet")? + 1;
-        let step = steps::sign(key, &Scope::Global, at, user, self.db.epoch(&Scope::Global), now, content)?;
-        steps::apply(&self.db, None, &Scope::Global, &step)?;
+        let step = steps::sign(key, &Scope::Global, at, user, self.db().epoch(&Scope::Global), now, content)?;
+        steps::apply(self.db(), None, &Scope::Global, &step)?;
         Ok(step)
     }
 
     /// `global`'s scope database: who's who, and who may do what.
     pub fn db(&self) -> &ScopeDb {
-        &self.db
+        self.reader.truth().map_or(&self.nobody, |t| &t.db)
     }
 
     /// `global`'s epochs' hashes by number: which key opens which of its steps.
     pub fn global_epochs(&self) -> std::collections::BTreeMap<u32, String> {
-        self.db.epoch_hashes(&Scope::Global)
+        self.db().epoch_hashes(&Scope::Global)
     }
 
     /// The newest epoch of a scope made: a step under a newer one is junk.
     pub fn epoch_made(&self, scope: &Scope) -> u32 {
-        self.db.epoch(scope)
+        self.db().epoch(scope)
     }
 
     /// Whether this device holds `scope`: `global`, and each scope whose calls it runs. Until it sees itself listed it
@@ -152,20 +137,20 @@ impl Replica {
     pub fn holds(&self, scope: &Scope) -> bool {
         *scope == Scope::Global || self.db().runs_for(&self.id, scope)
     }
+}
 
-    /// What changed from `was`, who's who before, to `db`: scopes this device no longer holds; whether it holds one it
-    /// didn't; and people who may no longer use a scope they could.
-    fn changed(&mut self, was: &ScopeDb, handled: &mut Handled) -> Result<()> {
-        let (had, has) = (was.run_by(&self.id), self.db.run_by(&self.id));
-        handled.dropped.extend(had.iter().filter(|s| **s != Scope::Global && !has.contains(s)).map(Scope::to_string));
-        handled.gained |= has.iter().any(|s| !had.contains(s));
-        let after = self.db.roles();
-        for ((user, scope), (_, invited)) in was.roles() {
-            if !invited && !after.get(&(user.clone(), scope)).is_some_and(|(_, invited)| !invited) && !handled.lost.contains(&user) {
-                handled.lost.push(user);
-            }
+/// What changed for the device `id` from `was`, who's who before, to `db`: scopes it no longer holds; whether it holds
+/// one it didn't; and people who may no longer use a scope they could.
+fn changed_from(id: &Key, was: &ScopeDb, db: &ScopeDb, handled: &mut Handled) {
+    handled.members = true;
+    let (had, has) = (was.run_by(id), db.run_by(id));
+    handled.dropped.extend(had.iter().filter(|s| **s != Scope::Global && !has.contains(s)).map(Scope::to_string));
+    handled.gained |= has.iter().any(|s| !had.contains(s));
+    let after = db.roles();
+    for ((user, scope), (_, invited)) in was.roles() {
+        if !invited && !after.get(&(user.clone(), scope)).is_some_and(|(_, invited)| !invited) && !handled.lost.contains(&user) {
+            handled.lost.push(user);
         }
-        Ok(())
     }
 }
 

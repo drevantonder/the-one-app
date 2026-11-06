@@ -158,7 +158,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         use one::database::scopes::{Kind, Scope};
         use one::database::{content, scopes};
         use one::keys::{Endpoint, Hash};
-        use one_client::members::Global;
+        use one::database::steps::Reader;
         const ANDRE: &str = "a000000000000001";
         let browser_seed: [u8; 32] = rand::random();
         let (mac, browser, recovery) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&browser_seed), SigningKey::from_bytes(&rand::random()));
@@ -181,38 +181,42 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let (s1, s2, s3) = (sealed(1, &first.step, first.copy.as_deref()), sealed(2, &listed, None), sealed(3, &signed, None));
         let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::database::stored::step_name(&prefix, 4), b"not a step").unwrap()) });
         let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
+        // As a browser gives them (client/src/wasm.rs `Global`).
+        let step_keys = one_client::members::step_keys(&epochs, &apps);
+        let add = |r: &mut Reader, given: &serde_json::Value| r.add(&steps::Sealed::from_json(given), &step_keys, Some(&epochs), 0, |_, _, _| {});
+        let frozen = |r: &Reader| r.truth().is_some();
         // A freeze an admin's device signed is nothing.
-        let mut client = Global::new(Some(root));
+        let mut client = Reader::new(Some(root));
         let planted = steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, first.step.content.clone()).unwrap();
-        client.add_sealed(&json!({ "steps": [sealed(1, &planted, first.copy.as_deref())] }), &epochs, &apps).unwrap();
-        assert!(!client.frozen() && client.at() == 1, "it's passed over");
-        let mut client = Global::new(Some(root));
+        add(&mut client, &json!({ "steps": [sealed(1, &planted, first.copy.as_deref())] })).unwrap();
+        assert!(!frozen(&client) && client.at() == 1, "it's passed over");
+        let mut client = Reader::new(Some(root));
         let read = json!({ "steps": [s1, s2, s3, junk] });
-        client.add_sealed(&read, &epochs, &apps).unwrap();
-        assert!(client.frozen() && client.at() == 4, "frozen, the browser's step taken and the junk passed over");
-        let who = client.who().unwrap();
+        add(&mut client, &read).unwrap();
+        assert!(frozen(&client) && client.at() == 4, "frozen, the browser's step taken and the junk passed over");
+        let who = &client.truth().unwrap().db;
         assert_eq!(who.setting("greeting").as_deref(), Some("hi"), "the step a browser signed counts");
         // Another network's freeze: nothing to a device of this one.
-        let mut elsewhere = Global::new(Some(Hash::from_bytes(rand::random())));
-        elsewhere.add_sealed(&read, &epochs, &apps).unwrap();
-        assert!(!elsewhere.frozen(), "a freeze that isn't the network it joined");
+        let mut elsewhere = Reader::new(Some(Hash::from_bytes(rand::random())));
+        add(&mut elsewhere, &read).unwrap();
+        assert!(!frozen(&elsewhere), "a freeze that isn't the network it joined");
         // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
         let welcome = steps::Welcome { freeze: 1, at: 3, hash: one::database::stored::state_hash(who.conn()).unwrap() };
         let said = js(json!({ "op": "joining", "asked": [], "said": [[200, { "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() }]] }));
         let given = json!({ "welcome": said["said"][0]["welcome"], "freeze": s1, "at": 3, "steps": [s2, s3] });
-        let mut new = Global::new(Some(root));
-        new.add_sealed(&given, &epochs, &apps).unwrap();
-        assert!(new.frozen() && new.at() == 3, "a new device starts where it was welcomed");
-        assert_eq!(one::database::stored::state_hash(new.who().unwrap().conn()).unwrap(), welcome.hash);
+        let mut new = Reader::new(Some(root));
+        add(&mut new, &given).unwrap();
+        assert!(frozen(&new) && new.at() == 3, "a new device starts where it was welcomed");
+        assert_eq!(one::database::stored::state_hash(new.truth().unwrap().db.conn()).unwrap(), welcome.hash);
         let mut other = given.clone();
         other["welcome"] = json!(steps::Welcome { hash: "0".repeat(64), ..welcome.clone() }.to_string());
-        let mut new = Global::new(Some(root));
-        assert!(new.add_sealed(&other, &epochs, &apps).is_err() && !new.frozen(), "nor from a Welcome its steps don't come to: it reads from the freeze, which it wasn't given");
+        let mut new = Reader::new(Some(root));
+        assert!(add(&mut new, &other).is_err() && !frozen(&new), "nor from a Welcome its steps don't come to: it reads from the freeze, which it wasn't given");
         // Junk at the first position, under an epoch no one made, and anything after it: passed over, not waited for.
         let name = one::database::stored::step_name(&prefix, 1);
         let junk = json!({ "at": 1, "sealed": B64U.encode(&one::keys::seal(0xFFFF_FFFF, &rand::random(), &name, b"junk")) });
-        let mut fresh = Global::new(Some(root));
-        fresh.add_sealed(&json!({ "steps": [junk, sealed(2, &first.step, first.copy.as_deref())] }), &epochs, &apps).unwrap();
+        let mut fresh = Reader::new(Some(root));
+        add(&mut fresh, &json!({ "steps": [junk, sealed(2, &first.step, first.copy.as_deref())] })).unwrap();
         assert_eq!(fresh.at(), 2, "a browser reads past junk");
     }
 

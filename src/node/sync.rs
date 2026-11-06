@@ -43,7 +43,7 @@ impl Node {
     /// freeze (`first_global_read`), or another scope's own, once it has an epoch.
     pub(super) async fn read_scope_now(&self, scope: &Scope) -> Result<()> {
         if *scope == Scope::Global {
-            if self.with(|i| Ok(i.r.frozen.is_none()))? {
+            if self.with(|i| Ok(i.r.freeze().is_none()))? {
                 self.first_global_read().await?;
             }
             self.read_steps_now().await?;

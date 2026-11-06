@@ -59,7 +59,7 @@ impl Node {
     pub fn parts_on(&self) -> Result<(crate::services::endpoint::Network, BTreeMap<String, u64>)> {
         let address = self.address()?;
         self.with(|i| {
-            let root = i.r.root.with_context(|| format!("this device isn't in {YOURS} yet"))?.to_hex();
+            let root = i.r.root().with_context(|| format!("this device isn't in {YOURS} yet"))?.to_hex();
             let on = i.r.db().switches().into_iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name, s.time)).collect();
             Ok((crate::services::endpoint::Network { address: address.clone(), root, user: i.user.clone() }, on))
         })

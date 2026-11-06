@@ -121,7 +121,7 @@ impl Node {
         // Phones joined as clients before they signed in at your One App network's address: only devices join now.
         ensure!(request.as_ == "device", "only computers join with a pairing code: sign in at {YOURS}'s address instead");
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
-        let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no network")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
+        let (root, bucket) = self.with(|i| Ok((i.r.root().map(|r| r.to_hex()).context("no network")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let endpoint = crate::keys::Endpoint { key, seal: crate::keys::twin_public(&key)? };
         // A machine of the person's own is their device too. An admin lists another person's as compute, which runs

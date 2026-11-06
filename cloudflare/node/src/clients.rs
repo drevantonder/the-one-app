@@ -19,8 +19,7 @@ use anyhow::{Context, Result, anyhow, ensure};
 use js_sys::{Function, Uint8Array};
 use one::database::scopes::{ScopeDb, object};
 use one::database::scopes::Scope;
-use one::database::scopes;
-use one_client::members::Global;
+use one::database::steps::Reader;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
@@ -171,60 +170,36 @@ struct View {
     user: String,
     seal: Key,
     global: one::database::stored::Keys,
-    who: Global,
-    db: ScopeDb,
+    who: Reader,
     epochs: HashMap<Scope, one::database::stored::Keys>,
     apps: HashMap<(Scope, String, u32), Key>,
 }
 
 impl View {
-    /// `global`'s steps from scratch: each of its epochs sealed to `me` in the bucket, kept only once who's who they
-    /// open says it's theirs, as a node's first read is (`Node::first_global_read`).
+    /// `global`'s steps from scratch, with its epochs sealed to `me` in the bucket (`steps::read_sealed_to`).
     async fn read(bucket: &crate::Js, me: &Key, user: &str, seal: &Key) -> Result<View> {
-        let mine = data_encoding::HEXLOWER.encode(me);
-        let mut candidates = one::database::stored::Keys::new();
-        for n in 1..=one::database::stored::EPOCHS_MAX {
-            let Some(o) = one::bucket::Bucket::get(bucket, &one::keys::epoch_name("global", n, &mine)).await? else { break };
-            if let Some(k) = one::keys::open_sealed(seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()) {
-                candidates.insert(n, k);
-            }
-        }
-        loop {
-            ensure!(!candidates.is_empty(), "no keys of your One App network are sealed to this device yet");
-            let mut log_keys = one::database::stored::Keys::new();
-            for (n, epoch) in &candidates {
-                if let Ok(Some(app)) = one::keys::app_key(bucket, epoch, "global", scopes::APP, *n, false).await {
-                    log_keys.insert(*n, one::keys::database_key(&app, scopes::APP, one::database::steps::NAME));
-                }
-            }
-            let mut who = Global::new(None);
-            who.read_steps(bucket, &log_keys).await?;
-            let db = who.who()?;
-            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| db.epoch_hash(&Scope::Global, **n) != Some(one::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
-            if wrong.is_empty() {
-                return Ok(View { user: user.into(), seal: *seal, global: log_keys, who, db, epochs: HashMap::from([(Scope::Global, candidates)]), apps: HashMap::new() });
-            }
-            for n in wrong {
-                candidates.remove(&n);
-            }
-        }
+        let mut who = Reader::new(None);
+        let (epochs, global) = one::database::steps::read_sealed_to(bucket, &mut who, &data_encoding::HEXLOWER.encode(me), seal, &mut None, now() as u64).await?;
+        ensure!(!epochs.is_empty() && who.truth().is_some(), "no keys of your One App network are sealed to this device yet");
+        Ok(View { user: user.into(), seal: *seal, global, who, epochs: HashMap::from([(Scope::Global, epochs)]), apps: HashMap::new() })
+    }
+
+    /// Who's who as it read it.
+    fn db(&self) -> &ScopeDb {
+        &self.who.truth().expect("a view is made once it's read the freeze").db
     }
 
     /// The steps written since it last read: false once who's who has an epoch of `global`'s it hasn't opened, so it
     /// must read again.
     async fn refresh(&mut self, bucket: &crate::Js) -> Result<bool> {
-        let had = self.who.at();
-        self.who.read_steps(bucket, &self.global).await?;
-        if had != self.who.at() {
-            self.db = self.who.who()?;
-        }
-        Ok(self.global.keys().next_back().is_some_and(|n| *n >= self.db.epoch(&Scope::Global)))
+        self.who.read(bucket, &self.global, now() as u64).await?;
+        Ok(self.global.keys().next_back().is_some_and(|n| *n >= self.db().epoch(&Scope::Global)))
     }
 
     /// A scope's epochs this device opens, by number: each one who's who made, from its copy in the bucket sealed to
     /// this device whose hash is the one who's who names (`Node::epoch_keys`).
     async fn epoch_keys(&mut self, bucket: &crate::Js, me: &Key, scope: &Scope) -> Result<one::database::stored::Keys> {
-        let m = &self.db;
+        let m = self.db();
         let hashes: BTreeMap<u32, String> = (1..=m.epoch(scope)).filter_map(|n| Some((n, m.epoch_hash(scope, n)?))).collect();
         let kept = self.epochs.get(scope).cloned().unwrap_or_default();
         let mut keys: one::database::stored::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&one::keys::epoch_hash(k))).collect();
@@ -245,7 +220,7 @@ impl View {
     /// The compute endpoints the network lists as running some of its person's calls: `{ key, seal, scopes }` each,
     /// hex, `scopes` the ones of theirs it runs.
     fn nodes(&self) -> Vec<Value> {
-        let m = &self.db;
+        let m = self.db();
         let theirs: Vec<Scope> = m.scopes().into_iter().filter(|s| m.may(&self.user, "use", &object(s))).collect();
         m.computes()
             .into_iter()
@@ -286,7 +261,7 @@ pub async fn device_view(me: String, user: String, seal: Vec<u8>, bucket: JsValu
             },
             None => View::read(&bucket, &me, &user, &seal).await?,
         };
-        let listed = fresh.db.client(&me).is_some_and(|c| c.user == user);
+        let listed = fresh.db().client(&me).is_some_and(|c| c.user == user);
         let out = json!({ "listed": listed, "nodes": fresh.nodes() });
         *view = Some(fresh);
         Ok(out)
@@ -313,12 +288,12 @@ pub async fn device_keys(me: String, need: String, bucket: JsValue) -> Result<St
             let (scope, app, database) = (field("scope")?, field("app")?, field("database")?);
             let prefix = crate::prefix_of(scope, app, database)?;
             let scope = Scope::parse(scope)?;
-            ensure!(view.db.may(&view.user, "use", &object(&scope)), "you don't use {scope}");
+            ensure!(view.db().may(&view.user, "use", &object(&scope)), "you don't use {scope}");
             let epochs = view.epoch_keys(&bucket, &me, &scope).await?;
             let newest = epochs.keys().next_back().copied().unwrap_or(0);
             // From the epoch its newest copy is under: older ones open only its history.
             let hint = one::bucket::Bucket::get(&bucket, &one::database::stored::newest_name(&prefix)).await?;
-            let oldest = one::keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), view.db.epoch(&scope));
+            let oldest = one::keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), view.db().epoch(&scope));
             for (epoch, epoch_key) in epochs.range(oldest..) {
                 let id = (scope.clone(), app.to_string(), *epoch);
                 let app_key = match view.apps.get(&id) {

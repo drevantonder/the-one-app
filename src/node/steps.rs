@@ -8,7 +8,7 @@ use crate::database::steps;
 impl Node {
     /// Whether this device has read who's who: `global`'s freeze, and the steps after it.
     pub fn frozen(&self) -> bool {
-        self.with(|i| Ok(i.r.frozen.is_some())).unwrap_or(false)
+        self.with(|i| Ok(i.r.freeze().is_some())).unwrap_or(false)
     }
 
     /// Reads `global`'s steps in the bucket after the last this device applied: each applied if it counts, passed over
@@ -23,11 +23,8 @@ impl Node {
     /// `read_steps`, while this device holds its writes.
     pub(super) async fn read_steps_now(&self) -> Result<bool> {
         let bucket = self.bucket()?;
-        let prefix = steps::prefix("global");
-        let from = self.with(|i| Ok(i.r.at().unwrap_or(i.r.looked)))?;
-        let mut at = from;
+        let from = self.with(|i| Ok(i.r.looked()))?;
         loop {
-            let name = crate::database::stored::step_name(&prefix, at + 1);
             let keys = match self.step_keys(&Scope::Global).await {
                 Ok(keys) => keys,
                 // Not given `global`'s newest epoch yet, as between its own new epoch's step and its seals: it reads
@@ -35,31 +32,24 @@ impl Node {
                 Err(err) if err.is::<NotGiven>() => self.step_keys_of(&self.epochs_held(&Scope::Global).await?.0).await?,
                 Err(err) => return Err(err),
             };
-            let Some(o) = crate::bucket::Bucket::get(&bucket, &name).await? else {
-                steps::missing(&bucket, &keys, &Scope::Global, at + 1).await?;
-                break;
-            };
-            let given = match steps::open(&keys, u32::MAX, &Scope::Global, at + 1, &o.bytes) {
-                steps::Opened::Step(given) => Some(given),
-                steps::Opened::Junk => None,
-                steps::Opened::Waits(epoch) if !self.frozen() || self.with(|i| Ok(i.r.epoch_made(&Scope::Global)))? >= epoch => {
-                    // Made, but not handed to this device yet, or before it's read the freeze: it reads on once it is.
-                    self.forget_epochs(&Scope::Global);
-                    break;
-                }
-                steps::Opened::Waits(_) => None,
-            };
-            let handled = self.with(|i| match i.r.frozen {
-                Some(_) => i.r.take_step(at + 1, given.as_ref().map(|g| &g.step), now_ms()),
-                None => i.r.take_first(at + 1, given.as_ref(), now_ms()),
-            })?;
-            at += 1;
+            let at = self.with(|i| Ok(i.r.looked()))?;
+            let sealed = steps::fetch(&bucket, at, None).await?;
+            let (handled, waits) = self.with(|i| Ok(i.r.add(&sealed, &keys, now_ms())))?;
             self.after(handled).await?;
+            if waits?.is_none() {
+                break;
+            }
+            // Made, but not handed to this device yet: it reads on once it is.
+            if self.with(|i| Ok(i.r.looked()))? == at {
+                self.forget_epochs(&Scope::Global);
+                break;
+            }
         }
-        if at > from {
+        let read = self.with(|i| Ok(i.r.looked()))? > from;
+        if read {
             self.keep_global();
         }
-        Ok(at > from)
+        Ok(read)
     }
 
     /// Where this device read `global`'s scope database to, and the database there, kept in its folder: what it starts
@@ -148,7 +138,7 @@ impl Node {
         if !crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(step, None))?).await? {
             return Ok(false);
         }
-        let handled = self.with(|i| i.r.take_step(at, Some(step), now_ms()))?;
+        let handled = self.with(|i| i.r.take_step(at, step, now_ms()))?;
         self.after(handled).await?;
         self.keep_global();
         // A copy now and then, and the newest hint: only saves readers work.
@@ -190,34 +180,9 @@ impl Node {
             Ok(i.r.at())
         })?;
         let read = read.context("global's log isn't frozen")?;
-        let bucket = self.bucket()?;
-        let prefix = steps::prefix("global");
-        let sealed = |at: u64, o: crate::bucket::Object| json!({ "at": at, "sealed": data_encoding::BASE64URL_NOPAD.encode(&o.bytes) });
-        let mut out = json!({});
-        let mut from = from;
-        if let Some(w) = welcome.filter(|w| w.at <= read)
-            && let Some(freeze) = crate::bucket::Bucket::get(&bucket, &crate::database::stored::step_name(&prefix, w.freeze)).await?
-        {
-            out = json!({ "welcome": w.to_string(), "freeze": sealed(w.freeze, freeze) });
-            from = w.freeze;
-            if let Some(c) = w.copy()
-                && let Some(copy) = crate::bucket::Bucket::get(&bucket, &crate::database::stored::copy_name(&prefix, c)).await?
-            {
-                out["start"] = sealed(c, copy);
-                from = c;
-            }
-        }
-        let mut list = Vec::new();
-        let mut at = from.min(read);
-        while let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::database::stored::step_name(&prefix, at + 1)).await? {
-            at += 1;
-            if at > from {
-                list.push(sealed(at, o));
-            }
-        }
-        out["at"] = json!(at);
+        let from = from.min(read);
+        let mut out = steps::fetch(&self.bucket()?, from, welcome.filter(|w| w.at <= read).as_ref()).await?.to_json(from);
         out["epoch"] = json!(self.with(|i| Ok(i.r.db().epoch(&Scope::Global)))?);
-        out["steps"] = json!(list);
         Ok(out)
     }
 
@@ -230,7 +195,7 @@ impl Node {
         }
         let keys = self.step_keys(scope).await?;
         let bucket = self.bucket()?;
-        let freeze = self.with(|i| Ok(i.r.frozen.clone().map(|(f, _)| f)))?.context("global's log isn't frozen")?;
+        let freeze = self.with(|i| Ok(i.r.freeze().cloned()))?.context("global's log isn't frozen")?;
         if !self.with(|i| Ok(i.scope_dbs.contains_key(scope)))? {
             let start = match crate::bucket::Bucket::get(&bucket, &steps::start_name(scope)).await? {
                 Some(o) => match steps::open(&keys, u32::MAX, scope, 0, &o.bytes) {

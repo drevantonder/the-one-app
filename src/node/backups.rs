@@ -340,7 +340,7 @@ impl Node {
             if !i.views.contains_key("global") {
                 return Ok((String::new(), Vec::new()));
             }
-            let network = i.r.root.map(|r| r.to_hex()[..16].to_string()).context("no network")?;
+            let network = i.r.root().map(|r| r.to_hex()[..16].to_string()).context("no network")?;
             m.recovery().context("the network has no recovery key")?;
             let cache = self.0.backups.backed.lock().unwrap();
             let failed = self.0.backups.failed.lock().unwrap();
@@ -722,7 +722,7 @@ impl Node {
         let (network, places, root) = self.with(|i| {
             ensure!(i.views.contains_key("global"), "no network");
             let places: Vec<(String, String, Place)> = places(i).into_iter().filter(|p| only.is_none_or(|o| o.contains(&p.id))).filter_map(|p| Some((p.id, p.title, p.place.ok()?))).filter(|(_, _, p)| p.present()).collect();
-            Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root))
+            Ok((i.r.root().map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root()))
         })?;
         let bucket = self.bucket().ok();
         let mut out = Vec::new();

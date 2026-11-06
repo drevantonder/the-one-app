@@ -594,33 +594,10 @@ pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, f
     }
     let read = LOGS.with(|l| l.borrow().get(&(owner.clone(), "global".to_string())).map(|g| g.truth().map(|t| t.map(|t| t.at)))).transpose().map_err(failed)?.flatten();
     let read = read.ok_or_else(|| failed(anyhow!("global's log isn't frozen")))?;
-    let prefix = steps::prefix("global");
-    let sealed = |at: u64, o: Object| json!({ "at": at, "sealed": data_encoding::BASE64URL_NOPAD.encode(&o.bytes) });
-    let mut out = json!({});
-    let mut from = from as u64;
-    if let Some(w) = welcome.as_deref().and_then(steps::Welcome::parse).filter(|w| w.at <= read)
-        && let Some(freeze) = bucket.get(&one::database::stored::step_name(&prefix, w.freeze)).await.map_err(failed)?
-    {
-        out = json!({ "welcome": w.to_string(), "freeze": sealed(w.freeze, freeze) });
-        from = w.freeze;
-        if let Some(c) = w.copy()
-            && let Some(copy) = bucket.get(&one::database::stored::copy_name(&prefix, c)).await.map_err(failed)?
-        {
-            out["start"] = sealed(c, copy);
-            from = c;
-        }
-    }
-    let mut list = Vec::new();
-    let mut at = from.min(read);
-    while let Some(o) = bucket.get(&one::database::stored::step_name(&prefix, at + 1)).await.map_err(failed)? {
-        at += 1;
-        if at > from {
-            list.push(sealed(at, o));
-        }
-    }
-    out["at"] = json!(at);
+    let from = (from as u64).min(read);
+    let welcome = welcome.as_deref().and_then(steps::Welcome::parse).filter(|w| w.at <= read);
+    let mut out = steps::fetch(&bucket, from, welcome.as_ref()).await.map_err(failed)?.to_json(from);
     out["epoch"] = json!(epoch);
-    out["steps"] = json!(list);
     Ok(out.to_string())
 }
 

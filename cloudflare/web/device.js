@@ -151,7 +151,7 @@ export class Device {
 
   /// `global`'s epochs sealed to this browser, opened (hex, by number), and the node's key in each, sealed under it
   /// (base64url, by number): what it opens `global`'s scope database's steps with. Unchecked here: who's who checks
-  /// each epoch against the steps before it, before it's used (client/src/members.rs `add_sealed`).
+  /// each epoch against the steps before it, before it's used (src/database/steps.rs `Reader::add`).
   async stepKeys() {
     const [{ sealed: epochs }, { sealed: apps }] = await Promise.all([this.api(`/v1/keys?scope=global&to=${this.me.key}`), this.api("/v1/keys?scope=global&app=node")]);
     const opened = {};
@@ -401,7 +401,7 @@ export class Device {
 
   /// `global`'s scope database's steps after `from`, as the bucket holds them, read through the URL signer's `get`, 32
   /// at a time: `[{ at, sealed }]`, base64url, to the first that isn't there, and the one after that, if it is: who's
-  /// who says whether it's a step, which would mean the one missing was written (client/src/members.rs `add_sealed`).
+  /// who says whether it's a step, which would mean the one missing was written (src/database/steps.rs `Reader::add`).
   async bucketSteps(from) {
     const prefix = prefixOf({ scope: "global", app: "node", database: "scope" });
     const out = [];

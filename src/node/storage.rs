@@ -100,7 +100,7 @@ impl Node {
     async fn move_to(&self, fields: BTreeMap<String, String>) -> Result<()> {
         let to = self.network_place(&fields)?;
         let from = self.bucket().ok().map(|b| b.place);
-        let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no network"))?;
+        let root = self.with(|i| i.r.root().map(|r| r.to_hex()).context("no network"))?;
         let (place, theirs) = (to.clone(), root.clone());
         tokio::task::spawn_blocking(move || -> Result<()> {
             place.can_hold_a_network()?;

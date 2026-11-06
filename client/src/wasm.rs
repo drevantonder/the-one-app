@@ -180,27 +180,34 @@ pub struct Global {
 impl Global {
     #[wasm_bindgen(constructor)]
     /// `steps`, as JSON: `{ kept, given, epochs, apps }`, where its scope database's steps were read to as it kept that
-    /// (`members::Global::kept`), and those this browser read since from the bucket itself (`{ steps, welcome, freeze,
+    /// (`steps::Reader::kept`), and those this browser read since from the bucket itself (`{ steps, welcome, freeze,
     /// start }`, through the URL signer's `get`) with the keys to open them: `global`'s epochs sealed to this
     /// device, opened (hex, by number), and the node's key sealed in each (base64url, by number)
-    /// (`members::Global::add_sealed`).
+    /// (`steps::Reader::add`).
     pub fn new(root: String, steps: Option<String>) -> Result<Global, JsError> {
         let root = (!root.is_empty()).then(|| one::keys::Hash::from_hex(&root)).transpose().map_err(js)?;
-        let mut g = crate::members::Global::new(root);
+        let mut g = one::database::steps::Reader::new(root);
+        let now = js_sys::Date::now() as u64;
         if let Some(steps) = steps.filter(|s| !s.is_empty()) {
             let steps: serde_json::Value = serde_json::from_str(&steps).map_err(js)?;
             if steps["kept"].is_object() {
-                g.restart(&steps["kept"]).map_err(js)?;
+                g.restart(&steps["kept"], now).map_err(js)?;
             }
             let epochs = steps["epochs"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, key(k.as_str()?).ok()?))).collect();
             let apps = steps["apps"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, data_encoding::BASE64URL_NOPAD.decode(k.as_str()?.as_bytes()).ok()?))).collect();
-            g.add_sealed(&steps["given"], &epochs, &apps).map_err(js)?;
+            let sealed = one::database::steps::Sealed::from_json(&steps["given"]);
+            g.add(&sealed, &crate::members::step_keys(&epochs, &apps), Some(&epochs), now, |_, _, _| {}).map_err(js)?;
         }
-        let members = crate::members::view_of(&g.who().map_err(js)?).map_err(js)?.to_string();
+        let members = match g.truth() {
+            Some(t) => crate::members::view_of(&t.db),
+            None => crate::members::view_of(&one::database::scopes::ScopeDb::empty(&one::database::scopes::Scope::Global, now).map_err(js)?),
+        }
+        .map_err(js)?
+        .to_string();
         Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members })
     }
 
-    /// Where its scope database's steps were read to, as JSON (`members::Global::kept`): to keep, and give again.
+    /// Where its scope database's steps were read to, as JSON (`steps::Reader::kept`): to keep, and give again.
     #[wasm_bindgen(getter)]
     pub fn steps(&self) -> String {
         self.steps.clone()
