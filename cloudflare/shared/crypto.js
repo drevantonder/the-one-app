@@ -11,7 +11,7 @@
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
 // nonce ‖ AES-256-GCM(key, nonce, plain), with key and the copy's id both derived from the secret.
 
-import { BLOBS, CODES, ENDPOINT, FRESH, LOG, MAIN, MOST_NEEDED, NODE_APP, NUMBER_MAX, READS, SESSION, SIGNED_NOTE, SOCKET, STEP, VAULT } from "./protocol.js";
+import { CODES, ENDPOINT, FRESH, NUMBER_MAX, READS, SESSION, SIGNED_NOTE, SOCKET, STEP } from "./protocol.js";
 
 const text = new TextEncoder();
 
@@ -43,7 +43,7 @@ export function concat(...parts) {
 }
 
 /// HKDF-SHA256's 32 bytes from `ikm`: bytes, or a non-extractable HKDF CryptoKey (`hkdfKey`) a browser keeps in memory.
-export async function hkdf(ikm, info, salt = new Uint8Array()) {
+async function hkdf(ikm, info, salt = new Uint8Array()) {
   const key = ikm instanceof CryptoKey ? ikm : await crypto.subtle.importKey("raw", bytes(ikm), "HKDF", false, ["deriveBits"]);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: bytes(salt), info: bytes(info) }, key, 256));
 }
@@ -68,10 +68,6 @@ export async function openAppKey(scopeKey, app, sealed) {
   sealed = bytes(sealed);
   const key = await aes(await hkdf(scopeKey, `one/app\0${app}`), "decrypt");
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: sealed.slice(0, 12) }, key, sealed.slice(12)));
-}
-
-export function databaseKey(appKey, database) {
-  return hkdf(appKey, `one/database\0${database}`);
 }
 
 async function aes(key, use) {
@@ -133,8 +129,7 @@ export async function sha256(v) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes(v)));
 }
 
-// Keys as devices hold them (src/keys.rs): endpoints' keys, epochs, objects sealed under an epoch, signed requests,
-// and the keys a caller hands a node for a call.
+// Keys as devices hold them (src/keys.rs): endpoints' keys, epochs and signed requests.
 
 const hex = {
   encode: (bytes) => Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join(""),
@@ -190,11 +185,11 @@ export function twinPublic(edPublic) {
   return out;
 }
 
-export async function sign(key, domain, v) {
+async function sign(key, domain, v) {
   return new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, await signingKey(key), signed(domain, v)));
 }
 
-export async function verify(publicKey, domain, v, signature) {
+async function verify(publicKey, domain, v, signature) {
   const key = await crypto.subtle.importKey("raw", bytes(publicKey), { name: "Ed25519" }, false, ["verify"]);
   return crypto.subtle.verify({ name: "Ed25519" }, key, bytes(signature), signed(domain, v));
 }
@@ -209,7 +204,7 @@ export const rolesOf = (text) => String(text || "").split(" ");
 let lastAt = 0;
 
 /// When to sign what the relay takes once by its `at`: now, or one more than the last this page or Worker signed.
-export function nextAt() {
+function nextAt() {
   lastAt = Math.max(Date.now(), lastAt + 1);
   return lastAt;
 }
@@ -287,27 +282,6 @@ export async function signStep(key, by, { log, at, time, user, epoch }, body) {
 /// What an `epoch` entry says of its key: HKDF-SHA256(key, "one/epoch-hash"), hex.
 export const epochHash = async (key) => hex.encode(await hkdf(key, "one/epoch-hash"));
 
-/// Seals an object under an epoch's key and its name: epoch (u32, big-endian) ‖ nonce ‖ AES-256-GCM(aad = name).
-export async function seal(epoch, key, name, plain) {
-  const nonce = random(12);
-  const head = new Uint8Array(4);
-  new DataView(head.buffer).setUint32(0, epoch);
-  const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: text.encode(name) }, await aes(bytes(key), "encrypt"), bytes(plain));
-  return concat(head, nonce, new Uint8Array(sealed));
-}
-
-export async function open(key, name, sealed) {
-  sealed = bytes(sealed);
-  if (sealed.length < 32) throw new Error("too short to be sealed");
-  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: sealed.slice(4, 16), additionalData: text.encode(name) }, await aes(bytes(key), "decrypt"), sealed.slice(16)));
-}
-
-/// What a caller hands a node, `{ for, until, keys: [{ scope, epoch, app, database, key }] }` (each key base64url),
-/// sealed to its seal key: the `x-one-keys` header's value.
-export async function sealHandoff(to, handoff) {
-  return b64u.encode(await sealTo(to, JSON.stringify(handoff)));
-}
-
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// The code a new device shows: the first 8 base32 characters of the sha256 of its key and seal key.
@@ -343,38 +317,6 @@ export async function passkeyKeys(prf) {
   return { sign: await hkdf(prf, "one/passkey-device/sign"), seal: await hkdf(prf, "one/passkey-device/seal") };
 }
 
-/// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
-/// or its screens (`/v1/screens/<app>`). Null for any other. (src/keys.rs `app_of`.)
-export function appOf(route) {
-  const m = /^call (.+)$/.exec(route) || /^\/v1\/screens\/([^/]+)$/.exec(route);
-  return m ? m[1] : null;
-}
-
-/// Whether a client hands a node the key of `need`'s database (`{ scope, app, database }`) with a kind of request
-/// (`route`), when the node asks (428): only what that kind of request can use. As src/keys.rs `may_hand`, which says
-/// why.
-export function mayHand(route, need) {
-  const node = (of) => need.app === NODE_APP && of.includes(need.database);
-  // Apps' deployed code, which everyone in the network may read.
-  const code = need.scope === "global" && node([BLOBS]);
-  const app = appOf(route);
-  if (app) return need.app === app || node([VAULT, LOG]) || code;
-  if (["/mcp", "/v1/widgets", "/v1/badges"].includes(route)) return (need.app !== NODE_APP && need.database === MAIN) || node([VAULT, LOG]) || code;
-  if (route === "/v1/apps") return node([LOG]) || code;
-  if (route === "/v1/vault" || route.startsWith("/v1/vault/")) return node([VAULT, LOG]);
-  return node([LOG]);
-}
-
-/// What a node's 428 (`answer`) asks a request of `route` to hand, from the node that answered (`node`, hex): its
-/// `need`, once each, or null if it asks for anything it mayn't. As src/keys.rs `asked_for`, which says why.
-export function askedFor(route, node, answer) {
-  if (!node || answer?.to !== node || !Array.isArray(answer.need)) return null;
-  const whole = (n) => n && typeof n === "object" && typeof n.scope === "string" && typeof n.app === "string" && typeof n.database === "string" && Number.isInteger(n.epoch) && n.epoch >= 0 && n.epoch <= 0xffffffff;
-  if (!answer.need.every(whole)) return null;
-  const need = [...new Map(answer.need.map(({ scope, epoch, app, database }) => [JSON.stringify([scope, epoch, app, database]), { scope, epoch, app, database }])).values()];
-  return need.length && need.length <= MOST_NEEDED && need.every((n) => mayHand(route, n)) ? need : null;
-}
-
 /// What sign-in said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
 /// `{ approved, root? }`, `{ gone }`, or `{}` while it waits. As src/keys.rs `waited`, which says what each means.
 export function waited(status, said) {
@@ -387,18 +329,4 @@ export function waited(status, said) {
     return { approved: true, ...(typeof said.root === "string" && /^[0-9a-f]{64}$/.test(said.root) ? { root: said.root } : {}), ...(welcome ? { welcome } : {}) };
   }
   return {};
-}
-
-/// The oldest epoch of `database`'s key a reader needs, of a scope whose newest is `newest`, from its newest hint
-/// (`hint`, its text, or null if it has none). As src/keys.rs `oldest_needed`, which says why.
-export function oldestNeeded(database, hint, newest) {
-  if (database === BLOBS || database === LOG) return 1;
-  newest = Math.max(1, newest || 0);
-  if (hint == null) return newest;
-  let v = {};
-  try {
-    v = JSON.parse(hint) || {};
-  } catch {}
-  const n = (x) => (Number.isSafeInteger(x) && x > 0 ? x : 0);
-  return n(v.copy) === 0 ? 1 : Math.min(Math.max(n(v.epoch), 1), newest);
 }

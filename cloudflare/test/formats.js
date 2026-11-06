@@ -1,5 +1,5 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { appOf, askedFor, b64u, canonical, certify, checkCertificate, epochHash, checkRequest, databaseKey, ed25519Public, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, mayHand, oldestNeeded, open, openAppKey, openNote, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signStep, signedRequest, twinPublic, waited, x25519Public } from "../shared/crypto.js";
+import { b64u, canonical, certify, checkCertificate, epochHash, checkRequest, ed25519Public, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, openAppKey, openNote, openSealed, openUnder, passkeyKeys, sealAppKey, sealTo, sealUnder, signStep, signedRequest, twinPublic, waited, x25519Public } from "../shared/crypto.js";
 import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { members } from "../web/members.js";
 import { AGENTS } from "../screen/agents.js";
@@ -14,9 +14,8 @@ const ops = {
   async sealAppKey({ scopeKey, app, key }) {
     return { sealed: b64u.encode(await sealAppKey(b64u.decode(scopeKey), app, b64u.decode(key))) };
   },
-  async openAppKey({ scopeKey, app, sealed, database }) {
-    const key = await openAppKey(b64u.decode(scopeKey), app, b64u.decode(sealed));
-    return { key: b64u.encode(key), database: b64u.encode(await databaseKey(key, database)) };
+  async openAppKey({ scopeKey, app, sealed }) {
+    return { key: b64u.encode(await openAppKey(b64u.decode(scopeKey), app, b64u.decode(sealed))) };
   },
   async sealTo({ to, plain }) {
     return { sealed: b64u.encode(await sealTo(b64u.decode(to), b64u.decode(plain))) };
@@ -31,18 +30,14 @@ const ops = {
   async sealUnder({ secret, plain }) {
     return { sealed: b64u.encode(await sealUnder(secret, b64u.decode(plain))), id: await idOf(secret) };
   },
-  async keys({ seed, domain, fields, at, request, now, epoch, key, name, plain, sealed, to, handoff, pair, secret, prf }) {
+  async keys({ seed, domain, fields, at, request, now, key, pair, secret, prf }) {
     const signedBy = await signedRequest(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), domain, fields, at);
     const checked = await checkRequest(domain, request, now).then((c) => c.by, (err) => ({ error: String(err) }));
-    const opened = await open(b64u.decode(key), name, b64u.decode(sealed));
     const pk = await passkeyKeys(b64u.decode(prf));
     return {
       canonical: new TextDecoder().decode(canonical(fields)),
       signed: signedBy,
       checked,
-      sealed: b64u.encode(await seal(epoch, b64u.decode(key), name, b64u.decode(plain))),
-      opened: b64u.encode(opened),
-      handoff: await sealHandoff(b64u.decode(to), handoff),
       epochHash: await epochHash(b64u.decode(key)),
       twin: hex.encode(twinPublic(hex.decode(pair.key))),
       joinCode: await joinCode(hex.decode(pair.key), hex.decode(pair.seal)),
@@ -65,15 +60,9 @@ const ops = {
   async members({ calls }) {
     return { contents: calls.map(([name, args]) => members[name](args)) };
   },
-  /// What a node is handed with each kind of request: `[[route, need]]` → whether each is, and `[[hint, newest]]` → the
-  /// oldest epoch each needs.
-  async handed({ hands, hints }) {
-    return { hands: hands.map(([route, need]) => mayHand(route, need)), oldest: hints.map(([database, hint, newest]) => oldestNeeded(database, hint, newest)), apps: hands.map(([route]) => appOf(route)) };
-  },
-  /// What a client does with a node's 428 and sign-in's word while it waits to be let in: `[[route, node, answer]]` → what
-  /// each asks it to hand, or null; `[[status, said]]` → what each says.
-  async joining({ asked, said }) {
-    return { asked: asked.map(([route, node, answer]) => askedFor(route, node, answer)), said: said.map(([status, body]) => waited(status, body)) };
+  /// What sign-in's word says while a device waits to be let in: `[[status, said]]` → what each says.
+  async joining({ said }) {
+    return { said: said.map(([status, body]) => waited(status, body)) };
   },
   /// The bucket's names, the refusal the Workers make and the codes answers carry: `[prefix, n]` → each of the names, and `[scope, app, database]`
   /// → its prefix.

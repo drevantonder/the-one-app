@@ -490,7 +490,7 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
 /// blobs, where apps' deployed code is (a node that keeps nothing, the Cloudflare node, reads it there). The list of
 /// apps, which says what each does from its code, the log and that code. The Vault's routes, its Vault and log; any
-/// other, the log alone. `cloudflare/shared/crypto.js`'s `mayHand` is the same.
+/// other, the log alone.
 ///
 /// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the network
 /// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
@@ -515,7 +515,6 @@ pub fn may_hand(route: &str, need: &Need) -> bool {
 /// was put in, so every epoch from the first. The log, a scope's steps, needs every epoch from the first too: every
 /// reader replays it from the first (`steps::Truth::read`), whatever copies there are. Nodes ask for no older, and
 /// clients hand no older.
-/// `cloudflare/shared/crypto.js`'s `oldestNeeded` is the same.
 pub fn oldest_needed(database: &str, hint: Option<&[u8]>, newest: u32) -> u32 {
     if database == crate::bucket::BLOBS || database == crate::database::steps::KEY_NAME {
         return 1;
@@ -537,7 +536,7 @@ pub const MOST_NEEDED: usize = 64;
 /// What a node's 428 (`answer`) asks a request of `route` to hand: taken only from the node that answered (`node`, hex,
 /// as its connection proved), naming itself; one or more keys, MOST_NEEDED at most, each of a database that kind of
 /// request uses (`may_hand`). None if it asks for anything else. The seal key it names isn't read: what's handed is
-/// sealed to the one the network's entries list for that node. `cloudflare/shared/crypto.js`'s `askedFor` is the same.
+/// sealed to the one the network's entries list for that node.
 pub fn asked_for(route: &str, node: &str, answer: &Value) -> Option<Vec<Need>> {
     if answer["to"].as_str() != Some(node) {
         return None;
@@ -631,6 +630,42 @@ mod b64key {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_node_is_handed_only_the_keys_a_kind_of_request_uses() {
+        let need = |app: &str, database: &str| Need { scope: "global".into(), epoch: 1, app: app.into(), database: database.into() };
+        assert!(may_hand("call tally", &need("tally", "main")) && !may_hand("call tally", &need("notes", "main")));
+        assert!(may_hand("/v1/steps", &need("node", "log")) && !may_hand("/v1/steps", &need("tally", "main")) && !may_hand("/v1/state", &need("node", "vault")));
+        assert!(may_hand("/v1/vault", &need("node", "vault")) && !may_hand("/v1/vault", &need("tally", "main")));
+        // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
+        // blobs, its people's files, never.
+        let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
+        assert!(may_hand("call tally", &blobs("global")) && may_hand("/v1/screens/tally", &blobs("global")) && may_hand("/v1/badges", &blobs("global")) && may_hand("/v1/apps", &blobs("global")));
+        assert!(!may_hand("/v1/apps", &need("tally", "main")) && !may_hand("/v1/apps", &blobs("user:ab")));
+        assert!(!may_hand("call tally", &blobs("user:ab")) && !may_hand("/mcp", &blobs("group:cd")) && !may_hand("/v1/state", &blobs("global")));
+        assert_eq!(oldest_needed("main", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
+        assert_eq!(oldest_needed("log", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 1, "a scope's steps are read from the first");
+        assert_eq!(oldest_needed("log", None, 3), 1, "a scope's steps are read from the first, before any hint");
+        assert_eq!(oldest_needed("blobs", None, 3), 1, "a blob is kept under the epoch it was put in");
+    }
+
+    #[test]
+    fn a_nodes_428_asks_only_for_what_the_request_uses_from_the_node_that_answered() {
+        let node = "ab".repeat(32);
+        let need = |app: &str, database: &str| json!({ "scope": "global", "epoch": 1, "app": app, "database": database });
+        let every = |n: usize| (0..n).map(|i| need(&format!("app{i}"), "main")).collect::<Vec<_>>();
+        let twice = json!({ "to": node, "need": [need("tally", "main"), need("tally", "main"), need("node", "log")] });
+        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [need("tally", "main")] })).is_some());
+        assert!(asked_for("call tally", &node, &twice).is_some_and(|n| n.len() == 2), "a key asked for twice is handed once");
+        assert!(asked_for("call tally", &node, &json!({ "to": "cd".repeat(32), "need": [need("tally", "main")] })).is_none(), "only the node that answered");
+        assert!(asked_for("call tally", &node, &json!({ "need": [need("tally", "main")] })).is_none(), "naming itself");
+        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [] })).is_none() && asked_for("call tally", &node, &json!({ "to": node, "need": null })).is_none());
+        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [need("notes", "main")] })).is_none(), "another app's");
+        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [need("tally", "main"), { "scope": "global", "epoch": "1", "app": "tally", "database": "main" }] })).is_none());
+        assert!(asked_for("call tally", &node, &json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "tally", "database": "main" }] })).is_none());
+        assert!(asked_for("/v1/badges", &node, &json!({ "to": node, "need": every(MOST_NEEDED) })).is_some());
+        assert!(asked_for("/v1/badges", &node, &json!({ "to": node, "need": every(MOST_NEEDED + 1) })).is_none());
+    }
 
     #[test]
     fn a_signed_request_is_checked_whole_and_fresh() {

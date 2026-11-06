@@ -46,18 +46,17 @@ fn b(v: &Value) -> Vec<u8> {
 }
 
 /// The Workers (JavaScript, `cloudflare/shared/crypto.js`) and nodes each open what the other seals: app keys under
-/// scope keys, keys to key pairs and under secrets; and derive the same database keys.
+/// scope keys, keys to key pairs and under secrets;.
 #[test]
 fn the_workers_and_nodes_seal_keys_for_each_other() {
     let formats = Formats::start();
     let js = |body: Value| formats.js(body);
 
-    // An app's key, sealed under its scope's: each opens what the other sealed, and derives the same database key.
+    // An app's key, sealed under its scope's: each opens what the other sealed.
     let scope: [u8; 32] = rand::random();
     let app: [u8; 32] = rand::random();
-    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "sealed": B64U.encode(&keys::seal_app_key(&scope, "tally", &app)), "database": "main" }));
+    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "sealed": B64U.encode(&keys::seal_app_key(&scope, "tally", &app)) }));
     assert_eq!(b(&opened["key"]), app, "JavaScript opens an app's key Rust sealed");
-    assert_eq!(b(&opened["database"]), keys::database_key(&app, "tally", "main"), "a database's key");
     let sealed = js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "key": B64U.encode(&app) }));
     assert_eq!(keys::open_app_key(&scope, "tally", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
     assert!(keys::open_app_key(&scope, "calendar", &b(&sealed["sealed"])).is_err(), "only as that app's");
@@ -79,10 +78,10 @@ fn the_workers_and_nodes_seal_keys_for_each_other() {
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
 }
 
-/// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, objects sealed under an epoch, a call's
-/// handoff, join codes, invite proofs, passkeys' device keys and a session endpoint's certificate.
+/// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, epoch hashes, join codes, invite proofs,
+/// passkeys' device keys and a session endpoint's certificate.
 #[test]
-fn a_device_signs_seals_and_hands_keys_as_the_nodes_read_them() {
+fn a_device_signs_and_proves_as_the_nodes_read_it() {
     let formats = Formats::start();
     let js = |body: Value| formats.js(body);
 
@@ -92,17 +91,13 @@ fn a_device_signs_seals_and_hands_keys_as_the_nodes_read_them() {
     let request = keys::signed_request(&signer, "one/urls", fields.clone(), 1_000_000);
     let node = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let to = keys::Endpoint::of(&node).seal;
-    let handoff = keys::Handoff { for_: keys::token_id("a token"), until: 9, keys: vec![keys::Handed { scope: "global".into(), epoch: 2, app: "tally".into(), database: "main".into(), key: rand::random() }] };
     let epoch_key: [u8; 32] = rand::random();
-    let sealed = keys::seal(3, &epoch_key, "global/tally/main/1", b"a step");
     let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
     let device_seal: [u8; 32] = rand::random();
     let prf: [u8; 32] = rand::random();
     let out = js(json!({
         "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
-        "request": request, "now": 1_000_000 + keys::FRESH, "epoch": 4, "key": B64U.encode(&epoch_key),
-        "name": "global/tally/main/1", "plain": B64U.encode(b"from js"), "sealed": B64U.encode(&sealed),
-        "to": B64U.encode(&keys::twin_public(&node.verifying_key().to_bytes()).unwrap()), "handoff": handoff,
+        "request": request, "now": 1_000_000 + keys::FRESH, "key": B64U.encode(&epoch_key),
         "pair": { "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
         "secret": B64U.encode(b"an invite's secret"), "prf": B64U.encode(&prf),
     }));
@@ -110,10 +105,6 @@ fn a_device_signs_seals_and_hands_keys_as_the_nodes_read_them() {
     assert_eq!(out["signed"], request, "the same request signed the same, Ed25519 being deterministic");
     assert_eq!(out["checked"], json!(data_encoding::HEXLOWER.encode(signer.verifying_key().as_bytes())), "JavaScript checks a request Rust signed");
     assert!(keys::check_request("one/urls", &out["signed"], 1_000_000).is_ok(), "Rust checks one JavaScript signed");
-    assert_eq!(keys::open(&epoch_key, "global/tally/main/1", &b(&out["sealed"])).unwrap(), b"from js", "Rust opens an object JavaScript sealed");
-    assert_eq!(keys::epoch_of(&b(&out["sealed"])).unwrap(), 4);
-    assert_eq!(b(&out["opened"]), b"a step", "JavaScript opens one Rust sealed");
-    assert_eq!(keys::open_handoff(&keys::seal_secret(&node), out["handoff"].as_str().unwrap()).unwrap(), handoff, "Rust opens a handoff JavaScript sealed");
     assert_eq!(out["epochHash"], keys::epoch_hash(&epoch_key), "an epoch key's hash");
     assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
     assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&keys::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
@@ -234,7 +225,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     assert!(!frozen(&elsewhere), "a freeze that isn't the network it joined");
     // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
     let welcome = steps::Welcome { freeze: 1, at: 3, hash: one::database::stored::state_hash(who.conn()).unwrap() };
-    let said = js(json!({ "op": "joining", "asked": [], "said": [[200, { "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() }]] }));
+    let said = js(json!({ "op": "joining", "said": [[200, { "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() }]] }));
     let given = json!({ "welcome": said["said"][0]["welcome"], "freeze": s1, "at": 3, "steps": [s2, s3] });
     let mut new = Reader::new(Some(root));
     add(&mut new, &given).unwrap();
@@ -321,77 +312,14 @@ fn the_web_client_builds_the_content_of_steps_as_rust_does() {
     }
 }
 
-/// What a node is handed with each kind of request (`keys::may_hand`), and how old an epoch (`keys::oldest_needed`):
-/// browsers and the remote MCP server hand by the same rule as native apps.
+/// What sign-in's word on a device's request to be let in means (`keys::waited`): the web client reads it as native apps
+/// and the CLI do.
 #[test]
-fn browsers_and_the_remote_mcp_server_hand_a_node_keys_by_the_rule_native_apps_do() {
+fn a_client_reads_sign_ins_word_as_native_apps_do() {
     let formats = Formats::start();
     let js = |body: Value| formats.js(body);
 
-    use one::keys::{Need, app_of, may_hand, oldest_needed};
-    let routes = ["call tally", "call node", "/v1/screens/tally", "/v1/screens/tally/main", "/mcp", "/v1/widgets", "/v1/badges", "/v1/vault", "/v1/vault/requests", "/v1/state", "/v1/steps", "/v1/apps", "call "];
-    let dbs = [("tally", "main"), ("tally", "sidecar"), ("notes", "main"), ("tally", "other"), ("node", "vault"), ("node", "log"), ("node", "main"), ("node", "blobs")];
-    let mut hands: Vec<(String, Need)> = Vec::new();
-    for (route, scope, (app, database)) in routes.iter().flat_map(|r| ["user:ab", "global"].map(|s| (r, s))).flat_map(|(r, s)| dbs.iter().map(move |d| (r, s, d))) {
-        hands.push((route.to_string(), Need { scope: scope.into(), epoch: 1, app: app.to_string(), database: database.to_string() }));
-    }
-    let hints: Vec<(&str, Option<String>, u32)> = [None, Some(r#"{"at":9,"copy":0,"epoch":0}"#), Some(r#"{"at":9,"copy":7,"epoch":2}"#), Some(r#"{"at":9,"copy":7,"epoch":5}"#), Some(r#"{"at":9,"copy":7}"#), Some("not a hint"), Some(r#"{"copy":-1,"epoch":2}"#)]
-        .into_iter()
-        .flat_map(|h| ["log", "main", "blobs"].map(move |d| (d, h)))
-        .flat_map(|(d, h)| [0, 1, 3].map(|n| (d, h.map(str::to_string), n)))
-        .collect();
-    let out = js(json!({ "op": "handed", "hands": hands.iter().map(|(r, n)| json!([r, n])).collect::<Vec<_>>(), "hints": hints.iter().map(|(d, h, n)| json!([d, h, n])).collect::<Vec<_>>() }));
-    for ((route, need), (js, app)) in hands.iter().zip(out["hands"].as_array().unwrap().iter().zip(out["apps"].as_array().unwrap())) {
-        assert_eq!(js.as_bool(), Some(may_hand(route, need)), "{route} handed {}/{}", need.app, need.database);
-        assert_eq!(app.as_str(), app_of(route), "{route}'s app");
-    }
-    for ((database, hint, newest), js) in hints.iter().zip(out["oldest"].as_array().unwrap()) {
-        assert_eq!(js.as_u64(), Some(oldest_needed(database, hint.as_deref().map(str::as_bytes), *newest) as u64), "{database} {hint:?} at {newest}");
-    }
-    // And what it says, for what matters most: another app's, or anything but the log with a request that runs none.
-    let need = |app: &str, database: &str| Need { scope: "global".into(), epoch: 1, app: app.into(), database: database.into() };
-    assert!(may_hand("call tally", &need("tally", "main")) && !may_hand("call tally", &need("notes", "main")));
-    assert!(may_hand("/v1/steps", &need("node", "log")) && !may_hand("/v1/steps", &need("tally", "main")) && !may_hand("/v1/state", &need("node", "vault")));
-    assert!(may_hand("/v1/vault", &need("node", "vault")) && !may_hand("/v1/vault", &need("tally", "main")));
-    // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
-    // blobs, its people's files, never.
-    let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
-    assert!(may_hand("call tally", &blobs("global")) && may_hand("/v1/screens/tally", &blobs("global")) && may_hand("/v1/badges", &blobs("global")) && may_hand("/v1/apps", &blobs("global")));
-    assert!(!may_hand("/v1/apps", &need("tally", "main")) && !may_hand("/v1/apps", &blobs("user:ab")));
-    assert!(!may_hand("call tally", &blobs("user:ab")) && !may_hand("/mcp", &blobs("group:cd")) && !may_hand("/v1/state", &blobs("global")));
-    assert_eq!(oldest_needed("main", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
-    assert_eq!(oldest_needed("log", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 1, "a scope's steps are read from the first");
-    assert_eq!(oldest_needed("log", None, 3), 1, "a scope's steps are read from the first, before any hint");
-    assert_eq!(oldest_needed("blobs", None, 3), 1, "a blob is kept under the epoch it was put in");
-}
-
-/// A client device's way in, the same in a browser (`cloudflare/web`) as in a native app and the CLI (`one-client`): what a
-/// node's 428 may ask it to hand (`keys::asked_for`), what sign-in's word on its request to be let in means
-/// (`keys::waited`).
-#[test]
-fn a_client_answers_a_nodes_428_and_sign_ins_word_as_native_apps_do() {
-    let formats = Formats::start();
-    let js = |body: Value| formats.js(body);
-
-    use one::keys::{MOST_NEEDED, Need, Waited, asked_for, waited};
-    let node = "ab".repeat(32);
-    let need = |app: &str, database: &str| json!({ "scope": "global", "epoch": 1, "app": app, "database": database });
-    let every = |n: usize| (0..n).map(|i| need(&format!("app{i}"), "main")).collect::<Vec<_>>();
-    let asked: Vec<(&str, Value)> = vec![
-        ("call tally", json!({ "to": node, "need": [need("tally", "main")] })),
-        ("call tally", json!({ "to": node, "need": [need("tally", "main"), need("tally", "main"), need("node", "log")] })),
-        // The seal key it names isn't read: what's handed is sealed to the one the entries list.
-        ("call tally", json!({ "to": node, "seal": "cd".repeat(32), "need": [need("tally", "main")] })),
-        ("call tally", json!({ "to": "cd".repeat(32), "need": [need("tally", "main")] })),
-        ("call tally", json!({ "need": [need("tally", "main")] })),
-        ("call tally", json!({ "to": node, "need": [] })),
-        ("call tally", json!({ "to": node, "need": null })),
-        ("call tally", json!({ "to": node, "need": [need("notes", "main")] })),
-        ("call tally", json!({ "to": node, "need": [need("tally", "main"), { "scope": "global", "epoch": "1", "app": "tally", "database": "main" }] })),
-        ("call tally", json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "tally", "database": "main" }] })),
-        ("/v1/badges", json!({ "to": node, "need": every(MOST_NEEDED) })),
-        ("/v1/badges", json!({ "to": node, "need": every(MOST_NEEDED + 1) })),
-    ];
+    use one::keys::{Waited, waited};
     let root = "e".repeat(64);
     let said: Vec<(u16, Value)> = vec![
         (401, json!({})),
@@ -418,21 +346,7 @@ fn a_client_answers_a_nodes_428_and_sign_ins_word_as_native_apps_do() {
         (500, json!({ "approved": true })),
         (0, Value::Null),
     ];
-    let out = js(json!({
-        "op": "joining",
-        "asked": asked.iter().map(|(route, answer)| json!([route, node, answer])).collect::<Vec<_>>(),
-        "said": said.iter().map(|(status, body)| json!([status, body])).collect::<Vec<_>>(),
-    }));
-    for ((route, answer), js) in asked.iter().zip(out["asked"].as_array().unwrap()) {
-        let js: Option<Vec<Need>> = serde_json::from_value(js.clone()).unwrap();
-        let js = js.map(|mut n| {
-            n.sort();
-            n
-        });
-        assert_eq!(js, asked_for(route, &node, answer), "{route}: {answer}");
-    }
-    assert!(asked_for("call tally", &node, &asked[1].1).is_some_and(|n| n.len() == 2), "a key asked for twice is handed once");
-    assert!(asked_for("/v1/badges", &node, &asked[10].1).is_some() && asked_for("/v1/badges", &node, &asked[11].1).is_none());
+    let out = js(json!({ "op": "joining", "said": said.iter().map(|(status, body)| json!([status, body])).collect::<Vec<_>>() }));
     for ((status, body), js) in said.iter().zip(out["said"].as_array().unwrap()) {
         let rust = match waited(*status, body) {
             Waited::SignedOut => json!({ "signedOut": true }),
