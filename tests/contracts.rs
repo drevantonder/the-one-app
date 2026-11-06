@@ -190,7 +190,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::db::step_name(&prefix, 4), b"not a step").unwrap()) });
         let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
         // The log's first step as the URL signer's `get` gives it.
-        let log_steps = json!([{ "at": 1, "sealed": B64U.encode(&one::database::steps::seal(&keys, &one::db::step_name(&one::log::prefix("global"), 1), &pack(&[&g])).unwrap()) }]);
+        let log_steps = json!([{ "at": 1, "sealed": B64U.encode(&one::database::steps::seal(&keys, &one::database::steps::genesis_name(), &pack(&[&g])).unwrap()) }]);
         // A freeze an admin's device signed is nothing, once the recovery key is known.
         let mut client = Global::new(Some(g.hash()));
         let planted = json!({ "steps": [sealed(1, &steps::first_freeze(&mac, &g, ANDRE, 0).unwrap().step, first.copy.as_deref())] });
@@ -296,7 +296,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
     // browsers and the remote MCP server hand by the same rule as native apps.
     {
         use one::keys::{Need, app_of, may_hand, oldest_needed};
-        let routes = ["call tally", "call node", "/v1/screens/tally", "/v1/screens/tally/main", "/mcp", "/v1/widgets", "/v1/badges", "/v1/vault", "/v1/vault/requests", "/v1/state", "/v1/entries", "/v1/apps", "call "];
+        let routes = ["call tally", "call node", "/v1/screens/tally", "/v1/screens/tally/main", "/mcp", "/v1/widgets", "/v1/badges", "/v1/vault", "/v1/vault/requests", "/v1/state", "/v1/steps", "/v1/apps", "call "];
         let dbs = [("tally", "main"), ("tally", "sidecar"), ("notes", "main"), ("tally", "other"), ("node", "vault"), ("node", "log"), ("node", "main"), ("node", "blobs")];
         let mut hands: Vec<(String, Need)> = Vec::new();
         for (route, scope, (app, database)) in routes.iter().flat_map(|r| ["user:ab", "global"].map(|s| (r, s))).flat_map(|(r, s)| dbs.iter().map(move |d| (r, s, d))) {
@@ -318,7 +318,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         // And what it says, for what matters most: another app's, or anything but the log with a request that runs none.
         let need = |app: &str, database: &str| Need { scope: "global".into(), epoch: 1, app: app.into(), database: database.into() };
         assert!(may_hand("call tally", &need("tally", "main")) && !may_hand("call tally", &need("notes", "main")));
-        assert!(may_hand("/v1/entries", &need("node", "log")) && !may_hand("/v1/entries", &need("tally", "main")) && !may_hand("/v1/state", &need("node", "vault")));
+        assert!(may_hand("/v1/steps", &need("node", "log")) && !may_hand("/v1/steps", &need("tally", "main")) && !may_hand("/v1/state", &need("node", "vault")));
         assert!(may_hand("/v1/vault", &need("node", "vault")) && !may_hand("/v1/vault", &need("tally", "main")));
         // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
         // blobs, its people's files, never.

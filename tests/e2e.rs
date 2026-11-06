@@ -37,8 +37,8 @@ async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
 /// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
 async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: one::entry::Content) {
     let global = one::entry::Scope::Global;
-    let at = a.global_steps(caller, 9007199254740991, None).await.unwrap()["at"].as_u64().unwrap();
-    let epoch = a.entry_heads(caller, &global).await.unwrap()["epoch"].as_u64().unwrap() as u32;
+    let next = a.global_steps(caller, 9007199254740991, None).await.unwrap();
+    let (at, epoch) = (next["at"].as_u64().unwrap(), next["epoch"].as_u64().unwrap() as u32);
     let step = one::database::steps::sign(key, &global, at + 1, &caller.user, epoch, one::node::now_ms(), content).unwrap();
     a.put_signed_steps(caller, vec![step]).await.unwrap();
 }
@@ -83,7 +83,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let first = shown["places"][0]["last"]["time"].clone();
     eventually("b to see it", async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
 
-    // The folder's device restores it into a throwaway copy, against what it holds: entries, databases and blobs.
+    // The folder's device restores it into a throwaway copy, against what it holds: who's who, databases and blobs.
     let report = a.check_backups().await.unwrap();
     assert!(report[0]["error"].is_null() && !report[0]["scopes"].as_array().unwrap().is_empty(), "{report}");
     assert!(a.backups().unwrap()["places"][0]["checked"]["error"].is_null(), "and says it passed");
@@ -93,7 +93,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let network = one::backups::networks(&place).unwrap().remove(0);
     let keys = one::backups::open_keys(&place, &network, &one::entry::unhex(&recovery).unwrap()).unwrap();
     assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
-    let checked = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None, live: None }).unwrap().0;
+    let checked = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None }).unwrap().0;
     assert_eq!(checked["problems"], json!([]), "{checked}");
     assert_eq!(checked["network"], "Home");
     assert_eq!(checked["people"], json!(["Andre"]));
@@ -102,7 +102,6 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let items = backed_up(&dir, &network, &one::entry::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
     assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
     let restored = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
-    assert!(restored.entries.iter().any(|e| e.content.kind == "genesis"));
     assert_eq!(backed_up_posts(&dir, &network, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup"]);
     let steps_then = restored.snapshot.databases["notes/main"].0;
     let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();

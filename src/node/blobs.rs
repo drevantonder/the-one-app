@@ -1,5 +1,5 @@
-//! Blobs: keeping them here and in the bucket, and reading the ones a person may. Each blob an entry names is in the
-//! bucket too, sealed with its scope's key, where a device that lacks one reads it: a deploy's bundle and a release's
+//! Blobs: keeping them here and in the bucket, and reading the ones a person may. Each blob a scope database names is in
+//! the bucket too, sealed with its scope's key, where a device that lacks one reads it: a deploy's bundle and a release's
 //! binary among them.
 
 use super::*;
@@ -10,7 +10,7 @@ impl Node {
         release::put_blob(&self.0.dir, bytes)
     }
 
-    /// A blob from this device, else from the bucket, in a scope whose entries name it.
+    /// A blob from this device, else from the bucket, in a scope whose database names it.
     pub async fn blob(&self, hash: &str) -> Result<Vec<u8>> {
         if let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) {
             return Ok(bytes);
@@ -32,7 +32,7 @@ impl Node {
     }
 
     /// Puts a blob this device has in the bucket, in `scope`, sealed under that scope's newest epoch, where it isn't: for a new
-    /// entry, always, since another device may have taken it out after a scope forgot it, unless a call just put it
+    /// step, always, since another device may have taken it out after a scope forgot it, unless a call just put it
     /// there before writing (`Node::prepare_appends`); else (`noted`) unless this device notes it put it there.
     pub(super) async fn share_blob(&self, scope: &Scope, hash: &str, noted: bool) -> Result<()> {
         use crate::bucket::Bucket;
@@ -55,7 +55,7 @@ impl Node {
         Ok(())
     }
 
-    /// Tries again to put in the bucket the blobs it didn't take when their entries were written.
+    /// Tries again to put in the bucket the blobs it didn't take when their steps were written.
     pub(super) async fn share_unshared(&self) {
         let unshared = std::mem::take(&mut *self.0.unshared.lock().unwrap());
         for (scope, hash) in unshared {
@@ -66,8 +66,7 @@ impl Node {
         }
     }
 
-    /// Puts in the bucket each blob this device has that an entry it holds names, and it hasn't put there yet: those
-    /// from before blobs were kept in the bucket.
+    /// Puts in the bucket each blob this device has that a scope it holds names, and it hasn't put there yet.
     pub(super) async fn share_blobs(self) {
         let noted = std::fs::read_to_string(self.network_dir().join("shared")).unwrap_or_default();
         {
@@ -80,12 +79,9 @@ impl Node {
             }
         }
         let Ok(named) = self.with(|i| {
-            let mut named = Vec::new();
-            for log in i.r.store.logs()? {
-                let Ok(scope) = Scope::parse(&log) else { continue };
-                for e in i.r.store.scope(&log)? {
-                    named.extend(e.content.blobs.iter().map(|b| (scope.clone(), b.clone())));
-                }
+            let mut named: Vec<(Scope, String)> = i.r.db().blobs().into_iter().map(|b| (Scope::Global, b)).collect();
+            for (scope, (_, db)) in &i.scope_dbs {
+                named.extend(db.blobs().into_iter().map(|b| (scope.clone(), b)));
             }
             Ok(named)
         }) else {
@@ -98,17 +94,9 @@ impl Node {
         }
     }
 
-    /// The scopes this device holds whose entries, or once `global`'s log is frozen whose steps, name a blob.
+    /// The scopes this device holds whose databases name a blob.
     fn scopes_naming(&self, hash: &str) -> Result<Vec<Scope>> {
-        self.with(|i| {
-            let mut out: Vec<Scope> = steps_naming(i, hash).collect();
-            for log in i.r.store.logs()? {
-                if i.r.store.scope(&log)?.iter().any(|e| e.content.blobs.iter().any(|b| b == hash)) {
-                    out.extend(Scope::parse(&log).ok().filter(|s| !out.contains(s)));
-                }
-            }
-            Ok(out)
-        })
+        self.with(|i| Ok(steps_naming(i, hash).collect()))
     }
 
     /// Keeps what `body` sends as a blob, read as it comes, up to `most` bytes and with at most `IDLE` between its
@@ -205,7 +193,7 @@ impl Node {
         Ok(hash)
     }
 
-    /// A blob for someone who isn't this machine's own programs: one they put, or an entry names in a scope they may use.
+    /// A blob for someone who isn't this machine's own programs: one they put, or a scope they may use names.
     pub async fn blob_for(&self, caller: &Caller, hash: &str) -> Result<Vec<u8>> {
         ensure!(self.may_read_blob(&caller.user, hash)?, "no such blob for you");
         self.blob(hash).await
@@ -215,28 +203,15 @@ impl Node {
         Ok(self.0.put_by.lock().unwrap().get(hash).is_some_and(|users| users.contains(user)) || self.blob_named_for(hash, user)?)
     }
 
-    /// Whether an entry in a scope `holds` says yes to names the blob, and that scope still needs it: a blob a scope
-    /// keeps stops counting once it forgets it; one another node entry names (a deploy's bundle, a release's binary)
-    /// never does.
+    /// Whether the database of a scope `holds` says yes to names the blob, and that scope still needs it: a blob a
+    /// scope keeps stops counting once it forgets it; one another step names (a deploy's bundle, a release's binary)
+    /// never does (`ScopeDb::names_blob`).
     pub(super) fn blob_named(&self, hash: &str, holds: impl Fn(&Scope) -> bool) -> Result<bool> {
-        self.with(|i| {
-            // Once `global`'s log is frozen, its steps name blobs too, and each other scope's own (`database::steps`).
-            if steps_naming(i, hash).any(|s| holds(&s)) {
-                return Ok(true);
-            }
-            for log in i.r.store.logs()? {
-                let forgotten = i.views.get(&log).is_some_and(|(_, s)| s.forgotten.contains(hash));
-                let names = |e: &Entry| e.content.blobs.iter().any(|b| b == hash) && (!forgotten || (e.content.app == members::APP && e.content.kind != "keep"));
-                if Scope::parse(&log).is_ok_and(|s| holds(&s)) && i.r.store.scope(&log)?.iter().any(names) {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        })
+        self.with(|i| Ok(steps_naming(i, hash).any(|s| holds(&s))))
     }
 
     /// Notes in `network/forgotten` each blob a scope forgot, `(scope, hash)`s, to take from the bucket once
-    /// `FORGOTTEN_KEPT` is up, and deletes the blobs here that no entry this device holds still needs.
+    /// `FORGOTTEN_KEPT` is up, and deletes the blobs here that no scope this device holds still needs.
     pub(super) fn delete_forgotten(&self, forgotten: Vec<(String, String)>) {
         let due = now_ms() + FORGOTTEN_KEPT.as_millis() as u64;
         for (log, hash) in forgotten {
@@ -257,7 +232,7 @@ impl Node {
         }
     }
 
-    /// Takes from the bucket each forgotten blob whose time is up that no entry of its scope needs, by when an entry
+    /// Takes from the bucket each forgotten blob whose time is up that its scope no longer needs, by when a step
     /// another device wrote naming it again is read here. Kept in a file, so a restart loses none; one the bucket didn't
     /// take is tried again next time.
     pub(super) async fn take_forgotten(&self) {
@@ -346,8 +321,8 @@ impl std::fmt::Display for Full {
 
 impl std::error::Error for Full {}
 
-/// The scopes whose steps name a blob the scope still needs (`ScopeDb::names_blob`), once `global`'s log is frozen:
-/// `global`'s, and each other scope's database this device reads.
+/// The scopes whose databases name a blob the scope still needs (`ScopeDb::names_blob`): `global`'s, once this device
+/// has read who's who, and each other scope's database it reads.
 fn steps_naming<'a>(i: &'a Network, hash: &'a str) -> impl Iterator<Item = Scope> + 'a {
     let global = (i.r.frozen.is_some() && i.r.db().names_blob(hash)).then_some(Scope::Global);
     global.into_iter().chain(i.scope_dbs.iter().filter(|(_, (_, db))| db.names_blob(hash)).map(|(s, _)| s.clone()))

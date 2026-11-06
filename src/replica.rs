@@ -1,7 +1,6 @@
 //! What one device holds and knows: `global`'s scope database as its steps leave it, from the freeze the network's
-//! recovery key signed (`database::steps`), which is what everything asks; and the entries of each frozen log of the
-//! scopes it holds, as the network's bucket has them, read only. No clock or I/O: `node.rs` reads and writes the
-//! bucket, and says the time.
+//! recovery key signed (`database::steps`), which is what everything asks. No clock or I/O: `node.rs` reads and writes
+//! the bucket, and says the time.
 
 use anyhow::{Context, Result, ensure};
 use ed25519_dalek::SigningKey;
@@ -10,16 +9,16 @@ use crate::database::scopes::ScopeDb;
 use crate::database::steps::{self, Freeze, Given, Truth};
 use crate::entry::{Content, Entry, Hash, Key, Scope};
 use crate::members::Members;
-use crate::store::Store;
 
 /// What one device holds and knows.
 pub struct Replica {
     pub key: SigningKey,
     pub id: Key,
-    /// Each frozen log's entries this device holds, read only.
-    pub store: Store,
     /// The network's genesis, once this device created or joined it.
     pub root: Option<Hash>,
+    /// The recovery key the genesis names, once read (`steps::recovery_key`): only the first freeze it signed is who's
+    /// who.
+    pub recovery: Option<Key>,
     /// `global`'s scope database: one of nobody until this device has read its freeze.
     db: ScopeDb,
     /// Once this device has read the freeze: it, and the last of the scope database's steps applied to `db` (or
@@ -32,8 +31,6 @@ pub struct Replica {
 /// What reading the bucket changed here.
 #[derive(Default)]
 pub struct Handled {
-    /// Entries of the frozen logs new to this device.
-    pub new: Vec<Entry>,
     /// Whether who's who changed.
     pub members: bool,
     /// Scopes this device stopped holding, and deleted.
@@ -45,15 +42,9 @@ pub struct Handled {
 }
 
 impl Replica {
-    pub fn new(key: SigningKey, store: Store, root: Option<Hash>, now: u64) -> Result<Replica> {
+    pub fn new(key: SigningKey, root: Option<Hash>, now: u64) -> Replica {
         let id = key.verifying_key().to_bytes();
-        Ok(Replica { key, id, store, root, db: nobody(now), frozen: None, looked: 0 })
-    }
-
-    /// The network's recovery key, as its genesis among `global`'s entries here names it: only the first freeze it
-    /// signed is who's who.
-    pub fn recovery(&self) -> Option<Key> {
-        steps::recovery_of(self.root?, &self.store.scope("global").ok()?)
+        Replica { key, id, root, recovery: None, db: nobody(now), frozen: None, looked: 0 }
     }
 
     /// Step `at` of `global`'s scope database before this device has read its freeze, the next it looks at: if it's
@@ -62,7 +53,7 @@ impl Replica {
     pub fn take_first(&mut self, at: u64, given: Option<&Given>, now: u64) -> Result<Handled> {
         ensure!(self.frozen.is_none() && at == self.looked + 1, "step {at} isn't the next");
         let mut handled = Handled::default();
-        let recovery = self.recovery().context("this device hasn't read its network's genesis yet")?;
+        let recovery = self.recovery.context("this device hasn't read its network's genesis yet")?;
         let truth = Truth::first(at, given, recovery, now)?;
         self.looked = at;
         if let Some(t) = truth {
@@ -163,21 +154,12 @@ impl Replica {
         *scope == Scope::Global || self.db().runs_for(&self.id, scope)
     }
 
-    fn holds_log(&self, log: &str) -> bool {
-        Scope::parse(log).is_ok_and(|s| self.holds(&s))
-    }
-
-    /// What changed from `was`, who's who before, to `db`: scopes this device no longer holds, and deletes; whether it
-    /// holds one it didn't; and people who may no longer use a scope they could.
+    /// What changed from `was`, who's who before, to `db`: scopes this device no longer holds; whether it holds one it
+    /// didn't; and people who may no longer use a scope they could.
     fn changed(&mut self, was: &ScopeDb, handled: &mut Handled) -> Result<()> {
-        for log in &self.store.logs()? {
-            if !self.holds_log(log) {
-                self.store.delete(log)?;
-                handled.dropped.push(log.clone());
-            }
-        }
-        let had = was.run_by(&self.id);
-        handled.gained |= self.db.run_by(&self.id).iter().any(|s| !had.contains(s));
+        let (had, has) = (was.run_by(&self.id), self.db.run_by(&self.id));
+        handled.dropped.extend(had.iter().filter(|s| **s != Scope::Global && !has.contains(s)).map(Scope::to_string));
+        handled.gained |= has.iter().any(|s| !had.contains(s));
         let after = self.db.roles();
         for ((user, scope), (_, invited)) in was.roles() {
             if !invited && !after.get(&(user.clone(), scope)).is_some_and(|(_, invited)| !invited) && !handled.lost.contains(&user) {
@@ -185,16 +167,6 @@ impl Replica {
             }
         }
         Ok(())
-    }
-
-    /// Takes a frozen log's entries as the bucket gives them: each checked (signature, body, chain) and kept once
-    /// everything it follows is here, in scopes this device holds. They change nothing.
-    pub fn receive(&mut self, entries: Vec<Entry>) -> Result<Handled> {
-        let mut handled = Handled::default();
-        let entries = entries.into_iter().filter(|e| self.holds_log(e.log())).collect();
-        let (taken, _) = self.store.take(entries)?;
-        handled.new = taken;
-        Ok(handled)
     }
 }
 

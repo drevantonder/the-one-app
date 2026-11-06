@@ -122,12 +122,11 @@ pub struct BackupRun {
     pub snapshots: Vec<BackedUp>,
 }
 
-/// A scope's snapshot in a run: when its newest entry was, and what it added.
+/// A scope's snapshot in a run: when it holds the scope as of, and what it added.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackedUp {
     pub scope: String,
     pub upto: u64,
-    pub entries: u64,
     pub blobs: u64,
     pub bytes: u64,
 }

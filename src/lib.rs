@@ -49,8 +49,6 @@ pub mod members;
 pub mod permissions;
 pub mod rank;
 #[cfg(feature = "node")]
-pub mod store;
-#[cfg(feature = "node")]
 pub mod replica;
 #[cfg(feature = "node")]
 pub mod harnesses;
@@ -80,8 +78,6 @@ pub mod sandbox;
 pub mod cloudflare;
 pub mod keys;
 pub mod push;
-#[cfg(feature = "db")]
-pub mod log;
 pub mod screen;
 pub mod web;
 #[cfg(feature = "db")]

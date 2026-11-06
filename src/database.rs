@@ -9,8 +9,8 @@ pub mod steps;
 /// What this build reads of who's who: the scope database's tables, types, roles and rules of this number. A device
 /// that reads less is told to update, by nodes (`HEADER`), the relay, sign-in and the URL signer (`reads` in what it
 /// asks them, `cloudflare/shared/crypto.js`'s `READS`, which `tests/contracts.rs` holds to this). A release that changes
-/// `scope::SCHEMA`, `permissions::SCHEMA` or `permissions::defaults` reads one more.
-pub const READS: u32 = 4;
+/// `scope::SCHEMA`, `permissions::SCHEMA` or `permissions::defaults`, or takes away a route older devices use, reads one more.
+pub const READS: u32 = 5;
 
 /// The header a client says what it reads in.
 pub const HEADER: &str = "x-one-reads";

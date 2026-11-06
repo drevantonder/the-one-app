@@ -455,7 +455,7 @@ impl Node {
         let deadline = tokio::time::Instant::now() + limit.saturating_sub(Duration::from_secs(1));
         let input = if req.input.is_null() { json!({}) } else { req.input.clone() };
         let reading = Instant::now();
-        self.read_callers_logs(me).await?;
+        self.read_callers_scopes(me).await?;
         if reading.elapsed() >= Duration::from_millis(1) {
             trace::note(json!({ "step": "logs" }), reading.elapsed());
         }

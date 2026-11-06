@@ -2117,9 +2117,9 @@ fn checked_said(r: &Value) -> String {
             unchecked => format!("{place}: not checked here, without their keys: {unchecked}\n"),
         };
     }
-    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} entries, {} blobs, from {})", s["name"].as_str().or(s["scope"].as_str()).unwrap_or(""), s["entries"], s["blobs"], say_time(s["time"].as_u64().unwrap_or(0)))).collect();
+    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} databases, {} blobs, from {})", s["name"].as_str().or(s["scope"].as_str()).unwrap_or(""), s["databases"], s["blobs"], say_time(s["time"].as_u64().unwrap_or(0)))).collect();
     let mut out = format!(
-        "{}: {} came back, checked, from {:.1} MB there\n  ✓ every entry signed and in order, every blob as its hash says: {}\n",
+        "{}: {} came back, checked, from {:.1} MB there\n  ✓ who's who from its steps, every blob as its hash says: {}\n",
         place,
         r["network"].as_str().unwrap_or(""),
         r["bytes"].as_f64().unwrap_or(0.0) / 1e6,
@@ -2144,7 +2144,7 @@ fn check_folder(folder: &str) -> Result<Value> {
     let mut out = Vec::new();
     for network in one::backups::networks(&place)? {
         let keys = one::backups::open_keys(&place, &network, &secret)?;
-        let mut r = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None, live: None })?.0;
+        let mut r = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None })?.0;
         r["place"] = json!(folder);
         out.push(r);
     }

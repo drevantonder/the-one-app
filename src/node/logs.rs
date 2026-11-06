@@ -1,167 +1,65 @@
-//! Each scope's log in the bucket, reading and writing its entries, and what devices tell each other: pings and presence.
+//! Reading each scope this device holds from the bucket, and what devices tell each other: pings and presence.
 
 use super::*;
 
 impl Node {
     /// Reads what each scope this device holds has in the bucket after what it last read, `global` first, until it
-    /// gains no scope by what it read.
-    pub(super) async fn read_logs(&self) -> Result<()> {
+    /// holds no scope it didn't.
+    pub(super) async fn read_scopes(&self) -> Result<()> {
+        let held = || self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<Scope>>()));
+        let mut read: Vec<Scope> = Vec::new();
         loop {
-            let scopes = self.with(|i| {
-                let mut scopes: Vec<Scope> = i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect();
-                scopes.sort_by_key(|s| *s != Scope::Global);
-                Ok(scopes)
-            })?;
-            let mut gained = false;
-            for scope in scopes {
-                gained |= match self.read_log(&scope).await {
-                    // One whose newest key this device wasn't given yet: it reads the rest.
-                    Err(err) if scope != Scope::Global && err.is::<NotGiven>() => {
-                        tracing::debug!("{err:#}");
-                        false
-                    }
-                    other => other?,
-                };
-            }
-            if !gained {
+            let mut scopes: Vec<Scope> = held()?.into_iter().filter(|s| !read.contains(s)).collect();
+            if scopes.is_empty() {
                 break;
+            }
+            scopes.sort_by_key(|s| *s != Scope::Global);
+            for scope in scopes {
+                match self.read_scope(&scope).await {
+                    // One whose newest key this device wasn't given yet: it reads the rest.
+                    Err(err) if scope != Scope::Global && err.is::<NotGiven>() => tracing::debug!("{err:#}"),
+                    other => other?,
+                }
+                read.push(scope);
             }
         }
         self.with(|i| {
             i.read = true;
             Ok(())
-        })?;
-        if !std::mem::replace(&mut *self.0.carried.lock().unwrap(), true) {
-            let node = self.clone();
-            tokio::spawn(async move {
-                // Tried again the next time it reads them, as one not handed a scope's keys yet waits for them.
-                if let Err(err) = node.carry_frozen().await {
-                    tracing::warn!("writing what only the frozen logs said as steps: {err:#}");
-                    *node.0.carried.lock().unwrap() = false;
-                }
-            });
+        })
+    }
+
+    /// Reads a scope's steps in the bucket after the last this device read.
+    pub(super) async fn read_scope(&self, scope: &Scope) -> Result<()> {
+        let _write = self.0.writes.lock().await;
+        self.read_scope_now(scope).await
+    }
+
+    /// `read_scope`, while this device holds its writes: `global`'s steps, its genesis first while it knows no recovery
+    /// key (`first_global_read`), or another scope's own, once it has an epoch.
+    pub(super) async fn read_scope_now(&self, scope: &Scope) -> Result<()> {
+        if *scope == Scope::Global {
+            if self.with(|i| Ok(i.r.frozen.is_none() && i.r.recovery.is_none()))? {
+                self.first_global_read().await?;
+            }
+            self.read_steps_now().await?;
+        } else if self.with(|i| Ok(i.r.db().epoch(scope)))? > 0 {
+            self.read_scope_steps_now(scope).await?;
         }
         Ok(())
     }
 
-    /// Reads a scope's entries in the bucket after the last this device read: whether it now holds a scope it didn't.
-    pub(super) async fn read_log(&self, scope: &Scope) -> Result<bool> {
-        let _write = self.0.writes.lock().await;
-        self.read_log_now(scope).await
-    }
-
-    /// `read_log`, while this device holds its writes. A device that has read none of a scope's entries starts from
-    /// their newest copy. A scope with no epoch yet has nothing to read. A step under an epoch newer than any this
-    /// device opens is read once that epoch's entry is (in `global`, which is read again for it), or if no entry made
-    /// it, passed over as junk: an epoch's entry is always written before anything is sealed under it.
-    pub(super) async fn read_log_now(&self, scope: &Scope) -> Result<bool> {
-        let gained = self.read_entries_now(scope).await?;
-        // Once `global`'s log is frozen, its scope database's steps: who's who from there; and each other scope's own.
-        if *scope == Scope::Global {
-            self.read_steps_now().await?;
-        } else {
-            self.read_scope_steps_now(scope).await?;
-        }
-        Ok(gained)
-    }
-
-    /// `read_log_now`'s entries alone: what a freeze's signer is checked against, read to the log's end first.
-    pub(super) async fn read_entries_now(&self, scope: &Scope) -> Result<bool> {
-        let log = scope.to_string();
-        let (genesis, epoch) = self.with(|i| Ok((i.r.recovery().is_some(), i.r.db().epoch(scope))))?;
-        if *scope != Scope::Global && epoch == 0 {
-            return Ok(false);
-        }
-        let bucket = self.bucket()?;
-        let prefix = crate::log::prefix(&log);
-        let mut gained = false;
-        loop {
-            let (from, floor) = self.with(|i| i.r.store.position(&log))?;
-            let (key, read) = match (from, genesis) {
-                (0, false) if *scope == Scope::Global => {
-                    let (epochs, read) = self.first_global_read().await?;
-                    (self.log_key_of(&epochs).await?, read)
-                }
-                _ => {
-                    let key = self.log_key(scope).await?;
-                    let read = match from {
-                        0 => crate::log::open(&bucket, &key, &prefix, &log).await?,
-                        _ => crate::log::read(&bucket, &key, u32::MAX, &prefix, &log, from, floor).await?,
-                    };
-                    (key, read)
-                }
-            };
-            let at = read.at;
-            if at > from {
-                let handled = self.with(|i| {
-                    let handled = i.r.receive(read.entries)?;
-                    i.r.store.set_position(&log, at, read.floor)?;
-                    Ok(handled)
-                })?;
-                gained |= handled.gained;
-                self.after(handled).await?;
-            }
-            let Some(ahead) = read.ahead else {
-                self.hint_log(scope, &bucket, &key, at).await;
-                return Ok(gained);
-            };
-            if *scope != Scope::Global {
-                Box::pin(self.read_log_now(&Scope::Global)).await?;
-            }
-            if self.with(|i| Ok(i.r.epoch_made(scope)))? >= ahead.epoch {
-                self.forget_epochs(scope);
-            } else {
-                tracing::warn!("{log}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);
-                self.with(|i| i.r.store.set_position(&log, ahead.at, read.floor))?;
-            }
-        }
-    }
-
-    /// Once this device has read a scope's entries up to step `at`, and hasn't said so since it started: a copy of them
-    /// in the bucket if it's due, and their newest hint moved on (`src/log.rs`).
-    pub(super) async fn hint_log(&self, scope: &Scope, bucket: &impl crate::bucket::Bucket, key: &crate::db::Keys, at: u64) {
-        let log = scope.to_string();
-        if self.0.hinted.lock().unwrap().get(&log) == Some(&at) {
-            return;
-        }
-        // With any fork's evidence, so a device that reads only the copy finds the fork too.
-        let entries = || self.with(|i| Ok([i.r.store.scope(&log)?, i.r.store.forked(&log)?].concat()));
-        match crate::log::hint(bucket, key, &crate::log::prefix(&log), at, entries).await {
-            Ok(()) => drop(self.0.hinted.lock().unwrap().insert(log, at)),
-            Err(err) => tracing::debug!("{log}'s copy: {err:#}"),
-        }
-    }
-
-    /// Writes an entry this device made to its scope's entries in the bucket, at the first position free.
-    /// → the position it was written at.
-    pub(super) async fn put_entry(&self, scope: &Scope, entry: &Entry) -> Result<u64> {
-        use crate::bucket::Bucket;
-        let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, crate::log::prefix(&scope.to_string()));
-        let bytes = crate::entry::pack(&[entry]);
-        let written = self.0.written.lock().unwrap().get(scope).copied().unwrap_or(0);
-        let mut at = self.with(|i| i.r.store.position(&scope.to_string()))?.0.max(written);
-        for _ in 0..1000 {
-            at += 1;
-            let name = crate::db::step_name(&prefix, at);
-            if Bucket::create(&bucket, &name, &crate::database::steps::seal(&key, &name, &bytes)?).await? {
-                self.0.written.lock().unwrap().insert(scope.clone(), at);
-                return Ok(at);
-            }
-        }
-        bail!("{scope} changed too often to write to")
-    }
-
-    /// The keys a scope's entries are sealed with in the bucket, by epoch: the node's `log` of the scope. Of one this
+    /// The keys a scope's database's steps are sealed with in the bucket, by epoch (`steps::KEY_NAME`). Of one this
     /// device runs but doesn't open, those a caller who does handed it.
-    pub(super) async fn log_key(&self, scope: &Scope) -> Result<crate::db::Keys> {
+    pub(super) async fn step_keys(&self, scope: &Scope) -> Result<crate::db::Keys> {
         if !self.with(|i| Ok(self.opens(i.r.db(), scope)))? {
-            return self.handed_log(scope).await;
+            return self.handed_step_keys(scope).await;
         }
         self.database_keys(scope, members::APP, crate::database::steps::KEY_NAME, false).await
     }
 
-    /// The keys of `global`'s entries in each of its epochs given.
-    pub(super) async fn log_key_of(&self, epochs: &crate::db::Keys) -> Result<crate::db::Keys> {
+    /// The keys of `global`'s steps in each of its epochs given.
+    pub(super) async fn step_keys_of(&self, epochs: &crate::db::Keys) -> Result<crate::db::Keys> {
         let bucket = self.bucket()?;
         let mut out = crate::db::Keys::new();
         for (n, epoch) in epochs {
@@ -172,7 +70,7 @@ impl Node {
         Ok(out)
     }
 
-    /// Tells the devices that hold `scope` it changed, so they read it now rather than at their next look: its entries,
+    /// Tells the devices that hold `scope` it changed, so they read it now rather than at their next look: its steps,
     /// or with `wrote`, step `at` of an app's database, which it sends them unless it's big. Each applies a step only
     /// once the bucket confirms it holds those bytes, so nothing a device sends can be anything but the bucket's, and
     /// QUIC proves who sent it: it needs no signature.
@@ -199,7 +97,7 @@ impl Node {
         self.notify(&devices, &input);
     }
 
-    /// What another device said changed in `scope`, which this device holds: its entries, which it reads now, or with
+    /// What another device said changed in `scope`, which this device holds: its steps, which it reads now, or with
     /// `wrote`, step `at` of a database. If it has the database open, it fetches that step into its copy now: the one
     /// sent, once the bucket confirms it, else the bucket's. Until then a read asks the bucket first.
     pub(super) fn changed_there(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>, step: Option<Vec<u8>>, sig: Option<Vec<u8>>) {
@@ -209,7 +107,7 @@ impl Node {
         let (node, scope) = (self.clone(), scope.clone());
         let Some((app, database, at)) = wrote.map(|(a, d, at)| (a.to_string(), d.to_string(), at)) else {
             tokio::spawn(async move {
-                let _ = node.read_log(&scope).await;
+                let _ = node.read_scope(&scope).await;
             });
             return;
         };

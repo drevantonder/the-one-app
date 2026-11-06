@@ -107,8 +107,8 @@ impl Node {
             client: (sign_in.is_none() && viewer.key != self.0.id).then(|| json!({ "key": hex(&viewer.key), "name": viewer_name })),
             device: json!({ "key": hex(&self.0.id), "name": self.device_name(), "ready": ready, "guide": crate::skills::address() }),
             member: network.as_ref().is_some_and(|i| i.r.db().compute(&self.0.id).is_some()),
-            // Its log's entries, and once it's frozen, `global`'s steps since.
-            entries: network.as_ref().map(|i| i.r.store.count().unwrap_or(0) as u64 + i.r.at().unwrap_or(0)).unwrap_or(0),
+            // `global`'s steps read.
+            entries: network.as_ref().map(|i| i.r.at().unwrap_or(0)).unwrap_or(0),
             waiting,
             arrangements: json!(arrangements),
             backups,

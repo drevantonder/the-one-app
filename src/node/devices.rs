@@ -469,7 +469,7 @@ impl Node {
             return Ok(json!({ "device": r.name, "person": person, "recovery": true }));
         }
         let endpoint = r.endpoint()?;
-        self.read_log_now(&Scope::Global).await?;
+        self.read_scope_now(&Scope::Global).await?;
         // Listed already by an approval that didn't finish: the rest is done again, each step once.
         if !self.with(|i| Ok(i.r.db().client(&endpoint.key).is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))? {
             self.write_step_as(recovery, &r.user, members::device(&endpoint, &r.user, &r.name, &[members::Kind::Client], None)).await?;
@@ -732,7 +732,7 @@ impl Node {
                 continue;
             }
             // Another device of theirs may have just let it in.
-            self.read_log_now(&Scope::Global).await?;
+            self.read_scope_now(&Scope::Global).await?;
             let caller = Caller { key: self.0.id, user: user.clone(), agent: None, token: None };
             let approved = self.approve_request(&caller, &r, None).await;
             match approved {

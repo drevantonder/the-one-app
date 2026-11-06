@@ -643,14 +643,14 @@ impl Node {
         self.send(&to, "ask", &body, true, limit).await
     }
 
-    /// Says hello to a service endpoint, with how many of `global`'s steps this device has: it answers what it offers
-    /// once it lists this device as one that may call it; until then, that it's behind, and is sent the network's
-    /// genesis and the steps, which it checks itself. → what it offers, and whom it serves.
+    /// Says hello to a service endpoint, with the network's genesis and how many of `global`'s steps this device has:
+    /// it answers what it offers once it lists this device as one that may call it; until then, that it's behind, and
+    /// is sent them, which it checks itself. → what it offers, and whom it serves.
     pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
-        // Once `global`'s log is frozen, its scope database's steps too (`database::steps`), its freeze among them.
+        // `global`'s scope database's steps (`database::steps`), its freeze among them.
         let mut steps = Vec::new();
         if self.frozen() {
-            let (bucket, keys) = (self.bucket()?, self.log_key(&Scope::Global).await?);
+            let (bucket, keys) = (self.bucket()?, self.step_keys(&Scope::Global).await?);
             loop {
                 let read = crate::database::steps::read(&bucket, &keys, &Scope::Global, steps.len() as u64).await?;
                 steps.extend(read.steps.iter().cloned());
@@ -663,7 +663,7 @@ impl Node {
         let hello = json!({ "entries": 1, "steps": steps.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         if answer["behind"] == true {
-            let genesis = crate::database::steps::genesis(&self.bucket()?, &self.log_key(&Scope::Global).await?).await?;
+            let genesis = crate::database::steps::genesis(&self.bucket()?, &self.step_keys(&Scope::Global).await?).await?;
             let pack = data_encoding::BASE64.encode(&crate::entry::pack(&genesis.iter().collect::<Vec<_>>()));
             let taken = self.send(&to, "entries", &json!({ "pack": pack }), true, CONNECT).await?;
             if let Some(err) = taken["error"].as_str() {

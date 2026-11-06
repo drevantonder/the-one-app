@@ -128,7 +128,7 @@ impl Node {
             let mut ctx = self.read_context(&app, viewer)?;
             let granted = self.grant(&app, viewer, &mut ctx, 0);
             if let Some(scope) = &scope {
-                let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&app))))?;
+                let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(&app))))?;
                 ctx.scopes.retain(|s| installed && s.id == scope.to_string());
             }
             if !ctx.scopes.is_empty() {
@@ -182,6 +182,6 @@ impl Node {
 
     /// How `user` arranged their pages, by page, as their own scope's `arrange` entries say.
     pub(super) fn arrangements(&self, user: &str) -> BTreeMap<String, Value> {
-        self.with(|i| Ok(i.views.get(&Scope::User(user.to_string()).to_string()).map(|(_, s)| s.arrangements.clone()).unwrap_or_default())).unwrap_or_default()
+        self.with(|i| Ok(i.views.get(&Scope::User(user.to_string()).to_string()).map(|s| s.arrangements.clone()).unwrap_or_default())).unwrap_or_default()
     }
 }

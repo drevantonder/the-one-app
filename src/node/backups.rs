@@ -95,15 +95,15 @@ fn problems(i: &Network, now: u64) -> Result<Vec<Problem>> {
             continue;
         }
         let mut late: Option<(u64, String)> = None;
-        for log in i.r.store.logs()? {
-            let Ok(scope) = Scope::parse(&log) else { continue };
+        for scope in m.scopes() {
+            let log = scope.to_string();
             let backer = match p.device {
                 Some(_) => p.device.filter(|k| m.runs_for(k, &scope)),
                 None => line(m, &scope, &p.id).first().copied(),
             };
             let Some(backer) = backer.filter(|_| i.r.holds(&scope)) else { continue };
             let covered = status.covered.get(&(p.id.clone(), log.clone())).map_or(0, |c| c.0);
-            let Some(waiting) = i.r.store.first_change(&log, covered)? else { continue };
+            let Some(waiting) = first_change(i, &scope, covered) else { continue };
             let since = waiting.max(p.made);
             if now.saturating_sub(since) >= LATE && late.as_ref().is_none_or(|l| since < l.0) {
                 late = Some((since, name(&backer)));
@@ -319,7 +319,6 @@ impl Node {
             }
             let network = i.r.root.map(|r| r.to_hex()[..16].to_string()).context("no network")?;
             m.recovery().context("the network has no recovery key")?;
-            let frontier = i.r.store.frontier()?;
             let cache = self.0.backed.lock().unwrap();
             let failed = self.0.backup_failed.lock().unwrap();
             let pruned = self.0.pruned.lock().unwrap();
@@ -333,18 +332,9 @@ impl Node {
                     continue;
                 }
                 // Every device prunes each scope it holds the key of, so pruning needs no one device.
-                let prune = (force || pruned.get(&p.id).is_none_or(|t| now - t >= PRUNE_EVERY)).then(|| -> Result<_> {
-                    Ok((keys.clone(), releases(&i.r.store.scope("global")?)))
-                });
-                let prune = prune.transpose()?;
+                let prune = (force || pruned.get(&p.id).is_none_or(|t| now - t >= PRUNE_EVERY)).then(|| (keys.clone(), release_blobs(m).0));
                 let mut due = Vec::new();
-                // Every scope it holds, as one may have databases (its Vault's among them) and no entries yet.
-                let mut logs = i.r.store.logs()?;
-                for scope in m.scopes().iter().map(Scope::to_string) {
-                    if !logs.contains(&scope) {
-                        logs.push(scope);
-                    }
-                }
+                let mut logs: Vec<String> = m.scopes().iter().map(Scope::to_string).collect();
                 logs.sort_by_key(|l| l != "global");
                 for log in logs {
                     let Ok(scope) = Scope::parse(&log) else { continue };
@@ -358,7 +348,7 @@ impl Node {
                         // device before it.
                         if at > 0 {
                             let covered = i.status.get("global").and_then(|s| s.covered.get(&(p.id.clone(), log.clone()))).map_or(0, |c| c.0);
-                            if !b::takes_over(at, i.r.store.first_change(&log, covered)?, p.made, now) {
+                            if !b::takes_over(at, first_change(i, &scope, covered), p.made, now) {
                                 continue;
                             }
                         }
@@ -369,10 +359,10 @@ impl Node {
                         None => true,
                         Some((s, _)) => {
                             let since = s.time + b::EVERY <= now || force;
-                            // Its databases change without entries: the bucket is looked at once an hour.
+                            // Its databases are looked at in the bucket once an hour, and as soon as its scope database
+                            // changes.
                             let looked = self.0.backup_looked.lock().unwrap().get(&(p.id.clone(), log.clone())).is_some_and(|t| t + b::EVERY > now);
-                            let entries = frontier.iter().any(|(a, l, next)| *l == log && s.frontier.get(&hex(a)).copied().unwrap_or(0) < *next) && i.r.store.changed_since(&log, &s.frontier)?;
-                            since && (entries || !looked || force)
+                            since && (first_change(i, &scope, s.upto).is_some() || !looked || force)
                         }
                     };
                     if !changed {
@@ -461,17 +451,14 @@ impl Node {
         let name = crate::keys::epoch_name(&d.scope, n, "recovery");
         let sealed = crate::bucket::Bucket::get(&self.bucket()?, &name).await?.with_context(|| format!("{name} is missing"))?.bytes;
         let cached = self.0.backed.lock().unwrap().get(&(place_id.to_string(), d.scope.clone())).filter(|s| s.1 == b::key_id(&key)).map(|s| s.0.clone());
-        let (entries, blobs) = self.with(|i| {
-            let entries = i.r.store.scope(&d.scope)?;
-            let forgotten = i.views.get(&d.scope).map(|(_, s)| s.forgotten.clone()).unwrap_or_default();
-            let mut blobs = backed_blobs(&entries, &forgotten);
-            // And once `global`'s log is frozen, what its steps name, and each other scope's own (`database::steps`).
-            if d.scope == "global" {
-                blobs.extend(i.r.db().blobs());
-            } else if let Some((_, db)) = Scope::parse(&d.scope).ok().and_then(|s| i.scope_dbs.get(&s)) {
-                blobs.extend(db.blobs());
-            }
-            Ok((entries.clone(), blobs))
+        let blobs = self.with(|i| {
+            // What its database names, of the releases only the newest of each.
+            let (releases, newest) = release_blobs(i.r.db());
+            let named = match &scope {
+                Scope::Global => i.r.db().blobs(),
+                _ => i.scope_dbs.get(&scope).map(|(_, db)| db.blobs()).unwrap_or_default(),
+            };
+            Ok(named.into_iter().filter(|b| !releases.contains(b) || newest.contains(b)).collect::<BTreeSet<String>>())
         })?;
         let (node, runtime) = (self.clone(), tokio::runtime::Handle::current());
         let bucket = self.bucket().ok().map(|b| b.place);
@@ -487,7 +474,7 @@ impl Node {
             if !force && previous.as_ref().is_some_and(|p| p.time + b::EVERY > now) {
                 return Ok((None, previous));
             }
-            let job = b::Job { place: &place, network: &network, scope: &scope_name, key, epochs, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
+            let job = b::Job { place: &place, network: &network, scope: &scope_name, key, epochs, sealed, device, now, previous: previous.clone(), blobs, bucket: bucket.as_ref() };
             // A blob this device doesn't keep is read from the bucket, where the device that wrote it put it.
             let written = b::back_up(job, |hash| runtime.block_on(node.blob(hash)).inspect_err(|err| tracing::debug!("backing up blob {hash}: {err:#}")).ok())?;
             Ok((written.clone(), written.or(previous)))
@@ -507,7 +494,7 @@ impl Node {
 
     /// Says how a run to a place went, in `global`.
     async fn backed_up(&self, place: &str, now: u64, error: Option<anyhow::Error>, snapshots: Vec<Snapshot>) -> Result<()> {
-        let snapshots = snapshots.iter().map(|s| BackedUp { scope: s.scope.clone(), upto: s.upto, entries: s.entries, blobs: s.blobs.len() as u64, bytes: s.bytes }).collect();
+        let snapshots = snapshots.iter().map(|s| BackedUp { scope: s.scope.clone(), upto: s.upto, blobs: s.blobs.len() as u64, bytes: s.bytes }).collect();
         let trouble = error.as_ref().and_then(crate::bucket::Trouble::of).map(|t| t.name().to_string());
         let error = error.map(|e| format!("{e:#}").chars().take(500).collect::<String>());
         self.say(&Scope::Global, Said::BackedUp(BackupRun { place: place.into(), device: self.0.id, time: now, error, trouble, snapshots })).await
@@ -710,23 +697,19 @@ impl Node {
     /// Checks the places `only` names, or every one this device reaches, and writes how each went in `global`.
     async fn check_places(&self, only: Option<&[String]>) -> Result<Value> {
         let epochs = self.held_epochs().await;
-        let (network, places, root, live) = self.with(|i| {
+        let (network, places, root) = self.with(|i| {
             ensure!(i.views.contains_key("global"), "no network");
             let places: Vec<(String, String, Place)> = places(i).into_iter().filter(|p| only.is_none_or(|o| o.contains(&p.id))).filter_map(|p| Some((p.id, p.title, p.place.ok()?))).filter(|(_, _, p)| p.present()).collect();
-            let mut live = BTreeMap::new();
-            for scope in epochs.keys() {
-                live.insert(scope.clone(), i.r.store.scope(scope)?);
-            }
-            Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root, live))
+            Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root))
         })?;
-        let (live, bucket) = (Arc::new(live), self.bucket().ok());
+        let bucket = self.bucket().ok();
         let mut out = Vec::new();
         for (id, title, place) in places {
             let now = now_ms();
             let checked = {
                 let keys: BTreeMap<String, Vec<[u8; 32]>> = epochs.iter().map(|(s, k)| (s.clone(), k.values().copied().collect())).collect();
-                let (place, network, live) = (place.clone(), network.clone(), live.clone());
-                tokio::task::spawn_blocking(move || b::check(&b::Check { place: &place, network: &network, keys: &keys, root, live: Some(&live) })).await?
+                let (place, network) = (place.clone(), network.clone());
+                tokio::task::spawn_blocking(move || b::check(&b::Check { place: &place, network: &network, keys: &keys, root })).await?
             };
             let (mut report, error) = match checked {
                 Ok((mut report, restored)) => {
@@ -810,37 +793,22 @@ impl Node {
     }
 }
 
-/// Whether an entry is a release of the node's or a service's.
-fn is_release(e: &Entry) -> bool {
-    e.content.app == release::APP && (e.content.kind == "node-release" || e.content.kind == release::SERVICE_KIND)
-}
-
-/// The node's releases' blobs: what a backup needn't keep but the newest of, since releases can be fetched again from
-/// where they're published.
-fn releases(entries: &[Entry]) -> BTreeSet<String> {
-    entries.iter().filter(|e| is_release(e)).flat_map(|e| e.content.blobs.iter().cloned()).collect()
-}
-
-/// The blobs a scope's backup keeps: every blob its entries name but those its apps forgot, and of the node's releases
-/// only the newest for each platform (and each service's), so a custom build with no published releases can still
-/// recover.
-fn backed_blobs(entries: &[Entry], forgotten: &BTreeSet<String>) -> BTreeSet<String> {
+/// The blobs `global`'s releases name (`ScopeDb::releases`): every one, which a backup needn't keep, since releases can
+/// be fetched again from where they're published; and the newest of each platform's (and each service's), which it
+/// keeps, so a custom build with no published releases can still recover.
+fn release_blobs(db: &ScopeDb) -> (BTreeSet<String>, BTreeSet<String>) {
     let mut newest: BTreeMap<String, (u64, String)> = BTreeMap::new();
-    let mut out = BTreeSet::new();
-    for e in entries {
-        if is_release(e) {
-            let target = format!("{} {}", e.content.data["target"].as_str().unwrap_or(""), e.content.data["service"].as_str().unwrap_or(""));
-            if let Some(blob) = e.content.blobs.first() {
-                if newest.get(&target).is_none_or(|(t, _)| e.time() > *t) {
-                    newest.insert(target, (e.time(), blob.clone()));
-                }
-            }
-            continue;
+    let mut all = BTreeSet::new();
+    for (c, _, time) in db.releases() {
+        all.extend(c.blobs.iter().cloned());
+        let target = format!("{} {}", c.data["target"].as_str().unwrap_or(""), c.data["service"].as_str().unwrap_or(""));
+        if let Some(blob) = c.blobs.first()
+            && newest.get(&target).is_none_or(|(t, _)| time >= *t)
+        {
+            newest.insert(target, (time, blob.clone()));
         }
-        out.extend(e.content.blobs.iter().filter(|b| (e.content.app == members::APP && e.content.kind != "keep") || !forgotten.contains(*b)).cloned());
     }
-    out.extend(newest.into_values().map(|(_, b)| b));
-    out
+    (all, newest.into_values().map(|(_, b)| b).collect())
 }
 
 /// The disks plugged into this machine, where a folder place could go: each one's name, folder and free space.
@@ -871,4 +839,10 @@ fn free_space(path: &Path) -> Option<u64> {
     let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
     let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
     (unsafe { libc::statvfs(c.as_ptr(), &mut s) } == 0).then(|| s.f_bavail as u64 * s.f_frsize as u64)
+}
+
+/// When a scope's database first changed after `after` (ms), as this device read it since it started: none if it hasn't,
+/// or this device hasn't seen it change since then.
+fn first_change(i: &Network, scope: &Scope, after: u64) -> Option<u64> {
+    i.changed.get(scope).filter(|(_, last)| *last > after).map(|(first, _)| (*first).max(after))
 }

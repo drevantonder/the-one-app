@@ -33,7 +33,7 @@ impl Node {
             let mut due = Vec::new();
             let mut seen = BTreeSet::new();
             for ((_, scope, app), _) in m.app_schedules_at(now).into_iter().filter(|((k, ..), _)| *k == self.0.id) {
-                let Some((_, state)) = i.views.get(&scope.to_string()).filter(|(_, s)| s.installed.contains(&app)) else { continue };
+                let Some(state) = i.views.get(&scope.to_string()).filter(|s| s.installed.contains(&app)) else { continue };
                 let Some((_, list)) = declared.iter().find(|(a, _)| *a == app) else { continue };
                 for s in list.iter().filter_map(|s| s.as_ref().ok()) {
                     let Some(user) = runs_as(m, state, &scope, &app, &s.name) else { continue };
@@ -113,7 +113,7 @@ impl Node {
                 .filter(|a| !a.erased && a.deleted.is_none())
                 .filter(|a| {
                     reachable(i, &a.name, &viewer.user).iter().any(|scope| {
-                        let installed = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&a.name));
+                        let installed = i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(&a.name));
                         let failed = i.status.get(&scope.to_string()).is_some_and(|st| st.runs.iter().any(|((app, _), runs)| app == &a.name && runs.last().is_some_and(|r| !r.ok)));
                         installed && failed && m.may(&viewer.user, "add-apps", &scopes::object(&scope))
                     })
@@ -144,7 +144,7 @@ impl Node {
             let user_name = |u: &str| m.user_ever(u).map(|u| u.name).unwrap_or_default();
             let (mut list, mut activity) = (Vec::new(), Vec::new());
             for scope in reachable(i, app, &viewer.user) {
-                let Some((_, state)) = i.views.get(&scope.to_string()) else { continue };
+                let Some(state) = i.views.get(&scope.to_string()) else { continue };
                 if !state.installed.contains(app) {
                     continue;
                 }

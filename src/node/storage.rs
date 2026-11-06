@@ -68,18 +68,6 @@ impl Node {
             return Ok(json!({ "tried": steps }));
         }
         let setting = serde_json::to_string(&fields)?;
-        // A device of a network made before its data was in a bucket keeps it there now, with its entries, which
-        // takes a while: it runs no calls until it's done.
-        if self.bucket().is_err() {
-            let (node, caller) = (self.clone(), caller.clone());
-            tokio::spawn(async move {
-                let adopted = node.adopt(fields).await;
-                if let Err(err) = adopted.and(node.set_setting(&caller, STORAGE, Some(&setting)).await) {
-                    tracing::warn!("moving the network's data: {err:#}");
-                }
-            });
-            return Ok(json!({ "tried": steps, "moving": true }));
-        }
         self.set_setting(caller, STORAGE, Some(&setting)).await?;
         Ok(json!({ "tried": steps, "kept": true }))
     }
@@ -151,58 +139,6 @@ impl Node {
         tracing::info!("the network's data is kept in {} now", self.storage()?["where"].as_str().unwrap_or(""));
         self.emit(Event::Changed { apps: Vec::new() });
         Ok(())
-    }
-
-    /// Takes the bucket `fields` say as this device's own, for a network whose devices had none: puts every entry
-    /// it holds there (another device may have put some already), so every device reads them from then on.
-    async fn adopt(&self, fields: BTreeMap<String, String>) -> Result<()> {
-        let place = self.network_place(&fields)?;
-        let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no network"))?;
-        let (p, theirs) = (place.clone(), root.clone());
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            if let Some(other) = bucket_root(&p)?.filter(|r| r != theirs.as_bytes()) {
-                bail!("that bucket holds another network's data ({})", String::from_utf8_lossy(&other));
-            }
-            p.create(NETWORK_OBJECT, theirs.as_bytes())?;
-            Ok(())
-        })
-        .await??;
-        let logs = self.with(|i| {
-            i.bucket = Some((place, fields.clone()));
-            i.read = false;
-            Ok(i.r.store.logs()?)
-        })?;
-        let _write = self.0.writes.lock().await;
-        let put = async {
-            for log in logs {
-                let scope = Scope::parse(&log)?;
-                let entries = self.with(|i| i.r.store.scope(&log))?;
-                for entry in &entries {
-                    self.put_entry(&scope, entry).await?;
-                }
-                tracing::info!("put {} of {scope}'s entries in the bucket", entries.len());
-            }
-            anyhow::Ok(())
-        };
-        if let Err(err) = put.await {
-            // Back as it was, with no bucket, for moving again to finish.
-            self.with(|i| {
-                i.bucket = None;
-                i.read = true;
-                Ok(())
-            })?;
-            return Err(err);
-        }
-        // Kept as this device's bucket only once its entries are there: stopped before, it starts with none again, and
-        // moving again puts what's missing.
-        let dir = self.network_dir();
-        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join(NETWORK_FILE))?)?;
-        file.bucket = Some(fields);
-        self.save_network(&file)?;
-        self.with(|i| {
-            i.read = true;
-            Ok(())
-        })
     }
 
     pub async fn storage_route(&self, me: &Caller, method: &str, path: &str, body: &Value) -> Result<Option<Value>> {

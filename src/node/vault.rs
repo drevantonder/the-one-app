@@ -574,7 +574,7 @@ impl Node {
     /// Answers a request in `scope`: switches its app on for `item` (with every app that shares its need), or makes an
     /// item with `fields` (name → value) and `title`; with `declined`, declines it.
     pub async fn answer_request(&self, caller: &Caller, scope: &Scope, id: &str, answer: &Value) -> Result<()> {
-        let asked = self.with(|i| Ok(i.views.get(&scope.to_string()).and_then(|(_, s)| s.requests.get(id)).map(|r| (r.app.clone(), r.need.clone()))))?;
+        let asked = self.with(|i| Ok(i.views.get(&scope.to_string()).and_then(|s| s.requests.get(id)).map(|r| (r.app.clone(), r.need.clone()))))?;
         let (sharing, kind) = match &asked {
             Some((app, need)) => {
                 let kind = match need.as_deref().filter(|_| app != members::AGENTS && app != members::APP) {
@@ -586,7 +586,7 @@ impl Node {
             None => (Vec::new(), None),
         };
         let r = self.with(|i| {
-            let state = &i.views.get(&scope.to_string()).with_context(|| format!("no request {id} in {scope}"))?.1;
+            let state = &i.views.get(&scope.to_string()).with_context(|| format!("no request {id} in {scope}"))?;
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
             ensure!(r.answer.is_none(), "that request was already answered");
             ensure!(now_ms().saturating_sub(r.time) <= REQUEST_LIFE, "that request has expired: ask for it again");
@@ -647,7 +647,7 @@ impl Node {
         let wanted = |rid: &String| id.is_none_or(|want| want == rid.as_str());
         // The items there that have a request's fields, from the scopes that have one.
         let managed = self.managed_scopes(viewer, scope)?;
-        let asked: Vec<Scope> = self.with(|i| Ok(managed.into_iter().filter(|s| i.views.get(&s.to_string()).is_some_and(|(_, st)| st.requests.keys().any(wanted))).collect()))?;
+        let asked: Vec<Scope> = self.with(|i| Ok(managed.into_iter().filter(|s| i.views.get(&s.to_string()).is_some_and(|st| st.requests.keys().any(wanted))).collect()))?;
         let all = self.items_of(viewer, &asked).await?;
         self.with(|i| {
             let m = i.r.db();
@@ -655,7 +655,7 @@ impl Node {
             let mut out = Vec::new();
             for (s, items) in &all {
                 let (log, scope_name) = (s.to_string(), handles(m, std::slice::from_ref(s), &viewer.user).remove(0).name);
-                let Some((_, state)) = i.views.get(&log) else { continue };
+                let Some(state) = i.views.get(&log) else { continue };
                 for (rid, r) in state.requests.iter().filter(|(rid, _)| wanted(rid)) {
                     let state_now = match &r.answer {
                         Some((how, ..)) => how.as_str(),
@@ -686,7 +686,7 @@ impl Node {
         let now = now_ms();
         let scopes = self.managed_scopes(viewer, None)?;
         self.with(|i| {
-            let waiting = |s: &Scope| i.views.get(&s.to_string()).map_or(0, |(_, st)| st.requests.values().filter(|r| r.answer.is_none() && now.saturating_sub(r.time) <= REQUEST_LIFE).count());
+            let waiting = |s: &Scope| i.views.get(&s.to_string()).map_or(0, |st| st.requests.values().filter(|r| r.answer.is_none() && now.saturating_sub(r.time) <= REQUEST_LIFE).count());
             Ok(scopes.iter().map(waiting).sum())
         })
     }

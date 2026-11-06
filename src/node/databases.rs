@@ -141,10 +141,10 @@ impl Node {
         self.0.database_keys.lock().unwrap().retain(|(s, _), _| s != scope);
     }
 
-    /// `global`'s epochs, for a device that has read none of its entries yet, so knows no epoch's hash: those sealed to
-    /// it in the bucket, each kept only once the entries it opens say it's theirs (the genesis, whose hash is the
-    /// network's, names the first's hash, and each `epoch` entry the next's). → (the keys, what was read with them).
-    pub(super) async fn first_global_read(&self) -> Result<(crate::db::Keys, crate::log::Read)> {
+    /// `global`'s epochs, for a device that has read nothing of who's who yet, so knows no epoch's hash: those sealed
+    /// to it in the bucket, each kept only once who's who, from the freeze the recovery key its genesis names signed,
+    /// says it's theirs; and that recovery key (`Replica::recovery`).
+    pub(super) async fn first_global_read(&self) -> Result<crate::db::Keys> {
         let (bucket, me, secret, root) = (self.bucket()?, hex(&self.0.id), self.seal_secret(), self.with(|i| Ok(i.r.root))?);
         let mut candidates = crate::db::Keys::new();
         // Past a gap or two: an epoch whose device stopped before sealing it is sealed to nobody, and the next one is.
@@ -162,19 +162,12 @@ impl Node {
                 candidates.insert(n, key);
             }
         }
-        let prefix = crate::log::prefix("global");
         loop {
             ensure!(!candidates.is_empty(), NotGiven(Scope::Global, self.device_name()));
-            let mut log_keys = crate::db::Keys::new();
-            for (n, epoch) in &candidates {
-                if let Ok(Some(app)) = crate::db::app_key(&bucket, epoch, "global", members::APP, *n, false).await {
-                    log_keys.insert(*n, crate::cloudflare::database_key(&app, crate::database::steps::KEY_NAME));
-                }
-            }
-            let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
+            let log_keys = self.step_keys_of(&candidates).await?;
             // Who's who as the steps say it, from the freeze the recovery key its genesis names signed: the epochs'
             // hashes each key sealed to this device must have.
-            let recovery = root.and_then(|root| crate::database::steps::recovery_of(root, &read.entries)).with_context(|| format!("{YOURS}'s genesis isn't in its log"))?;
+            let (_, recovery) = crate::database::steps::recovery_key(&bucket, &log_keys, root).await?;
             let mut steps = Vec::new();
             let who = loop {
                 let more = crate::database::steps::read(&bucket, &log_keys, &Scope::Global, steps.len() as u64).await?;
@@ -189,9 +182,13 @@ impl Node {
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| hashes.get(*n) != Some(&crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
-                return Ok((candidates, read));
+                self.with(|i| {
+                    i.r.recovery = Some(recovery);
+                    Ok(())
+                })?;
+                return Ok(candidates);
             }
-            tracing::warn!("global's epochs {wrong:?} sealed to {} aren't the keys their entries made: passed over", self.device_name());
+            tracing::warn!("global's epochs {wrong:?} sealed to {} aren't the keys who's who made: passed over", self.device_name());
             for n in wrong {
                 candidates.remove(&n);
             }
@@ -218,7 +215,7 @@ impl Node {
             // Another device is making it: its entry says so soon. If none does, what's there is junk, and this one's made.
             for _ in 0..50 {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                self.read_log(&Scope::Global).await?;
+                self.read_scope(&Scope::Global).await?;
                 if self.with(|i| Ok(i.r.db().epoch(scope)))? > 0 {
                     return self.settled_first_epoch(scope).await;
                 }
@@ -342,7 +339,7 @@ impl Node {
     /// (false), which every read of it here passes over from now on.
     async fn judge_ahead(&self, scope: &Scope, prefix: &str, ahead: &crate::db::Ahead) -> Result<bool> {
         if self.with(|i| Ok(i.r.epoch_made(scope)))? < ahead.epoch {
-            tokio::time::timeout(Duration::from_secs(10), self.read_log(&Scope::Global)).await.map_err(|_| anyhow!("global's entries didn't come in time to say what {prefix}'s step {} is", ahead.at))??;
+            tokio::time::timeout(Duration::from_secs(10), self.read_scope(&Scope::Global)).await.map_err(|_| anyhow!("global's entries didn't come in time to say what {prefix}'s step {} is", ahead.at))??;
         }
         if self.with(|i| Ok(i.r.epoch_made(scope)))? >= ahead.epoch {
             return Ok(true);

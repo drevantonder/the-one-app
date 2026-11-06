@@ -617,14 +617,14 @@ fn root(global: &[Entry]) -> Option<Hash> {
 }
 
 /// `global`'s scope database's steps after `from` as the bucket holds them, sealed, for `user`, as a node on a machine
-/// gives them (`Node::global_steps`): `{ at, steps: [{ at, sealed }] }` (base64url), and for a device that starts
+/// gives them (`Node::global_steps`): `{ at, epoch, steps: [{ at, sealed }] }` (base64url), and for a device that starts
 /// from its `welcome` (`steps::Welcome`), its freeze's step and the copy before its step, `{ welcome, freeze, start }`.
 /// Fails before the log is frozen. The caller opens and checks them all itself: this trusts the node with nothing.
 #[wasm_bindgen]
 pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
     use one::database::steps;
     let bucket = Js(bucket);
-    let people = replayed(&owner, &[], |r| r.global().may(&user, "use", one::database::scopes::NETWORK)).map_err(failed)?;
+    let (people, epoch) = replayed(&owner, &[], |r| (r.global().may(&user, "use", one::database::scopes::NETWORK), r.global().epoch(&Scope::Global))).map_err(failed)?;
     if !people {
         return Err(failed(anyhow!("you aren't one of this network's people")));
     }
@@ -655,6 +655,7 @@ pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, f
         }
     }
     out["at"] = json!(at);
+    out["epoch"] = json!(epoch);
     out["steps"] = json!(list);
     Ok(out.to_string())
 }

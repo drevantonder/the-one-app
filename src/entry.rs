@@ -1,17 +1,17 @@
-//! Entries: the one kind of thing anyone ever writes, each signed by the endpoint that wrote it.
+//! A signed change, the one shape a scope database's step has (`database::steps`), each signed by the endpoint that
+//! wrote it; and the frozen logs' entries, of which only the genesis is read now.
 //!
 //! ```text
 //! header     canonical JSON { v: 1, author, log, seq, backlink, previous: [hash], time, user, epoch, body, size }
-//! signature  Ed25519 by `author` over "one/entry\0" ‖ header (`keys::sign`)
+//! signature  Ed25519 by `author` over "one/step\0" ‖ header (a step), or "one/entry\0" ‖ header (an entry)
 //! hash       sha256(header)
 //! ```
 //!
-//! `backlink` is the author's entry before it in that log, `previous` the heads of the other logs its author had read
-//! (of its scope, and of `global`), `body` the sha256 of the body (hex) and `size` its length. Entries are replayed in
-//! causal order, each after everything it follows, never by the `time` it claims. `cloudflare/shared/crypto.js` signs and
-//! checks the same (`signEntry`, `checkEntry`), and `tests/contracts.rs` checks they agree.
+//! A step's `seq` is its position and it follows nothing (no `backlink` or `previous`); an entry's `backlink` was the
+//! author's entry before it in that log and `previous` the heads of the other logs its author had read. `body` is the
+//! sha256 of the body (hex) and `size` its length. `cloudflare/shared/crypto.js` signs and checks steps the same
+//! (`signStep`), and `tests/contracts.rs` checks they agree.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
@@ -190,14 +190,7 @@ pub struct Entry {
     hash: Hash,
     pub body: Vec<u8>,
     pub content: Content,
-    /// How far it is from the start of its scope in causal order: one more than the furthest it follows. Known once a
-    /// device holds everything it follows (`Store::take`, `causal`).
-    pub depth: u64,
 }
-
-/// Where an entry sits in the replay order: (depth, hash), so each comes after everything it follows, and entries
-/// none of which follows the other sort by hash, the same on every device.
-pub type Order = (u64, Hash);
 
 /// The end of a log as its author last wrote it: (seq, hash).
 pub type Head = (u32, Hash);
@@ -233,7 +226,7 @@ impl Entry {
         let v = header.json();
         let signature = keys::sign(key, domain, &v);
         let raw = keys::canonical(&v);
-        Entry { hash: Hash(keys::sha256(&raw)), header, raw, signature, body, content, depth: 0 }
+        Entry { hash: Hash(keys::sha256(&raw)), header, raw, signature, body, content }
     }
 
     /// Decodes and checks an entry from the wire: its header canonical, its signature, body and content.
@@ -260,24 +253,15 @@ impl Entry {
         ensure!(h.body == keys::sha256(body), "body hash mismatch");
         let mut content: Content = serde_json::from_slice(body).context("decode body")?;
         crate::database::migrate::content(&mut content);
-        Ok(Entry { hash: Hash(keys::sha256(header)), header: h, raw: header.to_vec(), signature: signature.try_into().expect("checked"), body: body.to_vec(), content, depth: 0 })
+        Ok(Entry { hash: Hash(keys::sha256(header)), header: h, raw: header.to_vec(), signature: signature.try_into().expect("checked"), body: body.to_vec(), content })
     }
 
-    /// Decodes an entry this device already checked when it arrived.
-    pub fn decode_trusted(header: &[u8], signature: &[u8], body: &[u8], depth: u64) -> Result<Self> {
-        let h = Header::parse(&serde_json::from_slice(header).context("decode header")?)?;
-        let mut content: Content = serde_json::from_slice(body).context("decode body")?;
-        crate::database::migrate::content(&mut content);
-        let signature = signature.try_into().map_err(|_| anyhow!("not a signature"))?;
-        Ok(Entry { hash: Hash(keys::sha256(header)), header: h, raw: header.to_vec(), signature, body: body.to_vec(), content, depth })
-    }
-
-    /// (header, signature, body), as packs and the store keep it.
+    /// (header, signature, body), as packs keep it.
     pub fn encode(&self) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
         (self.raw.clone(), self.signature.to_vec(), self.body.clone())
     }
 
-    /// As `POST /v1/entries` takes it: `{ header, signature, body }`, each base64url.
+    /// As `POST /v1/steps` takes it: `{ header, signature, body }`, each base64url.
     pub fn to_json(&self) -> Value {
         let b = |v: &[u8]| data_encoding::BASE64URL_NOPAD.encode(v);
         json!({ "header": b(&self.raw), "signature": b(&self.signature), "body": b(&self.body) })
@@ -318,93 +302,14 @@ impl Entry {
     pub fn previous(&self) -> &[Hash] {
         &self.header.previous
     }
-    /// Everything it follows directly: its backlink and previous.
-    pub fn follows_all(&self) -> impl Iterator<Item = Hash> + '_ {
-        self.header.backlink.into_iter().chain(self.header.previous.iter().copied())
-    }
     pub fn head(&self) -> Head {
         (self.seq(), self.hash())
-    }
-    pub fn order(&self) -> Order {
-        (self.depth, self.hash)
     }
     /// How apps name an entry: the first 8 hex characters of its author, and its seq.
     pub fn id(&self) -> String {
         format!("{}:{}", short(&self.author()), self.seq())
     }
 
-    /// Checks that `self` follows `prev`, the end of the same log.
-    pub fn follows(&self, prev: Option<Head>) -> Result<()> {
-        match prev {
-            None if self.seq() == 0 && self.header.backlink.is_none() => Ok(()),
-            None => bail!("entry {} has no predecessor", self.seq()),
-            Some((seq, hash)) => {
-                ensure!(self.seq() == seq + 1, "seq gap");
-                ensure!(self.header.backlink == Some(hash), "backlink mismatch");
-                Ok(())
-            }
-        }
-    }
-}
-
-/// Puts entries in causal order, each with its depth: after its backlink and previous, and among those that don't
-/// follow each other, by hash. `known` gives the depths of entries they may follow that aren't among them. An entry
-/// that follows one neither among them nor known is left out, as is one whose backlink isn't its log's entry before.
-pub fn causal(entries: Vec<Entry>, known: &HashMap<Hash, u64>) -> Vec<Entry> {
-    let mut by_hash: HashMap<Hash, Entry> = HashMap::new();
-    for e in entries {
-        by_hash.entry(e.hash()).or_insert(e);
-    }
-    let mut depths: HashMap<Hash, u64> = HashMap::new();
-    let mut waiting: HashMap<Hash, usize> = HashMap::new();
-    let mut followers: HashMap<Hash, Vec<Hash>> = HashMap::new();
-    let mut ready = BTreeSet::new();
-    for (hash, e) in &by_hash {
-        let mut lacks = 0;
-        let mut depth = 0;
-        let mut whole = true;
-        for f in e.follows_all() {
-            if by_hash.contains_key(&f) {
-                lacks += 1;
-                followers.entry(f).or_default().push(*hash);
-            } else if let Some(d) = known.get(&f) {
-                depth = depth.max(d + 1);
-            } else {
-                whole = false;
-            }
-        }
-        if let Some(b) = e.backlink().and_then(|b| by_hash.get(&b)) {
-            whole &= b.author() == e.author() && b.log() == e.log() && b.seq() + 1 == e.seq();
-        }
-        if !whole {
-            continue;
-        }
-        depths.insert(*hash, depth);
-        match lacks {
-            0 => drop(ready.insert((depth, *hash))),
-            n => drop(waiting.insert(*hash, n)),
-        }
-    }
-    // Each entry once all it follows is placed, at one more than the furthest of them.
-    let mut out = Vec::new();
-    let mut placed: BTreeMap<Hash, u64> = BTreeMap::new();
-    while let Some((depth, hash)) = ready.pop_first() {
-        placed.insert(hash, depth);
-        for f in followers.remove(&hash).unwrap_or_default() {
-            let Some(d) = depths.get_mut(&f) else { continue };
-            *d = (*d).max(depth + 1);
-            let n = waiting.get_mut(&f).expect("counted");
-            *n -= 1;
-            if *n == 0 {
-                ready.insert((*d, f));
-            }
-        }
-        let mut e = by_hash.remove(&hash).expect("held");
-        e.depth = depth;
-        out.push(e);
-    }
-    out.sort_by_key(Entry::order);
-    out
 }
 
 pub fn hex(key: &Key) -> String {
@@ -470,28 +375,5 @@ mod tests {
         assert!(Entry::decode(other.as_bytes(), &s, &b).is_err(), "not with another time");
         let spaced = String::from_utf8(h).unwrap().replace(',', ", ");
         assert!(Entry::decode(spaced.as_bytes(), &s, &b).is_err(), "only as canonical JSON");
-    }
-
-    #[test]
-    fn concurrent_entries_order_the_same_whatever_the_time_they_claim_or_the_order_they_arrive() {
-        let (a, b, c) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[3; 32]));
-        let g = write(&a, "global", 1, None, &[]);
-        // b and c each write without having read the other's, b claiming a time long after c's.
-        let b1 = write(&b, "global", 9_000_000, None, &[&g]);
-        let c1 = write(&c, "global", 2, None, &[&g]);
-        let c2 = write(&c, "global", 3, Some(&c1), &[&g]);
-        // a read both, and says so, though its clock is behind.
-        let a1 = write(&a, "global", 0, Some(&g), &[&b1, &c2]);
-        let all = vec![g.clone(), b1.clone(), c1.clone(), c2.clone(), a1.clone()];
-        let order = |list: Vec<Entry>| causal(list, &HashMap::new()).iter().map(Entry::hash).collect::<Vec<_>>();
-        let first = order(all.clone());
-        assert_eq!(first, order(all.iter().rev().cloned().collect()));
-        assert_eq!(first.len(), 5);
-        assert_eq!(first[0], g.hash());
-        assert_eq!(*first.last().unwrap(), a1.hash(), "after everything it read");
-        let at = |h: Hash| first.iter().position(|x| *x == h).unwrap();
-        assert!(at(c1.hash()) < at(c2.hash()));
-        // One whose backlink hasn't arrived waits.
-        assert_eq!(order(vec![g.clone(), c2.clone()]), vec![g.hash()]);
     }
 }

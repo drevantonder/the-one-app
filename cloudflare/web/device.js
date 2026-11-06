@@ -438,7 +438,6 @@ export class Device {
   // Signing.
 
   /// Writes `content` to `log`'s database as `as` (this browser, or a passkey): `global`'s only, as a step (`step`).
-  /// `content` may be a function of the entry's seq, for one that says which it is.
   async write(log, content, as = this.me) {
     if (log !== "global") throw new Error(`a browser writes only Everyone's who's who, not ${log}`);
     return this.step(content, as);
@@ -448,10 +447,9 @@ export class Device {
   /// (src/database/steps.rs), and again for the one after while another device's goes first.
   async step(content, as = this.me) {
     for (let tries = 0; ; tries++) {
-      const { at } = await this.api(`/v1/steps/global?from=${Number.MAX_SAFE_INTEGER}`);
-      const { epoch } = await this.api("/v1/entries?scope=global");
+      const { at, epoch } = await this.api(`/v1/steps/global?from=${Number.MAX_SAFE_INTEGER}`);
       const fields = { log: "global", at: at + 1, time: Date.now(), user: this.user, epoch };
-      const s = await signStep(as.sign, hex.decode(as.key), fields, JSON.stringify(typeof content === "function" ? content(null) : content));
+      const s = await signStep(as.sign, hex.decode(as.key), fields, JSON.stringify(content));
       try {
         return await this.api("/v1/steps", { method: "POST", body: [{ header: b64u.encode(s.header), signature: b64u.encode(s.signature), body: b64u.encode(s.body) }] });
       } catch (err) {

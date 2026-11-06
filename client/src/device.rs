@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
-use one::entry::{Entry, Ext, Hash, Scope, hex};
+use one::entry::{Hash, Scope, hex};
 use one::keys::{self, Endpoint, Handed, Handoff, Need, Waited};
 use one::members;
 use data_encoding::BASE64URL_NOPAD as B64U;
@@ -1012,36 +1012,24 @@ impl Device {
         Ok(())
     }
 
-    /// Signs an entry of `content` in `log`, after what the node has, and writes it.
+    /// Signs a step of `content` in `global`'s scope database for the next position (`one::database::steps`), and
+    /// writes it, signing it again for the one after while another device's goes first.
     async fn write(&self, log: &str, user: &str, content: one::entry::Content) -> Result<(), Error> {
-        // Once `global`'s log is frozen, a step of its scope database for the next position (`one::database::steps`).
-        if log == "global"
-            && let Ok(steps) = self.json("GET", "/v1/steps/global?from=9007199254740991", None).await
-        {
-            let mut at = steps["at"].as_u64().unwrap_or(0);
-            for _ in 0..5 {
-                let heads = self.json("GET", "/v1/entries?scope=global", None).await?;
-                let epoch = heads["epoch"].as_u64().unwrap_or(0) as u32;
-                let step = one::database::steps::sign(&self.key, &Scope::Global, at + 1, user, epoch, now(), content.clone()).map_err(failed)?;
-                match self.json("POST", "/v1/steps", Some(json!([step.to_json()]))).await {
-                    Ok(_) => return Ok(()),
-                    Err(err) if err.to_string().contains("taken") => at = self.json("GET", "/v1/steps/global?from=9007199254740991", None).await?["at"].as_u64().unwrap_or(at + 1),
-                    Err(err) => return Err(err),
-                }
-            }
-            return Err(failed("Who's who changed too often to write to: try again."));
+        if log != "global" {
+            return Err(failed(format!("a device writes only Everyone's who's who, not {log}")));
         }
-        let heads = self.json("GET", &format!("/v1/entries?scope={}", query(log)), None).await?;
-        let last = &heads["logs"][self.key()];
-        let prev = match (last["seq"].as_u64(), last["hash"].as_str()) {
-            (Some(seq), Some(hash)) => Some((seq as u32, Hash::from_hex(hash).map_err(failed)?)),
-            _ => None,
-        };
-        let previous: Vec<Hash> = heads["previous"].as_array().into_iter().flatten().filter_map(|h| Hash::from_hex(h.as_str()?).ok()).filter(|h| Some(*h) != prev.map(|p| p.1)).collect();
-        let ext = Ext { log: log.to_string(), time: now(), user: user.to_string(), epoch: heads["epoch"].as_u64().unwrap_or(0) as u32, previous };
-        let entry = Entry::create(&self.key, ext, prev, content);
-        self.json("POST", "/v1/entries", Some(json!([entry.to_json()]))).await?;
-        Ok(())
+        let next = || self.json("GET", "/v1/steps/global?from=9007199254740991", None);
+        let mut steps = next().await?;
+        for _ in 0..5 {
+            let (at, epoch) = (steps["at"].as_u64().unwrap_or(0), steps["epoch"].as_u64().unwrap_or(0) as u32);
+            let step = one::database::steps::sign(&self.key, &Scope::Global, at + 1, user, epoch, now(), content.clone()).map_err(failed)?;
+            match self.json("POST", "/v1/steps", Some(json!([step.to_json()]))).await {
+                Ok(_) => return Ok(()),
+                Err(err) if err.to_string().contains("taken") => steps = next().await?,
+                Err(err) => return Err(err),
+            }
+        }
+        Err(failed("Who's who changed too often to write to: try again."))
     }
 }
 

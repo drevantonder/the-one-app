@@ -4,11 +4,11 @@
 //! key, by RPC, which comes in at `device_deliver`. It lives while its object does, and holds its key only while it
 //! runs.
 //!
-//! A device trusts no node for who's who or for its keys: it reads `global`'s entries from the bucket itself, through
-//! the URL signer, with the epochs sealed to it that those entries made, replays them as every client device does
-//! (one-client's `members::Global`, the nodes' own replay), and asks who's who and who may of `global`'s scope
-//! database built from that (`one::database::scopes`) (`device_view`); it opens the keys a call needs from the bucket
-//! too, each epoch checked against its entry's hash (`device_keys`). So it asks only the compute endpoints the network
+//! A device trusts no node for who's who or for its keys: it reads `global`'s scope database's steps from the bucket
+//! itself, through the URL signer, with the epochs sealed to it that those steps made, as every client device does
+//! (one-client's `members::Global`), and asks who's who and who may of the database they leave
+//! (`one::database::scopes`) (`device_view`); it opens the keys a call needs from the bucket too, each epoch checked
+//! against the hash who's who names (`device_keys`). So it asks only the compute endpoints the network
 //! lists as running its person's calls, and hands each only the keys of scopes it runs.
 
 use std::cell::RefCell;
@@ -165,35 +165,21 @@ pub async fn device_close(me: String) {
 
 // Who's who, as the device reads it itself.
 
-/// What a device knows of who's who: `global`'s entries as its epochs open them in the bucket, `global`'s scope
-/// database built from what they add up to, and the keys it opened, each epoch's only while it's the key its entry
-/// made.
+/// What a device knows of who's who: `global`'s scope database's steps as its epochs open them in the bucket, the
+/// database they leave, and the keys it opened, each epoch's only while it's the key who's who says.
 struct View {
     user: String,
     seal: Key,
     global: one::db::Keys,
-    at: u64,
-    floor: u32,
-    entries: Global,
+    who: Global,
     db: ScopeDb,
     epochs: HashMap<Scope, one::db::Keys>,
     apps: HashMap<(Scope, String, u32), Key>,
 }
 
-/// `global`'s scope database, from its entries.
-fn built(entries: &mut Global) -> Result<ScopeDb> {
-    entries.who()
-}
-
-/// `global`'s scope database's steps after those `entries` took, with the log's keys: who's who once it's frozen.
-async fn steps(bucket: &crate::Js, keys: &one::db::Keys, entries: &mut Global) -> Result<()> {
-    entries.read_steps(bucket, keys).await
-}
-
 impl View {
-    /// `global`'s entries from scratch: each of its epochs sealed to `me` in the bucket, kept only once the entries
-    /// they open say it's theirs (the genesis names the first's hash, each `epoch` entry the next's), as a node's
-    /// first read is (`Node::first_global_read`).
+    /// `global`'s steps from scratch: each of its epochs sealed to `me` in the bucket, kept only once who's who they
+    /// open says it's theirs, as a node's first read is (`Node::first_global_read`).
     async fn read(bucket: &crate::Js, me: &Key, user: &str, seal: &Key) -> Result<View> {
         let mine = data_encoding::HEXLOWER.encode(me);
         let mut candidates = one::db::Keys::new();
@@ -211,13 +197,12 @@ impl View {
                     log_keys.insert(*n, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME));
                 }
             }
-            let read = one::log::open(bucket, &log_keys, &one::log::prefix("global"), "global").await?;
-            let mut entries = Global::new(None);
-            steps(bucket, &log_keys, &mut entries).await?;
-            let db = built(&mut entries)?;
+            let mut who = Global::new(None);
+            who.read_steps(bucket, &log_keys).await?;
+            let db = who.who()?;
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| db.epoch_hash(&Scope::Global, **n) != Some(one::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
-                return Ok(View { user: user.into(), seal: *seal, global: log_keys, at: read.at, floor: read.floor, entries, db, epochs: HashMap::from([(Scope::Global, candidates)]), apps: HashMap::new() });
+                return Ok(View { user: user.into(), seal: *seal, global: log_keys, who, db, epochs: HashMap::from([(Scope::Global, candidates)]), apps: HashMap::new() });
             }
             for n in wrong {
                 candidates.remove(&n);
@@ -225,23 +210,19 @@ impl View {
         }
     }
 
-    /// The entries written since it last read: false if one is under an epoch it hasn't opened, so it must read again.
+    /// The steps written since it last read: false once who's who has an epoch of `global`'s it hasn't opened, so it
+    /// must read again.
     async fn refresh(&mut self, bucket: &crate::Js) -> Result<bool> {
-        let read = one::log::read(bucket, &self.global, u32::MAX, &one::log::prefix("global"), "global", self.at, self.floor).await?;
-        if read.ahead.is_some() {
-            return Ok(false);
+        let had = self.who.at();
+        self.who.read_steps(bucket, &self.global).await?;
+        if had != self.who.at() {
+            self.db = self.who.who()?;
         }
-        (self.at, self.floor) = (read.at, read.floor);
-        let (had, new) = (self.entries.at(), !read.entries.is_empty());
-        steps(bucket, &self.global, &mut self.entries).await?;
-        if new || had != self.entries.at() {
-            self.db = built(&mut self.entries)?;
-        }
-        Ok(true)
+        Ok(self.global.keys().next_back().is_some_and(|n| *n >= self.db.epoch(&Scope::Global)))
     }
 
-    /// A scope's epochs this device opens, by number: each one its entry made, from its copy in the bucket sealed to
-    /// this device whose hash is the one the entry names (`Node::epoch_keys`).
+    /// A scope's epochs this device opens, by number: each one who's who made, from its copy in the bucket sealed to
+    /// this device whose hash is the one who's who names (`Node::epoch_keys`).
     async fn epoch_keys(&mut self, bucket: &crate::Js, me: &Key, scope: &Scope) -> Result<one::db::Keys> {
         let m = &self.db;
         let hashes: BTreeMap<u32, String> = (1..=m.epoch(scope)).filter_map(|n| Some((n, m.epoch_hash(scope, n)?))).collect();
@@ -291,7 +272,7 @@ async fn with_view<R>(me: Key, f: impl AsyncFnOnce(&mut Option<View>) -> Result<
 
 /// What the running device `me` (hex), of `user`, with its seal key's secret `seal`, knows of who's who, read from
 /// `bucket` (as `worker.js`'s, through the URL signer): the first time, everything, after that what's new. → `{
-/// listed, nodes }`: whether the entries list it as a client device of `user`, and `View::nodes`.
+/// listed, nodes }`: whether who's who lists it as a client device of `user`, and `View::nodes`.
 #[wasm_bindgen]
 pub async fn device_view(me: String, user: String, seal: Vec<u8>, bucket: JsValue) -> Result<String, JsError> {
     let me = key(&me)?;

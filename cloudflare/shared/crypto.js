@@ -210,7 +210,7 @@ export const FRESH = 60_000;
 
 /// What this build reads of who's who (src/database.rs `READS`, which tests/contracts.rs holds it to): what a device
 /// says as it asks the URL signer, the relay and sign-in, which tell one that reads less to update.
-export const READS = 4;
+export const READS = 5;
 
 let lastAt = 0;
 

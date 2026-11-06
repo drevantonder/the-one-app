@@ -35,9 +35,9 @@ pub(super) struct Sessions {
     /// exactly those keys, and forgotten with them: once their last session or app schedules end, or no live session holds
     /// them.
     pub opened: Mutex<HashMap<(Scope, String), Vec<Opened>>>,
-    /// The log keys handed here that opened what the bucket holds of their scope at their epoch, each by a hash of
+    /// The step keys handed here that opened what the bucket holds of their scope at their epoch, each by a hash of
     /// (scope, epoch, key): not the key, which is kept only while a session that handed it lasts.
-    opened_logs: Mutex<HashSet<[u8; 32]>>,
+    opened_steps: Mutex<HashSet<[u8; 32]>>,
 }
 
 /// A database opened with keys a caller handed: shared only with calls handed exactly them.
@@ -84,8 +84,8 @@ pub fn client_token(key: &Key) -> String {
 
 pub(super) const CLIENT: &str = "client.";
 
-/// How many of a log's last steps a key handed for it is checked against, newest first.
-const LOG_CHECKED: usize = 64;
+/// How many of a scope database's last steps a key handed for it is checked against, newest first.
+const STEPS_CHECKED: usize = 64;
 
 /// The longest keys handed with no sign-in (a client device's, or with a call passed on) are kept here.
 const CLIENT_KEYS: u64 = 3_600_000;
@@ -186,7 +186,7 @@ impl Node {
             return;
         }
         *last = Some(std::time::Instant::now());
-        if let Err(err) = self.read_log(&Scope::Global).await {
+        if let Err(err) = self.read_scope(&Scope::Global).await {
             tracing::debug!("reading global for a device it doesn't list: {err:#}");
         }
     }
@@ -290,11 +290,11 @@ impl Node {
         kept.get(&hash(token)).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
     }
 
-    /// The keys of a scope's log that live sessions of people who may use it were handed, if they hold its newest
-    /// epoch's: what this device reads and writes the entries of a scope it runs but doesn't open with, while someone
-    /// who opens it uses it here. Of each epoch, only a key that opens what the bucket holds under it, so nobody's key
-    /// has this device pass over the real entries or write any it can't be read by (`log_opens`).
-    pub(super) async fn handed_log(&self, scope: &Scope) -> Result<Keys> {
+    /// The keys of a scope's database's steps that live sessions of people who may use it were handed, if they hold its
+    /// newest epoch's: what this device reads and writes the steps of a scope it runs but doesn't open with, while
+    /// someone who opens it uses it here. Of each epoch, only a key that opens what the bucket holds under it, so
+    /// nobody's key has this device pass over the real steps or write any it can't be read by (`opens_steps`).
+    pub(super) async fn handed_step_keys(&self, scope: &Scope) -> Result<Keys> {
         let (now, newest) = (now_ms(), self.with(|i| Ok(i.r.db().epoch(scope)))?);
         let id = (scope.to_string(), members::APP.to_string(), crate::database::steps::KEY_NAME.to_string());
         let handed: Vec<(String, Keys)> = self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)).filter_map(|s| s.keys.get(&id).map(|k| (s.user.clone(), k.clone()))).collect();
@@ -312,43 +312,43 @@ impl Node {
         })?;
         let mut keys = Keys::new();
         for (n, offered) in offered {
-            if let Some(key) = self.log_opens(scope, n, n < newest, &offered).await? {
+            if let Some(key) = self.opens_steps(scope, n, n < newest, &offered).await? {
                 keys.insert(n, key);
             }
         }
         crate::db::handed(keys, newest).map_err(|_| NotGiven(scope.clone(), self.device_name()).into())
     }
 
-    /// Which of the keys `offered` for epoch `n` of a scope's log opens what the bucket holds under that epoch: its
-    /// newest copy, or the newest of its last `LOG_CHECKED` steps. With nothing under it there, the one key offered, if
+    /// Which of the keys `offered` for epoch `n` of a scope's database's steps opens what the bucket holds under that
+    /// epoch: its newest copy, or the newest of its last `STEPS_CHECKED` steps, or its start. With nothing under it there, the one key offered, if
     /// everyone offered the same; else none. An epoch before the newest (`old`) has nothing more written under it, so
     /// what it came to holds.
-    async fn log_opens(&self, scope: &Scope, n: u32, old: bool, offered: &[[u8; 32]]) -> Result<Option<[u8; 32]>> {
+    async fn opens_steps(&self, scope: &Scope, n: u32, old: bool, offered: &[[u8; 32]]) -> Result<Option<[u8; 32]>> {
         use crate::bucket::Bucket;
         let checked = |k: &[u8; 32]| -> [u8; 32] {
             use sha2::Digest;
             sha2::Sha256::new().chain_update(scope.to_string()).chain_update(n.to_be_bytes()).chain_update(k).finalize().into()
         };
-        if let Some(k) = offered.iter().find(|k| self.0.sessions.opened_logs.lock().unwrap().contains(&checked(k))) {
+        if let Some(k) = offered.iter().find(|k| self.0.sessions.opened_steps.lock().unwrap().contains(&checked(k))) {
             return Ok(Some(*k));
         }
         let bucket = self.bucket()?;
-        let prefix = crate::log::prefix(&scope.to_string());
+        let prefix = crate::database::steps::prefix(&scope.to_string());
         let (at, copy, epoch) = Bucket::get(&bucket, &crate::db::newest_name(&prefix)).await?.map_or((0, 0, 0), |o| crate::db::newest(&o.bytes));
         let mut sealed = None;
         if copy > 0 && epoch == n {
             sealed = Bucket::get(&bucket, &crate::db::copy_name(&prefix, copy)).await?.map(|o| (crate::db::copy_name(&prefix, copy), o.bytes));
         }
-        // From the last step anyone said is there, or this device read or wrote, on to the last there is.
-        let read = self.with(|i| i.r.store.position(&scope.to_string()))?.0;
-        let mut top = at.max(read).max(self.0.written.lock().unwrap().get(scope).copied().unwrap_or(0));
-        for _ in 0..LOG_CHECKED {
+        // From the last step anyone said is there, or this device read, on to the last there is.
+        let read = self.with(|i| Ok(i.scope_dbs.get(scope).map_or(0, |(at, _)| *at)))?;
+        let mut top = at.max(read);
+        for _ in 0..STEPS_CHECKED {
             match Bucket::get(&bucket, &crate::db::step_name(&prefix, top + 1)).await? {
                 Some(_) => top += 1,
                 None => break,
             }
         }
-        for step in (1..=top).rev().take(LOG_CHECKED) {
+        for step in (0..=top).rev().take(STEPS_CHECKED) {
             if sealed.is_some() {
                 break;
             }
@@ -363,22 +363,22 @@ impl Node {
         let Some((name, sealed)) = sealed else {
             let [one] = offered else { return Ok(None) };
             if old {
-                self.0.sessions.opened_logs.lock().unwrap().insert(checked(one));
+                self.0.sessions.opened_steps.lock().unwrap().insert(checked(one));
             }
             return Ok(Some(*one));
         };
         let opens = offered.iter().find(|k| crate::keys::open(k, &name, &sealed).is_ok()).copied();
         match opens {
-            Some(k) => drop(self.0.sessions.opened_logs.lock().unwrap().insert(checked(&k))),
-            None => tracing::warn!("{scope}'s log: no key handed for epoch {n} opens {name}: left"),
+            Some(k) => drop(self.0.sessions.opened_steps.lock().unwrap().insert(checked(&k))),
+            None => tracing::warn!("{scope}'s steps: no key handed for epoch {n} opens {name}: left"),
         }
         Ok(opens)
     }
 
-    /// Reads the entries of each scope a token caller uses that this device runs but doesn't open (someone else's own,
-    /// or a group its person isn't in), with the keys of its log the caller hands, which it's asked for (428) if it
+    /// Reads the steps of each scope a token caller uses that this device runs but doesn't open (someone else's own, or
+    /// a group its person isn't in), with the keys of its steps the caller hands, which it's asked for (428) if it
     /// didn't: what their calls are checked by (which apps are there, who may do what), and written after.
-    pub(super) async fn read_callers_logs(&self, me: &Caller) -> Result<()> {
+    pub(super) async fn read_callers_scopes(&self, me: &Caller) -> Result<()> {
         if me.token.as_deref().is_none_or(|t| t.starts_with(app_schedules::TOKEN)) {
             return Ok(());
         }
@@ -388,7 +388,7 @@ impl Node {
         })?;
         self.needs(me, &want).await?;
         for (scope, ..) in &want {
-            self.read_log(scope).await?;
+            self.read_scope(scope).await?;
         }
         Ok(())
     }

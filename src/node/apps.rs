@@ -179,7 +179,7 @@ impl Node {
                     let mut installed: Vec<String> = i
                         .views
                         .iter()
-                        .filter(|(scope, (_, s))| s.installed.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may(&viewer.user, "use", &scopes::object(&s))))
+                        .filter(|(scope, s)| s.installed.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may(&viewer.user, "use", &scopes::object(&s))))
                         .map(|(scope, _)| scope.clone())
                         .collect();
                     // Yours, then groups', then everyone's.
@@ -357,7 +357,7 @@ impl Node {
             let named = scope_name(i, &scope.to_string());
             ensure!(m.may(&caller.user, "add-apps", &scopes::object(scope)), "You can't add apps to {named}.");
             ensure!(i.r.holds(scope), "This device can't open {named} yet.");
-            let here = i.views.get(&scope.to_string()).map(|(_, s)| s.installed.clone()).unwrap_or_default();
+            let here = i.views.get(&scope.to_string()).map(|s| s.installed.clone()).unwrap_or_default();
             let mut out = Vec::new();
             for (n, name) in wanted.iter().enumerate().rev() {
                 ensure!(m.app(name).is_some(), "no app named {name}{}", if n > 0 { format!(", which {app} uses") } else { String::new() });
@@ -388,7 +388,7 @@ impl Node {
 
     /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses, its services on `node`.
     pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool, node: Option<&str>) -> Result<()> {
-        self.read_callers_logs(caller).await?;
+        self.read_callers_scopes(caller).await?;
         let entries = self.install_entries(caller, app, scope, installed, node).await?;
         for (scope, content) in entries {
             self.append_as(&scope, &caller.user, content).await?;

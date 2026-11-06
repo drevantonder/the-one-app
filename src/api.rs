@@ -198,7 +198,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/settings", post(settings))
         .route("/v1/steps", post(steps))
         .route("/v1/steps/global", get(global_steps))
-        .route("/v1/entries", get(heads))
         .route("/v1/runs", post(runs))
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
@@ -320,7 +319,6 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/erase",
     "/v1/role",
     "/v1/settings",
-    "/v1/entries",
     "/v1/steps",
     "/v1/steps/global",
     "/v1/name",
@@ -893,15 +891,6 @@ async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q):
     let from = q.get("from").map(|f| f.parse()).transpose()?.unwrap_or(0);
     let welcome = q.get("welcome").and_then(|w| crate::database::steps::Welcome::parse(w));
     Ok(Json(node.global_steps(&me.caller, from, welcome).await?))
-}
-
-/// `?scope=`: what a device signing a step there needs: `{ epoch }` (`Node::entry_heads`).
-async fn heads(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Reply {
-    let scope = match q.get("scope").map(String::as_str) {
-        None | Some("user") => crate::entry::Scope::User(me.caller.user.clone()),
-        Some(s) => crate::entry::Scope::parse(s)?,
-    };
-    Ok(Json(node.entry_heads(&me.caller, &scope).await?))
 }
 
 /// `{ on: [device] }` (names or keys): the network's machines that run the caller's own things besides their own, as

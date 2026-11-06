@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use ssh_key::{HashAlg, LineEnding, PrivateKey, PublicKey, SshSig};
 
-use crate::entry::{Content, Entry, Key};
+use crate::entry::{Content, Key};
 
 pub const APP: &str = "node";
 /// The kind of entry, or step, that says a release of the node.
@@ -59,25 +59,15 @@ fn signed_by(key: &str, signature: &str) -> bool {
     sig.public_key() == key.key_data() && sig.namespace() == NAMESPACE
 }
 
-/// The newest release for `target` signed with `key`, and the device that published it. Any device may publish or pass
-/// on a release: only the signature counts. The newest of any newer ones without it is logged.
-pub fn latest(key: &str, entries: &[Entry], target: &str) -> Option<(Release, Key)> {
-    latest_of(key, entries, target, None)
+/// What `global` said of releases, oldest first, as each release's content and who published it, from its scope
+/// database's steps (`ScopeDb::releases`).
+pub fn said(steps: &[(crate::entry::Content, Key, u64)]) -> Vec<(crate::entry::Content, Key)> {
+    steps.iter().map(|(c, k, _)| (c.clone(), *k)).collect()
 }
 
-/// The same for the service `service` (`None`: the node).
-pub fn latest_of(key: &str, entries: &[Entry], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
-    latest_said(key, &said(entries, &[]), target, service)
-}
-
-/// What `global` said of releases, oldest first, as each release's content and who published it: in its log's
-/// `entries`, then once it's frozen, in its scope database's steps (`ScopeDb::releases`).
-pub fn said(entries: &[Entry], steps: &[(crate::entry::Content, Key, u64)]) -> Vec<(crate::entry::Content, Key)> {
-    let logged = entries.iter().filter(|e| e.content.app == APP && [NODE_KIND, SERVICE_KIND].contains(&e.content.kind.as_str())).map(|e| (e.content.clone(), e.author()));
-    logged.chain(steps.iter().map(|(c, k, _)| (c.clone(), *k))).collect()
-}
-
-/// `latest_of`, of what `said` gives.
+/// The newest release for `target` signed with `key`, of the node or the service `service`, and the device that
+/// published it, of what `said` gives. Any device may publish or pass on a release: only the signature counts. The
+/// newest of any newer ones without it is logged.
 pub fn latest_said(key: &str, said: &[(crate::entry::Content, Key)], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
     let kind = if service.is_some() { SERVICE_KIND } else { NODE_KIND };
     let releases = said.iter().rev().filter(|(c, _)| c.app == APP && c.kind == kind);
@@ -177,15 +167,8 @@ mod tests {
     }
 
     /// One device publishing each release in turn.
-    fn entries(releases: &[Release]) -> Vec<Entry> {
-        let device = SigningKey::from_bytes(&[1; 32]);
-        let mut out: Vec<Entry> = Vec::new();
-        for (i, r) in releases.iter().enumerate() {
-            let ext = crate::entry::Ext { log: "global".into(), time: i as u64 + 1, user: "a000000000000001".into(), epoch: 0, previous: Vec::new() };
-            let prev = out.last().map(Entry::head);
-            out.push(Entry::create(&device, ext, prev, content(r)));
-        }
-        out
+    fn said(releases: &[Release]) -> Vec<(Content, Key)> {
+        releases.iter().map(|r| (content(r), [1; 32])).collect()
     }
 
     #[test]
@@ -195,15 +178,15 @@ mod tests {
         let unsigned = release("unsigned", 30, String::new());
         let theirs = release("theirs", 40, sign(&someone, b"bin").unwrap());
         let garbled = release("garbled", 50, "-----BEGIN SSH SIGNATURE-----\nnope\n-----END SSH SIGNATURE-----\n".into());
-        let all = entries(&[good.clone(), unsigned, theirs.clone(), garbled]);
-        assert_eq!(latest(&public(&publisher), &all, "t").unwrap().0.commit, "good", "newer releases without its signature don't count");
-        assert!(latest(&public(&publisher), &all, "other target").is_none());
+        let all = said(&[good.clone(), unsigned, theirs.clone(), garbled]);
+        assert_eq!(latest_said(&public(&publisher), &all, "t", None).unwrap().0.commit, "good", "newer releases without its signature don't count");
+        assert!(latest_said(&public(&publisher), &all, "other target", None).is_none());
         // A service's release is its program's, never the node's, nor another service's.
         let whatsapp = Release { service: Some("whatsapp".into()), ..release("whatsapp", 60, sign(&publisher, b"go").unwrap()) };
-        let all = [all, entries(std::slice::from_ref(&whatsapp))].concat();
-        assert_eq!(latest(&public(&publisher), &all, "t").unwrap().0.commit, "good");
-        assert_eq!(latest_of(&public(&publisher), &all, "t", Some("whatsapp")).unwrap().0, whatsapp);
-        assert!(latest_of(&public(&publisher), &all, "t", Some("push")).is_none());
+        let all = [all, said(std::slice::from_ref(&whatsapp))].concat();
+        assert_eq!(latest_said(&public(&publisher), &all, "t", None).unwrap().0.commit, "good");
+        assert_eq!(latest_said(&public(&publisher), &all, "t", Some("whatsapp")).unwrap().0, whatsapp);
+        assert!(latest_said(&public(&publisher), &all, "t", Some("push")).is_none());
         assert!(verify(&public(&publisher), b"bin", &theirs.signature).is_err());
         assert!(verify(&public(&publisher), b"something else", &good.signature).is_err(), "a signature over another binary");
         assert!(verify(&public(&publisher), b"bin", "").is_err());

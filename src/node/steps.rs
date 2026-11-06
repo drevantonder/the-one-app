@@ -28,11 +28,11 @@ impl Node {
         let mut at = from;
         loop {
             let name = crate::db::step_name(&prefix, at + 1);
-            let keys = match self.log_key(&Scope::Global).await {
+            let keys = match self.step_keys(&Scope::Global).await {
                 Ok(keys) => keys,
                 // Not given `global`'s newest epoch yet, as between its own new epoch's step and its seals: it reads
                 // with those it holds, and a step under the newest waits for it, as one under any epoch not handed yet.
-                Err(err) if err.is::<NotGiven>() => self.log_key_of(&self.epochs_held(&Scope::Global).await?.0).await?,
+                Err(err) if err.is::<NotGiven>() => self.step_keys_of(&self.epochs_held(&Scope::Global).await?.0).await?,
                 Err(err) => return Err(err),
             };
             let Some(o) = crate::bucket::Bucket::get(&bucket, &name).await? else {
@@ -143,7 +143,7 @@ impl Node {
         for blob in &step.content.blobs {
             self.share_blob(&Scope::Global, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
         }
-        let keys = self.log_key(&Scope::Global).await?;
+        let keys = self.step_keys(&Scope::Global).await?;
         let name = crate::db::step_name(&steps::prefix("global"), at);
         if !crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(step, None))?).await? {
             return Ok(false);
@@ -163,7 +163,7 @@ impl Node {
     /// Writes steps `caller`'s own device signed (a browser's, say), each once it's checked: it's for the next
     /// position here, written as them, and counts. A step for a position already taken fails, saying the next.
     pub async fn put_signed_steps(&self, caller: &Caller, list: Vec<Entry>) -> Result<()> {
-        self.read_callers_logs(caller).await?;
+        self.read_callers_scopes(caller).await?;
         for step in list {
             ensure!(step.user() == caller.user, "step {} isn't written as you", step.seq());
             let _write = self.0.writes.lock().await;
@@ -178,7 +178,8 @@ impl Node {
 
     /// `global`'s steps after `from` as the bucket holds them, sealed, each `{ at, sealed }` (base64url), its freeze
     /// among them: a client device opens them with its own keys and applies them itself, never taking who's who, nor
-    /// that a step isn't one, from a node. With `{ at }`, the last there, after which a writer signs its own. Fails
+    /// that a step isn't one, from a node. With `{ at, epoch }`, the last there and `global`'s newest epoch, after which
+    /// and under which a writer signs its own. Fails
     /// before the log is frozen here, so a writer writes entries. For a device that starts from its `welcome`
     /// (`steps::Welcome`), those after the copy before its step instead, with that copy and the freeze's step, sealed:
     /// `{ welcome, freeze: { at, sealed }, start: { at, sealed } }`, without `start` if the copy isn't there.
@@ -215,6 +216,7 @@ impl Node {
             }
         }
         out["at"] = json!(at);
+        out["epoch"] = json!(self.with(|i| Ok(i.r.db().epoch(&Scope::Global)))?);
         out["steps"] = json!(list);
         Ok(out)
     }
@@ -226,7 +228,7 @@ impl Node {
         if *scope == Scope::Global || !self.frozen() || !self.with(|i| Ok(i.r.holds(scope)))? {
             return Ok(false);
         }
-        let keys = self.log_key(scope).await?;
+        let keys = self.step_keys(scope).await?;
         let bucket = self.bucket()?;
         let freeze = self.with(|i| Ok(i.r.frozen.clone().map(|(f, _)| f)))?.context("global's log isn't frozen")?;
         if !self.with(|i| Ok(i.scope_dbs.contains_key(scope)))? {
@@ -254,11 +256,14 @@ impl Node {
         let (kept, newer, forgotten) = self.with(|i| {
             let (at, db) = i.scope_dbs.remove(scope).context("no database")?;
             let steps::TookScope { at, mut db, newer } = steps::take_scope(at, db, i.r.db(), scope, &read, now_ms())?;
-            let (position, was) = i.views.get(&scope.to_string()).map(|(p, s)| (p.clone(), s.forgotten.clone())).unwrap_or(((0, Hash::from_bytes([0; 32])), Default::default()));
+            let was = i.views.get(&scope.to_string()).map(|s| s.forgotten.clone()).unwrap_or_default();
             let state = db.state();
             // The blobs its steps said its apps no longer need, as `forget` entries did.
             let forgotten: Vec<(String, String)> = state.forgotten.iter().filter(|b| !was.contains(*b)).map(|b| (scope.to_string(), b.clone())).collect();
-            i.views.insert(scope.to_string(), (position, state));
+            i.views.insert(scope.to_string(), state);
+            if !read.is_empty() {
+                note_change(i, scope);
+            }
             let kept = json!({ "at": at, "hash": crate::db::state_hash(db.conn())?, "db": data_encoding::BASE64.encode(&db.bytes()?) });
             i.scope_dbs.insert(scope.clone(), (at, db));
             Ok((kept, newer, forgotten))
@@ -270,58 +275,6 @@ impl Node {
         // A newer release's step: this device reads no further until it's updated.
         ensure!(!newer, steps::Newer);
         Ok(!read.is_empty())
-    }
-
-    /// What only the frozen logs say that a reader still needs, written once as steps of the same content, so none
-    /// reads the logs for it: the newest release of each target and service that no step has said, and in each scope
-    /// held, the blobs its `keep` entries named that it hasn't forgotten and no step names. Every node of this release
-    /// looks, as it first reads its scopes; one that finds them written writes nothing.
-    pub(super) async fn carry_frozen(&self) -> Result<()> {
-        type Said = (String, Option<String>, Option<String>);
-        let said = |c: &Content| -> Said { (c.kind.clone(), c.data["target"].as_str().map(str::to_string), c.data["service"].as_str().map(str::to_string)) };
-        let releases = self.with(|i| {
-            let have: std::collections::BTreeSet<Said> = i.r.db().releases().iter().map(|(c, _, _)| said(c)).collect();
-            let mut newest: BTreeMap<Said, Entry> = BTreeMap::new();
-            for e in i.r.store.scope("global")?.into_iter().filter(|e| e.content.app == members::APP && members::RELEASES.contains(&e.content.kind.as_str())) {
-                newest.insert(said(&e.content), e);
-            }
-            Ok(newest.into_iter().filter(|(k, _)| !have.contains(k)).map(|(_, e)| e).collect::<Vec<_>>())
-        })?;
-        for e in releases {
-            let wrote = self.write_step(e.user(), e.content.clone()).await?;
-            tracing::info!("wrote the frozen log's {} for {:?} as step {}", e.content.kind, said(&e.content), wrote.seq());
-        }
-        let logs = self.with(|i| Ok(i.r.store.logs()?))?;
-        for log in logs {
-            let scope = Scope::parse(&log)?;
-            if scope != Scope::Global {
-                self.read_scope_steps_now(&scope).await?;
-            }
-            let keeps = self.with(|i| {
-                let Some(db) = (if scope == Scope::Global { Some(i.r.db()) } else { i.scope_dbs.get(&scope).map(|(_, d)| d) }) else { return Ok(BTreeMap::new()) };
-                let forgotten = db.state().forgotten;
-                let mut by: BTreeMap<String, Vec<String>> = BTreeMap::new();
-                for e in i.r.store.scope(&log)?.into_iter().filter(|e| e.content.app == members::APP && e.content.kind == "keep") {
-                    for b in e.content.blobs.iter().filter(|b| !forgotten.contains(*b) && !db.names_blob(b)) {
-                        let list = by.entry(e.user().to_string()).or_default();
-                        if !list.contains(b) {
-                            list.push(b.clone());
-                        }
-                    }
-                }
-                Ok(by)
-            })?;
-            for (user, blobs) in keeps {
-                let content = Content { blobs, ..members::node("keep", json!({})) };
-                let n = content.blobs.len();
-                let wrote = match scope {
-                    Scope::Global => self.write_step(&user, content).await?,
-                    _ => self.write_scope_step(&scope, &user, content).await?,
-                };
-                tracing::info!("wrote the {n} blobs the frozen log of {scope} kept for {user} as step {}", wrote.seq());
-            }
-        }
-        Ok(())
     }
 
     /// Writes `content` to a scope's own database (not `global`'s) as a step this device signs as `user`, once
@@ -340,7 +293,7 @@ impl Node {
             for blob in &step.content.blobs {
                 self.share_blob(scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
             }
-            let keys = self.log_key(scope).await?;
+            let keys = self.step_keys(scope).await?;
             let name = crate::db::step_name(&steps::prefix(&scope.to_string()), at);
             if crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(&step, None))?).await? {
                 self.read_scope_steps_now(scope).await?;
