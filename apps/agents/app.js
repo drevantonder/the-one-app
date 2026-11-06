@@ -1,25 +1,19 @@
 // AGENTS.md: the AGENTS.md and skills every agent harness on every device gets. They're records in the person's own
 // database, oldest first, each a revision; the newest of each says what's current. Its service (service/), on each
 // device it's switched on for, asks for them (_files) and writes them into each harness's folders there.
-//
-// Before, the node kept these records itself, sealed where a service holding no keys can't read them (`agents/sidecar`);
-// each person's node copies them here once, as they were, and says how many in `moved`. Until it has, this app waits.
 
 const SKILL = { description: "the skill's name, from agents_skills, like writing-for-agents", type: "string" };
 
-/// The person's records, oldest first, each { id, kind, data, time, by, device }, once their node has moved them here.
+/// The person's records, oldest first, each { id, kind, data, time, by, device }.
 async function records(ctx) {
   const db = ctx.user;
   if (!db) throw new Error("AGENTS.md is each person's own: this call reaches no one's");
-  const [moved] = await db.query("select records from moved");
-  if (!moved) throw new Error("AGENTS.md is moving to where it's kept now: one of your computers does it within a minute of updating, so ask again then.");
   const rows = await db.query("select n, kind, data, time, by, device from records order by n");
   return rows.map((r) => ({ id: String(r.n), kind: r.kind, data: JSON.parse(r.data), time: r.time, by: r.by, device: r.device }));
 }
 
-/// Keeps a revision: written once the call returns, and only while the records have moved here.
+/// Keeps a revision: written once the call returns.
 function keep(ctx, kind, data) {
-  ctx.user.check("select count(*) > 0 from moved", [], "AGENTS.md is moving to where it's kept now: ask again in a minute.");
   ctx.user.exec("insert into records (kind, data, time, by, device) values (?, ?, ?, ?, ?)", [kind, JSON.stringify(data), ctx.now(), ctx.me.user_name, ctx.me.name]);
 }
 
@@ -136,7 +130,8 @@ export default {
   schema: {
     user: [`
       create table records (n integer primary key, kind text not null, data text not null, time integer not null, by text not null, device text not null);
-      create table moved (records integer not null);`],
+      create table moved (records integer not null);`,
+      `drop table moved;`],
   },
 
   tools: {

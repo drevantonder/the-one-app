@@ -161,8 +161,8 @@ AGENTS.md too: the node hooks its machine's harnesses up itself (`src/harnesses.
 prompt hook, git's token for Repos, the built-in skills), on every device; AGENTS.md and the person's skills are
 records in the app's own database, which each person's node copied once from the sealed `agents/sidecar`
 (`Node::move_records`, checked by count and every record's contents), and its service asks its app for them
-(`_files`) and writes them. Left for phase 7's contract: `move_records` and the `sidecar` databases, once no device
-older than this runs.
+(`_files`) and writes them. `move_records` went once every node of both networks was past it (2026-11-06); the sealed
+`agents/sidecar` databases stay in the buckets, read by nothing.
 
 ### Phase 3: the Mac's Swift services become helper apps
 

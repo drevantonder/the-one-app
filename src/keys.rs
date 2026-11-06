@@ -314,11 +314,8 @@ const VAULT: &str = "vault";
 const LOG: &str = "log";
 /// The node's database of the blobs a scope's entries name (`bucket::BLOBS`).
 const BLOBS: &str = "blobs";
-/// An app's own databases: its data, and its services' records.
+/// An app's own database.
 const APP_DATABASE: &str = "main";
-// Named before services were called services: it holds sealed records (AGENTS.md's history among them), which only
-// clients could copy under a new name.
-const RECORDS_DATABASE: &str = "sidecar";
 
 /// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
 /// or its screens (`/v1/screens/<app>`). None for any other.
@@ -339,7 +336,7 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// never go with a request.
 pub fn may_hand(route: &str, need: &Need) -> bool {
     let node = |of: &[&str]| need.app == crate::members::APP && of.contains(&need.database.as_str());
-    let apps = need.app != crate::members::APP && [APP_DATABASE, RECORDS_DATABASE].contains(&need.database.as_str());
+    let apps = need.app != crate::members::APP && need.database == APP_DATABASE;
     let code = need.scope == "global" && node(&[BLOBS]);
     match (app_of(route), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,

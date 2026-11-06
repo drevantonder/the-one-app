@@ -99,9 +99,6 @@ const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
 /// What an app's own database is called: SQLite's name for a connection's first.
 const DATABASE: &str = "main";
-/// What the database is called where services built into nodes kept their records, under their app's name, until each
-/// person's node moved them into the app's own (`move_records`).
-const RECORDS_DATABASE: &str = "sidecar";
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -666,7 +663,6 @@ impl Node {
         });
         if node.has_install() {
             tokio::task::spawn_blocking(crate::harnesses::set_up);
-            node.move_records();
         }
         Ok(node)
     }
@@ -1209,7 +1205,6 @@ impl Node {
                 self.tidy_databases().await;
                 self.sweep_remote_puts();
                 tokio::task::spawn_blocking(crate::harnesses::set_up);
-                self.move_records();
             }
         }
     }
