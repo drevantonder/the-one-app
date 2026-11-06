@@ -219,11 +219,7 @@ pub fn routes() -> Routes {
         .route("/llms.txt", ThisMachine, get(llms))
         .route("/skills/{name}/{*path}", ThisMachine, get(skill_file))
         .route("/v1/state", SignedIn, get(state))
-        .route("/v1/endpoint", SignedIn, get(endpoint))
         .route("/v1/keys", SignedIn, get(keys_get).post(keys_post))
-        .route("/v1/apps", SignedIn, get(apps))
-        .route("/v1/labs", SignedIn, get(labs))
-        .route("/v1/images/{name}", Anyone, get(image))
         .route("/v1/call", SignedIn, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/create", ThisMachine, post(create))
         .route("/v1/join", ThisMachine, post(join))
@@ -231,15 +227,7 @@ pub fn routes() -> Routes {
         .route("/v1/settings", SignedIn, post(settings))
         .route("/v1/steps", SignedIn, post(steps))
         .route("/v1/steps/global", SignedIn, get(global_steps))
-        .route("/v1/app", ThisMachine, post(app))
-        .route("/v1/deploy", SignedIn, post(deploy))
-        .route("/v1/install", SignedIn, post(install))
-        .route("/v1/schedule", ThisMachine, post(schedule))
-        .route("/v1/arrange", SignedIn, post(arrange))
-        .route("/v1/retire", SignedIn, post(retire))
         .route("/v1/service", SignedIn, post(service))
-        .route("/v1/fork", ThisMachine, post(fork))
-        .route("/v1/source/{app}", ThisMachine, get(source))
         .route("/v1/node-release", ThisMachine, post(release))
         .route("/v1/service-release", ThisMachine, post(service_release))
         .route("/v1/blobs", SignedIn, post(put_blob))
@@ -260,6 +248,7 @@ pub fn routes() -> Routes {
         .merge(crate::node::devices::routes::routes())
         .merge(crate::node::groups::routes::routes())
         .merge(crate::node::widgets::routes::routes())
+        .merge(crate::node::apps::routes::routes())
 }
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.
@@ -661,10 +650,6 @@ pub(crate) fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
 }
 
 
-/// This device as an endpoint, `{ key, seal }` (hex): what a caller seals the keys it hands a call to (`x-one-keys`).
-async fn endpoint(State(node): State<Node>) -> Json<Value> {
-    Json(json!(node.endpoint()))
-}
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
 async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
@@ -688,33 +673,9 @@ async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>)
     })
 }
 
-#[derive(Deserialize)]
-struct AppsQuery {
-    /// As a window draws them (`Node::apps_drawn`).
-    light: Option<bool>,
-}
 
-async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Query(q): Query<AppsQuery>) -> Result<Response, Error> {
-    let apps = if q.light == Some(true) { node.apps_drawn(&me.caller).await? } else { node.apps(&me.caller).await? };
-    let body = serde_json::to_string(&apps)?;
-    let tag = crate::screen::tag(&body);
-    Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
-}
 
-/// Every lab, for an admin's Settings › Labs (`Node::labs`).
-async fn labs(State(node): State<Node>, me: Me) -> Reply {
-    Ok(Json(json!(node.labs(&me.caller).await?)))
-}
 
-/// A picture a window's app list names (`Node::apps_drawn`), for anyone who has its name, which is its content's:
-/// kept for good, since it can't change.
-async fn image(State(node): State<Node>, Path(name): Path<String>) -> Response {
-    let found = if name.len() == 32 && name.bytes().all(|b| b.is_ascii_hexdigit()) { node.named_image(&name).await } else { None };
-    match found {
-        Some((kind, bytes)) => ([(axum::http::header::CONTENT_TYPE, kind), (axum::http::header::CACHE_CONTROL, "public, max-age=31536000, immutable".into())], bytes).into_response(),
-        None => (StatusCode::NOT_FOUND, [(axum::http::header::CACHE_CONTROL, "no-store")]).into_response(),
-    }
-}
 
 /// `{ name, device?, installed? }`: removes a service from a device (this one by default, for this machine's own
 /// programs), or with `installed` lets it register there again.
@@ -724,25 +685,9 @@ async fn service(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
     done()
 }
 
-/// `{ app, how }`: deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`).
-async fn retire(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.retire(&me.caller, text(&body, "app")?, text(&body, "how")?).await?;
-    done()
-}
-
-/// `{ page, items, hidden, pages }`: how the local user arranges one of their pages (`pages` with their own: the order
-/// of their groups' pages, `{ order, hidden }`).
-async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.arrange(&me.caller, text(&body, "page")?, body["items"].clone(), body["hidden"].clone(), body["pages"].clone()).await?;
-    done()
-}
 
 
-async fn schedule(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let scope = node.scope_for(&me.caller, body["scope"].as_str().unwrap_or("user"))?;
-    node.switch_schedule(&me.caller, text(&body, "app")?, text(&body, "schedule")?, &scope, body["on"] != false).await?;
-    done()
-}
+
 
 /// What a client that picks the node it asks itself says with each request (client/src/lib.rs): a call this node can't
 /// run is answered 421 with the nodes that can (`node::Elsewhere`), not passed on.
@@ -847,72 +792,11 @@ async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q):
 
 
 
-/// `{ name, owner, from? }`: `owner` is `user:<id>`, `group:<id>`, `admins`, or a group's name.
-async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let owner = text(&body, "owner")?;
-    let owner = match crate::database::scopes::Principal::parse(owner) {
-        Ok(p) => p.to_string(),
-        Err(_) => format!("group:{}", node.find_group(owner)?),
-    };
-    let mut data = json!({ "name": text(&body, "name")?, "owner": owner });
-    if let Some(from) = body["from"].as_str() {
-        data["from"] = json!(from);
-    }
-    node.member("app", data).await?;
-    done()
-}
 
-/// `{ app, bundle, owner?, wait? }`, or `{ app, files, … }` (each file's path → its text, built here as `one deploy`
-/// builds a folder): deploys it, making the app first if there's none by that name, owned by `owner` (as for
-/// `/v1/app`) or the caller. → what `Node::deploy_making` says.
-async fn deploy(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let bundle = match body["files"].as_object() {
-        Some(files) => {
-            let files = crate::app::deploy::given(files)?;
-            // Built only where the deploy was asked, by its runtime: never on a node for someone elsewhere.
-            if let Some((screen, _)) = files.iter().find(|(p, _)| crate::app::deploy::has_screens([p.as_str()])) {
-                return Err(anyhow::anyhow!("{screen} is a React screen, built on the machine that deploys it with Bun or Node: deploy it from there, with {cli} deploy <folder> or {cli} mcp's deploy tool", cli = crate::config::CLI).into());
-            }
-            let built = tokio::task::spawn_blocking(move || crate::app::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>()));
-            node.put_blob_for(&me.caller, &built.await.map_err(anyhow::Error::from)??)?
-        }
-        None => text(&body, "bundle")?.to_string(),
-    };
-    let owner = match body["owner"].as_str() {
-        Some(o) => Some(crate::database::scopes::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
-        None => None,
-    };
-    Ok(Json(node.deploy_making(&me.caller, text(&body, "app")?, &bundle, owner.as_deref(), body["wait"] == true).await?))
-}
 
-#[derive(Deserialize)]
-struct SourceQuery {
-    bundle: Option<String>,
-    path: Option<String>,
-}
 
-/// An app's deployed code: its files, or with `path` one of them; with `bundle`, an earlier deploy's.
-async fn source(State(node): State<Node>, Path(app): Path<String>, Query(q): Query<SourceQuery>) -> Reply {
-    Ok(Json(node.source(&app, q.bundle.as_deref(), q.path.as_deref()).await?))
-}
 
-/// `{ app, scope, installed, node }`: `scope` is `user`, `group:<id>` (or a group's name) or `global`; `node`, the
-/// device (by name, or `cloudflare`) that runs its services. Installing an app also installs the apps it uses.
-async fn install(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let scope = node.scope_for(&me.caller, text(&body, "scope")?)?;
-    node.install(&me.caller, text(&body, "app")?, &scope, body["installed"] != false, body["node"].as_str()).await?;
-    done()
-}
 
-/// `{ app, name, owner? }`: a new app called `name`, from `app`, with data of its own. `owner` as for `/v1/app`.
-async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let owner = match body["owner"].as_str() {
-        Some(o) => Some(crate::database::scopes::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
-        None => None,
-    };
-    node.fork(&local(&node)?, text(&body, "app")?, text(&body, "name")?, owner.as_deref()).await?;
-    done()
-}
 
 /// For agent harnesses' prompt hooks: the body is the hook's JSON, the reply is plain text to show the agent.
 async fn prompt(State(node): State<Node>, body: String) -> Response {
@@ -1047,7 +931,7 @@ fn page(headers: &axum::http::HeaderMap, html: String) -> Response {
 }
 
 /// An answer named by its content (`tag`, its ETag): to a client that has it already, only that.
-fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl IntoResponse) -> Response {
+pub(crate) fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl IntoResponse) -> Response {
     if headers.get(axum::http::header::IF_NONE_MATCH).is_some_and(|had| had.as_bytes() == tag.as_bytes()) {
         return (StatusCode::NOT_MODIFIED, [(axum::http::header::ETAG, tag)]).into_response();
     }
@@ -1089,7 +973,6 @@ mod tests {
             ("/llms.txt", ThisMachine),
             ("/skills/{name}/{*path}", ThisMachine),
             ("/v1/state", SignedIn),
-            ("/v1/endpoint", SignedIn),
             ("/v1/keys", SignedIn),
             ("/v1/apps", SignedIn),
             ("/v1/labs", SignedIn),
@@ -1119,7 +1002,6 @@ mod tests {
             ("/v1/accept", SignedIn),
             ("/v1/handle", SignedIn),
             ("/v1/member", SignedIn),
-            ("/v1/app", ThisMachine),
             ("/v1/deploy", SignedIn),
             ("/v1/install", SignedIn),
             ("/v1/schedule", ThisMachine),

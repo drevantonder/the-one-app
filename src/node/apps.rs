@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(crate) mod routes;
+
 impl Node {
     /// What people call `app`, for what they read: its title, or its service's, else its name.
     pub(super) async fn title(&self, app: &str) -> String {

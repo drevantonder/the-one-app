@@ -29,7 +29,7 @@ use crate::release::{self, Release};
 use crate::schedules::{self, Schedule};
 use crate::replica::{Handled, Replica};
 
-mod apps;
+pub(crate) mod apps;
 pub mod backups;
 mod blobs;
 mod calls;
