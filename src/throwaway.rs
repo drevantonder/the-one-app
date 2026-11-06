@@ -87,7 +87,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     };
     match rest.first().map(String::as_str) {
         Some("stop") => {
-            give_back(&dir);
+            give_back(&dir, &checkout);
             stop(&dir, true)?;
             println!("Stopped and deleted this checkout's throwaway network, and gave back its devices. {CLI} throwaway starts a new one.");
             return Ok(());
@@ -662,12 +662,33 @@ fn on_device(device: &str, command: &str) -> Result<String> {
     Ok(out.as_str().map(str::to_string).unwrap_or_else(|| out.to_string()))
 }
 
-/// Gives back every device borrowed for the throwaway network.
-fn give_back(dir: &Path) {
-    for (kind, device) in devices(dir) {
-        if let Some(device) = device.as_str()
-            && let Err(err) = agent_devices("give_back", json!({ "device": device }))
+/// The agent devices on this machine's network's devices, each with who borrowed it and what for (Computer's own list
+/// leaves that out).
+fn listed_devices() -> Value {
+    agent_devices("_list", json!({})).map(|l| l["devices"].clone()).unwrap_or_default()
+}
+
+/// What a device borrowed for this checkout's throwaway network says it's for: `one throwaway client <kind>, for <checkout>`.
+fn borrowed_for(checkout: &Path, kind: &str) -> String {
+    format!("one throwaway client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+}
+
+/// Gives back every device borrowed for the throwaway network: those devices.json names, and any Agent Devices lists as
+/// borrowed for this checkout (what the file lost, or never got because the node restarted as it was lent).
+fn give_back(dir: &Path, checkout: &Path) {
+    let mut all: Vec<(String, String)> = devices(dir).into_iter().filter_map(|(kind, d)| Some((kind, d.as_str()?.to_string()))).collect();
+    let ours = format!(", for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    for d in listed_devices().as_array().into_iter().flatten() {
+        if let (Some(name), Some(what)) = (d["name"].as_str(), d["borrowed"]["for"].as_str())
+            && what.starts_with("one throwaway client ")
+            && what.ends_with(&ours)
+            && !all.iter().any(|(_, n)| n == name)
         {
+            all.push((what["one throwaway client ".len()..what.len() - ours.len()].to_string(), name.to_string()));
+        }
+    }
+    for (kind, device) in all {
+        if let Err(err) = agent_devices("give_back", json!({ "device": device })) {
             eprintln!("Couldn't give back the {kind} device {device}: {err:#}");
         }
     }
@@ -946,8 +967,8 @@ fn browser(dir: &Path, settings: &one::cloudflare::Settings, person: Option<&str
 /// which reaches the throwaway network's address at the same address; this checkout's build installed there, and signed in.
 fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, kind: &str, person: Option<&str>) -> Result<()> {
     let mut borrowed = devices(dir);
-    let what = format!("one throwaway client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-    let listed = || again(|| post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one throwaway" }))).map(|l| l["ok"]["devices"].clone()).unwrap_or_default();
+    let what = borrowed_for(checkout, kind);
+    let listed = listed_devices;
     // A copy borrowed for this checkout's throwaway network that it lost track of (the node restarted as it was lent) is
     // taken, not left beside a second one.
     let ours = |listed: &Value| listed.as_array().into_iter().flatten().find(|d| d["borrowed"]["for"] == what.as_str()).and_then(|d| d["name"].as_str()).map(String::from);
