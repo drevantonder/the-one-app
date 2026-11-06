@@ -171,6 +171,10 @@ function setCookie(env, name, value, seconds) {
 export class Auth extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    /// Only a test binds `TEST` (tests/cloudflare.rs on the Workers it serves itself; a network's bindings come from its
+    /// settings, which hold none): the wait for "wants in" is judged by a clock a day behind, which `POST /api/auth/test`
+    /// moves on, so it passes when a test says and not by itself.
+    this.skew = env.TEST ? -86_400_000 : 0;
     const sql = ctx.storage.sql;
     // Invites, by their secret's hash, and `by`, the endpoint that made one; kept once used, for the requests of the
     // device its person joined with.
@@ -362,6 +366,11 @@ export class Auth extends DurableObject {
   async route(request, url) {
     const path = url.pathname;
     const method = request.method;
+    if (path === "/api/auth/test" && method === "POST" && this.env.TEST) {
+      this.skew += (await request.json()).advance;
+      await this.alarm();
+      return json({});
+    }
     if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
     if (path === "/api/auth/people/admin" && method === "POST") return json(await this.setAdmin(request));
     if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
@@ -583,7 +592,7 @@ export class Auth extends DurableObject {
   async alarm() {
     this.expire();
     const sql = this.ctx.storage.sql;
-    const due = Date.now() - WANTS_IN;
+    const due = Date.now() + this.skew - WANTS_IN;
     for (const r of sql.exec("select * from requests where approved is null and told is null and made <= ?", due).toArray()) {
       sql.exec("update requests set told = ? where key = ?", Date.now(), r.key);
       if (sql.exec("select 1 from refused where key = ?", r.key).toArray().length) continue;

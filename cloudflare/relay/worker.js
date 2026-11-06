@@ -126,6 +126,7 @@ export default class extends WorkerEntrypoint {
     if (url.pathname === "/relay/computes") return this.ask(request, "computes");
     if (url.pathname === "/relay/seen") return this.ask(request, "seen");
     if (url.pathname === "/relay") return this.relay().fetch(request);
+    if (url.pathname === "/relay/test" && this.env.TEST) return Response.json(await this.relay().testing(await request.json()));
     return refuse(404, "not the relay's");
   }
 
@@ -258,6 +259,48 @@ export class Relay extends DurableObject {
     for (const b of this.sql.exec("SELECT key, name, until, ticket FROM bound WHERE until > ?", Date.now()).toArray()) this.bound.set(b.key, { name: b.name, until: b.until, ticket: b.ticket });
     /// When each sender was last told an endpoint isn't here, `<from> <to>` → ms; lost on hibernation, which is fine.
     this.told = new Map();
+    /// Only a test binds `TEST` (tests/cloudflare.rs on the Workers it serves itself; a network's bindings come from its
+    /// settings, which hold none): its clock, moved by `testing`, so what ends with time ends without waiting; and a
+    /// log of what the relay refused and ended, which a test waits on instead of timing out on what never happens.
+    this.skew = 0;
+    this.log = [];
+    this.waiting = [];
+  }
+
+  /// The time expiries are judged by.
+  now() {
+    return Date.now() + this.skew;
+  }
+
+  /// What the relay did to `key`: `"denied"` at its socket's proof, `"ended"` once let in, or `"forbidden"` as it sent
+  /// to a device its pairing code doesn't reach.
+  note(key, what) {
+    if (!this.env.TEST) return;
+    this.log.push([key, what]);
+    const heard = this.waiting.filter((w) => w.key === key && w.what === what && this.count(key, what) > w.after);
+    this.waiting = this.waiting.filter((w) => !heard.includes(w));
+    for (const w of heard) w.resolve();
+  }
+
+  count(key, what) {
+    return this.log.filter(([k, w]) => k === key && w === what).length;
+  }
+
+  /// A test's way in (`/relay/test`): `{ advance: ms }` moves the clock on and ends what it ended; `{ count: [key, what] }`
+  /// is how often `note` said it; `{ wait: [key, what, after] }` answers once it has said it more than `after` times;
+  /// `{ connected: [key] }` is which of those are connected.
+  async testing(told) {
+    if (told.advance !== undefined) {
+      this.skew += told.advance;
+      await this.alarm();
+    }
+    if (told.count) return this.count(...told.count);
+    if (told.connected) return this.connected(told.connected);
+    if (told.wait) {
+      const [key, what, after] = told.wait;
+      if (this.count(key, what) <= after) await new Promise((resolve) => this.waiting.push({ key, what, after, resolve }));
+    }
+    return null;
   }
 
   key(key) {
@@ -325,7 +368,7 @@ export class Relay extends DurableObject {
     // decided once the key is proved, here if the certificate comes with its endpoint's proof.
     const ticket = token(request, url);
     const joining = isKey(ticket) ? hex.encode(await sha256(ticket)) : null;
-    if (joining && !(this.pairing(joining)?.until > now)) return refuse(403, "that pairing code has expired");
+    if (joining && !(this.pairing(joining)?.until > this.now())) return refuse(403, "that pairing code has expired");
     let session = null;
     let proved = false;
     if (ticket && !joining) {
@@ -378,7 +421,7 @@ export class Relay extends DurableObject {
     const said = ws.deserializeAttachment();
     if (said?.challenge) return this.prove(ws, said, bytes);
     if (!said?.id) return;
-    const now = Date.now();
+    const now = this.now();
     // A pairing code's computer, until it's added: only while its code works, and only to the device that made it. A
     // session's endpoint, only until its certificate's `until`.
     if (said.pairing && now > said.until) return this.end(said.id, "its pairing code expired");
@@ -392,7 +435,7 @@ export class Relay extends DurableObject {
     if (out[0] === 1) return ws.send(out.subarray(1));
     if (out[0] !== 0) return;
     const to = hex.encode(out.subarray(1, 33));
-    if (said.pairing && to !== said.to) return;
+    if (said.pairing && to !== said.to) return this.note(said.id, "forbidden");
     if (to === this.env.BOUND && this.env.NODE) return this.toNode(said.id, bytes);
     const client = this.boundTo(to);
     if (client) return this.toClient(to, client, said.id, bytes);
@@ -547,18 +590,19 @@ export class Relay extends DurableObject {
     let attachment = id && this.key(id) ? { id } : null;
     // A session's endpoint: the key its certificate names, signed by a client's key on the list. Checked here, not when
     // it connects, so that tells no one who's on the list either.
-    if (id && !attachment && said.session?.endpoint === id && is(this.key(said.session.by), "client") && said.session.until > Date.now()) {
+    if (id && !attachment && said.session?.endpoint === id && is(this.key(said.session.by), "client") && said.session.until > this.now()) {
       attachment = { id, by: said.session.by, until: said.session.until };
     }
     if (id && !attachment && said.joining) {
       const pairing = this.pairing(said.joining);
-      if (pairing && pairing.until > Date.now() && [null, id].includes(pairing.key)) {
+      if (pairing && pairing.until > this.now() && [null, id].includes(pairing.key)) {
         // A pairing code lets in one computer: this one, again if it reconnects, until it expires or it's added.
         this.sql.exec("UPDATE pairings SET key = ? WHERE hash = ?", id, pairing.hash);
         attachment = { id, pairing: pairing.hash, until: pairing.until, to: pairing.by };
       }
     }
     if (!attachment) {
+      this.note(id, "denied");
       ws.serializeAttachment({});
       ws.send(deny(`the relay takes only ${this.env.YOURS}'s devices`));
       return ws.close(1008, "not allowed");
@@ -606,6 +650,7 @@ export class Relay extends DurableObject {
     const ws = this.sockets.get(key);
     this.sockets.delete(key);
     if (!ws) return;
+    this.note(key, "ended");
     ws.serializeAttachment({});
     try {
       ws.close(1008, why);
@@ -620,7 +665,7 @@ export class Relay extends DurableObject {
   }
 
   async alarm() {
-    const now = Date.now();
+    const now = this.now();
     let next = null;
     for (const ws of this.ctx.getWebSockets()) {
       const said = ws.deserializeAttachment();

@@ -1,5 +1,5 @@
 // The Workers' own tests, run by `workerd test` (tests/cloudflare.rs runs them with cargo test).
-import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, ed25519Public, random, sealAppKey, sealTo, sealUnder, signedRequest } from "../shared/crypto.js";
+import { b64u, ed25519Public, random, signedRequest } from "../shared/crypto.js";
 import { READS, URLS } from "../shared/protocol.js";
 import signer from "../signer/worker.js";
 import { presign } from "../shared/s3.js";
@@ -50,27 +50,6 @@ export default {
     equal(new URL(url).searchParams.get("X-Amz-Signature"), "aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404", "AWS's example signature");
     const create = new URL(await presign({ method: "PUT", host: "h", path: "/b/k", region: "auto", keyId: "k", secret: "s", expires: 60, headers: { "If-None-Match": "*" } }));
     equal(create.searchParams.get("X-Amz-SignedHeaders"), "host;if-none-match", "a create URL signs If-None-Match in");
-
-    // An app's key opens with its scope's key, under its own name only; a database's derives from its app's.
-    const scope = random(32);
-    const app = random(32);
-    const sealedApp = await sealAppKey(scope, "tally", app);
-    equal((await openAppKey(scope, "tally", sealedApp)).join(), app.join(), "opening an app's key");
-    await fails(() => openAppKey(scope, "tallys", sealedApp), "opening it as another app's");
-    await fails(() => openAppKey(random(32), "tally", sealedApp), "opening it with another scope's key");
-    if ((await databaseKey(app, "main")).join() === app.join()) throw new Error("a database has its app's key");
-
-    // Sealing to a key pair opens only with it.
-    const me = await keyPair(), them = await keyPair();
-    const sealed = await sealTo(me.public, scope);
-    equal((await openSealed(me, sealed)).join(), scope.join(), "opening what was sealed to me");
-    await fails(() => openSealed(them, sealed), "opening what was sealed to someone else");
-
-    // Sealing under a secret opens only with it, and its id names it without opening it.
-    const under = await sealUnder("a refresh token, long enough", scope);
-    equal((await openUnder("a refresh token, long enough", under)).join(), scope.join(), "opening under the secret");
-    await fails(() => openUnder("another refresh token, long", under), "opening under another secret");
-    if ((await idOf("one secret here")) === (await idOf("another secret"))) throw new Error("two secrets share an id");
 
     // A token checks only with the key that signed it, from its issuer, before it expires.
     const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);

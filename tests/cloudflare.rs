@@ -56,17 +56,6 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
 }
 
-/// How long what's meant to end has to be let in or used first, before the test waits for it to end: seconds on a
-/// machine that's busy, which a quiet one doesn't use.
-const LASTS: u64 = 4_000;
-
-/// Waits until `ms` (a time as `now` gives it) has passed, as the ending of what lasted until then is seen after it.
-async fn past(ms: u64) {
-    while now() <= ms + 250 {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-}
-
 /// A workerd running the Workers, stopped when dropped.
 struct Running {
     child: std::process::Child,
@@ -246,6 +235,8 @@ pub(crate) struct Workers {
     pub(crate) address: String,
     /// The stand-in sites the Workers' requests go to (test/sites.js).
     pub(crate) sites: String,
+    /// Where the relay answers a test alone, which no gateway passes on.
+    relay_test: String,
 }
 
 impl Workers {
@@ -277,13 +268,32 @@ impl Workers {
         for s in served.iter_mut().filter(|s| ["signer", "mcp", "push"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());
         }
+        // `TEST` gives sign-in and the relay a clock a test moves and the relay a log of what it refused: a network's
+        // bindings come from its settings, so no deployed one has it.
+        for s in served.iter_mut().filter(|s| ["auth", "relay"].contains(&s.name.as_str())) {
+            s.bindings.push(("TEST".into(), "1".into()));
+        }
+        let relay_test = port();
+        served.iter_mut().find(|s| s.name == "relay").unwrap().listen = Some(format!("127.0.0.1:{relay_test}"));
         if google {
-            served[0].outbound = Some("sites".into());
-            served[0].bindings.extend([("SIGN_IN", "google"), ("JOIN_DOMAIN", "test.example"), ("GOOGLE_CLIENT_ID", "a client id"), ("GOOGLE_CLIENT_SECRET", "a client secret")].map(|(n, v)| (n.into(), v.into())));
+            let sign_in = served.iter_mut().find(|s| s.name == "auth").unwrap();
+            sign_in.outbound = Some("sites".into());
+            sign_in.bindings.extend([("SIGN_IN", "google"), ("JOIN_DOMAIN", "test.example"), ("GOOGLE_CLIENT_ID", "a client id"), ("GOOGLE_CLIENT_SECRET", "a client secret")].map(|(n, v)| (n.into(), v.into())));
         }
         served.push(Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
-        Workers { _running: running, address: settings.address, sites: format!("http://127.0.0.1:{sites}") }
+        Workers { _running: running, address: settings.address, sites: format!("http://127.0.0.1:{sites}"), relay_test: format!("http://127.0.0.1:{relay_test}") }
+    }
+
+    /// Moves on the time sign-in judges how long a request has waited by (a day behind until then), so its person is
+    /// pushed "wants in" now.
+    fn wait_for_a_device_to_let_it_in(&self) {
+        assert_eq!(post(&format!("{}/api/auth/test", self.address), &[], json!({ "advance": 2 * 86_400_000 })).0, 200);
+    }
+
+    /// The gateway's address, as endpoints reach it.
+    fn relay_address(&self) -> String {
+        self.address.replace("localhost", "127.0.0.1")
     }
 
     fn browser(&self) -> Browser {
@@ -602,7 +612,7 @@ fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
     let mac = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     ask(&mut andre, &mac);
     assert!(pushed(Subscription::new()).is_empty(), "not before nothing let it in");
-    std::thread::sleep(std::time::Duration::from_secs(12));
+    k.wait_for_a_device_to_let_it_in();
     let [notes, to_old]: [Vec<one::push::Note>; 2] = pushed_to(vec![(endpoint, sub, &phone), (old_endpoint, old_sub, &old)]).try_into().unwrap();
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(to_old.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), ["MacBook Pro wants in"], "the Mac that only registered is pushed too");
@@ -647,49 +657,89 @@ mod relay {
     /// How long a device may take to be let in, or to reach another through the relay: a limit only for what never
     /// happens, as a busy machine takes seconds for what a quiet one takes milliseconds.
     const LET_IN: Duration = Duration::from_secs(60);
-    /// How long to wait to be sure of a refusal. A key the relay won't take never comes online, so there's nothing to
-    /// wait for: this can only pass too soon on a busy machine, never fail, and each such key is let in at once by the
-    /// positive checks beside it.
-    const REFUSED: Duration = Duration::from_secs(2);
-
-    async fn enter(address: &str, key: &SecretKey, ticket: Option<&str>, within: Duration) -> Option<Endpoint> {
-        let ep = endpoint(address, key, ticket).await;
-        match tokio::time::timeout(within, ep.online()).await {
-            Ok(()) => Some(ep),
-            Err(_) => {
-                ep.close().await;
-                None
-            }
-        }
-    }
 
     /// `key`, let in by the relay, as iroh sees it.
     async fn online(address: &str, key: &SecretKey, ticket: Option<&str>) -> Option<Endpoint> {
-        enter(address, key, ticket, LET_IN).await
+        let ep = endpoint(address, key, ticket).await;
+        if tokio::time::timeout(LET_IN, ep.online()).await.is_ok() {
+            return Some(ep);
+        }
+        ep.close().await;
+        None
     }
 
-    /// Whether the relay refuses `key`.
-    async fn shut_out(address: &str, key: &SecretKey, ticket: Option<&str>) -> bool {
-        match enter(address, key, ticket, REFUSED).await {
-            Some(ep) => {
-                ep.close().await;
-                false
-            }
-            None => true,
+    /// What the relay's test hooks (its `TEST` binding) say: see `Relay.testing`. A wait for what the relay will say
+    /// is bounded by `LET_IN`, as it's for what happens.
+    async fn testing(k: &super::Workers, told: Value) -> Value {
+        let url = format!("{}/relay/test", k.relay_test);
+        tokio::task::spawn_blocking(move || {
+            let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(LET_IN)).build().into();
+            agent.post(&url).send_json(told).unwrap().body_mut().read_json().unwrap()
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn said(k: &super::Workers, key: &str, what: &str) -> u64 {
+        testing(k, json!({ "count": [key, what] })).await.as_u64().unwrap()
+    }
+
+    /// The relay says `what` of `key` once more than `after` times: a wait for what it does, which a refusal is, not
+    /// for what it doesn't.
+    async fn says(k: &super::Workers, key: &str, what: &str, after: u64) {
+        testing(k, json!({ "wait": [key, what, after] })).await;
+    }
+
+    fn id_of(ep: &Endpoint) -> String {
+        data_encoding::HEXLOWER.encode(ep.id().as_bytes())
+    }
+
+    /// Whether the relay denies `key` at its proof, as it says it does; an endpoint it let in would be online first.
+    async fn shut_out(k: &super::Workers, key: &SecretKey, ticket: Option<&str>) -> bool {
+        let (address, id) = (k.relay_address(), hex(key));
+        let before = said(k, &id, "denied").await;
+        let ep = endpoint(&address, key, ticket).await;
+        let denied = tokio::select! {
+            () = ep.online() => false,
+            () = says(k, &id, "denied", before) => true,
+        };
+        ep.close().await;
+        denied
+    }
+
+    /// The status the relay answers a socket that shows `ticket` with, before it asks for any proof.
+    fn upgrade_status(address: &str, ticket: &str) -> u16 {
+        use std::io::{Read, Write};
+        let host = address.trim_start_matches("http://");
+        let mut tcp = std::net::TcpStream::connect(host).unwrap();
+        tcp.set_read_timeout(Some(LET_IN)).unwrap();
+        write!(tcp, "GET /relay?token={ticket} HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nsec-websocket-protocol: iroh-relay-v2\r\n\r\n").unwrap();
+        let mut got = [0u8; 12];
+        tcp.read_exact(&mut got).unwrap();
+        String::from_utf8_lossy(&got[9..12]).parse().unwrap()
+    }
+
+    /// Whether the relay has no socket of `ep`'s: taken out, or ended.
+    async fn cut_off(k: &super::Workers, ep: &Endpoint) -> bool {
+        testing(k, json!({ "connected": [id_of(ep)] })).await == json!([])
+    }
+
+    /// Whether the relay refuses what `from` sends to `to`, as it says it does, not carrying it.
+    async fn forbidden(k: &super::Workers, from: &Endpoint, to: &Endpoint) -> bool {
+        let (address, id) = (k.relay_address(), id_of(from));
+        let before = said(k, &id, "forbidden").await;
+        tokio::select! {
+            _ = carries(&address, from, to) => false,
+            () = says(k, &id, "forbidden", before) => true,
         }
     }
 
     /// `from` reaches `to` through the relay: a stream that `to` echoes back, whole.
     async fn reaches(address: &str, from: &Endpoint, to: &Endpoint) -> bool {
-        carries(address, from, to, LET_IN).await
+        tokio::time::timeout(LET_IN, carries(address, from, to)).await.unwrap_or(false)
     }
 
-    /// Whether the relay carries nothing from `from` to `to`.
-    async fn cut_off(address: &str, from: &Endpoint, to: &Endpoint) -> bool {
-        !carries(address, from, to, REFUSED).await
-    }
-
-    async fn carries(address: &str, from: &Endpoint, to: &Endpoint, within: Duration) -> bool {
+    async fn carries(address: &str, from: &Endpoint, to: &Endpoint) -> bool {
         let serving = to.clone();
         let server = tokio::spawn(async move {
             let conn = serving.accept().await?.await.ok()?;
@@ -702,7 +752,7 @@ mod relay {
         });
         let said = vec![7u8; 100_000];
         let at = EndpointAddr::new(to.id()).with_relay_url(address.parse().unwrap());
-        let echoed = tokio::time::timeout(within, async {
+        let echoed = async {
             let conn = from.connect(at, ALPN).await.ok()?;
             let (mut send, mut recv) = conn.open_bi().await.ok()?;
             send.write_all(&said).await.ok()?;
@@ -710,15 +760,15 @@ mod relay {
             let got = recv.read_to_end(1 << 20).await.ok()?;
             conn.close(0u32.into(), b"done");
             Some(got)
-        })
+        }
         .await;
         server.abort();
         match echoed {
-            Ok(Some(got)) => {
+            Some(got) => {
                 assert_eq!(got, said, "the relay changed what it carried");
                 true
             }
-            _ => false,
+            None => false,
         }
     }
 
@@ -813,7 +863,7 @@ mod relay {
             // The network's first device is on the list, an admin's, and a stranger isn't.
             let a = online(&address, &first, None).await.expect("the network's first device isn't let in");
             let stranger = SecretKey::generate();
-            assert!(shut_out(&address, &stranger, None).await, "a stranger's key reached the relay");
+            assert!(shut_out(&k, &stranger, None).await, "a stranger's key reached the relay");
 
             // A device it adds is let in, and the two reach each other through it.
             let phone = SecretKey::generate();
@@ -838,7 +888,7 @@ mod relay {
             let big = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&phone), "role": "client", "pad": "x".repeat(5000) }), at());
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], big).0, 403, "a big tell was read");
             assert_eq!(tell(&address, &stranger, json!({ "remove": hex(&stranger) })), 204);
-            assert!(shut_out(&address, &stranger, None).await, "a key taken out reached the relay");
+            assert!(shut_out(&k, &stranger, None).await, "a key taken out reached the relay");
 
             // A client adds only clients: a compute or a service only an admin's device or a compute adds, and a key's
             // role, once it's in, only an admin's changes.
@@ -862,30 +912,21 @@ mod relay {
             assert_eq!(tell(&address, &first, json!({ "pairing": { "hash": sha256(&code), "until": super::now() + 600_000 } })), 204);
             let joining = SecretKey::generate();
             let c = online(&address, &joining, Some(&code)).await.expect("a pairing code's computer isn't let in");
-            assert!(shut_out(&address, &SecretKey::generate(), Some(&code)).await, "a pairing code let in a second computer");
+            assert!(shut_out(&k, &SecretKey::generate(), Some(&code)).await, "a pairing code let in a second computer");
             assert!(reaches(&address, &c, &a).await, "a pairing code's computer doesn't reach the device that made it");
-            assert!(cut_off(&address, &c, &b).await, "a pairing code's computer reached another device");
+            assert!(forbidden(&k, &c, &b).await, "a pairing code's computer reached another device");
             // Ended, its computer is out.
             assert_eq!(tell(&address, &phone, json!({ "unpair": sha256(&code) })), 403, "a device ended another's pairing code");
             assert_eq!(tell(&address, &first, json!({ "unpair": sha256(&code) })), 204);
-            assert!(cut_off(&address, &c, &a).await, "an ended pairing code's computer still reached the relay");
+            assert!(cut_off(&k, &c).await, "an ended pairing code's computer still reached the relay");
             c.close().await;
-            assert!(shut_out(&address, &joining, Some(&code)).await, "an ended pairing code let its computer in again");
-            // Expired, too, while it's connected.
-            let code = ticket();
-            let until = super::now() + super::LASTS;
-            assert_eq!(tell(&address, &first, json!({ "pairing": { "hash": sha256(&code), "until": until } })), 204);
-            let d = online(&address, &SecretKey::generate(), Some(&code)).await.expect("a pairing code's computer isn't let in");
-            super::past(until).await;
-            assert!(cut_off(&address, &d, &a).await, "an expired pairing code's computer still reached the relay");
-            d.close().await;
-
+            assert_eq!(upgrade_status(&address, &code), 403, "an ended pairing code let its computer in again");
             // Taking a device out takes out the devices it let in.
             let laptop = SecretKey::generate();
             assert_eq!(tell(&address, &phone, json!({ "add": hex(&laptop), "role": "client" })), 204);
             assert_eq!(tell(&address, &first, json!({ "remove": hex(&phone) })), 204);
-            assert!(shut_out(&address, &laptop, None).await, "a key a removed device let in still reached the relay");
-            assert!(cut_off(&address, &b, &a).await, "a removed device's socket still reached the relay");
+            assert!(shut_out(&k, &laptop, None).await, "a key a removed device let in still reached the relay");
+            assert!(cut_off(&k, &b).await, "a removed device's socket still reached the relay");
             for ep in [a, b] {
                 ep.close().await;
             }
@@ -896,6 +937,40 @@ mod relay {
         assert_eq!((ping.status().as_u16(), ping.headers().get("access-control-allow-origin").map(|v| v.to_str().unwrap())), (200, Some("*")));
         let portal = agent.get(format!("{address}/generate_204")).header("x-iroh-challenge", "abc_1.2").call().unwrap();
         assert_eq!((portal.status().as_u16(), portal.headers().get("x-iroh-response").map(|v| v.to_str().unwrap())), (204, Some("response abc_1.2")));
+    }
+
+    /// A pairing code's computer and a session's endpoint, let in, are cut off as their code and certificate end, and
+    /// don't get in again: the relay's clock is moved on (`TEST`), not waited for.
+    #[test]
+    fn what_ends_with_time_cuts_its_endpoint_off() {
+        let (first, phone) = (SecretKey::generate(), SecretKey::generate());
+        let k = super::Workers::for_devices(vec![hex(&first)]);
+        let address = k.address.replace("localhost", "127.0.0.1");
+        let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
+        assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let a = online(&address, &first, None).await.expect("the network's first device isn't let in");
+            let code = ticket();
+            let lasts = super::now() + 600_000;
+            assert_eq!(tell(&address, &first, json!({ "pairing": { "hash": sha256(&code), "until": lasts } })), 204);
+            let d = online(&address, &SecretKey::generate(), Some(&code)).await.expect("a pairing code's computer isn't let in");
+            let short = SecretKey::generate();
+            let cert = one::keys::certify(&signer(&phone), short.public().as_bytes(), lasts, super::now());
+            let brief = online(&address, &short, Some(&cert)).await.expect("a session isn't let in");
+            assert!(reaches(&address, &d, &a).await, "a pairing code's computer doesn't reach the device that made it");
+            assert!(reaches(&address, &brief, &a).await, "a session's endpoint doesn't reach the network's devices");
+            assert!(!cut_off(&k, &d).await && !cut_off(&k, &brief).await);
+
+            testing(&k, json!({ "advance": 600_001 })).await;
+            assert!(cut_off(&k, &d).await, "an expired pairing code's computer is still let in");
+            assert!(cut_off(&k, &brief).await, "an ended session is still let in");
+            assert_eq!(upgrade_status(&address, &code), 403, "an expired pairing code let its computer in again");
+            assert!(shut_out(&k, &short, Some(&cert)).await, "an ended session was let in again");
+            for ep in [a, d, brief] {
+                ep.close().await;
+            }
+        });
     }
 
     /// A browser's endpoint is a key of its session's, which its device vouches for (keys::certify): the relay lets it
@@ -914,11 +989,10 @@ mod relay {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             // Each node answers every request, noting the keys it was handed with it (`x-one-keys`); the slow one lets
-            // a connection open only a while after it's asked.
+            // a connection open only once the test lets it.
             let got: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
-            let opened: Arc<Mutex<Vec<String>>> = Arc::default();
-            let serve = |key: &SecretKey, wait: Duration| {
-                let (key, address, got, opened) = (key.clone(), address.clone(), got.clone(), opened.clone());
+            let serve = |key: &SecretKey, gate: Option<Arc<tokio::sync::Notify>>| {
+                let (key, address, got) = (key.clone(), address.clone(), got.clone());
                 async move {
                     let alpn = format!("{}/http/1", one::config::CLI).into_bytes();
                     let relay = RelayConfig::new(address.parse::<RelayUrl>().unwrap(), None);
@@ -927,11 +1001,12 @@ mod relay {
                     let serving = ep.clone();
                     tokio::spawn(async move {
                         while let Some(incoming) = serving.accept().await {
-                            let (key, got, opened) = (hex(&key), got.clone(), opened.clone());
+                            let (key, got, gate) = (hex(&key), got.clone(), gate.clone());
                             tokio::spawn(async move {
-                                tokio::time::sleep(wait).await;
+                                if let Some(gate) = gate {
+                                    gate.notified().await;
+                                }
                                 let conn = incoming.await.ok()?;
-                                opened.lock().unwrap().push(key.clone());
                                 while let Ok((mut send, mut recv)) = conn.accept_bi().await {
                                     let asked = recv.read_to_end(1 << 16).await.ok()?;
                                     let asked = String::from_utf8_lossy(&asked).to_string();
@@ -947,7 +1022,8 @@ mod relay {
                     ep
                 }
             };
-            let _nodes = (serve(&slow, Duration::from_secs(2)).await, serve(&quick, Duration::ZERO).await);
+            let gate = Arc::new(tokio::sync::Notify::new());
+            let _nodes = (serve(&slow, Some(gate.clone())).await, serve(&quick, None).await);
             let client = one_client::Client::start(secret, None, &address, &[*slow.public().as_bytes(), *quick.public().as_bytes()]).await.unwrap();
             let sealed: Arc<Mutex<Vec<String>>> = Arc::default();
             let ask = || {
@@ -963,17 +1039,12 @@ mod relay {
             assert_eq!(answered.node, *quick.public().as_bytes(), "the node raced beside the slow one wasn't asked");
             assert_eq!(*sealed.lock().unwrap(), [hex(&quick)], "keys were sealed to a node the request didn't go to");
             assert_eq!(*got.lock().unwrap(), [(hex(&quick), format!("sealed to {}", hex(&quick)))]);
-            // The slow one's connection, raced, opens and is kept: the next request goes to it, the first in order, and
-            // only it is handed that request's keys.
-            let up = async {
-                while !opened.lock().unwrap().contains(&hex(&slow)) {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            };
-            tokio::time::timeout(LET_IN, up).await.expect("the slow node's raced connection never opened");
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            // The slow one's connection, raced, is kept as it opens: a request to it alone waits for that one, and only
+            // it is handed that request's keys.
+            gate.notify_one();
+            client.set_nodes(&[*slow.public().as_bytes()]).unwrap();
             let answered = ask().await.expect("no node answered");
-            assert_eq!(answered.node, *slow.public().as_bytes(), "the first node in order, connected since, wasn't asked");
+            assert_eq!(answered.node, *slow.public().as_bytes(), "the node asked wasn't the one asked");
             assert_eq!(*sealed.lock().unwrap(), [hex(&quick), hex(&slow)]);
             assert_eq!(got.lock().unwrap()[1..], [(hex(&slow), format!("sealed to {}", hex(&slow)))], "keys reached a node they weren't sealed to");
             client.close().await;
@@ -1059,7 +1130,7 @@ mod relay {
             for by in [&first, &service] {
                 let other = SecretKey::generate();
                 let vouched = certify(by, &other, super::now() + 60_000);
-                assert!(shut_out(&address, &other, Some(&vouched)).await, "a session a compute or service vouched for got in");
+                assert!(shut_out(&k, &other, Some(&vouched)).await, "a session a compute or service vouched for got in");
                 assert_eq!(computes(ask(&other, &vouched)).0, 403, "a session a compute or service vouched for was told the computes");
             }
 
@@ -1077,7 +1148,7 @@ mod relay {
             let theirs = SecretKey::generate();
             let foreign = format!("{}.{}", certify(&stranger, &theirs, super::now() + 60_000), proof(&theirs, super::now()));
             assert_eq!(first_frame(&address, &foreign), CHALLENGE, "a stranger's session was taken in");
-            assert!(shut_out(&address, &theirs, Some(&foreign)).await, "a stranger's session got in with its proof");
+            assert!(shut_out(&k, &theirs, Some(&foreign)).await, "a stranger's session got in with its proof");
             // Its own session, as one key's newest socket is the one it's reached at, and `s` is still connected.
             let fresh = SecretKey::generate();
             let shown = format!("{}.{}", certify(&phone, &fresh, super::now() + 60_000), proof(&fresh, super::now()));
@@ -1086,21 +1157,15 @@ mod relay {
             proved.close().await;
 
             // Nothing for another endpoint, by a key not on the list, or once it has ended.
-            assert!(shut_out(&address, &SecretKey::generate(), Some(&cert)).await, "a certificate let in an endpoint it doesn't name");
-            assert!(shut_out(&address, &SecretKey::generate(), Some(&certify(&stranger, &stranger, super::now() + 60_000))).await, "a stranger vouched for itself");
-            let short = SecretKey::generate();
-            let until = super::now() + super::LASTS;
-            let brief = online(&address, &short, Some(&certify(&phone, &short, until))).await.expect("a short session isn't let in");
-            super::past(until).await;
-            assert!(cut_off(&address, &brief, &a).await, "an ended session still reached the relay");
-            assert!(shut_out(&address, &short, Some(&certify(&phone, &short, super::now() - 1))).await, "an ended session was let in");
-            brief.close().await;
+            assert!(shut_out(&k, &SecretKey::generate(), Some(&cert)).await, "a certificate let in an endpoint it doesn't name");
+            assert!(shut_out(&k, &SecretKey::generate(), Some(&certify(&stranger, &stranger, super::now() + 60_000))).await, "a stranger vouched for itself");
+            assert_eq!(upgrade_status(&address, &certify(&phone, &SecretKey::generate(), super::now() - 1)), 403, "an ended session was let in");
 
             // Its device taken out, it's out too.
             assert_eq!(tell(&address, &first, json!({ "remove": hex(&phone) })), 204);
-            assert!(cut_off(&address, &s, &a).await, "a removed device's session still reached the relay");
+            assert!(cut_off(&k, &s).await, "a removed device's session still reached the relay");
             s.close().await;
-            assert!(shut_out(&address, &session, Some(&cert)).await, "a removed device's session got in again");
+            assert!(shut_out(&k, &session, Some(&cert)).await, "a removed device's session got in again");
             assert_eq!(computes(ask(&session, &cert)).0, 403, "a removed device's session was told the computes");
             a.close().await;
         });
