@@ -599,9 +599,9 @@ const h = OneUI.react.createElement;
   /// The URL is the place: `/` (You), `/page/<scope>`, `/accounts/<scope>`, `/settings`, `/settings/<screen>?params=`
   /// (a Settings screen), `/app/<app>/<screen>?params=&scope=`; and `/vault?id=&scope=`, a request for an item, as a sheet
   /// over You. Each is a screen: the client's own (`own`, by name), or an app's.
-  function route() {
-    const path = location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-    const q = new URLSearchParams(location.search);
+  function route(at = location) {
+    const path = at.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    const q = new URLSearchParams(at.search);
     if (path[0] === "page" && path[1]) return own("pages", { scope: path[1] });
     if (path[0] === "accounts" && path[1]) return own("accounts", { scope: path[1] });
     if (path[0] === "app" && path[1]) return { kind: "screen", app: path[1], screen: path[2] || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined };
@@ -1451,12 +1451,30 @@ const h = OneUI.react.createElement;
     nativeIn = true;
   }
 
-  /// A link the app was opened with, `<cli>://open?app=&screen=&params=&scope=` (as `showBack` sends one on): that
-  /// app's screen, once this device is in.
+  /// A link the app was opened with, there once this device is in, as the old native apps took them:
+  /// `<cli>://open?app=&screen=&params=&scope=` (an app's screen; with no app, the page `scope`), `<cli>://page?scope=`
+  /// (`&folder=accounts`, its Accounts), `<cli>://settings[/<item>]`, `<cli>://vault?id=&scope=` (a request, as a sheet),
+  /// `<cli>://signed-in` (the window in front, which the app does), and a link to the address's own pages.
   function opened(link) {
-    const q = new URL(link).searchParams;
-    const app = q.get("app");
-    if (app) joined.then(() => go({ kind: "screen", app, screen: q.get("screen") || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined }));
+    let url;
+    try {
+      url = new URL(link);
+    } catch {
+      return;
+    }
+    const q = url.searchParams, part = url.pathname.split("/").filter(Boolean)[0];
+    const sheet = (scope, id) => scope && id && joined.then(() => openSheet(own("request", { scope, id })));
+    let to = null;
+    if (url.protocol === `${about.cli}:`) {
+      if (url.host === "open") to = q.get("app") ? { kind: "screen", app: q.get("app"), screen: q.get("screen") || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined } : own("pages", { scope: q.get("scope") || "user" });
+      else if (url.host === "page") to = own(q.get("folder") === "accounts" ? "accounts" : "pages", { scope: q.get("scope") || "user" });
+      else if (url.host === "settings") to = part ? { kind: "own", name: part, params: "{}" } : own("pages", { scope: "settings" });
+      else if (url.host === "vault") return void sheet(q.get("scope"), q.get("id"));
+    } else if (about.address && url.origin === new URL(about.address).origin) {
+      if (url.pathname === "/vault") return void sheet(q.get("scope"), q.get("id"));
+      to = route(url);
+    }
+    if (to) joined.then(() => go(to));
   }
 
   /// A link elsewhere, in a new tab, or in the app, the system's browser.
