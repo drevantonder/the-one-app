@@ -284,10 +284,16 @@ fn start(dir: &Path) -> Result<String> {
 fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
     use std::os::fd::{FromRawFd, OwnedFd};
     let addr: std::net::SocketAddrV4 = addr.parse().context("the throwaway network's address")?;
-    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+    // macOS has no SOCK_CLOEXEC: it's set after, before anything here starts a program.
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
     anyhow::ensure!(fd >= 0, "no socket: {}", std::io::Error::last_os_error());
     let held = unsafe { OwnedFd::from_raw_fd(fd) };
-    let sin = libc::sockaddr_in { sin_family: libc::AF_INET as _, sin_port: addr.port().to_be(), sin_addr: libc::in_addr { s_addr: u32::from_ne_bytes(addr.ip().octets()) }, sin_zero: [0; 8] };
+    unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    // Zeroed, then filled in: macOS's has a length field too (sin_len), which zero is fine for.
+    let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    sin.sin_family = libc::AF_INET as _;
+    sin.sin_port = addr.port().to_be();
+    sin.sin_addr = libc::in_addr { s_addr: u32::from_ne_bytes(addr.ip().octets()) };
     let bound = unsafe { libc::bind(fd, (&sin as *const libc::sockaddr_in).cast(), std::mem::size_of::<libc::sockaddr_in>() as _) };
     anyhow::ensure!(bound == 0, "{addr} is taken: {}", std::io::Error::last_os_error());
     // With port 0 the system picked one: which.
