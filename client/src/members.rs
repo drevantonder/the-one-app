@@ -129,9 +129,7 @@ impl Global {
         if self.wants_genesis() {
             let first = [&given["log"]["steps"], &given["entries"]["steps"]].into_iter().flat_map(|s| s.as_array().into_iter().flatten()).find(|s| s["at"].as_u64() == Some(1)).cloned();
             let Some(bytes) = first.and_then(|s| data_encoding::BASE64URL_NOPAD.decode(s["sealed"].as_str()?.as_bytes()).ok()) else { return Ok(Some(1)) };
-            let mut read = steps::Log::new(self.root);
-            read.take(&all_keys(epochs, apps), &bytes)?;
-            self.genesis(read.entries(1))?;
+            self.genesis(&steps::genesis_entries(&all_keys(epochs, apps), &bytes)?)?;
         }
         let mut keys = one::db::Keys::new();
         let key = |keys: &mut one::db::Keys, g: &Global, e: u32| {
@@ -140,7 +138,7 @@ impl Global {
                 && let Some(epoch) = epochs.get(&e).filter(|k| checked(k))
                 && let Some(app) = apps.get(&e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok())
             {
-                keys.insert(e, one::cloudflare::database_key(&app, one::log::NAME));
+                keys.insert(e, one::cloudflare::database_key(&app, steps::KEY_NAME));
             }
         };
         let sealed_at = |n: u64| given["steps"].as_array().into_iter().flatten().find(|s| s["at"].as_u64() == Some(n)).and_then(|s| data_encoding::BASE64URL_NOPAD.decode(s["sealed"].as_str()?.as_bytes()).ok());
@@ -249,7 +247,7 @@ fn all_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> 
     let mut keys = one::db::Keys::new();
     for (e, epoch) in epochs {
         if let Some(app) = apps.get(e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok()) {
-            keys.insert(*e, one::cloudflare::database_key(&app, one::log::NAME));
+            keys.insert(*e, one::cloudflare::database_key(&app, steps::KEY_NAME));
         }
     }
     keys

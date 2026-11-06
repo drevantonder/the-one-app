@@ -132,7 +132,7 @@ impl Node {
         for _ in 0..1000 {
             at += 1;
             let name = crate::db::step_name(&prefix, at);
-            if Bucket::create(&bucket, &name, &crate::log::seal(&key, &name, &bytes)?).await? {
+            if Bucket::create(&bucket, &name, &crate::database::steps::seal(&key, &name, &bytes)?).await? {
                 self.0.written.lock().unwrap().insert(scope.clone(), at);
                 return Ok(at);
             }
@@ -146,7 +146,7 @@ impl Node {
         if !self.with(|i| Ok(self.opens(i.r.db(), scope)))? {
             return self.handed_log(scope).await;
         }
-        self.database_keys(scope, members::APP, crate::log::NAME, false).await
+        self.database_keys(scope, members::APP, crate::database::steps::KEY_NAME, false).await
     }
 
     /// The keys of `global`'s entries in each of its epochs given.
@@ -155,7 +155,7 @@ impl Node {
         let mut out = crate::db::Keys::new();
         for (n, epoch) in epochs {
             if let Some(app) = crate::db::app_key(&bucket, epoch, "global", members::APP, *n, false).await? {
-                out.insert(*n, crate::cloudflare::database_key(&app, crate::log::NAME));
+                out.insert(*n, crate::cloudflare::database_key(&app, crate::database::steps::KEY_NAME));
             }
         }
         Ok(out)

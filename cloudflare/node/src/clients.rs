@@ -208,7 +208,7 @@ impl View {
             let mut log_keys = one::db::Keys::new();
             for (n, epoch) in &candidates {
                 if let Ok(Some(app)) = one::db::app_key(bucket, epoch, "global", members::APP, *n, false).await {
-                    log_keys.insert(*n, one::cloudflare::database_key(&app, one::log::NAME));
+                    log_keys.insert(*n, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME));
                 }
             }
             let read = one::log::open(bucket, &log_keys, &one::log::prefix("global"), "global").await?;

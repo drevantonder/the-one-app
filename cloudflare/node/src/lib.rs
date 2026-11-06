@@ -14,7 +14,7 @@ use js_sys::{Function, Promise, Reflect, Uint8Array};
 use one::bucket::{Bucket, Failed, Object, Trouble};
 use one::call::Append;
 use one::db::Db;
-use one::entry::{Entry, Hash, Scope, causal};
+use one::entry::{Entry, Hash, Scope};
 use one::database::scopes::{ScopeDb, app, object};
 use one::members::{Members, ScopeState};
 use serde_json::{Value, json};
@@ -430,45 +430,37 @@ pub fn following(name: &str, n: u32) -> String {
     Value::from(names.filter(|other| other.as_str() > name).collect::<Vec<_>>()).to_string()
 }
 
-// Who can do what: each scope's entries (`src/log.rs`), what they add up to (`src/members.rs`), and each scope's
-// database built from that (`src/database/scopes.rs`), which every question of who's who and who may is asked of.
+// Who can do what: each scope's database's steps (`src/database/steps.rs`), which every question of who's who and who
+// may is asked of.
 
-/// A scope's entries this isolate read for one person's object: the keys they were read with, the last step read, the
-/// entries (in replay order for `global`; another scope's are put in order with `global`'s when replayed, as they
-/// follow them), and which reading of them this is.
-struct Log {
+/// A scope's steps this isolate read for one person's object: the keys they were read with, which reading of them this
+/// is, and the steps, by position from the first: of `global`, its freeze among them.
+struct Held {
     keys: one::db::Keys,
-    at: u64,
-    entries: Vec<Entry>,
     read: u64,
-    /// Its scope database's steps read, by position from the first (`one::database::steps`): of `global`, its freeze
-    /// among them; of another scope, once `global`'s log is frozen.
     steps: Vec<Option<one::database::steps::Given>>,
-    /// Of another scope, once `global`'s log is frozen: its log's entries up to the freeze's end of it, which its
-    /// database starts from (`steps::scope_anchor`).
-    anchor: Option<Vec<Entry>>,
-    /// Of `global`, once its steps hold the freeze: its log to the end the freeze names, read only, which every other
-    /// scope's database starts from (`steps::Log`).
-    frozen: Option<one::database::steps::Log>,
+    /// Of another scope: its start (`steps::START`, step 0), once looked for; none inside if there's none.
+    start: Option<Option<one::database::steps::Given>>,
+    /// Of `global`: the entries of its frozen log's first step, the genesis among them (`steps::genesis_name`).
+    genesis: Vec<Entry>,
 }
 
-impl Log {
+impl Held {
     /// Of `global`'s: who's who from the freeze the recovery key its genesis names signed, and the steps after; none
     /// before. Fails at a freeze the recovery key signed that doesn't check out, or a newer release's step, which stops
     /// this node there as it stops every reader.
     fn truth(&self) -> Result<Option<one::database::steps::Truth>> {
-        let Some(recovery) = root(&self.entries).and_then(|r| one::database::steps::recovery_of(r, &self.entries)) else { return Ok(None) };
+        let Some(recovery) = root(&self.genesis).and_then(|r| one::database::steps::recovery_of(r, &self.genesis)) else { return Ok(None) };
         one::database::steps::Truth::read(&self.steps, recovery, now())
     }
 
     /// The newest epoch of `scope` made, as `global`'s steps say: any, before it's read the freeze.
-    fn made(global: &Log, scope: &Scope) -> Result<u32> {
+    fn made(global: &Held, scope: &Scope) -> Result<u32> {
         Ok(global.truth()?.map_or(u32::MAX, |t| t.db.epoch(scope)))
     }
 }
 
-/// What a scope's entries add up to, as of the readings of them and of `global`'s: the scope's database, built from
-/// `global`'s members and its own state.
+/// A scope's database, as of the readings of its steps and of `global`'s.
 struct Replayed {
     at: (u64, u64),
     db: ScopeDb,
@@ -488,13 +480,13 @@ impl Replays<'_> {
 }
 
 thread_local! {
-    /// Each scope's entries this isolate read, by whose object read them and the scope. A request uses them only if it
+    /// Each scope's steps this isolate read, by whose object read them and the scope. A request uses them only if it
     /// was handed exactly the keys they were read with: a key that opened nothing passes over what's under its epoch,
     /// and what was read that way is only ever shown to whoever handed it.
-    static LOGS: RefCell<HashMap<(String, String), Log>> = RefCell::new(HashMap::new());
-    /// Each scope's replay, by owner and scope, while its readings and `global`'s are the same.
+    static LOGS: RefCell<HashMap<(String, String), Held>> = RefCell::new(HashMap::new());
+    /// Each scope's database, by owner and scope, while its readings and `global`'s are the same.
     static REPLAYED: RefCell<HashMap<(String, String), Replayed>> = RefCell::new(HashMap::new());
-    /// Readings of entries, counted.
+    /// Readings of steps, counted.
     static READINGS: RefCell<u64> = const { RefCell::new(0) };
 }
 
@@ -505,63 +497,51 @@ fn reading() -> u64 {
     })
 }
 
-/// Reads a scope's entries for `owner`'s object, with the keys of its log a caller handed, up to its newest step: from
-/// the newest copy the first time, or when the keys differ from those last read with, and after that only the steps
-/// since.
+/// Reads a scope's steps for `owner`'s object, with the keys a caller handed, up to its newest: from the first the
+/// first time, or when the keys differ from those last read with, and after that only those since.
 #[wasm_bindgen]
-pub async fn read_log(owner: String, bucket: JsValue, scope: String, keys: String) -> Result<(), JsValue> {
+pub async fn read_scope(owner: String, bucket: JsValue, scope: String, keys: String) -> Result<(), JsValue> {
     touch(&owner);
     let keys = keys_of(&keys).map_err(failed)?;
     Scope::parse(&scope).map_err(failed)?;
-    read_log_with((owner, scope), &Js(bucket), keys).await.map_err(failed)
+    read_scope_with((owner, scope), &Js(bucket), keys).await.map_err(failed)
 }
 
-/// `read_log`, of `id`'s scope for its owner, with its log's `keys`.
-async fn read_log_with(id: (String, String), bucket: &Js, keys: one::db::Keys) -> Result<()> {
-    let scope = id.1.clone();
-    let prefix = one::log::prefix(&scope);
-    let from = LOGS.with(|l| l.borrow().get(&id).filter(|l| l.keys == keys).map(|l| l.at));
-    let Some(from) = from else {
-        let one::log::Read { at, entries, .. } = one::log::open(bucket, &keys, &prefix, &scope).await?;
-        let entries = if scope == "global" { causal(entries, &HashMap::new()) } else { entries };
-        LOGS.with(|l| l.borrow_mut().insert(id.clone(), Log { keys, at, entries, read: reading(), steps: Vec::new(), anchor: None, frozen: None }));
-        return read_steps(&id, bucket).await;
-    };
-    let one::log::Read { at, entries: new, .. } = one::log::read(bucket, &keys, u32::MAX, &prefix, &scope, from, 0).await?;
-    LOGS.with(|l| {
-        if let Some(log) = l.borrow_mut().get_mut(&id).filter(|l| l.keys == keys) {
-            // Each once, by hash: both sides of a fork are kept, as a node's store keeps them, so it's found.
-            let fresh: Vec<Entry> = new.into_iter().filter(|e| !log.entries.iter().any(|k| k.hash() == e.hash())).collect();
-            if !fresh.is_empty() {
-                log.entries.extend(fresh);
-                if scope == "global" {
-                    log.entries = causal(std::mem::take(&mut log.entries), &HashMap::new());
-                }
-                log.read = reading();
-            }
-            log.at = log.at.max(at);
-        }
-    });
+/// `read_scope`, of `id`'s scope for its owner, with its `keys`: `global`'s genesis first.
+async fn read_scope_with(id: (String, String), bucket: &Js, keys: one::db::Keys) -> Result<()> {
+    if LOGS.with(|l| l.borrow().get(&id).is_none_or(|l| l.keys != keys)) {
+        let genesis = match id.1.as_str() {
+            "global" => match bucket.get(&one::database::steps::genesis_name()).await? {
+                Some(o) => one::database::steps::genesis_entries(&keys, &o.bytes)?,
+                None => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        LOGS.with(|l| l.borrow_mut().insert(id.clone(), Held { keys, read: reading(), steps: Vec::new(), start: None, genesis }));
+    }
     read_steps(&id, bucket).await
 }
 
-/// A scope's database's steps after those read, with the log's keys: `global`'s always, since its freeze is one, and
-/// its log to the end the freeze names once the recovery key signed one; another scope's once `global`'s log is
-/// frozen, with the entries its database starts from the first time.
+/// A scope's database's steps after those read, with its keys: another scope's once `global`'s log is frozen, with its
+/// start the first time.
 async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
     let global = (id.0.clone(), "global".to_string());
-    let Some((keys, from, anchored)) = LOGS.with(|l| l.borrow().get(id).map(|g| (g.keys.clone(), g.steps.len() as u64, g.anchor.is_some()))) else { return Ok(()) };
+    let Some((keys, from, started)) = LOGS.with(|l| l.borrow().get(id).map(|g| (g.keys.clone(), g.steps.len() as u64, g.start.is_some()))) else { return Ok(()) };
     let scope = Scope::parse(&id.1)?;
     if id.1 != "global" {
-        let frozen = LOGS.with(|l| {
-            let logs = l.borrow();
-            let Some(g) = logs.get(&global) else { return Ok(None) };
-            Ok::<_, anyhow::Error>(g.truth()?.zip(g.frozen.clone()).map(|(t, log)| (t.freeze, root(&g.entries), log)))
-        })?;
-        let Some((freeze, root, frozen)) = frozen else { return Ok(()) };
-        if !anchored {
-            let entries = one::database::steps::anchor_entries(bucket, &keys, &freeze, root, &frozen, &scope).await?;
-            LOGS.with(|l| l.borrow_mut().get_mut(id).map(|log| log.anchor = Some(entries)));
+        let frozen = LOGS.with(|l| l.borrow().get(&global).map(|g| g.truth().map(|t| t.is_some())).transpose())?.unwrap_or(false);
+        if !frozen {
+            return Ok(());
+        }
+        if !started {
+            let start = match bucket.get(&one::database::steps::start_name(&scope)).await? {
+                Some(o) => match one::database::steps::open(&keys, u32::MAX, &scope, 0, &o.bytes) {
+                    one::database::steps::Opened::Step(g) => Some(g),
+                    _ => None,
+                },
+                None => None,
+            };
+            LOGS.with(|l| l.borrow_mut().get_mut(id).map(|log| log.start = Some(start)));
         }
     }
     let mut from = from;
@@ -577,26 +557,9 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
             });
         }
         from += n;
-        // The frozen log to where the freeze says it ends, read once, which every other scope's database starts from.
-        if id.1 == "global" {
-            let wants = LOGS.with(|l| {
-                let logs = l.borrow();
-                let g = logs.get(id)?;
-                Some((g.truth().ok()??.freeze.global(), root(&g.entries))).filter(|_| g.frozen.is_none())
-            });
-            if let Some((end, root)) = wants {
-                let log = one::database::steps::log_to(bucket, &keys, root, end).await?;
-                LOGS.with(|l| {
-                    if let Some(g) = l.borrow_mut().get_mut(id) {
-                        g.frozen = Some(log);
-                        g.read = reading();
-                    }
-                });
-            }
-        }
         // One under an epoch made whose key it wasn't handed: asked for (428), as the log's are. One under an epoch
         // above every one made, as the steps before it leave it, is junk: passed over.
-        let made = LOGS.with(|l| l.borrow().get(&global).map(|g| Log::made(g, &scope)).transpose());
+        let made = LOGS.with(|l| l.borrow().get(&global).map(|g| Held::made(g, &scope)).transpose());
         match (read.waits, made) {
             (Some(epoch), Ok(Some(made))) if epoch <= made => return Err(one::db::Missing { epoch }.into()),
             (Some(_), Ok(Some(made))) if read.junk_at_end(made) => {}
@@ -616,12 +579,12 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
     }
 }
 
-/// A scope's own database from its steps (`one::database::steps`): from what its log's entries up to the freeze add up
-/// to (`anchor`, `steps::scope_anchor`) with `global`'s log up to it (`frozen`), each that counts with `global`'s
-/// scope database `truth`. Fails at a newer release's step, which stops this node there as it stops every reader.
-fn scope_truth(truth: &one::database::steps::Truth, root: Option<Hash>, frozen: &one::database::steps::Log, anchor: &[Entry], scope: &Scope, steps: &[Option<one::database::steps::Given>]) -> Result<ScopeDb> {
+/// A scope's own database from its steps (`one::database::steps`): from its start (`steps::started`), each that counts
+/// with `global`'s scope database `truth`. Fails at a newer release's step, which stops this node there as it stops
+/// every reader.
+fn scope_truth(truth: &one::database::steps::Truth, start: Option<&one::database::steps::Given>, scope: &Scope, steps: &[Option<one::database::steps::Given>]) -> Result<ScopeDb> {
     use one::database::steps;
-    let db = steps::scope_anchor(&truth.freeze, root, frozen, scope, anchor, now())?;
+    let db = steps::started(&truth.freeze, &truth.db, scope, start, now())?;
     let took = steps::take_scope(0, db, &truth.db, scope, steps, now())?;
     anyhow::ensure!(!took.newer, steps::Newer);
     Ok(took.db)
@@ -647,7 +610,8 @@ pub fn pin_genesis(genesis: &str) -> Result<(), JsError> {
     Ok(())
 }
 
-/// The network's genesis, which its members are replayed from: the one pinned (`pin_genesis`, `steps::genesis_of`).
+/// The network's genesis among `global`, its frozen log's first step's entries: the one pinned (`pin_genesis`,
+/// `steps::genesis_of`).
 fn root(global: &[Entry]) -> Option<Hash> {
     one::database::steps::genesis_of(GENESIS.with(|g| *g.borrow()), global)
 }
@@ -700,31 +664,30 @@ fn now() -> u64 {
     js_sys::Date::now() as u64
 }
 
-/// `global`'s database and each of `scopes`', from the entries `owner`'s object read (`read_log`), built again only
+/// `global`'s database and each of `scopes`', from the steps `owner`'s object read (`read_scope`), built again only
 /// once what was read of them changed.
 fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) -> Result<R> {
     touch(owner);
     LOGS.with(|logs| {
         let logs = logs.borrow();
         let log_of = |scope: &str| logs.get(&(owner.to_string(), scope.to_string()));
-        let global = log_of("global").context("read global's entries first")?;
-        let root = root(&global.entries);
+        let global = log_of("global").context("read global's steps first")?;
         REPLAYED.with(|r| {
             let mut r = r.borrow_mut();
             let mut read = vec!["global".to_string()];
             read.extend(scopes.iter().filter(|s| *s != "global" && log_of(s).is_some()).cloned());
             for scope in &read {
-                let log = log_of(scope).context("read global's entries first")?;
+                let log = log_of(scope).context("read global's steps first")?;
                 let at = (global.read, log.read);
                 let id = (owner.to_string(), scope.clone());
                 if r.get(&id).is_none_or(|x| x.at != at) {
                     // Who's who is `global`'s scope database: its freeze's, and the steps after; and a scope's own state
-                    // its own steps', from its anchor on. Nobody's until they're read.
+                    // its own steps', from its start on. Nobody's until they're read.
                     let truth = global.truth()?;
                     let s = Scope::parse(scope)?;
-                    let db = match (truth, scope.as_str(), &log.anchor, &global.frozen) {
-                        (Some(t), "global", _, _) => t.db,
-                        (Some(t), _, Some(anchor), Some(frozen)) => scope_truth(&t, root, frozen, anchor, &s, &log.steps)?,
+                    let db = match (truth, scope.as_str(), &log.start) {
+                        (Some(t), "global", _) => t.db,
+                        (Some(t), _, Some(start)) => scope_truth(&t, start.as_ref(), &s, &log.steps)?,
                         _ => ScopeDb::build(&Members::default(), &s, &ScopeState::default(), now())?,
                     };
                     r.insert(id.clone(), Replayed { at, db });

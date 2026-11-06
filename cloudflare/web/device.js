@@ -555,8 +555,7 @@ export class Device {
     // keep their keys.
     for (const old of r.device ? k.devices.filter((d) => d.user === r.user && d.device === r.device && d.key !== r.key && !d.passkey && (d.roles || []).includes("client")) : []) {
       await this.tell({ remove: old.key }, as).catch(() => {});
-      const next = (await get(`global:${this.user}`))?.have.split(",").find((h) => h.startsWith(`${old.key}.`))?.split(".")[1];
-      await this.write("global", members.removeDevice({ key: old.key, seq: next ? Number(next) - 1 : null }), as);
+      await this.write("global", members.removeDevice({ key: old.key }), as);
     }
     // Marked approved, for the device waiting on it to see, with the network it's in: the only one it then takes; and
     // once who's who is written as steps, where this browser read them to, which it starts from (src/database/steps.rs
@@ -592,32 +591,28 @@ export class Device {
     if (!k.people[this.user].removes.includes(key)) throw new Error("Only its person or an admin takes a device out.");
     // It, and what's part of it: its services with endpoints of their own.
     const keys = [key, ...k.devices.filter((d) => d.device === key && d.key !== key).map((d) => d.key)];
-    const had = (await get(`global:${this.user}`))?.have.split(",") || [];
     for (const one of keys) {
       await this.tell({ remove: one }, as).catch((err) => {
         if (!/isn.t|not/.test(err.message)) throw err;
       });
-      // The last of its entries this browser checked, from which on none counts.
-      const next = had.find((h) => h.startsWith(`${one}.`))?.split(".")[1];
-      await this.write("global", members.removeDevice({ key: one, seq: next ? Number(next) - 1 : null }), as);
+      await this.write("global", members.removeDevice({ key: one }), as);
     }
     await this.renew(scopesOf(k, it.user), keys);
   }
 
   /// Takes this browser out of its person's devices, as it signs out, so signing in again makes a new one that
   /// replaces it, never a second. Itself it may (the network lets a device take out its person's, itself among them),
-  /// but nothing it writes after counts, so it goes in this order: its `remove` entry, whose seq is its own, so that one
-  /// counts and none after; then off the network, which ends its connection, so nothing is asked after. Its scopes keep
+  /// but nothing it writes after counts, so it goes in this order: its removal, then off the network, which ends its
+  /// connection, so nothing is asked after. Its scopes keep
   /// their keys, as it forgets its own (ARCHITECTURE.md): a device in doubt is removed from another, which makes new ones.
   async leave() {
     const k = await this.checked(true);
     if (!k.devices.some((d) => d.key === this.me.key)) return;
-    await this.write("global", (seq) => members.removeDevice({ key: this.me.key, seq }));
+    await this.write("global", members.removeDevice({ key: this.me.key }));
     await this.tell({ remove: this.me.key });
   }
 
-  /// Takes a person out, for an admin: each of their devices off the network first, then them (with the last of each of
-  /// their devices' entries it had seen), then each scope they could open but their own (everyone's and their groups')
+  /// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they could open but their own (everyone's and their groups')
   /// gets a new epoch they don't have. Their own stays as it is.
   async removePerson(user) {
     const k = await this.checked(true);
@@ -629,13 +624,7 @@ export class Device {
         if (!/isn.t|not/.test(err.message)) throw err;
       });
     }
-    // The last of each of their devices' entries this browser checked, from which on none counts.
-    const have = (await get(`global:${this.user}`))?.have.split(",") || [];
-    const seqs = Object.fromEntries(theirs.map((key) => {
-      const next = have.find((h) => h.startsWith(`${key}.`))?.split(".")[1];
-      return [key, next ? Number(next) - 1 : null];
-    }));
-    await this.write("global", members.removeUser({ user, seqs }));
+    await this.write("global", members.removeUser({ user }));
     await this.renew(scopesOf(k, user).filter((s) => s !== `user:${user}`), theirs);
   }
 

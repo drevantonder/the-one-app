@@ -16,9 +16,9 @@
 //! shaped like a freeze is nothing. A device let in starts where the device that let it in had read to (its `Welcome`),
 //! which pins who's who by its hash.
 //!
-//! Every other scope's database starts, before its first step, from what its frozen log's entries up to the freeze's
-//! end of it add up to (`scope_anchor`), which every reader of it works out itself from the frozen logs: no writer
-//! chooses it.
+//! Every other scope's database starts, before its first step, from its start (`START`, step 0): for a scope whose
+//! frozen log the freeze names, what that log's entries added up to there, written once by a device holding its keys;
+//! for any other, nothing.
 //!
 //! Every reader applies each step after to the database as the steps before it left it, and counts it only if all
 //! three of the protocol's rules hold there:
@@ -30,13 +30,15 @@
 //!    state, a device that runs the scope's calls for them.
 //!
 //! A step that doesn't count is passed over, its position taken, as a database's are: nothing it says happens. What a
-//! counted one changes is what replay's entry of the same content changed (`Members` and a scope's own state, read from
-//! the database and built back into it), so the database a step leaves is the one replay would have made.
+//! counted one changes is what `members`' rules for that content change (`Members` and a scope's own state, read from
+//! the database and built back into it).
 //!
-//! Its steps are sealed as the scope's log was, with the key of the log in each epoch (`log::seal`), under their own
-//! names, so whoever was handed the log's key reads them. A reader opens them itself: a node passes them on sealed.
+//! Its steps are sealed with the key the frozen log had in each epoch (`KEY_NAME`, `seal`), under their own names. A
+//! reader opens them itself: a node passes them on sealed. The frozen logs are read no more, but for the genesis, the
+//! first entry of `global`'s, whose hash every device pins and which names the recovery key (`genesis_name`).
 //!
 //! ```text
+//! <prefix>/0                  a scope's start, but `global`'s, with its copy
 //! <prefix>/<n>               step n, from 1: one signed step, its header, signature and body, and a freeze's copy
 //! <prefix>/copy/<n>          the database after step n, every `db::COPY_EVERY` steps
 //! <prefix>/newest            the newest hint, as a database's
@@ -51,7 +53,7 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use crate::entry::{Content, Entry, Ext, Hash, Key, Scope, unhex};
-use crate::members::{self, Cuts, Members, Principal, Role, ScopeState};
+use crate::members::{self, Members, Principal, Role, ScopeState};
 use crate::permissions;
 
 use super::scopes::{self, ScopeDb};
@@ -242,73 +244,27 @@ impl Freeze {
     }
 }
 
-/// `global`'s frozen log as the bucket's steps hold it, read only: a scope's database starts, before its first step,
-/// from what its own log's entries add up to with it (`scope_anchor`). The entries in each of its steps from the first.
-#[derive(Clone, Debug, Default)]
-pub struct Log {
-    read: crate::log::ReadTo,
-    /// How many entries there are up to each step.
-    ends: Vec<usize>,
-    /// The network's genesis, which the entries before each step are replayed from (`take`).
-    root: Option<Hash>,
-    /// The newest epoch of `global` the entries in its steps so far make, as last worked out (`made`).
-    made: u32,
+/// The name the steps' key is derived under in each epoch (`cloudflare::database_key`): the frozen log's, whose key
+/// they took over.
+pub const KEY_NAME: &str = "log";
+
+/// Seals a step or copy of a scope's database as `name` under the newest epoch `keys` has.
+pub fn seal(keys: &crate::db::Keys, name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+    let (epoch, key) = keys.last_key_value().with_context(|| format!("no key to write {name} with"))?;
+    Ok(crate::keys::seal(*epoch, key, name, bytes))
 }
 
-impl Log {
-    /// Of the network whose genesis is `root`, before its first step.
-    pub fn new(root: Option<Hash>) -> Log {
-        Log { root, ..Default::default() }
-    }
-
-    /// The last of its steps it holds.
-    pub fn last(&self) -> u64 {
-        self.ends.len() as u64
-    }
-
-    /// The entries in its steps 1 to `to`.
-    pub fn entries(&self, to: u64) -> &[Entry] {
-        let n = to.min(self.last()).checked_sub(1).map_or(0, |i| self.ends[i as usize]);
-        &self.read.entries[..n]
-    }
-
-    /// Takes its next step, sealed as the bucket holds it, opened with `keys` (`crate::log::read_to`): junk if it's under
-    /// an epoch above the newest the entries in the steps before it make, so every reader reads the same steps.
-    pub fn take(&mut self, keys: &crate::db::Keys, sealed: &[u8]) -> Result<()> {
-        let name = crate::db::step_name(&crate::log::prefix("global"), self.last() + 1);
-        let made = self.made(sealed);
-        self.read.take(keys, made, &name, sealed, "global")?;
-        self.ends.push(self.read.entries.len());
-        Ok(())
-    }
-
-    /// The newest epoch of `global` the entries in its steps so far make, for `sealed`, its next step: worked out again
-    /// only for a step under a newer epoch than it was last time. The first is the genesis's.
-    fn made(&mut self, sealed: &[u8]) -> u32 {
-        if crate::keys::epoch_of(sealed).is_ok_and(|e| e > self.made.max(1)) {
-            self.made = made_by(self.root, &self.read.entries, &Scope::Global);
-        }
-        self.made.max(1)
-    }
-
-    /// A step of `entries` already opened, as a test writes them.
-    pub fn push(&mut self, entries: Vec<Entry>) {
-        self.read.entries.extend(entries);
-        self.ends.push(self.read.entries.len());
-    }
+/// Where the network's genesis is: the first step of `global`'s frozen log, a pack of entries under its first epoch,
+/// read only. Every device pins its hash.
+pub fn genesis_name() -> String {
+    crate::db::step_name(&format!("{}/{}/{KEY_NAME}", crate::bucket::folder("global"), members::APP), 1)
 }
 
-/// `global`'s log of the network at `root` from the bucket to step `to`, or its end if it ends before (`Log`).
-pub async fn log_to(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, root: Option<Hash>, to: u64) -> Result<Log> {
-    let prefix = crate::log::prefix("global");
-    let mut log = Log::new(root);
-    for at in 1..=to {
-        match bucket.get(&crate::db::step_name(&prefix, at)).await? {
-            Some(o) => log.take(keys, &o.bytes)?,
-            None => break,
-        }
-    }
-    Ok(log)
+/// The entries in `sealed`, the first step of `global`'s frozen log as the bucket holds it (`genesis_name`), opened
+/// with `keys`, `global`'s by epoch: the genesis among them (`recovery_of`).
+pub fn genesis_entries(keys: &crate::db::Keys, sealed: &[u8]) -> Result<Vec<Entry>> {
+    let key = keys.get(&crate::keys::epoch_of(sealed)?).context("the genesis is under a key this device wasn't given")?;
+    crate::entry::unpack(&crate::keys::open(key, &genesis_name(), sealed)?)
 }
 
 /// The network's recovery key, as its genesis names it: the entry whose hash is `root` among `entries`, those of
@@ -330,32 +286,13 @@ pub fn genesis_of(pinned: Option<Hash>, entries: &[Entry]) -> Option<Hash> {
 }
 
 /// The network's genesis (`root`, or for a reader that pins none, `genesis_of`) and the recovery key it names, read
-/// from `global`'s log's first step in the bucket, opened with `keys` (`recovery_of`).
+/// from the bucket with `keys`, `global`'s by epoch (`genesis_entries`).
 pub async fn recovery_key(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, root: Option<Hash>) -> Result<(Hash, Key)> {
-    let log = log_to(bucket, keys, root, 1).await?;
-    let root = genesis_of(root, log.entries(1)).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
-    let key = recovery_of(root, log.entries(1)).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
+    let sealed = bucket.get(&genesis_name()).await?.with_context(|| format!("{YOURS}'s genesis isn't in its bucket"))?;
+    let entries = genesis_entries(keys, &sealed.bytes)?;
+    let root = genesis_of(root, &entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
+    let key = recovery_of(root, &entries).with_context(|| format!("{YOURS}'s genesis isn't the first of its log's entries"))?;
     Ok((root, key))
-}
-
-/// The newest epoch of `scope` that `entries` of `global`'s make, of the network at `root`, with the forks among them.
-fn made_by(root: Option<Hash>, entries: &[Entry], scope: &Scope) -> u32 {
-    let ordered = crate::entry::causal(entries.to_vec(), &Default::default());
-    let member_entries: Vec<Entry> = ordered.into_iter().filter(members::is_member_entry).collect();
-    Members::replay(root, &member_entries, &forks(entries)).epoch(scope)
-}
-
-/// Each device that signed two entries at one seq of a log among `entries`, cut from the first.
-fn forks(entries: &[Entry]) -> Cuts {
-    let mut seen: BTreeMap<(Key, String, u32), Hash> = BTreeMap::new();
-    let mut cuts = Cuts::new();
-    for e in &crate::entry::causal(entries.to_vec(), &Default::default()) {
-        if seen.insert((e.author(), e.log().to_string(), e.seq()), e.hash()).is_some_and(|h| h != e.hash()) {
-            let at = cuts.entry((e.author(), e.log().to_string())).or_insert(u32::MAX);
-            *at = (*at).min(e.seq());
-        }
-    }
-    cuts
 }
 
 /// The database a copy is, as bytes.
@@ -379,27 +316,13 @@ pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
 /// The freeze a new network starts with, at step 1 of `global`'s database, signed by its recovery key as `user`: who's
 /// who as `genesis`, its log's first entry, says it, with its log's one step. → the step, and its copy.
 pub fn first_freeze(recovery: &SigningKey, genesis: &Entry, user: &str, now: u64) -> Result<Given> {
-    let m = Members::replay(Some(genesis.hash()), std::slice::from_ref(genesis), &Cuts::new());
+    let mut m = Members::new(Some(genesis.hash()));
+    m.try_step(genesis)?;
     let mut db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), now)?;
     db.conn().pragma_update(None, "user_version", READS)?;
     let freeze = Freeze { at: 1, hash: crate::db::state_hash(db.conn())?, logs: [("global".to_string(), 1)].into() };
     let step = sign(recovery, &Scope::Global, 1, user, 1, now, freeze.content())?;
     Ok(Given { step, copy: Some(db.bytes()?) })
-}
-
-/// A scope's database before its first step (not `global`'s): what its log's entries up to the freeze's position there
-/// (`entries`, read from its steps up to `Freeze::logs`') add up to with `global`'s at the freeze (`global`, its log up
-/// to the freeze's end of it, of the network at `root`). Every reader works it out itself, from the frozen logs.
-pub fn scope_anchor(freeze: &Freeze, root: Option<Hash>, global: &Log, scope: &Scope, entries: &[Entry], now: u64) -> Result<ScopeDb> {
-    ensure!(*scope != Scope::Global, "global's database starts from its freeze");
-    ensure!(global.last() >= freeze.global(), "global's log was read to {}, not to the freeze's {}", global.last(), freeze.global());
-    let entries_of_global = global.entries(freeze.global());
-    let ordered_global = crate::entry::causal(entries_of_global.to_vec(), &Default::default());
-    let member_entries: Vec<Entry> = ordered_global.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
-    let known = Members::replay(root, &member_entries, &forks(entries_of_global));
-    let ordered = crate::entry::causal(entries.to_vec(), &ordered_global.iter().map(|e| (e.hash(), e.depth)).collect());
-    let (_, state) = members::replay_from(&known, &member_entries, &ordered, ScopeState::default(), |_, _, _| {});
-    ScopeDb::open(super::scope::build(&Members::default(), scope, &state)?, now)
 }
 
 /// The kind of step that starts a scope's database (not `global`'s) whose frozen log the freeze names, at position 0:
@@ -413,7 +336,7 @@ pub fn start_name(scope: &Scope) -> String {
 }
 
 /// `scope`'s start, step 0 of its database, signed by `key` as `user`, the scope at `epoch`: `db`, what its frozen log's
-/// entries add up to (`scope_anchor`).
+/// entries added up to at the freeze.
 pub fn start(key: &SigningKey, scope: &Scope, user: &str, epoch: u32, now: u64, db: &mut ScopeDb) -> Result<Given> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
     let hash = crate::db::state_hash(db.conn())?;
@@ -438,18 +361,6 @@ pub fn started(freeze: &Freeze, global: &ScopeDb, scope: &Scope, given: Option<&
     let copy = connection(given.copy.as_deref().context("a start carries its copy")?)?;
     ensure!(Some(crate::db::state_hash(&copy)?.as_str()) == step.content.data["hash"].as_str(), "{scope}'s start's copy isn't what it says");
     normalize(copy, scope, now)
-}
-
-/// The entries `scope_anchor` starts `scope`'s database from (not `global`'s): those in its log's steps up to the
-/// freeze's end of it, read from the bucket with `keys`, its log's keys by epoch. A step under an epoch above the newest
-/// of `scope` made at the freeze, as `global`, `global`'s log to the freeze's end of it (of the network at `root`), says,
-/// is junk: every reader reads them the same whenever it reads them.
-pub async fn anchor_entries(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, freeze: &Freeze, root: Option<Hash>, global: &Log, scope: &Scope) -> Result<Vec<Entry>> {
-    ensure!(*scope != Scope::Global, "global's database starts from its freeze");
-    ensure!(global.last() >= freeze.global(), "global's log was read to {}, not to the freeze's {}", global.last(), freeze.global());
-    let end = freeze.logs.get(&scope.to_string()).copied().unwrap_or(0);
-    let made = made_by(root, global.entries(freeze.global()), scope);
-    crate::log::read_to(bucket, keys, made, &crate::log::prefix(&scope.to_string()), &scope.to_string(), end).await
 }
 
 /// `global`'s scope database as a reader has it: the freeze, the last position applied (or passed over), and the
@@ -538,7 +449,7 @@ pub async fn written(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys
     let epoch = *keys.keys().next_back().context("no key")?;
     if at % crate::db::COPY_EVERY == 0 {
         let name = crate::db::copy_name(&prefix, at);
-        bucket.create(&name, &crate::log::seal(keys, &name, &bytes)?).await?;
+        bucket.create(&name, &seal(keys, &name, &bytes)?).await?;
     }
     crate::db::hint(bucket, &prefix, at, at - at % crate::db::COPY_EVERY, epoch).await
 }
@@ -999,30 +910,11 @@ pub(crate) mod tests {
     use super::*;
     use serde_json::json;
 
-    /// That `entries`, replay's in its order, applied as steps from the genesis on, leave the database replay's
-    /// `m` builds: what each counted for and changed is replay's.
-    /// Histories written one after another (each entry after every one before it): those where replay's order is
-    /// the one the steps would have, with nothing written at once, which a database's one order never has.
+    /// That `entries`, applied as steps from the genesis on, leave the database `m`, those entries stepped in memory,
+    /// builds: what each counted for and changed is the same read from and built back into the database each time.
     pub(crate) fn agrees(entries: &[Entry], m: &Members) {
-        let mut before: std::collections::HashMap<crate::entry::Hash, std::collections::HashSet<crate::entry::Hash>> = Default::default();
-        for (i, e) in entries.iter().enumerate() {
-            let mut all: std::collections::HashSet<_> = e.follows_all().collect();
-            for f in e.follows_all() {
-                all.extend(before.get(&f).cloned().unwrap_or_default());
-            }
-            if !entries[..i].iter().all(|p| all.contains(&p.hash())) {
-                return;
-            }
-            before.insert(e.hash(), all);
-        }
-        // Nor a removal that says its remover had seen less than it had, which replay takes back from before it: a
-        // step's place is where it was written, so what came before a removal counts.
-        let last_removal = entries.iter().rposition(|e| e.content.kind == "remove").unwrap_or(0);
-        if entries[..last_removal].iter().any(|e| m.cut(e)) {
-            return;
-        }
-        let genesis = &entries[..1];
-        let start = Members::replay(Some(genesis[0].hash()), genesis, &Default::default());
+        let mut start = Members::new(Some(entries[0].hash()));
+        start.try_step(&entries[0]).unwrap();
         let mut db = ScopeDb::build(&start, &Scope::Global, &ScopeState::default(), 0).unwrap();
         for e in &entries[1..] {
             match apply(&db, None, &Scope::Global, e) {
@@ -1043,7 +935,7 @@ pub(crate) mod tests {
                 }
                 out.join("\n")
             };
-            panic!("steps left\n{}\nreplay made\n{}", dump(&db), dump(&replayed));
+            panic!("steps left\n{}\nin memory\n{}", dump(&db), dump(&replayed));
         }
     }
 
@@ -1071,6 +963,15 @@ pub(crate) mod tests {
 
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";
+
+    /// Who's who after `entries`, each written after every one before it, from the first, the genesis.
+    fn members_of(entries: &[Entry]) -> Members {
+        let mut m = Members::new(Some(entries[0].hash()));
+        for e in entries {
+            m.step(e);
+        }
+        m
+    }
 
     /// Andre's Mac starts the network, its recovery key kept offline, and lists Bob's laptop, Bob an admin too.
     fn two_admins() -> (History, SigningKey, SigningKey, SigningKey) {
@@ -1121,7 +1022,7 @@ pub(crate) mod tests {
     #[test]
     fn a_scope_starts_from_its_start() {
         let (h, mac, _, _) = two_admins();
-        let m = Members::replay(Some(h.root()), &h.entries, &Default::default());
+        let m = members_of(&h.entries);
         let global = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
         let scope = Scope::User(ANDRE.into());
         let state = ScopeState { installed: ["notes".to_string()].into(), arrangements: [("user".to_string(), json!({ "items": ["notes"] }))].into(), ..Default::default() };
@@ -1146,7 +1047,7 @@ pub(crate) mod tests {
     #[test]
     fn a_scope_s_reader_stops_at_a_newer_release_s_step() {
         let (h, mac, _, _) = two_admins();
-        let m = Members::replay(Some(h.root()), &h.entries, &Default::default());
+        let m = members_of(&h.entries);
         let global = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
         let scope = Scope::User(ANDRE.into());
         let db = || ScopeDb::open(super::super::scope::build(&Members::default(), &scope, &ScopeState::default()).unwrap(), 0).unwrap();
@@ -1171,7 +1072,7 @@ pub(crate) mod tests {
         let (_, mac, _, _) = two_admins();
         let step = |at: u64| {
             let name = crate::db::step_name(&prefix, at);
-            crate::log::seal(&keys, &name, &encode(&sign(&mac, &Scope::Global, at, ANDRE, 1, 0, members::setting("name", Some("x"))).unwrap(), None)).unwrap()
+            seal(&keys, &name, &encode(&sign(&mac, &Scope::Global, at, ANDRE, 1, 0, members::setting("name", Some("x"))).unwrap(), None)).unwrap()
         };
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
             bucket.create(&crate::db::newest_name(&prefix), br#"{"at": 1000000000, "copy": 0, "epoch": 1}"#).await.unwrap();
@@ -1198,7 +1099,7 @@ pub(crate) mod tests {
         let (h, mac, laptop, _) = two_admins();
         let mut h = h;
         h.write(&mac, ANDRE, members::role(BOB, Role::Member));
-        let m = Members::replay(Some(h.root()), &h.entries, &Default::default());
+        let m = members_of(&h.entries);
         let db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
         let step = |key: &SigningKey, user: &str| {
             let mut content = release_defaults().unwrap();
@@ -1224,7 +1125,7 @@ pub(crate) mod tests {
         const ANDRE: &str = "a000000000000001";
         let mac = SigningKey::from_bytes(&[1; 32]);
         let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
-        let m = Members::replay(Some(g.hash()), std::slice::from_ref(&g), &Default::default());
+        let m = members_of(std::slice::from_ref(&g));
         let db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
         let step = |at: u64, reads: u32| {
             let mut content = release_defaults().unwrap();
@@ -1257,7 +1158,7 @@ pub(crate) mod tests {
         const BOB: &str = "b000000000000002";
         let (mac, laptop, phone) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[3; 32]));
         let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
-        let m = Members::replay(Some(g.hash()), std::slice::from_ref(&g), &Default::default());
+        let m = members_of(std::slice::from_ref(&g));
         let mut db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
         let mut at = 0;
         let mut step = |db: &mut ScopeDb, key: &SigningKey, user: &str, epoch: u32, content: Content| -> bool {
@@ -1277,7 +1178,7 @@ pub(crate) mod tests {
         assert!(!step(&mut db, &laptop, BOB, 1, setting("name", Some("Bob's"))), "but changes no setting");
         assert!(!step(&mut db, &laptop, BOB, 1, device(&Endpoint::of(&phone), ANDRE, "phone", &[Kind::Client], None)), "nor lists another's device");
         assert!(!step(&mut db, &mac, ANDRE, 2, setting("name", Some("Ours"))), "nor names an epoch not reached");
-        assert!(step(&mut db, &mac, ANDRE, 1, remove_device(&laptop.verifying_key().to_bytes(), None)));
+        assert!(step(&mut db, &mac, ANDRE, 1, remove_device(&laptop.verifying_key().to_bytes())));
         assert!(!step(&mut db, &laptop, BOB, 1, node("rename", json!({ "user": BOB, "name": "Robert" }))), "a removed device's next step counts for nothing");
         assert!(db.group("c000000000000003").is_some() && db.setting("name").is_none());
         // Signed for one place, it's nowhere else; and an entry, signed the same way, is never a step.

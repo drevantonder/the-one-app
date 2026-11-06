@@ -204,47 +204,6 @@ pub struct Members {
     pub recovery_set: u64,
     /// The network's recovery keys before this one, which the relay lets in no more.
     pub recovery_was: Vec<Key>,
-    /// Who opened the gate to the scope database, each from an admin's own device as it sorts (`gate`).
-    gates: BTreeSet<String>,
-    /// Where each endpoint's entries stop counting, by (endpoint, log): the first seq that doesn't, wherever it sorts.
-    /// A removed device's in `global` after the last its remover had seen (`remove`'s `seq`), and a device's in a log
-    /// it forked from the fork on (`Store::forks`).
-    pub cuts: Cuts,
-    /// Devices that forked `global` (two entries at one seq): removed once it's replayed.
-    forked: BTreeMap<Key, Fork>,
-    /// How many of each forked device's entries before its fork replay has passed so far.
-    passed: BTreeMap<Key, usize>,
-}
-
-/// Where a device forked `global`: the seq with two entries, and how many of its member entries came before it.
-#[derive(Clone, Copy, Debug, Default)]
-struct Fork {
-    seq: u32,
-    before: usize,
-}
-
-/// Where endpoints' entries stop counting: (endpoint, log) → the first seq that doesn't.
-pub type Cuts = BTreeMap<(Key, String), u32>;
-
-/// Adds `more` to `cuts`, each the lower where both have one: → whether that changed anything.
-fn merge(cuts: &mut Cuts, more: &Cuts) -> bool {
-    let mut changed = false;
-    for (k, seq) in more {
-        let at = cuts.entry(k.clone()).or_insert(u32::MAX);
-        if *seq < *at {
-            *at = *seq;
-            changed = true;
-        }
-    }
-    changed
-}
-
-/// The first seq of a device's in `global` that doesn't count, from the last its remover had seen (null for none).
-fn first_not(seq: &Value) -> Result<u32> {
-    Ok(match seq {
-        Value::Null => 0,
-        seq => u32::try_from(seq.as_u64().context("a seq is a device's last in global, or null")?)?.checked_add(1).context("seq is too big")?,
-    })
 }
 
 /// App schedules: who set them, until when, and the hash (`keys::epoch_hash`) of the app's key in each epoch
@@ -289,71 +248,6 @@ impl Members {
         Members { root, ..Default::default() }
     }
 
-    /// Replays `global`'s node entries, sorted in replay order, with the forks `Store::forks` found. A removal's cut
-    /// applies to entries that sort before it too, so where one stops entries that counted, it's replayed again with the
-    /// cuts known from the start, until they don't change.
-    pub fn replay(root: Option<Hash>, member_entries: &[Entry], forks: &Cuts) -> Members {
-        let forked: BTreeMap<Key, Fork> = forks
-            .iter()
-            .filter(|((_, log), _)| log == "global")
-            .map(|((k, _), seq)| (*k, Fork { seq: *seq, before: member_entries.iter().filter(|e| e.author() == *k && e.seq() < *seq).count() }))
-            .collect();
-        let mut known = forks.clone();
-        loop {
-            let m = Members::replay_with(root, member_entries, &known, &forked);
-            if !merge(&mut known, &m.cuts) {
-                return m;
-            }
-        }
-    }
-
-    /// Replays with cuts known from the start.
-    fn replay_with(root: Option<Hash>, member_entries: &[Entry], cuts: &Cuts, forked: &BTreeMap<Key, Fork>) -> Members {
-        let mut m = Members::with_cuts(root, cuts, forked);
-        for e in member_entries {
-            m.step(e);
-        }
-        m.end();
-        m
-    }
-
-    /// Members before any entry, with the cuts a full replay found, and the devices that forked `global`.
-    fn with_cuts(root: Option<Hash>, cuts: &Cuts, forked: &BTreeMap<Key, Fork>) -> Members {
-        Members { root, cuts: cuts.clone(), forked: forked.clone(), ..Default::default() }
-    }
-
-    /// Once every member entry is replayed: a device that forked `global` is removed, and a recovery key that did is
-    /// no recovery key: whoever forked it could fork away its own replacement, so an admin's own device names the
-    /// next (`recovery_lost`).
-    pub fn end(&mut self) {
-        for key in self.forked.keys() {
-            if let Some(m) = self.machines.get_mut(key) {
-                m.removed = true;
-            }
-        }
-        if self.recovery_lost() {
-            self.recovery_was.extend(self.recovery.take());
-        }
-    }
-
-    /// Whether an admin's own device said the gate to the scope database is open (`GATE`), before the log's freeze:
-    /// only a freeze of the log from there on counts (`database::steps::claimed`). Only if one who's still an admin
-    /// did, so a device of someone demoted can't open it with an entry that sorts before their demotion; worked out
-    /// as it's asked, so it's the same stepped one entry at a time as replayed whole.
-    pub fn gate(&self) -> bool {
-        self.gates.iter().any(|u| self.is_admin(u))
-    }
-
-    /// Whether the network has no recovery key, or one that forked `global` whose every entry from before its fork
-    /// replay has passed: only then does an admin's own device name the next, and once replayed, `end` takes it away.
-    /// Only those entries of a forked key's count, its handover to the next among them, so no admin's naming that
-    /// sorts before that handover, from a device that hadn't seen it, ever replaces the key it handed over to. Not
-    /// "has the namer seen the fork": a node holds only the first of two entries at one seq, so which it holds, and
-    /// where it sorts, isn't the same on every reader; the entries before it are.
-    pub fn recovery_lost(&self) -> bool {
-        self.recovery.is_none_or(|k| self.forked.get(&k).is_some_and(|f| self.passed.get(&k).copied().unwrap_or(0) >= f.before))
-    }
-
     /// Applies one of `global`'s node entries, if it counts. Returns whether it did.
     pub fn step(&mut self, e: &Entry) -> bool {
         let counted = self.try_step(e).is_ok();
@@ -365,19 +259,8 @@ impl Members {
 
     /// As `step`, saying why an entry doesn't count.
     pub fn try_step(&mut self, e: &Entry) -> Result<()> {
-        if let Some(f) = self.forked.get(&e.author())
-            && e.log() == "global"
-            && e.seq() < f.seq
-        {
-            *self.passed.entry(e.author()).or_default() += 1;
-        }
         ensure!(e.content.kind == "genesis" || self.counts(e), "that changes nothing: you may not {} that", e.content.kind);
         self.apply(e)
-    }
-
-    /// Whether an entry is at or after where its device's entries in its log stop counting.
-    pub fn cut(&self, e: &Entry) -> bool {
-        self.cuts.get(&(e.author(), e.log().to_string())).is_some_and(|c| e.seq() >= *c)
     }
 
     /// The hash of a scope's epoch `n`, if an entry that counts made it.
@@ -633,7 +516,7 @@ impl Members {
     /// checked as it's applied (`apply`), or, for one in a user or group scope, by `apply_in_scope`.
     pub fn counts(&self, e: &Entry) -> bool {
         let scope = e.scope();
-        if !self.may_use(e.user(), &scope) || e.epoch() > self.epoch(&scope) || self.cut(e) {
+        if !self.may_use(e.user(), &scope) || e.epoch() > self.epoch(&scope) {
             return false;
         }
         let author = e.author();
@@ -732,7 +615,6 @@ impl Members {
                 let mut machine = listed(&json!({ "key": data["key"], "seal": data["seal"], "name": data["name"], "roles": [Kind::Client] }), &w, e.time())?;
                 machine.by = w.clone();
                 machine.removed = true;
-                merge(&mut self.cuts, &BTreeMap::from([((key, "global".to_string()), 0)]));
                 self.machines.insert(key, machine);
                 self.devices_at = self.devices_at.max(e.time());
             }
@@ -754,15 +636,6 @@ impl Members {
             "remove" => {
                 if let Ok(user) = id_of("user") {
                     ensure!(self.is_admin(&w), "admins only");
-                    // The last of each of their devices' entries in `global` its remover had seen: those after never
-                    // count, wherever they sort, so a device of theirs that hadn't read its removal can't write one that
-                    // sorts before it. A device its remover hadn't seen at all keeps none.
-                    let seqs = data["seqs"].as_object().context("a person's removal says the last of each of their devices' entries its remover had seen (seqs)")?;
-                    let mut cut = Cuts::new();
-                    for d in self.machines.values().filter(|d| d.user == user) {
-                        cut.insert((d.key, "global".to_string()), first_not(seqs.get(&hex(&d.key)).unwrap_or(&Value::Null))?);
-                    }
-                    merge(&mut self.cuts, &cut);
                     let theirs: Vec<Key> = self.machines.values().filter(|d| d.user == user).map(|d| d.key).collect();
                     let owed = self.held_by(&theirs, Some(&Scope::User(user.clone())));
                     self.users.get_mut(&user).context("no such user")?.removed = true;
@@ -771,9 +644,6 @@ impl Members {
                     let key = key_of("key")?;
                     ensure!(self.machine(&key).is_some(), "no such key");
                     ensure!(self.looks_after(&w, &key), "only its person or an admin removes a device");
-                    // The last of its entries in `global` its remover had seen: those after never count, wherever they sort.
-                    ensure!(data.get("seq").is_some(), "a device's removal says the last of its entries its remover had seen (seq)");
-                    merge(&mut self.cuts, &BTreeMap::from([((key, "global".to_string()), first_not(&data["seq"])?)]));
                     // A device signing itself out deletes its own keys: signed by it, or by a node of its person's it
                     // asked (`itself`). So does a sign-in before on a device signed in again (`Node::approve_request`).
                     // One removed otherwise may still hold them.
@@ -935,20 +805,13 @@ impl Members {
             }
             "recovery" => {
                 // Only the recovery key itself hands over to a new one: no admin's device can, since every epoch is
-                // sealed to it, own scopes too. Unless there's none, since the one there was forked `global`: then an
-                // admin's own device names the next.
-                let named = self.recovery_lost() && self.is_admin(&w) && self.client(&author).is_some_and(|c| c.user == w);
+                // sealed to it, own scopes too. Unless there's none: then an admin's own device names the next.
+                let named = self.recovery.is_none() && self.is_admin(&w) && self.client(&author).is_some_and(|c| c.user == w);
                 ensure!(self.recovery == Some(author) || named, "only the network's recovery key changes it");
                 let key = key_of("key")?;
                 ensure!(Some(key) != self.recovery && !self.recovery_was.contains(&key) && !self.machines.contains_key(&key), "a new recovery key is a key of its own");
                 self.recovery_was.extend(self.recovery.replace(key));
                 self.recovery_set = e.time();
-            }
-            "gate" => {
-                // The gate to the scope database is open: said by an admin's own device in the ceremony that freezes the
-                // log (`Node::switch`), before it. An older device skips it.
-                ensure!(self.is_admin(&w), "admins only");
-                self.gates.insert(w);
             }
             "app" => {
                 let name = text("name")?;
@@ -1265,45 +1128,6 @@ pub fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<
     Ok(())
 }
 
-/// Replays a scope: `global`'s member entries and the scope's own, merged in replay order (both sorted). Calls `f`
-/// with each of the scope's entries that counts, the members as they were then, and the scope's node state.
-/// For `global`, pass its entries as both.
-/// `known` are the members a full replay of `global` made, whose cuts (and forks) apply from the start.
-pub fn replay(known: &Members, member_entries: &[Entry], scope_entries: &[Entry], f: impl FnMut(&Entry, &Members, &ScopeState)) -> (Members, ScopeState) {
-    replay_from(known, member_entries, scope_entries, ScopeState::default(), f)
-}
-
-/// Replays more of a scope's entries onto `state`, what its earlier ones added up to.
-pub fn replay_from(known: &Members, member_entries: &[Entry], scope_entries: &[Entry], mut state: ScopeState, mut f: impl FnMut(&Entry, &Members, &ScopeState)) -> (Members, ScopeState) {
-    let mut m = Members::with_cuts(known.root, &known.cuts, &known.forked);
-    let mut members = member_entries.iter().peekable();
-    for e in scope_entries {
-        let order = e.order();
-        while let Some(me) = members.next_if(|me| me.order() < order) {
-            m.step(me);
-        }
-        let counted = if is_member_entry(e) {
-            members.next_if(|me| me.order() == order);
-            m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall") || apply_in_scope(&m, &mut state, e).is_ok())
-        } else if e.content.app == APP && e.log() == "global" {
-            // A scope-only node entry of `global`'s.
-            m.counts(e) && apply_in_scope(&m, &mut state, e).is_ok()
-        } else if m.counts(e) {
-            e.content.app != APP || apply_in_scope(&m, &mut state, e).is_ok()
-        } else {
-            false
-        };
-        if counted {
-            f(e, &m, &state);
-        }
-    }
-    for me in members {
-        m.step(me);
-    }
-    m.end();
-    (m, state)
-}
-
 // Building node entries.
 
 pub fn node(kind: &str, data: Value) -> Content {
@@ -1342,17 +1166,14 @@ pub fn role(user: &str, role: Role) -> Content {
     node("role", json!({ "user": user, "role": role }))
 }
 
-/// Takes a person out: `seqs` is the last entry in `global` the remover holds of each of their devices (none if it has
-/// none), and their later ones don't count.
-pub fn remove_user(user: &str, seqs: &BTreeMap<Key, Option<u32>>) -> Content {
-    let seqs: serde_json::Map<String, Value> = seqs.iter().map(|(k, seq)| (hex(k), json!(seq))).collect();
-    node("remove", json!({ "user": user, "seqs": seqs }))
+/// Takes a person out, with an empty `seqs`, which devices from before 2026-11-06 still look for.
+pub fn remove_user(user: &str) -> Content {
+    node("remove", json!({ "user": user, "seqs": {} }))
 }
 
-/// Takes a device out: `seq` is its last entry in `global` that the remover holds (none if it has none), and its later
-/// ones don't count.
-pub fn remove_device(key: &Key, seq: Option<u32>) -> Content {
-    node("remove", json!({ "key": hex(key), "seq": seq }))
+/// Takes a device out, with an empty `seq`, which devices from before 2026-11-06 still look for.
+pub fn remove_device(key: &Key) -> Content {
+    node("remove", json!({ "key": hex(key), "seq": null }))
 }
 
 /// One of the network's settings; `None` puts back the custom build's default.
@@ -1361,10 +1182,6 @@ pub fn setting(name: &str, value: Option<&str>) -> Content {
 }
 
 /// The gate to the scope database is open, as an admin's own device says in the ceremony that freezes the log.
-pub fn gate() -> Content {
-    node("gate", json!({}))
-}
-
 pub fn group(id: &str, name: &str) -> Content {
     node("group", json!({ "group": id, "name": name }))
 }
@@ -1469,7 +1286,7 @@ pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry::{Ext, Head, causal};
+    use crate::entry::{Ext, Head};
     use crate::keys::Endpoint;
     use ed25519_dalek::SigningKey;
 
@@ -1508,15 +1325,17 @@ mod tests {
         (mac, vec![g])
     }
 
+    /// Who's who after `entries`, in the order they were written, as `members`' rules alone make it; and the scope
+    /// database says the same, built from it and applying them as steps.
     fn members(entries: &[Entry]) -> Members {
-        let sorted = causal(entries.to_vec(), &Default::default());
-        let m = Members::replay(Some(entries[0].hash()), &sorted, &Cuts::new());
-        // Phase 1 changes nothing: the scope database says what replay does.
+        let mut m = Members::new(Some(entries[0].hash()));
+        for e in entries {
+            m.step(e);
+        }
         #[cfg(feature = "db")]
         crate::database::scope::tests::agrees(&m);
-        // Phase 2 changes nothing either: the same changes as steps, in that order, leave the database replay made.
         #[cfg(feature = "db")]
-        crate::database::steps::tests::agrees(&sorted, &m);
+        crate::database::steps::tests::agrees(entries, &m);
         m
     }
 
@@ -1544,7 +1363,7 @@ mod tests {
         let m = members(&entries);
         assert_eq!(m.machines[&phone.id()].sign_in, serde_json::from_value(google).ok());
         assert_eq!(m.machines[&laptop.id()].sign_in, None);
-        add(&mut entries, &mut mac, ANDRE, remove_device(&phone.id(), None));
+        add(&mut entries, &mut mac, ANDRE, remove_device(&phone.id()));
         let m = members(&entries);
         assert!(m.machine(&phone.id()).is_none(), "taken out, and the scope database's sign_ins agree it's gone (agrees)");
     }
@@ -1605,8 +1424,8 @@ mod tests {
         let mut other = Dev::new(2);
         let fake = other.write("global", ANDRE, genesis("Home", ANDRE, "x", &other.endpoint(), "y", BOTH, &[7; 32], &H.repeat(64)), &[]);
         let (_, entries) = setup();
-        let m = Members::replay(Some(entries[0].hash()), &[fake], &Cuts::new());
-        assert!(m.users.is_empty());
+        let mut m = Members::new(Some(entries[0].hash()));
+        assert!(!m.step(&fake) && m.users.is_empty());
         let m = members(&entries);
         assert_eq!(m.users.len(), 1);
         assert_eq!(m.seal_key(&entries[0].author()), Some(Dev::new(1).endpoint().seal), "the seal key it was listed with");
@@ -1702,63 +1521,6 @@ mod tests {
     }
 
     #[test]
-    fn a_removed_devices_later_entries_dont_count_wherever_they_sort() {
-        let (mut mac, mut entries) = setup();
-        let mut laptop = Dev::new(3);
-        add(&mut entries, &mut mac, ANDRE, device(&laptop.endpoint(), ANDRE, "laptop", &[Kind::Client], None));
-        let before = add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "before", "value": "1" })));
-        let read = entries.clone();
-        add(&mut entries, &mut mac, ANDRE, node("setting", json!({ "name": "busy", "value": "1" })));
-        let removed = add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "key": hex(&laptop.id()), "seq": before.seq() })));
-        // The laptop, never having read its removal, writes after what it had read: it sorts before the removal.
-        let sneaky = laptop.write("global", ANDRE, node("setting", json!({ "name": "sneaky", "value": "1" })), &read);
-        entries.push(sneaky.clone());
-        add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "after", "value": "1" })));
-        let sorted = causal(entries.clone(), &Default::default());
-        let at = |h: Hash| sorted.iter().position(|e| e.hash() == h).unwrap();
-        assert!(at(sneaky.hash()) < at(removed.hash()), "it sorts before its removal");
-        let m = members(&entries);
-        assert!(m.settings.contains_key("before"), "what its remover had seen still counts");
-        assert!(!m.settings.contains_key("sneaky") && !m.settings.contains_key("after"));
-        assert!(m.machine(&laptop.id()).is_none());
-        // A removal that doesn't say what its remover had seen doesn't count.
-        let (mut mac, mut entries) = setup();
-        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(4).endpoint(), ANDRE, "phone", &[Kind::Client], None));
-        add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "key": hex(&Dev::new(4).id()) })));
-        assert!(members(&entries).machine(&Dev::new(4).id()).is_some());
-    }
-
-    #[test]
-    fn a_device_that_forks_its_log_counts_no_more_from_the_fork_on_wherever_its_sides_arrive() {
-        let (mut mac, mut entries) = setup();
-        let mut laptop = Dev::new(3);
-        add(&mut entries, &mut mac, ANDRE, device(&laptop.endpoint(), ANDRE, "laptop", &[Kind::Client], None));
-        add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "before", "value": "1" })));
-        let fork_at = laptop.last.get("global").copied();
-        let one = add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "one", "value": "1" })));
-        laptop.last.insert("global".into(), fork_at.unwrap());
-        let two = add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "two", "value": "1" })));
-        add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "after", "value": "1" })));
-        add(&mut entries, &mut mac, ANDRE, node("setting", json!({ "name": "mac", "value": "1" })));
-        assert_eq!(one.seq(), two.seq());
-        // Two devices that took the sides in opposite orders count the same.
-        let replayed = |list: Vec<Entry>| {
-            let store = crate::store::Store::memory().unwrap();
-            store.take(list).unwrap();
-            let member_entries: Vec<Entry> = store.scope("global").unwrap().into_iter().filter(is_member_entry).collect();
-            Members::replay(Some(entries[0].hash()), &member_entries, &store.forks().unwrap())
-        };
-        let a = replayed(entries.clone());
-        let b = replayed(entries.iter().rev().cloned().collect());
-        for m in [&a, &b] {
-            assert_eq!(m.settings.keys().collect::<Vec<_>>(), ["before", "mac"], "nothing from the fork on");
-            assert!(m.machine(&laptop.id()).is_none(), "it's removed");
-            #[cfg(feature = "db")]
-            crate::database::scope::tests::agrees(m);
-        }
-    }
-
-    #[test]
     fn a_new_epoch_counts_only_from_the_scopes_admins_and_names_its_key() {
         let (mut mac, mut entries) = setup();
         let mut bobs = Dev::new(3);
@@ -1831,7 +1593,7 @@ mod tests {
         let recovery = Dev::new(9);
         let (mut mac, _, mut bobs, mut entries) = with_bob(&recovery);
         let (mac_id, bob_id) = (mac.id(), bobs.id());
-        add(&mut entries, &mut mac, ANDRE, remove_user(BOB, &[(bob_id, None)].into()));
+        add(&mut entries, &mut mac, ANDRE, remove_user(BOB));
         // A new epoch of everyone's can't be sealed to Bob's phone, and what his phone writes after doesn't count.
         add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id, bob_id], &"c".repeat(64)));
         add(&mut entries, &mut bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" })));
@@ -1867,7 +1629,7 @@ mod tests {
         assert!(owed(&entries).is_empty());
         // Signing itself out, a device deletes its own keys: nothing's owed.
         let laptop_id = laptop.id();
-        add(&mut entries, &mut laptop, BOB, remove_device(&laptop_id, Some(0)));
+        add(&mut entries, &mut laptop, BOB, remove_device(&laptop_id));
         assert!(owed(&entries).is_empty() && members(&entries).machine(&laptop_id).is_none(), "signing out owes nothing");
         // Nor one a node of its person's wrote for it, saying it signed itself out; an admin's saying so for another's
         // device is taken as removing it.
@@ -1891,10 +1653,10 @@ mod tests {
         let (before, again) = (Dev::new(10), Dev::new(11));
         add(&mut entries, &mut bobs, BOB, on(&before));
         add(&mut entries, &mut bobs, BOB, on(&again));
-        add(&mut entries, &mut bobs, BOB, remove_device(&before.id(), None));
+        add(&mut entries, &mut bobs, BOB, remove_device(&before.id()));
         assert!(owed(&entries).is_empty() && members(&entries).machine(&before.id()).is_none(), "signing in again owes nothing");
         // Taken out by another, it may still hold every key it opened, until each scope's next epoch counts.
-        add(&mut entries, &mut mac, ANDRE, remove_device(&tablet.id(), None));
+        add(&mut entries, &mut mac, ANDRE, remove_device(&tablet.id()));
         assert_eq!(owed(&entries), vec![Scope::Global, work.clone(), bob.clone()]);
         add(&mut entries, &mut bobs, BOB, epoch(&bob, 3, &[bob_id], &H.repeat(64)));
         add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 3, &[tablet.id()], &H.repeat(64)));
@@ -1908,42 +1670,15 @@ mod tests {
         assert_eq!(owed(&entries), vec![bob.clone()]);
         add(&mut entries, &mut bobs, BOB, epoch(&bob, 4, &[bob_id], &H.repeat(64)));
         add(&mut entries, &mut bobs, BOB, app_schedules(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
-        add(&mut entries, &mut mac, ANDRE, remove_device(&linux_id, None));
+        add(&mut entries, &mut mac, ANDRE, remove_device(&linux_id));
         assert_eq!(owed(&entries), vec![bob.clone()], "a machine holds no epoch, only the keys of the app schedules it runs");
         add(&mut entries, &mut bobs, BOB, epoch(&bob, 5, &[bob_id], &H.repeat(64)));
         // Taken out of a group, then out of the network: their own scope is kept as it is.
         add(&mut entries, &mut mac, ANDRE, member("c000000000000003", BOB, None));
         assert_eq!(owed(&entries), vec![work.clone()]);
         add(&mut entries, &mut mac, ANDRE, epoch(&work, 4, &[mac_id], &H.repeat(64)));
-        add(&mut entries, &mut mac, ANDRE, remove_user(BOB, &[(bob_id, None)].into()));
+        add(&mut entries, &mut mac, ANDRE, remove_user(BOB));
         assert_eq!(owed(&entries), vec![Scope::Global]);
-    }
-
-    #[test]
-    fn a_removed_admins_devices_write_nothing_that_counts_after_what_their_remover_had_seen() {
-        const MAL: &str = "c000000000000003";
-        let (mut mac, mut entries) = setup();
-        let (mut laptop, eve, stranger) = (Dev::new(5), Dev::new(6), Dev::new(8));
-        add(&mut entries, &mut mac, ANDRE, device(&laptop.endpoint(), MAL, "mal's laptop", &[Kind::Client], Some(("Mal", Role::Admin))));
-        let before = add(&mut entries, &mut laptop, MAL, node("setting", json!({ "name": "before", "value": "1" })));
-        let read = entries.clone();
-        let removed = add(&mut entries, &mut mac, ANDRE, remove_user(MAL, &[(laptop.id(), Some(before.seq()))].into()));
-        // Mal's laptop, never having read its removal, writes after only what it had read: it sorts before the removal.
-        let admin = laptop.write("global", MAL, device(&eve.endpoint(), "e000000000000005", "eve's", &[Kind::Client], Some(("Eve", Role::Admin))), &read);
-        let recovery = laptop.write("global", MAL, node("recovery", json!({ "key": hex(&stranger.id()) })), &read);
-        entries.extend([admin.clone(), recovery.clone()]);
-        let sorted = causal(entries.clone(), &Default::default());
-        let at = |h: Hash| sorted.iter().position(|e| e.hash() == h).unwrap();
-        assert!(at(admin.hash()) < at(removed.hash()) || at(recovery.hash()) < at(removed.hash()), "one sorts before the removal");
-        let m = members(&entries);
-        assert!(m.settings.contains_key("before"), "what its remover had seen still counts");
-        assert!(m.machine(&eve.id()).is_none() && m.user("e000000000000005").is_none(), "the admin device it wrote doesn't count");
-        assert_eq!(m.recovery, Some([7; 32]), "nor its recovery key");
-        assert!(m.machine(&laptop.id()).is_none() && m.user(MAL).is_none());
-        // A removal that doesn't say what its remover had seen of their devices doesn't count.
-        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(10).endpoint(), "d000000000000004", "dan's", &[Kind::Client], Some(("Dan", Role::Member))));
-        add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "user": "d000000000000004" })));
-        assert!(members(&entries).user("d000000000000004").is_some());
     }
 
     #[test]

@@ -43,7 +43,7 @@ impl Node {
         let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
         let keys = self.database_keys(scope, members::APP, crate::bucket::BLOBS, false).await?;
         let name = crate::bucket::blob_name(&scope.to_string(), hash);
-        Bucket::create(&self.bucket()?.place, &name, &crate::log::seal(&keys, &name, &bytes)?).await?;
+        Bucket::create(&self.bucket()?.place, &name, &crate::database::steps::seal(&keys, &name, &bytes)?).await?;
         self.0.shared.lock().unwrap().insert(marker.clone());
         self.note_shared(&marker)
     }

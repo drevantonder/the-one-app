@@ -454,10 +454,6 @@ pub struct Inner {
     making_keys: tokio::sync::Mutex<()>,
     /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
     junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
-    /// `global`'s log up to its freeze's end of it, once read: what each scope's database starts from (`node::steps`).
-    frozen_log: Mutex<Option<Arc<crate::database::steps::Log>>>,
-    /// The scopes whose start this device has looked for since it started (`node::steps`).
-    started: Mutex<std::collections::BTreeSet<Scope>>,
     /// When this device last tidied each database (by prefix), ms.
     tidied: Mutex<HashMap<String, u64>>,
     /// The last position this device wrote an entry of each scope at.
@@ -605,8 +601,6 @@ impl Node {
             moved: Arc::default(),
             making_keys: tokio::sync::Mutex::new(()),
             junk: Mutex::new(HashMap::new()),
-            frozen_log: Mutex::new(None),
-            started: Mutex::new(Default::default()),
             tidied: Mutex::new(HashMap::new()),
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),
@@ -890,7 +884,7 @@ impl Node {
         let first = crate::database::steps::first_freeze(&recovery, &entry, &user, now_ms())?;
         let keys = self.log_key_of(&crate::db::Keys::from([(1, global)])).await?;
         let name = crate::db::step_name(&crate::database::steps::prefix("global"), 1);
-        let sealed = crate::log::seal(&keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref()))?;
+        let sealed = crate::database::steps::seal(&keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref()))?;
         ensure!(crate::bucket::Bucket::create(&bucket, &name, &sealed).await?, "the new network's bucket isn't empty");
         self.read_steps().await?;
         ensure!(self.frozen(), "the new network's freeze didn't count");

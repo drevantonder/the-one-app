@@ -62,18 +62,6 @@ impl Node {
         Ok(at > from)
     }
 
-    /// `global`'s frozen log to step `end`, where its freeze says it ends (`steps::log_to`), read only: kept while this
-    /// device runs, for each other scope's database to start from.
-    async fn global_log(&self, end: u64) -> Result<Arc<steps::Log>> {
-        if let Some(log) = self.0.frozen_log.lock().unwrap().clone().filter(|l| l.last() >= end) {
-            return Ok(log);
-        }
-        let root = self.with(|i| Ok(i.r.root))?;
-        let log = Arc::new(steps::log_to(&self.bucket()?, &self.log_key(&Scope::Global).await?, root, end).await?);
-        *self.0.frozen_log.lock().unwrap() = Some(log.clone());
-        Ok(log)
-    }
-
     /// Where this device read `global`'s scope database to, and the database there, kept in its folder: what it starts
     /// again from (`start_kept`), never the entries again.
     fn keep_global(&self) {
@@ -157,7 +145,7 @@ impl Node {
         }
         let keys = self.log_key(&Scope::Global).await?;
         let name = crate::db::step_name(&steps::prefix("global"), at);
-        if !crate::bucket::Bucket::create(&self.bucket()?, &name, &crate::log::seal(&keys, &name, &steps::encode(step, None))?).await? {
+        if !crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(step, None))?).await? {
             return Ok(false);
         }
         let handled = self.with(|i| i.r.take_step(at, Some(step), now_ms()))?;
@@ -231,9 +219,8 @@ impl Node {
         Ok(out)
     }
 
-    /// Reads a scope's own steps after the last this device applied, once `global`'s log is frozen: from the database
-    /// its log's entries up to the freeze's end of it add up to (`steps::scope_anchor`), worked out here the first time
-    /// and kept, then each applied if it counts there with `global`'s scope database as it is now. Its state is the
+    /// Reads a scope's own steps after the last this device applied, once `global`'s log is frozen: from its start
+    /// (`steps::started`), then each applied if it counts there with `global`'s scope database as it is now. Its state is the
     /// scope's view from then on. One whose start can't be worked out yet is tried again the next time.
     pub(super) async fn read_scope_steps_now(&self, scope: &Scope) -> Result<bool> {
         if *scope == Scope::Global || !self.frozen() || !self.with(|i| Ok(i.r.holds(scope)))? {
@@ -242,7 +229,6 @@ impl Node {
         let keys = self.log_key(scope).await?;
         let bucket = self.bucket()?;
         let freeze = self.with(|i| Ok(i.r.frozen.clone().map(|(f, _)| f)))?.context("global's log isn't frozen")?;
-        self.write_start(scope, &bucket, &keys, &freeze).await?;
         if !self.with(|i| Ok(i.scope_dbs.contains_key(scope)))? {
             let start = match crate::bucket::Bucket::get(&bucket, &steps::start_name(scope)).await? {
                 Some(o) => match steps::open(&keys, u32::MAX, scope, 0, &o.bytes) {
@@ -286,49 +272,6 @@ impl Node {
         Ok(!read.is_empty())
     }
 
-    /// Writes `scope`'s start (`steps::START`) if the freeze names its frozen log and it has none: what that log's
-    /// entries add up to (`steps::scope_anchor`), signed by this device as one of the scope's people. Once per scope
-    /// while it runs; says whether the start there agrees with the frozen log.
-    async fn write_start(&self, scope: &Scope, bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, freeze: &steps::Freeze) -> Result<()> {
-        if freeze.logs.get(&scope.to_string()).is_none_or(|n| *n == 0) || self.0.started.lock().unwrap().contains(scope) {
-            return Ok(());
-        }
-        let root = self.with(|i| Ok(i.r.root))?;
-        let global = self.global_log(freeze.global()).await?;
-        let entries = steps::anchor_entries(bucket, keys, freeze, root, &global, scope).await?;
-        let mut db = steps::scope_anchor(freeze, root, &global, scope, &entries, now_ms())?;
-        let name = steps::start_name(scope);
-        if crate::bucket::Bucket::get(bucket, &name).await?.is_none() {
-            let (user, epoch) = self.with(|i| {
-                let who = i.r.db();
-                let user = match scope {
-                    Scope::User(u) => Some(u.clone()),
-                    _ => who.users().into_iter().filter(|u| !u.removed).map(|u| u.id).find(|u| who.may(u, "use", &scopes::object(scope))),
-                };
-                Ok((user.context("no one uses that scope")?, who.epoch(scope)))
-            })?;
-            let given = steps::start(&self.0.key, scope, &user, epoch, now_ms(), &mut db)?;
-            if crate::bucket::Bucket::create(bucket, &name, &crate::log::seal(keys, &name, &steps::encoded(&given))?).await? {
-                tracing::info!("wrote {scope}'s start");
-            }
-        }
-        let start = match crate::bucket::Bucket::get(bucket, &name).await? {
-            Some(o) => match steps::open(keys, u32::MAX, scope, 0, &o.bytes) {
-                steps::Opened::Step(given) => Some(given),
-                _ => None,
-            },
-            None => None,
-        };
-        let started = self.with(|i| steps::started(freeze, i.r.db(), scope, start.as_ref(), now_ms()))?;
-        let (from_log, from_start) = (crate::db::state_hash(steps::normalize(steps::connection(&db.bytes()?)?, scope, now_ms())?.conn())?, crate::db::state_hash(started.conn())?);
-        match from_log == from_start {
-            true => tracing::info!("{scope}'s start agrees with its frozen log ({from_start})"),
-            false => tracing::warn!("{scope}'s start ({from_start}) isn't what its frozen log adds up to ({from_log})"),
-        }
-        self.0.started.lock().unwrap().insert(scope.clone());
-        Ok(())
-    }
-
     /// Writes `content` to a scope's own database (not `global`'s) as a step this device signs as `user`, once
     /// `global`'s log is frozen, at the next position.
     pub(super) async fn write_scope_step(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
@@ -347,7 +290,7 @@ impl Node {
             }
             let keys = self.log_key(scope).await?;
             let name = crate::db::step_name(&steps::prefix(&scope.to_string()), at);
-            if crate::bucket::Bucket::create(&self.bucket()?, &name, &crate::log::seal(&keys, &name, &steps::encode(&step, None))?).await? {
+            if crate::bucket::Bucket::create(&self.bucket()?, &name, &steps::seal(&keys, &name, &steps::encode(&step, None))?).await? {
                 self.read_scope_steps_now(scope).await?;
                 let copy = self.with(|i| i.scope_dbs.get_mut(scope).map(|(_, d)| d.bytes()).transpose())?;
                 if let Some(bytes) = copy

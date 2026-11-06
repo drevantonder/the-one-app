@@ -168,7 +168,7 @@ impl Node {
             let mut log_keys = crate::db::Keys::new();
             for (n, epoch) in &candidates {
                 if let Ok(Some(app)) = crate::db::app_key(&bucket, epoch, "global", members::APP, *n, false).await {
-                    log_keys.insert(*n, crate::cloudflare::database_key(&app, crate::log::NAME));
+                    log_keys.insert(*n, crate::cloudflare::database_key(&app, crate::database::steps::KEY_NAME));
                 }
             }
             let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;

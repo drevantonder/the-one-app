@@ -165,13 +165,6 @@ impl Store {
         Ok(Some(depth))
     }
 
-    /// Where devices forked their logs: (device, log) → the first seq with two entries.
-    pub fn forks(&self) -> Result<crate::members::Cuts> {
-        let mut stmt = self.db.prepare("select author, log, min(seq) from forks group by author, log")?;
-        let rows = stmt.query_map([], |r| Ok(((r.get::<_, Key>(0)?, r.get::<_, String>(1)?), r.get::<_, u32>(2)?)))?;
-        Ok(rows.collect::<Result<_, _>>()?)
-    }
-
     /// A log's forks' evidence, for its copies: so a device that reads only a copy finds the fork too.
     pub fn forked(&self, log: &str) -> Result<Vec<Entry>> {
         self.query("select header, signature, body, depth from forks where log = ? order by depth, hash", [log])

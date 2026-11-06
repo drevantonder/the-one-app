@@ -30,7 +30,7 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, sealed_global_steps, reads } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, sealed_global_steps, reads } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 
@@ -343,7 +343,7 @@ class Person {
     /// the scope.
     this.handed = new Map();
     /// When each scope's entries were last read here, and with which keys.
-    this.logsRead = new Map();
+    this.scopesRead = new Map();
     /// Databases it has open, by where they are in the bucket, each brought up to what the bucket has when a call
     /// reaches it again: `{ handle, keys, queue, used, users }`. A call uses one only if it was handed exactly the keys
     /// it was opened with.
@@ -419,7 +419,7 @@ class Person {
   /// Says with 428 what a device (`who`) needs, of `wants` (`{ scope, app, database, have, missing? }`), sealed to
   /// this node: its caller sends the call again with them.
   async needs(wants, who) {
-    const epochs = this.logsRead.has("global") ? this.epochs([...new Set(wants.map((w) => w.scope))]) : {};
+    const epochs = this.scopesRead.has("global") ? this.epochs([...new Set(wants.map((w) => w.scope))]) : {};
     const need = JSON.parse(await needed(this.bucket, JSON.stringify(wants), JSON.stringify(epochs)));
     // The epoch it stopped at, and those it was handed and read with, which a client hands in place of what it did.
     for (const w of wants) for (const epoch of [w.missing, ...(w.missing ? w.have || [] : [])]) if (epoch && !need.some((n) => n.scope === w.scope && n.app === w.app && n.database === w.database && n.epoch === epoch)) need.push({ scope: w.scope, epoch, app: w.app, database: w.database });
@@ -455,14 +455,14 @@ class Person {
 
   // Who can do what.
 
-  /// Reads `scopes`' entries for a request, each with the keys its person handed: a scope whose they didn't hand is
-  /// asked for with 428, so its entries are never shown to someone who can't open them.
-  async readLogs(who, scopes) {
+  /// Reads `scopes`' steps for a request, each with the keys its person handed: a scope whose they didn't hand is
+  /// asked for with 428, so its steps are never shown to someone who can't open them.
+  async readScopes(who, scopes) {
     await Promise.all(scopes.map((scope) => this.withKeys(who, scope, "node", "log", async (keys) => {
-      const last = this.logsRead.get(scope);
+      const last = this.scopesRead.get(scope);
       if (last?.keys === keys && Date.now() - last.at < 2000) return;
-      await read_log(this.owner, this.bucket, scope, keys);
-      this.logsRead.set(scope, { keys, at: Date.now() });
+      await read_scope(this.owner, this.bucket, scope, keys);
+      this.scopesRead.set(scope, { keys, at: Date.now() });
     })));
   }
 
@@ -488,14 +488,14 @@ class Person {
   /// The network as a request's person sees it (src/lib.rs: `network`): `{ state, apps, me, epochs }`, from the
   /// entries of Everyone's, their own and the groups' they handed the keys of. Their device is checked first.
   async networkFor(who) {
-    await this.readLogs(who, ["global"]);
+    await this.readScopes(who, ["global"]);
     const runs = this.forgetLost(who);
     // Their own log's keys are asked for only if they chose this node to run their own things; it and their groups'
     // are read whenever they're handed.
     const own = `user:${who.user}`;
     if (runs.includes(own) && !this.keysOf(who, own, "node", "log")) await this.needs([{ scope: own, app: "node", database: "log", have: [] }], who);
     const handed = (s) => this.handed.get(who.hash)?.keys.has(`${s}/node/log`);
-    const theirs = [own, ...JSON.parse(groups(this.owner, who.user))].filter(handed).map((s) => this.readLogs(who, [s]).then(() => s, () => null));
+    const theirs = [own, ...JSON.parse(groups(this.owner, who.user))].filter(handed).map((s) => this.readScopes(who, [s]).then(() => s, () => null));
     const read = ["global", ...(await Promise.all(theirs)).filter(Boolean)];
     const view = JSON.parse(network(this.owner, who.user, who.clientName, JSON.stringify(read), Date.now()));
     this.bucket.sealed.forgetErased(view.erased || []);
@@ -1021,7 +1021,7 @@ async function route(p, request) {
   // database's steps, sealed.
   if (request.method === "GET" && path === "/v1/steps/global") {
     const who = p.whom(request);
-    await p.readLogs(who, ["global"]);
+    await p.readScopes(who, ["global"]);
     p.forgetLost(who);
     return json(JSON.parse(await sealed_global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
   }

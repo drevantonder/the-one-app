@@ -152,7 +152,7 @@ async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32,
     for (n, epoch) in &epochs {
         let Some(o) = one::bucket::Bucket::get(bucket, &keys::app_key_name("global", members::APP, *n)).await.map_err(failed)? else { continue };
         let app = one::cloudflare::open_app_key(epoch, members::APP, &o.bytes).map_err(failed)?;
-        log_keys.insert(*n, one::cloudflare::database_key(&app, one::log::NAME));
+        log_keys.insert(*n, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME));
     }
     Ok((epochs, log_keys))
 }

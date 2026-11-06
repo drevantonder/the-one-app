@@ -265,7 +265,7 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
 /// log, whose copies are its entries, not a database, takes the hint's.
 #[allow(clippy::too_many_arguments)]
 fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::db::Keys, hinted: u64, above: u64) -> Result<u64> {
-    if (app, database) == (crate::members::APP, crate::log::NAME) {
+    if (app, database) == (crate::members::APP, crate::database::steps::KEY_NAME) {
         return Ok(hinted.max(above));
     }
     let mut keys = crate::db::Keys::new();
@@ -616,7 +616,7 @@ fn steps_of(store: &crate::store::Store, root: Option<crate::entry::Hash>, place
     for n in 1..=(keys.len() as u32 + 8) {
         let Some(sealed) = place.get(&format!("{install}/bucket/{}", crate::keys::app_key_name("global", crate::members::APP, n)))? else { continue };
         if let Some(app) = keys.iter().find_map(|k| crate::cloudflare::open_app_key(k, crate::members::APP, &sealed).ok()) {
-            log_keys.insert(n, crate::cloudflare::database_key(&app, crate::log::NAME));
+            log_keys.insert(n, crate::cloudflare::database_key(&app, crate::database::steps::KEY_NAME));
         }
     }
     let prefix = crate::database::steps::prefix("global");
@@ -643,11 +643,9 @@ fn steps_of(store: &crate::store::Store, root: Option<crate::entry::Hash>, place
     }
 }
 
-/// Who's who, as the member entries in a store replay: `global`'s scope database.
-fn members_of(store: &crate::store::Store, root: Option<crate::entry::Hash>) -> Result<ScopeDb> {
-    let member_entries: Vec<Entry> = store.ordered()?.into_iter().filter(crate::members::is_member_entry).collect();
-    let m = crate::members::Members::replay(root, &member_entries, &store.forks()?);
-    ScopeDb::build(&m, &crate::entry::Scope::Global, &Default::default(), crate::node::now_ms())
+/// Who's who for a backup with no freeze in it: no one, since only the scope database's steps say it.
+fn members_of(_: &crate::store::Store, _: Option<crate::entry::Hash>) -> Result<ScopeDb> {
+    ScopeDb::build(&crate::members::Members::default(), &crate::entry::Scope::Global, &Default::default(), crate::node::now_ms())
 }
 
 /// What a restore must bring back the same: the network's name, its people, devices, groups, apps and settings, and
@@ -702,7 +700,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         // What a person calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
         let said = match (app, db) {
             (crate::members::APP, "vault") => "Vault".to_string(),
-            (crate::members::APP, crate::log::NAME) => "history".to_string(),
+            (crate::members::APP, crate::database::steps::KEY_NAME) => "history".to_string(),
             (crate::members::APP, crate::database::steps::NAME) => "who's who".to_string(),
             (crate::members::APP, _) => "status".to_string(),
             (app, "main") => app.to_string(),
@@ -713,7 +711,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
             let Ok(Some(sealed)) = copy.get(&crate::keys::app_key_name(scope, app, *n)).await else { continue };
             match crate::cloudflare::open_app_key(epoch, app, &sealed.bytes) {
                 // A scope database's steps are sealed as its log is (`database::steps`).
-                Ok(key) => drop(keys.insert(*n, crate::cloudflare::database_key(&key, if (app, db) == (crate::members::APP, crate::database::steps::NAME) { crate::log::NAME } else { db }))),
+                Ok(key) => drop(keys.insert(*n, crate::cloudflare::database_key(&key, if (app, db) == (crate::members::APP, crate::database::steps::NAME) { crate::database::steps::KEY_NAME } else { db }))),
                 Err(err) => out.push(format!("{scope} {said}: its key in epoch {n}: {err:#}")),
             }
         }
@@ -745,7 +743,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         }
         // The node's log of a scope is entries, which `check` restored, and its scope database's steps who's who, which
         // it checked too (`steps_of`); the rest are SQLite.
-        if [crate::log::NAME, crate::database::steps::NAME].map(|db| format!("{}/{db}", crate::members::APP)).contains(database) || keys.is_empty() {
+        if [crate::database::steps::KEY_NAME, crate::database::steps::NAME].map(|db| format!("{}/{db}", crate::members::APP)).contains(database) || keys.is_empty() {
             continue;
         }
         match crate::db::Db::open(&copy, &prefix, keys).await {

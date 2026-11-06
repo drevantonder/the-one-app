@@ -180,17 +180,17 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let out = js(json!({ "op": "step", "seed": B64U.encode(&browser_seed), "fields": fields, "body": String::from_utf8(body).unwrap() }));
         let signed = Entry::decode_step(&b(&out["signed"]["header"]), &b(&out["signed"]["signature"]), &b(&out["signed"]["body"])).unwrap();
         let sealed_app = b(&js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&epoch), "app": members::APP, "key": B64U.encode(&app) }))["sealed"]);
-        let keys: one::db::Keys = [(1, one::cloudflare::database_key(&app, one::log::NAME))].into();
+        let keys: one::db::Keys = [(1, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME))].into();
         let prefix = steps::prefix("global");
         let sealed = |at: u64, step: &Entry, copy: Option<&[u8]>| {
             let name = one::db::step_name(&prefix, at);
-            json!({ "at": at, "sealed": B64U.encode(&one::log::seal(&keys, &name, &steps::encode(step, copy)).unwrap()) })
+            json!({ "at": at, "sealed": B64U.encode(&one::database::steps::seal(&keys, &name, &steps::encode(step, copy)).unwrap()) })
         };
         let (s1, s2, s3) = (sealed(1, &first.step, first.copy.as_deref()), sealed(2, &listed, None), sealed(3, &signed, None));
-        let junk = json!({ "at": 4, "sealed": B64U.encode(&one::log::seal(&[(1, rand::random())].into(), &one::db::step_name(&prefix, 4), b"not a step").unwrap()) });
+        let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::db::step_name(&prefix, 4), b"not a step").unwrap()) });
         let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
         // The log's first step as the URL signer's `get` gives it.
-        let log_steps = json!([{ "at": 1, "sealed": B64U.encode(&one::log::seal(&keys, &one::db::step_name(&one::log::prefix("global"), 1), &pack(&[&g])).unwrap()) }]);
+        let log_steps = json!([{ "at": 1, "sealed": B64U.encode(&one::database::steps::seal(&keys, &one::db::step_name(&one::log::prefix("global"), 1), &pack(&[&g])).unwrap()) }]);
         // A freeze an admin's device signed is nothing, once the recovery key is known.
         let mut client = Global::new(Some(g.hash()));
         let planted = json!({ "steps": [sealed(1, &steps::first_freeze(&mac, &g, ANDRE, 0).unwrap().step, first.copy.as_deref())] });
@@ -260,10 +260,8 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             (members::device(&endpoint, user, "Sam's Chrome", &[Kind::Client], Some(("Sam", Role::Member))), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Sam's Chrome", "newUser": { "name": "Sam", "role": "member" } }])),
             (members::passkey(&endpoint, user, "Passkey", "cred-1"), json!(["passkey", { "key": key, "seal": seal, "user": user, "name": "Passkey", "credential": "cred-1" }])),
             (members::role(user, Role::Admin), json!(["role", { "user": user, "role": "admin" }])),
-            (members::remove_user(user, &[(endpoint.key, Some(7))].into()), json!(["removeUser", { "user": user, "seqs": { &key: 7 } }])),
-            (members::remove_user(user, &[(endpoint.key, None)].into()), json!(["removeUser", { "user": user, "seqs": { &key: null } }])),
-            (members::remove_device(&endpoint.key, Some(7)), json!(["removeDevice", { "key": key, "seq": 7 }])),
-            (members::remove_device(&endpoint.key, None), json!(["removeDevice", { "key": key }])),
+            (members::remove_user(user), json!(["removeUser", { "user": user }])),
+            (members::remove_device(&endpoint.key), json!(["removeDevice", { "key": key }])),
             (members::refuse(&endpoint, "MacBook Pro"), json!(["refuse", { "key": key, "seal": seal, "name": "MacBook Pro" }])),
             (members::forget_sign_in(&endpoint.key), json!(["forgetSignIn", { "key": key }])),
             (members::setting("name", Some("Home")), json!(["setting", { "name": "name", "value": "Home" }])),
