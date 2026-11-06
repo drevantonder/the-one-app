@@ -257,7 +257,7 @@ impl Keyring {
             if response.status == 428 && needed < 3 {
                 needed += 1;
                 let node = response.node;
-                let answer: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
+                let answer: Value = serde_json::from_slice(&response.body.bytes().await?).map_err(|err| failed(format!("the node asked for keys in a reply that wasn't JSON: {err}")))?;
                 let notes = fetches.is_some().then(Notes::new);
                 let learned = self.learn(client, on, &kind, &node, &answer, sent_with, notes.as_ref()).await;
                 if let (Some(notes), Some(last)) = (notes, fetches.as_deref_mut().and_then(|f| f.last_mut())) {
@@ -322,7 +322,12 @@ impl Keyring {
         let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
         let response = self.send(client, Request { method: method.into(), path: path.into(), headers, body: body.into() }, &[], 0).await?;
         let status = response.status;
-        let out: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
+        let out: Value = match serde_json::from_slice(&response.body.bytes().await?) {
+            Ok(out) => out,
+            // A proxy's own error page isn't JSON: the status says it.
+            Err(_) if status != 200 => Value::Null,
+            Err(err) => return Err(failed(format!("{path} answered with a reply that wasn't JSON: {err}"))),
+        };
         if status != 200 {
             let said = error(&out).unwrap_or_else(|| format!("{path} answered {status}"));
             return Err(Error { code: out["code"].as_str().map(str::to_string), ..failed(said) });

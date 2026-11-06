@@ -216,6 +216,7 @@ impl Node {
         let rows = |sql: &str| db.query(sql, &[]);
         let text = |v: &Value| v.as_str().unwrap_or("").to_string();
         let n = |v: &Value| v.as_u64().unwrap_or(0);
+        let device = |v: &Value| unhex(v.as_str().unwrap_or("")).context("a device in this status isn't a key: the status can't be read");
         let mut s = Status::default();
         for r in rows("select * from used")? {
             let used = Used { days: n(&r["days"]), last: n(&r["last"]), agent: r["agent"].as_str().map(str::to_string) };
@@ -234,12 +235,12 @@ impl Node {
             let run = Run {
                 slot: n(&r["slot"]),
                 time: n(&r["time"]),
-                device: unhex(r["device"].as_str().unwrap_or("")).unwrap_or_default(),
+                device: device(&r["device"])?,
                 user: text(&r["user"]),
                 ok: r["ok"] == 1,
                 error: r["error"].as_str().map(str::to_string),
                 ms: n(&r["ms"]),
-                spec: serde_json::from_str(r["spec"].as_str().unwrap_or("null")).unwrap_or_default(),
+                spec: stored(&r["spec"], "null")?,
             };
             let runs = s.runs.entry(key.clone()).or_default();
             if let Some(last) = runs.last().filter(|l| !l.spec.is_null() && !run.spec.is_null() && l.spec != run.spec) {
@@ -253,10 +254,10 @@ impl Node {
             }
         }
         for r in rows("select * from backups order by time")? {
-            let snapshots: Vec<BackedUp> = serde_json::from_str(r["snapshots"].as_str().unwrap_or("[]")).unwrap_or_default();
+            let snapshots: Vec<BackedUp> = stored(&r["snapshots"], "[]")?;
             let run = BackupRun {
                 place: text(&r["place"]),
-                device: unhex(r["device"].as_str().unwrap_or("")).unwrap_or_default(),
+                device: device(&r["device"])?,
                 time: n(&r["time"]),
                 error: r["error"].as_str().map(str::to_string),
                 trouble: r["trouble"].as_str().map(str::to_string),
@@ -276,10 +277,10 @@ impl Node {
         for r in rows("select * from checks order by time")? {
             s.checks.push(CheckRun {
                 place: text(&r["place"]),
-                device: unhex(r["device"].as_str().unwrap_or("")).unwrap_or_default(),
+                device: device(&r["device"])?,
                 time: n(&r["time"]),
                 error: r["error"].as_str().map(str::to_string),
-                report: serde_json::from_str(r["report"].as_str().unwrap_or("null")).unwrap_or_default(),
+                report: stored(&r["report"], "null")?,
             });
         }
         // While it holds the database, so a read that started earlier can't land after this one.
@@ -296,12 +297,20 @@ impl Node {
     pub(super) fn read_all_status(&self) {
         let node = self.clone();
         tokio::spawn(async move {
-            let scopes = node.with(|i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
+            let scopes = match node.with(|i| Ok(i.r.db().scopes()?.into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())) {
+                Ok(scopes) => scopes,
+                Err(err) => return tracing::warn!("reading every scope's status: {err:#}"),
+            };
             for scope in scopes {
                 if let Err(err) = node.read_status(&scope).await {
-                    tracing::debug!("reading {scope}'s status: {err:#}");
+                    tracing::warn!("reading {scope}'s status: {err:#}");
                 }
             }
         });
     }
+}
+
+/// A JSON column of a status row, `empty` when it's null.
+fn stored<T: serde::de::DeserializeOwned>(v: &Value, empty: &str) -> Result<T> {
+    serde_json::from_str(v.as_str().unwrap_or(empty)).context("a stored status field isn't JSON: the status can't be read")
 }

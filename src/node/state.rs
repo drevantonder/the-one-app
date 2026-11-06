@@ -49,7 +49,7 @@ impl Node {
         let arrangements = self.arrangements(&viewer.user);
         let Ok(network) = self.0.network.lock() else { return Ok(json!({ "error": "this device couldn't answer that: a bug in it, which its log shows" })) };
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { network.as_ref().map(|i| i.r.db().machine(&viewer.key)).transpose()?.flatten().map(|m| m.name.clone()).unwrap_or_default() };
-        let backups = network.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
+        let backups = network.as_ref().map(|i| self.backup_problem(i, &viewer.user)).transpose()?.flatten();
         let here_services = network.as_ref().map(|i| self.services_here(i)).transpose()?.unwrap_or_default();
         let here_parts = network.as_ref().map(|i| self.parts_here(i)).transpose()?.map_or(Value::Null, |parts| json!(parts));
         // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.

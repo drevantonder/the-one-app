@@ -228,7 +228,7 @@ impl Node {
             match reply {
                 Ok((Reply::Ok(v), theirs)) => {
                     tried("ran", json!({ "here": here, "trace": theirs }));
-                    let _ = self.with(|i| Ok(i.nearest.insert(device, started.elapsed())));
+                    self.with_or(None, |i| Ok(i.nearest.insert(device, started.elapsed())));
                     return Ok(v);
                 }
                 Ok((Reply::Error(e, code), theirs)) => {
@@ -247,7 +247,7 @@ impl Node {
                 }
                 Err(err) => {
                     tried(if err.is::<net::NotThere>() { "unreachable" } else if err.to_string() == "timed out" { "no answer" } else { "failed" }, json!({}));
-                    let _ = self.with(|i| Ok(i.nearest.insert(device, Duration::MAX)));
+                    self.with_or(None, |i| Ok(i.nearest.insert(device, Duration::MAX)));
                     why.push(format!("{name}: {err:#}"));
                 }
             }
@@ -1199,7 +1199,7 @@ impl Node {
                 ok(json!({}))
             }
             ("POST", "/done") => {
-                let req: Value = serde_json::from_slice(&body).unwrap_or_default();
+                let req: Value = serde_json::from_slice(&body)?;
                 if let Some(err) = req["error"].as_str() {
                     tracing::warn!("{}'s work after a call failed: {err}", grant.app);
                 }

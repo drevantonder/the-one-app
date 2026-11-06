@@ -319,11 +319,11 @@ impl Node {
     }
 
     /// The first of the backups' problems, for the badge on Settings: only an admin's to see.
-    pub(super) fn backup_problem(&self, i: &Network, user: &str) -> Option<Value> {
+    pub(super) fn backup_problem(&self, i: &Network, user: &str) -> Result<Option<Value>> {
         if !i.r.db().may(user, "change-settings", scopes::NETWORK) {
-            return None;
+            return Ok(None);
         }
-        problems(i, now_ms()).ok()?.into_iter().min_by_key(|p| p.since).map(|p| p.json())
+        Ok(problems(i, now_ms())?.into_iter().min_by_key(|p| p.since).map(|p| p.json()))
     }
 
     /// Backs up now, everything this device backs up, whether or not an hour has passed.

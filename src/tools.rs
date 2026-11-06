@@ -122,7 +122,7 @@ pub fn print_trace(lines: Option<&[String]>) {
 }
 
 /// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
-/// (`one gmail sign_in`).
+/// (`one gmail sign_in`), as it was when the node can't list its apps: the error that came with it matters more.
 pub fn in_cli_words(node: &Client, text: &str) -> String {
     let apps = node.apps().unwrap_or_default();
     let command = |word: &str| -> Option<String> {
@@ -166,11 +166,11 @@ pub fn none_said(node: &Client, app: &Value, tool: &str, ok: &Value, cli: bool) 
     // One that needs a part on a device, with none of yours running it: signing in can't work yet.
     let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
     let on_none = || {
-        let state = node.get("/v1/state").unwrap_or_default();
-        !state["network"]["devices"].as_array().into_iter().flatten().any(|d| d["services"].as_array().into_iter().flatten().any(|s| parts.contains(&s)))
+        let state = node.get("/v1/state").ok()?;
+        Some(!state["network"]["devices"].as_array().into_iter().flatten().any(|d| d["services"].as_array().into_iter().flatten().any(|s| parts.contains(&s))))
     };
     Some(match (signs_in, app["needs"].as_str()) {
-        (_, Some(needs)) if !parts.is_empty() && on_none() => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),
+        (_, Some(needs)) if !parts.is_empty() && on_none() == Some(true) => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),
         (true, _) => format!("No account is signed in to {title} yet: {} signs one in.", named(name, "sign_in", cli)),
         (false, Some(needs)) => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),
         (false, None) => format!("No {title} accounts yet."),
