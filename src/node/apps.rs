@@ -226,7 +226,7 @@ impl Node {
                 let described = Value::Object(d.clone());
                 info["offers"] = json!({
                     "screens": d["screens"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == "main")) || d["widgets"].as_array().is_some_and(|w| !w.is_empty()),
-                    "accounts": d["ops"].as_array().is_some_and(|o| o.iter().any(|o| o["accounts"] == true)),
+                    "accounts": d["tools"].as_array().is_some_and(|o| o.iter().any(|o| o["accounts"] == true)),
                 });
                 if let Some(nodes) = self.nodes_for(viewer, &described) {
                     info["nodes"] = json!(nodes);
@@ -237,9 +237,9 @@ impl Node {
                     info[k] = v;
                 }
                 // A tool of a lab that's off isn't there.
-                if let Some(ops) = info["ops"].as_array_mut() {
+                if let Some(tools) = info["tools"].as_array_mut() {
                     let on = self.with(|i| Ok(crate::labs::on_keys(&i.r.db().settings()?)))?;
-                    ops.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&crate::labs::app_key(&name, lab))));
+                    tools.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&crate::labs::app_key(&name, lab))));
                 }
                 if mine {
                     let (list, activity) = self.schedules_of(viewer, &name, &declared)?;
@@ -475,7 +475,7 @@ impl Node {
     }
 
     /// Deploys `bundle` as `app`, as `deploy` does, making the app first if there's none by that name, owned by
-    /// `owner` (by default the caller). → `{ bundle, made, before, here, ops }`: whether it was made, the deploy it ran
+    /// `owner` (by default the caller). → `{ bundle, made, before, here, tools }`: whether it was made, the deploy it ran
     /// before, and with `wait`, whether this device runs it now and then its tools (or why it doesn't start).
     pub async fn deploy_making(&self, caller: &Caller, app: &str, bundle: &str, owner: Option<&str>, wait: bool) -> Result<Value> {
         let before = self.with(|i| {
@@ -498,7 +498,7 @@ impl Node {
         let mut out = json!({ "bundle": bundle, "made": before.is_none(), "before": before.flatten(), "here": here });
         if here {
             match self.0.apps.describe(app).await {
-                Ok(d) => out["ops"] = json!(d["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).collect::<Vec<_>>()),
+                Ok(d) => out["tools"] = json!(d["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).collect::<Vec<_>>()),
                 Err(e) => out["failed"] = json!(format!("{e:#}")),
             }
         }

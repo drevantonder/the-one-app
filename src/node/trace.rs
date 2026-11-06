@@ -125,7 +125,7 @@ fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
     let mut listed = 0;
     for s in trace["steps"].as_array().into_iter().flatten() {
         let ms = s["ms"].as_u64().unwrap_or(0);
-        let (app, op) = (s["app"].as_str().unwrap_or(""), s["op"].as_str().unwrap_or(""));
+        let (app, runs) = (s["app"].as_str().unwrap_or(""), s["tool"].as_str().or(s["function"].as_str()).unwrap_or(""));
         match s["step"].as_str().unwrap_or("") {
             "device" => {
                 let to = s["device"].as_str().unwrap_or("a device");
@@ -136,8 +136,8 @@ fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
                 }
                 listed += ms;
                 match result {
-                    r if s["here"] == true => out.push(format!("{app}.{op} on {lane}: {r}{}: {ms} ms", s["why"].as_str().map(|w| format!(" ({w})")).unwrap_or_default())),
-                    "ran" => out.push(format!("{lane} passed {app}.{op} to {to}: {ms} ms")),
+                    r if s["here"] == true => out.push(format!("{app}.{runs} on {lane}: {r}{}: {ms} ms", s["why"].as_str().map(|w| format!(" ({w})")).unwrap_or_default())),
+                    "ran" => out.push(format!("{lane} passed {app}.{runs} to {to}: {ms} ms")),
                     r => out.push(format!("{lane} tried {to}: {}{}: {ms} ms", r.replace("no answer", "didn't answer"), s["why"].as_str().map(|w| format!(" ({w})")).unwrap_or_default())),
                 }
                 if s["trace"].is_object() {
@@ -194,7 +194,7 @@ fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
             }
             "run" => {
                 listed += ms;
-                out.push(format!("{app}.{op} ran on {lane}: {ms} ms"));
+                out.push(format!("{app}.{runs} ran on {lane}: {ms} ms"));
             }
             _ => {}
         }

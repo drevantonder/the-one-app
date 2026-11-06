@@ -117,7 +117,7 @@ struct WidgetNode: Codable, Sendable, Equatable {
     var round: Bool?
     var empty: String?
     var link: WidgetLink?
-    var op: String?
+    var tool: String?
     var input: JSONValue?
     var on: Bool?
     var anim: Bool?
@@ -147,7 +147,7 @@ struct WidgetNode: Codable, Sendable, Equatable {
 
     private enum Key: String, CodingKey {
         case t, gap, c, text, size, weight, tone, lines, at, style, value, max, label, unit, values, labels, kind, title, subtitle,
-             trailing, icon, name, url, w, h, round, empty, link, op, input, on, anim, next, grow, align, dim, badge, header, path
+             trailing, icon, name, url, w, h, round, empty, link, tool, input, on, anim, next, grow, align, dim, badge, header, path
     }
 
     /// Decodes what it can: a field of the wrong shape is left out, and so is a child that isn't a node.
@@ -159,7 +159,7 @@ struct WidgetNode: Codable, Sendable, Equatable {
         at = get(.at); style = get(.style); value = get(.value); max = get(.max); label = get(.label); unit = get(.unit)
         values = get(.values); labels = get(.labels); kind = get(.kind); title = get(.title); subtitle = get(.subtitle)
         trailing = get(.trailing); icon = get(.icon); name = get(.name); url = get(.url); w = get(.w); h = get(.h)
-        round = get(.round); empty = get(.empty); link = get(.link); op = get(.op); input = get(.input); on = get(.on)
+        round = get(.round); empty = get(.empty); link = get(.link); tool = get(.tool); input = get(.input); on = get(.on)
         anim = get(.anim); next = get(.next); grow = get(.grow); align = get(.align); dim = get(.dim); badge = get(.badge)
         header = get(.header); path = get(.path)
         let children: [Skippable]? = get(.c)
@@ -668,7 +668,7 @@ private struct ActionButton: View {
         } icon: {
             if let icon = node.icon { Glyph(name: icon, size: 16) }
         }
-        Button(intent: RunTool(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) { label }
+        Button(intent: RunTool(app: host.app, tool: node.tool ?? "", input: node.input ?? .object([:]), scope: host.scope)) { label }
             .buttonStyle(.bordered)
             .tint(toneColor(node.tone))
     }
@@ -680,7 +680,7 @@ private struct ActionToggle: View {
 
     var body: some View {
         let on = node.on ?? false
-        Toggle(isOn: on, intent: ToggleTool(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) {
+        Toggle(isOn: on, intent: ToggleTool(app: host.app, tool: node.tool ?? "", input: node.input ?? .object([:]), scope: host.scope)) {
             Text(node.label ?? "").lineLimit(1)
         }
         .tint(.accentColor)

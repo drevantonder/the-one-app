@@ -24,7 +24,7 @@ const form = (o) => Object.entries(o).filter(([, v]) => v != null && v !== "")
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
 
-function opName(tool) {
+function toolName(tool) {
   let name = tool.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   const own = NAME.replace(/-/g, "_") + "_";
   if (name.startsWith(own) && name.length > own.length) name = name.slice(own.length);
@@ -158,7 +158,7 @@ const tools = Object.fromEntries(listed.tools.map((tool) => {
   const input = { type: "object", ...(tool.inputSchema || {}) };
   const own = input.properties && "account" in input.properties;
   if (listed.oauth && !own) input.properties = { ...(input.properties || {}), account: ACCOUNT };
-  return [opName(tool.name), {
+  return [toolName(tool.name), {
     description: tool.description || tool.title || tool.name,
     input,
     reads: tool.annotations?.readOnlyHint === true,

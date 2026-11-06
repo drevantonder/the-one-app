@@ -153,14 +153,14 @@ pub fn push(device: std::sync::Arc<one_client::Device>) {
 }
 
 /// What Kotlin tells Rust (`kind`, with `json`): "join", a notification's Approve or Not Me (`{ code, approve }`); "call", a
-/// widget's button or toggle (`{ app, op, input }`), after which the widgets are kept again; "widgets", the refresh
+/// widget's button or toggle (`{ app, tool, input }`), after which the widgets are kept again; "widgets", the refresh
 /// WorkManager makes; "open-note", a push (`{ n }`) opened with this device's key; "register-push", a new FCM token
 /// (`{ token }`). → `{ ok }` or `{ error }`. It waits: never call it on the main thread.
 fn answer(kind: &str, asked: &Value) -> Value {
     let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
     let (what, args): (&str, Vec<String>) = match kind {
         "join" => ("--answer-join", vec![text(&asked["code"]), if asked["approve"] == true { "approve" } else { "refuse" }.into()]),
-        "call" => ("--call", vec![text(&asked["app"]), text(&asked["op"]), asked["input"].to_string()]),
+        "call" => ("--call", vec![text(&asked["app"]), text(&asked["tool"]), asked["input"].to_string()]),
         "widgets" => ("--widgets", vec![]),
         "open-note" => ("--open-note", vec![text(&asked["n"])]),
         "register-push" => ("--register-push", vec!["fcm".into(), text(&asked["token"])]),

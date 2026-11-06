@@ -109,7 +109,7 @@ export default {
       run: async (ctx, input) => {
         const p = await profile(ctx, input.item || input.profile || "default");
         const r = await service(ctx, "sign_in", { profile: given(p), ...(input.url ? { url: input.url } : {}), ...(input.minutes ? { minutes: input.minutes } : {}) });
-        return { ...r, screen: { screen: "device", params: { device: r.device, on: r.on } }, then: { op: "save_profile", title: "Done Signing In" } };
+        return { ...r, screen: { screen: "device", params: { device: r.device, on: r.on } }, then: { tool: "save_profile", title: "Done Signing In" } };
       },
     },
     save_profile: {

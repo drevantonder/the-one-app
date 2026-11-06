@@ -632,7 +632,7 @@ fn what(path: &str, body: &[u8]) -> Value {
     let at = path.split('?').next().unwrap_or(path);
     if at == "/v1/call" {
         let b = serde_json::from_slice::<Value>(body).unwrap_or_default();
-        return json!({ "what": "call", "app": b["app"], "op": b["op"] });
+        return json!({ "what": "call", "app": b["app"], "tool": b["tool"] });
     }
     match at.strip_prefix("/v1/screens/").map(|s| s.split('/')) {
         Some(mut s) => json!({ "what": "page", "app": s.next(), "screen": s.next() }),

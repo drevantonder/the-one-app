@@ -111,7 +111,7 @@
   // Calls answered from what was kept a while ago, by their key, while their answer is still out: what the note says.
   const old = new Map();
   async function call(tool, input) {
-    const m = { type: "call", app: ctx.app, op: tool, input };
+    const m = { type: "call", app: ctx.app, tool, input };
     const key = JSON.stringify([tool, input]);
     const got = landed.get(key);
     landed.clear();
@@ -119,7 +119,7 @@
     const sent = () => host(m).then((answer) => (old.delete(key) && note(), answer));
     if (first.has(key)) return sent();
     first.add(key);
-    const kept = await host({ type: "kept", app: ctx.app, op: tool, input }).catch(() => null);
+    const kept = await host({ type: "kept", app: ctx.app, tool, input }).catch(() => null);
     if (!kept || !("answer" in kept)) return sent();
     const fresh = sent();
     if (Date.now() - kept.at > 60_000) {

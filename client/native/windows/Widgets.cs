@@ -240,9 +240,9 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
             case "run":
                 // Drawn as done at once (a toggle switched, a button greyed), then as its tool leaves it; back as it
                 // was if it didn't work.
-                var (app, op) = (data?["app"]?.GetValue<string>() ?? "", data?["op"]?.GetValue<string>() ?? "");
+                var (app, tool) = (data?["app"]?.GetValue<string>() ?? "", data?["tool"]?.GetValue<string>() ?? "");
                 var input = data?["input"] as JsonObject;
-                var which = WidgetCard.Which(app, op, input);
+                var which = WidgetCard.Which(app, tool, input);
                 p.Problem = null;
                 WidgetCard.Doing[which] = input?["on"] is JsonValue on && on.TryGetValue<bool>(out var to) ? to : true;
                 DrawAll(_ => true);
@@ -250,7 +250,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
                 {
                     try
                     {
-                        await App.Ask("--call", app, op, input?.ToJsonString() ?? "{}");
+                        await App.Ask("--call", app, tool, input?.ToJsonString() ?? "{}");
                         p.Problem = null;
                     }
                     catch (Exception e)

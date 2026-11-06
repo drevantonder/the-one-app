@@ -8,12 +8,12 @@ import { Problem } from "@one/ui"
 const listening = new Set()
 one.on("changed", () => listening.forEach((reload) => reload()))
 
-export function useCall(op, input) {
+export function useCall(tool, input) {
   const [state, setState] = useState({ data: null, error: null })
   const key = JSON.stringify(input)
   const reload = useCallback(
-    () => one.call(op, input).then((data) => setState({ data, error: null }), (error) => setState((s) => ({ data: s.data, error }))),
-    [op, key],
+    () => one.call(tool, input).then((data) => setState({ data, error: null }), (error) => setState((s) => ({ data: s.data, error }))),
+    [tool, key],
   )
   useEffect(() => {
     reload()

@@ -64,7 +64,7 @@ fn is_zero_i(n: &i64) -> bool {
 impl Devices {
     /// Runs `function` on the device `on` (by name; "" for wherever the node picks): its answer.
     pub(super) fn call_node(&self, on: &str, function: &str, input: &Value) -> Result<Value> {
-        let mut req = json!({ "app": NAME, "service": NAME, "op": function, "input": input });
+        let mut req = json!({ "app": NAME, "service": NAME, "function": function, "input": input });
         if !on.is_empty() {
             req["device"] = json!(on);
         }
@@ -72,12 +72,12 @@ impl Devices {
     }
 
     fn call_node_within(&self, on: &str, function: &str, input: &Value, limit: Duration) -> Result<Value> {
-        let req = json!({ "app": NAME, "service": NAME, "op": function, "input": input, "device": on });
+        let req = json!({ "app": NAME, "service": NAME, "function": function, "input": input, "device": on });
         Ok(self.host.post_within("/v1/call", &req, limit)?["ok"].clone())
     }
 
     pub(super) fn call_app(&self, tool: &str, input: &Value) -> Result<Value> {
-        Ok(self.host.post("/v1/call", &json!({ "app": NAME, "op": tool, "input": input }))?["ok"].clone())
+        Ok(self.host.post("/v1/call", &json!({ "app": NAME, "tool": tool, "input": input }))?["ok"].clone())
     }
 
     /// This device's name and the person's other online devices that run agent devices, as the node says.

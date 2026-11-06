@@ -50,8 +50,7 @@ const GONE_AFTER: Duration = Duration::from_secs(60);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {
     pub id: u64,
-    /// The function it runs: `op` on the wire.
-    #[serde(rename = "op")]
+    /// The function it runs.
     pub function: String,
     pub input: Value,
     pub caller: Me,

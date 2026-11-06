@@ -72,8 +72,8 @@ class Network:
             raise RuntimeError(f"{CLI} {' '.join(args)}: {r.stderr or r.stdout}")
         return r.stdout
 
-    def call(self, app, op, **input):
-        return self.run(app, op, input=json.dumps(input))
+    def call(self, app, tool, **input):
+        return self.run(app, tool, input=json.dumps(input))
 
     def up(self):
         if self.home.exists():

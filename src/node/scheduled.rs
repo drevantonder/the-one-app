@@ -169,7 +169,7 @@ impl Node {
                             let switched = state.switches.get(&(app.to_string(), s.name.clone()));
                             v["description"] = json!(s.description);
                             v["when"] = json!(s.say());
-                            v["op"] = json!(s.tool);
+                            v["tool"] = json!(s.tool);
                             v["on"] = json!(switched.is_none_or(|(on, ..)| *on));
                             v["switched"] = json!(switched.map(|(on, by, t)| user_name(by).map(|by| json!({ "on": on, "by": by, "time": t }))).transpose()?);
                             v["runs_as"] = json!(user.as_deref().map(user_name).transpose()?);

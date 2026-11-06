@@ -170,7 +170,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             .collect();
     }
     // Each app with a guide and tools, the node's own first, as the node lists them.
-    skills.extend(apps.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["ops"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
+    skills.extend(apps.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["tools"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
 
@@ -191,7 +191,7 @@ pub fn app_skill(app: &Value) -> Skill {
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().filter(|t| !t.is_empty()).unwrap_or(app["name"].as_str().unwrap_or("")));
     let about = app["description"].as_str().map(|d| d.trim().trim_end_matches('.')).filter(|d| !d.is_empty()).map(|d| format!(": {d}")).unwrap_or_default();
     let description: String = format!("{title} in {NAME}{about}. Use when the person asks about {title}, and before using its tools ({name}_...).").chars().take(1024).collect();
-    let tools: Vec<&Value> = app["ops"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).collect();
+    let tools: Vec<&Value> = app["tools"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).collect();
     // The guide names tools as MCP does (gmail_search); a harness with only the command line reads each as its command too.
     let mut guide = app["instructions"].as_str().unwrap_or("").trim().to_string();
     let mut by_length: Vec<&str> = tools.iter().filter_map(|o| o["name"].as_str()).collect();
@@ -326,7 +326,7 @@ pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String 
     }
     let lines: Vec<String> = apps
         .iter()
-        .filter(|a| a["ops"].as_array().is_some_and(|o| !o.is_empty()))
+        .filter(|a| a["tools"].as_array().is_some_and(|o| !o.is_empty()))
         .map(|a| match a["description"].as_str().map(|d| d.trim().trim_end_matches('.')).filter(|d| !d.is_empty()) {
             Some(d) => format!("\n- {}: {d}", a["name"].as_str().unwrap_or("")),
             None => format!("\n- {}", a["name"].as_str().unwrap_or("")),

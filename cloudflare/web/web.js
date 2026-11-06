@@ -315,7 +315,7 @@ const h = OneUI.react.createElement;
     /// Never its input or query. `since` (`{ at, perf, first }`) is when what it's for began, if earlier: a screen's
     /// page waits for this browser to be let in, and the screen the window opened on from the page's start.
     start(path, body, since) {
-      const what = path === "/v1/call" ? { what: "call", app: body?.app, op: body?.op }
+      const what = path === "/v1/call" ? { what: "call", app: body?.app, tool: body?.tool }
         : path.startsWith("/v1/screens/") ? { what: "page", app: decodeURIComponent(path.split("/")[3] || ""), screen: decodeURIComponent(path.split("/")[4] || "") }
         : { what: "request", path };
       const now = performance.now();
@@ -439,10 +439,10 @@ const h = OneUI.react.createElement;
     return answer;
   }
 
-  async function call(app, op, input = {}) {
-    const same = reads(app, op) ? JSON.stringify([app, op, input]) : null;
+  async function call(app, tool, input = {}) {
+    const same = reads(app, tool) ? JSON.stringify([app, tool, input]) : null;
     if (same && reading.has(same)) return reading.get(same);
-    const asked = api("/v1/call", { method: "POST", body: { app, op, input, client: about?.client || "web" } }).then((r) => r.ok);
+    const asked = api("/v1/call", { method: "POST", body: { app, tool, input, client: about?.client || "web" } }).then((r) => r.ok);
     if (same) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
     const out = await asked;
     device?.renewAppSchedules(app);
@@ -460,10 +460,10 @@ const h = OneUI.react.createElement;
   const config = () => store.state?.config || customBuild;
   const app = (name) => store.apps.find((a) => a.name === name);
   /// Whether an app's tool only reads, as its app says: only what such a call answered is kept (answers.js).
-  const reads = (name, op) => !!app(name)?.ops?.some((o) => o.name === op && o.reads === true);
+  const reads = (name, tool) => !!app(name)?.tools?.some((t) => t.name === tool && t.reads === true);
   const label = (a) => a?.title || a?.name || "";
   const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
-  const keepsAccounts = (a) => !!a?.ops?.some((o) => o.accounts);
+  const keepsAccounts = (a) => !!a?.tools?.some((t) => t.accounts);
   const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
 
   /// Every page this person can read, as the sidebar lists them: theirs, their groups', then everyone's.
@@ -1163,8 +1163,8 @@ const h = OneUI.react.createElement;
     if (!m || typeof m !== "object") return;
     // What a call answered last time, if it only reads: from this browser, at once, while the window still starts.
     if (m.type === "kept") {
-      const op = String(m.op || "");
-      const got = !mine && reads(r.app, op) ? await answers.kept(auth.user(), r.app, op, m.input ?? {}).catch(() => null) : null;
+      const tool = String(m.tool || "");
+      const got = !mine && reads(r.app, tool) ? await answers.kept(auth.user(), r.app, tool, m.input ?? {}).catch(() => null) : null;
       return void f.frame.contentWindow?.postMessage({ oneReply: id, ok: got }, "*");
     }
     f.busy++;
@@ -1176,10 +1176,10 @@ const h = OneUI.react.createElement;
     try {
       reply(await oneHost.answer(m, {
         frame: f.frame,
-        call: async (op, input) => {
+        call: async (tool, input) => {
           if (mine) throw new Error("Settings has no app to call.");
-          const out = await call(r.app, op, input);
-          if (reads(r.app, op)) answers.keep(auth.user(), r.app, op, input, out).catch(() => {});
+          const out = await call(r.app, tool, input);
+          if (reads(r.app, tool)) answers.keep(auth.user(), r.app, tool, input, out).catch(() => {});
           return out;
         },
         open: (m) => {

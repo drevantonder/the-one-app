@@ -62,7 +62,7 @@ fn cli() -> &'static str {
 }
 
 fn sync(host: &Host) -> Result<()> {
-    let files = host.post("/v1/call", &json!({ "app": "agents", "op": "_files", "input": {} }))?;
+    let files = host.post("/v1/call", &json!({ "app": "agents", "tool": "_files", "input": {} }))?;
     let files = &files["ok"];
     let text = files["text"].as_str().context("its app answered with no text")?;
     let skills: BTreeMap<String, BTreeMap<String, String>> = serde_json::from_value(files["skills"].clone()).context("its app's skills")?;

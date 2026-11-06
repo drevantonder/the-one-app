@@ -162,7 +162,7 @@ function T(e, t) {
 			className: "text-destructive",
 			children: e.error || "Failed"
 		}),
-		sub: `${e.op} · ${one.ago(e.last)}${e.user ? " · " + e.user : ""}`,
+		sub: `${e.tool} · ${one.ago(e.last)}${e.user ? " · " + e.user : ""}`,
 		trailing: b(`${e.count}×`)
 	}, t);
 }

@@ -14,11 +14,11 @@ const MENU = "More options for ";
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-async function use(ctx, app, op, input) {
+async function use(ctx, app, tool, input) {
   try {
-    return await ctx.apps[app][op](input);
+    return await ctx.apps[app][tool](input);
   } catch (err) {
-    throw new Error(`agent devices ${op}: ${err.message}`);
+    throw new Error(`agent devices ${tool}: ${err.message}`);
   }
 }
 
@@ -559,16 +559,16 @@ function profileOf(s, account) {
 /// Runs one of the browser's reads (or the send) on the account's profile, keeping its device for the next call. A profile
 /// Messenger signed out is kept as one that needs signing in: its read says so as its answer, since a call that fails
 /// keeps nothing; a send fails.
-async function browse(ctx, input, op, run) {
+async function browse(ctx, input, tool, run) {
   const s = await load(ctx);
   const profile = profileOf(s, input.account);
   const b = new Browser(ctx, profile, s.browsers[profile]);
   let result;
   try {
     result = await run(b);
-    if (op !== "send") found(ctx, s, profile, null);
+    if (tool !== "send") found(ctx, s, profile, null);
   } catch (err) {
-    if (!(err instanceof NotSignedIn) || op === "send") {
+    if (!(err instanceof NotSignedIn) || tool === "send") {
       if (b.borrowed) await b.giveBack();
       throw err;
     }
@@ -613,7 +613,7 @@ export default {
 
   // A device borrowed for a read goes back after 5 idle minutes; Agent Devices takes one back after 15 without a call. Runs on
   // the device that runs Messenger's schedules (one devices run_schedules messenger <it>).
-  schedules: { idle: { op: "_idle", every: "2m", description: "Gives back the devices Messenger borrowed and isn't using" } },
+  schedules: { idle: { tool: "_idle", every: "2m", description: "Gives back the devices Messenger borrowed and isn't using" } },
 
   tools: {
     accounts: {

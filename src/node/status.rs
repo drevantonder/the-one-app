@@ -30,6 +30,8 @@ create table checks (place text, device text, time integer, error text, report t
 create table reads (device text primary key, reads integer not null, build text not null, time integer not null);
 ", "
 alter table errors rename column op to tool;
+", "
+update runs set spec = json_remove(json_set(spec, '$.tool', json_extract(spec, '$.op')), '$.op') where json_valid(spec) and json_extract(spec, '$.op') is not null;
 "];
 
 pub const RUNS_KEPT: usize = 20;

@@ -15,13 +15,13 @@ var w = {
 	color: "#8e8e93"
 }, T = (e, t) => t === w.name ? w : e.find((e) => e.name === t), E = one.api, D = async (e, t, n) => (await E("POST", "/v1/call", {
 	app: e,
-	op: t,
+	tool: t,
 	input: n
 })).ok, O = (e) => E("GET", `/v1/vault?scope=${encodeURIComponent(e)}`), k = (e, t, n) => E("POST", "/v1/vault", {
 	...n,
 	scope: e,
 	...t ? { id: t } : {}
-}), A = (e, t) => Array.isArray(e?.ops) ? e.ops.some((e) => (e.name ?? e) === t) : !!e?.ops?.[t], j = (e) => e.fields.filter((e) => !e.name.startsWith("_")), M = (e) => e.type ? e.type === e.title ? "" : e.type : j(e).find((e) => !e.secret && e.value)?.value || "", N = (e) => {
+}), A = (e, t) => Array.isArray(e?.tools) ? e.tools.some((e) => (e.name ?? e) === t) : !!e?.tools?.[t], j = (e) => e.fields.filter((e) => !e.name.startsWith("_")), M = (e) => e.type ? e.type === e.title ? "" : e.type : j(e).find((e) => !e.secret && e.value)?.value || "", N = (e) => {
 	let t = e.split(/[_\-.]/).filter(Boolean).map((e) => [
 		"id",
 		"url",
@@ -67,12 +67,12 @@ function R(e) {
 		},
 		makers: () => e.filter((e) => e.installed?.length).flatMap((e) => Object.values(e.vault || {}).filter((e) => e.make && e.type).map((t) => ({
 			app: e.name,
-			op: t.make,
+			tool: t.make,
 			type: t.type
 		}))).sort((e, t) => e.type.localeCompare(t.type)),
 		actions: (t) => e.filter((e) => t.apps.includes(e.name)).flatMap((e) => Object.values(e.vault || {}).filter((e) => e.type && e.type === t.type).flatMap((t) => Object.entries(t.actions || {}).map(([t, n]) => ({
 			app: e.name,
-			op: t,
+			tool: t,
 			title: n
 		})))).sort((e, t) => e.title.localeCompare(t.title)),
 		rowLine: (e) => {
@@ -91,7 +91,7 @@ function R(e) {
 			if (e.account) {
 				let n = /* @__PURE__ */ new Set([e.title, ...e.fields.filter((e) => !e.secret).map((e) => e.value)]);
 				if (await Promise.all([...new Set([...e.apps, e.app].filter(Boolean))].map(async (e) => {
-					let r = t(e), i = Array.isArray(r?.ops) && r.ops.find((e) => e.accounts)?.name;
+					let r = t(e), i = Array.isArray(r?.tools) && r.tools.find((e) => e.accounts)?.name;
 					if (!i || !A(r, "sign_out")) return;
 					let a = (await D(e, i, {})).find((e) => n.has(e.account));
 					a && await D(e, "sign_out", { account: a.account });
@@ -332,14 +332,14 @@ function ee({ item: e, k: t, following: n, follow: i, refresh: s, deleted: u }) 
 		if (g === null) {
 			_(n), p("");
 			try {
-				let n = await D(t.app, t.op, { item: e.id }) || {}, r = {
+				let n = await D(t.app, t.tool, { item: e.id }) || {}, r = {
 					app: t.app,
 					screen: n.screen,
 					url: n.url
 				};
-				n.then?.op && i({
+				n.then?.tool && i({
 					...r,
-					op: n.then.op,
+					tool: n.then.tool,
 					title: n.then.title || "Done"
 				}), await s(), B(r);
 			} catch (e) {
@@ -353,7 +353,7 @@ function ee({ item: e, k: t, following: n, follow: i, refresh: s, deleted: u }) 
 		if (g === null) {
 			_("finish"), p("");
 			try {
-				await D(n.app, n.op, { item: e.id }), i(void 0), await s();
+				await D(n.app, n.tool, { item: e.id }), i(void 0), await s();
 			} catch (e) {
 				p(F(e));
 			} finally {
@@ -431,7 +431,7 @@ function ee({ item: e, k: t, following: n, follow: i, refresh: s, deleted: u }) 
 					disabled: g !== null,
 					onClick: () => O(e, t),
 					children: g === t ? `${e.title}…` : e.title
-				}, `${e.app}.${e.op}`))
+				}, `${e.app}.${e.tool}`))
 			}),
 			/* @__PURE__ */ C(d, { children: [j(e).map((e) => /* @__PURE__ */ S(q, {
 				field: e,
@@ -879,18 +879,18 @@ function $(e, t) {
 }
 function re(t) {
 	let i = e(21), { maker: a, open: s, setOpen: c, done: u } = t, [d, f] = r(""), [p, m] = r(!1), g = n(null), _;
-	i[0] !== p || i[1] !== u || i[2] !== a.app || i[3] !== a.op ? (_ = async function() {
+	i[0] !== p || i[1] !== u || i[2] !== a.app || i[3] !== a.tool ? (_ = async function() {
 		let e = g.current.value.trim();
 		if (e && !p) {
 			m(!0), f("");
 			try {
-				await D(a.app, a.op, { title: e }), u();
+				await D(a.app, a.tool, { title: e }), u();
 			} catch (e) {
 				let t = e;
 				m(!1), f(F(t));
 			}
 		}
-	}, i[0] = p, i[1] = u, i[2] = a.app, i[3] = a.op, i[4] = _) : _ = i[4];
+	}, i[0] = p, i[1] = u, i[2] = a.app, i[3] = a.tool, i[4] = _) : _ = i[4];
 	let v = _, y = `New ${a.type}`, b;
 	i[5] !== p || i[6] !== v ? (b = /* @__PURE__ */ S(o, {
 		size: "sm",

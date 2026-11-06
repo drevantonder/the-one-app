@@ -39,8 +39,7 @@ function describe() {
     // Features still being built, each off until an admin switches it on in Settings › Labs (src/labs.rs). A tool
     // with `lab` is there only while its lab is on.
     ...(app.labs && Object.keys(app.labs).length ? { labs: Object.fromEntries(Object.entries(app.labs).map(([name, l]) => [name, { title: String(l.title || name), description: String(l.description || "") }])) } : {}),
-    // The wire calls tools `ops`, and a call's tool `op` (tests/contracts.rs).
-    ops: Object.entries(tools()).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.accounts ? { accounts: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}), ...(o.lab ? { lab: String(o.lab) } : {}) })),
+    tools: Object.entries(tools()).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.accounts ? { accounts: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}), ...(o.lab ? { lab: String(o.lab) } : {}) })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => {
       const size = w.size || "medium";
       const options = Object.entries(w.options || {}).map(([name, o]) => ({ name, title: o.title || name, default: o.default ?? null }));
@@ -160,7 +159,7 @@ function context(ask, body, appends, later) {
             // An option it doesn't know (one renamed, say) fails, rather than running the call somewhere else.
             const [unknown] = Object.keys(other);
             if (unknown) throw new Error(`${unknown} isn't an option of ctx.${kind} calls: give device`);
-            return (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, service: kind === "services", op: tool, input, device }) })).json()).ok;
+            return (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, service: kind === "services", [kind === "services" ? "function" : "tool"]: tool, input, device }) })).json()).ok;
           };
         },
       });
@@ -307,8 +306,8 @@ async function handle(what, name, body, ask, waitUntil, out) {
     const ctx = context(ask, body, appends, later);
     let run;
     if (what === "call") {
-      const tool = tools()[body.op];
-      if (!tool) throw new Error(`${app.name} has no tool ${body.op}`);
+      const tool = tools()[body.tool];
+      if (!tool) throw new Error(`${app.name} has no tool ${body.tool}`);
       run = () => tool.run(ctx, body.input ?? {});
     } else if (what === "widget") {
       const widget = app.widgets[body.name];

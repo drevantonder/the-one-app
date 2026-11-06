@@ -47,7 +47,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 
 - **App**: code deployed into a scope, run in the app runtime. It publishes any of four things: **screens** (pages
   people open), **widgets** (what it shows on a home page), **tools** (what agents use, through MCP and the CLI), and
-  **services**. An app with only tools is still an app (Gmail, Shell). Avoid: worker, connector, operation (for a tool), except `op`, the wire's name for a tool's name (`{ op }` in a call, `ops` for its tools), kept until the Swift helpers and the Workers move to one word together.
+  **services**. An app with only tools is still an app (Gmail, Shell). Avoid: worker, connector, operation (for a tool).
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
   as its own process, an endpoint of its own key. Adding WhatsApp asks which of your nodes runs its service. A service

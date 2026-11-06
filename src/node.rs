@@ -229,9 +229,12 @@ pub struct CallRequest {
     /// The service whose function this is, when it is one: an app and the service it wraps may share a name.
     #[serde(default)]
     pub service: Option<String>,
-    /// The tool it runs: `op` on the wire.
-    #[serde(rename = "op")]
+    /// The tool it runs, for an app's call.
+    #[serde(default)]
     pub tool: String,
+    /// The function it runs, for a service's call.
+    #[serde(default)]
+    pub function: String,
     #[serde(default)]
     pub input: Value,
     /// The scopes the call touches, named before it runs; by default every scope it may reach.
@@ -262,6 +265,21 @@ pub struct CallRequest {
     /// It runs where it was named, first, so no other device has it or the id: it takes no lease.
     #[serde(skip)]
     pub unleased: bool,
+}
+
+impl CallRequest {
+    /// What it runs: its service's function, or its app's tool.
+    pub fn runs(&self) -> &str {
+        if self.service.is_some() { &self.function } else { &self.tool }
+    }
+
+    /// `fields` of the call with its app and what it runs, under the name its kind has: how a call goes between devices
+    /// and into the trace.
+    fn named(&self, mut fields: Value) -> Value {
+        fields["app"] = json!(self.app);
+        fields[if self.service.is_some() { "function" } else { "tool" }] = json!(self.runs());
+        fields
+    }
 }
 
 enum Reply {

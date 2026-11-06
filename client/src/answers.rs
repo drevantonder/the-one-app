@@ -46,14 +46,14 @@ impl Answers {
         let Ok(Value::Array(apps)) = serde_json::from_slice::<Value>(apps) else { return };
         let reads = apps
             .iter()
-            .filter_map(|a| Some((a["name"].as_str()?.to_string(), a["ops"].as_array()?.iter().filter(|o| o["reads"] == true).filter_map(|o| Some(o["name"].as_str()?.to_string())).collect())))
+            .filter_map(|a| Some((a["name"].as_str()?.to_string(), a["tools"].as_array()?.iter().filter(|o| o["reads"] == true).filter_map(|o| Some(o["name"].as_str()?.to_string())).collect())))
             .collect();
         *self.reads.lock().unwrap() = Some(reads);
     }
 
     pub fn keep(&self, sent: &[u8], answer: &[u8]) {
         let Ok(sent) = serde_json::from_slice::<Value>(sent) else { return };
-        let (Some(app), Some(tool)) = (sent["app"].as_str(), sent["op"].as_str()) else { return };
+        let (Some(app), Some(tool)) = (sent["app"].as_str(), sent["tool"].as_str()) else { return };
         if self.reads(app, tool) != Some(true) {
             return;
         }
@@ -106,9 +106,8 @@ mod tests {
     async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
         let dir = std::env::temp_dir().join(format!("one-answers-{}", std::process::id()));
         let (andre, sam) = ([1; 32], [2; 32]);
-        // On the wire an app's tools are `ops`, and a call's tool `op`.
-        let apps = serde_json::to_vec(&serde_json::json!([{ "name": "tally", "ops": [{ "name": "topics", "reads": true }, { "name": "post", "reads": false }] }])).unwrap();
-        let call = |op: &str, input: serde_json::Value| serde_json::to_vec(&serde_json::json!({ "id": "1", "app": "tally", "op": op, "input": input, "client": "mac" })).unwrap();
+        let apps = serde_json::to_vec(&serde_json::json!([{ "name": "tally", "tools": [{ "name": "topics", "reads": true }, { "name": "post", "reads": false }] }])).unwrap();
+        let call = |tool: &str, input: serde_json::Value| serde_json::to_vec(&serde_json::json!({ "id": "1", "app": "tally", "tool": tool, "input": input, "client": "mac" })).unwrap();
         let mine = Answers::new(&dir, &SigningKey::from_bytes(&andre));
         mine.learn(&apps);
         mine.keep(&call("topics", serde_json::json!({ "scope": "user", "format": "json" })), br#"{"ok":[{"path":"kitchen-reno"}]}"#);

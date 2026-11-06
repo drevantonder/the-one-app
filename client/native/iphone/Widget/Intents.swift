@@ -10,9 +10,9 @@ import Foundation
 /// What runs a home-screen widget's tools: the app, which reaches the person's devices, in its own process (each tool's
 /// intent is a Live Activity intent, so the system starts the app for it if it must). The widget only names them.
 enum WidgetActions {
-    static func run(_ app: String, _ op: String, _ input: Data) async throws {
+    static func run(_ app: String, _ tool: String, _ input: Data) async throws {
         #if !WIDGET
-        let asked: [String: Any] = ["app": app, "op": op, "input": (try? JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)) ?? [:]]
+        let asked: [String: Any] = ["app": app, "tool": tool, "input": (try? JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)) ?? [:]]
         let error = await Task.detached { () -> String? in
             let json = (try? JSONSerialization.data(withJSONObject: asked)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
             let out = "call".withCString { k in json.withCString { j in oneIOS(k, j) } }
@@ -36,23 +36,23 @@ struct RunTool: LiveActivityIntent {
     static let isDiscoverable = false
 
     @Parameter(title: "App") var app: String
-    @Parameter(title: "Tool") var op: String
+    @Parameter(title: "Tool") var tool: String
     /// Its input, as JSON.
     @Parameter(title: "Input") var input: String
     @Parameter(title: "Page") var scope: String?
 
     init() {}
 
-    init(app: String, op: String, input: JSONValue, scope: String?) {
+    init(app: String, tool: String, input: JSONValue, scope: String?) {
         self.app = app
-        self.op = op
+        self.tool = tool
         self.input = String(decoding: input.data, as: UTF8.self)
         self.scope = scope
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        try await WidgetActions.run(app, op, Data(input.utf8))
+        try await WidgetActions.run(app, tool, Data(input.utf8))
         return .result()
     }
 }
@@ -63,16 +63,16 @@ struct ToggleTool: SetValueIntent, LiveActivityIntent {
     static let isDiscoverable = false
 
     @Parameter(title: "App") var app: String
-    @Parameter(title: "Tool") var op: String
+    @Parameter(title: "Tool") var tool: String
     @Parameter(title: "Input") var input: String
     @Parameter(title: "Page") var scope: String?
     @Parameter(title: "On") var value: Bool
 
     init() {}
 
-    init(app: String, op: String, input: JSONValue, scope: String?) {
+    init(app: String, tool: String, input: JSONValue, scope: String?) {
         self.app = app
-        self.op = op
+        self.tool = tool
         self.input = String(decoding: input.data, as: UTF8.self)
         self.scope = scope
     }
@@ -80,7 +80,7 @@ struct ToggleTool: SetValueIntent, LiveActivityIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         let base = (try? JSONDecoder().decode(JSONValue.self, from: Data(input.utf8))) ?? .object([:])
-        try await WidgetActions.run(app, op, base.merging("on", .bool(value)).data)
+        try await WidgetActions.run(app, tool, base.merging("on", .bool(value)).data)
         return .result()
     }
 }

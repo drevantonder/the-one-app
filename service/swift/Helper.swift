@@ -105,7 +105,7 @@ enum Node {
 /// What a service and its node say to each other, in JSON: the same as `service/src/lib.rs` and WhatsApp's Go service say
 /// it, which tests/contracts.rs holds all three to with `service/wire.json`.
 enum Wire {
-    /// A call the node hands it: `{ id, op, input, caller }`.
+    /// A call the node hands it: `{ id, function, input, caller }`.
     struct Call: Sendable {
         var id: UInt64
         var function: String
@@ -114,7 +114,7 @@ enum Wire {
 
     static func call(_ data: Data) throws -> Call {
         guard let call = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = (call["id"] as? NSNumber)?.uint64Value, let function = call["op"] as? String
+              let id = (call["id"] as? NSNumber)?.uint64Value, let function = call["function"] as? String
         else { throw URLError(.badServerResponse) }
         return Call(id: id, function: function, input: Input(call["input"] as? [String: Any] ?? [:], caller: call["caller"] as? [String: Any] ?? [:]))
     }

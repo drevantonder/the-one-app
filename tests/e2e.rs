@@ -297,7 +297,7 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
     let read = trace::within(Some(t.clone()), a.call(notes("read", json!({ "format": "json" })))).await.unwrap();
     assert!(read.to_string().contains("a private thought"), "{read}");
     let said = t.done(&a.device_name()).to_string();
-    assert!(said.contains(r#""step":"device""#) && said.contains(r#""op":"read""#) && said.contains(r#""step":"run""#), "{said}");
+    assert!(said.contains(r#""step":"device""#) && said.contains(r#""tool":"read""#) && said.contains(r#""step":"run""#), "{said}");
     assert!(!said.contains("private thought") && !said.contains(&a.user().unwrap()), "a trace holds names and timings alone: {said}");
 }
 

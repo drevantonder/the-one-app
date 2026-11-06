@@ -32,8 +32,7 @@ pub struct Me {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {
     pub id: u64,
-    /// The function it runs: `op` on the wire.
-    #[serde(rename = "op")]
+    /// The function it runs.
     pub function: String,
     #[serde(default)]
     pub input: Value,

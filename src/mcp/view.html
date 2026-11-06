@@ -145,9 +145,9 @@
 
   // A button or toggle: runs the app's tool as the person, then draws its widget again, the others left as they
   // are; → the error's text.
-  async function act(app, op, input, w) {
+  async function act(app, tool, input, w) {
     try {
-      await call(`${app}_${op}`, input);
+      await call(`${app}_${tool}`, input);
       await redraw(top(), w);
     } catch (err) {
       return err.message;
@@ -242,7 +242,7 @@
     try {
       reply(await oneHost.answer(m.one, {
         frame,
-        call: (op, input) => call(`${s.app}_${op}`, input),
+        call: (tool, input) => call(`${s.app}_${tool}`, input),
         open: async (msg) => {
           const scope = msg.scope || s.scope;
           const to = await call("screens_open", { app: msg.app || s.app, screen: msg.screen || "main", params: msg.params || {}, ...(scope ? { scope } : {}) });

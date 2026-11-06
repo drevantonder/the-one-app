@@ -86,8 +86,8 @@ window.oneHost = (() => {
   /// message, on a page that has them.
   async function answer(m, h) {
     switch (m.type) {
-      case "call": return h.call(String(m.op || ""), m.input ?? {});
-      case "kept": return h.kept ? h.kept(String(m.op || ""), m.input ?? {}) : null;
+      case "call": return h.call(String(m.tool || ""), m.input ?? {});
+      case "kept": return h.kept ? h.kept(String(m.tool || ""), m.input ?? {}) : null;
       case "open": return h.open(m);
       case "close": return h.close(m.value);
       case "title": return h.title(String(m.text ?? ""), m);

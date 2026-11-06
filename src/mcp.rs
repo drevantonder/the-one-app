@@ -152,7 +152,7 @@ pub fn answer(node: &Client, msg: &Value, session: &mut Session) -> Option<(Valu
 
 /// Every app's tools by name, as `GET /v1/apps` gives them: what a session's list of tools is made of.
 fn tool_names(apps: &[Value]) -> Vec<String> {
-    let mut names: Vec<String> = apps.iter().flat_map(|a| a["ops"].as_array().into_iter().flatten().map(move |o| format!("{}_{}", a["name"].as_str().unwrap_or(""), o["name"].as_str().unwrap_or("")))).collect();
+    let mut names: Vec<String> = apps.iter().flat_map(|a| a["tools"].as_array().into_iter().flatten().map(move |o| format!("{}_{}", a["name"].as_str().unwrap_or(""), o["name"].as_str().unwrap_or("")))).collect();
     names.sort();
     names
 }
@@ -163,7 +163,7 @@ fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bo
     let name = params["name"].as_str().unwrap_or("");
     let apps = (session.mode == Mode::All && name != "search").then(|| node.apps().ok()).flatten();
     let reads = |apps: &[Value]| match name.split_once('_') {
-        Some((a, o)) => apps.iter().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
+        Some((a, o)) => apps.iter().filter(|x| x["name"] == a).flat_map(|x| x["tools"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
         None => name == "search",
     };
     let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
@@ -286,7 +286,7 @@ pub fn logs_read(node: &Client, input: &Map<String, Value>, agent: Option<&str>,
     if let Err(e) = crate::logs::Ask::from_json(&Value::Object(asked.clone())) {
         return crate::api::client::Called { ok: Err(crate::cli::Failed::Typed(format!("{e:#}")).into()), trace: None };
     }
-    node.call(&json!({ "device": device, "app": crate::database::scopes::APP, "op": "logs", "scopes": [], "input": asked, "agent": agent, "client": client }), trace)
+    node.call(&json!({ "device": device, "app": crate::database::scopes::APP, "tool": "logs", "scopes": [], "input": asked, "agent": agent, "client": client }), trace)
 }
 
 /// What a log read gives, as its lines and, if there's something to say about them, a note.
@@ -307,7 +307,7 @@ pub fn logs_said(r: &Value, device: &str) -> (Value, Option<String>) {
 fn deploy_said(app: &str, r: &Value, installed: bool) -> String {
     let short = |b: &Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
     let mut out = vec![format!("Deployed {app} ({}){}.", short(&r["bundle"]), if r["made"] == true { ", a new app of yours" } else { "" })];
-    let tools: Vec<String> = r["ops"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|o| format!("{app}_{o}")).collect();
+    let tools: Vec<String> = r["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|o| format!("{app}_{o}")).collect();
     match (&r["failed"], r["here"] == true) {
         (Value::String(why), _) => out.push(format!("{why}. Fix it and deploy again.")),
         (_, false) => out.push("Your devices take it within a few seconds.".into()),
@@ -339,7 +339,7 @@ fn listed(node: &Client) -> Result<Vec<Value>, Value> {
     for app in apps.iter().filter(|a| usable(node, a)) {
         let name = app["name"].as_str().unwrap_or("");
         // Tools starting with `_` are for the screens, and the node's own.
-        for tool in app["ops"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')).filter(|tool| !drawn.contains(&json!(format!("{name}_{}", tool["name"].as_str().unwrap_or(""))))) {
+        for tool in app["tools"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')).filter(|tool| !drawn.contains(&json!(format!("{name}_{}", tool["name"].as_str().unwrap_or(""))))) {
             tools.push(json!({ "name": format!("{name}_{}", tool["name"].as_str().unwrap_or("")), "description": tool["description"], "inputSchema": tools::mcp_schema(app, tool), "annotations": tools::mcp_annotations(tool) }));
         }
     }
@@ -522,5 +522,5 @@ pub fn run(node: &Client, app: &str, tool: &str, spec: &Value, input: Map<String
         let ok = (own.run)(tool, &input, &crate::node::own::Asked { node, agent: how.agent, client: how.client, confirmed: how.confirmed });
         return crate::api::client::Called { ok, trace: None };
     }
-    node.call(&json!({ "device": how.device, "scopes": how.scopes, "app": app, "op": tool, "input": input, "agent": how.agent, "client": how.client }), how.trace)
+    node.call(&json!({ "device": how.device, "scopes": how.scopes, "app": app, "tool": tool, "input": input, "agent": how.agent, "client": how.client }), how.trace)
 }

@@ -1,7 +1,7 @@
 {
   "call": {
     "id": 7,
-    "op": "events",
+    "function": "events",
     "input": { "limit": 5, "calendar": "Home" },
     "caller": { "key": "k1", "user": "u1", "name": "mac", "role": null, "user_name": "Ann", "handle": "ann", "agent": "Claude Code" },
     "from": "calendar"

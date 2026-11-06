@@ -169,8 +169,8 @@ object HomeWidgets {
     }
 
     /** A button or toggle's tool, run by the app's library as the person → the error, if it didn't work. */
-    suspend fun run(app: String, op: String, input: JsonElement): String? = withContext(Dispatchers.IO) {
-        val said = JSONObject(Native.call("call", JSONObject().put("app", app).put("op", op).put("input", JSONObject(input.toString())).toString()))
+    suspend fun run(app: String, tool: String, input: JsonElement): String? = withContext(Dispatchers.IO) {
+        val said = JSONObject(Native.call("call", JSONObject().put("app", app).put("tool", tool).put("input", JSONObject(input.toString())).toString()))
         said.optString("error").ifEmpty { null }
     }
 

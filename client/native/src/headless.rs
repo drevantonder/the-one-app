@@ -159,7 +159,7 @@ async fn run(what: &str, rest: &[String], mine: Option<Arc<one_client::Device>>)
         "--call" => {
             let input: Value = serde_json::from_str(&rest.get(2).cloned().unwrap_or_else(|| "{}".into())).map_err(|e| e.to_string())?;
             let id = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>());
-            let out = post(&*device(&data).await?, "/v1/call", json!({ "id": id, "app": arg(0)?, "op": arg(1)?, "input": input, "client": crate::client_name() })).await?;
+            let out = post(&*device(&data).await?, "/v1/call", json!({ "id": id, "app": arg(0)?, "tool": arg(1)?, "input": input, "client": crate::client_name() })).await?;
             Ok(json!({ "ok": out["ok"] }))
         }
         "--widgets" => {

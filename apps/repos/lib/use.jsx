@@ -11,12 +11,12 @@ one.on("changed", () => listening.forEach((reload) => reload()))
 /// A call's answer: { data, error, reload }. Asked for when drawn, and again whenever the app changes; a later failure
 /// keeps what's shown. With `input` null it isn't asked for (yet). With `keep`, an answer stays shown while the next one
 /// for other input is out, rather than grey shapes.
-export function useCall(op, input, keep = false) {
+export function useCall(tool, input, keep = false) {
   const [state, setState] = useState({ data: null, error: null })
   const key = JSON.stringify(input)
   const reload = useCallback(
-    () => (input === null ? Promise.resolve() : one.call(op, input).then((data) => setState({ data, error: null }), (error) => setState((s) => ({ data: s.data, error })))),
-    [op, key],
+    () => (input === null ? Promise.resolve() : one.call(tool, input).then((data) => setState({ data, error: null }), (error) => setState((s) => ({ data: s.data, error })))),
+    [tool, key],
   )
   useEffect(() => {
     if (!keep) setState({ data: null, error: null })

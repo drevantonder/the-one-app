@@ -154,18 +154,18 @@ export function IssueView({ repo, number, onGone }) {
 
   if (!d) return <div ref={room}><Pending call={issue} rows={3} /></div>
 
-  const act = async (op, input) => {
-    await one.call(op, { repo, number: d.number, ...input })
+  const act = async (tool, input) => {
+    await one.call(tool, { repo, number: d.number, ...input })
     one.tap("success")
     await issue.reload()
   }
-  const sending = async (key, op, build) => {
+  const sending = async (key, tool, build) => {
     const text = draft
     setBusy(key)
     setError("")
     setDraft("")
     try {
-      await act(op, build(text))
+      await act(tool, build(text))
     } catch (err) {
       setDraft(text)
       setError(said(err).title)

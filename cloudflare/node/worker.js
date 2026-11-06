@@ -721,7 +721,7 @@ class Run {
         const wrote = await call.write(reply.appends || []);
         later = reply.later === true;
         // What ran, for the Worker's logs: never what it read or wrote.
-        console.log(JSON.stringify({ call: `${app.name}.${fields.op}`, user: this.who.user, from, wrote, ms: Date.now() - body.now }));
+        console.log(JSON.stringify({ call: `${app.name}.${fields.tool}`, user: this.who.user, from, wrote, ms: Date.now() - body.now }));
       }
       return reply.ok ?? null;
     } finally {
@@ -737,7 +737,7 @@ class Run {
     // The keys of every database it may open, asked for at once, before it runs, unless each has its scope's current.
     const lacking = scopes.filter((h) => !Object.hasOwn(p.keysOf(this.who, h.id, app.name, "main") || {}, this.view.epochs[h.id] ?? 1));
     if (lacking.length) await p.needs(lacking.map((h) => ({ scope: h.id, app: app.name, database: "main", have: Object.keys(p.keysOf(this.who, h.id, app.name, "main") || {}).map(Number) })), this.who);
-    return { ok: await this.run(app, "call", { op: req.op, input: req.input ?? {} }, scopes, from, depth) };
+    return { ok: await this.run(app, "call", { tool: req.tool, input: req.input ?? {} }, scopes, from, depth) };
   }
 
   /// The apps a page shows and the scopes each reads (src/node.rs: `page_contexts`): with `page` (`user`,
@@ -806,7 +806,7 @@ class Run {
       const mine = reach.length > 0;
       const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "needs"];
       for (const [k, v] of Object.entries(d || {})) if (k !== "name" && k !== "schedules" && (mine || shown.includes(k))) info[k] = v;
-      if (d) info.offers = { screens: !!d.screens?.some((s) => s.name === "main") || !!d.widgets?.length, accounts: !!d.ops?.some((o) => o.accounts) };
+      if (d) info.offers = { screens: !!d.screens?.some((s) => s.name === "main") || !!d.widgets?.length, accounts: !!d.tools?.some((o) => o.accounts) };
       return light ? Object.fromEntries(Object.entries(info).filter(([k]) => drawn.includes(k))) : info;
     }));
   }
@@ -831,8 +831,8 @@ const servedHere = (view, d) => (d?.uses?.services || []).every((s) => onHere(vi
 
 /// A function of a service built for Cloudflare, run here: → `{ ok }`, or null when it can't answer here (it gave
 /// nothing, as for a model it doesn't have), for a device to.
-async function hereCall(env, name, op, input) {
-  const fn = services[name]?.[op];
+async function hereCall(env, name, functionName, input) {
+  const fn = services[name]?.[functionName];
   if (typeof fn !== "function" || !env.AI) return null;
   const ok = await fn(input ?? {}, { ai: env.AI });
   return ok === undefined ? null : { ok };
@@ -843,11 +843,11 @@ async function hereCall(env, name, op, input) {
 async function ownService(run, q, d) {
   const cloudflare = String(q.device || "").toLowerCase() === "cloudflare";
   if (q.device === "all") {
-    const here = await hereCall(run.env, q.app, q.op, q.input).catch((err) => ({ ok: { error: err.message } }));
+    const here = await hereCall(run.env, q.app, q.function, q.input).catch((err) => ({ ok: { error: err.message } }));
     const there = await machineCall(run, q, d).catch(() => ({ ok: {} }));
     return { ok: { ...there.ok, ...(here ? { Cloudflare: here.ok } : {}) } };
   }
-  const here = !q.device || cloudflare ? await hereCall(run.env, q.app, q.op, q.input) : null;
+  const here = !q.device || cloudflare ? await hereCall(run.env, q.app, q.function, q.input) : null;
   if (here) return here;
   if (cloudflare) refuse(400, `the Cloudflare node can't do that for ${d?.title || q.app}`);
   return machineCall(run, q, d);
@@ -908,7 +908,7 @@ class ForCall extends RpcTarget {
           if (!callee) refuse(404, `no app named ${q.app}`);
           const d = q.device ? null : await person.describe(who, callee);
           if (!d || !servedHere(view, d)) return Response.json(await machineCall(this.run, q, d));
-          return Response.json(await this.run.call({ app: q.app, op: q.op, input: q.input }, this.app.name, this.depth + 1));
+          return Response.json(await this.run.call({ app: q.app, tool: q.tool, input: q.input }, this.app.name, this.depth + 1));
         }
         case "GET vault":
           return new Response(vault_items(await this.call.vault(), this.app.name, who.user), { headers: { "content-type": "application/json" } });
@@ -929,7 +929,7 @@ class ForCall extends RpcTarget {
 
 /// An app's call that needs a node on a machine (a service's, or one of an app that uses one), as this person.
 async function machineCall(run, q, d) {
-  const call = { app: q.app, op: q.op, input: q.input ?? {}, service: q.service ? q.app : undefined, device: q.device };
+  const call = { app: q.app, ...(q.service ? { function: q.function } : { tool: q.tool }), input: q.input ?? {}, service: q.service ? q.app : undefined, device: q.device };
   const out = await run.person.onMachine(run.who, run.view, call, 15_000);
   if (!out) refuse(503, needsDevice(d, q.app));
   return answered(out, q.app);

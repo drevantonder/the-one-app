@@ -33,7 +33,7 @@ function Activity() {
               <ListRow
                 key={i}
                 title={<span className="text-destructive">{e.error || "Failed"}</span>}
-                sub={`${e.op} · ${one.ago(e.last)}${e.user ? " · " + e.user : ""}`}
+                sub={`${e.tool} · ${one.ago(e.last)}${e.user ? " · " + e.user : ""}`}
                 trailing={grey(`${e.count}×`)}
               />
             ))}

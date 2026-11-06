@@ -34,7 +34,7 @@ fn command_words() -> Vec<String> {
 /// What `help` and the bare command say: what an agent needs to start, and where the rest is.
 fn help(node: &Client) -> String {
     let apps = node.apps().unwrap_or_default();
-    let names: Vec<&str> = apps.iter().filter(|a| a["ops"].as_array().is_some_and(|o| !o.is_empty())).filter_map(|a| a["name"].as_str()).collect();
+    let names: Vec<&str> = apps.iter().filter(|a| a["tools"].as_array().is_some_and(|o| !o.is_empty())).filter_map(|a| a["name"].as_str()).collect();
     let yours = match names.is_empty() {
         true => String::new(),
         false => format!("\nYour apps: {}.\n", names.join(", ")),

@@ -1,7 +1,7 @@
 // A widget drawn from its tree (`GET /v1/widgets`): a card under its title, the same on the pages (src/screen/home)
 // and in a chat's view (src/mcp_view.html). The Apple, Android and Windows widgets draw the same trees natively. A
 // tree is the app's, so nothing in it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
-// `host` is what buttons, toggles and links act through: `run(app, op, input, widget)` → the error's text for people if
+// `host` is what buttons, toggles and links act through: `run(app, tool, input, widget)` → the error's text for people if
 // it failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`.
 import * as React from "react"
 import { useLayoutEffect, useRef, useState } from "react"
@@ -16,7 +16,7 @@ type Widget = { app: string; widget: string; title?: string; error?: string; roo
 type Tree = { [key: string]: any }
 /// What a widget's buttons, toggles and links act through.
 type WidgetHost = {
-  run: (app: string, op: string, input: object, w: Widget) => Promise<string | void | undefined>
+  run: (app: string, tool: string, input: object, w: Widget) => Promise<string | void | undefined>
   follow: (link: string | { screen: string; params?: object }, w: Widget) => unknown
 }
 type Parts = { n: Tree; w: Widget; host: WidgetHost }
@@ -292,9 +292,9 @@ function Fit({ children, className }: { children: React.ReactNode; className?: s
 function useAct(w: Widget, host: WidgetHost) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
-  const act = async (op: string, input: object) => {
+  const act = async (tool: string, input: object) => {
     setBusy(true)
-    const failed = await host.run(w.app, op, input, w)
+    const failed = await host.run(w.app, tool, input, w)
     setBusy(false)
     setError(failed || "")
     return failed
@@ -312,7 +312,7 @@ function WidgetButton({ n, w, host, color }: Parts & { color: string | null }) {
       style={color ? { color } : undefined}
       disabled={busy}
       title={error}
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); act(n.op, n.input || {}) }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); act(n.tool, n.input || {}) }}
     >
       <span className={busy ? "invisible" : undefined}>{n.label || n.text || ""}</span>
       {busy && <Spinner className="absolute size-3" />}
@@ -337,7 +337,7 @@ function WidgetToggle({ n, w, host }: Parts) {
         onClick={(e) => e.stopPropagation()}
         onCheckedChange={async (next) => {
           setOn(next)
-          if (await act(n.op, { ...(n.input || {}), on: next })) setOn(!next)
+          if (await act(n.tool, { ...(n.input || {}), on: next })) setOn(!next)
         }}
       />
     </label>

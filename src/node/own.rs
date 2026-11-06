@@ -33,7 +33,7 @@ impl NodeApp {
         let name = self.name;
         json!({
             "name": name, "title": self.title, "description": self.description, "instructions": self.guide, "runs": "node", "elsewhere": self.elsewhere,
-            "ops": self.tools.iter().map(|t| {
+            "tools": self.tools.iter().map(|t| {
                 let confirm = t["annotations"]["destructiveHint"] == true;
                 json!({ "name": t["name"].as_str().unwrap_or("").trim_start_matches(&format!("{name}_")), "description": t["description"], "input": t["inputSchema"], "reads": t["annotations"]["readOnlyHint"] == true, "confirm": confirm })
             }).collect::<Vec<_>>(),

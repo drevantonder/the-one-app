@@ -169,9 +169,9 @@ function Main() {
   }
 
   async function pictures(devices) {
-    const shot = async (key, op, device) => {
+    const shot = async (key, tool, device) => {
       try {
-        const src = picture(await one.call(op, { device, width: 640 }))
+        const src = picture(await one.call(tool, { device, width: 640 }))
         if (src) setPics((p) => ({ ...p, [key]: src }))
       } catch {}
     }

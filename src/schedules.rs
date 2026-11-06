@@ -28,7 +28,7 @@ const DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 impl Schedule {
     /// Reads one of an app's schedules, as its module describes it.
     pub fn parse(name: &str, v: &Value) -> Result<Schedule> {
-        let tool = v["op"].as_str().filter(|o| !o.is_empty()).context("a schedule names the tool it runs")?.to_string();
+        let tool = v["tool"].as_str().filter(|o| !o.is_empty()).context("a schedule names the tool it runs")?.to_string();
         let when = match (v["every"].as_str(), v["at"].as_str()) {
             (Some(every), None) => When::Every(duration(every)?),
             (None, Some(at)) => {
@@ -64,7 +64,7 @@ impl Schedule {
 
     /// What it runs and when, as written: kept with each run, so a deploy that changes it shows.
     pub fn spec(&self) -> Value {
-        let mut v = json!({ "op": self.tool, "input": self.input });
+        let mut v = json!({ "tool": self.tool, "input": self.input });
         match &self.when {
             When::Every(ms) => v["every"] = json!(say_duration(*ms)),
             When::At { hour, minute, tz, days } => {

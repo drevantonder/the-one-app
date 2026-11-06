@@ -115,7 +115,7 @@ class HomeWidgetReceiver : GlanceAppWidgetReceiver() {
 
 private object Keys {
     val app = ActionParameters.Key<String>("app")
-    val op = ActionParameters.Key<String>("op")
+    val tool = ActionParameters.Key<String>("tool")
     val input = ActionParameters.Key<String>("input")
     /** Which button or toggle it is, and what a toggle's switched to, to draw it so before its tool's done. */
     val which = ActionParameters.Key<String>("which")
@@ -128,11 +128,11 @@ class RunTool : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         HomeWidgets.start(context)
         val app = parameters[Keys.app] ?: return
-        val op = parameters[Keys.op] ?: return
+        val tool = parameters[Keys.tool] ?: return
         val input = parameters[Keys.input]?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() } ?: JsonObject(emptyMap())
         val which = parameters[Keys.which]
         if (which != null) HomeWidgets.doing(which, parameters[Keys.on] ?: true)
-        val failed = runCatching { HomeWidgets.run(app, op, input) }.getOrElse { it.message ?: "Try again." }
+        val failed = runCatching { HomeWidgets.run(app, tool, input) }.getOrElse { it.message ?: "Try again." }
         if (failed != null) {
             if (which != null) HomeWidgets.done(which)
             withContext(Dispatchers.Main) { Toast.makeText(context, "Couldn’t do that. $failed".trim(), Toast.LENGTH_LONG).show() }
@@ -573,18 +573,18 @@ private fun run(n: WidgetNode, c: Ctx, on: Boolean? = null): Action {
     var input = n.input ?: JsonObject(emptyMap())
     if (on != null) input = JsonObject((input as? JsonObject ?: JsonObject(emptyMap())) + ("on" to JsonPrimitive(on)))
     return actionRunCallback<RunTool>(
-        actionParametersOf(Keys.app to c.widget.app, Keys.op to (n.op ?: ""), Keys.input to input.toString(), Keys.which to which(n, c), Keys.on to (on ?: true)),
+        actionParametersOf(Keys.app to c.widget.app, Keys.tool to (n.tool ?: ""), Keys.input to input.toString(), Keys.which to which(n, c), Keys.on to (on ?: true)),
     )
 }
 
 /** A button or toggle, the same each time it's drawn. */
-private fun which(n: WidgetNode, c: Ctx) = "${c.widget.id}|${n.op}|${n.input}|${n.label ?: n.text}"
+private fun which(n: WidgetNode, c: Ctx) = "${c.widget.id}|${n.tool}|${n.input}|${n.label ?: n.text}"
 
 @Composable
 private fun Button(n: WidgetNode, ctx: Ctx, modifier: GlanceModifier) {
     val c = if (which(n, ctx) in ctx.doing) ctx.copy(alpha = ctx.alpha * 0.5f) else ctx
     val tint = c.tone(n.tone, { it.tint })
-    val m = modifier.cornerRadius(15.dp).background(c.tone(n.tone, { it.tint }, 0.15f)).let { if (n.op != null) it.clickable(run(n, c)) else it }
+    val m = modifier.cornerRadius(15.dp).background(c.tone(n.tone, { it.tint }, 0.15f)).let { if (n.tool != null) it.clickable(run(n, c)) else it }
     Row(m.height(30.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         n.icon?.let {
             Mask(c.masks.glyph(it, 15f), tint, GlanceModifier.size(15.dp))
@@ -598,7 +598,7 @@ private fun Button(n: WidgetNode, ctx: Ctx, modifier: GlanceModifier) {
 @Composable
 private fun Toggle(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val on = c.doing[which(n, c)] ?: n.on ?: false
-    val m = if (n.op != null) modifier.clickable(run(n, c, !on)) else modifier
+    val m = if (n.tool != null) modifier.clickable(run(n, c, !on)) else modifier
     Row(m.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(n.label ?: "", GlanceModifier.defaultWeight(), style = TextStyle(color = c.color { it.label }, fontSize = 13.sp), maxLines = 1)
         Box(GlanceModifier.size(40.dp, 24.dp), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {

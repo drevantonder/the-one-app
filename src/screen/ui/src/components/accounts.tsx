@@ -9,7 +9,7 @@ import { failureSentence } from "@/components/loading"
 type Account = { account: string; ok?: boolean; why?: string; [more: string]: unknown }
 
 type Bridge = {
-  call: (op: string, input?: object) => Promise<any>
+  call: (tool: string, input?: object) => Promise<any>
   on: (event: string, run: () => void) => void
   plain: (err: unknown) => { title: string; next?: string }
 }

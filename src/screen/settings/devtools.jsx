@@ -15,7 +15,7 @@ const ms = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)} s` : `${Math.max(0, Mat
 // Requests that start within this long of the last one's end are part of the same burst: opening a screen, say.
 const BURST = 500;
 
-const title = (r) => (r.what === "call" ? `${r.app}.${r.op}` : r.what === "page" ? "Page code" : r.path || "");
+const title = (r) => (r.what === "call" ? `${r.app}.${r.tool}` : r.what === "page" ? "Page code" : r.path || "");
 const mine = (r) => (p.app ? r.app === p.app : true) && r.at >= (p.since || 0) - 1000;
 
 // The device names the traces know, by key: the nodes say theirs, and the network's others.

@@ -38,7 +38,7 @@ func (f *fakeNodes) node(t *testing.T, name string) string {
 				}}})
 		case "/v1/call":
 			var c struct {
-				Function string `json:"op"`
+				Function string `json:"function"`
 				Device   string
 				Input    map[string]any
 			}

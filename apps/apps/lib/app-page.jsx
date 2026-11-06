@@ -61,9 +61,9 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
 
   const add = () => one.open("add", { app: name }, undefined, { sheet: true }).then(refresh)
   const editSource = () => one.open("source", { app: name }, undefined, { sheet: true }).then(refresh)
-  const retire = async (op) => {
-    if (op === "restore") return run("restore", () => one.call("restore", { app: name, confirm: true }))
-    const erase = op === "erase"
+  const retire = async (tool) => {
+    if (tool === "restore") return run("restore", () => one.call("restore", { app: name, confirm: true }))
+    const erase = tool === "erase"
     const ok = await one.alert({
       title: erase ? `Erase ${a.title} for good?` : `Delete ${a.title}?`,
       text: erase ? "Its name can't be used again." : "You can restore it from Recently Deleted.",
@@ -71,7 +71,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
       danger: true,
     })
     if (!ok) return
-    await run(op, () => one.call(op, { app: name, confirm: true }))
+    await run(tool, () => one.call(tool, { app: name, confirm: true }))
     if (erase) onGone()
   }
   const chooseDevice = (scope) => one.open("devices", { schedules: name, scope }, "settings")

@@ -455,7 +455,7 @@ impl Service {
         };
         let input = if call["input"].is_null() { json!({}) } else { call["input"].clone() };
         let from = call["from"].as_str().map(str::to_string);
-        Ok(match self.0.services.call(&self.0.name, call["op"].as_str().unwrap_or(""), input, caller, from).await {
+        Ok(match self.0.services.call(&self.0.name, call["function"].as_str().unwrap_or(""), input, caller, from).await {
             Ok(answer) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
             Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
             Err(err) => json!({ "error": format!("{err:#}") }),
@@ -582,9 +582,11 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
         _ => false,
     };
     ensure!(scopes_ok, "a service's calls reach only its person's own scope");
-    let mut asked = json!({ "app": name, "service": call["service"], "op": call["op"], "input": call["input"], "scopes": ["user"] });
-    if call["device"].is_string() {
-        asked["device"] = call["device"].clone();
+    let mut asked = json!({ "app": name, "service": call["service"], "input": call["input"], "scopes": ["user"] });
+    for field in ["tool", "function", "device"] {
+        if call[field].is_string() {
+            asked[field] = call[field].clone();
+        }
     }
     Ok(asked)
 }

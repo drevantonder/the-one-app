@@ -23,7 +23,7 @@ pub const MCP_FILE_LIMIT: usize = 1 << 20;
 pub fn find(node: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
     let apps = node.apps().ok()?;
     let a = apps.iter().find(|a| a["name"] == app)?.clone();
-    let o = a["ops"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
+    let o = a["tools"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
     Some((a, o))
 }
 
@@ -129,7 +129,7 @@ pub fn in_cli_words(node: &Client, text: &str) -> String {
         word.match_indices('_').find_map(|(i, _)| {
             let (app, tool) = (&word[..i], &word[i + 1..]);
             let a = apps.iter().find(|a| a["name"] == app)?;
-            a["ops"].as_array()?.iter().any(|o| o["name"] == tool).then(|| format!("{CLI} {app} {tool}"))
+            a["tools"].as_array()?.iter().any(|o| o["name"] == tool).then(|| format!("{CLI} {app} {tool}"))
         })
     };
     let mut out = String::new();
@@ -163,7 +163,7 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, cli: bool
         return None;
     }
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
-    let signs_in = app["ops"].as_array().into_iter().flatten().any(|o| o["name"] == "sign_in");
+    let signs_in = app["tools"].as_array().into_iter().flatten().any(|o| o["name"] == "sign_in");
     // One that needs a part on a device, with none of yours running it: signing in can't work yet.
     let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
     let on_none = || {
@@ -184,9 +184,9 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, cli: bool
 pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[String]>) -> Result<String> {
     let cli = commands.is_some();
     let apps = node.apps()?;
-    let tools_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
+    let tools_of = |a: &Value| -> Vec<String> { a["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
     // One the person could add: the node lists it, without tools for them, since it isn't added where they are.
-    let addable = |a: &Value| a["ops"].is_null() && a["deleted"].is_null();
+    let addable = |a: &Value| a["tools"].is_null() && a["deleted"].is_null();
     if let Some(a) = apps.iter().find(|a| a["name"] == app) {
         let title = a["title"].as_str().unwrap_or(app);
         if !a["deleted"].is_null() {
@@ -648,7 +648,7 @@ pub fn list(apps: &[Value]) -> Vec<String> {
         .iter()
         .flat_map(|a| {
             let name = a["name"].as_str().unwrap_or("").to_string();
-            a["ops"].as_array().cloned().unwrap_or_default().into_iter().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).map(move |o| {
+            a["tools"].as_array().cloned().unwrap_or_default().into_iter().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).map(move |o| {
                 let mark = if o["confirm"] == true { " (needs --confirm)" } else { "" };
                 (format!("{CLI} {name} {}", o["name"].as_str().unwrap_or("")), format!("{}{mark}", first_sentence(o["description"].as_str().unwrap_or(""))))
             })

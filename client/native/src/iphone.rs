@@ -123,7 +123,7 @@ fn started() -> Option<&'static crate::App> {
 }
 
 /// What the Swift side tells Rust (`kind`, with `json`): "open", a link a tapped notification opens (`{ link }`);
-/// "join", its Approve or Not Me (`{ code, approve }`); "call", a widget's button or toggle (`{ app, op, input }`), after
+/// "join", its Approve or Not Me (`{ code, approve }`); "call", a widget's button or toggle (`{ app, tool, input }`), after
 /// which the widgets are drawn again. → `{ ok }` or `{ error }`, freed with `one_ios_free`. It waits: never call it on
 /// the main thread.
 ///
@@ -145,7 +145,7 @@ pub unsafe extern "C" fn one_ios(kind: *const c_char, json: *const c_char) -> *m
             tauri::async_runtime::block_on(crate::headless::run_here("--answer-join", &[text(&asked["code"]), how.into()])).unwrap_or_else(|e| json!({ "error": e }))
         }
         ("call", Some(_)) => {
-            let args = [text(&asked["app"]), text(&asked["op"]), asked["input"].to_string()];
+            let args = [text(&asked["app"]), text(&asked["tool"]), asked["input"].to_string()];
             let out = tauri::async_runtime::block_on(crate::headless::run_here("--call", &args)).unwrap_or_else(|e| json!({ "error": e }));
             crate::changed();
             out

@@ -263,7 +263,7 @@ const people = (what) => ({
   description: `${what}: addresses, each "a@example.org" or "Name <a@example.org>"`,
 });
 const maxResults = (usual, most) => ({ type: "integer", description: `at most this many; default ${usual}, at most ${most}` });
-const pageToken = (op) => str(`the next page: the token the last ${op} ended with ("More: give pageToken …"), with the same other inputs`);
+const pageToken = (tool) => str(`the next page: the token the last ${tool} ended with ("More: give pageToken …"), with the same other inputs`);
 const writing = {
   to: people("who it's to; a reply goes to the sender unless given"), cc: people("copied to"), bcc: people("copied to, unseen"),
   subject: str("the subject; a reply keeps the original's (with Re:) unless given"),

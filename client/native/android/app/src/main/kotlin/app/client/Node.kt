@@ -71,7 +71,7 @@ data class WidgetNode(
     val round: Boolean? = null,
     val empty: String? = null,
     val link: JsonElement? = null,
-    val op: String? = null,
+    val tool: String? = null,
     val input: JsonElement? = null,
     val on: Boolean? = null,
     val next: Double? = null,
@@ -105,7 +105,7 @@ object WidgetNodeSerializer : KSerializer<WidgetNode> {
             labels = (o["labels"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content },
             kind = o.str("kind"), title = o.str("title"), subtitle = o.str("subtitle"), trailing = o.str("trailing"), icon = o.str("icon"),
             name = o.str("name"), url = o.str("url"), w = o.num("w"), h = o.num("h"), round = o.bool("round"), empty = o.str("empty"),
-            link = any("link"), op = o.str("op"), input = any("input"), on = o.bool("on"), next = o.num("next"), grow = o.bool("grow"),
+            link = any("link"), tool = o.str("tool"), input = any("input"), on = o.bool("on"), next = o.num("next"), grow = o.bool("grow"),
             align = o.str("align"), dim = o.bool("dim"), badge = o.str("badge"), header = o.bool("header"), path = o.str("path"),
         )
     }

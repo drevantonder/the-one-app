@@ -41,15 +41,15 @@ function ready(user) {
   return ready;
 }
 
-async function named(user, app, op, input) {
-  const id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical([app, op, input])))), (b) => b.toString(16).padStart(2, "0")).join("");
+async function named(user, app, tool, input) {
+  const id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical([app, tool, input])))), (b) => b.toString(16).padStart(2, "0")).join("");
   return { id, aad: new TextEncoder().encode(`${user}\n${id}`) };
 }
 
-export async function kept(user, app, op, input) {
+export async function kept(user, app, tool, input) {
   if (!user) return null;
   const { db, key } = await ready(user);
-  const { id, aad } = await named(user, app, op, input);
+  const { id, aad } = await named(user, app, tool, input);
   const got = await done(db.transaction("answers").objectStore("answers").get(id));
   if (!got) return null;
   try {
@@ -60,11 +60,11 @@ export async function kept(user, app, op, input) {
   }
 }
 
-export async function keep(user, app, op, input, answer) {
+export async function keep(user, app, tool, input, answer) {
   const json = JSON.stringify(answer ?? null);
   if (!user || json.length > BIGGEST) return;
   const { db, key } = await ready(user);
-  const { id, aad } = await named(user, app, op, input);
+  const { id, aad } = await named(user, app, tool, input);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, key, new TextEncoder().encode(json));
   const tx = db.transaction("answers", "readwrite");

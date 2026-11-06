@@ -25,7 +25,7 @@ const app = "whatsapp"
 
 type call struct {
 	ID       uint64          `json:"id"`
-	Function string          `json:"op"`
+	Function string          `json:"function"`
 	Input    json.RawMessage `json:"input"`
 }
 
@@ -138,7 +138,7 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 
 func callOn(node, device, function string, input, out any) error {
 	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/v1/call",
-		map[string]any{"app": app, "service": app, "op": function, "input": input, "device": device})
+		map[string]any{"app": app, "service": app, "function": function, "input": input, "device": device})
 	if err != nil {
 		return err
 	}

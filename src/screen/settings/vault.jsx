@@ -13,10 +13,10 @@ import {
 import { appNamed } from "./agents.js"
 
 const api = one.api
-const call = async (app, op, input) => (await api("POST", "/v1/call", { app, op, input })).ok
+const call = async (app, tool, input) => (await api("POST", "/v1/call", { app, tool, input })).ok
 const listItems = (s) => api("GET", `/v1/vault?scope=${encodeURIComponent(s)}`)
 const setItem = (s, id, change) => api("POST", "/v1/vault", { ...change, scope: s, ...(id ? { id } : {}) })
-const has = (a, op) => (Array.isArray(a?.ops) ? a.ops.some((o) => (o.name ?? o) === op) : !!a?.ops?.[op])
+const has = (a, tool) => (Array.isArray(a?.tools) ? a.tools.some((o) => (o.name ?? o) === tool) : !!a?.tools?.[tool])
 const shown = (item) => item.fields.filter((f) => !f.name.startsWith("_"))
 // Its one short line: what it is, else its first plain field; none when what it is is its title.
 const line = (item) => (item.type ? (item.type === item.title ? "" : item.type) : shown(item).find((f) => !f.secret && f.value)?.value || "")
@@ -49,9 +49,9 @@ function know(apps) {
     // An item's icon: the logo of the site it's for, else the icon of the app that made or uses it, else a key.
     icon: (item) => (item.image ? { name: item.title, image: item.image, image_kind: item.image_kind } : app(item.app || item.apps[0]) || { ...KEY, name: item.title }),
     // The items the apps installed for this person make, as their `vault` says.
-    makers: () => apps.filter((a) => a.installed?.length).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.make && n.type).map((n) => ({ app: a.name, op: n.make, type: n.type }))).sort((x, y) => x.type.localeCompare(y.type)),
+    makers: () => apps.filter((a) => a.installed?.length).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.make && n.type).map((n) => ({ app: a.name, tool: n.make, type: n.type }))).sort((x, y) => x.type.localeCompare(y.type)),
     // What the apps switched on for an item do with items of its type.
-    actions: (item) => apps.filter((a) => item.apps.includes(a.name)).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.type && n.type === item.type).flatMap((n) => Object.entries(n.actions || {}).map(([op, title]) => ({ app: a.name, op, title })))).sort((x, y) => x.title.localeCompare(y.title)),
+    actions: (item) => apps.filter((a) => item.apps.includes(a.name)).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.type && n.type === item.type).flatMap((n) => Object.entries(n.actions || {}).map(([tool, title]) => ({ app: a.name, tool, title })))).sort((x, y) => x.title.localeCompare(y.title)),
     // Its row's grey line: what it is, and the apps using it but the one that made it and those what it is names;
     // with no type, the apps using it, else its first plain field.
     rowLine: (item) => {
@@ -73,7 +73,7 @@ function know(apps) {
         // Every app at once.
         await Promise.all([...new Set([...item.apps, item.app].filter(Boolean))].map(async (name) => {
           const a = app(name)
-          const accounts = Array.isArray(a?.ops) && a.ops.find((o) => o.accounts)?.name
+          const accounts = Array.isArray(a?.tools) && a.tools.find((o) => o.accounts)?.name
           if (!accounts || !has(a, "sign_out")) return
           const account = (await call(name, accounts, {})).find((x) => known.has(x.account))
           if (account) await call(name, "sign_out", { account: account.account })
@@ -308,9 +308,9 @@ function Item({ item, k, following: f, follow, refresh, deleted }) {
     setBusy(n)
     setError("")
     try {
-      const reply = (await call(a.app, a.op, { item: item.id })) || {}
+      const reply = (await call(a.app, a.tool, { item: item.id })) || {}
       const to = { app: a.app, screen: reply.screen, url: reply.url }
-      if (reply.then?.op) follow({ ...to, op: reply.then.op, title: reply.then.title || "Done" })
+      if (reply.then?.tool) follow({ ...to, tool: reply.then.tool, title: reply.then.title || "Done" })
       await refresh()
       go(to)
     } catch (e) {
@@ -324,7 +324,7 @@ function Item({ item, k, following: f, follow, refresh, deleted }) {
     setBusy("finish")
     setError("")
     try {
-      await call(f.app, f.op, { item: item.id })
+      await call(f.app, f.tool, { item: item.id })
       follow(undefined)
       await refresh()
     } catch (e) {
@@ -393,7 +393,7 @@ function Item({ item, k, following: f, follow, refresh, deleted }) {
               <Button variant="secondary" disabled={busy !== null} onClick={finish}>{busy === "finish" ? `${f.title}…` : f.title}</Button>
             </>
           ) : acts.map((a, n) => (
-            <Button key={`${a.app}.${a.op}`} variant="secondary" disabled={busy !== null} onClick={() => act(a, n)}>{busy === n ? `${a.title}…` : a.title}</Button>
+            <Button key={`${a.app}.${a.tool}`} variant="secondary" disabled={busy !== null} onClick={() => act(a, n)}>{busy === n ? `${a.title}…` : a.title}</Button>
           ))}
         </div>
       )}
@@ -621,7 +621,7 @@ function MakeItem({ maker, open, setOpen, done }) {
     setAdding(true)
     setError("")
     try {
-      await call(maker.app, maker.op, { title })
+      await call(maker.app, maker.tool, { title })
       done()
     } catch (e) {
       setAdding(false)

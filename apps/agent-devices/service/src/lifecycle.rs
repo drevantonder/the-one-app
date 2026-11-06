@@ -113,7 +113,7 @@ impl Devices {
     }
 
     fn has_there(&self, machine: &str, name: &str) -> Result<bool> {
-        let req = json!({ "app": super::NAME, "service": super::NAME, "op": "list", "input": { "here": true }, "device": machine });
+        let req = json!({ "app": super::NAME, "service": super::NAME, "function": "list", "input": { "here": true }, "device": machine });
         let theirs = self.host.post_within("/v1/call", &req, Duration::from_secs(20))?["ok"].clone();
         Ok(theirs["devices"].as_array().into_iter().flatten().any(|d| d["name"] == name && d["moved_to"].as_str().unwrap_or_default().is_empty()))
     }

@@ -8,7 +8,7 @@ import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
 import { Button as i, Empty as a, Icon as o, Tabs as s, TabsList as c, TabsTrigger as l, cn as u, useWidth as d } from "@one/ui";
 import { Fragment as f, jsx as p, jsxs as m } from "react/jsx-runtime";
-var h = one.params || {}, g = (e) => e >= 1e3 ? `${(e / 1e3).toFixed(1)} s` : `${Math.max(0, Math.round(e))} ms`, _ = 500, v = (e) => e.what === "call" ? `${e.app}.${e.op}` : e.what === "page" ? "Page code" : e.path || "", y = (e) => (!h.app || e.app === h.app) && e.at >= (h.since || 0) - 1e3;
+var h = one.params || {}, g = (e) => e >= 1e3 ? `${(e / 1e3).toFixed(1)} s` : `${Math.max(0, Math.round(e))} ms`, _ = 500, v = (e) => e.what === "call" ? `${e.app}.${e.tool}` : e.what === "page" ? "Page code" : e.path || "", y = (e) => (!h.app || e.app === h.app) && e.at >= (h.since || 0) - 1e3;
 function b(e) {
 	let t = {}, n = (e) => {
 		if (e && typeof e == "object") {

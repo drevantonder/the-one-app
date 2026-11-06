@@ -494,9 +494,9 @@ export const elsewhere = {
   restore: "restore it",
   erase: "erase it",
 };
-export async function refuse(ctx, op, repo) {
+export async function refuse(ctx, tool, repo) {
   const full = fullOf(repo);
-  throw new Error(`${PREFIX}${full} is on GitHub: ${elsewhere[op]} there, at https://github.com/${full}`);
+  throw new Error(`${PREFIX}${full} is on GitHub: ${elsewhere[tool]} there, at https://github.com/${full}`);
 }
 
 export async function list(ctx) {

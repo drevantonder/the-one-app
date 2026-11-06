@@ -32,7 +32,7 @@ pub fn catalog(node: &Client) -> Result<Vec<Value>> {
 pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
     let (mut apps, mut addable) = (Vec::new(), Vec::new());
     for mut app in node.apps()? {
-        let tools: Vec<Value> = app["ops"]
+        let tools: Vec<Value> = app["tools"]
             .as_array()
             .into_iter()
             .flatten()
@@ -44,9 +44,9 @@ pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
             })
             .collect();
         if !tools.is_empty() {
-            app["ops"] = json!(tools);
+            app["tools"] = json!(tools);
             apps.push(app);
-        } else if app["ops"].is_null() && app["deleted"].is_null() && app["title"].is_string() {
+        } else if app["tools"].is_null() && app["deleted"].is_null() && app["title"].is_string() {
             addable.push(app);
         }
     }
@@ -175,7 +175,7 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
     let mut found: Vec<(u32, usize, usize, &Value, &Value)> = Vec::new();
     let mut named = Vec::new();
     for (i, app) in apps.iter().enumerate() {
-        for tool in app["ops"].as_array().into_iter().flatten() {
+        for tool in app["tools"].as_array().into_iter().flatten() {
             let (s, covers, by_name) = score(app, tool, &query);
             if enough(covers) {
                 found.push((s, covers, i, app, tool));
@@ -341,7 +341,7 @@ pub fn execute(node: &Client, script: &str, agent: Option<&str>, client: &str) -
     for app in &apps {
         let name = app["name"].as_str().unwrap_or("");
         descriptions.insert(name.into(), app["description"].clone());
-        for tool in app["ops"].as_array().into_iter().flatten() {
+        for tool in app["tools"].as_array().into_iter().flatten() {
             tools.push(json!({ "app": name, "tool": tool["name"], "description": tool["description"], "input": tool["input"], "confirm": tool["confirm"] == true }));
         }
     }
@@ -366,7 +366,7 @@ pub fn execute(node: &Client, script: &str, agent: Option<&str>, client: &str) -
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
         if let Some(id) = msg.get("call") {
             let (app, tool) = (msg["app"].as_str().unwrap_or(""), msg["tool"].as_str().unwrap_or(""));
-            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["ops"].as_array()?.iter().find(|o| o["name"] == tool)?.clone())));
+            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["tools"].as_array()?.iter().find(|o| o["name"] == tool)?.clone())));
             let input = msg["input"].clone();
             let answer = (|| {
                 let spec = spec.with_context(|| format!("no tool {app}_{tool}"))?;

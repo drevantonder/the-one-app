@@ -139,7 +139,7 @@ impl Node {
         let others: Vec<String> = devices.iter().filter(|k| **k != self.0.id).map(hex).collect();
         let started = Instant::now();
         let name = self.device_name();
-        let tried = |result: &str, why: Option<&str>| trace::note(json!({ "step": "device", "device": name, "app": req.app, "op": req.tool, "result": result, "here": true, "why": why }), started.elapsed());
+        let tried = |result: &str, why: Option<&str>| trace::note(req.named(json!({ "step": "device", "device": name, "result": result, "here": true, "why": why })), started.elapsed());
         if !devices.contains(&self.0.id) {
             let why = format!("{name} doesn't run everything {} reaches for you", req.app);
             tried("elsewhere", Some(&why));
@@ -186,6 +186,7 @@ impl Node {
     /// runs once, as it names its lease in the bucket), or a new one.
     fn identified(&self, req: CallRequest) -> Result<CallRequest> {
         let mut req = self.resolve(req);
+        ensure!(if req.service.is_some() { req.tool.is_empty() } else { req.function.is_empty() }, "a call to an app names a tool, and one to a service a function");
         req.named_here = req.id.is_none();
         let id = req.id.get_or_insert_with(new_id);
         ensure!(id.len() <= 64 && !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "a call's id is up to 64 letters, digits, - and _");
@@ -206,7 +207,7 @@ impl Node {
             let name = self.name_of(&device);
             // Each device tried, for a trace: how long it took, and why the next was tried.
             let tried = |result: &str, more: Value| {
-                let mut step = json!({ "step": "device", "device": name, "app": req.app, "op": req.tool, "result": result });
+                let mut step = req.named(json!({ "step": "device", "device": name, "result": result }));
                 if let (Value::Object(step), Value::Object(more)) = (&mut step, more) {
                     step.extend(more);
                 }
@@ -346,7 +347,7 @@ impl Node {
         let here = self.runs_service_here(&req.app);
         // A function of a service that's about its own machine (`prefer: { run: "here" }`: Shell's run, Models' here) runs on
         // the caller's first.
-        let about_here = |d: &Value| d["prefer"][req.tool.as_str()] == "here";
+        let about_here = |d: &Value| d["prefer"][req.runs()] == "here";
         // This device: its node, or a part of it (a service endpoint of oned's own).
         let ours = |i: &Network, k: &Key| -> Result<bool> { Ok(*k == self.0.id || i.r.db().machine(k)?.is_some_and(|m| m.device == Some(self.0.id))) };
         let here_first = req.service.is_some()
@@ -407,6 +408,9 @@ impl Node {
         } else if req.app != scopes::APP && (!self.deployed(&req.app) || req.device.as_deref() == Some("all")) {
             req.service = Some(req.app.clone());
         }
+        if req.service.is_some() && req.function.is_empty() {
+            req.function = std::mem::take(&mut req.tool);
+        }
         req
     }
 
@@ -432,7 +436,7 @@ impl Node {
             _ => false,
         } && self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
-        let mut request = json!({ "app": req.app, "service": req.service, "op": req.tool, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });
+        let mut request = req.named(json!({ "service": req.service, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } }));
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
         // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone: only those the
         // device runs, and only the call's app's.
@@ -566,7 +570,7 @@ impl Node {
             if passed(me) && !self.0.services.serves_everyone(&req.app) {
                 return Ok(Reply::error(format!("{} runs only for its person's own devices", req.app)));
             }
-            return match self.run_service(&req.app, &req.tool, input, me, req.from.clone()).await {
+            return match self.run_service(&req.app, &req.function, input, me, req.from.clone()).await {
                 Err(err) if err.is::<crate::services::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
                 other => other.map(Reply::Ok),
             };
@@ -599,7 +603,7 @@ impl Node {
         }
         // A tool of a lab that's off isn't there.
         let described = self.0.apps.describe(&req.app).await?;
-        if let Some(lab) = described["ops"].as_array().into_iter().flatten().find(|o| o["name"] == req.tool.as_str()).and_then(|o| o["lab"].as_str())
+        if let Some(lab) = described["tools"].as_array().into_iter().flatten().find(|o| o["name"] == req.tool.as_str()).and_then(|o| o["lab"].as_str())
             && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings()?, &crate::labs::app_key(&req.app, lab))))?
         {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
@@ -617,7 +621,7 @@ impl Node {
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
         let mut lease = None;
         if let (Some(id), Some(scope), false) = (&req.id, scopes.first(), req.unleased) {
-            let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.tool.as_str() && o["reads"] == true);
+            let reads = self.0.apps.describe(&req.app).await?["tools"].as_array().into_iter().flatten().any(|o| o["name"] == req.tool.as_str() && o["reads"] == true);
             if !reads {
                 let base = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
                 let leasing = Instant::now();
@@ -640,7 +644,7 @@ impl Node {
             let ran = self.0.apps.call(&req.app, &req.tool, input, &ctx, deadline.saturating_duration_since(tokio::time::Instant::now())).await;
             answered.store(true, Ordering::Relaxed);
             let mut outcome = ran?;
-            trace::note(json!({ "step": "run", "app": req.app, "op": req.tool }), running.elapsed());
+            trace::note(req.named(json!({ "step": "run" })), running.elapsed());
             let preparing = Instant::now();
             let prepared = self.prepare_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
             trace::note(json!({ "step": "prepare" }), preparing.elapsed());
@@ -719,7 +723,7 @@ impl Node {
                     return;
                 }
                 let error: String = error.lines().next().unwrap_or("").chars().take(300).collect();
-                status::Said::Failed { app: app.into(), tool: req.tool.clone(), error, user: me.user.clone() }
+                status::Said::Failed { app: app.into(), tool: req.runs().to_string(), error, user: me.user.clone() }
             }
         };
         self.write_insight(app, me, said);
@@ -794,7 +798,7 @@ impl Node {
                 usage.push(json!({ "user": name(&u)?, "client": client, "agent": agent, "days": days, "last": last }));
             }
             usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
-            let mut errors: Vec<Value> = errors.into_iter().map(|((tool, error), (count, first, last, user))| json!({ "op": tool, "error": error, "count": count, "first": first, "last": last, "user": user })).collect();
+            let mut errors: Vec<Value> = errors.into_iter().map(|((tool, error), (count, first, last, user))| json!({ "tool": tool, "error": error, "count": count, "first": first, "last": last, "user": user })).collect();
             errors.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
             let cost: Vec<Value> = cost.into_iter().map(|(model, (usd, input, output, calls))| json!({ "model": model, "usd": usd, "input": input, "output": output, "calls": calls })).collect();
             Ok(Some(json!({ "usage": usage, "errors": errors, "cost": cost })))
@@ -1110,7 +1114,7 @@ impl Node {
         Ok(db)
     }
 
-    /// What the shim asks the node for a running call (`src/app/outbound.rs`): `POST /call { app, op, input }` runs a
+    /// What the shim asks the node for a running call (`src/app/outbound.rs`): `POST /call { app, tool, input }` runs a
     /// tool of an app the calling app uses, or a function of its own service, as its caller; `POST /blob` keeps a blob, `GET
     /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the network's apps, `GET /devices` its devices.
     pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
@@ -1121,13 +1125,14 @@ impl Node {
             ("POST", "/call") => {
                 ensure!(!grant.read_only, "this call only reads: it can't run other apps' tools");
                 let req: Value = serde_json::from_slice(&body)?;
-                let (app, tool) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
+                let service = req["service"] == true;
+                let (app, runs) = (req["app"].as_str().unwrap_or(""), req[if service { "function" } else { "tool" }].as_str().unwrap_or(""));
                 // An app may say which device runs it, like the one with a local model.
                 let device = req["device"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
                 // `ctx.services` says it's a service's; `ctx.apps`, an app's, unless it runs as a service anyway (on
                 // every device, or with no deploy). A service is its app's alone: other apps call that app's tools.
-                let service = req["service"] == true;
-                let call = self.resolve(CallRequest { app: app.into(), service: service.then(|| app.into()), tool: tool.into(), input: req["input"].clone(), device, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() });
+                let (tool, function) = if service { ("", runs) } else { (runs, "") };
+                let call = self.resolve(CallRequest { app: app.into(), service: service.then(|| app.into()), tool: tool.into(), function: function.into(), input: req["input"].clone(), device, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() });
                 let (apps, services) = self.uses(&grant.app).await;
                 match call.service.is_some() {
                     true => {

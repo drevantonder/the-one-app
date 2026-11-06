@@ -11,7 +11,7 @@ export const home = (() => {
   const has = (a, screen) => !!a?.screens?.some((s) => s.name === screen);
   const hasScreens = (a) => has(a, "main");
   // The tool that lists an app's accounts, the one it says does (`accounts: true`): none for an app without.
-  const accountsTool = (a) => a?.ops?.find((o) => o.accounts)?.name;
+  const accountsTool = (a) => a?.tools?.find((o) => o.accounts)?.name;
   const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
   const userName = (id) => (id === me()?.id ? "You" : network()?.users.find((u) => u.id === id)?.name || "Someone");
   // People by name, you last, as "you".
@@ -145,7 +145,7 @@ export const home = (() => {
   // MARK: Changing things
 
   async function call(a, tool, input = {}) {
-    return (await one.api("POST", "/v1/call", { app: a, op: tool, input })).ok;
+    return (await one.api("POST", "/v1/call", { app: a, tool, input })).ok;
   }
 
   /// Says what went wrong, in the shell's own alert.
