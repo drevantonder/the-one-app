@@ -5,7 +5,11 @@
 //! browser. What the app adds is what a page can't do: this device's key in the OS's secret store, signing in through
 //! the system's browser, notifications, the clipboard, files, and links outside.
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod apple;
 mod headless;
+#[cfg(target_os = "ios")]
+mod iphone;
 #[cfg(target_os = "macos")]
 mod mac;
 #[cfg(target_os = "macos")]
@@ -27,13 +31,15 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+#[cfg(not(target_os = "ios"))]
 use tauri_plugin_dialog::DialogExt;
+#[cfg(not(target_os = "ios"))]
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 use tauri_plugin_opener::OpenerExt;
 
-/// What a call says it came from.
+/// What a call says it came from: the platform, an iPhone as "phone", as the iPhone app's did.
 fn client_name() -> String {
-    std::env::consts::OS.replace("macos", "mac")
+    std::env::consts::OS.replace("macos", "mac").replace("ios", "phone")
 }
 
 /// The app's id, as build.rs names it for this platform: `app.<cli>.<platform>` (a throwaway's, `….throwaway`).
@@ -46,6 +52,10 @@ fn device_name() -> String {
     // A Mac, as it's named in its settings ("Andre's MacBook Air"), as the Mac app named it.
     #[cfg(target_os = "macos")]
     if let Some(name) = std::process::Command::new("/usr/sbin/scutil").args(["--get", "ComputerName"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|n| !n.is_empty()) {
+        return name;
+    }
+    #[cfg(target_os = "ios")]
+    if let Some(name) = iphone::name() {
         return name;
     }
     // Windows names it in COMPUTERNAME.
@@ -77,10 +87,14 @@ fn env(name: &str) -> Option<String> {
 
 /// The device this app is on, which signing in again replaces its sign-in under: the computer's own node's key, where
 /// one runs here (as the Mac app's was); else the machine's own id, hashed: Linux's machine-id, or Windows' MachineGuid,
-/// which outlives reinstalling Windows' apps (as the Windows app's was).
+/// which outlives reinstalling Windows' apps (as the Windows app's was); on an iPhone, an id of its own in its Keychain,
+/// which outlives signing out (as the iPhone app's was).
 fn this_device() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    #[cfg(target_os = "ios")]
+    return secrets::this_device().ok().map(|id| data_encoding::HEXLOWER.encode(&Sha256::digest(id)));
+    #[cfg(not(target_os = "ios"))]
     local_node().or_else(|| {
-        use sha2::{Digest, Sha256};
         #[cfg(windows)]
         let id = windows::machine_guid()?;
         #[cfg(not(windows))]
@@ -90,6 +104,7 @@ fn this_device() -> Option<String> {
 }
 
 /// This computer's own node's key, where one runs here.
+#[cfg(not(target_os = "ios"))]
 fn local_node() -> Option<String> {
     local_state()?["device"]["key"].as_str().map(str::to_string)
 }
@@ -177,8 +192,12 @@ async fn node_json(device: &one_client::Device, path: &str) -> Result<Value, Str
     Ok(out)
 }
 
-/// Where the platform's own widgets read the pages' widgets (`widgets`).
+/// Where the platform's own widgets read the pages' widgets (`widgets`): on an iPhone, the App Group they share.
 fn widgets_dir() -> PathBuf {
+    #[cfg(target_os = "ios")]
+    if let Some(group) = iphone::group() {
+        return group;
+    }
     app().data.join("widgets")
 }
 
@@ -196,10 +215,14 @@ fn keep_widgets() {
     });
 }
 
-/// Let in, now or as it starts: the platform's own widgets kept, and on Windows, its push channel registered (by the
-/// package's helper, which has the Windows App SDK), since a channel lasts 30 days.
+/// Let in, now or as it starts: the platform's own widgets kept, and its pushes registered: on Windows its channel (by
+/// the package's helper, which has the Windows App SDK), since a channel lasts 30 days; on an iPhone its token.
 fn let_in() {
     keep_widgets();
+    #[cfg(target_os = "ios")]
+    if let Ok(device) = app().device() {
+        iphone::push(device);
+    }
     // The panel, drawn before this device was in (signed out), draws again.
     if let Some(p) = app().handle.get_webview_window("panel") {
         let _ = p.eval("location.reload()");
@@ -218,6 +241,8 @@ fn changed() {
         }
         #[cfg(target_os = "macos")]
         menubar::update();
+        #[cfg(target_os = "ios")]
+        iphone::tell("reload", json!({}));
     });
 }
 
@@ -232,7 +257,9 @@ fn badge(count: u32) {
     if let Some(w) = app().handle.get_webview_window("main") {
         let _ = w.set_badge_count((count > 0).then_some(count as i64));
     }
-    #[cfg(mobile)]
+    #[cfg(target_os = "ios")]
+    iphone::tell("badge", json!({ "count": count }));
+    #[cfg(target_os = "android")]
     let _ = count;
 }
 
@@ -255,6 +282,9 @@ fn native() -> Value {
     a.page.store(true, Ordering::Relaxed);
     let opened = a.opened.lock().unwrap().take();
     let local = local_state();
+    let unpaired = cfg!(target_os = "macos") && local.as_ref().is_some_and(|s| s["network"].is_null());
+    #[cfg(target_os = "macos")]
+    mac::menu_now(signed_in, unpaired);
     json!({
         "name": one::config::NAME, "yours": one::config::YOURS, "cli": one::config::CLI, "platform": platform(), "device": device_name(), "client": client_name(),
         "address": address, "signedIn": signed_in, "user": if signed_in { a.kept("user") } else { None },
@@ -262,11 +292,16 @@ fn native() -> Value {
         // This computer's own node, where one runs here: "This device" in the panel.
         "node": local.as_ref().and_then(|s| s["device"]["key"].as_str().map(str::to_string)),
         // A Mac whose own node is in no network yet joins one with a pairing code (`pair`), as the Mac app did.
-        "unpaired": cfg!(target_os = "macos") && local.is_some_and(|s| s["network"].is_null()),
+        "unpaired": unpaired,
         // Open at login: whether it's on, where the app switches it (none where it can't yet).
         "login": login_now(&a.handle),
         // Let Agents Use This Mac, on a Mac (Computer Use's helper reads it).
         "computerUse": computer_use_now(),
+        // A Mac's widgets hidden from the menu bar (their own items), which its panel shows again.
+        "menubar": menubar_hidden(),
+        // An iPhone's: the document camera, and touch and hold lifting what's held with its menu (`menu`).
+        "scan": cfg!(target_os = "ios"),
+        "lifts": cfg!(target_os = "ios"),
     })
 }
 
@@ -318,6 +353,11 @@ async fn sign_in() -> Result<(), String> {
     let auth2 = auth.clone();
     let print = env("SIGN_IN_PRINT").is_some();
     tauri::async_runtime::spawn_blocking(move || {
+        // An iPhone signs in in the system's sheet, which comes back to the app's own link; a test's prints the link.
+        #[cfg(target_os = "ios")]
+        if !print {
+            return auth2.sign_in_here(&join, iphone::sign_in);
+        }
         auth2.sign_in(&join, |u| {
             if print {
                 println!("Sign in: {u}");
@@ -331,6 +371,7 @@ async fn sign_in() -> Result<(), String> {
     let token = token().await?;
     a.keep("user", Some(&signin::Auth::subject(&token)));
     // Back in front of the browser it signed in with.
+    #[cfg(desktop)]
     if let Some(w) = a.handle.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -459,23 +500,30 @@ async fn sign_out() -> Result<(), String> {
     }
     a.keep("user", None);
     widgets::forget(&widgets_dir());
+    #[cfg(target_os = "ios")]
+    iphone::tell("reload", json!({}));
     badge(0);
     Ok(())
 }
 
 /// Whether this device shows notifications, asking the person first if `ask` → "granted", "denied" or "default".
 #[tauri::command]
-fn notify(ask: bool) -> String {
-    let n = app().handle.notification();
-    let state = match n.permission_state() {
-        Ok(PermissionState::Granted) => PermissionState::Granted,
-        Ok(s) if !ask => s,
-        _ => n.request_permission().unwrap_or(PermissionState::Denied),
-    };
-    match state {
-        PermissionState::Granted => "granted".into(),
-        PermissionState::Denied => "denied".into(),
-        _ => "default".into(),
+async fn notify(ask: bool) -> String {
+    #[cfg(target_os = "ios")]
+    return iphone::ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string)).unwrap_or_else(|| "default".into());
+    #[cfg(not(target_os = "ios"))]
+    {
+        let n = app().handle.notification();
+        let state = match n.permission_state() {
+            Ok(PermissionState::Granted) => PermissionState::Granted,
+            Ok(s) if !ask => s,
+            _ => n.request_permission().unwrap_or(PermissionState::Denied),
+        };
+        match state {
+            PermissionState::Granted => "granted".into(),
+            PermissionState::Denied => "denied".into(),
+            _ => "default".into(),
+        }
     }
 }
 
@@ -499,6 +547,16 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
     let data = data_encoding::BASE64.decode(data.as_bytes()).map_err(|e| e.to_string())?;
     let name: String = name.chars().filter(|c| !matches!(c, '/' | '\\' | '\0')).collect();
     let name = if name.trim().is_empty() { "file".to_string() } else { name };
+    // An iPhone shares it (the share sheet, which saves to Files too), or shows it in Quick Look.
+    #[cfg(target_os = "ios")]
+    {
+        let dir = std::env::temp_dir().join("screen-files").join(app().next.fetch_add(1, Ordering::Relaxed).to_string());
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join(&name);
+        std::fs::write(&path, data).map_err(|e| e.to_string())?;
+        return iphone::ask_off("give", json!({ "path": path, "preview": preview })).await.map(drop);
+    }
+    #[cfg(not(target_os = "ios"))]
     if preview {
         let dir = std::env::temp_dir().join(format!("{}-{}", one::config::CLI, app().next.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -506,7 +564,9 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
         std::fs::write(&path, data).map_err(|e| e.to_string())?;
         return app().handle.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string());
     }
+    #[cfg(not(target_os = "ios"))]
     let handle = app().handle.clone();
+    #[cfg(not(target_os = "ios"))]
     tauri::async_runtime::spawn_blocking(move || {
         let Some(path) = handle.dialog().file().set_file_name(&name).blocking_save_file() else { return Ok(()) };
         let path = path.into_path().map_err(|e| e.to_string())?;
@@ -514,6 +574,62 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// A phone's haptic: "selection" (a press), "medium" (a long press), "success" or "error"; elsewhere, nothing.
+#[tauri::command]
+fn haptic(style: String) {
+    #[cfg(target_os = "ios")]
+    iphone::tell("haptic", json!({ "style": style }));
+    let _ = style;
+}
+
+/// The document camera, where there's one (an iPhone's): each page found, straightened and cropped, as a JPEG
+/// `{ name, type, size, base64 }`; none if the person cancels.
+#[tauri::command]
+async fn scan() -> Result<Value, String> {
+    #[cfg(target_os = "ios")]
+    return iphone::ask_off("scan", json!({})).await.map(|v| v["files"].clone());
+    #[cfg(not(target_os = "ios"))]
+    Err("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.".into())
+}
+
+/// A screen's menu while a touch and hold has lifted what it's for out of the page (an iPhone's): shown with it, as the
+/// Home Screen's → `{ index }` (null if none was chosen); else `{ lifted: false }`, and the page shows its own.
+#[tauri::command]
+async fn menu(items: Value) -> Value {
+    #[cfg(target_os = "ios")]
+    return iphone::ask_off("menu", json!({ "items": items })).await.unwrap_or_else(|_| json!({ "lifted": false }));
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = items;
+        json!({ "lifted": false })
+    }
+}
+
+/// Light, dark or automatic, as the person chose: kept by the app too, so its next start draws in it from its first
+/// frame (an iPhone's).
+#[tauri::command]
+fn appearance(value: String) {
+    #[cfg(target_os = "ios")]
+    iphone::tell("appearance", json!({ "value": value }));
+    let _ = value;
+}
+
+/// A widget's own menu bar item shown again, or hidden (a Mac's) → the kinds hidden now.
+#[tauri::command]
+fn menubar(kind: String, show: bool) -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    {
+        menubar::set_hidden(&kind, !show);
+        tray_menu(&app().handle);
+        return menubar::hidden();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (kind, show);
+        Vec::new()
+    }
 }
 
 // MARK: The menu bar panel
@@ -547,6 +663,13 @@ fn login(on: bool) -> Option<bool> {
     login::set(&app().handle, on);
     let _ = on;
     login_now(&app().handle)
+}
+
+fn menubar_hidden() -> Option<Vec<String>> {
+    #[cfg(target_os = "macos")]
+    return Some(menubar::hidden());
+    #[cfg(not(target_os = "macos"))]
+    None
 }
 
 fn computer_use_now() -> Option<bool> {
@@ -835,6 +958,14 @@ fn toggle_widget(kind: &str, at: tauri::Rect) {
     toggle_under(&window, Some(at));
 }
 
+/// One of the app menu's commands, to the window's page, which does it: "sidebar" (fold it or unfold it), "join".
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn command(name: &str) {
+    if let Some(w) = app().handle.get_webview_window("main") {
+        let _ = w.eval(format!("window.__oneNative?.command({})", json!(name)));
+    }
+}
+
 /// A link the app was opened with (`<cli>://…`, or one to the network's address, which Windows hands it): to the page,
 /// which goes there, or kept for it until it asks.
 fn opened(url: &str) {
@@ -935,6 +1066,7 @@ fn launcher(app: &tauri::App) -> Result<(), String> {
 
 /// The window, in front.
 fn show() {
+    #[cfg(desktop)]
     if let Some(w) = app().handle.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
@@ -995,21 +1127,36 @@ pub fn run() {
         }))
         // The window as it was left; the panel shows only when its item is clicked.
         .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["panel"]).build());
+    // The iPhone's notifications are its own (iphone.rs), which the plugin's would take from it.
+    #[cfg(not(target_os = "ios"))]
+    let builder = builder.plugin(tauri_plugin_notification::init());
+    #[cfg(target_os = "ios")]
+    let builder = builder.plugin(iphone::plugin());
     builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, computer_use, pair, quit, panel, fit, badge])
+        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, computer_use, pair, quit, panel, fit, badge, haptic, scan, menu, appearance, menubar])
         .setup(|app| {
             // Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
             let data = app.path().app_local_data_dir()?;
-            // What the old Mac app kept, taken over once; and this Mac's node kept running.
+            // What the old Mac or iPhone app kept, taken over once.
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            apple::take_over(&data);
+            // This Mac's node kept running; the Mac app's menus, with its keys.
             #[cfg(target_os = "macos")]
             {
-                mac::take_over(&data);
                 mac::start_node();
+                app.set_menu(mac::menu(app.handle())?)?;
+                app.on_menu_event(|_, e| match e.id().as_ref() {
+                    "sidebar" | "join" => {
+                        show();
+                        command(e.id().as_ref());
+                    }
+                    "pair" => main(Some(format!("{}://settings/devices?add=1", one::config::CLI))),
+                    _ => {}
+                });
             }
             #[cfg(debug_assertions)]
             if let Some(port) = env("CONTROL").and_then(|p| p.parse().ok()) {
@@ -1044,7 +1191,6 @@ pub fn run() {
                 app.deep_link().on_open_url(|e| e.urls().iter().for_each(|u| opened(u.as_str())));
             }
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title(one::config::NAME)
                 .initialization_script(include_str!("native.js"))
                 .use_https_scheme(true)
                 // Anything that would take the page away goes to the browser.
@@ -1056,7 +1202,8 @@ pub fn run() {
                     own
                 });
             #[cfg(desktop)]
-            let window = window.inner_size(1000.0, 700.0).min_inner_size(360.0, 480.0);
+            let window = window.title(one::config::NAME).inner_size(1000.0, 700.0).min_inner_size(360.0, 480.0);
+            #[cfg_attr(mobile, allow(unused_variables))]
             let window = window.build()?;
             // On a computer, closing the window leaves the app running, in the tray or menu bar, where Open shows it
             // again (or starting it again does); Quit quits.

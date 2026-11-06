@@ -39,6 +39,11 @@ fn main() {
         println!("cargo:rerun-if-changed={}", mark.display());
         std::fs::copy(&mark, Path::new(&std::env::var("OUT_DIR").unwrap()).join("menubar.png")).unwrap_or_else(|e| panic!("{}: {e}", mark.display()));
     }
+    // The iPhone's Swift (iphone/), a plugin of the app's own (src/iphone.rs), built and linked into it as Tauri's own
+    // plugins are, against Tauri's Swift, copied beside it as theirs is.
+    if platform == "phone" {
+        iphone_swift();
+    }
     // The custom build's app icon, as the web client's files have it; on Windows, the program's own too (its window's,
     // the taskbar's), an .ico.
     let mut icons = vec!["gen/web/icon.png"];
@@ -58,7 +63,7 @@ fn main() {
     println!("cargo:rustc-env=TAURI_CONFIG={config}");
     println!("cargo:rustc-env=IDENTIFIER={}", identifier(platform));
     println!("cargo:rerun-if-env-changed=CONFIG");
-    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit", "badge", "computer_use", "pair"]);
+    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit", "badge", "computer_use", "pair", "haptic", "scan", "menu", "appearance", "menubar"]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands)).expect("the app's build")
 }
 
@@ -74,4 +79,41 @@ fn windows_icon(png: &Path, to: &Path) {
         dir.add_entry(ico::IconDirEntry::encode(&ico::IconImage::from_rgba_data(size, size, small.into_raw())).unwrap());
     }
     dir.write(std::fs::File::create(to).unwrap()).unwrap();
+}
+
+/// Builds the iPhone's Swift package (iphone/Package.swift) and links it in.
+#[cfg(target_os = "macos")]
+fn iphone_swift() {
+    let tauri = std::path::PathBuf::from(std::env::var("DEP_TAURI_IOS_LIBRARY_PATH").expect("Tauri's Swift, which its build names"));
+    let to = Path::new("iphone/.tauri/tauri-api");
+    let _ = std::fs::remove_dir_all(to);
+    copy(&tauri, to);
+    // Its APIs are iOS 26's, as the app's least.
+    // SAFETY: nothing else runs in this build script.
+    unsafe { std::env::set_var("IPHONEOS_DEPLOYMENT_TARGET", "26.0") };
+    tauri_utils::build::link_apple_library("one-native-iphone", std::fs::canonicalize("iphone").unwrap());
+    println!("cargo:rerun-if-changed=iphone/Sources");
+    println!("cargo:rerun-if-changed=iphone/Package.swift");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn iphone_swift() {
+    panic!("The iPhone's app builds on a Mac.");
+}
+
+/// A folder's files, but what Swift's build left in it.
+#[cfg(target_os = "macos")]
+fn copy(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let name = entry.file_name();
+        if [".build", "Package.resolved", "Tests"].iter().any(|n| name == *n) {
+            continue;
+        }
+        if entry.file_type().unwrap().is_dir() {
+            copy(&entry.path(), &to.join(&name));
+        } else {
+            std::fs::copy(entry.path(), to.join(&name)).unwrap();
+        }
+    }
 }

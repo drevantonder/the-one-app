@@ -1,24 +1,13 @@
 import Foundation
 import UserNotifications
 
-/// What's pushed to this device: each push carries a note sealed to it (src/push.rs), which the app's notification
-/// extension opens with this device's key and shows as its notification, with the app screen a tap opens (`link`). A
-/// note whose action is a device asking to join (`{ "join": "<its code>" }`) shows Approve and Not Me, which the app
-/// acts on (`PushActions`), where the person's node checks the request is theirs.
+/// What's pushed to this device: each push carries a note sealed to it (src/push.rs), which this extension opens with
+/// this device's key and shows as its notification, with the app screen a tap opens (`link`). A note whose action is a
+/// device asking to join (`{ "join": "<its code>" }`) shows Approve and Not Me, which the app acts on (its plugin's
+/// `Notes`, iphone/Sources/OneNative), where the person's node checks the request is theirs.
 enum Notes {
-    /// A device asking to join: its notification's category, and its two actions.
+    /// A device asking to join: its notification's category, whose Approve and Not Me the app registers and answers.
     static let join = "join"
-    static let approve = "approve"
-    static let notMe = "not-me"
-
-    /// The categories the app registers, for its notifications' actions.
-    static var categories: Set<UNNotificationCategory> {
-        let actions = [
-            UNNotificationAction(identifier: approve, title: String(localized: "Approve"), options: [.authenticationRequired]),
-            UNNotificationAction(identifier: notMe, title: String(localized: "Not Me"), options: [.authenticationRequired, .destructive]),
-        ]
-        return [UNNotificationCategory(identifier: join, actions: actions, intentIdentifiers: [])]
-    }
 
     /// Shows the note `content` carries (`n`), opened with one of this device's keys; or, if none opens it, only that one
     /// came.

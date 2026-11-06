@@ -266,7 +266,8 @@ function Devices() {
     await load()
   }
 
-  // The same screen first loaded gets the one asked about from its QR and the app that sent them to choose where its schedules run.
+  // The same screen first loaded gets the one asked about from its QR, the app that sent them to choose where its
+  // schedules run, and Add Device (a Mac's Pair a Computer…, `add`).
   useEffect(() => {
     one.largeTitle("Devices")
     const schedulesAsked = one.params?.schedules ? { app: String(one.params.schedules), scope: one.params.scope && String(one.params.scope) } : null
@@ -276,6 +277,7 @@ function Devices() {
       const typed = String(one.params?.approve || "").toUpperCase().replace(/[^A-Z2-7]/g, "")
       if (typed && !first.waiting.some((r) => r.code.replace(" ", "") === typed)) approveScanned(typed)
       if (schedulesAsked && first.device.keys) show({ schedules: schedulesAsked })
+      else if (one.params?.add) show({ add: true })
     })
     one.on("changed", () => load())
   }, [])

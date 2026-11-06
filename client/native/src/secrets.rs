@@ -40,14 +40,7 @@ mod store {
         if !service.ends_with(" device") {
             return None;
         }
-        GROUP
-            .get_or_init(|| {
-                use core_foundation::string::CFString;
-                let info = core_foundation::bundle::CFBundle::main_bundle().info_dictionary();
-                let value = info.find(CFString::new("KeychainGroup"))?;
-                value.downcast::<CFString>().map(|s| s.to_string()).filter(|s| !s.is_empty())
-            })
-            .clone()
+        GROUP.get_or_init(|| crate::apple::info("KeychainGroup")).clone()
     }
 
     /// The item's query: in its group (`shared`), or where an older build kept it.
@@ -140,6 +133,18 @@ pub fn signing_in() -> Result<[u8; 32], String> {
     }
     let key = one_client::new_secret();
     set("device", SIGNING_IN, &key)?;
+    Ok(key)
+}
+
+/// An iPhone's id of its own, made the first time and kept past signing out (not a person's device key): what signing
+/// in again replaces its sign-in under, as the iPhone app's was.
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub fn this_device() -> Result<[u8; 32], String> {
+    if let Some(key) = device("this device") {
+        return Ok(key);
+    }
+    let key = one_client::new_secret();
+    set("device", "this device", &key)?;
     Ok(key)
 }
 

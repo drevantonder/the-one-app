@@ -1,14 +1,13 @@
 //! What's the Mac's own, beside the window: opening at login (SMAppService's main app), this Mac's node (oned, the
-//! bundle's launch agent `app.<cli>.mac.oned`, kept running), the defaults the old Mac app kept that this one takes over
-//! once (its address and sign-in), and "Let Agents Use This Mac", which Computer Use's helper reads from this app's
-//! defaults (`computerUse`).
-
-use std::path::Path;
+//! bundle's launch agent `app.<cli>.mac.oned`, kept running), and "Let Agents Use This Mac", which Computer Use's helper
+//! reads from this app's defaults (`computerUse`).
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
-use objc2_foundation::{NSString, NSUserDefaults};
+use objc2_foundation::NSString;
+
+use crate::apple::defaults;
 
 #[link(name = "ServiceManagement", kind = "framework")]
 unsafe extern "C" {}
@@ -42,14 +41,6 @@ pub fn set_login(on: bool) {
     if on { register(&app) } else { unregister(&app) };
 }
 
-fn defaults() -> Retained<NSUserDefaults> {
-    NSUserDefaults::standardUserDefaults()
-}
-
-fn string(key: &str) -> Option<String> {
-    defaults().stringForKey(&NSString::from_str(key)).map(|s| s.to_string()).filter(|s| !s.is_empty())
-}
-
 /// Whether the person lets their agents use this Mac (Computer Use's helper reads it here).
 pub fn computer_use() -> bool {
     defaults().boolForKey(&NSString::from_str("computerUse"))
@@ -57,39 +48,6 @@ pub fn computer_use() -> bool {
 
 pub fn set_computer_use(on: bool) {
     defaults().setBool_forKey(on, &NSString::from_str("computerUse"));
-}
-
-/// What the old Mac app kept in its defaults, taken over the first time (`data` has no address yet), so a signed-in
-/// Mac stays signed in: the address, an invite's secret, its sign-in's client, and the client's own folder; and its Open at
-/// Login and the widgets hidden from the menu bar.
-pub fn take_over(data: &Path) {
-    if data.join("address").exists() {
-        return;
-    }
-    let Some(address) = string("address") else { return };
-    let _ = std::fs::create_dir_all(data);
-    let _ = std::fs::write(data.join("address"), &address);
-    if let Some(invite) = string("invite") {
-        let _ = std::fs::write(data.join("invite"), invite);
-    }
-    if let (Some(client), Some("http://127.0.0.1/callback")) = (string("client"), string("clientRedirect").as_deref()) {
-        let _ = std::fs::write(data.join("sign-in"), format!("{address}\n{client}"));
-    }
-    // Open at login was set the first time it opened; the person's choice since stays (lib.rs `tray`).
-    if defaults().boolForKey(&NSString::from_str("loginItemSet")) {
-        let _ = std::fs::write(data.join("opened-at-login"), "");
-    }
-    // The widgets they hid from the menu bar (src/menubar.rs).
-    if let Some(hidden) = defaults().stringArrayForKey(&NSString::from_str("hiddenWidgets")) {
-        let kinds: Vec<String> = hidden.iter().map(|k| k.to_string()).collect();
-        let _ = std::fs::write(data.join("menubar-hidden"), kinds.join("\n"));
-    }
-    if let Some(support) = std::env::var_os("HOME").map(|h| Path::new(&h).join("Library/Application Support")) {
-        let old = support.join(one::config::NAME).join(one::config::CLI).join("client");
-        if old.is_dir() && !data.join("client").exists() {
-            let _ = std::fs::rename(old, data.join("client"));
-        }
-    }
 }
 
 /// The node's launch agent's label, in this bundle's Contents/Library/LaunchAgents.
@@ -140,4 +98,37 @@ pub fn start_node() {
             let _ = std::process::Command::new(node).spawn();
         }
     });
+}
+
+/// The app's menus, macOS's own with the Mac app's keys, as items of them so they work wherever the focus is (a key
+/// pressed in a screen's frame never reaches the page): View's Fold Sidebar (⌘\), File's Pair a Computer… (⌘⇧I, signed
+/// in) and Join with a Pairing Code… (⌘⇧J, while this Mac's node is in no network).
+pub fn menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem as P, Submenu};
+    let pair = MenuItem::with_id(app, "pair", "Pair a Computer…", false, Some("CmdOrCtrl+Shift+I"))?;
+    let join = MenuItem::with_id(app, "join", "Join with a Pairing Code…", false, Some("CmdOrCtrl+Shift+J"))?;
+    let about = AboutMetadata { name: Some(one::config::NAME.into()), ..Default::default() };
+    let menu = Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(app, one::config::NAME, true, &[&P::about(app, None, Some(about))?, &P::separator(app)?, &P::services(app, None)?, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?, &P::separator(app)?, &P::quit(app, None)?])?,
+            &Submenu::with_items(app, "File", true, &[&pair, &join, &P::separator(app)?, &P::close_window(app, None)?])?,
+            &Submenu::with_items(app, "Edit", true, &[&P::undo(app, None)?, &P::redo(app, None)?, &P::separator(app)?, &P::cut(app, None)?, &P::copy(app, None)?, &P::paste(app, None)?, &P::select_all(app, None)?])?,
+            &Submenu::with_items(app, "View", true, &[&MenuItem::with_id(app, "sidebar", "Fold Sidebar", true, Some("CmdOrCtrl+\\"))?, &P::separator(app)?, &P::fullscreen(app, None)?])?,
+            &Submenu::with_items(app, "Window", true, &[&P::minimize(app, None)?, &P::maximize(app, None)?, &P::separator(app)?, &P::close_window(app, None)?])?,
+            &Submenu::with_items(app, "Help", true, &[])?,
+        ],
+    )?;
+    let _ = MENU.set((pair, join));
+    Ok(menu)
+}
+
+static MENU: std::sync::OnceLock<(tauri::menu::MenuItem<tauri::Wry>, tauri::menu::MenuItem<tauri::Wry>)> = std::sync::OnceLock::new();
+
+/// Pair a Computer… while someone's signed in here; Join with a Pairing Code… while this Mac's node is in no network.
+pub fn menu_now(signed_in: bool, unpaired: bool) {
+    if let Some((pair, join)) = MENU.get() {
+        let _ = pair.set_enabled(signed_in);
+        let _ = join.set_enabled(unpaired);
+    }
 }

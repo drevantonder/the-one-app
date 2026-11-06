@@ -65,10 +65,11 @@ window.oneHost = (() => {
   /// What makes a screen's page sit in this one as its own: this page's background shows through, and on a computer
   /// the Mac app's size of text. It's light or dark as `appearance` says ("automatic", "light" or "dark"), and as a
   /// `{ oneScheme }` posted to its frame says after. In a sheet (`raised`), its cards are a step lighter, as on a phone's.
-  function look(html, appearance, raised = false) {
+  /// `shell` is what the page that holds it does beyond a browser, as its globals (`__oneShell`, `__oneLifts`).
+  function look(html, appearance, raised = false, shell = {}) {
     // With the nonce of a page that runs only its own scripts (the client's own screens), as one of them.
     const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
-    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance)}; const apply = () => scheme(document, now);
+    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { Object.assign(window, ${JSON.stringify(shell).replace(/</g, "\\u003c")}); ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance)}; const apply = () => scheme(document, now);
       addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
       addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()<\/script>`;
     const style = `<style>html, body { background: transparent !important; }
@@ -80,7 +81,7 @@ window.oneHost = (() => {
   /// answers them, the web client's and a chat's alike → what it replies; what it throws, it refuses with. `h` is what
   /// each page does its own way: `frame`, the screen's; `call(tool, input)`, as its app; `open(m)`, `close(value)` and
   /// `title(text, m)`; `kept(tool, input)`, what that call last answered if this page keeps it (`{ answer, at }`, or null); `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the node
-  /// keeps; `give` and `copy`, where the page does those its own way (the native app); `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; `traces()`, in
+  /// keeps; `give`, `copy`, `menu`, `scan` and `haptic`, where the page does those its own way (the native app); `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; `traces()`, in
   /// developer mode, its latest requests' traces (else null); and `own`, what only the client's own screens may do, by
   /// message, on a page that has them.
   async function answer(m, h) {
@@ -90,7 +91,7 @@ window.oneHost = (() => {
       case "open": return h.open(m);
       case "close": return h.close(m.value);
       case "title": return h.title(String(m.text ?? ""), m);
-      case "menu": return menu(h.frame, m);
+      case "menu": return h.menu ? h.menu(m) : menu(h.frame, m);
       case "alert": return alert(m);
       case "save": case "preview":
         if (h.elsewhere) return h.elsewhere();
@@ -102,10 +103,13 @@ window.oneHost = (() => {
       case "link": return h.link(String(m.url ?? ""));
       case "vault": return h.vault(String(m.need || ""));
       case "icons": return h.icons(Array.isArray(m.names) ? m.names.map(String) : []);
-      case "scan": throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
-      case "icon": case "haptic": return null;
+      case "scan":
+        if (h.scan) return h.scan();
+        throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
+      case "haptic": return h.haptic ? h.haptic(String(m.style || "selection")) : null;
+      case "icon": return null;
       case "traces": return h.traces ? h.traces() : null;
-      case "api": case "signOut": case "appearance": case "device": case "notify": case "request": case "cache": case "developer":
+      case "api": case "signOut": case "appearance": case "device": case "notify": case "request": case "cache": case "developer": case "menubar":
         if (!h.own) throw new Error("Only Settings can do that.");
         return h.own[m.type](m);
       default: throw new Error("Unknown message");

@@ -10,6 +10,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "iOS": { "template": "iphone/project.yml", "minimumSystemVersion": "26.0" }
   }
 }

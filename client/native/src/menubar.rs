@@ -136,13 +136,13 @@ fn made(handle: &AppHandle, kind: &str, title: &str, app: &str) -> tauri::Result
     let open = MenuItem::with_id(handle, format!("open {app}"), format!("Open {label}"), true, None::<&str>)?;
     let hide = MenuItem::with_id(handle, format!("hide {kind}"), "Hide from Menu Bar", true, None::<&str>)?;
     let menu = Menu::with_items(handle, &[&open, &hide])?;
-    let kind = kind.to_string();
-    TrayIconBuilder::with_id(id(&kind))
+    let (kind, clicked) = (kind.to_string(), kind.to_string());
+    let tray = TrayIconBuilder::with_id(id(&kind))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(move |_, e| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = e {
-                crate::toggle_widget(&kind, rect);
+                crate::toggle_widget(&clicked, rect);
             }
         })
         .on_menu_event(|_, e| {
@@ -153,7 +153,16 @@ fn made(handle: &AppHandle, kind: &str, title: &str, app: &str) -> tauri::Result
                 set_hidden(kind, true);
             }
         })
-        .build(handle)
+        .build(handle)?;
+    // Where the person dragged it in the menu bar, kept by macOS under its name, as the old app's was.
+    let name = id(&kind);
+    let _ = tray.with_inner_tray_icon(move |inner| {
+        if let Some(item) = inner.ns_status_item() {
+            let name = objc2_foundation::NSString::from_str(&name);
+            let _: () = unsafe { objc2::msg_send![&*item, setAutosaveName: &*name] };
+        }
+    });
+    Ok(tray)
 }
 
 /// An app's name as people read it, from the apps the window last had (kept by the page's own cache isn't readable

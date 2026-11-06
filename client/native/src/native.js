@@ -39,6 +39,22 @@
     /// Something changed on the person's devices: the app's own widgets are drawn again.
     changed: () => invoke("changed").catch(() => {}),
     signOut: () => invoke("sign_out"),
+    /// A phone's haptic: "selection", "medium", "success" or "error".
+    haptic: (style) => invoke("haptic", { style }).catch(() => {}),
+    /// The document camera, where there's one (`about().scan`) → its pages as files.
+    scan: () => invoke("scan"),
+    /// A screen's menu, shown with what a touch and hold lifted if it's for that (`about().lifts`) → `{ index }`; else
+    /// `{ lifted: false }`, and the page shows its own.
+    menu: (items) => invoke("menu", { items }),
+    /// Light, dark or automatic, kept by the app too, so it starts in it.
+    appearance: (value) => invoke("appearance", { value }).catch(() => {}),
+    /// A Mac's widget's own menu bar item shown again, or hidden → the widgets hidden now (`about().menubar`).
+    menubar: (kind, show) => invoke("menubar", { kind, show }),
+    /// One of the app menu's commands ("sidebar", "join"), to `onCommand`'s function.
+    onCommand: null,
+    command(name) {
+      if (window.__oneNative.onCommand) window.__oneNative.onCommand(name);
+    },
     /// What waits for the person, counted on the app's icon (the taskbar's, the dock's): 0 for none.
     badge: (count) => invoke("badge", { count }).catch(() => {}),
     notify: (ask) => invoke("notify", { ask }),

@@ -1,13 +1,14 @@
 // What the native app's menu bar item (its tray item, on other computers) opens, as the Mac app's did: your devices,
 // which are on and which this one is, then the widgets on your pages, each once, as they're arranged there. A tap on a
-// widget follows its link, or opens its app, in the app's window. What's under it (Open, Open at Login, Quit) is the
-// app's own, around this screen.
+// widget follows its link, or opens its app, in the app's window; on a Mac, each widget's pin shows it in the menu bar
+// as an item of its own, or hides it there (`menubar`, the widgets hidden). What's under it (Open, Open at Login, Quit)
+// is the app's own, around this screen.
 //
 // A client's own screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into
 // dist/panel.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Skeleton, WidgetCard, cn } from "@one/ui"
+import { Button, Icon, Skeleton, WidgetCard, cn } from "@one/ui"
 import { home } from "./lib/model.js"
 
 /// Each widget on the person's pages once, in their pages' order, at its medium size.
@@ -55,6 +56,7 @@ let draw = () => {}
 
 function Panel() {
   const [, setN] = useState(0)
+  const [hidden, setHidden] = useState(() => (Array.isArray(one.params?.menubar) ? one.params.menubar : null))
   draw = () => setN((n) => n + 1)
   useEffect(() => {
     home.load(draw).catch(() => draw())
@@ -92,10 +94,18 @@ function Panel() {
         <section className="flex flex-col gap-2">
           <h2 className="text-xs font-medium text-muted-foreground">Widgets</h2>
           {shown.map(({ w, p }) => {
-            const h = host(p)
+            const h = host(p), kind = `${w.app}.${w.widget}`, off = hidden?.includes(kind)
             return (
-              <WidgetCard key={`${w.app}.${w.widget}`} w={w} host={h} tree={home.tree(w, "medium")} className="cursor-pointer rounded-2xl"
-                onClick={(e) => !e.defaultPrevented && h.follow(home.tree(w, "medium")?.link || { screen: "main" }, w)} />
+              <div key={kind} className="relative">
+                <WidgetCard w={w} host={h} tree={home.tree(w, "medium")} className="cursor-pointer rounded-2xl"
+                  onClick={(e) => !e.defaultPrevented && h.follow(home.tree(w, "medium")?.link || { screen: "main" }, w)} />
+                {hidden && (
+                  <Button variant="ghost" size="icon-sm" className="absolute top-1.5 right-1.5" aria-label={off ? "Show in the Menu Bar" : "Hide from the Menu Bar"}
+                    title={off ? "Show in the Menu Bar" : "Shown in the menu bar: hide it there"} onClick={async () => setHidden(await one.menubar(kind, off))}>
+                    <Icon name={off ? "push-pin-slash" : "push-pin"} className={cn(off && "text-muted-foreground")} />
+                  </Button>
+                )}
+              </div>
             )
           })}
         </section>

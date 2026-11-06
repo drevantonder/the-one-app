@@ -713,7 +713,7 @@ const h = OneUI.react.createElement;
     windowShown = true;
     if (panelWidget) {
       show(h("div", { className: "panel" }, signedIn ? h("div", { className: "panel-screen", ref: (el) => el && detail.parentElement !== el && el.append(detail) }) : h("p", { className: "panel-note" }, "Signed out")));
-      if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", { here: about.node || "", widget: panelWidget }));
+      if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", { here: about.node || "", widget: panelWidget, menubar: about.menubar }));
       return;
     }
     show(h("div", { className: "panel" },
@@ -724,7 +724,7 @@ const h = OneUI.react.createElement;
         about.login != null && row("Open at Login", async () => ((about.login = await native.login(!about.login)), drawPanel()), about.login),
         about.computerUse != null && row("Let Agents Use This Mac", async () => ((about.computerUse = await native.computerUse(!about.computerUse)), drawPanel()), about.computerUse),
         row("Quit", () => native.quit()))));
-    if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", { here: about.node || "" }));
+    if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", { here: about.node || "", menubar: about.menubar }));
   }
 
   /// Where a route is as a link the app opens in its window (`opened`), for the panel.
@@ -965,7 +965,7 @@ const h = OneUI.react.createElement;
     // A spinner only for a wait that's long enough to notice.
     into.innerHTML = "";
     setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status"><span class="spinner"></span></div>`), 400);
-    const written = (page) => linkedIn(page).catch(() => page).then((html) => oneHost.look(html, appearance(), !!sheet));
+    const written = (page) => linkedIn(page).catch(() => page).then((html) => oneHost.look(html, appearance(), !!sheet, shellOf()));
     const draw = async (page) => {
       f.page = page;
       const html = await written(page);
@@ -1072,7 +1072,7 @@ const h = OneUI.react.createElement;
     frame.classList.add("screen-still");
     frame.setAttribute("aria-hidden", "true");
     const scrolled = `<script>addEventListener("load", () => scrollTo(0, Number(document.documentElement.dataset.stillY) || 0))</script>`;
-    f.still = { frame, html: oneHost.look(html.replace("</head>", `${scrolled}</head>`), appearance()) };
+    f.still = { frame, html: oneHost.look(html.replace("</head>", `${scrolled}</head>`), appearance(), false, shellOf()) };
     $(".screen-status", f.into)?.remove();
     f.into.prepend(frame);
   }
@@ -1247,13 +1247,18 @@ const h = OneUI.react.createElement;
         },
         icons: iconPaths,
         blob: async (id) => (await api(`/v1/blobs/${encodeURIComponent(id)}`, { raw: true })).blob(),
-        ...(native ? { copy, give: (how, name, blob) => native.save(name, blob, how === "preview") } : {}),
+        ...(native ? { copy, give: (how, name, blob) => native.save(name, blob, how === "preview"), haptic: (style) => native.haptic(style) } : {}),
+        // An iPhone's document camera; and its menu for what a touch and hold lifted, shown with it.
+        ...(about?.scan ? { scan: () => native.scan() } : {}),
+        ...(about?.lifts ? { menu: async (m) => ((r) => (r?.lifted === false ? oneHost.menu(f.frame, m) : r?.index ?? null))(await native.menu(Array.isArray(m.items) ? m.items : [])) } : {}),
         traces: () => (developer.on() ? developer.kept : null),
         own: mine && {
           developer: (m) => ("on" in m && developer.set(!!m.on), developer.on()),
           api: clientApi,
           signOut: () => (signOut(), null),
           appearance: (m) => (m.value != null && setAppearance(String(m.value)), appearance()),
+          // A Mac's widgets' own menu bar items: shown again, or hidden, from its panel.
+          menubar: async (m) => (native && about.menubar ? (about.menubar = await native.menubar(String(m.kind || ""), !!m.show)) : []),
           device: () => (native ? { name: about.device, signOut: true, keys: true, notify: nativeNotify } : { name: browserName(), signOut: true, keys: !!device, notify: notifyState(), ...(device ? { key: device.me.key } : {}) }),
           notify: () => notifications(true),
           request: async (m) => (await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true,
@@ -1468,7 +1473,12 @@ const h = OneUI.react.createElement;
     else if (["light", "dark"].includes(value)) localStorage.setItem(LOOK, value);
     schemed(document, appearance());
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneScheme: appearance() }, "*");
+    native?.appearance?.(appearance());
   }
+
+  /// What a screen's frame is told this page does beyond a browser's (oneHost.look): an iPhone's document camera, and
+  /// its touch and hold, which lifts what a screen marks `data-one-held` with its menu.
+  const shellOf = () => ({ ...(about?.scan ? { __oneShell: { scan: true } } : {}), ...(about?.lifts ? { __oneLifts: true } : {}) });
 
   const schemed = oneHost.scheme();
 
@@ -1634,7 +1644,7 @@ const h = OneUI.react.createElement;
     if (url.protocol === `${about.cli}:`) {
       if (url.host === "open") to = q.get("app") ? { kind: "screen", app: q.get("app"), screen: q.get("screen") || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined } : own("pages", { scope: q.get("scope") || "user" });
       else if (url.host === "page") to = q.get("folder") === "accounts" ? own("accounts") : own("pages", { scope: q.get("scope") || "user" });
-      else if (url.host === "settings") to = part ? { kind: "own", name: part, params: "{}" } : own("pages", { scope: "settings" });
+      else if (url.host === "settings") to = part ? { kind: "own", name: part, params: JSON.stringify(Object.fromEntries(q)) } : own("pages", { scope: "settings" });
       else if (url.host === "vault") return void sheet(q.get("scope"), q.get("id"));
     } else if (about.address && url.origin === new URL(about.address).origin) {
       // An invite while no one's signed in here: as if typed on the welcome, opened in the browser for its passkey.
@@ -1664,6 +1674,13 @@ const h = OneUI.react.createElement;
     if (native) {
       about = await native.about();
       native.onOpen = opened;
+      // The app menu's commands (a Mac's), which work wherever the focus is: the sidebar folded or unfolded, as its
+      // own key does here; joining a network with a pairing code, while this Mac's node is in none.
+      native.onCommand = (name) => {
+        if (name === "sidebar") dispatchEvent(new KeyboardEvent("keydown", { key: "\\", metaKey: true }));
+        else if (name === "join" && about.unpaired && !about.signedIn) showPairing();
+      };
+      native.appearance?.(appearance());
       if (about.opened) opened(about.opened);
     }
     // A new device's QR: Approve, with its code.

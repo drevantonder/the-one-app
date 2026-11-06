@@ -59,7 +59,7 @@
   // or refuses it by name. Anything a person touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
-    "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer"];
+    "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer", "menubar"];
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
@@ -254,7 +254,8 @@
     // sheet of the shell's. True once it's allowed; false if they declined or closed it.
     vault: (need) => host({ type: "vault", need }),
     // What this place can do beyond the basics.
-    can: { scan: !!window.__oneShell?.scan },
+    // (Asked as it's read: the page that holds this one may say so after this runs.)
+    can: { get scan() { return !!window.__oneShell?.scan; } },
     // Copies text: through the shell (which a page's clipboard can't always reach), else the browser's clipboard.
     async copy(text) {
       try {
@@ -268,7 +269,7 @@
       }
     },
     // A haptic on a phone: "selection" (a press), "medium" (a long press), "success" or "error". Elsewhere, nothing.
-    tap: (style = "selection") => shell?.postMessage({ type: "haptic", style }).catch(() => {}),
+    tap: (style = "selection") => (shell ? shell.postMessage({ type: "haptic", style }) : framed ? host({ type: "haptic", style }) : Promise.resolve()).catch(() => {}),
     on: (event, fn) => (handlers[event] ||= []).push(fn),
     // The shell calls this with node events: an app screen's "changed" is its app's data changing; a Settings
     // screen's, any event, since what it shows is the network's.
@@ -297,6 +298,9 @@
     traces: () => host({ type: "traces" }).catch(() => null),
     device: () => host({ type: "device" }),
     notify: () => host({ type: "notify" }),
+    // A Mac's widget (`<app>.<widget>`) shown in its menu bar again (`show`), or hidden: the menu bar panel's.
+    // → the widgets hidden there now.
+    menubar: (kind, show) => host({ type: "menubar", kind: String(kind), show: !!show }),
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),
     // How long ago: short ("5 min", "Tue", "3 Oct") for tight rows, or with `{ long: true }` for where there's room
     // ("5 minutes ago", "3 days ago", "2 years ago").

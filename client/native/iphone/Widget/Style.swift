@@ -1,9 +1,5 @@
 import SwiftUI
-#if canImport(AppKit)
-import AppKit
-#else
 import UIKit
-#endif
 
 /// A colour given as hex (an app's tile colour) as red, green and blue, lifted a little in dark mode so it keeps its
 /// contrast there, yet still carries white text.
@@ -13,44 +9,14 @@ func hexRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
     return (rgb[0], rgb[1], rgb[2])
 }
 
-/// The tint, what a person taps, as CSS for the screens: the system's blue on an iPhone, the accent colour the person
-/// chose in System Settings on a Mac. Native views get it by setting none.
-func tintCSS(dark: Bool) -> String {
-    #if canImport(AppKit)
-    var color = NSColor(srgbRed: 0, green: 0.478, blue: 1, alpha: 1)
-    NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
-        if let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) { color = accent }
-    }
-    #else
-    let color = UIColor.systemBlue.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
-    #endif
-    var (r, g, b, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
-    color.getRed(&r, green: &g, blue: &b, alpha: &a)
-    return "rgb(\(Int(r * 255)), \(Int(g * 255)), \(Int(b * 255)))"
-}
-
-/// Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every shell draws the
+/// Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every client draws the
 /// same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled.
-/// The app reads all 1.2 MB of them once, off the main thread as it starts (`load`); home-screen widgets read only the
-/// ones their widgets draw, which the app leaves in its group (`keep`).
+/// Only the ones the widgets draw, which the app leaves in its group (`icons.json`, src/widgets.rs).
 enum Icons {
     static let paths: [String: String] = file.flatMap { try? Data(contentsOf: $0) }
         .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: String] } ?? [:]
 
-    #if WIDGET
     private static var file: URL? { group?.appending(path: "icons.json") }
-    #else
-    private static var file: URL? { Bundle.main.url(forResource: "icons", withExtension: "json") }
-
-    static func load() { Task.detached(priority: .utility) { _ = paths } }
-
-    /// Leaves `names`' icons where the home-screen widgets read them.
-    static func keep(_ names: some Sequence<String>) {
-        guard let file = group?.appending(path: "icons.json") else { return }
-        let subset = Dictionary(names.compactMap { name in paths[name].map { (name, $0) } }) { a, _ in a }
-        try? JSONSerialization.data(withJSONObject: subset).write(to: file, options: .atomic)
-    }
-    #endif
 
     private static var group: URL? {
         guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
@@ -72,35 +38,6 @@ struct Glyph: View {
             shape.fill(.foreground).frame(width: size, height: size)
         }
     }
-}
-
-/// Shows only once it has been there for `delay`, fading in: a spinner or a problem, so a short wait or blip shows
-/// nothing. It keeps its place meanwhile, so nothing moves when it shows.
-struct Later<Content: View>: View {
-    var delay: Duration
-    @ViewBuilder var content: Content
-    @State private var due = false
-
-    init(_ delay: Duration, @ViewBuilder content: () -> Content) {
-        self.delay = delay
-        self.content = content()
-    }
-
-    var body: some View {
-        content
-            .opacity(due ? 1 : 0)
-            .allowsHitTesting(due)
-            .accessibilityHidden(!due)
-            .animation(.easeIn(duration: 0.2), value: due)
-            .task {
-                try? await Task.sleep(for: delay)
-                due = true
-            }
-    }
-}
-
-func displayName(_ name: String) -> String {
-    name.hasSuffix(".local") ? String(name.dropLast(6)) : name
 }
 
 /// The app's name before the node tells us its config.
@@ -181,11 +118,7 @@ struct AppTile: View {
         if let picture = pictures.object(forKey: url as NSString) { return picture }
         guard let comma = url.firstIndex(of: ","), let data = Data(base64Encoded: String(url[url.index(after: comma)...])),
               let image = PlatformImage(data: data) else { return nil }
-        #if canImport(AppKit)
-        let picture = Picture(Image(nsImage: image), clear: image.cgImage(forProposedRect: nil, context: nil, hints: nil).map(clearCorners) ?? false)
-        #else
         let picture = Picture(Image(uiImage: image), clear: image.cgImage.map(clearCorners) ?? false)
-        #endif
         pictures.setObject(picture, forKey: url as NSString)
         return picture
     }
@@ -204,11 +137,7 @@ struct AppTile: View {
     }
 }
 
-#if canImport(AppKit)
-typealias PlatformImage = NSImage
-#else
 typealias PlatformImage = UIImage
-#endif
 
 /// The old kit's colours, light then dark.
 enum Kit {
@@ -228,107 +157,12 @@ enum Kit {
 extension Color {
     init(light: UInt32, dark: UInt32) {
         func rgb(_ v: UInt32) -> (CGFloat, CGFloat, CGFloat) { (CGFloat(v >> 16 & 0xFF) / 255, CGFloat(v >> 8 & 0xFF) / 255, CGFloat(v & 0xFF) / 255) }
-        #if os(macOS)
-        self.init(nsColor: NSColor(name: nil) { appearance in
-            let (r, g, b) = rgb(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light)
-            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
-        })
-        #else
         self.init(uiColor: UIColor { traits in
             let (r, g, b) = rgb(traits.userInterfaceStyle == .dark ? dark : light)
             return UIColor(red: r, green: g, blue: b, alpha: 1)
         })
-        #endif
     }
 }
 
-extension EnvironmentValues {
-    /// In a sheet, which is raised: in the dark its page is a card's grey, as the kit's `data-raised`.
-    @Entry var raised = false
-}
 
-/// The page's background, a step lighter in a sheet in the dark.
-private struct KitBackground: ViewModifier {
-    @Environment(\.raised) private var raised
-    @Environment(\.colorScheme) private var scheme
 
-    func body(content: Content) -> some View {
-        content.background(raised && scheme == .dark ? Kit.card : Kit.bg)
-    }
-}
-
-extension View {
-    /// The page's background, behind its cards.
-    func groupedBackground() -> some View {
-        modifier(KitBackground())
-    }
-}
-
-/// A person: their initials on a colour picked by their id.
-struct Avatar: View {
-    var id: String
-    var name: String
-    var size: CGFloat = 32
-
-    private static let colors: [UInt32] = [0x5e5ce6, 0xff9f0a, 0x30b0c7, 0xff375f, 0x34c759, 0xaf52de, 0x0a84ff, 0xa2845e]
-
-    var body: some View {
-        let h = id.unicodeScalars.reduce(UInt32(0)) { $0 &* 31 &+ UInt32($1.value) }
-        let rgb = Self.colors[Int(h % UInt32(Self.colors.count))]
-        let initials = name.split(separator: " ").compactMap(\.first).prefix(2).map(String.init).joined().uppercased()
-        Circle()
-            .fill(Color(red: Double(rgb >> 16 & 0xFF) / 255, green: Double(rgb >> 8 & 0xFF) / 255, blue: Double(rgb & 0xFF) / 255).gradient)
-            .overlay {
-                Text(initials.isEmpty ? "?" : initials)
-                    .font(.system(size: size * 0.4, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
-    }
-}
-
-/// Light, Dark or Automatic, as chosen in Settings on this device.
-enum Appearance: String, CaseIterable, Identifiable {
-    case automatic, light, dark
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .automatic: String(localized: "Automatic")
-        case .light: String(localized: "Light")
-        case .dark: String(localized: "Dark")
-        }
-    }
-
-    var scheme: ColorScheme? {
-        switch self {
-        case .automatic: nil
-        case .light: .light
-        case .dark: .dark
-        }
-    }
-}
-
-extension View {
-    /// A navigation title that keeps every word: on a phone, a long one wraps to two lines and shrinks a little,
-    /// where the bar would cut it short.
-    func wholeTitle(_ title: String) -> some View {
-        #if os(iOS)
-        navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text(title)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                        .multilineTextAlignment(.center)
-                        .accessibilityAddTraits(.isHeader)
-                }
-            }
-        #else
-        navigationTitle(title)
-        #endif
-    }
-}

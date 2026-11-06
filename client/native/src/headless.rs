@@ -22,6 +22,9 @@ use serde_json::{Value, json};
 
 /// Where the window keeps what it keeps (Tauri's app local data folder), found with no window.
 pub fn data() -> PathBuf {
+    if let Some(app) = crate::APP.get() {
+        return app.data.clone();
+    }
     dirs_local().unwrap_or_else(|| PathBuf::from(".")).join(crate::identifier())
 }
 
@@ -59,6 +62,7 @@ fn running(args: &[String]) -> Option<Value> {
 
 /// The running app answering these for what runs beside it (`running`): a loopback port, and a token, in `headless` in
 /// its folder, which only this user reads.
+#[cfg(desktop)]
 pub fn serve(device: impl Fn() -> Option<Arc<one_client::Device>> + Send + Sync + 'static) {
     let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) else { return };
     let Ok(port) = listener.local_addr().map(|a| a.port()) else { return };
@@ -122,6 +126,13 @@ async fn post(device: &one_client::Device, path: &str, body: Value) -> Result<Va
         None if !(200..300).contains(&status) => Err("That didn’t work. Try again.".into()),
         None => Ok(out),
     }
+}
+
+/// One of them, in the running app, with its device if it's been let in yet, or else one started from what it keeps (an
+/// iPhone's widget's button, which may start it in the background).
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub async fn run_here(what: &str, rest: &[String]) -> Result<Value, String> {
+    run(what, rest, crate::APP.get().and_then(|a| a.device().ok())).await
 }
 
 /// One of them, with `mine`, the running app's device, or else one started here.

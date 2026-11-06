@@ -258,7 +258,7 @@ function G() {
 		R().then((t) => {
 			if (!t) return;
 			let n = String(one.params?.approve || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
-			n && !t.waiting.some((e) => e.code.replace(" ", "") === n) && B(n), e && t.device.keys && A({ schedules: e });
+			n && !t.waiting.some((e) => e.code.replace(" ", "") === n) && B(n), e && t.device.keys ? A({ schedules: e }) : one.params?.add && A({ add: !0 });
 		}), one.on("changed", () => R());
 	}, []);
 	async function B(e) {

@@ -39,59 +39,6 @@ enum WidgetSize {
     static let all = ["small", "medium", "large", "xl"]
 }
 
-/// Any JSON value: a tool's input, as a widget gives it.
-enum JSONValue: Codable, Sendable, Hashable {
-    case null, bool(Bool), number(Double), string(String), array([JSONValue]), object([String: JSONValue])
-
-    init(from decoder: Decoder) throws {
-        let value = try decoder.singleValueContainer()
-        if value.decodeNil() { self = .null }
-        else if let v = try? value.decode(Bool.self) { self = .bool(v) }
-        else if let v = try? value.decode(Double.self) { self = .number(v) }
-        else if let v = try? value.decode(String.self) { self = .string(v) }
-        else if let v = try? value.decode([JSONValue].self) { self = .array(v) }
-        else { self = .object(try value.decode([String: JSONValue].self)) }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var value = encoder.singleValueContainer()
-        switch self {
-        case .null: try value.encodeNil()
-        case .bool(let v): try value.encode(v)
-        case .number(let v): try value.encode(v)
-        case .string(let v): try value.encode(v)
-        case .array(let v): try value.encode(v)
-        case .object(let v): try value.encode(v)
-        }
-    }
-
-    var data: Data { (try? JSONEncoder().encode(self)) ?? Data("null".utf8) }
-
-    /// Its text, as a stat shows it: numbers without a needless ".0".
-    var text: String {
-        switch self {
-        case .number(let n): n.formatted(.number.precision(.fractionLength(0...2)))
-        case .string(let s): s
-        case .bool(let b): b ? "Yes" : "No"
-        default: ""
-        }
-    }
-
-    var number: Double? {
-        switch self {
-        case .number(let n): n
-        case .string(let s): Double(s)
-        default: nil
-        }
-    }
-
-    func merging(_ key: String, _ value: JSONValue) -> JSONValue {
-        guard case .object(var fields) = self else { return .object([key: value]) }
-        fields[key] = value
-        return .object(fields)
-    }
-}
-
 /// Where tapping a node goes: a web page, or one of its app's screens.
 enum WidgetLink: Codable, Sendable, Hashable {
     case url(URL)
@@ -260,9 +207,6 @@ struct WidgetHost {
     var app = ""
     /// The page it's on, for the screens it opens.
     var scope: String?
-    /// Runs a tool of the app; the error's text if it failed.
-    var run: (@MainActor (_ op: String, _ input: JSONValue) async -> String?)?
-    var open: (@MainActor (WidgetLink) -> Void)?
 }
 
 extension EnvironmentValues {
@@ -687,19 +631,11 @@ private struct WidgetImage: View {
         let shape = RoundedRectangle(cornerRadius: node.round == true ? 999 : 8, style: .continuous)
         let w = node.w.map { CGFloat($0) }, h = node.h.map { CGFloat($0) }
         Group {
-            #if WIDGET
             if let image = node.url.flatMap(WidgetImages.load) {
                 image.resizable().scaledToFill()
             } else {
                 Rectangle().fill(.quaternary)
             }
-            #else
-            AsyncImage(url: node.url.flatMap(URL.init(string:))) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Rectangle().fill(.quaternary)
-            }
-            #endif
         }
         .frame(width: w, height: h ?? (w == nil ? 120 : w))
         .frame(maxWidth: w == nil ? .infinity : nil)
@@ -714,28 +650,17 @@ private struct Linked<Content: View>: View {
     @Environment(\.widgetHost) private var host
 
     var body: some View {
-        #if WIDGET
         if let url = link.url(app: host.app, scope: host.scope) {
             Link(destination: url) { content }
         } else {
             content
         }
-        #else
-        if let open = host.open {
-            Button { open(link) } label: { content.contentShape(.rect) }.buttonStyle(.plain)
-        } else {
-            content
-        }
-        #endif
     }
 }
 
 private struct ActionButton: View {
     var node: WidgetNode
     @Environment(\.widgetHost) private var host
-    @State private var running = false
-    @State private var slow = false
-    @State private var error: String?
 
     var body: some View {
         let label = Label {
@@ -743,71 +668,22 @@ private struct ActionButton: View {
         } icon: {
             if let icon = node.icon { Glyph(name: icon, size: 16) }
         }
-        #if WIDGET
         Button(intent: RunTool(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) { label }
             .buttonStyle(.bordered)
             .tint(toneColor(node.tone))
-        #else
-        Button(role: node.tone == "bad" ? .destructive : nil) {
-            guard let run = host.run, let op = node.op, !running else { return }
-            running = true
-            Task {
-                // Dimmed at once; a spinner only if it takes a moment.
-                let spin = Task { try? await Task.sleep(for: .milliseconds(300)); if !Task.isCancelled { slow = true } }
-                error = await run(op, node.input ?? .object([:]))
-                spin.cancel()
-                running = false
-                slow = false
-            }
-        } label: {
-            label.opacity(slow ? 0 : running ? 0.5 : 1).overlay { if slow { ProgressView().controlSize(.small) } }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(toneColor(node.tone))
-        .disabled(host.run == nil || node.op == nil)
-        .alert("Couldn’t Do That", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
-            Button("OK") { error = nil }
-        } message: {
-            Text(error ?? "")
-        }
-        #endif
     }
 }
 
 private struct ActionToggle: View {
     var node: WidgetNode
     @Environment(\.widgetHost) private var host
-    /// What it shows while its tool runs, before the widget redraws.
-    @State private var pending: Bool?
-    @State private var error: String?
 
     var body: some View {
-        let on = pending ?? node.on ?? false
-        #if WIDGET
+        let on = node.on ?? false
         Toggle(isOn: on, intent: ToggleTool(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) {
             Text(node.label ?? "").lineLimit(1)
         }
         .tint(.accentColor)
-        #else
-        Toggle(isOn: Binding(get: { on }, set: { value in
-            guard let run = host.run, let op = node.op else { return }
-            pending = value
-            Task {
-                error = await run(op, (node.input ?? .object([:])).merging("on", .bool(value)))
-                pending = nil
-            }
-        })) {
-            Text(node.label ?? "").lineLimit(1)
-        }
-        .disabled(host.run == nil || node.op == nil)
-        .onChange(of: node.on) { pending = nil }
-        .alert("Couldn’t Do That", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
-            Button("OK") { error = nil }
-        } message: {
-            Text(error ?? "")
-        }
-        #endif
     }
 }
 

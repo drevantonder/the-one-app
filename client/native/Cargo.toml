@@ -27,12 +27,16 @@ serde_json = "1"
 # both already built for Tauri's own icons.
 image = { version = "0.25", default-features = false, features = ["png"] }
 ico = "0.6"
+# The iPhone's Swift (iphone/), a plugin of the app's own, linked into it as Tauri's own plugins link theirs: already
+# built for tauri-build, which takes it with the same feature.
+tauri-utils = { version = "2", features = ["build"] }
 
 [dependencies]
 # The app: the system's web view (WebKitGTK, WKWebView, WebView2, Android's) in a window, the same on every platform,
-# with a tray or menu bar item on computers. Its plugins: notifications, and opening links and files outside.
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
-tauri-plugin-notification = "2"
+# with a tray or menu bar item on computers. Its plugins: opening links and files outside, and notifications (below).
+# `custom-protocol`: the window's files are the app's own, built in, as the Tauri CLI's builds have them; without it,
+# Tauri takes every build for development, which on a phone fetches them from a dev server.
+tauri = { version = "2", features = ["tray-icon", "image-png", "custom-protocol"] }
 tauri-plugin-opener = "2"
 # Where a file a screen gives is saved; and what a screen copies, which a web view takes only with a tap.
 tauri-plugin-dialog = "2"
@@ -70,6 +74,10 @@ security-framework = { version = "3", features = ["OSX_10_15"] }
 core-foundation = "0.10"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSUserDefaults", "NSString", "NSObject", "NSArray"] }
+
+# Notifications, but on an iPhone, whose are its own (src/iphone.rs): the plugin's would take them from it.
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+tauri-plugin-notification = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
