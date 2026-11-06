@@ -13,10 +13,149 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
 
+/// A call to run: an app's tool, or a service's function.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CallRequest {
+    /// Names this call wherever it's tried, so a call that writes runs on one device only: the first to take its lease.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The app, or for a service's call, the service.
+    #[serde(default)]
+    pub app: String,
+    /// The service whose function this is, when it is one: an app and the service it wraps may share a name.
+    #[serde(default)]
+    pub service: Option<String>,
+    /// The tool it runs, for an app's call.
+    #[serde(default)]
+    pub tool: String,
+    /// The function it runs, for a service's call.
+    #[serde(default)]
+    pub function: String,
+    #[serde(default)]
+    pub input: Value,
+    /// The scopes the call touches, named before it runs; by default every scope it may reach.
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+    /// The device to run it on, by name or key prefix; by default the nearest that can.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// The agent that asked (an MCP client's name), credited on the call.
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// How many app-to-app calls deep it is: 0 when a person, an agent or a schedule made it.
+    #[serde(default)]
+    pub depth: u32,
+    /// The app whose `ctx.apps` made it, if one did.
+    #[serde(default)]
+    pub from: Option<String>,
+    /// What made it, for its app's insights: `cli`, `mcp`, `mac`, `phone`, `browser`, `schedule` or `app`.
+    #[serde(default)]
+    pub client: Option<String>,
+    /// Files put on this device for this call alone (an app's `_http` body), which go with it to the device that runs
+    /// it (`Node::carried`): never a client's to name.
+    #[serde(skip)]
+    pub puts: Vec<String>,
+    /// This node named the call (`Node::identified`), no client did.
+    #[serde(skip)]
+    pub named_here: bool,
+    /// It runs where it was named, first, so no other device has it or the id: it takes no lease.
+    #[serde(skip)]
+    pub unleased: bool,
+}
+
+impl CallRequest {
+    /// What it runs: its service's function, or its app's tool.
+    pub fn runs(&self) -> &str {
+        if self.service.is_some() { &self.function } else { &self.tool }
+    }
+
+    /// `fields` of the call with its app and what it runs, under the name its kind has: how a call goes between devices
+    /// and into the trace.
+    pub(super) fn named(&self, mut fields: Value) -> Value {
+        fields["app"] = json!(self.app);
+        fields[if self.service.is_some() { "function" } else { "tool" }] = json!(self.runs());
+        fields
+    }
+}
+
+pub(super) enum Reply {
+    Ok(Value),
+    /// It failed, saying why and, for the kinds callers act on, which kind (`protocol::code`).
+    Error(String, Option<String>),
+    /// It can't run here; try another device.
+    Elsewhere(String),
+    /// It lacks keys its caller hands: said as the API says it (`{ error, need, to, seal }`), so the device that passed
+    /// it on can ask for them in turn (428).
+    Needs(Needs),
+}
+
+impl Reply {
+    pub(super) fn error(why: impl Into<String>) -> Reply {
+        Reply::Error(why.into(), None)
+    }
+
+    pub(super) fn failed(err: &anyhow::Error) -> Reply {
+        Reply::Error(format!("{err:#}"), crate::protocol::Coded::of(err))
+    }
+
+    pub(super) fn json(self) -> Value {
+        match self {
+            Reply::Ok(v) => json!({ "ok": v }),
+            Reply::Error(e, None) => json!({ "error": e }),
+            Reply::Error(e, Some(code)) => json!({ "error": e, "code": code }),
+            Reply::Elsewhere(w) => json!({ "elsewhere": w }),
+            Reply::Needs(n) => n.json(),
+        }
+    }
+
+    pub(super) fn from_json(v: Value) -> Reply {
+        if let Some(w) = v.get("elsewhere") {
+            return Reply::Elsewhere(w.as_str().unwrap_or("").into());
+        }
+        if let Some(needs) = Needs::from_json(&v) {
+            return Reply::Needs(needs);
+        }
+        match v.get("error") {
+            Some(e) => Reply::Error(e.as_str().unwrap_or("failed").into(), v["code"].as_str().map(str::to_string)),
+            None => Reply::Ok(v["ok"].clone()),
+        }
+    }
+}
+
+/// What a running call may do through the node: whose it is, which app's, and which scopes it reaches.
+#[derive(Clone, Debug)]
+pub struct Grant {
+    pub app: String,
+    pub caller: Caller,
+    pub scopes: Vec<Scope>,
+    pub read_only: bool,
+    /// The blobs it kept, which it may read back before any entry names them.
+    pub puts: Vec<String>,
+    /// The scopes whose databases it has brought up to date, which it reads as they are from then on.
+    pub caught_up: Vec<Scope>,
+    pub depth: u32,
+    /// The app whose `ctx.apps` made the call, if one did.
+    pub from: Option<String>,
+    /// The trace of the request that made the call, if it asked for one: what its app's reads add to.
+    pub trace: Option<trace::Trace>,
+}
+
+/// Holds a grant for as long as its call runs.
+pub(super) struct Granted(Node, String);
+
+impl Drop for Granted {
+    fn drop(&mut self) {
+        self.0.0.grants.lock().unwrap().remove(&self.1);
+    }
+}
+
 mod accept;
 mod record;
 mod running;
 mod writes;
+
+pub(super) use writes::check_append;
 
 use record::Guard;
 

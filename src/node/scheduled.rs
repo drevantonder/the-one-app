@@ -229,3 +229,12 @@ fn runs_as(m: &ScopeDb, state: &ScopeState, scope: &Scope, app: &str, schedule: 
         _ => state.installers.get(app).map(|(u, _)| u.clone()).filter(manages),
     }
 }
+
+/// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
+pub(super) fn switch_entry(i: &Network, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
+    let name = scope_name(i, &scope.to_string())?;
+    ensure!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
+    ensure!(i.views.get(&scope.to_string()).is_some_and(|s| s.installed.contains(app)), "{title} isn't on {name}.");
+    ensure!(i.r.holds(scope), "This device can't open {name} yet.");
+    Ok(content::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
+}

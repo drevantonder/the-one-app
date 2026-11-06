@@ -657,7 +657,7 @@ pub fn network(owner: &str, user: &str, client: &str, scopes: &str, now: f64) ->
 
 fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
     let m = r.global();
-    // Requests for an item waiting for `me` to answer, as src/node.rs's `item_requests` counts them.
+    // Requests for an item waiting for `me` to answer, as src/node/vault.rs's `item_requests` counts them.
     let since = i64::try_from(now).unwrap_or(i64::MAX) - 86_400_000;
     let waiting: i64 = r
         .0

@@ -280,3 +280,174 @@ impl Node {
         bail!("{scope} changed too often to write to")
     }
 }
+
+impl Node {
+    pub async fn append(&self, scope: &Scope, content: Content) -> Result<Step> {
+        let user = self.user()?;
+        self.append_as(scope, &user, content).await
+    }
+
+    pub(super) async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Step> {
+        if !self.frozen() {
+            self.read_steps().await?;
+        }
+        match scope {
+            Scope::Global => self.write_step(user, content).await,
+            _ => self.write_scope_step(scope, user, content).await,
+        }
+    }
+
+    /// A scope's first epoch, before anything is written there, made outside this device's writes, since its entry is
+    /// one: a scope with none has nothing to read or write until it has.
+    pub(super) async fn first_epoch(&self, scope: &Scope) -> Result<()> {
+        if *scope != Scope::Global && self.with(|i| Ok(i.r.db().epoch(scope)?))? == 0 {
+            self.epoch_keys(scope, true).await?;
+        }
+        Ok(())
+    }
+
+    /// Follows what changed in who's who, and brings each scope's state up to date.
+    pub(super) async fn after(&self, handled: Handled) -> Result<()> {
+        if handled.dropped.is_empty() && !handled.members {
+            return Ok(());
+        }
+        // What `global`'s scope database forgets in a step, once its log is frozen, as its `forget` entries said before.
+        let forgotten_before = self.with(|i| Ok(i.views.get("global").map(|s| s.forgotten.clone()).unwrap_or_default()))?;
+        let forgotten_now = self.with(|i| {
+            if handled.members {
+                let db = i.r.db();
+                let mut listed = BTreeSet::new();
+                for peer in i.peers.keys() {
+                    if db.compute(peer)?.is_some() || db.service(peer)?.is_some() {
+                        listed.insert(*peer);
+                    }
+                }
+                i.peers.retain(|peer, _| listed.contains(peer));
+            }
+            for log in &handled.dropped {
+                i.views.remove(log);
+            }
+            if handled.members {
+                note_change(i, &Scope::Global);
+            }
+            update_views(i)?;
+            Ok(i.views.get("global").map(|s| s.forgotten.clone()).unwrap_or_default())
+        })?;
+        self.close_dbs(|scope, _| handled.dropped.contains(&scope.to_string()));
+        if let Ok(bucket) = self.bucket() {
+            for log in &handled.dropped {
+                if let Err(err) = bucket.forget(&crate::bucket::folder(log)) {
+                    tracing::warn!("forgetting this device's copy of {log}: {err:#}");
+                }
+            }
+        }
+        // A release is a step, which changes who's who: the updater looks again.
+        if handled.members {
+            self.0.released.notify_one();
+        }
+        if !handled.lost.is_empty() {
+            self.forget_sessions_of(&handled.lost);
+        }
+        if handled.members {
+            // A device removed keeps nothing it handed this one, nor its connections.
+            self.forget_removed_clients();
+            self.close_removed();
+            self.0.changed.notify_one();
+            self.emit(Event::Devices);
+            self.seal_epochs();
+            self.settle_own();
+            self.follow_recovery();
+        }
+        if handled.members {
+            self.follow_storage();
+            self.follow_net();
+        }
+        let forgotten: Vec<(String, String)> = forgotten_now.into_iter().filter(|b| !forgotten_before.contains(b)).map(|b| ("global".to_string(), b)).collect();
+        self.emit(Event::Changed { apps: Vec::new() });
+        if !forgotten.is_empty() {
+            self.delete_forgotten(forgotten);
+        }
+        Ok(())
+    }
+
+    /// Brings this device in line with the members: runs each app's latest deploy, fetching bundles it lacks, and
+    /// says which build it runs.
+    pub(super) async fn settle(&self) -> Result<()> {
+        let _settling = self.0.settling.lock().await;
+        let Ok((wanted, unadded, author)) = self.with(|i| {
+            let wanted: BTreeMap<String, String> = i.r.db().apps()?.into_iter().filter(|a| !a.erased).filter_map(|a| Some((a.name, a.bundle?))).collect();
+            let mut unadded = BTreeMap::new();
+            for (name, bundle) in self.0.built_in.iter() {
+                if i.r.db().app(name)?.is_none() {
+                    unadded.insert(name.clone(), bundle.clone());
+                }
+            }
+            Ok((wanted, unadded, i.r.db().compute(&self.0.id)?.is_some()))
+        }) else {
+            return Ok(());
+        };
+        if !author {
+            return Ok(());
+        }
+        // Each app's deploy, and the bundle it's of: its newest, or while that can't be fetched yet, the one it ran.
+        let (mut modules, mut used) = (Vec::new(), BTreeMap::new());
+        let mut unfetched = false;
+        let broken = self.0.broken.lock().unwrap().clone();
+        let ran = self.0.bundles.lock().unwrap().clone();
+        for (app, bundle) in wanted.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
+            let mut fetched = self.blob(bundle).await.and_then(|b| crate::app::bundle::module(&b)).map(|m| (m, bundle));
+            if let Err(err) = &fetched {
+                tracing::warn!("{app}'s deploy: {err:#}: tried again soon");
+                unfetched = true;
+                if let Some(old) = ran.get(app).filter(|old| *old != bundle)
+                    && let Ok(module) = self.blob(old).await.and_then(|b| crate::app::bundle::module(&b))
+                {
+                    fetched = Ok((module, old));
+                }
+            }
+            if let Ok((module, bundle)) = fetched {
+                modules.push((app.clone(), module));
+                used.insert(app.clone(), bundle.clone());
+            }
+        }
+        // The built-in apps no one has added run no calls: they're there to be described, for the App Store to list.
+        let mut waiting = Vec::new();
+        for (app, bundle) in unadded.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
+            if let Ok(module) = self.blob(bundle).await.and_then(|b| crate::app::bundle::module(&b)) {
+                waiting.push((app.clone(), module));
+            }
+        }
+        self.0.unfetched.store(unfetched, std::sync::atomic::Ordering::Relaxed);
+        let changed: Vec<String> = modules.iter().map(|(a, _)| a.clone()).filter(|a| ran.get(a) != used.get(a)).collect();
+        if !changed.is_empty() || modules.len() != self.0.apps.names().len() || waiting.iter().map(|(a, _)| a).ne(self.0.apps.unadded().iter()) {
+            // Writes wait for the new deploys, so what's written next runs on them.
+            let _write = self.0.writes.lock().await;
+            // An app whose code doesn't start is left out, so the rest run.
+            while let Err(err) = self.0.apps.load(modules.clone(), waiting.clone()).await {
+                let Some(broken) = err.downcast_ref::<crate::app::runtime::Broken>() else { return Err(err) };
+                tracing::warn!("{broken}: it's left out until it's deployed again");
+                if let Some(bundle) = used.get(&broken.app).or(unadded.get(&broken.app)) {
+                    self.0.broken.lock().unwrap().insert(broken.app.clone(), bundle.clone());
+                }
+                let before = modules.len() + waiting.len();
+                modules.retain(|(a, _)| *a != broken.app);
+                waiting.retain(|(a, _)| *a != broken.app);
+                ensure!(modules.len() + waiting.len() < before, "{err:#}");
+            }
+            *self.0.bundles.lock().unwrap() = modules.iter().map(|(a, _)| (a.clone(), used[a].clone())).collect();
+            // Read again, so each is brought to its new deploy's schema.
+            self.close_dbs(|_, db| changed.iter().any(|app| db.starts_with(&format!("{app}/"))));
+            self.emit(Event::Changed { apps: changed });
+            // The services of apps that came or changed are listed as their apps now say.
+            for app in self.0.services.offered() {
+                self.learn_app(&app).await;
+            }
+            self.say_hello();
+        }
+        let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;
+        if running.as_deref() != Some(crate::config::BUILD) {
+            self.say(&Scope::Global, status::Said::Build { device: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
+        }
+        Ok(())
+    }
+}

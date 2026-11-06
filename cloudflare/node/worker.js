@@ -683,7 +683,7 @@ class Call {
   }
 }
 
-/// A request's work, as each app it runs asks the node things (src/node.rs: `internal`).
+/// A request's work, as each app it runs asks the node things (src/node/calls/running.rs: `internal`).
 class Run {
   constructor(person, who, view) {
     Object.assign(this, { person, who, view, env: person.env, ctx: person.ctx });
@@ -740,7 +740,7 @@ class Run {
     return { ok: await this.run(app, "call", { tool: req.tool, input: req.input ?? {} }, scopes, from, depth) };
   }
 
-  /// The apps a page shows and the scopes each reads (src/node.rs: `page_contexts`): with `page` (`user`,
+  /// The apps a page shows and the scopes each reads (src/node/screens.rs: `page_contexts`): with `page` (`user`,
   /// `group:<id>` or `global`), those installed there, each reaching only it; without, every app, reaching all it may.
   pages(page) {
     const at = page === "user" ? `user:${this.who.user}` : page;
@@ -750,7 +750,7 @@ class Run {
       .filter((p) => p.scopes.length);
   }
 
-  /// Every widget of a page, drawn for this person (src/node.rs: `widgets`). One whose app needs a device says so.
+  /// Every widget of a page, drawn for this person (src/node/screens.rs: `widgets`). One whose app needs a device says so.
   async widgets(page) {
     const key = page === `user:${this.who.user}` ? "user" : page;
     const placed = (this.view.state.arrangements?.[key]?.items || []).filter((i) => typeof i.widget === "string" && i.options && Object.keys(i.options).length);
@@ -795,7 +795,7 @@ class Run {
     return out;
   }
 
-  /// Every app in the network, with what each does for this person where it's installed for them (src/node.rs:
+  /// Every app in the network, with what each does for this person where it's installed for them (src/node/apps.rs:
   /// `catalog`). What it says of itself comes from its latest deploy.
   /// `light`, as a window draws them (src/node/apps.rs: `apps_drawn`): what shows each one and where.
   async apps({ light = false } = {}) {
@@ -855,7 +855,7 @@ async function ownService(run, q, d) {
 
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
 
-/// What the node does for an app while it runs, as it asks (src/node.rs: `internal`): its databases, other apps'
+/// What the node does for an app while it runs, as it asks (src/node/calls/running.rs: `internal`): its databases, other apps'
 /// tools, the Vault's items it's switched on for, and its requests out, filled in from them.
 class ForCall extends RpcTarget {
   constructor(run, app, call, done, depth) {

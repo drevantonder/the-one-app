@@ -138,3 +138,50 @@ pub(in crate::node) struct Prepared {
     /// `<scope> <hash>` of each blob put in the bucket.
     put: Vec<String>,
 }
+
+/// Checks one of a call's appends: into a scope it named, which the caller may write. `title` is what people call
+/// the app a switch, retire or source names.
+pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, title: &str) -> Result<(Scope, Content)> {
+    Ok(match append {
+        Append::Switch { app, schedule, scope, on } => {
+            let scope = Scope::parse_for(&scope, &me.user)?;
+            (scope.clone(), switch_entry(i, &me.user, &scope, &app, title, &schedule, on)?)
+        }
+        Append::Forget { scope, blob } => {
+            let scope = Scope::parse(&scope)?;
+            ensure!(scopes.contains(&scope), "the call didn't name {scope}");
+            ensure!(blob.len() == 64 && blob.bytes().all(|b| b.is_ascii_hexdigit()), "a blob is named by its hash");
+            (scope, content::node("forget", json!({ "blob": blob.to_lowercase() })))
+        }
+        Append::Retire { app: name, how } => {
+            let db = i.r.db();
+            let a = db.app(&name)?.with_context(|| format!("no app named {name}"))?;
+            ensure!(db.may(&me.user, "delete", &scopes::app(&name)), "Only {title}'s owners can delete, restore or erase it.");
+            let mut data = json!({ "name": name, "owner": a.owner.to_string() });
+            match how.as_str() {
+                "deleted" => data["deleted"] = json!(true),
+                "restored" => data["deleted"] = json!(false),
+                "erased" if a.deleted.is_some() => data["erased"] = json!(true),
+                "erased" => bail!("Delete {title} before erasing it."),
+                other => bail!("an app is deleted, restored or erased, not {other}"),
+            }
+            (Scope::Global, content::node("app", data))
+        }
+        Append::Source { app: name, link } => {
+            let db = i.r.db();
+            let a = db.app(&name)?.filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
+            ensure!(db.may(&me.user, "deploy", &scopes::app(&name)), "Only {title}'s owners can set where its code is kept.");
+            let link = scopes::source_link(&json!(link))?;
+            (Scope::Global, content::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
+        }
+        Append::Service { device, name, on, scope } => {
+            let scope = match scope {
+                Some(s) => Some(Scope::parse_for(&s, &me.user)?),
+                None if on => added_scope(i, &me.user, &name)?,
+                None => None,
+            };
+            (Scope::Global, service_entry(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
+        }
+        Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("installs, costs, statements and items are written on their own"),
+    })
+}

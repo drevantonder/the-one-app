@@ -560,3 +560,23 @@ fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), scopes::
     }
     Ok(out)
 }
+
+/// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source. One with npm
+/// packages (a `package.json`) or React screens (a `dist/`, built when the app was committed) is built as `<cli> deploy`
+/// builds any app, its screens as they are.
+pub fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    if files.iter().any(|(p, _)| *p == "package.json" || p.starts_with("dist/")) {
+        return crate::app::deploy::build_built_in(files);
+    }
+    let module = files.iter().find(|(p, _)| *p == "app.js").context("a built-in app has no app.js")?.1;
+    let mut bundle = vec![("app.js".to_string(), module.to_vec())];
+    bundle.extend(files.iter().map(|(p, b)| (format!("src/{p}"), b.to_vec())));
+    crate::app::bundle::pack(&bundle)
+}
+
+/// A deploy of `app`: the bundle at blob `bundle`, and the builds of its service it names (`bundle::SERVICES`), each a
+/// blob too, so a node that runs it finds it.
+pub fn deploy(app: &str, bundle: &str, builds: impl IntoIterator<Item = String>) -> Content {
+    let blobs = std::iter::once(bundle.to_string()).chain(builds).collect();
+    Content { blobs, ..content::node("deploy", json!({ "app": app, "bundle": bundle })) }
+}
