@@ -22,7 +22,7 @@ function Add() {
   if (!list.data) return <div className="p-4">{list.error ? <Failed error={list.error} retry={list.reload} /> : <ListSkeleton rows={3} />}</div>
   if (!a) return <Empty>This app isn't here. It may have been erased, or the link is old.</Empty>
   const { places, admin } = list.data
-  const first = !a.added && !admin ? "Ask an admin to add it first" : null
+  const first = !a.deployed && !admin ? "Ask an admin to add it first" : null
 
   const w = where.data
   const node = picked || w?.runs_on.find((r) => r.name)?.name || w?.nodes[0]

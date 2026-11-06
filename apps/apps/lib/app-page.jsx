@@ -101,7 +101,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
 
   const w = where.data
   const move = () => one.open("add", { app: name }, undefined, { sheet: true }).then(refresh)
-  const owner = a.mine && a.added && !a.deleted
+  const owner = a.mine && a.deployed && !a.deleted
   const busyAny = !!health.data && !!(health.data.activity?.length || health.data.insights?.errors?.length || health.data.insights?.usage?.length || health.data.insights?.cost?.length)
   const repo = a.source && /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(a.source)?.[2]
 

@@ -83,7 +83,7 @@ function x() {
 		let e;
 		return t[12] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ p(o, { children: "This app isn't here. It may have been erased, or the link is old." }), t[12] = e) : e = t[12], e;
 	}
-	let { places: I, admin: L } = i.data, R = !O.added && !L ? "Ask an admin to add it first" : null, z = A.data, B;
+	let { places: I, admin: L } = i.data, R = !O.deployed && !L ? "Ask an admin to add it first" : null, z = A.data, B;
 	t[13] !== j || t[14] !== z ? (B = j || z?.runs_on.find(S)?.name || z?.nodes[0], t[13] = j, t[14] = z, t[15] = B) : B = t[15];
 	let V = B, H;
 	t[16] !== O.added || t[17] !== i || t[18] !== A ? (H = async (e) => {

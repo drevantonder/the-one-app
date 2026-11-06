@@ -113,14 +113,14 @@ async function listed(ctx, { full, gone }) {
   const every = await ctx.catalog();
   const all = every.filter((a) => full || !!a.deleted === !!gone);
   const apps = all.map((a) => {
-    const added = a.deploys > 0;
+    const deployed = a.deploys > 0;
     return {
       name: a.name, title: a.title || a.name, icon: a.icon || null, color: a.color || null, ...(full ? { image: a.image || null, image_kind: a.image_kind || null } : {}),
       tagline: a.tagline || null, description: a.description || null,
       owner: a.owner, owner_name: name(a.owner),
       from: a.from || null, forks: a.forks || [], deploys: a.deploys, added: a.added || [],
       added_names: (a.added || []).map(name), uses: a.uses || { apps: [], services: [] }, service: a.service || null, runs_on: a.runs_on || [],
-      advanced: !!a.advanced, built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
+      advanced: !!a.advanced, built_in: !!a.built_in, deployed, up_to_date: a.built_in && deployed ? a.bundle === a.built_in : null,
       source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: !!a.offers?.screens, keeps_accounts: !!a.offers?.accounts,
     };
   });
