@@ -15,7 +15,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 
 use super::Devices;
-use super::kinds::{ADB_PORT, Action, Kind, Vm, fetch, outliving, run, upstream_dns};
+use super::kinds::{ADB_PORT, Action, Kind, TimedOut, Vm, capture, fetch, outliving, run, run_within, upstream_dns};
 use super::linux::{cmd, found};
 use super::quote;
 
@@ -58,11 +58,31 @@ fn avds() -> Vec<String> {
     all
 }
 
+/// Runs adb for v, an error saying so if it has no answer in 10 seconds (a tap, a key, a look, an app opened).
 fn adb(v: &Vm, args: &[&str]) -> Result<String> {
+    adb_within(v, Duration::from_secs(10), args)
+}
+
+/// Runs adb for v, giving up on it at limit: a phone whose Android has hung (a WebView update ends the app it ran) leaves
+/// adb waiting for it for as long as the caller does, which is minutes.
+fn adb_within(v: &Vm, limit: Duration, args: &[&str]) -> Result<String> {
     let serial = format!("emulator-{}", v.port);
+    // A call allowed long (an install, a command) is for a phone that answers: asked first, so one that doesn't is told
+    // in seconds, not when the call's own limit is up.
+    if limit > Duration::from_secs(10) {
+        run_within(Duration::from_secs(5), adb_path(), &["-s", &serial, "shell", "true"]).map_err(|err| stopped(v, err))?;
+    }
     let mut all = vec!["-s", &serial];
     all.extend(args);
-    run(adb_path(), &all)
+    run_within(limit, adb_path(), &all).map_err(|err| stopped(v, err))
+}
+
+/// An adb error as one that says what to do, if it was for no answer.
+fn stopped(v: &Vm, err: anyhow::Error) -> anyhow::Error {
+    match err.downcast_ref::<TimedOut>() {
+        Some(t) => anyhow!("{} stopped answering: adb had no answer in {} s. Its Android is stuck (an app or WebView update can do that): give it back and borrow another, or stop it and start it again", v.name, t.0.as_secs()),
+        None => err,
+    }
 }
 
 /// An AVD's folder, as its .ini says.
@@ -103,7 +123,7 @@ fn emulators(v: &Vm) -> Vec<i32> {
 /// Tells adb's server of an emulator with adb at port, as the emulator itself would if it could reach the server: in
 /// a network of its own it can't. The server takes an emulator it knows already as told once.
 fn announce(port: u16) {
-    let _ = run(adb_path(), &["start-server"]);
+    let _ = run_within(Duration::from_secs(10), adb_path(), &["start-server"]);
     let Ok(mut c) = std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], ADB_PORT).into(), Duration::from_secs(1)) else { return };
     let msg = format!("host:emulator:{port}");
     let _ = write!(c, "{:04x}{msg}", msg.len());
@@ -237,7 +257,7 @@ impl Kind for Android {
     }
 
     fn running(&self, _: &Devices, v: &Vm) -> bool {
-        adb(v, &["get-state"]).is_ok_and(|out| out.trim() == "device")
+        adb_within(v, Duration::from_secs(5), &["get-state"]).is_ok_and(|out| out.trim() == "device")
     }
 
     fn start(&self, ds: &Devices, v: &Vm) -> Result<()> {
@@ -302,11 +322,13 @@ impl Kind for Android {
     }
 
     fn screen(&self, _: &Devices, v: &Vm) -> Result<image::DynamicImage> {
-        let out = cmd(adb_path()).args(["-s", &format!("emulator-{}", v.port), "exec-out", "screencap", "-p"]).stdin(Stdio::null()).output()?;
-        if !out.status.success() {
-            bail!("screencap: {}", out.status);
+        let mut c = cmd(adb_path());
+        c.args(["-s", &format!("emulator-{}", v.port), "exec-out", "screencap", "-p"]);
+        let (status, out, _) = capture(c, None, Some(Duration::from_secs(10))).map_err(|err| stopped(v, err))?;
+        if !status.success() {
+            bail!("screencap: {status}");
         }
-        super::picture::decode(&out.stdout)
+        super::picture::decode(&out)
     }
 
     fn act(&self, _: &Devices, v: &Vm, a: &Action) -> Result<()> {
@@ -342,7 +364,7 @@ impl Kind for Android {
             return Ok("Opened its page in the Play Store: tap Install there (it needs a Google account signed in).".into());
         }
         let (path, temp) = fetch(app)?;
-        let done = adb(v, &["install", "-r", "-g", &path.to_string_lossy()]);
+        let done = adb_within(v, Duration::from_secs(300), &["install", "-r", "-g", &path.to_string_lossy()]);
         if let Some(dir) = temp {
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -356,7 +378,7 @@ impl Kind for Android {
     }
 
     fn run(&self, _: &Devices, v: &Vm, command: &str) -> Result<String> {
-        adb(v, &["shell", command])
+        adb_within(v, Duration::from_secs(120), &["shell", command])
     }
 }
 
@@ -425,7 +447,7 @@ impl Android {
             if apart {
                 announce(v.port + 1);
             }
-            adb(v, &["shell", "getprop", "sys.boot_completed"]).is_ok_and(|out| out.trim() == "1")
+            adb_within(v, Duration::from_secs(5), &["shell", "getprop", "sys.boot_completed"]).is_ok_and(|out| out.trim() == "1")
         });
         if !booted {
             bail!("{} didn't start in {} minutes: {}", v.name, limit.as_secs() / 60, log_file(ds, v).display());

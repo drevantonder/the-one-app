@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
@@ -224,15 +224,49 @@ pub fn run(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<String
 
 /// Runs a command here with stdin.
 pub fn run_in(stdin: Option<&[u8]>, program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<String> {
-    let program = program.as_ref();
-    let mut c = cmd(program);
-    c.args(args).stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = c.spawn().map_err(|err| anyhow!("{}: {err}", program.to_string_lossy()))?;
-    // Both of what it says, in one: stderr into stdout's pipe isn't portable, so they're read apart and joined.
+    run_for(None, stdin, program, args)
+}
+
+/// Runs a command here, ended and an error if it says nothing more in limit: one that hangs (adb, with a phone that
+/// stopped answering) would otherwise hold its caller for as long as the caller waits.
+pub fn run_within(limit: Duration, program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<String> {
+    run_for(Some(limit), None, program, args)
+}
+
+/// What a command timed out in: the error of one ended for not finishing in time.
+#[derive(Debug)]
+pub struct TimedOut(pub Duration);
+
+impl std::fmt::Display for TimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no answer in {} s", self.0.as_secs())
+    }
+}
+
+impl std::error::Error for TimedOut {}
+
+/// Runs c to its end, or to limit if given, when it's killed and the error is a TimedOut. Returns its exit status and
+/// what it wrote to stdout and to stderr.
+pub fn capture(mut c: Command, stdin: Option<&[u8]>, limit: Option<Duration>) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>)> {
+    c.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = c.spawn()?;
     if let (Some(input), Some(mut w)) = (stdin, child.stdin.take()) {
         let input = input.to_vec();
         std::thread::spawn(move || {
             let _ = std::io::Write::write_all(&mut w, &input);
+        });
+    }
+    // A watcher that ends it at the limit, unless the command is done first.
+    let (done, wait) = std::sync::mpsc::channel::<()>();
+    let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    if let Some(limit) = limit {
+        let (pid, timed_out) = (child.id() as i32, timed_out.clone());
+        std::thread::spawn(move || {
+            if wait.recv_timeout(limit) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+                timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
+                // SAFETY: a signal to the command this started, which hasn't been waited for yet.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
         });
     }
     let mut err = child.stderr.take().unwrap();
@@ -242,12 +276,32 @@ pub fn run_in(stdin: Option<&[u8]>, program: impl AsRef<std::ffi::OsStr>, args: 
         s
     });
     let mut out = Vec::new();
-    child.stdout.take().unwrap().read_to_end(&mut out)?;
-    let status = child.wait()?;
-    out.extend(said_err.join().unwrap_or_default());
+    let read = child.stdout.take().unwrap().read_to_end(&mut out);
+    let status = child.wait();
+    let _ = done.send(());
+    let said_err = said_err.join().unwrap_or_default();
+    if timed_out.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(TimedOut(limit.unwrap_or_default()).into());
+    }
+    read?;
+    Ok((status?, out, said_err))
+}
+
+fn run_for(limit: Option<Duration>, stdin: Option<&[u8]>, program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<String> {
+    let program = program.as_ref();
+    let mut c = cmd(program);
+    c.args(args);
+    let name = Path::new(program).file_name().unwrap_or(program).to_string_lossy().to_string();
+    let spawned = capture(c, stdin, limit);
+    // Both of what it says, in one: stderr into stdout's pipe isn't portable, so they're read apart and joined.
+    let (status, mut out, said_err) = match spawned {
+        Ok(done) => done,
+        Err(err) if err.is::<TimedOut>() => return Err(err.context(format!("{name} {}", args[..args.len().min(2)].join(" ")))),
+        Err(err) => return Err(anyhow!("{}: {err}", program.to_string_lossy())),
+    };
+    out.extend(said_err);
     let out = String::from_utf8_lossy(&out).to_string();
     if !status.success() {
-        let name = Path::new(program).file_name().unwrap_or(program).to_string_lossy().to_string();
         bail!("{name} {}: {status}: {}", args[..args.len().min(2)].join(" "), out.trim());
     }
     Ok(out)
