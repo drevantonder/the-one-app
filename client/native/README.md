@@ -100,10 +100,13 @@ build with its own id, folder and Keychain names beside the person's app, on the
       (the old app's Hide never did); the main item's right-click menu shows a hidden one again (checked, the Mac: Repos'
       item titled "No repos yet."). Their places in the menu bar aren't remembered (the old app's autosaveName)
 - [ ] The dock's count (Tauri's badge), the window, panel and widget popovers drawn: not yet seen (the Mac was locked)
-- [ ] The old app's sign-in, address and client folder taken over (`mac::take_over`, the Keychain's same items): on
-      the real Mac at the cut-over
-- [ ] This Mac's node kept running (its launch agent registered, kickstarted, or a child), and it approves the window's
-      code at once (`approve_here`): on the real Mac at the cut-over
+- [x] The old app's sign-in taken over (`mac::take_over`, the Keychain's same items): its address, sign-in client, Open
+      at Login and hidden widgets from its defaults; no new sign-in, the same device key (checked on the real Mac at the
+      cut-over, a0950322: the key's Keychain item made by the Swift app on 2026-11-04, the widgets kept, Repos' item
+      still hidden)
+- [x] This Mac's node kept running (its launch agent registered and kickstarted, or a child) (checked on the real Mac:
+      `app.<cli>.mac.oned` running from the new bundle); it approves the window's code at once (`approve_here`): not
+      seen, as the Mac's window was let in already
 - [ ] Join with a Pairing Code for a Mac whose node is in no network (the welcome's second button, `pair`): built, not
       checked (no Mac without a network to try it on)
 - [ ] Keyboard shortcuts: ⌘\ (fold the sidebar), ⌘⇧I (Pair a Computer), ⌘⇧J (Join) aren't carried; the Edit menu's and
