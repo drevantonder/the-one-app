@@ -245,14 +245,16 @@ fn answer(status: u16, error: String) -> Result<ureq::http::Response<ureq::Body>
     Ok(ureq::http::Response::builder().status(status).header("content-type", "application/json").body(body)?)
 }
 
-/// A ureq middleware: what's asked of this machine's node goes to its person's nodes over iroh instead, as this
-/// device, while it's one and no node runs here. Its body is read before it's sent (to disk past `IN_MEMORY`, as a
-/// node may ask for it again with the keys it needs), and streamed from there; the answer's read as it comes.
-pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
-    if !req.uri().authority().is_some_and(|a| a.as_str() == one::api::addr()) || !active() {
-        return next.handle(req);
-    }
-    let Some(device) = kept() else { return next.handle(req) };
+/// A ureq middleware, the one place where what this CLI asks of its node goes: to this machine's node, as one of its
+/// own programs (`api::as_this_machine`); or while no node runs here and this computer is one of its person's devices,
+/// to their nodes over iroh instead, as this device, never with this machine's token or a sign-in. Its body is read
+/// before it's sent (to disk past `IN_MEMORY`, as a node may ask for it again with the keys it needs), and streamed
+/// from there; the answer's read as it comes.
+pub fn route(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    let device = kept().filter(|_| !node_here());
+    let (true, Some(device)) = (req.uri().authority().is_some_and(|a| a.as_str() == one::api::addr()), device) else {
+        return one::api::as_this_machine(req, next);
+    };
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/".into());
     if !one::api::clients_may(req.uri().path()) && !one_client::answered(req.uri().path()) {
         return answer(403, needs_node(req.uri().path()));

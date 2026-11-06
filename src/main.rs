@@ -268,9 +268,9 @@ fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
 }
 
 /// An HTTP client for this machine's node, as one of its own programs; or, where none runs and this computer is a
-/// device of its person, for their nodes, over iroh (`client_device::instead`).
+/// device of its person, for their nodes, over iroh (`client_device::route`).
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder().http_status_as_error(false).middleware(client_device::instead).middleware(api::as_this_machine).build().into()
+    ureq::Agent::config_builder().http_status_as_error(false).middleware(client_device::route).build().into()
 }
 
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
