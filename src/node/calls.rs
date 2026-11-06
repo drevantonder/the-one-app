@@ -1216,7 +1216,7 @@ impl Node {
         ensure!(request["me"]["token"].is_null(), "a service asks with no sign-in");
         let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote).map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this network")?;
         ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own person's node");
-        let mut req: CallRequest = serde_json::from_value(crate::service::limited(&name, request)?)?;
+        let mut req: CallRequest = serde_json::from_value(crate::services::endpoint::limited(&name, request)?)?;
         let resolved = self.resolve(req.clone());
         ensure!(resolved.app == name, "a service asks only for its own app, {name}");
         (req.from, req.depth) = (None, MAX_DEPTH);

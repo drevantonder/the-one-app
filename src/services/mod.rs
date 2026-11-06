@@ -2,7 +2,11 @@
 //! models, WhatsApp's linked phone, a Mac's own apps). A service serves its device's users, and the node says so in its
 //! hello to the other devices; its app, and only its app, calls it with `ctx.services`. Each is a program that
 //! registers over the local API and long-polls for calls: an app's own (`apps/<name>/service/`, in Rust on the
-//! `service` crate or in Go), or Swift in the Mac app. The core never names one.
+//! `service` crate or in Go), or Swift in the Mac app. The core never names one. Each runs as an endpoint of its own
+//! key, a part of its device's oned (`endpoint`), in its sandbox (`sandbox`).
+
+pub mod endpoint;
+pub mod sandbox;
 
 use std::collections::HashMap;
 use std::sync::Mutex;

@@ -1,6 +1,6 @@
 //! A service's sandbox: what its program may reach, as its app declares (`service: { network, person }` in its
 //! app.js, `Declared`), and how this machine holds it to that (`How`). The service's endpoint (`oned <name>`,
-//! src/service.rs) holds its key and starts its program; the program never sees the key.
+//! src/services/endpoint.rs) holds its key and starts its program; the program never sees the key.
 //!
 //! - **Linux**, a service not run as the person: a unit of the template `<cli>-service@.service`, which `<cli> services
 //!   sandbox` writes once as root (install.sh runs it) with a polkit rule letting the node's person start and stop
@@ -111,7 +111,7 @@ pub fn template() -> PathBuf {
 /// The unit's instance for the service `name`: a name that's also its OS user's, unique to its folder, so a
 /// throwaway network's never shares one with the real one's.
 pub fn instance(name: &str) -> String {
-    let hash = blake3::hash(crate::service::folder(name).to_string_lossy().as_bytes()).to_hex();
+    let hash = blake3::hash(crate::services::endpoint::folder(name).to_string_lossy().as_bytes()).to_hex();
     let long = format!("{CLI}-{name}-{}", &hash[..8]);
     if long.len() <= 31 { long } else { format!("{CLI}-{}", &hash[..16]) }
 }

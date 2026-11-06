@@ -54,12 +54,12 @@ impl Node {
 
     /// The network this device's parts are in, and those switched on here, each with when it was: switched on again
     /// while it's on, it starts afresh.
-    pub fn parts_on(&self) -> Result<(crate::service::Network, BTreeMap<String, u64>)> {
+    pub fn parts_on(&self) -> Result<(crate::services::endpoint::Network, BTreeMap<String, u64>)> {
         let address = self.address()?;
         self.with(|i| {
             let root = i.r.root.with_context(|| format!("this device isn't in {YOURS} yet"))?.to_hex();
             let on = i.r.db().switches().into_iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name, s.time)).collect();
-            Ok((crate::service::Network { address: address.clone(), root, user: i.user.clone() }, on))
+            Ok((crate::services::endpoint::Network { address: address.clone(), root, user: i.user.clone() }, on))
         })
     }
 
@@ -128,7 +128,7 @@ impl Node {
 
     /// What the app `name` this device runs says of its service's wrapper (`service: { network, person }` in its
     /// app.js), or why it can't be read: the app isn't running here, or its deploy says nothing of it.
-    pub async fn service_declared(&self, name: &str) -> Result<crate::sandbox::Declared> {
+    pub async fn service_declared(&self, name: &str) -> Result<crate::services::sandbox::Declared> {
         ensure!(self.0.apps.has(name), "its app isn't running on this device");
         let d = self.0.apps.describe(name).await?;
         ensure!(d["service"].is_object(), "its app doesn't say what its service may reach");

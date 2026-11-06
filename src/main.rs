@@ -839,7 +839,7 @@ fn run(args: Vec<String>) -> Result<()> {
             }
         }
         // What lets this machine's person start services in their sandbox, for root to run once: `| sudo sh`.
-        ["services", "sandbox"] => print!("{}", one::sandbox::setup_script()?),
+        ["services", "sandbox"] => print!("{}", one::services::sandbox::setup_script()?),
         ["services", "try", dir] => update::try_service(std::path::Path::new(dir), flags.get("device").and_then(Value::as_str))?,
         ["services", how @ ("on" | "off"), name] => {
             let device = flags.get("device").and_then(Value::as_str);
@@ -1448,14 +1448,14 @@ fn oned(args: &[String]) -> Result<()> {
     let named: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     match named.as_slice() {
         #[cfg(target_os = "linux")]
-        [] if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--sandboxed=")) => one::sandbox::launch(std::path::Path::new(dir)),
+        [] if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--sandboxed=")) => one::services::sandbox::launch(std::path::Path::new(dir)),
         [] => {
             usual_path();
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
             serve(args.iter().any(|a| a == "--throwaway"), args)
         }
         [name] if *name == one::members::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::app::runtime::run(std::path::Path::new(dir)),
-        [name] => one::service::run(name),
+        [name] => one::services::endpoint::run(name),
         _ => bail!("{} runs this device, or with a service's name, that service, as its oned starts it", one::oned::name()),
     }
 }

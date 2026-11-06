@@ -1,4 +1,4 @@
-//! A service's program in its sandbox (src/sandbox.rs) reaches only what its app declares: as the person, the network
+//! A service's program in its sandbox (src/services/sandbox.rs) reaches only what its app declares: as the person, the network
 //! only through its endpoint, to the hosts declared; in its own unit, on a machine set up for one, not the person's
 //! home or another service's folder either.
 
@@ -9,7 +9,7 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::time::Duration;
 
-use one::sandbox::{Declared, Launch};
+use one::services::sandbox::{Declared, Launch};
 
 /// A web server on this machine answering "ok" to anything, at its port.
 fn server() -> u16 {
@@ -28,8 +28,8 @@ fn server() -> u16 {
 /// Answers the sandbox's socket in `dir` as a service's endpoint does: only `CONNECT` to what `declared` names; and
 /// copies what a unit says (`log`) to `said`.
 fn endpoint(dir: &Path, declared: Declared, said: std::sync::mpsc::Sender<String>) {
-    let socket = dir.join(one::sandbox::SOCKET);
-    let log = dir.join(one::sandbox::LOG);
+    let socket = dir.join(one::services::sandbox::SOCKET);
+    let log = dir.join(one::services::sandbox::LOG);
     let _ = std::fs::remove_file(&socket);
     let _ = std::fs::remove_file(&log);
     let (ready, bound) = std::sync::mpsc::channel();
@@ -57,7 +57,7 @@ fn endpoint(dir: &Path, declared: Declared, said: std::sync::mpsc::Sender<String
             });
             let router = axum::Router::new().fallback(move |req: axum::extract::Request| {
                 let declared = declared.clone();
-                async move { one::sandbox::connect(Some(&declared), req).await }
+                async move { one::services::sandbox::connect(Some(&declared), req).await }
             });
             axum::serve(listener, router).await.unwrap();
         });
@@ -81,7 +81,7 @@ echo \"web=$(curl -s -m 5 -o /dev/null https://example.com && echo reached || ec
 echo done
 ",
             secret = secret.display(),
-            others = one::sandbox::dir("whatsapp").parent().unwrap().display(),
+            others = one::services::sandbox::dir("whatsapp").parent().unwrap().display(),
         ),
     )
     .unwrap();
@@ -107,7 +107,7 @@ fn said(lines: impl Iterator<Item = String>) -> std::collections::BTreeMap<Strin
 fn a_service_reaches_only_what_its_app_declares() {
     let dir = super::temp("sandbox");
     // In the person's home, beside every service's sandbox folder.
-    let secret = one::sandbox::dir("whatsapp").with_file_name(format!("test-secret-{}", std::process::id()));
+    let secret = one::services::sandbox::dir("whatsapp").with_file_name(format!("test-secret-{}", std::process::id()));
     std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
     std::fs::write(&secret, "the person's").unwrap();
     let (declared, undeclared) = (server(), server());
@@ -117,10 +117,10 @@ fn a_service_reaches_only_what_its_app_declares() {
     let name = format!("sandbox-test-{}", std::process::id());
     let launch = Launch { name: name.clone(), own_network: true, ports: vec![declared], data: Some(dir.join("data")) };
     let script = program(&dir, &secret, declared, undeclared);
-    let sandbox = one::sandbox::prepare(&name, &script, Path::new(env!("CARGO_BIN_EXE_one")), "token", &launch).unwrap();
+    let sandbox = one::services::sandbox::prepare(&name, &script, Path::new(env!("CARGO_BIN_EXE_one")), "token", &launch).unwrap();
     let (tx, _) = std::sync::mpsc::channel();
     endpoint(&sandbox, app.clone(), tx);
-    let _ = std::fs::remove_file(sandbox.join(one::sandbox::LOG));
+    let _ = std::fs::remove_file(sandbox.join(one::services::sandbox::LOG));
     let out = std::process::Command::new(sandbox.join("oned")).arg0("oned").arg(format!("--sandboxed={}", sandbox.display())).stdout(std::process::Stdio::piped()).output().unwrap();
     let got = said(String::from_utf8_lossy(&out.stdout).lines().map(str::to_string));
     let _ = std::fs::remove_dir_all(&sandbox);
@@ -131,28 +131,28 @@ fn a_service_reaches_only_what_its_app_declares() {
     assert_eq!(got.get("web").map(String::as_str), Some("refused"), "{got:?}");
 
     // In its own unit, as its own user: none of the person's files, nor another service's folder.
-    if !one::sandbox::template().exists() {
+    if !one::services::sandbox::template().exists() {
         let _ = std::fs::remove_file(&secret);
-        eprintln!("skipped a service in its own unit: this machine has no {} (`one services sandbox | sudo sh`)", one::sandbox::template().display());
+        eprintln!("skipped a service in its own unit: this machine has no {} (`one services sandbox | sudo sh`)", one::services::sandbox::template().display());
         return;
     }
     let name = "sandbox-test";
     // One run at a time on a machine: the unit is the same for all of them.
-    let lock = std::fs::File::create(one::sandbox::dir(name).with_extension("lock")).unwrap();
+    let lock = std::fs::File::create(one::services::sandbox::dir(name).with_extension("lock")).unwrap();
     // SAFETY: a plain flock on a file this keeps open until it's dropped.
     unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) };
     let app = Declared { person: false, ..app };
     let launch = Launch { name: name.into(), own_network: true, ports: vec![declared], data: None };
-    let sandbox = one::sandbox::prepare(name, &script, Path::new(env!("CARGO_BIN_EXE_one")), "token", &launch).unwrap();
+    let sandbox = one::services::sandbox::prepare(name, &script, Path::new(env!("CARGO_BIN_EXE_one")), "token", &launch).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     endpoint(&sandbox, app, tx);
-    let unit = one::sandbox::unit(name);
-    let _ = one::sandbox::systemctl(&["stop", &unit]);
-    let _ = one::sandbox::systemctl(&["reset-failed", &unit]);
-    one::sandbox::systemctl(&["start", &unit]).unwrap();
+    let unit = one::services::sandbox::unit(name);
+    let _ = one::services::sandbox::systemctl(&["stop", &unit]);
+    let _ = one::services::sandbox::systemctl(&["reset-failed", &unit]);
+    one::services::sandbox::systemctl(&["start", &unit]).unwrap();
     let got = said(std::iter::from_fn(|| rx.recv_timeout(Duration::from_secs(30)).ok()));
-    let _ = one::sandbox::systemctl(&["stop", &unit]);
-    let _ = one::sandbox::systemctl(&["reset-failed", &unit]);
+    let _ = one::services::sandbox::systemctl(&["stop", &unit]);
+    let _ = one::services::sandbox::systemctl(&["reset-failed", &unit]);
     let _ = std::fs::remove_dir_all(&sandbox);
     let _ = std::fs::remove_file(&secret);
     assert_eq!(got.get("home").map(String::as_str), Some("hidden"), "{got:?}");

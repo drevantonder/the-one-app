@@ -120,7 +120,7 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     for entry in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
         let file = entry.file_name().to_string_lossy().to_string();
         let Some(name) = file.strip_prefix(&prefix).filter(|n| crate::members::valid_app_name(n)) else { continue };
-        if on.contains_key(name) || crate::service::folder(name).is_dir() {
+        if on.contains_key(name) || crate::services::endpoint::folder(name).is_dir() {
             names.insert(name.to_string());
         }
     }
@@ -200,7 +200,7 @@ fn say(node: &Node, runtime: &tokio::runtime::Handle, name: &str, now: Now) {
 /// What's put in a service's folder of the build its program is: its blob, and the release's commit time, or none for
 /// the build a deploy named (`deploy <blob>`).
 fn taken(name: &str) -> (Option<u64>, String) {
-    let kept = std::fs::read_to_string(crate::service::folder(name).join("release")).unwrap_or_default();
+    let kept = std::fs::read_to_string(crate::services::endpoint::folder(name).join("release")).unwrap_or_default();
     let (committed, blob) = kept.trim().split_once(' ').unwrap_or(("0", ""));
     (committed.parse().ok(), blob.to_string())
 }
@@ -220,7 +220,7 @@ fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, build: &Build)
     std::fs::write(&new, bytes)?;
     std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))?;
     std::fs::rename(&new, &path)?;
-    let folder = crate::service::folder(name);
+    let folder = crate::services::endpoint::folder(name);
     std::fs::create_dir_all(&folder)?;
     std::fs::write(folder.join("release"), &kept)?;
     tracing::info!("oned put {name} {kept} in place");
@@ -244,7 +244,7 @@ pub fn erase(dir: &std::path::Path) {
 pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
     // Push was a part once; now every node answers it through the push Worker, so its folder (the phones it registered,
     // which register again) would only list a part that runs nothing.
-    let _ = std::fs::remove_dir_all(crate::service::folder(crate::push::NAME));
+    let _ = std::fs::remove_dir_all(crate::services::endpoint::folder(crate::push::NAME));
     std::thread::spawn(move || {
         // Each part running, and when it started.
         let mut running: BTreeMap<String, (std::process::Child, Instant)> = BTreeMap::new();
@@ -261,8 +261,8 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
         // When each part on was switched on: switched on again (Try Again), it starts afresh.
         let mut switched: BTreeMap<String, u64> = BTreeMap::new();
         // What each service's app declares it may reach, looked at with the builds; and what each was started with.
-        let mut declared: BTreeMap<String, Option<crate::sandbox::Declared>> = BTreeMap::new();
-        let mut started_with: BTreeMap<String, Option<crate::sandbox::Declared>> = BTreeMap::new();
+        let mut declared: BTreeMap<String, Option<crate::services::sandbox::Declared>> = BTreeMap::new();
+        let mut started_with: BTreeMap<String, Option<crate::services::sandbox::Declared>> = BTreeMap::new();
         let device = node.device_name();
         // The app runtime, while it runs, and when it stopped by itself lately.
         let mut apps: Option<std::process::Child> = None;
@@ -376,7 +376,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                             declared.insert(name.clone(), d);
                         }
                         let said = declared.get(name).cloned().flatten();
-                        let resandbox = HELD.lock().unwrap().get(name).is_some_and(|h| h.sandbox.is_some() && crate::sandbox::unsandboxed(said.as_ref(), &device).is_none());
+                        let resandbox = HELD.lock().unwrap().get(name).is_some_and(|h| h.sandbox.is_some() && crate::services::sandbox::unsandboxed(said.as_ref(), &device).is_none());
                         if running.contains_key(name) && (resandbox || started_with.get(name).is_some_and(|d| *d != said)) && let Some((child, _)) = running.remove(name) {
                             tracing::info!("{name}'s app declares something else of it, or this machine can sandbox it now: oned starts it again");
                             stop(name, child);
@@ -396,7 +396,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                             match start(&network, name, said.as_ref()) {
                                 Ok(child) => {
                                     tracing::info!("oned started {name}");
-                                    let held = Held { sandbox: crate::sandbox::unsandboxed(said.as_ref(), &device), person: said.as_ref().is_some_and(|d| d.person) };
+                                    let held = Held { sandbox: crate::services::sandbox::unsandboxed(said.as_ref(), &device), person: said.as_ref().is_some_and(|d| d.person) };
                                     hold(&node, &runtime, name, Some(held));
                                     running.insert(name.clone(), (child, Instant::now()));
                                     let problem = NOW.lock().unwrap().0.get(name).and_then(|n| n.problem.clone());
@@ -438,7 +438,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
             // start in its sandbox says why, and one running without one says so.
             for (name, (_, started)) in &running {
                 let now = NOW.lock().unwrap().0.get(name).cloned().unwrap_or_default();
-                if let Ok(why) = std::fs::read_to_string(crate::service::folder(name).join(crate::service::PROBLEM)) {
+                if let Ok(why) = std::fs::read_to_string(crate::services::endpoint::folder(name).join(crate::services::endpoint::PROBLEM)) {
                     say(&node, &runtime, name, Now { doing: None, problem: Some(why) });
                     continue;
                 }
@@ -458,7 +458,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                 }
             }
             for name in running.keys() {
-                let Ok(asked) = std::fs::read_to_string(crate::service::folder(name).join("ask")) else { continue };
+                let Ok(asked) = std::fs::read_to_string(crate::services::endpoint::folder(name).join("ask")) else { continue };
                 if listed.get(name).is_some_and(|(a, at)| *a == asked && at.elapsed() < Duration::from_secs(60)) {
                     continue;
                 }
@@ -510,13 +510,13 @@ fn keep_runtime(node: &Node, runtime: &tokio::runtime::Handle, apps: &mut Option
 }
 
 /// Starts a part, given the network it's in and what its app declares it may reach.
-fn start(network: &crate::service::Network, name: &str, declared: Option<&crate::sandbox::Declared>) -> anyhow::Result<std::process::Child> {
-    let folder = crate::service::folder(name);
+fn start(network: &crate::services::endpoint::Network, name: &str, declared: Option<&crate::services::sandbox::Declared>) -> anyhow::Result<std::process::Child> {
+    let folder = crate::services::endpoint::folder(name);
     network.give(&folder)?;
-    let _ = std::fs::remove_file(folder.join(crate::service::PROBLEM));
+    let _ = std::fs::remove_file(folder.join(crate::services::endpoint::PROBLEM));
     match declared {
-        Some(d) => std::fs::write(folder.join(crate::service::DECLARED), serde_json::to_vec(d)?)?,
-        None => drop(std::fs::remove_file(folder.join(crate::service::DECLARED))),
+        Some(d) => std::fs::write(folder.join(crate::services::endpoint::DECLARED), serde_json::to_vec(d)?)?,
+        None => drop(std::fs::remove_file(folder.join(crate::services::endpoint::DECLARED))),
     }
     Ok(command(&[name])?.stdin(std::process::Stdio::null()).spawn()?)
 }

@@ -140,7 +140,7 @@ Check: `one throwaway`, switch WhatsApp on, link a phone, send a message.
 ### Phase 2: the node's built-in Rust services become their own programs
 
 - Shell, Models, AGENTS.md, AI Usage and Agent Devices move to `apps/<name>/service/`, each a small crate depending on
-  a shared `service` crate (today's `src/service.rs` and the `Host` of `src/services.rs`: register, long-poll, reply).
+  a shared `service` crate (today's `src/services/endpoint.rs` and the `Host` of `src/services/mod.rs`: register, long-poll, reply).
 - Each is built and published per platform as WhatsApp is, and fetched by oned when switched on.
 - `built_in()` and `hosted()` go, and with them the core naming apps.
 - Older nodes keep their own built-in copies and say the same names in their hello; a client sees no difference.
@@ -199,7 +199,7 @@ switched off, as the Mac app's services did. Shared Swift is `service/swift` (`H
 
 Check: `one throwaway`, WhatsApp still links and sends; `one throwaway shell run` still works (`person: true`).
 
-Done for Linux and the Mac (2026-11-05), `src/sandbox.rs`, its test `tests/sandbox.rs`. Unlike the above: a fixed
+Done for Linux and the Mac (2026-11-05), `src/services/sandbox.rs`, its test `tests/sandbox.rs`. Unlike the above: a fixed
 template unit (`<cli>-service@.service`, written with polkit's rule by `<cli> services sandbox | sudo sh`, which install.sh runs), not transient units, since starting a transient unit lets its starter set `User=root`; and the
 network cut by our launcher inside it (an unprivileged user and network namespace, a port forwarded to the endpoint's
 socket, `HTTPS_PROXY` to its proxy), since LXC containers (personal, ptc) switch `PrivateNetwork=` off. A service

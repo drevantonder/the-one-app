@@ -100,7 +100,7 @@ fn http_alpn() -> Vec<u8> {
     format!("{}/http/1", crate::config::CLI).into_bytes()
 }
 
-/// What service endpoints of this custom build answer (src/service.rs): a node asks one with it.
+/// What service endpoints of this custom build answer (src/services/endpoint.rs): a node asks one with it.
 pub fn service_alpn() -> Vec<u8> {
     format!("{}/service/1", crate::config::CLI).into_bytes()
 }

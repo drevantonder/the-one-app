@@ -101,7 +101,7 @@ struct Inner {
     /// The network's sign-in service, whose keys check a sign-in a node passes on to a service that serves everyone.
     issuer: crate::cloudflare::Issuer,
     /// What its app declares its program may reach, as oned gave it (`declared.json`), if it did.
-    declared: Option<crate::sandbox::Declared>,
+    declared: Option<crate::services::sandbox::Declared>,
 }
 
 /// Where oned puts what a service's app declares it may reach, in its folder.
@@ -209,11 +209,11 @@ impl Service {
         let router = self.loopback();
         // A program in a sandbox reaches it through a socket in its sandbox's folder.
         #[cfg(target_os = "linux")]
-        if matches!(crate::sandbox::how(self.0.declared.as_ref(), ""), crate::sandbox::How::Unit | crate::sandbox::How::Person) {
+        if matches!(crate::services::sandbox::how(self.0.declared.as_ref(), ""), crate::services::sandbox::How::Unit | crate::services::sandbox::How::Person) {
             use std::os::unix::fs::PermissionsExt;
-            let dir = crate::sandbox::dir(&self.0.name);
+            let dir = crate::services::sandbox::dir(&self.0.name);
             std::fs::create_dir_all(&dir)?;
-            let path = dir.join(crate::sandbox::SOCKET);
+            let path = dir.join(crate::services::sandbox::SOCKET);
             let _ = std::fs::remove_file(&path);
             let socket = tokio::net::UnixListener::bind(&path)?;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666))?;
@@ -224,7 +224,7 @@ impl Service {
                 }
             });
             // What a unit's program says, which systemd would keep where its person can't read it.
-            let path = dir.join(crate::sandbox::LOG);
+            let path = dir.join(crate::services::sandbox::LOG);
             let _ = std::fs::remove_file(&path);
             let log = tokio::net::UnixListener::bind(&path)?;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666))?;
@@ -672,7 +672,7 @@ async fn fill(State(s): State<Service>, headers: HeaderMap) -> Response {
 }
 
 async fn proxy(State(s): State<Service>, req: axum::extract::Request) -> Response {
-    crate::sandbox::connect(s.0.declared.as_ref(), req).await
+    crate::services::sandbox::connect(s.0.declared.as_ref(), req).await
 }
 
 async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
@@ -764,7 +764,7 @@ impl Running {
         Ok(match self {
             Running::Child(child) => child.try_wait()?.map(|s| s.to_string()),
             Running::Unit(unit) => {
-                let state = crate::sandbox::systemctl(&["is-active", unit])?;
+                let state = crate::services::sandbox::systemctl(&["is-active", unit])?;
                 (!["active", "activating", "reloading"].contains(&state.as_str())).then_some(state)
             }
             #[cfg(target_os = "macos")]
@@ -784,7 +784,7 @@ impl Running {
         match self {
             Running::Child(child) => end(child),
             Running::Unit(unit) => {
-                if let Err(err) = crate::sandbox::systemctl(&["stop", unit]) {
+                if let Err(err) = crate::services::sandbox::systemctl(&["stop", unit]) {
                     eprintln!("stopping {unit}: {err:#}");
                 }
             }
@@ -847,29 +847,29 @@ fn disclaimed(command: &std::process::Command) -> Result<libc::pid_t> {
 
 /// Starts a service's program, in its sandbox as its app declares and this machine can give it.
 fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service) -> Result<Running> {
-    use crate::sandbox::{How, Launch};
+    use crate::services::sandbox::{How, Launch};
     let declared = service.0.declared.clone().unwrap_or_default();
     let data_var = format!("{}_DATA", name.to_uppercase().replace('-', "_"));
     let launcher = PathBuf::from(std::env::current_exe()?.to_string_lossy().trim_end_matches(" (deleted)"));
-    let mut command = match crate::sandbox::how(service.0.declared.as_ref(), "") {
+    let mut command = match crate::services::sandbox::how(service.0.declared.as_ref(), "") {
         How::Unit => {
             let launch = Launch { name: name.into(), own_network: !declared.any_host(), ports: declared.local_ports(), data: None };
-            crate::sandbox::prepare(name, program, &launcher, service.token(), &launch)?;
-            let unit = crate::sandbox::unit(name);
+            crate::services::sandbox::prepare(name, program, &launcher, service.token(), &launch)?;
+            let unit = crate::services::sandbox::unit(name);
             // One left by an endpoint that stopped without stopping it goes first: two mustn't share its data.
-            let _ = crate::sandbox::systemctl(&["stop", &unit]);
-            let _ = crate::sandbox::systemctl(&["reset-failed", &unit]);
-            crate::sandbox::systemctl(&["start", &unit])?;
+            let _ = crate::services::sandbox::systemctl(&["stop", &unit]);
+            let _ = crate::services::sandbox::systemctl(&["reset-failed", &unit]);
+            crate::services::sandbox::systemctl(&["start", &unit])?;
             return Ok(Running::Unit(unit));
         }
         How::Person => {
             let launch = Launch { name: name.into(), own_network: !declared.any_host(), ports: declared.local_ports(), data: Some(data.to_path_buf()) };
-            let dir = crate::sandbox::prepare(name, program, &launcher, service.token(), &launch)?;
+            let dir = crate::services::sandbox::prepare(name, program, &launcher, service.token(), &launch)?;
             crate::oned::command(&[&format!("--sandboxed={}", dir.display())])?
         }
         How::Seatbelt => {
             let token = service.0.dir.join(crate::api::LOCAL_TOKEN);
-            let profile = crate::sandbox::seatbelt(&declared, at.port(), data, &token, program);
+            let profile = crate::services::sandbox::seatbelt(&declared, at.port(), data, &token, program);
             let mut command = std::process::Command::new("/usr/bin/sandbox-exec");
             command.arg("-p").arg(profile).arg(program);
             let proxy = format!("http://{at}");
@@ -919,7 +919,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
     use std::os::unix::fs::MetadataExt;
     let built = || std::fs::metadata(program).map(|m| (m.ino(), m.mtime())).ok();
     let problem = service.0.dir.join(PROBLEM);
-    let before = crate::sandbox::dir(name).join(crate::sandbox::BEFORE);
+    let before = crate::services::sandbox::dir(name).join(crate::services::sandbox::BEFORE);
     while !stop() {
         let started = built();
         let mut running = match begin(name, program, data, at, service) {
