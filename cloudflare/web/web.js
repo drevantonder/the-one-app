@@ -1611,6 +1611,10 @@ const h = OneUI.react.createElement;
       else if (url.host === "settings") to = part ? { kind: "own", name: part, params: "{}" } : own("pages", { scope: "settings" });
       else if (url.host === "vault") return void sheet(q.get("scope"), q.get("id"));
     } else if (about.address && url.origin === new URL(about.address).origin) {
+      // An invite while no one's signed in here: as if typed on the welcome, opened in the browser for its passkey.
+      if (url.pathname === "/invite" && url.hash.length > 1 && !about.signedIn) {
+        return void native.address(link).then(async () => ((about = await native.about()), await native.open(link), showSignedOut(undefined, "Made your passkey? Sign in with it.")), (err) => showSignedOut(err.message));
+      }
       if (url.pathname === "/vault") return void sheet(q.get("scope"), q.get("id"));
       to = route(url);
     }
