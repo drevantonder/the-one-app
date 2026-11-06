@@ -286,6 +286,8 @@ impl Parts {
                         parts.services.push(app);
                     }
                 }
+                // An app's tests aren't in its deploy.
+                Some("apps") if file.split('/').nth(2) == Some("tests") => {}
                 Some("apps") => {
                     let app = file.split('/').nth(1).unwrap_or("").to_string();
                     if !parts.apps.contains(&app) {
@@ -301,7 +303,7 @@ impl Parts {
                 Some("client") if file.starts_with("client/native/") => parts.mac = true,
                 // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
                 Some("client") => (parts.node, parts.mac) = (true, true),
-                Some("docs" | "tests" | "cloudflare") => {}
+                Some("docs" | "tests" | "tools" | "cloudflare") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => (parts.node, parts.mac) = (true, true),
             }
@@ -1189,7 +1191,7 @@ mod tests {
 
     #[test]
     fn a_change_sends_out_what_is_made_of_it() {
-        assert_eq!(of(&["docs/x.md", "README.md", "tests/e2e.rs", ".gitignore"]), Parts::default());
+        assert_eq!(of(&["docs/x.md", "README.md", "tests/e2e.rs", "tools/iteration/report.py", "apps/repos/tests/repos.rs", ".gitignore"]), Parts::default());
         assert_eq!(of(&["apps/board/app.js", "apps/board/screen.js"]), Parts { apps: vec!["board".into()], ..Default::default() });
         assert_eq!(of(&["apps/shell/service/main.go"]), Parts { services: vec!["shell".into()], ..Default::default() });
         assert!(of(&["service/src/lib.rs"]).service);

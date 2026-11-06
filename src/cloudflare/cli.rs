@@ -122,7 +122,7 @@ pub fn commands() -> Command {
                             let mut settings = crate::cloudflare::Settings::new(NAME, &address);
                             settings.sign_in_url = at("auth");
                             settings.save()?;
-                            println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an tool(tool://…) reference in its place.\n", crate::cloudflare::Settings::path().with_file_name(".env.local").display());
+                            println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave a 1Password reference (op://…) in its place.\n", crate::cloudflare::Settings::path().with_file_name(".env.local").display());
                             // People signing in with Google need its OAuth client, which is put beside the secrets first.
                             match crate::config::SIGN_IN {
                                 "google" => crate::cloudflare::Settings::load()?,
