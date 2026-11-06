@@ -56,7 +56,6 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
 }
 
-/// A workerd running the Workers, stopped when dropped.
 struct Running {
     child: std::process::Child,
     dir: std::path::PathBuf,
@@ -129,7 +128,6 @@ fn url_query(url: &str) -> std::collections::BTreeMap<String, String> {
     query.split('&').map(|p| p.split_once('=').unwrap()).map(|(k, v)| (k.to_string(), v.replace("%3B", ";"))).collect()
 }
 
-/// A browser's cookies and Origin, for asking sign-in as its screens do.
 struct Browser {
     origin: String,
     cookies: std::collections::BTreeMap<String, String>,
@@ -300,7 +298,6 @@ impl Workers {
         Browser { origin: self.address.clone(), cookies: Default::default() }
     }
 
-    /// A passkey for the network's address, as passkeys belong to it.
     fn passkey(&self) -> Passkey {
         let rp = self.address.split("://").nth(1).unwrap().split([':', '/']).next().unwrap().to_string();
         Passkey { key: ed25519_dalek::SigningKey::from_bytes(&rand::random()), id: rand::random::<[u8; 16]>().to_vec(), rp, origin: self.address.clone() }
@@ -326,14 +323,12 @@ fn invited(k: &Workers, by: &ed25519_dalek::SigningKey, name: &str, email: Optio
     (invite.link.split_once('#').unwrap().1.to_string(), invite.user)
 }
 
-/// Signs in with a passkey in `browser`: → the status.
 fn signs_in_with_passkey(browser: &mut Browser, passkey: &Passkey) -> u16 {
     let (status, options, _) = browser.get("/api/auth/passkey/generate-authenticate-options");
     assert_eq!(status, 200, "{options}");
     browser.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0
 }
 
-/// Who `browser` is signed in as here, if anyone.
 fn signed_in_as(browser: &mut Browser) -> Option<String> {
     browser.get("/api/auth/get-session").1["user"]["id"].as_str().map(str::to_string)
 }
@@ -459,7 +454,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
 /// A device is let in by its sign-in only when it signed in itself: one whose sign-in was finished from a link opened
 /// elsewhere (the CLI's sign-in code page, or a site that sent the person a link) could have been started by whoever
 /// sent it, who'd hold the token it gave. Sign-in passes that one's proof on as `by_link`, which records what it signed in
-/// with when the person taps Approve but lets nothing in by itself; a release before it reads it as nothing.
+/// with when the person taps Approve but lets nothing in by itself.
 #[test]
 fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
     use one::sign_in_proof::{self, Proof};
@@ -533,7 +528,6 @@ impl Subscription {
         Subscription { public: key.compute_public_key().unwrap().as_ref().to_vec(), key, auth: rand::random() }
     }
 
-    /// Where the push Worker reaches it, at `endpoint`.
     pub(crate) fn address(&self, endpoint: &str) -> one::push::Address {
         one::push::Address { via: "webpush".into(), address: endpoint.into(), keys: Some(json!({ "p256dh": B64U.encode(&self.public), "auth": B64U.encode(&self.auth) })), ..Default::default() }
     }
@@ -644,7 +638,6 @@ mod relay {
         data_encoding::HEXLOWER.encode(key.public().as_bytes())
     }
 
-    /// An endpoint reached only through the relay at `address`, showing `ticket` (a pairing code's) if given.
     async fn endpoint(address: &str, key: &SecretKey, ticket: Option<&str>) -> Endpoint {
         let mut relay = RelayConfig::new(address.parse::<RelayUrl>().unwrap(), None);
         if let Some(ticket) = ticket {
@@ -658,7 +651,6 @@ mod relay {
     /// happens, as a busy machine takes seconds for what a quiet one takes milliseconds.
     const LET_IN: Duration = Duration::from_secs(60);
 
-    /// `key`, let in by the relay, as iroh sees it.
     async fn online(address: &str, key: &SecretKey, ticket: Option<&str>) -> Option<Endpoint> {
         let ep = endpoint(address, key, ticket).await;
         if tokio::time::timeout(LET_IN, ep.online()).await.is_ok() {
@@ -719,12 +711,10 @@ mod relay {
         String::from_utf8_lossy(&got[9..12]).parse().unwrap()
     }
 
-    /// Whether the relay has no socket of `ep`'s: taken out, or ended.
     async fn cut_off(k: &super::Workers, ep: &Endpoint) -> bool {
         testing(k, json!({ "connected": [id_of(ep)] })).await == json!([])
     }
 
-    /// Whether the relay refuses what `from` sends to `to`, as it says it does, not carrying it.
     async fn forbidden(k: &super::Workers, from: &Endpoint, to: &Endpoint) -> bool {
         let (address, id) = (k.relay_address(), id_of(from));
         let before = said(k, &id, "forbidden").await;

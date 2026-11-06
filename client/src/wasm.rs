@@ -28,7 +28,6 @@ impl Client {
         Ok(Client(crate::Client::start(secret, Some(certificate), &address, &nodes).await.map_err(js)?))
     }
 
-    /// A new certificate for the session, before the last ends.
     pub async fn certify(&self, certificate: String) {
         self.0.certify(certificate).await
     }
@@ -38,7 +37,6 @@ impl Client {
         data_encoding::HEXLOWER.encode(&self.0.id())
     }
 
-    /// The nodes to ask, as the network's state lists them.
     pub fn nodes(&self, nodes: Vec<String>) -> Result<(), JsError> {
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
         self.0.set_nodes(&nodes).map_err(js)

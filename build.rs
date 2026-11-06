@@ -46,7 +46,6 @@ fn main() {
     let out = format!("{out}pub const CONFIG_FILE: &str = {:?};\npub const CONFIG_REPO: &str = {repo:?};\n", file.to_string_lossy());
     let out = format!("{out}pub const MADE_HERE: &str = {:?};\n", config.get("made_here").and_then(|v| v.as_str()).unwrap_or("Made here"));
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
-    // How people sign in: with a passkey, or with Google at the network's domain.
     let sign_in = config.get("sign_in").and_then(|v| v.as_str()).unwrap_or("passkey");
     assert!(["passkey", "google"].contains(&sign_in), "sign_in is passkey or google");
     assert!(sign_in != "google" || !optional("join_domain").is_empty(), "signing in with Google needs join_domain");
@@ -117,7 +116,6 @@ fn main() {
     println!("cargo:rerun-if-changed={}", screen.display());
     let mut kit = Vec::new();
     collect(&screen, &screen, &mut kit);
-    // Of the new kit (src/screen/ui/), only what its build made, in dist/, at screen/ui/.
     let kit = kit.into_iter().filter_map(|(rel, abs)| match rel.strip_prefix("ui/") {
         Some(ui) => ui.strip_prefix("dist/").map(|built| (format!("ui/{built}"), abs)),
         None => Some((rel, abs)),

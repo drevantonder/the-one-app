@@ -45,7 +45,6 @@ fn parts() -> (Vec<(String, String)>, Vec<String>) {
         .filter(|f| f.rsplit_once('.').is_some_and(|(_, ext)| CODE.contains(&ext)))
         .filter_map(|f| Some(f.rsplit_once('/')?.0.to_string()))
         .collect();
-    // A Cargo package's `src/` is the package.
     let in_crate_src = |dir: &str| dir.strip_suffix("/src").is_some_and(|p| has(p, "Cargo.toml"));
     let mut dirs = BTreeSet::new();
     for dir in &code_dirs {

@@ -33,9 +33,7 @@ use crate::{Body, Client, Error, Request, Response, Sent, TRACE_HEADER, not_let_
 
 /// How long a node keeps the keys a request handed it.
 const HANDED_FOR: u64 = 3_600_000;
-/// How often, at most, it reads `global`'s entries again for a node it didn't know.
 const REREAD: u64 = 30_000;
-/// How many requests' traces it keeps, in developer mode, for screens to show.
 const TRACES_KEPT: usize = 100;
 
 /// What a sign-in for the device whose key is `secret` names it by (`join`), before it's made: its key ‖ seal key, hex.
@@ -51,7 +49,6 @@ pub fn open_note(secret: [u8; 32], pushed: &str) -> Result<(one::push::Note, Opt
     one::push::open_note(&keys::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
 }
 
-/// A new device's key: 32 random bytes, which its app keeps.
 pub fn new_secret() -> [u8; 32] {
     rand::random()
 }
@@ -64,7 +61,6 @@ fn failed(message: impl std::fmt::Display) -> Error {
     unsent(message)
 }
 
-/// What a request says when this device isn't one of the network's (yet, or any more).
 fn refused() -> Error {
     not_let_in("This device hasn't been let in yet.")
 }
@@ -72,14 +68,12 @@ fn refused() -> Error {
 /// The network as this device read and checked it itself.
 struct Known {
     who: ScopeDb,
-    /// Its person.
     user: String,
     /// The nodes it may ask, by key: their seal keys; and the Cloudflare node, asked last, if the network has one.
     nodes: HashMap<[u8; 32], [u8; 32]>,
     cloudflare_node: Option<[u8; 32]>,
     /// Each node's run priority, as the network's admins set it (src/rank.rs): the Cloudflare node's too.
     ranks: HashMap<[u8; 32], u32>,
-    /// When it was read.
     at: u64,
 }
 
@@ -91,7 +85,6 @@ enum Stage {
     /// `wait`); or let in, and its connections closed until it's asked again (`disconnect`: its app in the background,
     /// or a program ending).
     Off { asked: Option<Value> },
-    /// Reaching its nodes as one of its person's devices.
     In(Client),
     /// Taken out, as the relay said, or signed out: nothing more is asked as it, and its app forgets its key.
     Out,
@@ -106,13 +99,11 @@ pub struct Device {
     dir: PathBuf,
     /// Held while it connects, so it connects once.
     stage: tokio::sync::Mutex<Stage>,
-    /// Who's who, as it last read it itself.
     known: Mutex<Option<Known>>,
     /// The order things run in, as the node last said (`/v1/state`): only ever used to sort nodes it knows.
     order: Mutex<Vec<[u8; 32]>>,
     /// The device it's on, as its app says (`on`): signing in there again replaces this sign-in.
     on: Mutex<Option<String>>,
-    /// Each scope's epochs opened, by (scope, n), and apps' keys by (scope, app, n).
     epochs: Mutex<HashMap<(String, u32), [u8; 32]>>,
     app_keys: Mutex<HashMap<(String, String, u32), [u8; 32]>>,
     /// What each kind of request needed, by its route (`route`): the last 428's, and the node that sent it (hex).
@@ -120,7 +111,6 @@ pub struct Device {
     /// Held while a kind of request learns from a 428, by its route: another of its kind waits for it, and goes with
     /// what it learned.
     learning: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
-    /// In developer mode, its latest requests' traces, oldest first (`traces`).
     traces: Mutex<std::collections::VecDeque<Value>>,
     /// The last answer of each call that only reads, for its app's screens (`kept`): a native app's keeps them
     /// (`keeping`), the CLI's doesn't.
@@ -128,7 +118,6 @@ pub struct Device {
 }
 
 impl Device {
-    /// The device whose key is `secret`, of the network at `address`, keeping what it needs to in `dir`.
     pub fn new(secret: [u8; 32], address: &str, dir: &str) -> Device {
         let needs = std::fs::read(PathBuf::from(dir).join("needs.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let key = SigningKey::from_bytes(&secret);
@@ -158,13 +147,10 @@ impl Device {
         }
     }
 
-    /// The same device, keeping the last answer of each call that only reads (`kept`): a native app's.
     pub fn keeping(mut self) -> Device {
         self.answers = Some(Answers::new(&self.dir, &self.key));
         self
     }
-
-    // Developer mode.
 
     /// Whether this device is in developer mode, which only its own Settings › Developer changes: its requests then
     /// ask for traces, which its screens show.
@@ -197,12 +183,10 @@ impl Device {
         traces.push_back(trace);
     }
 
-    /// Its key, hex: its id.
     pub fn key(&self) -> String {
         hex(&self.me.key)
     }
 
-    /// What a sign-in for it names it by (`join`): its key ‖ seal key, hex.
     pub fn join(&self) -> String {
         format!("{}{}", self.key(), hex(&self.me.seal))
     }
@@ -216,8 +200,6 @@ impl Device {
     fn opens(&self) -> [u8; 32] {
         keys::seal_secret(&self.key)
     }
-
-    // Joining.
 
     /// Asks sign-in to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
     /// secret, its proof).
@@ -318,7 +300,6 @@ impl Device {
         Ok(true)
     }
 
-    /// Its client, while it's in.
     async fn client(&self) -> Option<Client> {
         match &*self.stage.lock().await {
             Stage::In(client) => Some(client.clone()),
@@ -372,7 +353,6 @@ impl Device {
         let pinned = self.dir.join("root");
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut reader = one::database::steps::Reader::new(kept);
-        // From where the device that let it in read who's who to, if it said (its Welcome), else from the first.
         let mut welcome = std::fs::read_to_string(self.dir.join("welcome")).ok().and_then(|w| one::database::steps::Welcome::parse(w.trim()));
         let had_welcome = welcome.is_some();
         let (epochs, _) = one::database::steps::read_sealed_to(&bucket, &mut reader, &hex(&self.me.key), &keys::seal_secret(&self.key), &mut welcome, now()).await.map_err(failed)?;
@@ -427,7 +407,6 @@ impl Device {
         out
     }
 
-    /// Each node's run priority, as it last read who's who.
     fn ranks(&self) -> Vec<([u8; 32], u32)> {
         self.known.lock().unwrap().as_ref().map(|k| k.ranks.iter().map(|(k, r)| (*k, *r)).collect()).unwrap_or_default()
     }
@@ -467,7 +446,6 @@ impl Device {
         Ok(())
     }
 
-    /// Starts again with a fresh connection, once the network's back.
     pub async fn reconnect(&self) {
         if let Some(client) = self.client().await {
             client.reconnect().await;
@@ -545,19 +523,15 @@ impl Device {
         removed
     }
 
-    /// Whether this key was let in on this device once.
     fn was_in(&self) -> bool {
         std::fs::read_to_string(self.dir.join("joined")).is_ok_and(|key| key.trim() == self.key())
     }
-
-    // Requests.
 
     /// A request to its network's nodes as its person, with the keys it needed last time; one a node needs others for
     /// (428) is sent again with them, a few times, as a node may find what it needs as it goes (the Cloudflare node,
     /// its logs' keys first, then a call's). `/v1/state` is read for the order things run in.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
         let body = body.into();
-        // In developer mode, what it did, from the start.
         let traced = self.developer().then(|| (now(), std::time::Instant::now(), what(path, body.bytes())));
         // Asked before it joined, or after its connections closed: it's in only if the relay lets it, else its own screen
         // says so.
@@ -606,7 +580,6 @@ impl Device {
         }
     }
 
-    /// `fetch`'s request, each send's trace kept in `fetches` if it's asked for one.
     async fn request(&self, method: &str, path: &str, mut headers: Vec<(String, String)>, body: Sent, mut fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
         let route = route(path, body.bytes());
         if fetches.is_some() && !headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(TRACE_HEADER)) {
@@ -768,8 +741,6 @@ impl Device {
         }
     }
 
-    // Keys.
-
     /// The keys a kind of request needed last time, opened: none it can't open. Each node it's sent to is handed only
     /// those of the scopes it runs (`sealed_for`).
     async fn handed(&self, route: &str, notes: Option<&Notes>) -> Vec<Handed> {
@@ -848,7 +819,7 @@ impl Device {
 
     /// What `need`'s keys are opened from that this device hasn't opened yet, asked for all at once: each scope's epochs
     /// sealed to it, and each app's keys in them, one request each. What doesn't open here is left for `database_key`,
-    /// which asks again, one at a time, as it always did.
+    /// which asks again, one at a time.
     async fn fetch_keys(&self, need: &[Need], notes: Option<&Notes>) {
         let scopes: std::collections::BTreeSet<&str> = need.iter().filter(|n| !self.epochs.lock().unwrap().contains_key(&(n.scope.clone(), n.epoch))).map(|n| n.scope.as_str()).collect();
         let apps: std::collections::BTreeSet<(&str, &str)> = need.iter().filter(|n| !self.app_keys.lock().unwrap().contains_key(&(n.scope.clone(), n.app.clone(), n.epoch))).map(|n| (n.scope.as_str(), n.app.as_str())).collect();

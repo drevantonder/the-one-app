@@ -14,7 +14,6 @@ use anyhow::{Context, Result, bail, ensure};
 use one::bucket::{Bucket, Object};
 use serde_json::json;
 
-/// How many positions after a step a read of it reads too.
 const AHEAD: u64 = 31;
 
 /// One agent for everything this device asks over HTTP, so connections are kept for the next request.
@@ -34,7 +33,6 @@ impl Signed {
     }
 }
 
-/// An object, from its signed `url`.
 fn download(url: &str) -> Result<Option<Object>> {
     let mut r = AGENT.get(url).call().with_context(|| format!("Couldn't reach {YOURS}'s storage"))?;
     match r.status().as_u16() {
@@ -63,7 +61,6 @@ impl Bucket for Signed {
         let (address, secret, asked) = (self.address.clone(), self.secret, name.to_string());
         let (found, next) = tokio::task::spawn_blocking(move || -> Result<_> {
             let name = &asked;
-            // A database's step: the positions after it too, which come next.
             let item = match name.rsplit_once('/').and_then(|(prefix, at)| Some((prefix, at.parse::<u64>().ok()?))) {
                 Some((prefix, at)) if one::database::stored::step_name(prefix, at) == *name && at > 0 => json!({ "steps": prefix, "from": at, "to": at + AHEAD }),
                 _ => json!(name),

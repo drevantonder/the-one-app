@@ -26,14 +26,12 @@ pub fn through_relay(key: &[u8]) -> CustomAddr {
 /// The most datagrams kept for one endpoint until iroh reads them: what comes faster is dropped, as a full socket does.
 const INBOX_MOST: usize = 1024;
 
-/// Datagrams the relay handed in for one endpoint, until iroh reads them.
 #[derive(Default)]
 struct Queue {
     packets: VecDeque<(CustomAddr, Vec<u8>)>,
     waker: Option<Waker>,
 }
 
-/// Where the relay's datagrams for one endpoint go in.
 #[derive(Clone, Default)]
 pub struct Inbox(Arc<Mutex<Queue>>);
 

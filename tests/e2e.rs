@@ -73,7 +73,6 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     eventually("notes to run", async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     a.set_item(&me, &one::database::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
-    // A place that can't be written isn't added.
     let bad = a.add_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" })).await.unwrap();
     assert!(bad["id"].is_null() && bad["tried"][0]["error"].is_string(), "{bad}");
     assert!(a.backups().unwrap()["places"].as_array().unwrap().is_empty());

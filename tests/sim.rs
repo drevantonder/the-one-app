@@ -501,7 +501,6 @@ async fn run(seed: u64) {
         assert_eq!(db.checks().refused, 0, "seed {seed}: device {i} refused a step");
     }
     assert!(link.objects.lock().unwrap().keys().any(|k| k.contains("/copy/")), "seed {seed}: copies were written as steps piled up");
-    // And a write after it all lands after every step.
     let mut last = opened(&link.steady(), &all).await.unwrap();
     last.sign_as(link.signer(DEVICES + 1));
     let before = last.at();

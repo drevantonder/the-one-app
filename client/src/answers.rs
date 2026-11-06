@@ -27,7 +27,6 @@ pub struct Answers {
 }
 
 impl Answers {
-    /// A device's, kept in `dir` (its folder) under its `key`.
     pub fn new(dir: &Path, key: &SigningKey) -> Answers {
         Answers { dir: dir.join("answers"), key: keys::answers_key(key), reads: Mutex::default() }
     }
@@ -43,7 +42,6 @@ impl Answers {
         Some((plain[8..].to_vec(), at))
     }
 
-    /// Learns which tools only read from the whole list of apps (`GET /v1/apps`'s answer).
     pub fn learn(&self, apps: &[u8]) {
         let Ok(Value::Array(apps)) = serde_json::from_slice::<Value>(apps) else { return };
         let reads = apps
@@ -53,8 +51,6 @@ impl Answers {
         *self.reads.lock().unwrap() = Some(reads);
     }
 
-    /// Keeps what a call (`sent`, `/v1/call`'s body) answered, if its tool only reads, as `learn` last said, and
-    /// it answered rather than failed.
     pub fn keep(&self, sent: &[u8], answer: &[u8]) {
         let Ok(sent) = serde_json::from_slice::<Value>(sent) else { return };
         let (Some(app), Some(tool)) = (sent["app"].as_str(), sent["op"].as_str()) else { return };
@@ -81,17 +77,14 @@ impl Answers {
         }
     }
 
-    /// Every answer kept goes.
     pub fn forget(&self) {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 
-    /// Whether `app`'s `tool` only reads, as `learn` last said; None until it has (an answer was kept only if it did then).
     fn reads(&self, app: &str, tool: &str) -> Option<bool> {
         self.reads.lock().unwrap().as_ref().map(|r| r.get(app).is_some_and(|tools| tools.iter().any(|o| o == tool)))
     }
 
-    /// Where a call's last answer is, by what it asked, and the name its seal is bound to.
     fn at(&self, app: &str, tool: &str, input: &Value) -> (PathBuf, String) {
         let name = hex(&keys::sha256(&keys::canonical(&json!([app, tool, input]))));
         (self.dir.join(&name), name)
@@ -128,12 +121,10 @@ mod tests {
         assert!(at > 0);
         assert!(mine.kept("tally", "post", br#"{"text":"hi"}"#).is_none());
         assert!(mine.kept("tally", "topics", br#"{"scope":"global"}"#).is_none());
-        // Nothing of it is in the clear.
         for file in std::fs::read_dir(dir.join("answers")).unwrap().flatten() {
             assert!(!String::from_utf8_lossy(&std::fs::read(file.path()).unwrap()).contains("kitchen-reno"));
         }
 
-        // Another person's device, in the same folder, opens nothing.
         assert!(Answers::new(&dir, &SigningKey::from_bytes(&sam)).kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
         // Only a native app's device keeps them; once it starts again, before it's read the apps, it finds them, and once
         // it signs out, they're gone.

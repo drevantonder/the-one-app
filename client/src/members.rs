@@ -49,8 +49,6 @@ pub fn step_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>
 ///   that run their calls), `runs_until_chosen`, `approves` (whose new devices they let in), `invites` (someone new),
 ///   `removes_people`, `removes` (the devices they may take out), and `app_schedules`: theirs on a device still
 ///   listed, `{ endpoint, scope, app, until, keys }` (each epoch's key hash), the only ones their browser renews
-///
-/// Of who's who as it is.
 pub fn view_of(db: &ScopeDb) -> Result<Value> {
     let scopes = db.scopes();
     let listed = db.machines().into_iter().filter(|d| !d.removed).collect::<Vec<_>>();
@@ -64,7 +62,6 @@ pub fn view_of(db: &ScopeDb) -> Result<Value> {
     let people: Vec<String> = db.users().into_iter().filter(|u| !u.removed).map(|u| u.id).collect();
     let uses = |u: &str| scopes.iter().filter(|s| db.may(u, "use", &object(s))).collect::<Vec<_>>();
     let uses: BTreeMap<&str, Vec<&Scope>> = people.iter().map(|u| (u.as_str(), uses(u))).collect();
-    // A scope someone opens, with the client devices of everyone who does.
     let mut openers = Map::new();
     for s in scopes.iter().filter(|s| uses.values().any(|on| on.contains(s))) {
         let to: Vec<Value> = listed.iter().filter(|d| d.is(Kind::Client) && uses.get(d.user.as_str()).is_some_and(|on| on.contains(&s))).map(|d| json!({ "key": hex(&d.key), "seal": hex(&d.seal) })).collect();

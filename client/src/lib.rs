@@ -34,7 +34,6 @@ mod device;
 pub use answers::Answers;
 #[cfg(not(target_family = "wasm"))]
 pub use device::{Device, join_of, new_secret, open_note};
-/// What a push carries and where a device gets them (`one::push`), as the apps' libraries hand them on.
 #[cfg(not(target_family = "wasm"))]
 pub use one::push;
 
@@ -48,24 +47,18 @@ const STAGGER: Duration = Duration::from_millis(250);
 /// How long the nodes the relay says are on are given before those it doesn't (the Cloudflare node, which wakes when
 /// asked, and any that may have come on since) are raced too.
 const FALLBACK: Duration = Duration::from_secs(1);
-/// How long a connection to a node has to open.
 const PATIENT: Duration = Duration::from_secs(10);
 /// How long a connected node has to start answering a GET or HEAD, before its connection is taken as gone quiet. (Other
 /// requests may run as long as they need: that one is for the connection's own idle timeout.)
 const ANSWER: Duration = Duration::from_secs(5);
-/// How long a node that didn't answer is skipped, before the next request tries it again in the background.
 const SKIP: Duration = Duration::from_secs(10);
-/// The most a response's head may be.
 const HEAD_LIMIT: usize = 64 << 10;
-/// How much of a body is read at once.
 const READ: usize = 64 << 10;
 
-/// What a session's endpoint sends its certificate in.
 const ENDPOINT_HEADER: &str = "x-one-endpoint";
 /// What every request says, so a node that can't run a call itself answers 421 with the nodes that can
 /// (`{ elsewhere }`), which this client asks itself, handing each its own keys, rather than passing it on.
 const ELSEWHERE_HEADER: &str = "x-one-elsewhere";
-/// How many times a request follows a node's word to ask another.
 const MOST_ELSEWHERE: usize = 2;
 /// What a request in developer mode asks for a trace with, and a node answers its own part in (src/node/trace.rs).
 pub const TRACE_HEADER: &str = "x-one-trace";
@@ -82,7 +75,6 @@ pub struct Error {
     /// The network doesn't list this device (yet, or any more): what an app shows is its own screen to approve it.
     pub not_let_in: bool,
     message: String,
-    /// The nodes it tried, for a request that asked for a trace.
     pub trace: Option<serde_json::Value>,
 }
 
@@ -139,7 +131,6 @@ impl Sent {
         }
     }
 
-    /// The bytes, if it's bytes.
     pub fn bytes(&self) -> &[u8] {
         match self {
             Sent::Bytes(bytes) => bytes,
@@ -148,7 +139,6 @@ impl Sent {
         }
     }
 
-    /// Writes it all to `send`, read as it goes.
     async fn write(&self, send: &mut iroh::endpoint::SendStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match self {
             Sent::Bytes(bytes) => send.write_all(bytes).await?,
@@ -169,7 +159,6 @@ impl Sent {
     }
 }
 
-/// A node's response, its body read as it comes.
 pub struct Response {
     /// The node that answered, as its connection proved: the one a 428 may be believed from, and keys sealed to.
     pub node: [u8; 32],
@@ -188,7 +177,6 @@ pub struct Client(Arc<Inner>);
 struct Inner {
     secret: SecretKey,
     way: Way,
-    /// A session's endpoint's certificate, if this key is one.
     certificate: Mutex<Option<String>>,
     /// The nodes to ask, in the order things run on them: the first connected is asked.
     nodes: Mutex<Vec<PublicKey>>,
@@ -209,7 +197,6 @@ struct Inner {
 
 struct Down {
     since: Instant,
-    /// Whether a connection to it is being tried in the background.
     probing: bool,
 }
 
@@ -253,7 +240,6 @@ impl Client {
         Ok(client)
     }
 
-    /// This endpoint's key: the device's, or its session's.
     pub fn id(&self) -> [u8; 32] {
         *self.0.secret.public().as_bytes()
     }
@@ -273,7 +259,6 @@ impl Client {
         Ok(())
     }
 
-    /// The node that wakes when asked (the Cloudflare node), if the network has one.
     pub fn set_wakes(&self, node: Option<[u8; 32]>) -> Result<(), Error> {
         *self.0.wakes.lock().unwrap() = node.map(|n| keys(&[n])).transpose()?.and_then(|k| k.into_iter().next());
         Ok(())
@@ -295,7 +280,6 @@ impl Client {
         Ok(())
     }
 
-    /// Races connections to the nodes in the background, so the next request finds one up.
     fn warm(&self) {
         let nodes = self.0.nodes.lock().unwrap().clone();
         let client = self.clone();
@@ -337,19 +321,16 @@ impl Client {
         (first, later)
     }
 
-    /// `node`'s connection, if one is up (and not being opened).
     fn live(&self, node: &PublicKey) -> Option<Connection> {
         let slot = self.0.conns.lock().unwrap().get(node).cloned()?;
         let held = slot.try_lock().ok()?;
         held.as_ref().filter(|c| c.close_reason().is_none()).cloned()
     }
 
-    /// Whether a connection to `node` is being opened.
     fn opening(&self, node: &PublicKey) -> bool {
         self.0.conns.lock().unwrap().get(node).is_some_and(|slot| slot.try_lock().is_err())
     }
 
-    /// `node` didn't answer: the others are raced first, for a while.
     fn give_up(&self, node: &PublicKey) {
         self.forget(node);
         let mut down = self.0.down.lock().unwrap();
@@ -381,7 +362,6 @@ impl Client {
         }
     }
 
-    /// Closes the client: its connections and its endpoint.
     pub async fn close(&self) {
         self.0.conns.lock().unwrap().clear();
         if let Some(endpoint) = self.0.endpoint.lock().await.take() {
@@ -389,7 +369,6 @@ impl Client {
         }
     }
 
-    /// Asks the first node connected (`fetch_with`).
     pub async fn fetch(&self, req: Request) -> Result<Response, Error> {
         self.fetch_with(req, |_| std::future::ready(Vec::new())).await
     }
@@ -408,7 +387,6 @@ impl Client {
         let certificate = self.0.certificate.lock().unwrap().clone();
         let again = matches!(req.method.as_str(), "GET" | "HEAD");
         let mut why = unsent("there's no node to ask");
-        // Asked for a trace: each try, as it went.
         let traced = req.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(TRACE_HEADER));
         let mut tries = traced.then(|| Trace { start: Instant::now(), tries: Vec::new() });
         let traces = |tries: &mut Option<Trace>, node: Option<serde_json::Value>| tries.as_mut().map(|t| serde_json::json!({ "tries": std::mem::take(&mut t.tries), "node": node }));
@@ -423,7 +401,6 @@ impl Client {
                 Ok(picked) => picked,
                 Err(err) => {
                     why = err;
-                    // This device lost the relay: once more, on a fresh endpoint.
                     if !reconnected && !self.on_relay().await {
                         reconnected = true;
                         self.reconnect().await;
@@ -447,7 +424,6 @@ impl Client {
                         return Ok(response);
                     }
                     let bytes = std::mem::replace(&mut response.body, Body::whole(Vec::new())).bytes_within(HEAD_LIMIT).await?;
-                    // Asked of the nodes it names that this client asks at all, in the order it gave.
                     let known = self.0.nodes.lock().unwrap().clone();
                     let said: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
                     let named: Vec<PublicKey> = said["elsewhere"].as_array().into_iter().flatten().filter_map(|k| data_encoding::HEXLOWER_PERMISSIVE.decode(k.as_str()?.as_bytes()).ok()).filter_map(|k| PublicKey::try_from(&k[..]).ok()).filter(|k| known.contains(k) && *k != key).collect();
@@ -536,7 +512,6 @@ impl Client {
         }
     }
 
-    /// Whether this device's endpoint is connected to the relay.
     async fn on_relay(&self) -> bool {
         if !matches!(self.0.way, Way::Relay(..)) {
             return true;
@@ -603,7 +578,6 @@ impl Client {
         }
     }
 
-    /// One request on a stream of its own on `conn`, `node`'s: → the response, or why not.
     async fn exchange(&self, node: &PublicKey, conn: &Connection, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {
         // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
         let (mut send, mut recv) = match timeout(ANSWER, conn.open_bi()).await {
@@ -636,12 +610,10 @@ impl Client {
     }
 }
 
-/// Nodes' keys, checked.
 fn keys(nodes: &[[u8; 32]]) -> Result<Vec<PublicKey>, Error> {
     nodes.iter().map(PublicKey::from_bytes).collect::<Result<Vec<_>, _>>().map_err(|_| unsent("a node's key isn't a key"))
 }
 
-/// A request's trace, as it goes: each node tried.
 struct Trace {
     start: Instant,
     tries: Vec<serde_json::Value>,
@@ -656,7 +628,6 @@ fn tried(trace: &mut Option<Trace>, key: &PublicKey, began: Instant, result: &st
     }
 }
 
-/// Why a try at a node failed, as a trace says it: which wait it gave up on.
 fn failure(err: &Error) -> &'static str {
     match err.message.as_str() {
         "the node isn't connected" => "no connection",
@@ -668,8 +639,6 @@ fn failure(err: &Error) -> &'static str {
     }
 }
 
-/// How a client reaches nodes: through the relay at the network's address, or (in a Worker) a transport that passes
-/// its datagrams to that relay by RPC.
 enum Way {
     Relay(RelayUrl, RelayConfig),
     #[cfg(feature = "relayed")]
@@ -699,13 +668,12 @@ fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certif
     if let Some(certificate) = certificate.filter(|c| c.bytes().all(|b| b.is_ascii_graphic())) {
         head.push_str(&format!("{ENDPOINT_HEADER}: {certificate}\r\n"));
     }
-    // What this client reads of who's who, which phase 2's switch waits for every device to read.
+    // A client that reads less than the network needs is told to update (`one::database::READS`).
     head.push_str(&format!("{}: {}\r\n", one::database::HEADER, one::database::READS));
     head.push_str(&format!("{ELSEWHERE_HEADER}: 1\r\ncontent-length: {len}\r\n\r\n"));
     Ok(head.into_bytes())
 }
 
-/// Reads a response's head: → its status, headers, and its body as it's framed, with what was read past the head.
 async fn read_response(recv: &mut RecvStream, head_only: bool) -> Result<(u16, Vec<(String, String)>, Body), Error> {
     let mut buf = Vec::new();
     loop {
@@ -738,7 +706,6 @@ async fn read_response(recv: &mut RecvStream, head_only: bool) -> Result<(u16, V
     }
 }
 
-/// Reads more of a stream onto `buf`: false at its end.
 async fn more(recv: &mut RecvStream, buf: &mut Vec<u8>) -> Result<bool, Error> {
     match recv.read_chunk(READ).await.map_err(|e| sent(format!("reading the node's response: {e}")))? {
         Some(chunk) => {
@@ -773,12 +740,10 @@ pub struct Body {
 }
 
 impl Body {
-    /// A body already read whole.
     pub fn whole(bytes: Vec<u8>) -> Body {
         Body { recv: None, framing: Framing::Length(bytes.len() as u64), buf: bytes }
     }
 
-    /// The next part of the body as it arrives, or none at its end.
     pub async fn chunk(&mut self) -> Result<Option<Vec<u8>>, Error> {
         loop {
             match self.framing {
@@ -833,7 +798,6 @@ impl Body {
         }
     }
 
-    /// The rest of the body, whole.
     pub async fn bytes(self) -> Result<Vec<u8>, Error> {
         self.bytes_within(usize::MAX).await
     }
