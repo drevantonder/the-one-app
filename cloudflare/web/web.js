@@ -604,8 +604,8 @@ const h = OneUI.react.createElement;
     history.replaceState(null, "", href(under(route())));
     render();
   }
-  /// Settings' text size on a phone (`about.textScale`, how many times usual): the whole window zoomed by it, its screens'
-  /// frames too, but never narrower than 320 pixels.
+  /// Settings' text size on an Android phone (`about.textScale`, how many times usual): the whole window zoomed by it, its
+  /// screens' frames too, but never narrower than 320 pixels.
   function zoomed() {
     const scale = about?.textScale > 0 ? about.textScale : 1;
     document.documentElement.style.zoom = scale === 1 ? "" : Math.min(scale, innerWidth / 320);
@@ -1513,8 +1513,6 @@ const h = OneUI.react.createElement;
       native.onBack = hardwareBack;
       native.onScale = (scale) => ((about.textScale = scale), zoomed());
       zoomed();
-      // A change made in Settings, where this was away (an iPhone's Dynamic Type): read again as it's back.
-      if (phone()) document.addEventListener("visibilitychange", () => !document.hidden && native.about().then((a) => a.textScale !== about.textScale && ((about.textScale = a.textScale), zoomed()), () => {}));
       // The app menu's commands (a Mac's), which work wherever the focus is: the sidebar folded or unfolded, as its
       // own key does here; joining a network with a pairing code, while this Mac's node is in none.
       native.onCommand = (name) => {

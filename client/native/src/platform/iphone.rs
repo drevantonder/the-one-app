@@ -133,12 +133,10 @@ pub fn name() -> Option<String> {
     name.map(|n| n.to_string()).filter(|n| !n.is_empty())
 }
 
-/// How many times usual the person has made text in Settings (Dynamic Type): body text's size as they've set it, over its
-/// size at the default, for the page to zoom screens by.
+/// The window isn't zoomed by Dynamic Type: WebKit lays out a screen's frame put into a CSS-zoomed page at no size (a
+/// black window), and its page zoom keeps the layout at the screen's width, so a larger text size runs off it.
 pub fn text_scale() -> f64 {
-    let metrics: Retained<AnyObject> = unsafe { msg_send![class!(UIFontMetrics), defaultMetrics] };
-    let scaled: f64 = unsafe { msg_send![&metrics, scaledValueForValue: 17.0f64] };
-    (scaled / 17.0).clamp(0.5, 3.0)
+    1.0
 }
 
 /// Which APNs service this build's pushes come through: what its provisioning profile says, as a build installed
