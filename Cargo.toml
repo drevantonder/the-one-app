@@ -61,7 +61,7 @@ getrandom = { version = "0.2", features = ["js"] }
 # the Cloudflare node and the native apps' client share.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 axum = { version = "0.8", optional = true }
-# Its take_until ends a node's event streams as it hands over to an update's build (src/api.rs); axum and iroh already
+# Its take_until ends a node's event streams as it hands over to an update's build (src/node/screens/routes.rs); axum and iroh already
 # build it.
 futures-util = { version = "0.3", default-features = false, optional = true }
 # Devices reach each other over iroh (src/node/net.rs): QUIC between their device keys, direct where a path opens and
