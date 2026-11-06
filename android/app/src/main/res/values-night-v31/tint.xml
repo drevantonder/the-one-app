@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- A tone darker than Material's dark primary, so white still reads on it, as the screens' filled buttons have it. -->
-<resources>
-    <color name="tint">@android:color/system_accent1_500</color>
-</resources>

@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- The tint, for what a person taps: the phone's own (Material You) from Android 12, a neutral blue before. -->
-<resources>
-    <color name="tint">#FF007AFF</color>
-</resources>

@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Kit's colours (Style.kt) for what's drawn before the app is (its window, a home-screen widget's preview): light
-     here, dark in values-night. -->
-<resources>
-    <color name="page">#FFFFFF</color>
-    <color name="card">#F4F4F4</color>
-    <color name="fill">#ECECEC</color>
-</resources>
