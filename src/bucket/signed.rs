@@ -6,31 +6,56 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 
-use super::Ask;
 use super::{Failed, Trouble};
 
-/// How many positions after a step a read, HEAD or create of it asks for too.
+/// How many positions after a step a read, HEAD or create of it asks for too, for a node; a client device only reads,
+/// and reads a log from its start, so it asks for more at a time.
 const READ_AHEAD: u64 = 15;
+const CLIENT_READ_AHEAD: u64 = 31;
 const CREATE_AHEAD: u64 = 3;
 
 pub type Address = Arc<dyn Fn() -> Result<String> + Send + Sync>;
 
+/// A request to sign: its method, the object's name ("" for the bucket), its query, and the headers it must carry.
+#[derive(Debug)]
+pub struct Ask<'a> {
+    pub method: &'a str,
+    pub name: &'a str,
+    pub query: &'a [(&'a str, &'a str)],
+    pub headers: &'a [(&'a str, &'a str)],
+}
+
+/// One pool of connections for every request of a bucket's, so a request after the first reaches it over a connection
+/// already open, not a new TCP and TLS handshake: each is `timeout` seconds at most.
+pub(super) fn pooled(pool: &'static std::sync::OnceLock<ureq::Agent>, timeout: u64) -> ureq::Agent {
+    pool.get_or_init(|| ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(timeout))).max_idle_connections_per_host(16).build().into()).clone()
+}
+
+/// The pool for asking the signer, and for a client device's downloads of the URLs it signs.
+pub fn signer_requests() -> ureq::Agent {
+    static POOL: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    pooled(&POOL, 30)
+}
+
 pub struct Signer {
     address: Address,
     key: ed25519_dalek::SigningKey,
-    /// What every URL it's given starts with: the bucket's own, `<endpoint>/<bucket>`.
-    base: String,
+    /// What every URL it's given starts with: the bucket's own, `<endpoint>/<bucket>`. A client device knows only the
+    /// signer's address, and what it reads is sealed and signed, so it takes the URLs as they come.
+    base: Option<String>,
+    read_ahead: u64,
     /// URLs by `<kind> <name>` (read, head, create), with until when (ms) they work.
     kept: Mutex<HashMap<String, (String, u64)>>,
 }
 
 impl std::fmt::Debug for Signer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "the URL signer, for {}", self.base)
+        write!(f, "the URL signer, for {}", self.base.as_deref().unwrap_or("a client device"))
     }
 }
 
@@ -40,7 +65,12 @@ fn now_ms() -> u64 {
 
 impl Signer {
     pub fn new(address: Address, key: ed25519_dalek::SigningKey, base: String) -> Signer {
-        Signer { address, key, base: base.trim_end_matches('/').to_string(), kept: Default::default() }
+        Signer { address, key, base: Some(base.trim_end_matches('/').to_string()), read_ahead: READ_AHEAD, kept: Default::default() }
+    }
+
+    /// A client device's: it only reads.
+    pub fn reading(address: String, key: ed25519_dalek::SigningKey) -> Signer {
+        Signer { address: Arc::new(move || Ok(address.clone())), key, base: None, read_ahead: CLIENT_READ_AHEAD, kept: Default::default() }
     }
 
     /// Asks the signer: `fields` signed, with what this build reads of who's who, which the signer
@@ -49,7 +79,7 @@ impl Signer {
         let address = (self.address)()?;
         fields["reads"] = serde_json::json!(crate::database::READS);
         let body = crate::keys::signed_request(&self.key, crate::protocol::URLS, fields, now_ms());
-        let mut resp = super::place::signer_requests().post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})")))?;
+        let mut resp = signer_requests().post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})")))?;
         let status = resp.status().as_u16();
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         let said = out["error"].as_str().unwrap_or("nothing").to_string();
@@ -88,15 +118,13 @@ impl Signer {
             _ => bail!("the bucket is only read, listed, created in, replaced by ETag and deleted from"),
         };
         ensure!(ask.query.is_empty(), "an object is reached by its name alone");
-        let id = format!("{kind} {}", ask.name);
-        if let Some((url, until)) = self.kept.lock().unwrap().get(&id) {
-            if *until > now_ms() + 60_000 {
-                return Ok(url.clone());
-            }
+        if let Some(url) = self.kept(kind, ask.name) {
+            return Ok(url);
         }
+        let id = format!("{kind} {}", ask.name);
         // A database's step or the signature beside one: the positions after it too, which come next, and the
         // signature beside each.
-        let ahead = if kind == "create" { CREATE_AHEAD } else { READ_AHEAD };
+        let ahead = if kind == "create" { CREATE_AHEAD } else { self.read_ahead };
         let items: Vec<Value> = match crate::database::stored::position(ask.name) {
             Some((prefix, at)) => {
                 let sigs = (at..=at + ahead).filter(|_| crate::database::stored::signed_beside(prefix)).map(|n| json!(crate::database::stored::sig_name(prefix, n)));
@@ -116,6 +144,19 @@ impl Signer {
             }
         }
         kept.get(&id).map(|(url, _)| url.clone()).context("the URL signer didn't sign that, for the network's bucket")
+    }
+
+    /// A read URL kept, with a minute to spare.
+    fn kept(&self, kind: &str, name: &str) -> Option<String> {
+        self.kept.lock().unwrap().get(&format!("{kind} {name}")).filter(|(_, until)| *until > now_ms() + 60_000).map(|(url, _)| url.clone())
+    }
+
+    /// The URL to read `name`, and those just signed to read the positions after it, if it's a database's step:
+    /// `(name's, [(a later name, its URL)])`.
+    pub fn reads_from(&self, name: &str) -> Result<(String, Vec<(String, String)>)> {
+        let url = self.sign(&Ask { method: "GET", name, query: &[], headers: &[] })?;
+        let after = crate::database::stored::position(name).filter(|_| !name.ends_with(".sig")).into_iter().flat_map(|(prefix, at)| (at + 1..=at + self.read_ahead).map(move |n| crate::database::stored::step_name(prefix, n)));
+        Ok((url, after.filter_map(|n| Some((n.clone(), self.kept("read", &n)?))).collect()))
     }
 
     /// One URL of a kind that's asked for each time.
@@ -143,6 +184,6 @@ impl Signer {
 
     /// Whether a URL is the network's bucket's, so a signer elsewhere can't send this device anywhere else.
     fn ours(&self, url: &str) -> bool {
-        url.strip_prefix(&self.base).is_some_and(|rest| rest.starts_with('/') || rest.starts_with('?'))
+        self.base.as_ref().is_none_or(|base| url.strip_prefix(base.as_str()).is_some_and(|rest| rest.starts_with('/') || rest.starts_with('?')))
     }
 }

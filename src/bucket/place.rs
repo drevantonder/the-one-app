@@ -4,29 +4,18 @@ use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use sha2::{Digest, Sha256};
 
 use crate::keys::hex;
 
-use super::{Bucket, Failed, Object, Trouble};
-
-/// One pool of connections for every request of a bucket's, so a request after the first reaches it over a connection
-/// already open, not a new TCP and TLS handshake: each is `timeout` seconds at most.
-fn pooled(pool: &'static std::sync::OnceLock<ureq::Agent>, timeout: u64) -> ureq::Agent {
-    pool.get_or_init(|| ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(timeout))).max_idle_connections_per_host(16).build().into()).clone()
-}
+use super::signed::pooled;
+use super::{Ask, Bucket, Failed, Object, Trouble};
 
 fn requests() -> ureq::Agent {
     static POOL: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
     pooled(&POOL, 300)
-}
-
-pub(super) fn signer_requests() -> ureq::Agent {
-    static POOL: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
-    pooled(&POOL, 30)
 }
 
 /// A folder's I/O error, as a disk's trouble, in words.
@@ -63,15 +52,6 @@ pub struct S3 {
 pub enum Auth {
     Keys { key_id: String, secret: String },
     Signed(Arc<super::Signer>),
-}
-
-/// A request to sign: its method, the object's name ("" for the bucket), its query, and the headers it must carry.
-#[derive(Debug)]
-pub struct Ask<'a> {
-    pub method: &'a str,
-    pub name: &'a str,
-    pub query: &'a [(&'a str, &'a str)],
-    pub headers: &'a [(&'a str, &'a str)],
 }
 
 impl std::fmt::Debug for S3 {

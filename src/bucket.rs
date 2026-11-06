@@ -123,12 +123,12 @@ pub fn scope_of(folder: &str) -> String {
 mod copied;
 #[cfg(feature = "node")]
 mod place;
-#[cfg(feature = "node")]
+#[cfg(not(target_family = "wasm"))]
 mod signed;
 #[cfg(feature = "node")]
 pub use copied::Copied;
-#[cfg(feature = "node")]
-pub use signed::{Address, Signer};
+#[cfg(not(target_family = "wasm"))]
+pub use signed::{Address, Ask, Signer, signer_requests};
 #[cfg(feature = "node")]
 pub use place::*;
 

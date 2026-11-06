@@ -8,28 +8,23 @@
 
 use one::config::YOURS;
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
-use anyhow::{Context, Result, bail, ensure};
-use one::bucket::{Bucket, Object};
-use serde_json::json;
-
-const AHEAD: u64 = 31;
+use anyhow::{Context, Result, bail};
+use one::bucket::{Bucket, Object, Signer, signer_requests};
 
 /// One agent for everything this device asks over HTTP, so connections are kept for the next request.
-pub(crate) static AGENT: LazyLock<ureq::Agent> =
-    LazyLock::new(|| ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(std::time::Duration::from_secs(30))).build().into());
+pub(crate) static AGENT: LazyLock<ureq::Agent> = LazyLock::new(signer_requests);
 
 pub struct Signed {
-    pub address: String,
-    pub secret: [u8; 32],
+    signer: Arc<Signer>,
     /// The steps read ahead and not yet asked for, by name: dropped once a read finds no step, the end of a log.
     ahead: Mutex<HashMap<String, Option<Object>>>,
 }
 
 impl Signed {
     pub fn new(address: String, secret: [u8; 32]) -> Signed {
-        Signed { address, secret, ahead: Mutex::default() }
+        Signed { signer: Arc::new(Signer::reading(address, ed25519_dalek::SigningKey::from_bytes(&secret))), ahead: Mutex::default() }
     }
 }
 
@@ -58,24 +53,12 @@ impl Bucket for Signed {
                 return Ok(found);
             }
         }
-        let (address, secret, asked) = (self.address.clone(), self.secret, name.to_string());
+        let (signer, asked) = (self.signer.clone(), name.to_string());
         let (found, next) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let name = &asked;
-            let item = match name.rsplit_once('/').and_then(|(prefix, at)| Some((prefix, at.parse::<u64>().ok()?))) {
-                Some((prefix, at)) if one::database::stored::step_name(prefix, at) == *name && at > 0 => json!({ "steps": prefix, "from": at, "to": at + AHEAD }),
-                _ => json!(name),
-            };
-            let key = ed25519_dalek::SigningKey::from_bytes(&secret);
-            let body = one::keys::signed_request(&key, one::protocol::URLS, json!({ "read": [item], "reads": one::database::READS }), crate::device::now());
-            let mut r = AGENT.post(format!("{address}/urls")).send_json(body).with_context(|| format!("Couldn't reach {YOURS}"))?;
-            let status = r.status().as_u16();
-            let out: serde_json::Value = r.body_mut().read_json().unwrap_or_default();
-            ensure!(status == 200, "{YOURS} didn't let this device read its data ({status}): {}", out["error"].as_str().unwrap_or(""));
-            let urls: Vec<(String, String)> = out["read"].as_object().into_iter().flatten().filter_map(|(n, u)| Some((n.clone(), u.as_str()?.to_string()))).collect();
-            let url = urls.iter().find(|(n, _)| n == name).map(|(_, u)| u.clone()).with_context(|| format!("{YOURS} didn't sign that"))?;
+            let (url, urls) = signer.reads_from(&asked).map_err(|e| anyhow::anyhow!("Couldn't read from {YOURS}: {e:#}"))?;
             // The ones after it, side by side with it; what they come to is for later, and a failure of theirs only theirs.
             Ok(std::thread::scope(|scope| {
-                let rest: Vec<_> = urls.iter().filter(|(n, _)| n != name).map(|(n, u)| scope.spawn(move || (n.clone(), download(u).ok()))).collect();
+                let rest: Vec<_> = urls.iter().map(|(n, u)| scope.spawn(move || (n.clone(), download(u).ok()))).collect();
                 let found = download(&url);
                 let next: Vec<(String, Option<Object>)> = rest.into_iter().filter_map(|t| t.join().ok()).filter_map(|(n, got)| Some((n, got?))).collect();
                 (found, next)
