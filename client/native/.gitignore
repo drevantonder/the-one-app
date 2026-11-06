@@ -2,3 +2,5 @@ target/
 gen/
 # Made by tauri-build from build.rs's list of commands.
 permissions/
+iphone/.tauri/
+iphone/Phone.xcodeproj/

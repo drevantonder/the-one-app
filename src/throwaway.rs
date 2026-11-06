@@ -219,7 +219,7 @@ fn usage() -> String {
   {CLI} throwaway sign-in          sign its CLI in as its person, with no browser
   {CLI} throwaway git <args>       git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone
   {CLI} throwaway cloudflare node deploy    run its Cloudflare node beside its Workers, as Cloudflare would
-  {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, linux, mac, android or windows
+  {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows
   {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
   {CLI} throwaway client cli <command>    a command from a computer that's only a device of its person's (no node), asking
                                    their nodes over iroh in run priority's order, as every client does: the Cloudflare
@@ -470,11 +470,16 @@ fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
         std::fs::write(dir.join("pids"), kept)?;
     }
     let _ = std::fs::remove_file(dir.join("pid"));
-    // The Mac app it started there (`client mac`).
+    // The Mac app it started there (`client mac`), and the simulator it made there for the iPhone app (`client iphone`).
     if clients && let Ok(host) = std::fs::read_to_string(dir.join("mac")) {
         let job = format!("gui/$(id -u)/app.{CLI}.mac.throwaway");
         let _ = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host.trim(), &format!("launchctl bootout {job}")]).output();
         let _ = std::fs::remove_file(dir.join("mac"));
+    }
+    if clients && let Ok(host) = std::fs::read_to_string(dir.join("iphone")) {
+        let sim = format!("'{CLI} throwaway'");
+        let _ = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host.trim(), &format!("xcrun simctl shutdown {sim}; xcrun simctl delete {sim}")]).output();
+        let _ = std::fs::remove_file(dir.join("iphone"));
     }
     if delete {
         // Its Linux devices, borrowed or spare, are its own containers on the machine's runtime, outside its folder.
@@ -698,9 +703,9 @@ fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, res
             }
             linux(dir, checkout, settings, person.as_deref())?
         }
-        Some("mac") => {
-            anyhow::ensure!(person.is_none(), "the Mac client signs in only as the throwaway network's first person: use web, linux or android for someone else");
-            mac(dir, checkout, settings)?
+        Some(kind @ ("mac" | "iphone")) => {
+            anyhow::ensure!(person.is_none(), "the {kind} client signs in only as the throwaway network's first person: use web, linux or android for someone else");
+            apple(dir, checkout, settings, kind == "iphone")?
         }
         Some(kind @ ("android" | "windows")) => {
             if let Some(name) = &person {
@@ -709,7 +714,7 @@ fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, res
             }
             device_client(dir, checkout, settings, kind, person.as_deref())?
         }
-        _ => bail!("which client? {CLI} throwaway client web, linux, mac, android, windows or cli, with --as <name> for someone else"),
+        _ => bail!("which client? {CLI} throwaway client web, linux, mac, iphone, android, windows or cli, with --as <name> for someone else"),
     }
     println!("Ready in {}s.", started.elapsed().as_secs());
     Ok(())
@@ -1093,10 +1098,12 @@ fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, pers
 /// reaching the throwaway network at its address through ports ssh forwards there. Signed in as the throwaway network's
 /// first person as linux() is: its Sign In pressed, the sign-in approved as them and opened there, its code approved.
 /// What it keeps stays on the Mac, so a new build is still signed in; it's started again each time.
-fn mac(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings) -> Result<()> {
+/// The Mac app, or with `iphone` the iPhone app on a simulator, of this checkout's build, built on the Mac `MAC` names
+/// (ssh's `mac` by default), signed in to the throwaway network as its first person.
+fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool) -> Result<()> {
     let address = settings.address.as_str();
     let host = std::env::var("MAC").unwrap_or_else(|_| "mac".into());
-    std::fs::write(dir.join("mac"), &host)?;
+    std::fs::write(dir.join(if iphone { "iphone" } else { "mac" }), &host)?;
     let ssh = |command: &str| -> Result<String> {
         let out = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", &host, command]).output()?;
         anyhow::ensure!(out.status.success(), "on {host}: {command}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -1127,13 +1134,18 @@ fn mac(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings) -> Res
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{host}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
     eprintln!("Building client/native on {host} (dev profile; the first time takes minutes)…");
-    let log = ssh(&format!("cd {there} && PATH=$HOME/.cargo/bin:$PATH client/native/mac/throwaway.sh '{address}' {control}"))?;
-    let log = log.lines().last().unwrap_or_default().to_string();
+    let script = if iphone { "iphone" } else { "mac" };
+    let said = ssh(&format!("cd {there} && PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH client/native/{script}/throwaway.sh '{address}' {control}"))?;
+    // The iPhone's says its simulator too.
+    let (sim, log) = match said.lines().last().unwrap_or_default().rsplit_once(' ') {
+        Some((sim, log)) if iphone => (sim.to_string(), log.to_string()),
+        _ => (String::new(), said.lines().last().unwrap_or_default().to_string()),
+    };
     let eval = |js: &str| ssh(&format!("curl -s -m 5 -d {} http://127.0.0.1:{control}/eval", shell_quote(js))).map(drop);
     let start = Instant::now();
     let (mut signed, mut approved) = (false, false);
     loop {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(180), "the Mac app didn't sign in: {host}:{log} says why");
+        anyhow::ensure!(start.elapsed() < Duration::from_secs(180), "the app didn't sign in: {host}:{log} says why");
         std::thread::sleep(Duration::from_secs(2));
         let said = ssh(&format!("cat '{log}' 2>/dev/null || true"))?;
         if said.lines().any(|l| l.trim() == "Let in.") {
@@ -1156,6 +1168,15 @@ fn mac(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings) -> Res
             approve_code(dir, code)?;
             approved = true;
         }
+    }
+    if iphone {
+        println!(
+            "The iPhone app of this build is signed in to the throwaway network, on a simulator of its own on {host} ({sim}).
+  See it: ssh {host} xcrun simctl io {sim} screenshot /tmp/shot.png
+  Use it: run JavaScript in its page there: ssh {host} curl -d '<js>' http://127.0.0.1:{control}/eval; open a link: ssh {host} xcrun simctl openurl {sim} '{CLI}://…'
+  What it said: {host}:{log}; {CLI} throwaway stop shuts the simulator down and deletes it"
+        );
+        return Ok(());
     }
     println!(
         "The Mac app of this build is signed in to the throwaway network, on {host} beside the app there (its menu bar item, its window).

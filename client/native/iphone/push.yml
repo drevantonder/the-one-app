@@ -1,0 +1,43 @@
+# What a build with push adds (project.yml includes it when build.sh sets PUSH): the notification extension, which
+# opens what's pushed to this device with its key, from the Keychain group it shares with the app.
+targets:
+  Phone:
+    dependencies:
+      - target: Notifications
+    entitlements:
+      properties:
+        aps-environment: development
+    info:
+      properties:
+        Push: true
+  Notifications:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Notifications
+      - ../target/iphone/Client/one_client_ffi.swift
+    dependencies:
+      # The client library (client/ffi), for opening a note, which build.sh makes.
+      - framework: ../target/iphone/Client/Client.xcframework
+        embed: false
+      - sdk: SystemConfiguration.framework
+      - sdk: Network.framework
+    settings:
+      base:
+        PRODUCT_NAME: Notifications
+        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.phone.notifications
+    entitlements:
+      path: ../target/iphone/Notifications.entitlements
+      properties:
+        com.apple.security.application-groups: ["group.app.${CONFIG_CLI}.phone"]
+    info:
+      path: ../target/iphone/Notifications-Info.plist
+      properties:
+        CFBundleShortVersionString: 0.1.0
+        CFBundleVersion: "${BUILD_NUMBER}"
+        CFBundleDisplayName: ${CONFIG_NAME}
+        CLI: ${CONFIG_CLI}
+        KeychainGroup: group.app.${CONFIG_CLI}.phone
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService

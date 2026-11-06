@@ -296,7 +296,6 @@ impl Parts {
                         parts.apps.push(app);
                     }
                 }
-                Some("apple") => parts.mac = true,
                 Some("service") => parts.service = true,
                 // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
@@ -1198,10 +1197,11 @@ cat > phone.sh <<'JOB'
 set -e
 c="$HOME/Library/Caches/{CLI}"
 {checkout}
-# Only what the iPhone app is made of: the node isn't in it, and each network closes the app on the phone.
+# Only what the iPhone app is made of: the Mac app's but for what's the Mac's own (its window's code, its node's
+# services and helpers, apps), and each network closes the app on the phone.
 last=$(cat "$c/phone.built" 2>/dev/null || true)
-if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- apple ':!apple/Mac' vendor/phosphor {CONFIG_FILE} 2>/dev/null; then exit 3; fi
-CONFIG="$config" client/native/disk.sh retry apple/build-phone.sh device "$c/phone"
+if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- . ':!client/native/mac' ':!client/native/windows' ':!service' ':!apps' ':!docs' ':!tests' ':!android' ':!*.md' 2>/dev/null; then exit 3; fi
+CONFIG="$config" client/native/disk.sh retry client/native/iphone/build.sh device "$c/phone"
 JOB
 cat > follow.sh <<'JOB'
 # launchd runs this in the login shell, zsh on a Mac; the job control it uses is bash's.
@@ -1278,7 +1278,7 @@ config="$c/config/{CONFIG_FILE}""#
 cd "$c/src"
 git fetch -q --tags --force origin
 git checkout -q --detach --force "{commit}"
-git clean -qfdx -e /target -e /client/native/target -e /apple/build
+git clean -qfdx -e /target -e /client/native/target
 # What the builds leave in target/ is kept in bounds, and a Mac with no room says so here, not in a link step.
 client/native/disk.sh prune
 {config}"#
