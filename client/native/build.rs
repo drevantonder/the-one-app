@@ -1,9 +1,19 @@
 // The window's files are the web client's (one::web), written where Tauri takes its frontend from (`gen/web`), with
 // the page's policy letting it reach the app (Tauri's `ipc:`). The app is named by the custom build (config.toml), as
 // Tauri's own config says it (`TAURI_CONFIG`, which tauri-build and generate_context! both read). The app's own commands
-// are listed, so each needs a permission a capability grants (capabilities/window.json): left unlisted, Tauri would let
-// any page call them.
+// (src/commands.rs) are listed, so each needs a permission, which the config's one capability grants the app's own
+// windows: left unlisted, Tauri would let any page call them.
 use std::path::Path;
+
+include!("src/commands.rs");
+
+macro_rules! names {
+    ($($command:ident),*) => {
+        &[$(stringify!($command)),*]
+    };
+}
+
+const COMMANDS: &[&str] = commands!(names);
 
 fn main() {
     let dist = Path::new("gen/web");
@@ -58,6 +68,14 @@ fn main() {
     let config = serde_json::json!({
         "productName": one::config::NAME,
         "identifier": tauri_identifier,
+        // The window's own page, and the menu bar panel's and a widget's (the same page), alone may ask the app's
+        // commands. Screens are sandboxed frames in it with no origin of their own, which reach none: they ask the page,
+        // which answers each as its app.
+        "app": { "windows": [], "security": { "csp": null, "capabilities": [{
+            "identifier": "window",
+            "windows": ["main", "panel", "widget"],
+            "permissions": COMMANDS.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).collect::<Vec<_>>(),
+        }] } },
         "bundle": { "icon": icons },
         // `<cli>://open?app=&screen=&params=&scope=`, as the address's /back passes a sign-in elsewhere on to the app; on
         // Android also the links to the network's address, which its manifest lets open the app (android/app/build.gradle.kts).
@@ -68,8 +86,8 @@ fn main() {
     println!("cargo:rustc-env=TAURI_CONFIG={config}");
     println!("cargo:rustc-env=IDENTIFIER={}", identifier(platform));
     println!("cargo:rerun-if-env-changed=CONFIG");
-    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "signs", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit", "badge", "computer_use", "pair", "haptic", "scan", "menu", "appearance", "menubar"]);
-    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands)).expect("the app's build")
+    println!("cargo:rerun-if-changed=src/commands.rs");
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS))).expect("the app's build")
 }
 
 /// The icon as Windows wants a program's: an .ico of each size it draws, from the icon drawn on Apple's Mac grid (an

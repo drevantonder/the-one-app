@@ -19,8 +19,8 @@ iPhone's `app.<cli>.phone` with `.widgets`, `.notifications` and the App Group `
 Keychain group), Android's `app.<cli>.android` signed with the debug key it was signed with (`Host.takeOver`), Windows'
 package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a device would sign in again as a new one.
 
-- Linux: `one release` builds it, install.sh puts it on a desktop. Its tray item shows only its menu, so the panel opens
-  only by the `panel` command.
+- Linux: `one release` builds it, install.sh puts it on a desktop. Its tray item shows only its menu (Linux's tray items
+  show no other), so it has no panel.
 - Mac: `mac/build.sh` (`one update`, `one release`, through `disk.sh`), the same bundle as before: the window, the CLI,
   the node and its launch agent, services, helpers.
 - iPhone: `iphone/build.sh` for the simulator, the paired iPhone (`one update`) or TestFlight; the Swift in `Sources/` is a

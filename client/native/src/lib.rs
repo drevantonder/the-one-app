@@ -5,6 +5,8 @@
 //! browser. What the app adds is what a page can't do: this device's key in the OS's secret store, signing in through
 //! the system's browser, notifications, the clipboard, files, and links outside.
 
+#[macro_use]
+mod commands;
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -912,13 +914,6 @@ fn quit() {
     app().handle.exit(0);
 }
 
-/// The panel, shown under the menu bar or tray item at `at` (its place and size on the screen, physical), or hidden if
-/// it shows; with none, at the top right.
-#[tauri::command]
-fn panel() {
-    toggle_panel(None);
-}
-
 /// The panel's size, as the Mac app's was wide.
 #[cfg(desktop)]
 const PANEL: (f64, f64) = (340.0, 560.0);
@@ -1304,7 +1299,12 @@ fn control(port: u16) {
 
 /// Every command a page may ask the app.
 fn commands() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, signs, removed, sign_out, notify, copy, open, save, changed, main, login, computer_use, pair, quit, panel, fit, badge, haptic, scan, menu, appearance, menubar]
+    macro_rules! handler {
+        ($($command:ident),*) => {
+            tauri::generate_handler![$($command),*]
+        };
+    }
+    commands!(handler)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
