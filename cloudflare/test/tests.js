@@ -3,7 +3,7 @@ import { b64u, ed25519Public, random, signedRequest } from "../shared/crypto.js"
 import { READS, URLS } from "../shared/protocol.js";
 import signer from "../signer/worker.js";
 import { presign } from "../shared/s3.js";
-import { verify } from "../shared/token.js";
+import { Issuer, verify } from "../shared/token.js";
 import { Copies } from "../mcp/copies.js";
 import { apns, encrypt, fcm, webPush, wns } from "../push/senders.js";
 
@@ -63,6 +63,11 @@ export default {
     await fails(async () => verify(await sign({ iss: "https://b", sub: "u", exp }), { keys: [jwk] }, "https://a"), "another issuer's token");
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp: exp - 120 }), { keys: [jwk] }, "https://a"), "an expired token");
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp }, "k2"), { keys: [jwk] }, "https://a"), "a token from an unknown key");
+    // A key sign-in rotated in after the keys were fetched is picked up by asking again, once, not after five minutes.
+    let asked = 0;
+    const rotating = new Issuer("https://a", async () => Response.json({ keys: asked++ ? [jwk] : [] }));
+    equal((await rotating.verify(await sign({ iss: "https://a", sub: "u", exp }))).sub, "u", "a token from a key published since the last fetch");
+    equal(asked, 2, "asked for the keys again once");
     await remoteMcpClientsSecrets();
     await browsersReadStepsFromTheBucket();
     await stepsAreCreatedInTurn();
