@@ -62,3 +62,58 @@ fn the_relays_wasm_is_built_from_the_sources_beside_it() {
     let wasm = version(relay.join("protos/Cargo.lock"), "iroh-base");
     assert_eq!(nodes, wasm, "the nodes link iroh-relay {nodes}, but relay/protos holds its files at {wasm}: copy them again, then run relay/build.sh");
 }
+
+/// The Cloudflare node's WebAssembly holds its own exports and one-client's (a class `Foo`'s methods are exported as
+/// `foo_<method>`, so a `foo_bar` function of the node's is the same name): wasm-bindgen links either one in place of the
+/// other, and the node answers with the wrong code. Read from the sources, which is cheaper than building the wasm.
+#[test]
+fn the_cloudflare_nodes_wasm_has_each_export_name_once() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let out = std::process::Command::new("git").args(["ls-files", "--cached", "--exclude-standard", "client/src", "cloudflare/node/src"]).current_dir(root).output().expect("git ls-files");
+    let snake = |name: &str| {
+        let mut out = String::new();
+        for (i, c) in name.chars().enumerate() {
+            if c.is_uppercase() && i > 0 && !out.ends_with('_') {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+        }
+        out
+    };
+    let fn_name = |line: &str| line.trim().strip_prefix("pub ")?.trim_start_matches("async ").strip_prefix("fn ")?.split(['(', '<']).next().map(str::to_string);
+    let mut seen = std::collections::BTreeMap::<String, String>::new();
+    let mut twice = Vec::new();
+    for path in String::from_utf8(out.stdout).unwrap().lines().filter(|p| p.ends_with(".rs")) {
+        let text = std::fs::read_to_string(root.join(path)).unwrap();
+        let mut exported = false;
+        let mut class = None;
+        for line in text.lines() {
+            let found = if line.starts_with("#[wasm_bindgen") {
+                exported = true;
+                None
+            } else if let Some(class) = class.as_deref().filter(|_| line.starts_with("    pub ")) {
+                fn_name(line).map(|f| format!("{}_{f}", snake(class)))
+            } else if line.starts_with("pub ") && exported {
+                fn_name(line)
+            } else {
+                None
+            };
+            if let Some(name) = found {
+                let here = format!("{path}: {line}");
+                if let Some(before) = seen.insert(name.clone(), here.clone()) {
+                    twice.push(format!("{name}, in {before} and {here}"));
+                }
+            }
+            if line.starts_with("impl ") {
+                class = exported.then(|| line.trim_start_matches("impl ").split([' ', '<']).next().unwrap().to_string());
+                exported = false;
+            } else if line == "}" {
+                class = None;
+            } else if !line.starts_with('#') && !line.starts_with("///") && !line.starts_with("//") {
+                exported = false;
+            }
+        }
+    }
+    assert!(twice.is_empty(), "exported twice from the Cloudflare node's WebAssembly (rename one):\n{}", twice.join("\n"));
+    assert!(seen.contains_key("keyring_fetch") && seen.contains_key("device_fetch"), "the sources' wasm exports weren't found: {:?}", seen.keys().collect::<Vec<_>>());
+}
