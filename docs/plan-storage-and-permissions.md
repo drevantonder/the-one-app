@@ -131,7 +131,6 @@ Left, and why:
 - **`members.js`** stays: it builds the content of the steps a browser signs (`database::content`'s, which `tests/contracts.rs` holds it to).
 - **`src/key/`, `src/blob/` and `src/call/`** are each one file or the node's today, so they wait until there's more than one file to put there.
 - **The frozen logs** (`<scope>/node/log/`) stay in the bucket untouched, as history: nothing reads them, and backups copy them as any database ("history").
-- **Sign-in's rename of its requests' `genesis` column** runs once per network as its Durable Object starts; it goes once both have.
 
 ## The scope database's tables
 

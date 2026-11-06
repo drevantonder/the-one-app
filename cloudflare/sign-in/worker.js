@@ -182,8 +182,6 @@ export class Auth extends DurableObject {
     // `by_link`, whether its sign-in was finished from a link opened elsewhere (`signsInHere`); and `told`, when its
     // person was pushed that it wants in.
     sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, root text, welcome text, place text, device text, by_link integer, told integer)");
-    // Its `root` was `genesis` until the network's root was called that: renamed once.
-    if (sql.exec("pragma table_info(requests)").toArray().some((c) => c.name === "genesis")) sql.exec("alter table requests rename column genesis to root");
     // A person's devices, by key, as they asked to join here or said they're theirs, for pushes.
     sql.exec("create table if not exists devices (key text primary key, user text not null, at integer not null)");
     // Devices whose request was turned down, whose person isn't pushed again when they ask again.
