@@ -28,10 +28,10 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::collections::BTreeSet;
 use one::bucket::{Bucket, Copied, Failed, Object, Trouble};
-use one::database::stored::{Db, Keys, Missing, execute};
+use one::database::stored::{Contended, Db, Keys, MayHaveBeen, Missing, execute};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::json;
@@ -61,13 +61,19 @@ struct Link {
     /// When the bucket wrote each object, in ms since `start`: none for what the forger left.
     born: Arc<Mutex<BTreeMap<String, u64>>>,
     start: tokio::time::Instant,
+    seed: u64,
 }
 
 impl Link {
     fn new(seed: u64) -> Link {
         let rng = Arc::new(Mutex::new(StdRng::seed_from_u64(seed)));
         let now = || Arc::new(Mutex::new(tokio::time::Instant::now()));
-        Link { objects: Default::default(), rng, going: Default::default(), steady: false, down: now(), refusing: now(), failed: Default::default(), born: Default::default(), start: tokio::time::Instant::now() }
+        Link { objects: Default::default(), rng, going: Default::default(), steady: false, down: now(), refusing: now(), failed: Default::default(), born: Default::default(), start: tokio::time::Instant::now(), seed }
+    }
+
+    /// The key `device` signs its steps with: the seed's, so a seed is the whole of its run.
+    fn signer(&self, device: usize) -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(blake3::hash(format!("{} signs as {device}", self.seed).as_bytes()).as_bytes())
     }
 
     /// The same bucket over a link that fails nothing: a new device's read of it, which on a device's own copy goes
@@ -144,14 +150,14 @@ impl Link {
             let attempt = self.rng.lock().unwrap().r#gen::<i64>();
             let (wrote, unanswered) = UNANSWERED
                 .scope(Default::default(), async {
-                    let wrote = tokio::time::timeout(self.patience(), db.write(bucket, write(id, device, attempt))).await.unwrap_or_else(|_| bail!("given up on"));
+                    let wrote = tokio::time::timeout(self.patience(), db.write(bucket, write(id, device, attempt))).await.unwrap_or_else(|_| Err(GivenUp.into()));
                     (wrote, UNANSWERED.with(|u| u.get()))
                 })
                 .await;
             if let Err(e) = &wrote {
-                assert!(unanswered || !format!("{e:#}").contains("may have been"), "a write said it may have been made, but the bucket answered all it sent: {e:#}");
+                assert!(unanswered || e.downcast_ref::<MayHaveBeen>().is_none(), "a write said it may have been made, but the bucket answered all it sent: {e:#}");
             }
-            if wrote.as_ref().is_err_and(|e| !format!("{e:#}").contains("given up on") && !format!("{e:#}").contains("may have been")) {
+            if wrote.as_ref().is_err_and(|e| e.downcast_ref::<GivenUp>().is_none() && e.downcast_ref::<MayHaveBeen>().is_none()) {
                 self.failed.lock().unwrap().push(attempt);
             }
             match wrote {
@@ -168,6 +174,24 @@ impl Link {
 tokio::task_local! {
     /// Whether a create the attempt running sent went unanswered.
     static UNANSWERED: std::cell::Cell<bool>;
+}
+
+/// A write given up on, as a call that runs out of time is: what it sent goes on.
+#[derive(Debug)]
+struct GivenUp;
+
+impl std::fmt::Display for GivenUp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("given up on")
+    }
+}
+
+impl std::error::Error for GivenUp {}
+
+/// Whether the link is to blame for `err`: it dropped a request, or the bucket wouldn't let the device write for a
+/// while; a write was given up on, or left unanswered; or the database changed under all its tries.
+fn the_links_fault(err: &anyhow::Error) -> bool {
+    matches!(Trouble::of(err), Some(Trouble::Unreachable | Trouble::Refused)) || err.downcast_ref::<GivenUp>().is_some() || err.downcast_ref::<MayHaveBeen>().is_some() || err.downcast_ref::<Contended>().is_some()
 }
 
 /// A request that failed on the link, with no answer from the bucket: it may have done what it asked.
@@ -289,7 +313,9 @@ async fn tidier(link: Link, keys: Keys, done: Arc<std::sync::atomic::AtomicBool>
     while !done.load(std::sync::atomic::Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(2_000)).await;
         let now = link.start.elapsed().as_millis() as u64 + one::database::stored::KEEP_STEPS_FOR - KEPT_FOR_MS;
-        let _ = one::database::stored::tidy(&link, PREFIX, &keys, &BTreeSet::new(), now).await;
+        if let Err(err) = one::database::stored::tidy(&link, PREFIX, &keys, &BTreeSet::new(), now).await {
+            assert!(the_links_fault(&err), "the tidier failed, not the link: {err:#}");
+        }
     }
 }
 
@@ -313,7 +339,7 @@ async fn retry<T>(mut f: impl AsyncFnMut() -> Result<T>) -> T {
     for _ in 0..10_000 {
         match f().await {
             Ok(v) => return v,
-            Err(err) if !format!("{err:#}").contains("the link dropped") && !format!("{err:#}").contains("given up on") && !format!("{err:#}").contains("changed too often") && !format!("{err:#}").contains("may have been") && !format!("{err:#}").contains("won't let") => panic!("it failed, not the link: {err:#}"),
+            Err(err) if !the_links_fault(&err) => panic!("it failed, not the link: {err:#}"),
             Err(err) => last = Some(err),
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -344,7 +370,7 @@ fn keys(seed: u64) -> (Keys, Keys) {
 
 /// Opens the database and brings it to the schema as a device does: handed `newer`, epoch 2, when it meets a step under
 /// it, as its node is once it finds that epoch's entry; never handed it, it doesn't open.
-async fn open(link: &Link, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
+async fn open(link: &Link, device: usize, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
     let ahead = |e: &anyhow::Error| e.is::<one::database::stored::Ahead>();
     let mut keys = older.clone();
     let mut db = loop {
@@ -358,7 +384,7 @@ async fn open(link: &Link, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
             None => keys = newer?.clone(),
         }
     };
-    db.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    db.sign_as(link.signer(device));
     while !retry(async || match db.migrate(link, &[SCHEMA.to_string()]).await {
         Err(e) if ahead(&e) && db.keys().len() == 1 => Ok(false),
         other => other.map(|()| true),
@@ -408,7 +434,7 @@ async fn run(seed: u64) {
     for device in 0..DEVICES {
         let (link, older, newer) = (link.clone(), older.clone(), newer.clone());
         devices.push(tokio::task::spawn_local(async move {
-            let mut db = open(&link, &older, Some(&newer)).await.expect("handed every epoch");
+            let mut db = open(&link, device, &older, Some(&newer)).await.expect("handed every epoch");
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;
                 write_handed(&link, &mut db, id, device, changes && i >= WRITES / 2, &newer).await;
@@ -421,7 +447,7 @@ async fn run(seed: u64) {
     let stale = changes.then(|| {
         let (link, older) = (link.clone(), older.clone());
         tokio::task::spawn_local(async move {
-            let mut db = open(&link, &older, None).await?;
+            let mut db = open(&link, DEVICES, &older, None).await?;
             let mut own = None;
             for i in 0..WRITES {
                 let at = db.at();
@@ -477,7 +503,7 @@ async fn run(seed: u64) {
     assert!(link.objects.lock().unwrap().keys().any(|k| k.contains("/copy/")), "seed {seed}: copies were written as steps piled up");
     // And a write after it all lands after every step.
     let mut last = opened(&link.steady(), &all).await.unwrap();
-    last.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    last.sign_as(link.signer(DEVICES + 1));
     let before = last.at();
     link.steady().write(&mut last, &link.steady(), u64::MAX >> 2, 0).await.unwrap();
     assert!(last.at() > before && state(&opened(&link.steady(), &all).await.unwrap()) == state(&last), "seed {seed}: a write after the steps went lands after the last");
@@ -544,7 +570,7 @@ async fn run_copied(seed: u64) {
         devices.push(tokio::task::spawn_local(async move {
             let here = &copies[device];
             let mut db = retry(async || opened(here, &key).await).await;
-            db.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            db.sign_as(link.signer(device));
             retry(async || db.migrate(here, &[SCHEMA.to_string()]).await).await;
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;

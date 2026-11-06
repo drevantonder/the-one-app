@@ -105,6 +105,30 @@ impl std::fmt::Display for Gone {
 
 impl std::error::Error for Gone {}
 
+/// What a write or a schema change stopped at: the database changed under every try, so nothing was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Contended(pub String);
+
+impl std::fmt::Display for Contended {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Contended {}
+
+/// What an object that wasn't answered for was left as: it may have been written, so look before trying again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MayHaveBeen;
+
+impl std::fmt::Display for MayHaveBeen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the bucket didn't answer whether it was written, so it may have been: look before trying again")
+    }
+}
+
+impl std::error::Error for MayHaveBeen {}
+
 /// A database's keys, by the epoch each opens.
 pub type Keys = BTreeMap<u32, [u8; 32]>;
 
@@ -573,7 +597,7 @@ impl Db {
                 self.written(bucket, &written).await;
             }
         }
-        bail!("{} changed too often to change its schema", self.prefix)
+        return Err(Contended(format!("{} changed too often to change its schema", self.prefix)).into())
     }
 
     /// The schema changes this database has had.
@@ -618,7 +642,7 @@ impl Db {
                 return Ok(result);
             }
         }
-        bail!("{} changed too often to write to", self.prefix)
+        return Err(Contended(format!("{} changed too often to write to", self.prefix)).into())
     }
 
     /// After its own step under `epoch` was created at the next position, signed in it from `from` if it says.
@@ -939,7 +963,6 @@ const ANSWERED_WITHIN_MS: u64 = 60_000;
 /// took that for a lost race would run again on top of itself, and one told it failed would be there after all. One the
 /// bucket refused, or that never left, isn't there, unless one sent before is.
 pub async fn created(bucket: &impl Bucket, name: &str, bytes: &[u8]) -> Result<bool> {
-    let may_have = "the bucket didn't answer whether it was written, so it may have been: look before trying again";
     let (mut sent, mut wait, mut waited) = (false, 100, 0);
     loop {
         match bucket.create(name, bytes).await {
@@ -948,14 +971,14 @@ pub async fn created(bucket: &impl Bucket, name: &str, bytes: &[u8]) -> Result<b
             // One sent before, whose answer was lost, may be what's there.
             Ok(false) => match bucket.get(name).await {
                 Ok(o) => return Ok(o.with_context(|| format!("{name} went once written"))?.bytes == bytes),
-                Err(err) if !unanswered(&err) => return Err(err.context(may_have)),
+                Err(err) if !unanswered(&err) => return Err(err.context(MayHaveBeen)),
                 Err(_) => {}
             },
-            Err(err) if !unanswered(&err) => return Err(if sent { err.context(may_have) } else { err }),
+            Err(err) if !unanswered(&err) => return Err(if sent { err.context(MayHaveBeen) } else { err }),
             Err(_) => sent = true,
         }
         if waited >= ANSWERED_WITHIN_MS {
-            bail!("{may_have}");
+            return Err(MayHaveBeen.into());
         }
         bucket.wait(wait).await;
         waited += wait;
