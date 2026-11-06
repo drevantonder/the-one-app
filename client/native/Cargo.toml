@@ -10,7 +10,7 @@ publish = false
 
 [lib]
 name = "one_native"
-crate-type = ["staticlib", "rlib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
 name = "one-native"
@@ -37,9 +37,7 @@ tauri-utils = { version = "2", features = ["build"] }
 # `custom-protocol`: the window's files are the app's own, built in, as the Tauri CLI's builds have them; without it,
 # Tauri takes every build for development, which on a phone fetches them from a dev server.
 tauri = { version = "2", features = ["tray-icon", "image-png", "custom-protocol"] }
-tauri-plugin-opener = "2"
-# Where a file a screen gives is saved; and what a screen copies, which a web view takes only with a tap.
-tauri-plugin-dialog = "2"
+# What a screen copies, which a web view takes only with a tap.
 tauri-plugin-clipboard-manager = "2"
 # Links that open the app (`<cli>://open?…`), and on computers, one app at a time, a second start (with a link or none)
 # showing the first; the window as big and where it was left.
@@ -63,8 +61,9 @@ windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "A
 windows-collections = "0.3"
 windows-registry = "0.6"
 
-# The OS's secret store for the device key and the refresh token: the Secret Service, the Credential Manager.
-[target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
+# The OS's secret store for the device key and the refresh token: the Secret Service, the Credential Manager (Android's
+# is its Keystore, through Kotlin: src/android.rs).
+[target.'cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))'.dependencies]
 keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
 
 # Apple's own (src/secrets.rs, src/mac.rs): the Keychain in the group the extensions read, Info.plist, and the Mac's
@@ -75,9 +74,19 @@ core-foundation = "0.10"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSUserDefaults", "NSString", "NSObject", "NSArray"] }
 
-# Notifications, but on an iPhone, whose are its own (src/iphone.rs): the plugin's would take them from it.
-[target.'cfg(not(target_os = "ios"))'.dependencies]
+# Notifications, but on a phone, whose are its own (src/iphone.rs, src/android.rs): the plugin's would take them from it.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 tauri-plugin-notification = "2"
+
+# Where a file a screen gives is saved, and links opened outside; Android's are its own (src/android.rs).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+
+# Android's own (src/android.rs): Kotlin's Keystore, widgets and pushes call the app's library, and it calls them back,
+# through JNI. Tauri already builds it (wry).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

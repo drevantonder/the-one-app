@@ -1,5 +1,5 @@
 // The bridge every app screen gets as `one`. Inside a shell, the shell answers it (WKWebView's
-// `one` message handler, or `__oneShell.postMessage` where another web view puts one, as Android's and Windows' do); in a sandboxed frame (the web client's, a chat's), the page
+// `one` message handler, or `__oneShell.postMessage` where another web view puts one); in a sandboxed frame (the web client's, a chat's), the page
 // holding the frame answers its messages. A screen never knows which. The web client's own page loads it too,
 // answering it itself (`__one.host`).
 (() => {
@@ -218,7 +218,7 @@
     // A large title at the top of a screen, as iOS draws one: the shell's own title stays empty while it shows, and is
     // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so
     // calling it once is enough; put what it returns first, or draw a `.large-title` of its own. A shell whose bar always
-    // shows the title (Android's, `__oneShell.bar`) hides it and takes the text.
+    // shows the title (`__oneShell.bar`) hides it and takes the text.
     largeTitle: (text) => {
       const follows = window.IntersectionObserver && !window.__oneShell?.bar;
       if (window.__oneShell?.bar) one.title(text);

@@ -51,12 +51,17 @@ fn main() {
         windows_icon(&dist.join("icon.png"), Path::new("gen/icon.ico"));
         icons.push("gen/icon.ico");
     }
+    // Android's Kotlin is one package, `app.client` (android/app/src/main/kotlin), which Tauri's web view's own is made in
+    // and its library's functions are named by: so Tauri's identifier there, which says that, isn't the app's
+    // (`app.<cli>.android`, the Gradle project's applicationId).
+    let tauri_identifier = if platform == "android" { "app.client".to_string() } else { identifier(platform) };
     let config = serde_json::json!({
         "productName": one::config::NAME,
-        "identifier": identifier(platform),
+        "identifier": tauri_identifier,
         "bundle": { "icon": icons },
-        // `<cli>://open?app=&screen=&params=&scope=`, as the address's /back passes a sign-in elsewhere on to the app.
-        "plugins": { "deep-link": { "desktop": { "schemes": [one::config::CLI] } } },
+        // `<cli>://open?app=&screen=&params=&scope=`, as the address's /back passes a sign-in elsewhere on to the app; on
+        // Android also the links to the network's address, which its manifest lets open the app (android/app/build.gradle.kts).
+        "plugins": { "deep-link": { "desktop": { "schemes": [one::config::CLI] }, "mobile": mobile_links() } },
     });
     // SAFETY: nothing else runs in this build script.
     unsafe { std::env::set_var("TAURI_CONFIG", config.to_string()) };
@@ -116,4 +121,18 @@ fn copy(from: &Path, to: &Path) {
             std::fs::copy(entry.path(), to.join(&name)).unwrap();
         }
     }
+}
+
+/// What Android passes the app as links: its own scheme, and `https` links to the hosts of the custom build's address and
+/// `LINKS`'s (comma-separated), as the manifest's filters (android/app/build.gradle.kts) let in.
+fn mobile_links() -> Vec<serde_json::Value> {
+    println!("cargo:rerun-if-env-changed=LINKS");
+    let mut links = vec![serde_json::json!({ "scheme": [one::config::CLI] })];
+    let more = std::env::var("LINKS").unwrap_or_default();
+    for address in std::iter::once(one::config::ADDRESS).chain(more.split(',')) {
+        if let Some(host) = address.trim().strip_prefix("https://").map(|h| h.trim_end_matches('/').to_string()).filter(|h| !h.is_empty()) {
+            links.push(serde_json::json!({ "scheme": ["https"], "host": host }));
+        }
+    }
+    links
 }

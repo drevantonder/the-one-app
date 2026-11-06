@@ -8,8 +8,22 @@
     const text = typeof err === "string" ? err : err?.message || String(err);
     return Object.assign(new Error(text), text.startsWith("Sign in again") ? { signedOut: true } : {});
   };
+  // On Android, Tauri's script and `ipc` are in every frame, a screen's too: the app's commands carry a token only this frame
+  // is given, by a web message listener that answers the page's own frame alone (MainActivity.kt). Without the listener
+  // (an old web view), none of it works.
+  const android = /Android/.test(navigator.userAgent);
+  const bridge = window.oneBridge;
+  const token = bridge
+    ? new Promise((resolve) => {
+        bridge.onmessage = (e) => resolve(e.data);
+        bridge.postMessage("token");
+      })
+    : null;
   // Each command's refusal, as an Error the page can say.
-  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args).catch((e) => Promise.reject(fail(e)));
+  const invoke = async (cmd, args) => {
+    if (android && !token) throw fail("Update Android System WebView in Google Play, then open this again.");
+    return window.__TAURI_INTERNALS__.invoke(cmd, args, token ? { headers: { "x-one": await token } } : undefined).catch((e) => Promise.reject(fail(e)));
+  };
   const base64 = (bytes) => {
     let s = "";
     for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -17,7 +31,8 @@
   };
 
   window.__oneNative = {
-    /// `{ name, cli, platform, device, client, address, signedIn, user, opened }`: `opened`, a link it was opened with.
+    /// `{ name, cli, platform, device, client, address, signedIn, user, opened, textScale }`: `opened`, a link it was opened with;
+    /// `textScale`, how many times usual the person has made text (a phone's; 1 for usual).
     about: () => invoke("native"),
     /// What the person typed, an address or an invite link → the address.
     address: (typed) => invoke("address", { typed }),
@@ -60,6 +75,15 @@
     notify: (ask) => invoke("notify", { ask }),
     copy: (text) => invoke("copy", { text }),
     open: (url) => invoke("open", { url }),
+    /// The hardware Back (an Android phone's) → whether the page took it (closed what's over it, or went back); if not, the
+    /// app leaves to the home screen. `onBack` is the page's.
+    onBack: null,
+    hardwareBack: () => (window.__oneNative.onBack ? !!window.__oneNative.onBack() : false),
+    /// Settings' text size changed while the app runs (a phone's): how many times usual, to `onScale`'s function.
+    onScale: null,
+    scale(value) {
+      if (window.__oneNative.onScale) window.__oneNative.onScale(value);
+    },
     /// A link the app was opened with while the page runs (`<cli>://open?…`), to `onOpen`'s function.
     onOpen: null,
     opened(url) {

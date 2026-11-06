@@ -63,6 +63,14 @@ pub fn name() -> Option<String> {
     name.map(|n| n.to_string()).filter(|n| !n.is_empty())
 }
 
+/// How many times usual the person has made text in Settings (Dynamic Type): body text's size as they've set it, over its
+/// size at the default, for the page to zoom screens by.
+pub fn text_scale() -> f64 {
+    let metrics: Retained<AnyObject> = unsafe { msg_send![class!(UIFontMetrics), defaultMetrics] };
+    let scaled: f64 = unsafe { msg_send![&metrics, scaledValueForValue: 17.0f64] };
+    (scaled / 17.0).clamp(0.5, 3.0)
+}
+
 /// Signs in in the system's sign-in sheet (ASWebAuthenticationSession, sharing Safari's passkeys and sign-ins) at
 /// `url` → where it came back to, the app's own `<cli>://signed-in/…`.
 pub fn sign_in(url: String) -> Result<String, String> {

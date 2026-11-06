@@ -660,6 +660,22 @@ const h = OneUI.react.createElement;
     history.replaceState(null, "", href(under(route())));
     render();
   }
+  /// Settings' text size on a phone (`about.textScale`, how many times usual): the whole window zoomed by it, its screens'
+  /// frames too, but never narrower than 320 pixels, as the old Android app's were.
+  function zoomed() {
+    const scale = about?.textScale > 0 ? about.textScale : 1;
+    document.documentElement.style.zoom = scale === 1 ? "" : Math.min(scale, innerWidth / 320);
+  }
+
+  /// A phone's hardware Back: what's over the window (a sheet, an alert, a menu) closes first, as Escape does; then a
+  /// pushed screen goes back, and so does one a person has gone deeper than the home screen. → whether it took it: if not,
+  /// the app leaves.
+  function hardwareBack() {
+    if ($("[role=alertdialog], [role=menu]") || (shaded && $(".shade.open"))) return document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), true;
+    const r = route();
+    if (history.state?.back || (phone() && !(r.kind === "own" && r.name === "pages"))) return back(), true;
+    return false;
+  }
   /// The sidebar row selected: where the window is, or what a pushed screen was opened from.
   const selection = () => history.state?.selection || location.pathname + location.search;
   addEventListener("popstate", () => render());
@@ -1674,6 +1690,12 @@ const h = OneUI.react.createElement;
     if (native) {
       about = await native.about();
       native.onOpen = opened;
+      // A phone's Back, and its text size changing while this runs.
+      native.onBack = hardwareBack;
+      native.onScale = (scale) => ((about.textScale = scale), zoomed());
+      zoomed();
+      // A change made in Settings, where this was away (an iPhone's Dynamic Type): read again as it's back.
+      if (phone()) document.addEventListener("visibilitychange", () => !document.hidden && native.about().then((a) => a.textScale !== about.textScale && ((about.textScale = a.textScale), zoomed()), () => {}));
       // The app menu's commands (a Mac's), which work wherever the focus is: the sidebar folded or unfolded, as its
       // own key does here; joining a network with a pairing code, while this Mac's node is in none.
       native.onCommand = (name) => {

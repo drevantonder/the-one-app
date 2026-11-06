@@ -62,11 +62,13 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
                 "app": name, "widget": w["widget"], "scope": scope, "page": title,
                 "title": named, "icon": app["icon"].as_str().unwrap_or_default(), "root": w["root"],
             });
-            for (from, to) in [("image", "image"), ("image_kind", "imageKind")] {
+            for (from, to) in [("image", "image"), ("image_kind", "imageKind"), ("color", "color")] {
                 if let Some(v) = app[from].as_str() {
                     item[to] = json!(v);
                 }
             }
+            // Whether its app has a screen to open (a `main`), which Android's widget opens on a tap.
+            item["opens"] = json!(app["screens"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == "main")));
             for field in ["error", "sizes"] {
                 if !w[field].is_null() {
                     item[field] = w[field].clone();
@@ -129,7 +131,9 @@ fn trees(items: &[Value]) -> Vec<&Value> {
 /// The Phosphor icons the widgets may draw (each app's, and each named in a tree, and their filled forms).
 fn icons(dir: &Path, items: &[Value]) -> Result<(), String> {
     let all: Map<String, Value> = serde_json::from_slice(one::screen::ICONS).unwrap_or_default();
-    let mut wanted: Vec<&str> = items.iter().filter_map(|i| i["icon"].as_str()).collect();
+    // And the two a widget draws itself: its problem box's, and a chosen row's.
+    let mut wanted: Vec<&str> = vec!["warning-fill", "check"];
+    wanted.extend(items.iter().filter_map(|i| i["icon"].as_str()));
     wanted.extend(trees(items).iter().flat_map(|n| [n["icon"].as_str(), n["name"].as_str()]).flatten());
     let mut out = Map::new();
     for name in wanted {

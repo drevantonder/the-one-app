@@ -1,6 +1,7 @@
 //! Signing in, as every client does: an OAuth client of the network's sign-in, registered the first time, with sign-in
-//! and consent in a browser that comes back to a port on this machine (RFC 8252's loopback redirect), or on an iPhone
-//! to the app's own link (`<cli>://signed-in/`), which the system's sign-in sheet takes. The refresh token is kept in the
+//! and consent in a browser that comes back to a port on this machine (RFC 8252's loopback redirect), or on a phone to
+//! the app's own link (`<cli>://signed-in/`), which an iPhone's system sign-in sheet takes and an Android phone's Chrome
+//! Custom Tab opens the app on. The refresh token is kept in the
 //! OS's secret store; access tokens only in memory. It names the device it's for (`join`), so the person's devices can
 //! let it in by this sign-in.
 
@@ -120,9 +121,9 @@ impl Auth {
         self.grant(m, &[("grant_type", "authorization_code"), ("code", code), ("redirect_uri", redirect), ("client_id", id), ("code_verifier", verifier)])
     }
 
-    /// Signs in on an iPhone: `open` shows the authorization URL in the system's sign-in sheet (which shares Safari's
+    /// Signs in on a phone: `open` shows the authorization URL in the system's sign-in sheet (which shares Safari's
     /// passkeys and sign-ins) and gives back where it came back to, the app's own link; `join` is the device it's for.
-    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "ios", target_os = "android")), allow(dead_code))]
     pub fn sign_in_here(&self, join: &str, open: impl FnOnce(String) -> Result<String, String>) -> Result<(), String> {
         let m = self.meta()?;
         let back = format!("{}://signed-in/", one::config::CLI);
@@ -134,6 +135,7 @@ impl Auth {
 
     /// Signs in: `open` shows the authorization URL (in a window of the app, or the system's browser), which comes
     /// back to this machine's loopback port; `join` is the device it's for. Blocks until it's back, or 5 minutes.
+    #[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
     pub fn sign_in(&self, join: &str, open: impl FnOnce(String) -> Result<(), String>) -> Result<(), String> {
         let m = self.meta()?;
         let id = self.client(&m, LOOPBACK)?;

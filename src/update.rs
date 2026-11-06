@@ -299,13 +299,13 @@ impl Parts {
                 Some("service") => parts.service = true,
                 // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
-                // The native app (client/native) is its own workspace, not in the node: the Mac app, but for Windows' own
-                // (client/native/windows/), which Windows' package is built from where it's released.
-                Some("client") if file.starts_with("client/native/windows/") => {}
+                // The native app (client/native) is its own workspace, not in the node: the Mac app, but for Windows' and
+                // Android's own (client/native/windows/, client/native/android/), which no update sends out.
+                Some("client") if file.starts_with("client/native/windows/") || file.starts_with("client/native/android/") => {}
                 Some("client") if file.starts_with("client/native/") => parts.mac = true,
                 // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
                 Some("client") => (parts.node, parts.mac) = (true, true),
-                Some("docs" | "tests" | "android" | "cloudflare") => {}
+                Some("docs" | "tests" | "cloudflare") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => (parts.node, parts.mac) = (true, true),
             }
@@ -1219,7 +1219,7 @@ c="$HOME/Library/Caches/{CLI}"
 # Only what the iPhone app is made of: the Mac app's but for what's the Mac's own (its window's code, its node's
 # services and helpers, apps), and each network closes the app on the phone.
 last=$(cat "$c/phone.built" 2>/dev/null || true)
-if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- . ':!client/native/mac' ':!client/native/windows' ':!service' ':!apps' ':!docs' ':!tests' ':!android' ':!*.md' 2>/dev/null; then exit 3; fi
+if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- . ':!client/native/mac' ':!client/native/windows' ':!client/native/android' ':!service' ':!apps' ':!docs' ':!tests' ':!*.md' 2>/dev/null; then exit 3; fi
 CONFIG="$config" client/native/disk.sh retry client/native/iphone/build.sh device "$c/phone"
 JOB
 put follow.sh <<'JOB'

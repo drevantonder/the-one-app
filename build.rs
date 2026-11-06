@@ -55,7 +55,7 @@ fn main() {
     assert!(["", "wnam", "enam", "sam", "weur", "eeur", "apac", "oc", "afr", "me"].contains(&relay_location.as_str()), "relay_location is one of Cloudflare's location hints");
     let out = format!("{out}pub const RELAY_LOCATION: &str = {relay_location:?};\n");
     // What a person joins, in their words: "your One App network"; a workplace's (one with a join_domain) is shared, "the PTC App network".
-    // client/native/apple.sh, android/app/build.gradle.kts and client/native/windows/build.sh say the same.
+    // client/native/apple.sh, client/native/android/app/build.gradle.kts and client/native/windows/build.sh say the same.
     let name = get("name").as_str().unwrap().to_string();
     let yours = if optional("join_domain").is_empty() { format!("your {} network", name.trim_start_matches("The ")) } else { format!("{} network", name.replacen("The ", "the ", 1)) };
     let out = format!("{out}pub const YOURS: &str = {yours:?};\n");

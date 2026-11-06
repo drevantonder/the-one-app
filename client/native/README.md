@@ -13,8 +13,8 @@ on a desktop.
 
 ## Replacing the old apps
 
-Until each platform's old app (`android/`) is gone, this is the list of what it does that this
-must too, ticked as it does and checked in `one throwaway`. Then this section goes, down to what the code can't say.
+Each platform's old app is gone: this is the list of what they did that this must too, ticked as it does and checked in
+`one throwaway`. Then this section goes, down to what the code can't say.
 
 Shared, every platform:
 
@@ -150,7 +150,59 @@ Group `group.app.<cli>.phone`, which is also its Keychain group:
       repo's commits>`, rising with either): built, not run. It waits on an App Store Connect app for the custom
       build's bundle id (PTC's, `app.ptc.phone`: Andre, top #87); then Google sign-in, receipt scan and photo upload in
       Claims to check there
-- Not carried: Dynamic Type's text size in screens (the old app zoomed each screen by it); the iPhone's own menus for
+- Not carried: the iPhone's own menus for
   `one.menu` (the web's, as Andre decided), but for what touch and hold lifts
 
-Android (`android/`): its old app's full inventory lands here before it's written.
+Android (`android/`: its own Gradle project, built by `android/build.sh` with the app's Rust for each processor and the
+Kotlin of the old app that has to be Kotlin, in `android/app/src/main/kotlin/app/client`: `OnePlugin` is the Tauri
+plugin of the app's own, `Host` and `Native` what the app's library and the system call each other by, through JNI, with
+no window; `one throwaway client android`, a copy of the person's Android Agent Device, with `--as sam`). The old app's
+identity: `app.<cli>.android`, signed with the debug key it was signed with, so it installs over it. No `one update` or
+release builds it (nothing did): only a throwaway, as before. Checked on an emulator (Android 16, Play Store image):
+
+- [x] Signed in and let in, as the person typed the address: the welcome, Sign In opens a Chrome Custom Tab, which comes
+      back to `<cli>://signed-in/`, then Waiting for Approval and the pages side by side with dots (checked: typed
+      address, the Custom Tab, the code approved with `one throwaway devices approve`); and as the throwaway client signs
+      it in, printing the link rather than opening the tab (`SIGN_IN_PRINT`, `CONTROL` and the address come as the start
+      intent's `env.<NAME>` extras, kept for later starts, in a debug build only). Not as Sam: `client android --as sam`
+      and `client web --as sam` both stopped at the web client's step ("the web client wasn't let in": Sam's browser,
+      not the app)
+- [x] The Kotlin app's sign-in taken over (`Host.takeOver`): its address, sign-in client, who's signed in and refresh token
+      move to this app's names; its device keys stay where they were (`sign-in.xml`, sealed by the Keystore alias
+      `sign-in`), so no new sign-in and no new device (checked on a copy of the person's phone that had the Kotlin app
+      signed in to an earlier throwaway; not on a real phone: none of ours has it)
+- [x] Pages, screens, menus: an app's screen opened from the pages, its bar with Back, an app's menu (checked); alerts
+      and sheets are the web's, as everywhere (not opened here)
+- [x] Screens reach none of the app's commands: Android gives a sandboxed frame Tauri's script and `ipc` (a probe screen
+      launched Chrome through `ipc.postMessage`), so every command carries a token only the page's own frame is given by
+      a web message listener (`oneBridge`, `MainActivity.kt`), which Rust checks (`android::ours`): the same probe
+      launches nothing, and an invoke without it is refused (checked, a deployed probe screen)
+- [x] Links: `<cli>://open?app=&screen=&params=&scope=` opens the screen (checked); the mobile deep-link config names the
+      scheme and https hosts (the address, `LINKS`); App Links on a build with an https address: built, not checked (the
+      throwaway's address is http), the address's `assetlinks.json` lists the debug key's fingerprint as before
+- [x] Hardware Back: closes what's over the page (a menu, a sheet, an alert), then goes back, at the home leaves the app
+      (checked: from a screen, and at the home; a menu open, by the page's `hardwareBack`)
+- [x] The scanner (`one.scan()`): Google's document scanner, each page a JPEG as the iPhone's (checked: a page scanned,
+      one file returned); `one.can.scan` follows Play services and 1.7 GB of memory
+- [x] Save (the share sheet) and preview (ACTION_VIEW; Photos opened a PNG), copy, links outside (a Custom Tab for the
+      network's own pages) (checked: save and preview; the Custom Tab by signing in)
+- [x] Home-screen widgets: the old app's two, placed in the copy, draw from the app's files (`widgets/`), neutral, app
+      tiles as gradient tiles; a button and a toggle (a probe app's) run their tool in the app's library and redraw;
+      signed out they say to sign in; touched and held they choose from the pages' widgets (`WidgetChooser`: built;
+      not opened); the 15-minute refresh (WorkManager) through the same library: built, not waited for
+- [x] Taken out (removed): signed out, "This device was removed. Sign in again.", the widgets say to sign in (checked)
+- [x] Text size: Settings' font size zooms the window, screens' frames with it, never narrower than 320 pixels, also while
+      the app runs (`about().textScale`, `native.onScale`; web.js `zoomed`); the iPhone's Dynamic Type through the same
+      (`iphone::text_scale`: built, not run: the Mac wasn't reachable)
+- [x] Edge to edge, the system bars' icons follow light or dark, the keyboard resizes the page (checked: the keyboard
+      over the welcome's field)
+- [ ] Push: FCM through the custom build's Firebase project (`firebase` in config.toml, empty for The One App): the token
+      registered with the push Worker, the note opened with the device's key by the app's library (`open-note`), its
+      Approve and Not Me answered with no window (`join`), the permission asked once: built, not checked (no Firebase
+      project)
+- [ ] Haptics (`one.tap`): called, no error; not felt (an emulator)
+- [x] Release build (`android/build.sh release`: Rust optimized, the APK shrunk, signed with the debug key): installed over the
+      debug build, starts and shows the welcome, its Keystore and JNI calls through the shrinking (checked)
+- Not carried: the phone's own accent colour on what's tapped (the web's look has none, as Andre decided); the old app's
+  a sign-in that comes back after the app was killed while the Custom Tab was open (it starts again, as the old app's kept
+  its half-made one)

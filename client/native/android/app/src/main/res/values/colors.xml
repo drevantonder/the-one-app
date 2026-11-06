@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The web client's colours (@one/ui's neutral theme) for what's drawn before the page is (its window, the system bars
+     behind it, a home-screen widget's preview): light here, dark in values-night. -->
+<resources>
+    <color name="page">#FFFFFF</color>
+    <color name="card">#F5F5F5</color>
+    <color name="fill">#E5E5E5</color>
+</resources>

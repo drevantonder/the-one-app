@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Light or dark with the phone, drawn edge to edge. Opening, it's the page's colour at once, never see-through or
+         the system's grey. -->
+    <style name="Client" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:colorBackground">@color/page</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/page</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

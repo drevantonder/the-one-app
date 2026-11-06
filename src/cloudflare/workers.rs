@@ -605,7 +605,7 @@ pub fn client_version() -> Option<String> {
     (!crate::config::CLIENT.is_empty()).then(|| data_encoding::HEXLOWER.encode(&hash.finalize()[..8]))
 }
 
-/// The Android app's package, as android/app/build.gradle.kts names it.
+/// The Android app's package, as client/native/android/app/build.gradle.kts names it.
 pub fn android_package() -> String {
     format!("app.{}.android", crate::config::CLI)
 }

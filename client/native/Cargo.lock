@@ -4129,6 +4129,7 @@ dependencies = [
  "data-encoding",
  "ico",
  "image",
+ "jni 0.21.1",
  "keyring",
  "objc2",
  "objc2-foundation",

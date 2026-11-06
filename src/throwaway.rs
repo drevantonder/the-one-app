@@ -1199,91 +1199,83 @@ fn build(checkout: &Path, script: &str, envs: &[(&str, &str)]) -> Result<String>
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// The Android app: built, installed over the one there, started, and signed in at `address` as a person would:
-/// typing it and tapping Sign In, then the throwaway network's sign-in going straight on, as the throwaway network's first person
-/// or `person`, whom the phone's browser signs in as first. Once signed in on a device as them (a file in the throwaway
-/// network's folder says so), a new build keeps that sign-in.
+/// The Android app (client/native), as this checkout builds it (client/native/android/build.sh, for the processor the device
+/// has), installed over the one there, then started with the throwaway network's address, printing its sign-in rather than
+/// opening a Custom Tab, and with a control port, as linux() starts it (its settings go in as the intent's `env.` extras,
+/// which a debug build reads): its Sign In pressed, the sign-in approved as the throwaway network's first person or `person`,
+/// coming back to it by the app's own link, opened on the device, and its code approved by the throwaway network's machine.
+/// Once signed in on a device as them (a file in the throwaway network's folder says so), a new build keeps that sign-in.
 fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
-    let apk = build(checkout, "android/build.sh", &[])?;
-    let apk = checkout.join("android").join(apk.lines().last().unwrap_or_default());
+    let abi = match on_device(device, "getprop ro.product.cpu.abi")?.trim() {
+        abi @ ("x86_64" | "arm64-v8a") => abi.to_string(),
+        other => bail!("this checkout builds the Android app for x86_64 and arm64-v8a, not {other}"),
+    };
+    let apk = build(checkout, "client/native/android/build.sh", &[("ABIS", abi.as_str())])?;
     let package = format!("app.{CLI}.android");
-    agent_devices("install", json!({ "device": device, "app": apk.display().to_string() }))?;
+    agent_devices("install", json!({ "device": device, "app": apk.lines().last().unwrap_or_default() }))?;
     // The launcher keeps drawing home-screen widgets from the APK it replaced ("Can't load widget") until it restarts.
     on_device(device, "am force-stop com.google.android.apps.nexuslauncher")?;
+    // Play Store updates WebView on a fresh copy a few minutes in, which kills every app using it: not while a test runs.
+    on_device(device, "pm disable-user --user 0 com.android.vending")?;
     let signed_in = dir.join(format!("signed-in-{device}"));
     let first = settings.throwaway_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
     let who = person.unwrap_or(first);
     let here = format!("{address}\n{who}");
     let kept = std::fs::read_to_string(&signed_in).is_ok_and(|was| was == here);
+    // A copy of the person's phone may have a build signed in elsewhere, or as someone else: what it kept goes.
     if !kept {
-        // A copy of the person's phone may have a build signed in elsewhere, or as someone else.
         on_device(device, &format!("pm clear {package}"))?;
-        // The app signs in through the phone's browser, which then signs in as whoever it last did here.
-        let url = format!("{address}/sign-in?as={}", who.replace(' ', "%20"));
-        on_device(device, &format!("am start -W -a android.intent.action.VIEW -d '{url}'"))?;
-        let start = Instant::now();
-        loop {
-            anyhow::ensure!(start.elapsed() < Duration::from_secs(60), "the phone's browser didn't sign in as {who}: look at it with {CLI} computer screen --device {device}");
-            std::thread::sleep(Duration::from_secs(2));
-            let nodes = ui_nodes(&on_device(device, "uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; cat /sdcard/ui.xml")?);
-            if nodes.iter().any(|n| n.text.contains("is signed in here as")) {
-                break;
-            }
-            if let Some(button) = ["Accept & continue", "No thanks", "Use without an account", "Got it"].iter().find_map(|t| nodes.iter().find(|n| n.text == *t)) {
-                on_device(device, &format!("input tap {} {}", button.x, button.y))?;
-            }
-        }
     }
-    on_device(device, &format!("am force-stop {package}; am start -W -n {package}/app.client.MainActivity"))?;
+    let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{device}", dir.display()).as_bytes()).into();
+    let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
+    let env = |key: &str| format!("{}_{key}", CLI.to_uppercase());
+    on_device(device, "logcat -c")?;
+    on_device(
+        device,
+        &format!(
+            "am force-stop {package}; am start -W -n {package}/app.client.MainActivity --es env.{} '{address}' --es env.{} 1 --es env.{} {control}",
+            env("ADDRESS"),
+            env("SIGN_IN_PRINT"),
+            env("CONTROL"),
+        ),
+    )?;
+    // Its page's JavaScript, run through the control port, which only the device reaches.
+    let click = "document.querySelector('[data-slot=welcome-action]')?.click()";
+    let eval = |js: &str| on_device(device, &format!("(printf 'POST /eval HTTP/1.0\\r\\ncontent-length: {}\\r\\n\\r\\n'; printf '%s' \"{js}\") | nc -w 2 127.0.0.1 {control}", js.len()));
     let start = Instant::now();
-    let (mut typed, mut pressed, mut approved) = (false, false, false);
+    let (mut signed, mut approved) = (false, false);
     loop {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(120), "the Android app didn't sign in: look at it with {CLI} computer screen --device {device}");
+        anyhow::ensure!(start.elapsed() < Duration::from_secs(180), "the Android app didn't sign in: look at it with {CLI} computer screen --device {device}, and at what it said with {CLI} agent-devices run --device {device} \"logcat -d -s RustStdoutStderr\"");
         std::thread::sleep(Duration::from_secs(2));
-        let ui = on_device(device, "uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; cat /sdcard/ui.xml")?;
-        let nodes = ui_nodes(&ui);
-        let find = |text: &str| nodes.iter().find(|n| n.text == text);
-        let ours = nodes.iter().any(|n| n.package == package);
-        if ours && let Some(field) = nodes.iter().find(|n| n.class == "android.widget.EditText").filter(|_| !typed) {
-            // The welcome keeps the address it was last signed in at: anything else there goes first.
-            if field.text != address {
-                on_device(device, &format!("input tap {} {}", field.x, field.y))?;
-                on_device(device, "input keycombination KEYCODE_CTRL_LEFT KEYCODE_A; input keyevent KEYCODE_DEL")?;
-                on_device(device, &format!("input text '{address}'"))?;
+        let said = on_device(device, "logcat -d -s RustStdoutStderr:I")?;
+        let said: Vec<&str> = said.lines().filter_map(|l| l.split_once("RustStdoutStderr: ").map(|(_, s)| s.trim())).collect();
+        if said.contains(&"Let in.") {
+            break;
+        }
+        match said.iter().rev().find_map(|l| l.strip_prefix("Sign in: ")) {
+            // Approved as the person, then back to the app by its own link, which opens it on the device.
+            Some(url) if !signed => {
+                let back = one::sign_in::approved_on_throwaway(address, url, person)?;
+                on_device(device, &format!("am start -a android.intent.action.VIEW -n {package}/app.client.MainActivity -d '{back}'"))?;
+                signed = true;
             }
-            typed = true;
-            continue;
+            Some(_) => {}
+            // Signed out: its Sign In, pressed for the person.
+            None => drop(eval(click)),
         }
-        // The throwaway network's sign-in page, where Chrome waits for a tap before going on to an app.
-        if let Some(button) = nodes.iter().find(|n| n.text.starts_with("Sign In as ")).or_else(|| ["Accept & continue", "No thanks", "Use without an account", "Got it"].iter().find_map(|t| find(t))) {
-            on_device(device, &format!("input tap {} {}", button.x, button.y))?;
-            continue;
-        }
-        // Once in, Android asks whether it may show notifications, as a person would be asked: it may.
-        if let Some(allow) = nodes.iter().find(|n| n.package.contains("permissioncontroller") && n.text == "Allow") {
-            on_device(device, &format!("input tap {} {}", allow.x, allow.y))?;
-            continue;
-        }
-        // Its code to be let in, which the throwaway network's machine approves, as one of its person's devices.
-        if ours && let Some(code) = nodes.iter().find(|n| is_code(&n.text)).filter(|_| !approved) {
-            approve_code(dir, &code.text)?;
+        if let Some(code) = said.iter().rev().find_map(|l| l.strip_prefix("Code: "))
+            && !approved
+        {
+            approve_code(dir, code)?;
             approved = true;
-            continue;
-        }
-        match find("Sign In").filter(|_| ours) {
-            Some(button) => {
-                on_device(device, &format!("input tap {} {}", button.x, button.y))?;
-                pressed = true;
-            }
-            // Its home, once it signed in here, now or before.
-            None if ours && (pressed || kept) && !nodes.iter().any(|n| n.class == "android.widget.EditText" || n.text.starts_with("Can’t Reach") || n.text.starts_with("Waiting for Approval")) => {
-                std::fs::write(&signed_in, &here)?;
-                return Ok(());
-            }
-            None => {}
         }
     }
+    std::fs::write(&signed_in, &here)?;
+    println!(
+        "  Run JavaScript in its page: {CLI} agent-devices run --device {device} \"(printf 'POST /eval HTTP/1.0\\r\\ncontent-length: <length>\\r\\n\\r\\n'; printf '%s' '<js>') | nc -w 2 127.0.0.1 {control}\"; what it said: {CLI} agent-devices run --device {device} \"logcat -d -s RustStdoutStderr\"; open a link: {CLI} agent-devices run --device {device} \"am start -a android.intent.action.VIEW -d '{CLI}://…' {package}\""
+    );
+    Ok(())
 }
 
 /// Whether text is the code a new device shows to be approved: "ABCD EFGH".
@@ -1301,27 +1293,6 @@ fn approve_code(dir: &Path, code: &str) -> Result<()> {
         Err(err) if format!("{err:#}").contains("no device is waiting") => Ok(()),
         r => r.map(drop),
     }
-}
-
-/// A view on an Android screen, as uiautomator dumps it: its text, class and package, and its middle.
-struct UiNode {
-    text: String,
-    class: String,
-    package: String,
-    x: i64,
-    y: i64,
-}
-
-fn ui_nodes(xml: &str) -> Vec<UiNode> {
-    let attr = |node: &str, name: &str| -> String {
-        let key = format!(" {name}=\"");
-        node.find(&key).map(|i| &node[i + key.len()..]).and_then(|s| s.split('"').next()).unwrap_or("").replace("&amp;", "&").replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")
-    };
-    xml.split("<node").skip(1).filter_map(|node| {
-        let bounds: Vec<i64> = attr(node, "bounds").split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).filter_map(|n| n.parse().ok()).collect();
-        let [x1, y1, x2, y2] = bounds[..] else { return None };
-        Some(UiNode { text: attr(node, "text"), class: attr(node, "class"), package: attr(node, "package"), x: (x1 + x2) / 2, y: (y1 + y2) / 2 })
-    }).collect()
 }
 
 /// The Windows app (client/native): cross-built here and packaged with its helper in the device

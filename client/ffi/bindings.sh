@@ -1,6 +1,6 @@
 #!/bin/sh
 # The client's bindings for an app, from the definition in src/lib.rs as this machine builds it: bindings.sh
-# <swift|kotlin> <folder>.
+# <swift> <folder> (uniffi makes Kotlin and others too, but no app uses them).
 set -eu
 language=$1 out=$(mkdir -p "$2" && cd "$2" && pwd)
 cd "$(dirname "$0")/../.."

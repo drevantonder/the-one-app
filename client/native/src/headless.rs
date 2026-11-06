@@ -25,6 +25,11 @@ pub fn data() -> PathBuf {
     if let Some(app) = crate::APP.get() {
         return app.data.clone();
     }
+    // Android's: the app's own folder, which Kotlin says.
+    #[cfg(target_os = "android")]
+    if let Some(files) = crate::android::files() {
+        return files;
+    }
     dirs_local().unwrap_or_else(|| PathBuf::from(".")).join(crate::identifier())
 }
 
@@ -33,7 +38,9 @@ fn dirs_local() -> Option<PathBuf> {
     return std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
     #[cfg(target_os = "macos")]
     return std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"));
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "android")]
+    return None;
+    #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
     return std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
 }
 
@@ -130,7 +137,7 @@ async fn post(device: &one_client::Device, path: &str, body: Value) -> Result<Va
 
 /// One of them, in the running app, with its device if it's been let in yet, or else one started from what it keeps (an
 /// iPhone's widget's button, which may start it in the background).
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "ios", target_os = "android")), allow(dead_code))]
 pub async fn run_here(what: &str, rest: &[String]) -> Result<Value, String> {
     run(what, rest, crate::APP.get().and_then(|a| a.device().ok())).await
 }

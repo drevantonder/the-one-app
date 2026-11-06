@@ -5,6 +5,8 @@
 //! browser. What the app adds is what a page can't do: this device's key in the OS's secret store, signing in through
 //! the system's browser, notifications, the clipboard, files, and links outside.
 
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple;
 mod headless;
@@ -31,10 +33,11 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_clipboard_manager::ClipboardExt;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use tauri_plugin_dialog::DialogExt;
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use tauri_plugin_notification::{NotificationExt, PermissionState};
+#[cfg(not(target_os = "android"))]
 use tauri_plugin_opener::OpenerExt;
 
 /// What a call says it came from: the platform, an iPhone as "phone", as the iPhone app's did.
@@ -56,6 +59,10 @@ fn device_name() -> String {
     }
     #[cfg(target_os = "ios")]
     if let Some(name) = iphone::name() {
+        return name;
+    }
+    #[cfg(target_os = "android")]
+    if let Some(name) = android::name() {
         return name;
     }
     // Windows names it in COMPUTERNAME.
@@ -88,12 +95,16 @@ fn env(name: &str) -> Option<String> {
 /// The device this app is on, which signing in again replaces its sign-in under: the computer's own node's key, where
 /// one runs here (as the Mac app's was); else the machine's own id, hashed: Linux's machine-id, or Windows' MachineGuid,
 /// which outlives reinstalling Windows' apps (as the Windows app's was); on an iPhone, an id of its own in its Keychain,
-/// which outlives signing out (as the iPhone app's was).
+/// which outlives signing out (as the iPhone app's was); on an Android phone, its Android ID for this app.
 fn this_device() -> Option<String> {
+    #[cfg(not(target_os = "android"))]
     use sha2::{Digest, Sha256};
     #[cfg(target_os = "ios")]
     return secrets::this_device().ok().map(|id| data_encoding::HEXLOWER.encode(&Sha256::digest(id)));
-    #[cfg(not(target_os = "ios"))]
+    // An Android phone's own id, which outlives reinstalling (as the Kotlin app's was).
+    #[cfg(target_os = "android")]
+    return android::this_device();
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     local_node().or_else(|| {
         #[cfg(windows)]
         let id = windows::machine_guid()?;
@@ -104,7 +115,7 @@ fn this_device() -> Option<String> {
 }
 
 /// This computer's own node's key, where one runs here.
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn local_node() -> Option<String> {
     local_state()?["device"]["key"].as_str().map(str::to_string)
 }
@@ -216,12 +227,19 @@ fn keep_widgets() {
 }
 
 /// Let in, now or as it starts: the platform's own widgets kept, and its pushes registered: on Windows its channel (by
-/// the package's helper, which has the Windows App SDK), since a channel lasts 30 days; on an iPhone its token.
+/// the package's helper, which has the Windows App SDK), since a channel lasts 30 days; on an iPhone or Android phone its
+/// token.
 fn let_in() {
     keep_widgets();
     #[cfg(target_os = "ios")]
     if let Ok(device) = app().device() {
         iphone::push(device);
+    }
+    // An Android phone asks the person, once, whether it may show notifications (in a build with pushes).
+    #[cfg(target_os = "android")]
+    if let Ok(device) = app().device() {
+        android::push(device);
+        android::tell("notify", json!({ "ask": true, "once": true }));
     }
     // The panel, drawn before this device was in (signed out), draws again.
     if let Some(p) = app().handle.get_webview_window("panel") {
@@ -243,6 +261,8 @@ fn changed() {
         menubar::update();
         #[cfg(target_os = "ios")]
         iphone::tell("reload", json!({}));
+        #[cfg(target_os = "android")]
+        let _ = android::host("reload", json!({}));
     });
 }
 
@@ -259,6 +279,7 @@ fn badge(count: u32) {
     }
     #[cfg(target_os = "ios")]
     iphone::tell("badge", json!({ "count": count }));
+    // An Android launcher counts what notifications it shows, not what the app says.
     #[cfg(target_os = "android")]
     let _ = count;
 }
@@ -300,9 +321,28 @@ fn native() -> Value {
         // A Mac's widgets hidden from the menu bar (their own items), which its panel shows again.
         "menubar": menubar_hidden(),
         // An iPhone's: the document camera, and touch and hold lifting what's held with its menu (`menu`).
-        "scan": cfg!(target_os = "ios"),
+        "scan": cfg!(target_os = "ios") || can_scan(),
         "lifts": cfg!(target_os = "ios"),
+        // How much bigger than usual the person has made text (a phone's: Android's font size, an iPhone's Dynamic Type), for the
+        // window to be zoomed by.
+        "textScale": text_scale(),
     })
+}
+
+fn can_scan() -> bool {
+    #[cfg(target_os = "android")]
+    return android::can_scan();
+    #[cfg(not(target_os = "android"))]
+    false
+}
+
+fn text_scale() -> f64 {
+    #[cfg(target_os = "android")]
+    return android::text_scale();
+    #[cfg(target_os = "ios")]
+    return iphone::text_scale();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    1.0
 }
 
 /// Links to the network's address open this app (Windows' app links), as of the address it signs in to.
@@ -349,6 +389,7 @@ async fn sign_in() -> Result<(), String> {
     let _ = &address;
     let join = one_client::join_of(secrets::signing_in()?);
     let auth = a.auth()?;
+    #[cfg(not(target_os = "android"))]
     let handle = a.handle.clone();
     let auth2 = auth.clone();
     let print = env("SIGN_IN_PRINT").is_some();
@@ -358,6 +399,16 @@ async fn sign_in() -> Result<(), String> {
         if !print {
             return auth2.sign_in_here(&join, iphone::sign_in);
         }
+        // An Android phone signs in in a Chrome Custom Tab, which comes back to the app's own link; a test's prints the
+        // link and waits for it to be opened.
+        #[cfg(target_os = "android")]
+        return auth2.sign_in_here(&join, |u| {
+            if print {
+                println!("Sign in: {u}");
+            }
+            android::sign_in(u, !print)
+        });
+        #[cfg(not(target_os = "android"))]
         auth2.sign_in(&join, |u| {
             if print {
                 println!("Sign in: {u}");
@@ -502,16 +553,21 @@ async fn sign_out() -> Result<(), String> {
     widgets::forget(&widgets_dir());
     #[cfg(target_os = "ios")]
     iphone::tell("reload", json!({}));
+    #[cfg(target_os = "android")]
+    let _ = android::host("reload", json!({}));
     badge(0);
     Ok(())
 }
 
-/// Whether this device shows notifications, asking the person first if `ask` → "granted", "denied" or "default".
+/// Whether this device shows notifications, asking the person first if `ask` → "granted", "denied" or "default"; none
+/// where a phone's build has no pushes to show (no Firebase project in its config.toml), so Settings has no row for it.
 #[tauri::command]
-async fn notify(ask: bool) -> String {
+async fn notify(ask: bool) -> Option<String> {
     #[cfg(target_os = "ios")]
-    return iphone::ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string)).unwrap_or_else(|| "default".into());
-    #[cfg(not(target_os = "ios"))]
+    return Some(iphone::ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string)).unwrap_or_else(|| "default".into()));
+    #[cfg(target_os = "android")]
+    return android::ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string));
+    #[cfg(desktop)]
     {
         let n = app().handle.notification();
         let state = match n.permission_state() {
@@ -519,11 +575,11 @@ async fn notify(ask: bool) -> String {
             Ok(s) if !ask => s,
             _ => n.request_permission().unwrap_or(PermissionState::Denied),
         };
-        match state {
+        Some(match state {
             PermissionState::Granted => "granted".into(),
             PermissionState::Denied => "denied".into(),
             _ => "default".into(),
-        }
+        })
     }
 }
 
@@ -538,6 +594,10 @@ fn open(url: String) -> Result<(), String> {
     if !["https://", "http://", "mailto:", "tel:"].iter().any(|p| url.starts_with(p)) {
         return Err("That isn’t a link this can open.".into());
     }
+    // On Android, the network's own pages open in a Custom Tab, as signed in there as the browser is.
+    #[cfg(target_os = "android")]
+    return android::ask("open", json!({ "url": url, "own": app().address().is_some_and(|a| url.starts_with(&a)) })).map(drop).map_err(|_| "Couldn’t open your browser.".to_string());
+    #[cfg(not(target_os = "android"))]
     app().handle.opener().open_url(url, None::<&str>).map_err(|_| "Couldn’t open your browser.".to_string())
 }
 
@@ -547,16 +607,24 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
     let data = data_encoding::BASE64.decode(data.as_bytes()).map_err(|e| e.to_string())?;
     let name: String = name.chars().filter(|c| !matches!(c, '/' | '\\' | '\0')).collect();
     let name = if name.trim().is_empty() { "file".to_string() } else { name };
-    // An iPhone shares it (the share sheet, which saves to Files too), or shows it in Quick Look.
-    #[cfg(target_os = "ios")]
+    // A phone shares it (the share sheet, which saves to Files too), or shows it (Quick Look; what views its type).
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     {
-        let dir = std::env::temp_dir().join("screen-files").join(app().next.fetch_add(1, Ordering::Relaxed).to_string());
+        // An Android phone's, in its own folder, where its share sheet is let read (android/.../res/xml/files.xml).
+        #[cfg(target_os = "android")]
+        let base = app().data.join("given");
+        #[cfg(not(target_os = "android"))]
+        let base = std::env::temp_dir().join("screen-files");
+        let dir = base.join(app().next.fetch_add(1, Ordering::Relaxed).to_string());
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join(&name);
         std::fs::write(&path, data).map_err(|e| e.to_string())?;
+        #[cfg(target_os = "ios")]
         return iphone::ask_off("give", json!({ "path": path, "preview": preview })).await.map(drop);
+        #[cfg(target_os = "android")]
+        return android::ask_off("give", json!({ "path": path, "preview": preview })).await.map(drop);
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(desktop)]
     if preview {
         let dir = std::env::temp_dir().join(format!("{}-{}", one::config::CLI, app().next.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -564,9 +632,9 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
         std::fs::write(&path, data).map_err(|e| e.to_string())?;
         return app().handle.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string());
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(desktop)]
     let handle = app().handle.clone();
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(desktop)]
     tauri::async_runtime::spawn_blocking(move || {
         let Some(path) = handle.dialog().file().set_file_name(&name).blocking_save_file() else { return Ok(()) };
         let path = path.into_path().map_err(|e| e.to_string())?;
@@ -581,16 +649,21 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
 fn haptic(style: String) {
     #[cfg(target_os = "ios")]
     iphone::tell("haptic", json!({ "style": style }));
+    #[cfg(target_os = "android")]
+    android::tell("haptic", json!({ "style": style }));
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     let _ = style;
 }
 
-/// The document camera, where there's one (an iPhone's): each page found, straightened and cropped, as a JPEG
+/// The document camera, where there's one (an iPhone's, or Android's scanner): each page found, straightened and cropped, as a JPEG
 /// `{ name, type, size, base64 }`; none if the person cancels.
 #[tauri::command]
 async fn scan() -> Result<Value, String> {
     #[cfg(target_os = "ios")]
     return iphone::ask_off("scan", json!({})).await.map(|v| v["files"].clone());
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(target_os = "android")]
+    return android::ask_off("scan", json!({})).await.map(|v| v["files"].clone());
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     Err("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.".into())
 }
 
@@ -608,11 +681,14 @@ async fn menu(items: Value) -> Value {
 }
 
 /// Light, dark or automatic, as the person chose: kept by the app too, so its next start draws in it from its first
-/// frame (an iPhone's).
+/// frame, and a phone's system bars follow it.
 #[tauri::command]
 fn appearance(value: String) {
     #[cfg(target_os = "ios")]
     iphone::tell("appearance", json!({ "value": value }));
+    #[cfg(target_os = "android")]
+    android::tell("appearance", json!({ "value": value }));
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     let _ = value;
 }
 
@@ -1115,6 +1191,11 @@ fn control(port: u16) {
     });
 }
 
+/// Every command a page may ask the app.
+fn commands() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, computer_use, pair, quit, panel, fit, badge, haptic, scan, menu, appearance, menubar]
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -1127,23 +1208,47 @@ pub fn run() {
         }))
         // The window as it was left; the panel shows only when its item is clicked.
         .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["panel"]).build());
-    // The iPhone's notifications are its own (iphone.rs), which the plugin's would take from it.
-    #[cfg(not(target_os = "ios"))]
+    // A phone's notifications are its own (iphone.rs, android.rs), which the plugin's would take from it.
+    #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_notification::init());
     #[cfg(target_os = "ios")]
     let builder = builder.plugin(iphone::plugin());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android::plugin());
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.plugin(tauri_plugin_dialog::init()).plugin(tauri_plugin_opener::init());
     builder
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, computer_use, pair, quit, panel, fit, badge, haptic, scan, menu, appearance, menubar])
+        .invoke_handler({
+            let commands = commands();
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+                // Android's web view gives screens' frames the app's commands too: only the page's own frame has the token.
+                #[cfg(target_os = "android")]
+                if !android::ours(&invoke) {
+                    invoke.resolver.reject("That isn’t for a screen to ask.");
+                    return true;
+                }
+                commands(invoke)
+            }
+        })
         .setup(|app| {
             // Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
+            #[cfg(not(target_os = "android"))]
             let data = app.path().app_local_data_dir()?;
+            // The app's own folder, where what runs with no window finds it too.
+            #[cfg(target_os = "android")]
+            let data = android::files().ok_or("The app's folder.")?;
             // What the old Mac or iPhone app kept, taken over once.
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             apple::take_over(&data);
+            // The Kotlin app's, taken over once: its sign-in and address.
+            #[cfg(target_os = "android")]
+            {
+                android::take_over();
+                // What screens gave to be shared, shown or saved is gone with the last run.
+                let _ = std::fs::remove_dir_all(data.join("given"));
+            }
             // This Mac's node kept running; the Mac app's menus, with its keys.
             #[cfg(target_os = "macos")]
             {

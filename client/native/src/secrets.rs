@@ -3,7 +3,7 @@
 //! (service `<cli> device`, account `<address> <sub>`, or `signing in` until a sign-in says whose), and the sign-in's
 //! refresh token (service `<cli> sign-in`, account `refresh`). Kept as bytes, as they were.
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
 mod store {
     fn entry(service: &str, account: &str) -> Option<keyring::Entry> {
         keyring::Entry::new(service, account).ok()
@@ -89,6 +89,41 @@ mod store {
     }
 }
 
+/// Android's Keystore, through Kotlin (android/.../Host.kt): each value sealed by a key that never leaves the phone, in the
+/// preferences the Kotlin app kept its device keys in, under the names it gave them (`device:<hash of the id>`, and
+/// `device:` until a sign-in says whose), so a phone that had it signed in still has its keys.
+#[cfg(target_os = "android")]
+mod store {
+    use data_encoding::{BASE64, BASE64URL_NOPAD};
+    use serde_json::json;
+    use sha2::{Digest, Sha256};
+
+    /// The name Kotlin keeps an item under.
+    fn name(service: &str, account: &str) -> String {
+        if service.ends_with(" device") {
+            return match account {
+                "signing in" => "device:".into(),
+                "this device" => "this-device".into(),
+                id => format!("device:{}", BASE64URL_NOPAD.encode(&Sha256::digest(id.as_bytes()))),
+            };
+        }
+        "refresh".into()
+    }
+
+    pub fn get(service: &str, account: &str) -> Option<Vec<u8>> {
+        let said = crate::android::host("get", json!({ "name": name(service, account) })).ok()?;
+        BASE64.decode(said.as_str()?.as_bytes()).ok()
+    }
+
+    pub fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
+        crate::android::host("set", json!({ "name": name(service, account), "value": BASE64.encode(value) })).map(drop)
+    }
+
+    pub fn delete(service: &str, account: &str) {
+        let _ = crate::android::host("delete", json!({ "name": name(service, account) }));
+    }
+}
+
 /// `<cli> <name>`; a throwaway build's, `<cli> throwaway <name>`, beside the person's own.
 fn service(name: &str) -> String {
     let throwaway = if env!("IDENTIFIER").ends_with(".throwaway") { " throwaway" } else { "" };
@@ -165,7 +200,15 @@ pub fn forget_refresh() {
     delete("sign-in", "refresh");
 }
 
-/// A short name for `id`, for its folder: FNV-1a's 64 bits in hex, as the Mac and iPhone apps name it.
+/// A short name for `id`, for its folder: FNV-1a's 64 bits in hex, as the Mac and iPhone apps name it; Android's, the
+/// first 8 bytes of its SHA-256 in hex, as the Kotlin app named it.
+#[cfg(target_os = "android")]
+pub fn folder(id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    data_encoding::HEXLOWER.encode(&Sha256::digest(id.as_bytes())[..8])
+}
+
+#[cfg(not(target_os = "android"))]
 pub fn folder(id: &str) -> String {
     let hash = id.bytes().fold(14_695_981_039_346_656_037u64, |h, b| (h ^ b as u64).wrapping_mul(1_099_511_628_211));
     format!("{hash:x}")

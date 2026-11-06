@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A widget from your pages: 2x2 at first, as small as 2x2 and as large as the home screen lets it be. It shows the
+     first of your pages' widgets until you choose, and touching and holding it chooses again. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/home_widget_description"
+    android:configure="app.client.widget.WidgetChooser"
+    android:widgetFeatures="reconfigurable|configuration_optional"
+    android:initialLayout="@layout/home_widget_preview"
+    android:previewLayout="@layout/home_widget_preview"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

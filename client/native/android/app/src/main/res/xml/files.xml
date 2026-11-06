@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- What a screen gives (a file to save or show), which the app's library writes here and the share sheet reads. -->
+    <files-path name="given" path="given/" />
+</paths>
