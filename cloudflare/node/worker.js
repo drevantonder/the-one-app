@@ -30,7 +30,7 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, sealed_global_steps, reads } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, sealed_global_steps, reads } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 
