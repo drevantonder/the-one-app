@@ -32,7 +32,11 @@ pub struct Item {
     pub domain: Option<String>,
     pub fields: BTreeMap<String, Field>,
     pub hosts: Vec<String>,
+    #[serde(default, rename = "used_by")]
     pub apps: BTreeSet<String>,
+    /// Its apps as a row from before `used_by` kept them (`migrate::vault_apps`).
+    #[serde(default, rename = "apps", skip_serializing)]
+    pub apps_before: Option<BTreeSet<String>>,
     /// The app whose call made it (a sign-in's account), if one did.
     pub app: Option<String>,
     /// Who changed it last, and when; and when it was made.
@@ -61,7 +65,10 @@ struct Secrets {
     id: String,
     values: BTreeMap<String, String>,
     hosts: Vec<String>,
+    #[serde(default, rename = "used_by")]
     apps: BTreeSet<String>,
+    #[serde(default, rename = "apps", skip_serializing)]
+    apps_before: Option<BTreeSet<String>>,
 }
 
 /// How a write seals what it changes: with the Vault secret keys this machine holds, by number (only if it's granted
@@ -147,7 +154,7 @@ pub fn load(conn: &Connection) -> Result<Items> {
         let (Some(id), Some(item)) = (row["id"].as_str(), row["item"].as_str()) else { continue };
         let mut item: Item = serde_json::from_str(item).context("an item that isn't one")?;
         item.opened = !item.fields.values().any(|f| f.secret);
-        crate::database::migrate::vault_apps(&mut item.apps);
+        crate::database::migrate::vault_apps(&mut item.apps, item.apps_before.take());
         out.insert(id.to_string(), item);
     }
     Ok(out)
@@ -168,13 +175,13 @@ pub fn open_all(items: &mut Items, keys: &BTreeMap<u32, [u8; 32]>) {
             f.value = s.values.get(name).cloned().unwrap_or_default();
         }
         (item.hosts, item.apps, item.opened) = (s.hosts, s.apps, true);
-        crate::database::migrate::vault_apps(&mut item.apps);
+        crate::database::migrate::vault_apps(&mut item.apps, s.apps_before);
     }
 }
 
 fn seal_item(id: &str, item: &mut Item, n: u32, public: &[u8; 32]) -> Result<()> {
     let values = item.fields.iter().filter(|(_, f)| f.secret).map(|(n, f)| (n.clone(), f.value.clone())).collect();
-    let s = Secrets { id: id.to_string(), values, hosts: item.hosts.clone(), apps: item.apps.clone() };
+    let s = Secrets { id: id.to_string(), values, hosts: item.hosts.clone(), apps: item.apps.clone(), apps_before: None };
     item.sealed = Some(Sealed { n, sealed: data_encoding::BASE64URL_NOPAD.encode(&crate::keys::seal_to(public, &serde_json::to_vec(&s)?)?) });
     Ok(())
 }
@@ -491,11 +498,18 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     let mut items = load(&conn).unwrap();
     open_all(&mut items, &keys);
     assert_eq!((items[id].hosts.clone(), items[id].fields["token"].value.as_str()), (vec!["api2.example.com".to_string()], "s3cret"));
-    // Items agents used before the Vault named them so read as theirs, from a box or a row.
+    // An item switched on for the app named agents is that app's, not agents'.
     let plain = "1111111111111111";
-    change(&conn, &json!({ "id": id, "apps": ["agents"] }), "andre", 5, |_| true, &granted).unwrap();
     change(&conn, &json!({ "id": plain, "title": "Plain", "fields": { "user": { "value": "andre" } }, "apps": ["agents"] }), "andre", 5, |_| true, &member).unwrap();
+    let items = load(&conn).unwrap();
+    assert!(items[plain].apps.iter().eq(["agents"]));
+    // A row and a box from before, when agents were `agents` in an item's `apps`, read as agents'.
+    let mut row: Value = serde_json::from_str(&crate::database::stored::query(&conn, "select item from items where id = ?", &[json!(plain)]).unwrap()[0]["item"].as_str().unwrap()).unwrap();
+    row["apps"] = row.as_object_mut().unwrap().remove("used_by").unwrap();
+    crate::database::stored::execute(&conn, "update items set item = ? where id = ?", &[json!(row.to_string()), json!(plain)]).unwrap();
+    let secrets = serde_json::to_vec(&json!({ "id": id, "values": { "token": "s3cret" }, "hosts": ["api2.example.com"], "apps": ["agents"] })).unwrap();
     let mut items = load(&conn).unwrap();
+    items.get_mut(id).unwrap().sealed = Some(Sealed { n: 1, sealed: data_encoding::BASE64URL_NOPAD.encode(&crate::keys::seal_to(&crate::keys::public_of(&secret), &secrets).unwrap()) });
     open_all(&mut items, &keys);
     assert!([id, plain].iter().all(|i| items[*i].apps.iter().eq([crate::database::scopes::AGENTS])));
 }

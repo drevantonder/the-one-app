@@ -53,10 +53,10 @@ pub fn content(c: &mut Content) {
     }
 }
 
-/// A Vault item's apps, as its row or its box says them.
-pub fn vault_apps(apps: &mut std::collections::BTreeSet<String>) {
-    if apps.remove("agents") {
-        apps.insert(crate::database::scopes::AGENTS.to_string());
+/// A Vault item's apps, from its row's or its box's `used_by`, or as one from before kept them, in `apps`.
+pub fn vault_apps(apps: &mut std::collections::BTreeSet<String>, before: Option<std::collections::BTreeSet<String>>) {
+    if let Some(before) = before {
+        *apps = before.into_iter().map(|a| if a == "agents" { crate::database::scopes::AGENTS.to_string() } else { a }).collect();
     }
 }
 

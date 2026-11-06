@@ -167,7 +167,7 @@ pub fn switch(node: &Client, scope: &str, item: &str, app: &str, on: bool, agent
         apps.push(json!(app));
     }
     node.post("/v1/vault", json!({ "scope": scope, "id": it["id"], "apps": apps, "agent": agent }))?;
-    Ok(format!("{app} is switched {} for {}.", if on { "on" } else { "off" }, it["title"].as_str().unwrap_or(item)))
+    Ok(format!("{} is switched {} for {}.", used_by(&json!([app]))[0], if on { "on" } else { "off" }, it["title"].as_str().unwrap_or(item)))
 }
 
 /// A scope's Vault as a person calls it: your Vault, Everyone's Vault, <name>'s Vault.
