@@ -203,7 +203,7 @@ pub fn cargo() -> PathBuf {
 }
 
 /// Go, also where mise's shims put it.
-fn go() -> PathBuf {
+pub fn go() -> PathBuf {
     tool("go", "version", ".local/share/mise/shims/go")
 }
 
