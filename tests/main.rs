@@ -4,6 +4,8 @@ mod cloudflare;
 mod contracts;
 mod e2e;
 mod map;
+#[path = "../apps/repos/tests/repos.rs"]
+mod repos;
 mod sandbox;
 mod sim;
 mod tree;

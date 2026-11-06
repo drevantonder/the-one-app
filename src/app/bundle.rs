@@ -7,8 +7,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
 
-/// An app folder's files, as written: everything but `node_modules`, dot files and its service's source (`service/`,
-/// built apart), sorted. A link in it to a file or folder of the same git repository is followed, so apps beside each
+/// An app folder's files, as written: everything but `node_modules`, dot files, its service's source (`service/`,
+/// built apart) and its tests (`tests/`), sorted. A link in it to a file or folder of the same git repository is followed, so apps beside each
 /// other share code with a link (`apps/gmail/google` → `../google`); a link out of the repository, or to a folder that
 /// holds itself, is refused.
 pub fn sources(dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
@@ -16,7 +16,7 @@ pub fn sources(dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     let repo = dir.ancestors().find(|a| a.join(".git").exists());
     let mut files = Vec::new();
     walk(&dir, "", repo, 0, &mut files)?;
-    files.retain(|(path, _)| !path.starts_with("service/"));
+    files.retain(|(path, _)| !path.starts_with("service/") && !path.starts_with("tests/"));
     files.sort();
     Ok(files)
 }

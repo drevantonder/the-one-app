@@ -5,7 +5,7 @@ Reads this machine's Claude Code sessions in the repo and its worktrees, the boa
 writes a report to ~/one-export/iteration/<date>.md. With --post, also posts its headline to the-one-app/speed.
 Sessions on other machines and other harnesses aren't in it; the board and git are everyone's.
 
-    python3 -I tests/iteration/report.py [--days 1] [--post]
+    python3 -I tools/iteration/report.py [--days 1] [--post]
 """
 
 import argparse, datetime as dt, glob, json, os, re, statistics, subprocess, sys, time
@@ -14,7 +14,7 @@ from collections import Counter
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SESSIONS = os.path.expanduser("~/.claude/projects/*the-one-app*/*.jsonl")
 OUT = os.path.expanduser("~/one-export/iteration")
-WHO = "iteration report (tests/iteration/report.py, personal)"
+WHO = "iteration report (tools/iteration/report.py, personal)"
 
 
 def when(s):

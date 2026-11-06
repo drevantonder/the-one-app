@@ -2,7 +2,7 @@
 """How a fresh agent gets on with the app: every prompt in prompts.json, each in a new OpenCode session, in three
 setups (mcp: the MCP server only; cli: the CLI only; both), against throwaway networks beside the real one.
 
-    python3 tests/agents/run.py [--setups mcp,cli,both] [--prompts id,...] [--repeat N] [--model M] [--one PATH] [--out DIR]
+    python3 tools/agents/run.py [--setups mcp,cli,both] [--prompts id,...] [--repeat N] [--model M] [--one PATH] [--out DIR]
 
 Each setup gets its own network: a node run with HOME set to a sandbox and its own port (ONE_ADDR), and the node itself
 writes the harness's AGENTS.md, skills, board plugin and MCP entry there, exactly as on a real device (src/agents.rs).

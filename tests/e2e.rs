@@ -7,14 +7,14 @@ use serde_json::{Value, json};
 
 use crate::temp;
 
-async fn start(name: &str) -> Node {
+pub(crate) async fn start(name: &str) -> Node {
     let dir = temp(name);
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": name }).to_string()).unwrap();
     Node::start(&dir).await.unwrap()
 }
 
 /// A new network on `a`: its recovery key's secret.
-async fn create(a: &Node, name: &str, user_name: &str) -> String {
+pub(crate) async fn create(a: &Node, name: &str, user_name: &str) -> String {
     a.create_with(name, user_name, None, one::config::STARTERS).await.unwrap()
 }
 
@@ -28,7 +28,7 @@ async fn relay(a: &Node) -> crate::cloudflare::Workers {
 }
 
 /// Waits for what's expected, as long as a busy machine may take: a limit only for what never happens.
-async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
+pub(crate) async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(180) {
         if check().await {
@@ -40,7 +40,7 @@ async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
 }
 
 /// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
-async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: one::database::content::Content) {
+pub(crate) async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: one::database::content::Content) {
     let global = one::database::scopes::Scope::Global;
     let next = a.global_steps(caller, 9007199254740991, None).await.unwrap();
     let (at, epoch) = (next["at"].as_u64().unwrap(), next["epoch"].as_u64().unwrap() as u32);
@@ -285,320 +285,6 @@ async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     assert!(a.blob_for(&sam, &theirs).await.is_err(), "nor Sam one nobody gave him");
     a.drop_put(&hash);
     assert!(a.blob_for(&sam, &hash).await.is_err(), "a request's file goes once it's answered");
-}
-
-/// In Repos, a repo's owner and its collaborators push to it, and its owners alone delete it: someone else is refused,
-/// from a client device or a sign-in from elsewhere, whose git reaches Repos' `_http` as them, until its owner adds them
-/// as a collaborator; a group's members push to its repos, and only its admins delete them. In its issues, anyone opens
-/// and comments, and edits and closes their own; only those who push close, label and assign another's, and only its
-/// owners delete one.
-#[tokio::test(flavor = "multi_thread")]
-async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_delete_it() {
-    use one::node::{Caller, DeviceRequest, Invited};
-    let a = start("repos-owner").await;
-    create(&a, "Home", "Andre").await;
-    let me = Caller::own(a.id(), a.user().unwrap());
-    // Naming no scopes, as git's requests don't: Sam's own runs nowhere, as he picked nowhere, so his run without it.
-    let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
-    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
-
-    // A real one-commit pack, as git sends it.
-    let dir = temp("repos-owner-git");
-    let git = |args: &[&str]| {
-        let out = std::process::Command::new("git").args(["-c", "user.name=Andre", "-c", "user.email=andre@example.com"]).args(args).current_dir(&dir).output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
-        out.stdout
-    };
-    git(&["init", "-q"]);
-    std::fs::write(dir.join("README"), "hello\n").unwrap();
-    git(&["add", "README"]);
-    git(&["commit", "-qm", "First"]);
-    let head = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_string();
-    let mut packing = std::process::Command::new("git").args(["pack-objects", "--stdout", "--revs"]).current_dir(&dir).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
-    std::io::Write::write_all(&mut packing.stdin.take().unwrap(), b"HEAD\n").unwrap();
-    let pack = packing.wait_with_output().unwrap().stdout;
-
-    // git's push: one pkt-line per branch moved (old, new, ref), a flush, then the pack.
-    let zero = "0".repeat(40);
-    let push = |commands: &[(&str, &str, &str)], pack: &[u8]| {
-        let mut body = Vec::new();
-        for (i, (old, new, r)) in commands.iter().enumerate() {
-            let line = format!("{old} {new} {r}{}\n", if i == 0 { "\0report-status" } else { "" });
-            body.extend(format!("{:04x}{line}", line.len() + 4).bytes());
-        }
-        body.extend(b"0000");
-        body.extend(pack);
-        body
-    };
-    let http = |repo: &str, body: Option<String>| repos("_http", json!({ "method": "POST", "path": format!("{repo}.git/git-receive-pack"), "query": "", "body": body }));
-    let branches = async |repo: &str| {
-        let got = a.call(repos("get", json!({ "repo": repo }))).await.unwrap();
-        got["branches"].as_array().unwrap().iter().map(|b| (b["branch"].as_str().unwrap().to_string(), b["head"].as_str().unwrap().to_string())).collect::<Vec<_>>()
-    };
-
-    // Andre's push makes the repo, his, at his handle.
-    let body = a.put_blob(&push(&[(&zero, &head, "refs/heads/main")], &pack)).unwrap();
-    let told = a.call(http("andre/home", Some(body))).await.unwrap();
-    assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
-    assert_eq!(branches("andre/home").await, [("main".to_string(), head.clone())]);
-
-    // Sam, a person of the network, with a device of his.
-    let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
-    let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let e = one::keys::Endpoint::of(&sams);
-    let proof = one::keys::invite_proof(secret.as_bytes(), &e);
-    let asks = DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
-    a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
-
-    // Repos' keys in global, as Sam's device opens them and hands them to the node with his calls.
-    let global = one::database::scopes::Scope::Global;
-    let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
-    // Repos' own, and the Vault's, which fills in its items, as a client hands them when the node asks.
-    let epochs = a.sealed_keys(&me, &global, Some(&one::keys::hex(&e.key)), None).await.unwrap();
-    let mut keys = Vec::new();
-    for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::vault::DATABASE)] {
-        let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
-        for (n, epoch) in epochs["sealed"].as_object().unwrap() {
-            let epoch: [u8; 32] = one::keys::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
-            let key = one::keys::open_database_key(&epoch, app, database, &b64(&sealed["sealed"][n])).unwrap();
-            keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key });
-        }
-    }
-
-    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
-    let signed_in = Caller { key: a.id(), user: sam.user.clone(), agent: None, credential: one::node::Credential::SignIn("Sam's sign-in".into()) };
-    let mut both = Vec::new();
-    for (sam, handed_for) in [(client, one::keys::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
-        let handoff = one::keys::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
-        a.hand(&sam.credential, &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
-        let call = |req: CallRequest| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
-
-        // His push, deleting main and making a branch of his at its head, is refused, and nothing moves.
-        let (body, _) = a.put_blob_from(&sam, axum::body::Body::from(push(&[(&head, &zero, "refs/heads/main"), (&zero, &head, "refs/heads/sams")], &[]))).await.unwrap();
-        let told = call(http("andre/home", Some(body))).await.unwrap();
-        let text = told["text"].as_str().unwrap();
-        assert!(text.contains("ng refs/heads/main ") && text.contains("ng refs/heads/sams ") && !text.contains("ok refs/"), "{told}");
-        assert_eq!(branches("andre/home").await, [("main".to_string(), head.clone())]);
-
-        // Nor does he delete it, nor make himself a collaborator.
-        let refused = call(repos("delete", json!({ "repo": "andre/home" }))).await.unwrap_err();
-        assert!(format!("{refused:#}").contains("only Andre manage andre/home"), "{refused:#}");
-        assert!(call(repos("add_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.is_err());
-        assert!(a.call(repos("get", json!({ "repo": "andre/home" }))).await.unwrap()["deleted"].is_null());
-        both.push(sam);
-    }
-    let [client, signed_in] = <[Caller; 2]>::try_from(both).unwrap();
-    let call = |req: CallRequest, sam: &Caller| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
-
-    // Its issues: Sam opens one and comments, as anyone may, and edits and closes his own; he doesn't close, edit or
-    // delete Andre's, label his own or make a label, which only those who push do, nor delete his own, which only its
-    // owners do.
-    let issue = |tool: &str, number: u64, mut input: Value| {
-        (input["repo"], input["number"]) = (json!("andre/home"), json!(number));
-        repos(tool, input)
-    };
-    assert_eq!(a.call(repos("open_issue", json!({ "repo": "andre/home", "title": "Andre's" }))).await.unwrap()["number"], 1);
-    assert_eq!(call(repos("open_issue", json!({ "repo": "andre/home", "title": "Sam's" })), &client).await.unwrap()["number"], 2);
-    call(issue("comment", 1, json!({ "body": "Me too" })), &client).await.unwrap();
-    let refused = call(issue("close_issue", 1, json!({})), &client).await.unwrap_err();
-    assert!(format!("{refused:#}").contains("only its author and the owners and collaborators of andre/home close #1"), "{refused:#}");
-    for req in [issue("edit_issue", 1, json!({ "title": "Sam's now" })), issue("edit_issue", 2, json!({ "labels": ["bug"] })), issue("delete_issue", 2, json!({ "confirm": true })), repos("set_label", json!({ "repo": "andre/home", "name": "sams" }))] {
-        let tool = req.tool.clone();
-        assert!(call(req, &client).await.is_err(), "Sam's {tool} is refused");
-    }
-    call(issue("edit_issue", 2, json!({ "title": "Sam's, edited" })), &client).await.unwrap();
-    call(issue("close_issue", 2, json!({ "state_reason": "not_planned" })), &client).await.unwrap();
-    a.call(issue("edit_issue", 1, json!({ "labels": ["bug"], "assignees": ["sam"] }))).await.unwrap();
-    let all = a.call(repos("issues", json!({ "repo": "andre/home", "state": "all" }))).await.unwrap();
-    let [his, andres] = [&all["issues"][0], &all["issues"][1]];
-    assert_eq!((his["title"].as_str(), his["state"].as_str(), his["state_reason"].as_str()), (Some("Sam's, edited"), Some("closed"), Some("not_planned")), "{all}");
-    assert_eq!((andres["labels"][0]["name"].as_str(), andres["assignees"][0]["handle"].as_str(), andres["comments"].as_u64()), (Some("bug"), Some("sam"), Some(1)), "{all}");
-    a.call(issue("delete_issue", 2, json!({ "confirm": true }))).await.unwrap();
-    // A push of Sam's: making `branch` at the commit, with its pack, or deleting it: → whether it was taken.
-    let sams_push = async |sam: &Caller, repo: &str, branch: &str, deleting: bool| {
-        let r = format!("refs/heads/{branch}");
-        let line = if deleting { (head.as_str(), zero.as_str(), r.as_str()) } else { (zero.as_str(), head.as_str(), r.as_str()) };
-        let (body, _) = a.put_blob_from(sam, axum::body::Body::from(push(&[line], if deleting { &[] } else { &pack }))).await.unwrap();
-        // A call reaches the groups he's in too, whose keys his device would hand; this one hands global's alone.
-        let told = call(CallRequest { scopes: repo.starts_with("team/").then(|| vec!["global".into()]), ..http(repo, Some(body)) }, sam).await.unwrap();
-        told["text"].as_str().unwrap().contains(&format!("ok {r}"))
-    };
-
-    // Once Andre adds him as a collaborator, Sam pushes, from either; he still doesn't delete it. Taken out, he's refused.
-    a.call(repos("add_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.unwrap();
-    assert!(sams_push(&client, "andre/home", "sams", false).await);
-    assert!(sams_push(&signed_in, "andre/home", "sams", true).await);
-    assert!(call(repos("delete", json!({ "repo": "andre/home" })), &client).await.is_err());
-    a.call(repos("remove_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.unwrap();
-    assert!(!sams_push(&client, "andre/home", "sams", false).await);
-
-    // A group's repo: its admins own it. Sam pushes to it only once he's in the group, and doesn't delete it.
-    let group = a.make_group(&me, "Team").await.unwrap();
-    a.call(repos("create", json!({ "name": "site", "owner": "team" }))).await.unwrap();
-    assert!(!sams_push(&client, "team/site", "sams", false).await);
-    a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
-    signed_by(&a, &client, &sams, one::database::content::accept(&group)).await;
-    assert!(sams_push(&client, "team/site", "sams", false).await, "a member of the group pushes to its repo");
-    let refused = call(CallRequest { scopes: Some(vec!["global".into()]), ..repos("delete", json!({ "repo": "team/site" })) }, &client).await.unwrap_err();
-    assert!(format!("{refused:#}").contains("only Team's admins manage team/site"), "{refused:#}");
-
-    // Andre deletes his, and the group's as its admin.
-    a.call(repos("delete", json!({ "repo": "andre/home" }))).await.unwrap();
-    a.call(repos("delete", json!({ "repo": "team/site" }))).await.unwrap();
-}
-
-/// In Repos, each push's pack is merged into the ones before it, which are then let go of from the bucket: after many
-/// pushes, each of whose packs holds deltas, the packs a repo keeps still hold every object of every head it had, as
-/// git itself reads them.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_repos_merged_packs_hold_every_object_pushed() {
-    let a = start("repos-merge").await;
-    create(&a, "Home", "Andre").await;
-    let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
-    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
-
-    let dir = temp("repos-merge-git");
-    let git = |dir: &std::path::Path, args: &[&str], input: &[u8]| {
-        let mut child = std::process::Command::new("git").args(["-c", "user.name=Andre", "-c", "user.email=andre@example.com"]).args(args).current_dir(dir)
-            .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
-        std::io::Write::write_all(&mut child.stdin.take().unwrap(), input).unwrap();
-        let out = child.wait_with_output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
-        out.stdout
-    };
-    git(&dir, &["init", "-q"], b"");
-
-    let zero = "0".repeat(40);
-    let (mut old, mut heads) = (zero.clone(), Vec::new());
-    for push in 0..12 {
-        // Two commits a push, each growing the same file, so the pack holds deltas.
-        for n in 0..2 {
-            let text: String = (0..200 * (2 * push + n + 1)).map(|i| format!("line {i}\n")).collect();
-            std::fs::write(dir.join("notes"), text).unwrap();
-            git(&dir, &["add", "notes"], b"");
-            git(&dir, &["commit", "-qm", &format!("Push {push}, commit {n}")], b"");
-        }
-        let head = String::from_utf8(git(&dir, &["rev-parse", "HEAD"], b"")).unwrap().trim().to_string();
-        let revs = if old == zero { "HEAD\n".to_string() } else { format!("HEAD\n^{old}\n") };
-        let pack = git(&dir, &["pack-objects", "--stdout", "--revs"], revs.as_bytes());
-        let line = format!("{old} {head} refs/heads/main\0report-status\n");
-        let mut body = format!("{:04x}{line}0000", line.len() + 4).into_bytes();
-        body.extend(pack);
-        let body = a.put_blob(&body).unwrap();
-        let told = a.call(repos("_http", json!({ "method": "POST", "path": "andre/home.git/git-receive-pack", "query": "", "body": body }))).await.unwrap();
-        assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
-        heads.push(head.clone());
-        old = head;
-    }
-
-    // What the repo keeps, read by git from nothing else.
-    let packs = a.call(repos("get", json!({ "repo": "andre/home" }))).await.unwrap()["packs"].as_array().unwrap().clone();
-    assert!(packs.len() < heads.len(), "pushes' packs are merged: {} packs", packs.len());
-    let bare = temp("repos-merge-bare");
-    git(&bare, &["init", "-q", "--bare"], b"");
-    for (i, hash) in packs.iter().enumerate() {
-        let path = bare.join(format!("objects/pack/kept-{i}.pack"));
-        std::fs::write(&path, a.blob(hash.as_str().unwrap()).await.unwrap()).unwrap();
-        git(&bare, &["index-pack", path.to_str().unwrap()], b"");
-    }
-    for head in &heads {
-        git(&bare, &["rev-list", "--objects", "--missing=error", head], b"");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_github_sign_in_only_to_them() {
-    use one::node::{Caller, DeviceRequest, Invited};
-    use std::sync::{Arc, Mutex};
-    let a = start("repos-github").await;
-    create(&a, "Home", "Andre").await;
-    let me = Caller::own(a.id(), a.user().unwrap());
-    let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
-    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
-
-    // GitHub, as far as this needs: Andre's own repo for his token, an organization's for the App's installation,
-    // which it gives a token for with a JWT. Each request's path and Authorization is kept.
-    let seen: Arc<Mutex<Vec<(String, String)>>> = Default::default();
-    let kept = seen.clone();
-    let repo = |full: &str| json!({ "full_name": full, "name": full.split('/').nth(1), "owner": { "login": full.split('/').next() }, "default_branch": "main", "html_url": format!("https://github.com/{full}"), "private": true, "permissions": { "push": true }, "pushed_at": "2026-11-01T00:00:00Z" });
-    let github = axum::Router::new().fallback(move |req: axum::extract::Request| {
-        let kept = kept.clone();
-        async move {
-            let auth = req.headers().get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-            let path = req.uri().path().to_string();
-            kept.lock().unwrap().push((path.clone(), auth.clone()));
-            let body = match (path.as_str(), auth.as_str()) {
-                ("/api/v3/app/installations/7/access_tokens", jwt) if jwt.starts_with("Bearer ey") && jwt.matches('.').count() == 2 => json!({ "token": "org-token", "expires_at": "2099-01-01T00:00:00Z" }),
-                ("/api/v3/installation/repositories", "Bearer org-token") => json!({ "repositories": [repo("org/site")] }),
-                ("/api/v3/user/repos", "Bearer andre-token") => json!([repo("andre-gh/mine")]),
-                _ => return (axum::http::StatusCode::NOT_FOUND, axum::Json(json!({ "message": "Not Found" }))),
-            };
-            (axum::http::StatusCode::OK, axum::Json(body))
-        }
-    });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(async move { axum::serve(listener, github).await.unwrap() });
-
-    // The network's GitHub App in Everyone's Vault, its key opened on this machine, and Andre's own GitHub sign-in in his.
-    let pem = String::from_utf8(std::process::Command::new("openssl").args(["genrsa", "-traditional", "2048"]).output().unwrap().stdout).unwrap();
-    let global = one::database::scopes::Scope::Global;
-    a.vault_grant(&me, &global, &a.device_name(), true).await.unwrap();
-    a.set_item(&me, &global, json!({ "title": "GitHub App", "type": "GitHub App", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
-        "app_id": { "value": "1" }, "slug": { "value": "app" }, "client_id": { "value": "Iv1" }, "client_secret": { "value": "s", "secret": true },
-        "private_key": { "value": pem, "secret": true }, "web": { "value": base }, "api": { "value": format!("{base}/api/v3") } } })).await.unwrap();
-    a.set_item(&me, &one::database::scopes::Scope::User(me.user.clone()), json!({ "title": "GitHub andre-gh", "type": "GitHub account", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
-        "login": { "value": "andre-gh" }, "access_token": { "value": "andre-token", "secret": true }, "expires": { "value": "0" } } })).await.unwrap();
-
-    // Andre, an admin of Team, connects the organization for it.
-    let group = a.make_group(&me, "Team").await.unwrap();
-    a.call(repos("connect_org", json!({ "group": "team" }))).await.unwrap();
-    a.call(repos("finish_connect_org", json!({ "back": "http://x/back?installation_id=7&setup_action=install" }))).await.unwrap();
-    let names = |list: Value| list.as_array().unwrap().iter().map(|r| r["repo"].as_str().unwrap().to_string()).collect::<Vec<_>>();
-    assert_eq!(names(a.call(repos("list", json!({ "source": "github" }))).await.unwrap()), ["github.com/andre-gh/mine", "github.com/org/site"]);
-
-    // Sam, a person of the network but not in Team, with a device of his that hands its keys with his calls: Repos'
-    // and the Vault's in global.
-    let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
-    let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let e = one::keys::Endpoint::of(&sams);
-    let proof = one::keys::invite_proof(secret.as_bytes(), &e);
-    let asks = DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
-    a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
-    let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
-    let epochs = a.sealed_keys(&me, &global, Some(&one::keys::hex(&e.key)), None).await.unwrap();
-    let mut keys = Vec::new();
-    for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::vault::DATABASE)] {
-        let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
-        for (n, epoch) in epochs["sealed"].as_object().unwrap() {
-            let epoch: [u8; 32] = one::keys::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
-            let key = one::keys::open_database_key(&epoch, app, database, &b64(&sealed["sealed"][n])).unwrap();
-            keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key });
-        }
-    }
-    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
-    let handoff = one::keys::Handoff { for_: one::keys::hex(&e.key), until: u64::MAX, keys };
-    a.hand(&client.credential, &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
-    let sams_list = async || {
-        let req = CallRequest { scopes: Some(vec!["global".into()]), ..repos("list", json!({ "source": "github" })) };
-        let before = seen.lock().unwrap().len();
-        let list = a.call_as(a.for_sign_in(req).unwrap(), client.clone()).await.unwrap();
-        (names(list), seen.lock().unwrap()[before..].to_vec())
-    };
-
-    // Not in Team, he sees none of GitHub's repos, and nothing goes to GitHub for him.
-    assert_eq!(sams_list().await, (Vec::<String>::new(), vec![]));
-    let refused = a.call_as(a.for_sign_in(CallRequest { scopes: Some(vec!["global".into()]), ..repos("tree", json!({ "repo": "github.com/andre-gh/mine" })) }).unwrap(), client.clone()).await.unwrap_err();
-    assert!(format!("{refused:#}").contains("Sign in to GitHub first"), "{refused:#}");
-
-    // Once he's in Team, he sees the organization's repo, as its installation, and never Andre's, nor with his token.
-    a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
-    signed_by(&a, &client, &sams, one::database::content::accept(&group)).await;
-    let (list, sent) = sams_list().await;
-    assert_eq!(list, ["github.com/org/site"]);
-    assert!(!sent.is_empty() && sent.iter().all(|(_, auth)| !auth.contains("andre-token")), "{sent:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

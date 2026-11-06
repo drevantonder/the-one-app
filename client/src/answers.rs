@@ -97,3 +97,53 @@ impl Answers {
         (self.dir.join(&name), name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ed25519_dalek::SigningKey;
+
+    use super::Answers;
+    use crate::device::Device;
+
+    /// What a native app keeps of its screens' calls, to show at once next time (one-client's `Answers`), is its person's
+    /// alone: only what tools that only read answered, sealed under that device's own key, so another person's
+    /// sign-in on the same computer (a device with its own key, even in the same folder) opens none of it; and it's gone
+    /// once the device signs out.
+    #[tokio::test]
+    async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
+        let dir = std::env::temp_dir().join(format!("one-answers-{}", std::process::id()));
+        let (andre, sam) = ([1; 32], [2; 32]);
+        // On the wire an app's tools are `ops`, and a call's tool `op`.
+        let apps = serde_json::to_vec(&serde_json::json!([{ "name": "tally", "ops": [{ "name": "topics", "reads": true }, { "name": "post", "reads": false }] }])).unwrap();
+        let call = |op: &str, input: serde_json::Value| serde_json::to_vec(&serde_json::json!({ "id": "1", "app": "tally", "op": op, "input": input, "client": "mac" })).unwrap();
+        let mine = Answers::new(&dir, &SigningKey::from_bytes(&andre));
+        mine.learn(&apps);
+        mine.keep(&call("topics", serde_json::json!({ "scope": "user", "format": "json" })), br#"{"ok":[{"path":"kitchen-reno"}]}"#);
+        mine.keep(&call("post", serde_json::json!({ "text": "hi" })), br#"{"ok":{"n":1}}"#);
+        mine.keep(&call("topics", serde_json::json!({ "scope": "global" })), br#"{"error":"no"}"#);
+
+        // The same call, its input's fields in any order, gets what it answered; a write, or a failure, was never kept.
+        let (answer, at) = mine.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).unwrap();
+        assert_eq!(answer, br#"[{"path":"kitchen-reno"}]"#);
+        assert!(at > 0);
+        assert!(mine.kept("tally", "post", br#"{"text":"hi"}"#).is_none());
+        assert!(mine.kept("tally", "topics", br#"{"scope":"global"}"#).is_none());
+        // Nothing of it is in the clear.
+        for file in std::fs::read_dir(dir.join("answers")).unwrap().flatten() {
+            assert!(!String::from_utf8_lossy(&std::fs::read(file.path()).unwrap()).contains("kitchen-reno"));
+        }
+
+        // Another person's device, in the same folder, opens nothing.
+        assert!(Answers::new(&dir, &SigningKey::from_bytes(&sam)).kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
+        // Only a native app's device keeps them; once it starts again, before it's read the apps, it finds them, and once
+        // it signs out, they're gone.
+        let cli = Device::new(andre, "https://one.invalid", dir.to_str().unwrap());
+        assert!(cli.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
+        let app = Device::new(andre, "https://one.invalid", dir.to_str().unwrap()).keeping();
+        assert!(app.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_some());
+        app.sign_out().await;
+        assert!(app.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
+        assert!(!dir.join("answers").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
