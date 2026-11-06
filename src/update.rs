@@ -7,13 +7,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use one::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
+use one::release::Version;
 use one::{cache, release};
 use serde_json::{Value, json};
 
+use crate::build::{self, PLATFORMS, Platform, cargo, git, quietly, show, succeeds};
 use crate::{get, post};
-
-/// Platforms the installer knows. A release has each one some device here can build.
-const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin"];
 
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
@@ -29,8 +28,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     std::env::set_current_dir(cache())?;
     if let Some(tag) = tag {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
-        ensure!(installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub; {CLI} update runs main on its devices");
-        ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
+        ensure!(build::installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub; {CLI} update runs main on its devices");
+        ensure!(succeeds(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
     // Updates here take turns: they share one checkout, and each would test one commit and send out another.
     let _turn = turn()?;
@@ -55,7 +54,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         return Ok(());
     }
     if let Some(tag) = tag {
-        ensure!(!quiet(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
+        ensure!(!succeeds(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
     let mut parts = last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this));
     parts.mac = mac_last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this)).mac;
@@ -72,7 +71,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
     parts.services.retain(|n| services(&src).contains(n));
     let macs: Vec<Value> =
-        if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect() } else { Vec::new() };
+        if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| Platform::is_mac(t))).collect() } else { Vec::new() };
 
     let sends = parts.node || parts.mac || !parts.apps.is_empty() || !parts.services.is_empty();
     let after = if sends && tag.is_none() { after_update()? } else { None };
@@ -124,19 +123,18 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let key = release_key()?;
     // Its commits were tested before they were pushed.
     println!("Building {short}");
-    let mut build = Command::new(cargo());
-    build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
+    let mut node = Command::new(cargo());
+    node.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
     // Every release carries the Cloudflare node: one without it couldn't deploy to Cloudflare.
-    build.env("CLOUDFLARE_NODE", timed("built the Cloudflare node", || cloudflare_node(&src, &config, "release")).context("couldn't build the Cloudflare node, so nothing was sent out")?);
+    node.env("CLOUDFLARE_NODE", timed("built the Cloudflare node", || build::cloudflare_node(&src, &config, "release")).context("couldn't build the Cloudflare node, so nothing was sent out")?);
     // And the web client's way to nodes: one without it couldn't reach them.
-    build.env("CLIENT", timed("built the web client", || client(&src, &config)).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
-    timed("built the node", || run_quiet(&mut build))?;
+    node.env("CLIENT", timed("built the web client", || build::client(&src, &config)).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
+    timed("built the node", || quietly(&mut node))?;
 
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // The build devices say they run: main's commit, and a custom build's config's.
-    let version: Value = serde_json::from_slice(&Command::new(&binary).args(["version", "--json"]).output()?.stdout).context("ask the new build what it is")?;
-    let short = version["commit"].as_str().context("the new build doesn't say what it is")?.to_string();
-    let short = short.as_str();
+    let version = Version::of(&binary).context("ask the new build what it is")?;
+    let short = version.commit.as_str();
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
     // Services first, so a node that no longer carries one (it became its app's own program) finds it out.
@@ -144,7 +142,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if !linux.is_empty() && linux.iter().all(|d| d["build"] == short) {
         println!("  every Linux device already runs {short}");
     } else {
-        timed("published the node", || crate::publish(&binary, &Default::default(), &key))?;
+        let published = timed("published the node", || build::publish(&binary, &key, &version, None))?;
+        println!("{}", build::published_said(&published, None));
     }
     let started_at = Instant::now();
     failed |= timed("waited for the Linux devices", || await_builds(&linux, short, started_at, Duration::from_secs(180)));
@@ -180,7 +179,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if cfg!(target_os = "linux") {
         println!("Building the Linux app");
         let native = src.join("client/native");
-        match run_quiet(Command::new(cargo()).current_dir(&native).env("CONFIG", &config).args(["build", "--release"])) {
+        match quietly(Command::new(cargo()).current_dir(&native).env("CONFIG", &config).args(["build", "--release"])) {
             Ok(()) => {
                 let name = format!("{CLI}-app-{TARGET}");
                 std::fs::copy(native.join("target/release/one-native"), dir.join(&name))?;
@@ -212,9 +211,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
             }
         }
     }
-    for p in PLATFORMS {
-        if !assets.iter().any(|a| a.ends_with(p)) && !(p.ends_with("-apple-darwin") && assets.iter().any(|a| a == &app_zip())) {
-            println!("No device here builds {p}, so {tag} has nothing for it.");
+    for p in &PLATFORMS {
+        if !assets.contains(&p.asset()) {
+            println!("No device here builds {}, so {tag} has nothing for it.", p.target);
         }
     }
     // Each file comes with its signature, which the installer checks.
@@ -225,7 +224,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     println!("Publishing {tag} on GitHub");
     let mut gh = Command::new("gh");
     gh.current_dir(&dir).args(["release", "create", tag, "--repo", REPO, "--target", &commit, "--generate-notes"]).args(&assets);
-    step(&mut gh)?;
+    show(&mut gh)?;
     ensure!(!failed, "released {tag}, but not every device runs it");
     ensure!(!cloudflare_failed, "released {tag}, but it isn't deployed to Cloudflare");
     Ok(())
@@ -330,86 +329,13 @@ fn services(src: &Path) -> Vec<String> {
     names
 }
 
-/// Builds the Go service in `dir` for `os` and `arch` (Go's names) at `out`, saying it was built from `built`.
-fn go_build(dir: &Path, os: &str, arch: &str, built: &str, out: &Path) -> Result<()> {
-    let mut go = Command::new(go());
-    go.current_dir(dir).env("CGO_ENABLED", "0").env("GOOS", os).env("GOARCH", arch);
-    go.args(["build", "-trimpath", "-ldflags", &format!("-X main.built={built}"), "-o"]).arg(out).arg(".");
-    run_quiet(&mut go)
-}
-
-/// A platform as Go names it: its `GOOS` and `GOARCH`.
-fn go_platform(target: &str) -> (&'static str, &'static str) {
-    match target {
-        "x86_64-unknown-linux-gnu" => ("linux", "amd64"),
-        "aarch64-unknown-linux-gnu" => ("linux", "arm64"),
-        _ => ("darwin", "arm64"),
-    }
-}
-
-/// A platform as a person says it.
-pub fn platform_said(target: &str) -> &'static str {
-    match target {
-        "x86_64-unknown-linux-gnu" => "Linux",
-        "aarch64-unknown-linux-gnu" => "Linux on ARM",
-        "aarch64-apple-darwin" => "Mac",
-        _ => "another platform",
-    }
-}
-
-/// Builds the service of the app in `dir` (its `service/`) here, as `deploy` does, for each platform this machine can:
-/// one in Go for every platform, one in Rust for this machine's. Nodes never build. → each build by platform, and the
-/// platforms it couldn't build for; none if the app has no service.
-pub fn build_service(dir: &Path) -> Result<Option<(Vec<(String, Vec<u8>)>, Vec<&'static str>)>> {
-    let source = dir.join("service");
-    let rust = source.join("Cargo.toml").is_file();
-    if !rust && !source.join("go.mod").is_file() {
-        return Ok(None);
-    }
-    let built = git(&source, &["rev-parse", "--short=12", "HEAD"]).unwrap_or_default();
-    let out = std::env::temp_dir().join(format!("{CLI}-service-{}", std::process::id()));
-    let (mut builds, mut missed) = (Vec::new(), Vec::new());
-    for target in PLATFORMS {
-        if rust && target != TARGET {
-            missed.push(target);
-            continue;
-        }
-        let (os, arch) = go_platform(target);
-        match rust {
-            true => {
-                // Cargo says where it put the program it built.
-                let o = Command::new(cargo()).env("ONE_BUILD", &built).args(["build", "--release", "--message-format=json-render-diagnostics", "--manifest-path"]).arg(source.join("Cargo.toml")).output()?;
-                ensure!(o.status.success(), "its service didn't build:\n{}", String::from_utf8_lossy(&o.stderr));
-                let said = String::from_utf8_lossy(&o.stdout);
-                let program = said.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|m| m["executable"].as_str().map(PathBuf::from)).last();
-                std::fs::copy(program.context("its service's crate builds no program")?, &out)?;
-            }
-            false => go_build(&source, os, arch, &built, &out).with_context(|| format!("build its service for {} (Go: go.dev/doc/install)", platform_said(target)))?,
-        }
-        builds.push((target.to_string(), std::fs::read(&out)?));
-        let _ = std::fs::remove_file(&out);
-    }
-    ensure!(!builds.is_empty(), "its service is in Rust, which this machine ({TARGET}) builds for no platform a node runs: deploy it from Linux or a Mac");
-    Ok(Some((builds, missed)))
-}
-
-/// Builds the Rust service of the app `name` in the checkout `src` for this machine, at `out`, saying it was built
-/// from `built`.
-fn cargo_build(src: &Path, name: &str, built: &str, out: &Path) -> Result<()> {
-    run_quiet(Command::new(cargo()).current_dir(src).env("ONE_BUILD", built).args(["build", "--release", "-p", &format!("{}-{name}", env!("CARGO_BIN_NAME"))]))?;
-    std::fs::copy(src.join("target/release").join(format!("{}-{name}", env!("CARGO_BIN_NAME"))), out)?;
-    Ok(())
-}
-
 /// Puts your checkout's build of the app's service in `dir` (`apps/<name>`) on `device` (here by default, else reached
 /// by ssh as its name) and switches it on there, for trying it before it's sent out. oned runs it until a release of it
 /// newer than this build is published.
 pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
     let dir = std::fs::canonicalize(dir).with_context(|| format!("{} isn't here", dir.display()))?;
     let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let source = dir.join("service");
-    let rust = source.join("Cargo.toml").is_file();
-    ensure!(rust || source.join("go.mod").is_file(), "{} has no service (service/go.mod or service/Cargo.toml)", dir.display());
+    ensure!(build::has_service(&dir), "{} has no service (service/go.mod or service/Cargo.toml)", dir.display());
     let on = |args: &str| -> Result<String> {
         let out = match device {
             Some(device) => Command::new("ssh").args([device, args]).stdin(std::process::Stdio::null()).output(),
@@ -421,32 +347,35 @@ pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
     let there = device.unwrap_or("this device");
     on(&format!("test -x ~/.local/bin/{CLI}")).map_err(|_| anyhow::anyhow!("{CLI} isn't on {there}: install it there first"))?;
     let uname = on("uname -sm")?;
-    let (os, arch) = uname.split_once(' ').unwrap_or_default();
-    let arch = if arch == "x86_64" { "amd64" } else { "arm64" };
-    let commit = git(&source, &["rev-parse", "--short=12", "HEAD"])?.trim().to_string();
-    let dirty = if quiet(Command::new("git").current_dir(&source).args(["diff", "--quiet", "HEAD", "--", "."])) { "" } else { "+dirty" };
+    let platform = Platform::of_uname(&uname).with_context(|| format!("{there} says it's {uname}, which no release is for"))?;
+    let built = build::built_from(&dir.join("service"), true)?;
     let out = std::env::temp_dir().join(format!("{CLI}-{name}-{}", std::process::id()));
-    match rust {
-        true => {
-            ensure!(uname == "Linux x86_64" && TARGET == "x86_64-unknown-linux-gnu", "a service in Rust is built here for this machine, so try it on a Linux x86_64 device from one");
-            cargo_build(dir.parent().and_then(Path::parent).unwrap_or(&dir), &name, &format!("{commit}{dirty}"), &out)?
-        }
-        false => go_build(&source, &os.to_lowercase(), arch, &format!("{commit}{dirty}"), &out)?,
-    }
-    // Put in place in one step, so oned never starts half of it. Here, where oned looks for it (`oned::fetched`: a throwaway
-    // network's own, never the real network's); on another device, in its `~/.local/bin`.
-    let program = format!("{CLI}-{name}");
-    let copied = match device {
-        Some(device) => quiet(Command::new("scp").arg("-q").arg(&out).arg(format!("{device}:.local/bin/{program}.new"))),
-        None => {
-            let new = one::oned::fetched(&name).with_extension("new");
-            new.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::copy(&out, new).is_ok()
+    let made = build::build_service(&dir, &built, [platform], &out);
+    let made = made.and_then(|b| match b {
+        Some(b) if !b.made.is_empty() => Ok(b.made[0].1.clone()),
+        _ => bail!("a service in Rust is built here for this machine, so try it on a device like it ({TARGET}) from one"),
+    });
+    let program = match made {
+        Ok(program) => program,
+        Err(err) => {
+            let _ = std::fs::remove_dir_all(&out);
+            return Err(err);
         }
     };
-    let _ = std::fs::remove_file(&out);
+    // Put in place in one step, so oned never starts half of it. Here, where oned looks for it (`oned::fetched`: a throwaway
+    // network's own, never the real network's); on another device, in its `~/.local/bin`.
+    let installed = format!("{CLI}-{name}");
+    let copied = match device {
+        Some(device) => succeeds(Command::new("scp").arg("-q").arg(&program).arg(format!("{device}:.local/bin/{installed}.new"))),
+        None => {
+            let new = one::oned::fetched(&name).with_extension("new");
+            new.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::copy(&program, new).is_ok()
+        }
+    };
+    let _ = std::fs::remove_dir_all(&out);
     ensure!(copied, "couldn't copy it to {there}");
     match device {
-        Some(_) => drop(on(&format!("chmod 755 ~/.local/bin/{program}.new && mv ~/.local/bin/{program}.new ~/.local/bin/{program}"))?),
+        Some(_) => drop(on(&format!("chmod 755 ~/.local/bin/{installed}.new && mv ~/.local/bin/{installed}.new ~/.local/bin/{installed}"))?),
         None => {
             use std::os::unix::fs::PermissionsExt;
             let path = one::oned::fetched(&name);
@@ -455,7 +384,7 @@ pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
         }
     }
     post("/v1/service", json!({ "name": name, "device": device, "on": true }))?;
-    println!("{name}'s service {commit}{dirty} is on {there}: its oned starts it; {CLI} services says when it's running.");
+    println!("{name}'s service {built} is on {there}: its oned starts it; {CLI} services says when it's running.");
     Ok(())
 }
 
@@ -471,22 +400,13 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
     let committed: u64 = git(src, &["log", "-1", "--format=%ct", commit]).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
     let mut released = services_released();
     for name in names {
-        let dir = service_dir(src, name);
-        let rust = dir.join("Cargo.toml").is_file();
         let each = || -> Result<()> {
             // One in Rust is built for this machine's platform: each Mac builds its own with its app, and carries it.
-            for target in PLATFORMS.into_iter().filter(|t| !rust || *t == TARGET) {
-                let (os, arch) = go_platform(target);
-                let out = cache().join("services").join(format!("{name}-{target}"));
-                std::fs::create_dir_all(out.parent().unwrap_or(&out))?;
-                match rust {
-                    true => cargo_build(src, name, &commit[..12], &out),
-                    false => go_build(&dir, os, arch, &commit[..12], &out),
-                }
-                .with_context(|| format!("build it for {target}"))?;
-                let signature = release::sign(key, &std::fs::read(&out)?)?;
-                let body = json!({ "path": out, "service": name, "commit": commit, "target": target, "committed": committed, "signature": signature });
-                post("/v1/service-release", body).with_context(|| format!("publish it for {target}"))?;
+            let out = cache().join("services").join(name);
+            let built = build::build_service(&src.join("apps").join(name), &commit[..12], PLATFORMS.iter(), &out)?.context("it has no service")?;
+            for (platform, program) in built.made {
+                let version = Version { commit: commit.into(), target: platform.target.into(), committed };
+                build::publish(&program, key, &version, Some(name)).with_context(|| format!("publish it for {}", platform.target))?;
             }
             Ok(())
         };
@@ -503,21 +423,6 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
     }
     let _ = std::fs::write(cache().join("services-released"), serde_json::to_vec(&released).unwrap_or_default());
     ok
-}
-
-/// Runs a command, showing its output only if it fails.
-pub fn run_quiet(cmd: &mut Command) -> Result<()> {
-    let out = cmd.output().with_context(|| format!("run {:?}", cmd.get_program()))?;
-    if !out.status.success() {
-        bail!(
-            "{:?} {} failed:\n{}{}",
-            cmd.get_program(),
-            cmd.get_args().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "),
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    Ok(())
 }
 
 /// Deletes the built-in apps whose folder is gone from `src`, renamed or removed, where the network still has them:
@@ -574,7 +479,7 @@ fn deploy_apps(src: &Path, changed: &[String]) -> Result<()> {
         let files = one::app::bundle::sources(&dir)?;
         let files: Vec<(&str, &[u8])> = files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect();
         let bundle = one::node::built_in_bundle(&files)?;
-        let blob = crate::request(crate::agent().post(format!("http://{}/v1/blobs", one::api::addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
+        let blob = crate::put_blob(&bundle)?;
         if app["bundle"].as_str() != Some(blob.as_str()) {
             post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
             println!("Deployed {name}'s new version ({})", &blob[..12]);
@@ -785,11 +690,6 @@ fn version_tag(tag: &str) -> bool {
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Whether install.sh, which gets releases from GitHub, installs this custom build. Only that custom build is released there.
-fn installer_is_ours() -> bool {
-    include_str!("../install.sh").contains(&format!("\ncli={CLI}\n"))
-}
-
 /// What the Mac app is published as.
 fn app_zip() -> String {
     format!("{CLI}-macos.zip")
@@ -815,10 +715,10 @@ fn checkout() -> Result<PathBuf> {
     let dir = cache().join("src");
     if !dir.join(".git").exists() {
         std::fs::create_dir_all(cache())?;
-        step(Command::new("git").args(["clone", "-q", &format!("https://github.com/{REPO}.git")]).arg(&dir))?;
+        show(Command::new("git").args(["clone", "-q", &format!("https://github.com/{REPO}.git")]).arg(&dir))?;
     }
     for args in [&["fetch", "-q", "--tags", "--force", "origin"][..], &["checkout", "-q", "--detach", "--force", "origin/main"], &["clean", "-qfdx", "-e", "/target"]] {
-        step(Command::new("git").current_dir(&dir).args(args))?;
+        show(Command::new("git").current_dir(&dir).args(args))?;
     }
     Ok(dir)
 }
@@ -833,81 +733,12 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
     }
     let dir = cache().join("config");
     if !dir.join(".git").exists() {
-        step(Command::new("git").args(["clone", "-q", CONFIG_REPO]).arg(&dir))?;
+        show(Command::new("git").args(["clone", "-q", CONFIG_REPO]).arg(&dir))?;
     }
     for args in [&["fetch", "-q", "origin", "HEAD"][..], &["checkout", "-q", "--detach", "--force", "FETCH_HEAD"]] {
-        step(Command::new("git").current_dir(&dir).args(args))?;
+        show(Command::new("git").current_dir(&dir).args(args))?;
     }
     Ok((dir.join(CONFIG_FILE), Some(git(&dir, &["rev-parse", "HEAD"])?)))
-}
-
-/// Builds the Cloudflare node (`cloudflare/node/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
-/// folder they're in. It needs Rust's wasm32-unknown-unknown target, a clang that builds for it (SQLite is C), and the
-/// wasm-bindgen of the version it's built with. `profile` is cargo's: a release's is `release`, a throwaway network's `dev`.
-pub fn cloudflare_node(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
-    run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--profile", profile, "-p", "one-cloudflare-node", "--target", "wasm32-unknown-unknown"]))
-        .context("build the Cloudflare node (rustup target add wasm32-unknown-unknown)")?;
-    let out = src.join("target/cloudflare-node");
-    let wasm = src.join("target/wasm32-unknown-unknown").join(if profile == "dev" { "debug" } else { profile }).join("one_cloudflare_node.wasm");
-    // Its glue is only made again for a node cargo built again, as the client's is: a build that holds it (`CLOUDFLARE_NODE`)
-    // watches these files, so rewriting them would have that build done again.
-    let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
-    let glued = out.join("one_cloudflare_node_bg.wasm");
-    if modified(&glued).is_some_and(|glued| modified(&wasm).is_some_and(|built| glued > built)) {
-        return Ok(out);
-    }
-    run_quiet(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
-    Ok(out)
-}
-
-/// Builds the client (`client/`) into WebAssembly for browsers, as small as it builds, and its JavaScript glue: → the
-/// folder they're in. It needs what `cloudflare_node` does, and makes it smaller still with wasm-opt where it's installed.
-pub fn client(src: &Path, config: &Path) -> Result<PathBuf> {
-    run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["rustc", "-p", "one-client", "--profile", "web", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib"]))
-        .context("build the client (rustup target add wasm32-unknown-unknown)")?;
-    let out = src.join("target/client");
-    let wasm = src.join("target/wasm32-unknown-unknown/web/one_client.wasm");
-    let built = out.join("one_client_bg.wasm");
-    // Its glue is only made again for a client cargo built again: one that's already here is what a build that has it
-    // embedded (`CLIENT`), so rewriting it would have that build done again.
-    let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
-    if modified(&built).is_some_and(|glued| modified(&wasm).is_some_and(|built| glued > built)) {
-        return Ok(out);
-    }
-    run_quiet(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
-    if quiet(Command::new("wasm-opt").arg("--version")) {
-        run_quiet(Command::new("wasm-opt").args(["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-sign-ext", "--enable-mutable-globals", "--enable-reference-types", "--enable-multivalue", "-o"]).arg(&built).arg(&built))?;
-    }
-    Ok(out)
-}
-
-/// Cargo, also where rustup puts it, for a shell that doesn't have it on its PATH.
-pub fn cargo() -> PathBuf {
-    let rustup = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cargo/bin/cargo");
-    if quiet(Command::new("cargo").arg("--version")) || !rustup.exists() { "cargo".into() } else { rustup }
-}
-
-/// Go, also where mise's shims put it, for a shell that doesn't have it on its PATH.
-fn go() -> PathBuf {
-    let mise = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share/mise/shims/go");
-    if quiet(Command::new("go").arg("version")) || !mise.exists() { "go".into() } else { mise }
-}
-
-fn git(dir: &Path, args: &[&str]) -> Result<String> {
-    let out = Command::new("git").current_dir(dir).args(args).output()?;
-    ensure!(out.status.success(), "git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-/// Runs a command, showing its output.
-fn step(cmd: &mut Command) -> Result<()> {
-    let status = cmd.status().with_context(|| format!("run {:?}", cmd.get_program()))?;
-    ensure!(status.success(), "{:?} {} failed", cmd.get_program(), cmd.get_args().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
-    Ok(())
-}
-
-fn quiet(cmd: &mut Command) -> bool {
-    cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
 }
 
 /// This user's own devices, as this one sees them now: none while its node restarts.
@@ -1006,7 +837,7 @@ fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
         open.retain(|(key, name, was)| {
             let Some(d) = now.iter().find(|d| d["key"] == key.as_str()) else { return true };
             let build = d["build"].as_str().unwrap_or("");
-            let mac = d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"));
+            let mac = d["target"].as_str().is_some_and(|t| Platform::is_mac(t));
             // What the Mac's build job says, not more than every few seconds: how its build is going, and its iPhone.
             let mut said = None;
             let running = has(commit, build, &mut fetched);
@@ -1092,7 +923,7 @@ fn has(commit: &str, build: &str, fetched: &mut std::collections::HashSet<String
         Some(0) => true,
         Some(1) => false,
         _ if fetched.insert(build.to_string()) => {
-            quiet(Command::new("git").args(["fetch", "-q", "origin"]));
+            succeeds(Command::new("git").args(["fetch", "-q", "origin"]));
             ancestor() == Some(0)
         }
         _ => false,
@@ -1362,4 +1193,32 @@ fn await_mac(mac: &Value) -> Result<(Vec<(String, String)>, Vec<String>)> {
 fn blob(hash: &str) -> Result<Vec<u8>> {
     let mut resp = crate::agent().get(format!("http://{}/v1/blobs/{hash}", one::api::addr())).call()?;
     Ok(resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn of(files: &[&str]) -> Parts {
+        Parts::of(files.iter().copied())
+    }
+
+    /// What an update sends out for what changed: the part of a release no run of the tests sees.
+    #[test]
+    fn a_change_sends_out_what_is_made_of_it() {
+        assert_eq!(of(&["docs/x.md", "README.md", "tests/e2e.rs", ".gitignore"]), Parts::default());
+        assert_eq!(of(&["apps/board/app.js", "apps/board/screen.js"]), Parts { apps: vec!["board".into()], ..Default::default() });
+        // An app's service is built apart from its app, which its deploy leaves out.
+        assert_eq!(of(&["apps/shell/service/main.go"]), Parts { services: vec!["shell".into()], ..Default::default() });
+        assert!(of(&["service/src/lib.rs"]).service);
+        assert!(of(&["src/node.rs"]).node && of(&["src/node.rs"]).mac);
+        let workers = of(&["cloudflare/relay/worker.js"]);
+        assert!(workers.node && !workers.mac, "the Workers are deployed by the node, not built by a Mac");
+        assert_eq!(of(&["cloudflare/test/x.js"]), Parts::default());
+        let native = of(&["client/native/mac/build.sh"]);
+        assert!(!native.node && native.mac);
+        assert_eq!(of(&["client/native/windows/build.sh"]), Parts::default());
+        let client = of(&["client/src/lib.rs"]);
+        assert!(client.node && client.mac, "the client's WebAssembly is in the node");
+    }
 }

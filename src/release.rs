@@ -132,14 +132,39 @@ pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
     }
     // The entry's commit and date aren't signed; the binary's own are.
-    let version = std::process::Command::new(&tmp).args(["version", "--json"]).output().ok().and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok());
-    let is = |v: &serde_json::Value| v["commit"] == r.commit.as_str() && v["target"] == crate::config::TARGET && v["committed"].as_u64().is_some_and(|c| c >= crate::config::COMMITTED);
-    if !version.as_ref().is_some_and(is) {
+    let version = Version::of(&tmp);
+    if !version.as_ref().is_some_and(|v| v.commit == r.commit && v.target == crate::config::TARGET && v.committed >= crate::config::COMMITTED) {
         let _ = std::fs::remove_file(&tmp);
-        anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.to_string()), r.commit, crate::config::TARGET);
+        anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.json()), r.commit, crate::config::TARGET);
     }
     std::fs::rename(&tmp, &exe).context("replace the binary")?;
     Ok(exe)
+}
+
+/// What a build says it is: `version --json`, which publishing, an update's check and installing a release all read.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct Version {
+    pub commit: String,
+    pub target: String,
+    /// When the commit was made, in seconds since 1970.
+    pub committed: u64,
+}
+
+impl Version {
+    /// This build.
+    pub fn this() -> Version {
+        Version { commit: crate::config::BUILD.into(), target: crate::config::TARGET.into(), committed: crate::config::COMMITTED }
+    }
+
+    /// What the program at `path` says it is: none if it can't run here (another platform's) or isn't one of ours.
+    pub fn of(path: &Path) -> Option<Version> {
+        let out = std::process::Command::new(path).args(["version", "--json"]).output().ok().filter(|o| o.status.success())?;
+        serde_json::from_slice(&out.stdout).ok()
+    }
+
+    pub fn json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -195,21 +220,25 @@ mod tests {
         assert!(verify(&public(&publisher), b"bin", &elsewhere).is_err(), "the key's signatures for anything but releases");
     }
 
+    /// install.sh's own `fetch`, from a folder of files (curl reads file:// too), as the installer runs it.
     #[test]
-    fn ssh_keygen_checks_them_as_the_installer_does() {
+    fn the_installers_fetch_checks_them() {
         let publisher = key(1);
         let dir = std::env::temp_dir().join(format!("one-release-{}", rand::random::<u32>()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("bin"), b"bin").unwrap();
-        std::fs::write(dir.join("bin.sig"), sign(&publisher, b"bin").unwrap()).unwrap();
-        std::fs::write(dir.join("signers"), format!("release namespaces=\"release\" {}\n", public(&publisher))).unwrap();
-        let check = |file: &str| {
-            let sh = format!("ssh-keygen -Y verify -f signers -I release -n release -s bin.sig < {file}");
-            std::process::Command::new("sh").current_dir(&dir).args(["-c", &sh]).output().unwrap().status.success()
+        std::fs::create_dir_all(dir.join("served")).unwrap();
+        std::fs::create_dir_all(dir.join("tmp")).unwrap();
+        std::fs::write(dir.join("served/bin"), b"bin").unwrap();
+        std::fs::write(dir.join("served/bin.sig"), sign(&publisher, b"bin").unwrap()).unwrap();
+        let installer = include_str!("../install.sh");
+        let function = &installer[installer.find("fetch() {").unwrap()..];
+        let function = &function[..function.find("\n}\n").unwrap() + 3];
+        let fetch = |file: &str| {
+            let sh = format!("{function}\ntmp={tmp}; url=file://{served}; key='{key}'; fetch {file}", tmp = dir.join("tmp").display(), served = dir.join("served").display(), key = public(&publisher));
+            std::process::Command::new("sh").args(["-c", &sh]).output().unwrap().status.success()
         };
-        assert!(check("bin"));
-        std::fs::write(dir.join("tampered"), b"bim").unwrap();
-        assert!(!check("tampered"));
+        assert!(fetch("bin"));
+        std::fs::write(dir.join("served/bin"), b"bim").unwrap();
+        assert!(!fetch("bin"), "a download that isn't what was signed");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

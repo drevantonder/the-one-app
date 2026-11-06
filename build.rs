@@ -136,58 +136,14 @@ fn main() {
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
-    // The Cloudflare node's WebAssembly and its glue (cloudflare/node/), which `update` builds into CLOUDFLARE_NODE where Rust
-    // builds for WebAssembly, so a release carries them to devices with no Rust to deploy it from.
-    // With no CLOUDFLARE_NODE, the one in target/cloudflare-node, if it's there (`throwaway cloudflare node deploy` builds it, as `throwaway client
-    // web` does the client's), so every build of a checkout is the same one: not the node's own, which holds `one`.
-    println!("cargo:rerun-if-env-changed=CLOUDFLARE_NODE");
-    let names = ["one_cloudflare_node.js", "one_cloudflare_node_bg.wasm"];
-    let wasm = std::env::var("TARGET").unwrap().starts_with("wasm32");
-    let explicit = std::env::var("CLOUDFLARE_NODE").ok();
-    let dir = explicit.clone().map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target/cloudflare-node"));
-    for name in names.iter().filter(|_| explicit.is_some() || !wasm) {
-        if dir.join(name).exists() {
-            println!("cargo:rerun-if-changed={}", dir.join(name).display());
-        }
-    }
-    let cloudflare_node: Vec<String> = if explicit.is_some() || (!wasm && names.iter().all(|name| dir.join(name).exists())) {
-        names
-            .iter()
-            .map(|name| {
-                let path = dir.join(name);
-                format!("({name:?}, include_bytes!({:?}))", std::fs::canonicalize(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-    let out = format!("{out}pub const CLOUDFLARE_NODE: &[(&str, &[u8])] = &[{}];\n", cloudflare_node.join(", "));
-    // And the client's, for browsers (client/src/wasm.rs), in CLIENT, which the address serves the web client. With no
-    // CLIENT, the one `update` and `throwaway client web` build into target/client, if it's there, so every build of a checkout
-    // is the same one, with or without it, but not the client's own (it's built for WebAssembly with `one` in it, which would hold
-    // itself). Only a file that exists is watched: cargo reruns a build for one that doesn't.
-    println!("cargo:rerun-if-env-changed=CLIENT");
-    let names = ["one_client.js", "one_client_bg.wasm"];
-    let explicit = std::env::var("CLIENT").ok();
-    let dir = explicit.clone().map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target/client"));
-    let wasm = std::env::var("TARGET").unwrap().starts_with("wasm32");
-    for name in names.iter().filter(|_| explicit.is_some() || !wasm) {
-        if dir.join(name).exists() {
-            println!("cargo:rerun-if-changed={}", dir.join(name).display());
-        }
-    }
-    let client: Vec<String> = if explicit.is_some() || (!wasm && names.iter().all(|name| dir.join(name).exists())) {
-        names
-            .iter()
-            .map(|name| {
-                let path = dir.join(name);
-                format!("({name:?}, include_bytes!({:?}))", std::fs::canonicalize(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-    let out = format!("{out}pub const CLIENT: &[(&str, &[u8])] = &[{}];\n", client.join(", "));
+    // The Cloudflare node's WebAssembly (cloudflare/node/) and the client's, for browsers (client/src/wasm.rs), which `update`
+    // builds into CLOUDFLARE_NODE and CLIENT where Rust builds for WebAssembly, so a release carries them to devices with no
+    // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update`, `throwaway cloudflare
+    // node deploy` and `throwaway client web` build into target/, if they're there, so every build of a checkout is the same one,
+    // with or without them, but not their own (they're built with `one` in them, which would hold itself). Only a file that
+    // exists is watched: cargo reruns a build for one that doesn't.
+    let out = format!("{out}{}", wasm_constant("CLOUDFLARE_NODE", "target/cloudflare-node", ["one_cloudflare_node.js", "one_cloudflare_node_bg.wasm"]));
+    let out = format!("{out}{}", wasm_constant("CLIENT", "target/client", ["one_client.js", "one_client_bg.wasm"]));
     // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
     let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
     let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");
@@ -252,4 +208,30 @@ fn collect(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String,
             out.push((path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"), path.to_string_lossy().to_string()));
         }
     }
+}
+
+/// `pub const <var>: &[(&str, &[u8])]` holding `names`, which are in the folder the environment variable `var` names or, with
+/// none, `default` in this package, if all of them are there; and what cargo watches for them.
+fn wasm_constant(var: &str, default: &str, names: [&str; 2]) -> String {
+    println!("cargo:rerun-if-env-changed={var}");
+    let wasm = std::env::var("TARGET").unwrap().starts_with("wasm32");
+    let explicit = std::env::var(var).ok();
+    let dir = explicit.clone().map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join(default));
+    for name in names.iter().filter(|_| explicit.is_some() || !wasm) {
+        if dir.join(name).exists() {
+            println!("cargo:rerun-if-changed={}", dir.join(name).display());
+        }
+    }
+    let held: Vec<String> = if explicit.is_some() || (!wasm && names.iter().all(|name| dir.join(name).exists())) {
+        names
+            .iter()
+            .map(|name| {
+                let path = dir.join(name);
+                format!("({name:?}, include_bytes!({:?}))", std::fs::canonicalize(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+    format!("pub const {var}: &[(&str, &[u8])] = &[{}];\n", held.join(", "))
 }

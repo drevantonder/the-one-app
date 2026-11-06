@@ -797,7 +797,7 @@ fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
         return Ok(());
     }
     eprintln!("Building the web client's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
-    let built = crate::update::client(checkout, &checkout.join(one::config::CONFIG_FILE))?;
+    let built = crate::build::client(checkout, &checkout.join(one::config::CONFIG_FILE))?;
     let held = |name: &str, bytes: &[u8]| std::fs::read(built.join(name)).is_ok_and(|file| file == bytes);
     if !one::config::CLIENT.is_empty() && one::config::CLIENT.iter().all(|(name, bytes)| held(name, bytes)) {
         return Ok(());
@@ -816,7 +816,7 @@ fn cloudflare_node_built(checkout: &Path, rest: &[String]) -> Result<()> {
         return Ok(());
     }
     eprintln!("Building the Cloudflare node's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
-    let built = crate::update::cloudflare_node(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
+    let built = crate::build::cloudflare_node(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
     let held = |name: &str, bytes: &[u8]| std::fs::read(built.join(name)).is_ok_and(|file| file == bytes);
     if !one::config::CLOUDFLARE_NODE.is_empty() && one::config::CLOUDFLARE_NODE.iter().all(|(name, bytes)| held(name, bytes)) {
         return Ok(());
@@ -834,7 +834,7 @@ fn rebuilt(checkout: &Path, rest: &[String], what: &str) -> Result<()> {
     anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again and doesn't hold what it was built with: {what}");
     eprintln!("Building {what} (dev profile, not release)…");
     std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
-    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env_remove("CLIENT").env_remove("CLOUDFLARE_NODE").arg("build"))?;
+    crate::build::quietly(std::process::Command::new("nice").arg(crate::build::cargo()).current_dir(checkout).env_remove("CLIENT").env_remove("CLOUDFLARE_NODE").arg("build"))?;
     use std::os::unix::process::CommandExt;
     Err(std::process::Command::new(&own).arg("throwaway").args(rest).env(&again, "1").exec().into())
 }
@@ -1035,7 +1035,7 @@ fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, pers
     let home = dir.join(&name);
     std::fs::create_dir_all(&home)?;
     eprintln!("Building client/native (dev profile; the first time takes minutes)…");
-    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).arg("build").current_dir(checkout.join("client/native")))?;
+    crate::build::quietly(std::process::Command::new("nice").arg(crate::build::cargo()).arg("build").current_dir(checkout.join("client/native")))?;
     // Its own display and control port, the same each time for this throwaway network and person.
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(home.to_string_lossy().as_bytes()).into();
     let display = format!(":{}", 200 + u16::from_le_bytes([hash[0], hash[1]]) % 600);

@@ -8,6 +8,7 @@ use one::skills::Mode;
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
+mod build;
 mod client_device;
 mod code;
 mod git_remote;
@@ -530,7 +531,7 @@ fn agents() -> Command {
                     let (apps, addable) = code::catalogs()?;
                     println!("{}", code::search(&apps, &addable, &words.join(" "), limit, code::For::Cli));
                 }
-                ["version"] if tools::json() => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
+                ["version"] if tools::json() => println!("{}", one::release::Version::this().json()),
                 ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
                 _ => return Ok(false),
             }
@@ -579,27 +580,14 @@ fn generic() -> Command {
 fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
     // The binary knows what it is; ask it, unless it's for another platform and can't run here, or a service's.
     let service = flags.get("service").and_then(Value::as_str);
-    let version: Value = (service.is_none()).then(|| std::process::Command::new(path)
-        .args(["version", "--json"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| serde_json::from_slice(&o.stdout).ok()))
-        .flatten()
-        .unwrap_or_default();
-    let committed = flags.get("committed").and_then(Value::as_u64).or(version["committed"].as_u64()).context("say when the commit was made with --committed (seconds since 1970)")?;
-    let commit = flags.get("commit").and_then(Value::as_str).or(version["commit"].as_str()).context("say which commit this is with --commit")?;
-    let target = flags.get("target").and_then(Value::as_str).or(version["target"].as_str()).context("say which platform this is for with --target")?;
-    if commit.ends_with("+dirty") {
-        bail!("that build has uncommitted changes; commit, build again, then publish");
-    }
-    let signature = one::release::sign(key, &std::fs::read(path)?)?;
-    let body = json!({ "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature, "service": service });
-    let r = post(if service.is_some() { "/v1/service-release" } else { "/v1/node-release" }, body)?;
-    match service {
-        Some(service) => println!("Published {service} {} for {}. Every device on that platform that runs it takes it.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or("")),
-        None => println!("Published {} for {}. Every device on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or("")),
-    }
+    let version = if service.is_none() { one::release::Version::of(path) } else { None };
+    let flag = |name: &str| flags.get(name).and_then(Value::as_str).map(str::to_string);
+    let version = one::release::Version {
+        committed: flags.get("committed").and_then(Value::as_u64).or(version.as_ref().map(|v| v.committed)).context("say when the commit was made with --committed (seconds since 1970)")?,
+        commit: flag("commit").or(version.as_ref().map(|v| v.commit.clone())).context("say which commit this is with --commit")?,
+        target: flag("target").or(version.as_ref().map(|v| v.target.clone())).context("say which platform this is for with --target")?,
+    };
+    println!("{}", build::published_said(&build::publish(path, key, &version, service)?, service));
     Ok(())
 }
 
@@ -622,14 +610,21 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
 fn built_with_service(dir: &std::path::Path) -> Result<(String, String)> {
     let mut builds = std::collections::BTreeMap::new();
     let mut service = String::new();
-    if let Some((built, missed)) = update::build_service(dir)? {
-        for (target, bytes) in &built {
-            builds.insert(target.clone(), put_blob(bytes)?);
+    let out = std::env::temp_dir().join(format!("{CLI}-service-{}", std::process::id()));
+    let built = build::build_service(dir, &build::built_from(&dir.join("service"), false).unwrap_or_default(), build::PLATFORMS.iter(), &out).and_then(|built| {
+        if let Some(built) = &built {
+            for (platform, program) in &built.made {
+                builds.insert(platform.target.to_string(), put_blob(&std::fs::read(program)?)?);
+            }
         }
-        let said = |targets: Vec<&str>| targets.into_iter().map(update::platform_said).collect::<Vec<_>>().join(", ");
-        service = format!(" Its service is built for {}.", said(built.iter().map(|(t, _)| t.as_str()).collect()));
-        if !missed.is_empty() {
-            service += &format!(" Not for {}: this machine can't build it for them, so deploy it again from one that can.", said(missed));
+        Ok(built)
+    });
+    let _ = std::fs::remove_dir_all(&out);
+    if let Some(built) = built? {
+        let said = |platforms: Vec<&build::Platform>| platforms.iter().map(|p| p.said).collect::<Vec<_>>().join(", ");
+        service = format!(" Its service is built for {}.", said(built.made.iter().map(|(p, _)| *p).collect()));
+        if !built.missed.is_empty() {
+            service += &format!(" Not for {}: this machine can't build it for them, so deploy it again from one that can.", said(built.missed));
         }
     }
     Ok((put_blob(&one::app::deploy::build(dir, &builds)?)?, service))
