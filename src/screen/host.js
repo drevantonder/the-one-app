@@ -65,7 +65,7 @@ window.oneHost = (() => {
   /// What makes a screen's page sit in this one as its own: this page's background shows through, and on a computer
   /// the Mac app's size of text. It's light or dark as `appearance` says ("automatic", "light" or "dark"), and as a
   /// `{ oneScheme }` posted to its frame says after. In a sheet (`raised`), its cards are a step lighter, as on a phone's.
-  /// `shell` is what the page that holds it does beyond a browser, as its globals (`__oneShell`, `__oneLifts`).
+  /// `shell` is what the page that holds it does beyond a browser, as its globals (`__oneCan`, `__oneLifts`).
   function look(html, appearance, raised = false, shell = {}) {
     // With the nonce of a page that runs only its own scripts (the client's own screens), as one of them.
     const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
@@ -107,7 +107,6 @@ window.oneHost = (() => {
         if (h.scan) return h.scan();
         throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
       case "haptic": return h.haptic ? h.haptic(String(m.style || "selection")) : null;
-      case "icon": return null;
       case "traces": return h.traces ? h.traces() : null;
       case "api": case "signOut": case "appearance": case "device": case "notify": case "request": case "cache": case "developer": case "menubar":
         if (!h.own) throw new Error("Only Settings can do that.");

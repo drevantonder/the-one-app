@@ -1,14 +1,11 @@
-// The bridge every app screen gets as `one`. Inside a shell, the shell answers it (WKWebView's
-// `one` message handler, or `__oneShell.postMessage` where another web view puts one); in a sandboxed frame (the web client's, a chat's), the page
-// holding the frame answers its messages. A screen never knows which. The web client's own page loads it too,
+// The bridge every app screen gets as `one`. In a sandboxed frame (the web client's, the app's window, a chat's), the
+// page holding the frame answers its messages; a screen never knows which. The web client's own page loads it too,
 // answering it itself (`__one.host`).
 (() => {
   const ctx = window.__one;
   const handlers = { changed: [] };
-  // Either answers each message with a promise of its reply.
-  const shell = window.webkit?.messageHandlers?.one || (window.__oneShell?.postMessage ? window.__oneShell : null);
   // A page that answers its own (`__one.host`: the web client's, a chat's view) isn't framed, even in a chat's frame.
-  const framed = !shell && !ctx.host && window.parent !== window;
+  const framed = !ctx.host && window.parent !== window;
 
   // Framed: each message goes up as `{ one: message, id }`, answered with `{ oneReply: id, ok }` or `{ oneReply: id,
   // error }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
@@ -46,7 +43,7 @@
       addEventListener("scroll", later, { passive: true });
       later();
     });
-    // Links leave the frame for a tab of their own, as a shell sends them to the browser.
+    // Links leave the frame for a tab of their own, as the app sends them to the browser.
     document.addEventListener("click", (e) => {
       const a = e.target.closest?.("a[href]");
       if (!a || e.defaultPrevented || a.hasAttribute("download") || /^(#|javascript:)/i.test(a.getAttribute("href"))) return;
@@ -55,7 +52,7 @@
     });
   }
 
-  // Every message a screen sends its host, and every host (the shells, the web client, a chat's view) answers each,
+  // Every message a screen sends its host, and every host (the web client, a chat's view) answers each,
   // or refuses it by name. Anything a person touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
@@ -63,7 +60,6 @@
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
-    if (shell) return shell.postMessage(message);
     if (ctx.host) return ctx.host(message);
     if (framed) {
       return new Promise((ok, fail) => {
@@ -76,7 +72,7 @@
     throw new Error("Open this in the app.");
   }
 
-  // Icons are Phosphor's (vendor/phosphor), the same in every shell: each a path on a 256-point grid, filled in the
+  // Icons are Phosphor's (vendor/phosphor), the same in every client: each a path on a 256-point grid, filled in the
   // text's colour. The host has them all; a screen draws `<svg data-icon="<name>">` (@one/ui's Icon), and the bridge
   // asks it for the ones drawn, once each, and fills them in.
   const paths = {};
@@ -158,7 +154,7 @@
     app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
     // The product: its `name` and `cli`, and `made_here`, what an App Store calls the apps made in the network.
     config: ctx.config,
-    // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
+    // The page the window opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,
     call: (tool, input = {}) => call(tool, input),
     // Opens one of this app's screens; or with `app`, another app's (a notification's link, say). `scope` is the page
@@ -168,11 +164,11 @@
       host({ type: "open", screen, params, ...(app && app !== ctx.app ? { app } : {}), ...(scope ? { scope } : {}), ...(sheet ? { sheet: true } : {}) }),
     // Closes this screen: a sheet goes, giving `value` to who opened it; a pushed screen goes back.
     close: (value = null) => host({ type: "close", value }),
-    // The shell's own menu, at `at` ({ x, y } in this page, or the element it's for), of `items`, each
+    // The window's own menu, at `at` ({ x, y } in this page, or the element it's for), of `items`, each
     // `{ title, danger, checked, icon, row, section }` → the index of the one chosen, or null. `icon` is a Phosphor
-    // icon's name, which a shell draws, or shows as its own symbol for it; items with `row`, first, are choices side by
+    // icon's name, which the window draws, or shows as its own symbol for it; items with `row`, first, are choices side by
     // side (a widget's sizes), shown by their icons; `section` starts a group of its own. A menu for an element comes
-    // from it (`rect`, its bounds), opening away from the edge it's near; a shell without that opens at the point:
+    // from it (`rect`, its bounds), opening away from the edge it's near; a host without that opens at the point:
     // the element's bottom middle, or its top in the lower half of the page.
     menu: (items, at) => {
       let rect;
@@ -184,13 +180,13 @@
       const item = (i) => ({ title: String(i.title), danger: !!i.danger, checked: !!i.checked, ...(i.icon ? { icon: String(i.icon) } : {}), ...(i.row ? { row: true } : {}), ...(i.section ? { section: true } : {}) });
       return host({ type: "menu", items: items.map(item), x: Math.round(at?.x || 0), y: Math.round(at?.y || 0), ...(rect ? { rect } : {}) });
     },
-    // The shell's own alert: `title` and `text`, then OK; with `action` (its button's name; `danger` if it can't be
+    // The window's own alert: `title` and `text`, then OK; with `action` (its button's name; `danger` if it can't be
     // undone), Cancel and that → whether it was chosen.
     alert: ({ title = "", text = "", action, danger = false }) => host({ type: "alert", title, text, ...(action ? { action, danger } : {}) }).then((ok) => !!ok),
     // Opens a web page's address in the browser.
     link: (url) => host({ type: "link", url: String(url) }),
     // The bar's title; empty while the screen shows its own heading, when `name` is still what the screen is called,
-    // for the shell's path, Back and window name.
+    // for the window's path, Back and window name.
     title: (text, name) => host({ type: "title", text, ...(name ? { name: String(name) } : {}) }),
     // What a failure means for someone: what happened, in plain words, whether anything was lost, and what to do next.
     // `app` is the title of the app that failed, where a screen knows it.
@@ -215,13 +211,11 @@
       const missing = /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b/i.test(msg);
       return { title: said, safe: "Nothing was lost.", next: "", missing };
     },
-    // A large title at the top of a screen, as iOS draws one: the shell's own title stays empty while it shows, and is
+    // A large title at the top of a screen, as iOS draws one: the window's own title stays empty while it shows, and is
     // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so
-    // calling it once is enough; put what it returns first, or draw a `.large-title` of its own. A shell whose bar always
-    // shows the title (`__oneShell.bar`) hides it and takes the text.
+    // calling it once is enough; put what it returns first, or draw a `.large-title` of its own.
     largeTitle: (text) => {
-      const follows = window.IntersectionObserver && !window.__oneShell?.bar;
-      if (window.__oneShell?.bar) one.title(text);
+      const follows = !!window.IntersectionObserver;
       if (!titled) {
         titled = true;
         one.title(follows ? "" : text, text);
@@ -247,16 +241,16 @@
     // Preview, a tab).
     save: (file) => host({ type: "save", file }),
     preview: (file) => host({ type: "preview", file }),
-    // The document camera, where the shell has one (one.can.scan): each page found, straightened and cropped, as a
+    // The document camera, where the device has one (one.can.scan): each page found, straightened and cropped, as a
     // JPEG `{ name, type, size, base64 }`; none if the person cancels.
     scan: () => host({ type: "scan" }),
     // Asks the person for what this app's `vault` declares as `need`: they pick one of their items or make one, in a
-    // sheet of the shell's. True once it's allowed; false if they declined or closed it.
+    // sheet of the window's. True once it's allowed; false if they declined or closed it.
     vault: (need) => host({ type: "vault", need }),
     // What this place can do beyond the basics.
     // (Asked as it's read: the page that holds this one may say so after this runs.)
-    can: { get scan() { return !!window.__oneShell?.scan; } },
-    // Copies text: through the shell (which a page's clipboard can't always reach), else the browser's clipboard.
+    can: { get scan() { return !!window.__oneCan?.scan; } },
+    // Copies text: through the host (which a frame's clipboard can't always reach), else the browser's clipboard.
     async copy(text) {
       try {
         await host({ type: "copy", text: String(text) });
@@ -269,9 +263,9 @@
       }
     },
     // A haptic on a phone: "selection" (a press), "medium" (a long press), "success" or "error". Elsewhere, nothing.
-    tap: (style = "selection") => (shell ? shell.postMessage({ type: "haptic", style }) : framed ? host({ type: "haptic", style }) : Promise.resolve()).catch(() => {}),
+    tap: (style = "selection") => (framed ? host({ type: "haptic", style }) : Promise.resolve()).catch(() => {}),
     on: (event, fn) => (handlers[event] ||= []).push(fn),
-    // The shell calls this with node events: an app screen's "changed" is its app's data changing; a Settings
+    // The host calls this with node events: an app screen's "changed" is its app's data changing; a Settings
     // screen's, any event, since what it shows is the network's.
     __event(e) {
       if (!ctx.app || (e.type === "changed" && (e.apps || []).includes(ctx.app))) landed.clear(), handlers.changed.forEach((f) => f(e));

@@ -1494,7 +1494,7 @@ const h = OneUI.react.createElement;
 
   /// What a screen's frame is told this page does beyond a browser's (oneHost.look): an iPhone's document camera, and
   /// its touch and hold, which lifts what a screen marks `data-one-held` with its menu.
-  const shellOf = () => ({ ...(about?.scan ? { __oneShell: { scan: true } } : {}), ...(about?.lifts ? { __oneLifts: true } : {}) });
+  const shellOf = () => ({ ...(about?.scan ? { __oneCan: { scan: true } } : {}), ...(about?.lifts ? { __oneLifts: true } : {}) });
 
   const schemed = oneHost.scheme();
 
