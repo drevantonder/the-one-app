@@ -164,9 +164,9 @@ release builds it (nothing did): only a throwaway, as before. Checked on an emul
       back to `<cli>://signed-in/`, then Waiting for Approval and the pages side by side with dots (checked: typed
       address, the Custom Tab, the code approved with `one throwaway devices approve`); and as the throwaway client signs
       it in, printing the link rather than opening the tab (`SIGN_IN_PRINT`, `CONTROL` and the address come as the start
-      intent's `env.<NAME>` extras, kept for later starts, in a debug build only). Not as Sam: `client android --as sam`
-      and `client web --as sam` both stopped at the web client's step ("the web client wasn't let in": Sam's browser,
-      not the app)
+      intent's `env.<NAME>` extras, kept for later starts, in a debug build only). As Sam (`client android --as sam`): the app
+      signed in as them, through the throwaway's sign-in, and showed Waiting for Approval; their second device is
+      approved by one of their own (their browser), which the throwaway doesn't drive: not seen further
 - [x] The Kotlin app's sign-in taken over (`Host.takeOver`): its address, sign-in client, who's signed in and refresh token
       move to this app's names; its device keys stay where they were (`sign-in.xml`, sealed by the Keystore alias
       `sign-in`), so no new sign-in and no new device (checked on a copy of the person's phone that had the Kotlin app
