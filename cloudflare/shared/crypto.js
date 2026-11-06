@@ -80,13 +80,6 @@ async function aes(key, use) {
 
 const ZERO = new Uint8Array(12);
 
-/// A fresh X25519 key pair: { secret, public }, each 32 bytes (the secret is X25519's scalar, unclamped).
-export async function keyPair() {
-  const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
-  const jwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
-  return { secret: b64u.decode(jwk.d), public: b64u.decode(jwk.x) };
-}
-
 export async function sealTo(to, plain) {
   to = bytes(to);
   const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
@@ -295,29 +288,16 @@ export async function seal(epoch, key, name, plain) {
   return concat(head, nonce, new Uint8Array(sealed));
 }
 
-export function epochOf(sealed) {
-  sealed = bytes(sealed);
-  if (sealed.length < 32) throw new Error("too short to be sealed");
-  return new DataView(sealed.buffer, sealed.byteOffset).getUint32(0);
-}
-
 export async function open(key, name, sealed) {
   sealed = bytes(sealed);
-  epochOf(sealed);
+  if (sealed.length < 32) throw new Error("too short to be sealed");
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: sealed.slice(4, 16), additionalData: text.encode(name) }, await aes(bytes(key), "decrypt"), sealed.slice(16)));
 }
-
-/// The `for` of a handoff with calls that bring `token`.
-export const tokenId = async (token) => hex.encode(await sha256(token));
 
 /// What a caller hands a node, `{ for, until, keys: [{ scope, epoch, app, database, key }] }` (each key base64url),
 /// sealed to its seal key: the `x-one-keys` header's value.
 export async function sealHandoff(to, handoff) {
   return b64u.encode(await sealTo(to, JSON.stringify(handoff)));
-}
-
-export async function openHandoff(pair, sealed) {
-  return JSON.parse(new TextDecoder().decode(await openSealed(pair, b64u.decode(sealed))));
 }
 
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
