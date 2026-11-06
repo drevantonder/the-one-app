@@ -2,7 +2,8 @@
 # `one throwaway client iphone`'s half on the Mac: builds this checkout's iPhone app for the simulator, on a simulator
 # of its own ("<CLI> throwaway", made the first time, booted now), and starts it signed in to ADDRESS, with what it says
 # in target/iphone-throwaway.log here. Started again each time; `one throwaway stop` shuts the simulator down and deletes
-# it.
+# it. The simulator's look is a phone's, not its defaults (light, the usual text size): dark, and the text a size smaller
+# (Andre's phone), as a page that only draws at the defaults would show nothing there, as one did when Dynamic Type zoomed it.
 #   throwaway.sh <address> <control port>
 set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
@@ -16,6 +17,9 @@ if [ -z "$sim" ]; then
 	sim=$(xcrun simctl create "$name" "$type")
 fi
 xcrun simctl boot "$sim" 2>/dev/null || true
+xcrun simctl bootstatus "$sim" -b >/dev/null
+xcrun simctl ui "$sim" appearance dark
+xcrun simctl ui "$sim" content_size small
 log=$native/target/iphone-throwaway.log
 rm -f "$log"
 upper=$(echo "$CONFIG_CLI" | tr '[:lower:]' '[:upper:]')

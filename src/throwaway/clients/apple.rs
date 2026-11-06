@@ -98,7 +98,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     }
     if iphone {
         println!(
-            "The iPhone app of this build is signed in to the throwaway network, on a simulator of its own on {host} ({sim}).
+            "The iPhone app of this build is signed in to the throwaway network, on a simulator of its own on {host} ({sim}), in dark with the text a size smaller, as a phone's settings are.
   See it: ssh {host} xcrun simctl io {sim} screenshot /tmp/shot.png
   Use it: in its page there: ssh {host} curl -d '<js>' http://127.0.0.1:{control}/eval runs JavaScript, and /value gives an expression's value, as JSON; open a link: ssh {host} xcrun simctl openurl {sim} '{CLI}://…'
   What it said: {host}:{log}; {CLI} throwaway stop shuts the simulator down and deletes it"
