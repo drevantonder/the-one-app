@@ -90,9 +90,11 @@ pub fn built_from(dir: &Path, dirty: bool) -> Result<String> {
 /// of `platforms` this machine can: a service in Go for all of them, one in Rust for this machine's. Nodes never build.
 /// None if the app has no service.
 pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item = &'static Platform>, out: &Path) -> Result<Option<Built>> {
-    let source = app.join("service");
+    // The builds run in the service's folder, so what they're given is by full paths.
+    let source = std::fs::canonicalize(app).with_context(|| format!("{} isn't here", app.display()))?.join("service");
     let Some(rust) = is_rust(&source) else { return Ok(None) };
     std::fs::create_dir_all(out)?;
+    let out = &std::fs::canonicalize(out)?;
     let mut done = Built { made: Vec::new(), missed: Vec::new() };
     for platform in platforms {
         if rust && platform.target != TARGET {
