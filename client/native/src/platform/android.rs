@@ -132,8 +132,8 @@ pub fn open(url: String) -> Result<(), String> {
 
 /// Signs in in a Chrome Custom Tab, which comes back to the app's own link; a test's prints the link and waits for it
 /// to be opened.
-pub fn sign_in(auth: &crate::signin::Auth, join: &str, print: bool) -> Result<(), String> {
-    auth.sign_in_here(join, |u| {
+pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Result<(), one_client::sign_in::Failed> {
+    signing.sign_in_here(join, |u| {
         if print {
             println!("Sign in: {u}");
         }

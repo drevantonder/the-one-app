@@ -81,7 +81,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         match said.lines().rev().find_map(|l| l.trim().strip_prefix("Sign in: ")) {
             // Approved as the person, then back to the app at its loopback port, which only the Mac reaches.
             Some(url) if !signed => {
-                let back = one::sign_in::approved_on_throwaway(address, url, None)?;
+                let back = crate::sign_in::approved_on_throwaway(address, url, None)?;
                 ssh(&format!("curl -s -m 30 -o /dev/null {}", shell_quote(&back)))?;
                 signed = true;
             }

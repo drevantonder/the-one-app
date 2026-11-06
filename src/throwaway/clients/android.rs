@@ -70,7 +70,7 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
         match said.iter().rev().find_map(|l| l.strip_prefix("Sign in: ")) {
             // Approved as the person, then back to the app by its own link, which opens it on the device.
             Some(url) if !signed => {
-                let back = one::sign_in::approved_on_throwaway(address, url, person)?;
+                let back = crate::sign_in::approved_on_throwaway(address, url, person)?;
                 on_device(device, &format!("am start -a android.intent.action.VIEW -n {package}/app.client.MainActivity -d '{back}'"))?;
                 signed = true;
             }

@@ -3,11 +3,8 @@
 // commands don't answer them.
 (() => {
   if (window !== window.top) return;
-  // Signed out (its refresh token refused) is said as "Sign in again", which the page takes as signed out.
-  const fail = (err) => {
-    const text = typeof err === "string" ? err : err?.message || String(err);
-    return Object.assign(new Error(text), text.startsWith("Sign in again") ? { signedOut: true } : {});
-  };
+  // A command's refusal: its text, or lib.rs's `Failure`, which says if this device is signed out (its sign-in refused).
+  const fail = (err) => Object.assign(new Error(typeof err === "string" ? err : err?.message || String(err)), err?.signedOut ? { signedOut: true } : {});
   // On Android, Tauri's script and `ipc` are in every frame, a screen's too: the app's commands carry a token only this frame
   // is given, by a web message listener that answers the page's own frame alone (MainActivity.kt). Without the listener
   // (an old web view), none of it works.

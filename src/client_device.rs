@@ -27,7 +27,7 @@ fn run<T: Send, F: Future<Output = T>>(work: impl FnOnce() -> F + Send) -> T {
 
 /// Where this computer keeps its device: beside the sign-in, one for each node address it'd ask, as the sign-in is.
 fn dir() -> PathBuf {
-    let signed_in = one::sign_in::path();
+    let signed_in = crate::sign_in::path();
     let name = signed_in.file_stem().unwrap_or_default().to_string_lossy().replacen("sign-in", "device", 1);
     signed_in.with_file_name(name)
 }
@@ -47,7 +47,7 @@ static KEPT: Mutex<Option<Arc<Device>>> = Mutex::new(None);
 fn kept() -> Option<Arc<Device>> {
     let mut kept = KEPT.lock().unwrap();
     if kept.is_none() {
-        let address = one::sign_in::kept()?.address;
+        let address = crate::sign_in::kept()?.address;
         let dir = dir();
         let secret = std::fs::read_to_string(dir.join("secret")).ok().and_then(|s| one::keys::unhex(s.trim()).ok())?;
         (std::fs::read_to_string(dir.join("address")).ok()?.trim() == address).then_some(())?;
@@ -68,7 +68,7 @@ pub fn active() -> bool {
 
 /// This computer's own name, as it asks to be let in, and its key.
 pub fn me() -> Option<(String, String)> {
-    active().then(|| (one::sign_in::hostname(), kept().map(|d| d.key()).unwrap_or_default()))
+    active().then(|| (crate::sign_in::hostname(), kept().map(|d| d.key()).unwrap_or_default()))
 }
 
 pub fn not_here() -> String {
@@ -99,9 +99,9 @@ pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
         forget();
         device = kept_or_new(address)?;
     }
-    let token = one::sign_in::token()?.with_context(|| format!("this computer is signed out: {CLI} sign-in"))?;
+    let token = crate::sign_in::token()?.with_context(|| format!("this computer is signed out: {CLI} sign-in"))?;
     let d = device.clone();
-    let name = one::sign_in::hostname();
+    let name = crate::sign_in::hostname();
     let invited = invite.map(str::to_string);
     run(move || async move { d.ask(&token, &name, invited.as_deref()).await })?;
     let code = device.code();
@@ -111,13 +111,13 @@ pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
     } else {
         println!("\nNow approve this computer as one of your devices: on another of them, in Settings › Devices, Approve, type\n\n  {code}\n\nor open {link} there.");
     }
-    if invite.is_none() && one::sign_in::has_screen() && one::sign_in::open(&link) {
+    if invite.is_none() && crate::sign_in::has_screen() && crate::sign_in::open(&link) {
         println!("It's open in your browser here, to approve it there if that browser is one of your devices.");
     }
     println!("\nWaiting for {} to approve it…", if invite.is_some() { "them" } else { "you" });
     loop {
         std::thread::sleep(Duration::from_secs(2));
-        let token = one::sign_in::token()?.with_context(|| format!("this computer was signed out: {CLI} sign-in"))?;
+        let token = crate::sign_in::token()?.with_context(|| format!("this computer was signed out: {CLI} sign-in"))?;
         let d = device.clone();
         if run(move || async move { d.wait(&token).await })? {
             return Ok(());

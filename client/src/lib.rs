@@ -39,10 +39,8 @@ pub use answers::Answers;
 pub use device::{Device, join_of, new_secret, open_note};
 #[cfg(not(target_family = "wasm"))]
 pub use one::push;
-
-mod config {
-    include!(concat!(env!("OUT_DIR"), "/config.rs"));
-}
+#[cfg(not(target_family = "wasm"))]
+pub mod sign_in;
 
 /// How long a connection to a node may take before the next is started alongside it: the first up is asked, and the
 /// rest are kept for later. A connection carries nothing but itself, so racing them hands no node anything.
@@ -68,7 +66,7 @@ pub const TRACE_HEADER: &str = "x-one-trace";
 
 /// What this custom build's clients speak to its nodes.
 fn alpn() -> Vec<u8> {
-    format!("{}/http/1", config::CLI).into_bytes()
+    format!("{}/http/1", one::config::CLI).into_bytes()
 }
 
 /// Why a request failed; `sent` if it may have reached the node, so that sending it again might run it twice.

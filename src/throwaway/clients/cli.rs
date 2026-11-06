@@ -38,7 +38,7 @@ pub(crate) fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[S
             let said = line.trim();
             eprintln!("{line}");
             if said.starts_with(&settings.address) && said.contains("/sign-in") {
-                one::sign_in::approve_on_throwaway(&settings.address, said, None)?;
+                crate::sign_in::approve_on_throwaway(&settings.address, said, None)?;
             } else if is_code(said) {
                 approve_code(dir, said)?;
             }

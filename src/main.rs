@@ -8,6 +8,7 @@ use serde_json::{Map, Value, json};
 mod client_device;
 mod git_remote;
 mod network;
+mod sign_in;
 mod throwaway;
 mod update;
 
@@ -284,7 +285,7 @@ fn token() -> Option<String> {
     if client_device::active() {
         return None;
     }
-    one::sign_in::token().unwrap_or_else(|err| {
+    crate::sign_in::token().unwrap_or_else(|err| {
         static SAID: std::sync::Once = std::sync::Once::new();
         SAID.call_once(|| eprintln!("{err:#}"));
         None

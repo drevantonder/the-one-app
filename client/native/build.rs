@@ -40,14 +40,12 @@ fn main() {
         "android" => "android",
         _ => "linux",
     };
-    // The Mac's menu bar mark, the custom build's (config.toml's `menubar`, its @2x), which the app draws as a template.
+    // The Mac's menu bar mark, the custom build's, which the app draws as a template.
     if platform == "mac" {
-        let config = std::env::var("CONFIG").map(std::path::PathBuf::from).unwrap_or_else(|_| Path::new("../../config.toml").to_path_buf());
-        let text = std::fs::read_to_string(&config).expect("the custom build's config.toml");
-        let named = text.lines().take_while(|l| !l.starts_with('[')).find_map(|l| l.strip_prefix("menubar")?.trim().strip_prefix('=')).expect("config.toml's menubar");
-        let mark = config.parent().unwrap().join(named.trim().trim_matches('"').replace(".png", "@2x.png"));
-        println!("cargo:rerun-if-changed={}", mark.display());
-        std::fs::copy(&mark, Path::new(&std::env::var("OUT_DIR").unwrap()).join("menubar.png")).unwrap_or_else(|e| panic!("{}: {e}", mark.display()));
+        let mark = one::config::MENUBAR;
+        assert!(!mark.is_empty(), "the custom build's config.toml names no menubar");
+        println!("cargo:rerun-if-changed={mark}");
+        std::fs::copy(mark, Path::new(&std::env::var("OUT_DIR").unwrap()).join("menubar.png")).unwrap_or_else(|e| panic!("{mark}: {e}"));
     }
     // The iPhone's Swift (iphone/), a plugin of the app's own (src/platform/iphone.rs), built and linked into it as Tauri's own
     // plugins are, against Tauri's Swift, copied beside it as theirs is.
@@ -85,7 +83,6 @@ fn main() {
     unsafe { std::env::set_var("TAURI_CONFIG", config.to_string()) };
     println!("cargo:rustc-env=TAURI_CONFIG={config}");
     println!("cargo:rustc-env=IDENTIFIER={}", identifier(platform));
-    println!("cargo:rerun-if-env-changed=CONFIG");
     println!("cargo:rerun-if-changed=src/commands.rs");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS))).expect("the app's build")
 }

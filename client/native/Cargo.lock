@@ -4116,7 +4116,6 @@ dependencies = [
  "serde_json",
  "sqlite-wasm-rs",
  "tokio",
- "toml 0.9.12+spec-1.1.0",
  "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",

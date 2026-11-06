@@ -52,9 +52,9 @@ pub fn text_scale() -> f64 {
 }
 
 /// Signs in in the system's browser, which comes back to this machine's loopback; a test's prints the link.
-pub fn sign_in(auth: &crate::signin::Auth, join: &str, print: bool) -> Result<(), String> {
+pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Result<(), one_client::sign_in::Failed> {
     let handle = app().handle.clone();
-    auth.sign_in(join, |u| {
+    signing.sign_in(join, |u| {
         if print {
             println!("Sign in: {u}");
             return Ok(());

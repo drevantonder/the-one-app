@@ -82,7 +82,7 @@ struct App {
     handle: AppHandle,
     /// Where it keeps what isn't secret: the address, who's signed in, and the client's own folder per person.
     data: PathBuf,
-    auth: Mutex<Option<Arc<signin::Auth>>>,
+    sign_in: Mutex<Option<Arc<signin::SignIn>>>,
     device: Mutex<Option<Arc<one_client::Device>>>,
     /// Responses whose bodies the page reads as they come, by id.
     bodies: Mutex<HashMap<u64, Arc<Reading>>>,
@@ -138,14 +138,14 @@ impl App {
         address_in(&self.data)
     }
 
-    fn auth(&self) -> Result<Arc<signin::Auth>, String> {
+    fn sign_in(&self) -> Result<Arc<signin::SignIn>, String> {
         let address = self.address().ok_or("Enter your address first.")?;
-        let mut auth = self.auth.lock().unwrap();
-        if let Some(a) = auth.as_ref().filter(|a| a.address == address) {
+        let mut kept = self.sign_in.lock().unwrap();
+        if let Some(a) = kept.as_ref().filter(|a| a.address == address) {
             return Ok(a.clone());
         }
-        let a = Arc::new(signin::Auth::new(&address, &format!("{} on {}", one::config::NAME, device_name()), self.data.clone()));
-        *auth = Some(a.clone());
+        let a = Arc::new(signin::SignIn::new(&address, &format!("{} on {}", one::config::NAME, device_name()), self.data.clone()));
+        *kept = Some(a.clone());
         Ok(a)
     }
 
@@ -223,10 +223,42 @@ fn badge(count: u32) {
     platform::badge(count);
 }
 
+/// Why a command didn't work, as the page reads it: what to say, and whether it's that this device is signed out (auth
+/// refused its sign-in), which the page shows as signed out.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Failure {
+    message: String,
+    signed_out: bool,
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Failure {
+        Failure { message, signed_out: false }
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(message: &str) -> Failure {
+        message.to_string().into()
+    }
+}
+
+impl From<one_client::sign_in::Failed> for Failure {
+    fn from(f: one_client::sign_in::Failed) -> Failure {
+        Failure { message: f.message, signed_out: f.signed_out }
+    }
+}
+
 /// An access token, from the refresh token in the secret store (a request to auth, so off the async threads).
-async fn token() -> Result<String, String> {
-    let auth = app().auth()?;
-    tauri::async_runtime::spawn_blocking(move || auth.token()).await.map_err(|e| e.to_string())?
+async fn token() -> Result<String, Failure> {
+    let signing = app().sign_in()?;
+    Ok(tauri::async_runtime::spawn_blocking(move || signing.token()).await.map_err(|e| e.to_string())??)
+}
+
+/// Who an access token is for.
+fn subject(token: &str) -> Result<String, Failure> {
+    signin::subject(token).ok_or_else(|| one_client::sign_in::signed_out("Sign in again: that sign-in names no one.").into())
 }
 
 // MARK: What the page asks
@@ -237,7 +269,7 @@ async fn token() -> Result<String, String> {
 fn native() -> Value {
     let a = app();
     let address = a.address();
-    let signed_in = address.as_ref().is_some_and(|_| a.auth().is_ok_and(|auth| auth.signed_in()));
+    let signed_in = address.as_ref().is_some_and(|_| a.sign_in().is_ok_and(|s| s.signed_in()));
     a.page.store(true, Ordering::Relaxed);
     let opened = a.opened.lock().unwrap().take();
     let local = local_state();
@@ -296,15 +328,15 @@ fn address_of(typed: &str) -> Result<String, String> {
 /// Signs in, in the system's browser, which comes back to this device; naming the device it's for, so the person's
 /// devices can let it in by this sign-in.
 #[tauri::command]
-async fn sign_in() -> Result<(), String> {
+async fn sign_in() -> Result<(), Failure> {
     let a = app();
     a.address().ok_or("Enter your address first.")?;
     let join = one_client::join_of(secrets::signing_in()?);
-    let auth = a.auth()?;
+    let signing = a.sign_in()?;
     let print = env("SIGN_IN_PRINT").is_some();
-    tauri::async_runtime::spawn_blocking(move || platform::sign_in(&auth, &join, print)).await.map_err(|e| e.to_string())??;
+    tauri::async_runtime::spawn_blocking(move || platform::sign_in(&signing, &join, print)).await.map_err(|e| e.to_string())??;
     let token = token().await?;
-    a.keep("user", Some(&signin::Auth::subject(&token)));
+    a.keep("user", Some(&subject(&token)?));
     // Back in front of the browser it signed in with.
     platform::show();
     Ok(())
@@ -313,11 +345,11 @@ async fn sign_in() -> Result<(), String> {
 /// Makes this device its person's: one already, or asking to be let in. → `{ in: true }`, or the code to approve
 /// it by (`{ code }`), after which `wait`.
 #[tauri::command]
-async fn join() -> Result<Value, String> {
+async fn join() -> Result<Value, Failure> {
     let a = app();
     let address = a.address().ok_or("Enter your address first.")?;
     let token = token().await?;
-    let user = signin::Auth::subject(&token);
+    let user = subject(&token)?;
     a.keep("user", Some(&user));
     // One key for each person at each address, as the Mac and iPhone apps keep them, its folder named by it too.
     let id = format!("{address} {user}");
@@ -350,7 +382,7 @@ async fn join() -> Result<Value, String> {
         }
         Ok(false) => {}
         Err(e) if e.not_let_in => {}
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(e.to_string().into()),
     }
     let invite = a.kept("invite");
     // A computer is "<name> on <computer>", as the Mac app's was; a phone, its own name.
@@ -363,7 +395,7 @@ async fn join() -> Result<Value, String> {
 
 /// Waits until this device is let in, as auth says it was approved and the relay lets it on.
 #[tauri::command]
-async fn wait() -> Result<(), String> {
+async fn wait() -> Result<(), Failure> {
     let device = app().device()?;
     loop {
         let token = token().await?;
@@ -440,8 +472,8 @@ async fn sign_out() -> Result<(), String> {
     if let Some(d) = device {
         let _ = tokio::time::timeout(Duration::from_secs(20), d.sign_out()).await;
     }
-    if let Ok(auth) = a.auth() {
-        let _ = tauri::async_runtime::spawn_blocking(move || auth.sign_out()).await;
+    if let Ok(signing) = a.sign_in() {
+        let _ = tauri::async_runtime::spawn_blocking(move || signing.sign_out()).await;
     }
     if let (Some(address), Some(user)) = (a.address(), a.kept("user")) {
         secrets::forget_device(&format!("{address} {user}"));
@@ -888,7 +920,7 @@ pub fn run() {
             let _ = APP.set(App {
                 handle: app.handle().clone(),
                 data,
-                auth: Mutex::default(),
+                sign_in: Mutex::default(),
                 device: Mutex::default(),
                 bodies: Mutex::default(),
                 next: AtomicU64::new(1),

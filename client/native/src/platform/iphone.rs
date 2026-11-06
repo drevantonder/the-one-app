@@ -78,11 +78,11 @@ pub fn can_scan() -> bool {
 
 /// Signs in in the system's sign-in sheet, which comes back to the app's own link; a test's prints the link, to the
 /// loopback.
-pub fn sign_in(auth: &crate::signin::Auth, join: &str, print: bool) -> Result<(), String> {
+pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Result<(), one_client::sign_in::Failed> {
     if print {
-        return auth.sign_in(join, |u| Ok(println!("Sign in: {u}")));
+        return signing.sign_in(join, |u| Ok(println!("Sign in: {u}")));
     }
-    auth.sign_in_here(join, |u| signed_in_at(u, true))
+    signing.sign_in_here(join, |u| signed_in_at(u, true))
 }
 
 /// In a build with pushes (Info.plist's `Push`), once it's let in: asks the person the first time, and gives the push

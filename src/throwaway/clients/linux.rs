@@ -75,7 +75,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         }
         match said.lines().rev().find_map(|l| l.strip_prefix("Sign in: ")) {
             Some(url) if !signed => {
-                one::sign_in::approve_on_throwaway(address, url, person)?;
+                crate::sign_in::approve_on_throwaway(address, url, person)?;
                 signed = true;
             }
             Some(_) => {}

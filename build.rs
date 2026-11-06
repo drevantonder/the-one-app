@@ -61,6 +61,11 @@ fn main() {
     let out = format!("{out}pub const YOURS: &str = {yours:?};\n");
     // A custom build's one network's address, if it serves only one: its native app never asks where.
     let out = format!("{out}pub const ADDRESS: &str = {:?};\n", optional("address").trim_end_matches('/'));
+    // The Mac's menu bar mark, its @2x, which the native app's build draws its menu bar item with.
+    let menubar = std::path::Path::new(&path).parent().unwrap().join(optional("menubar").replace(".png", "@2x.png"));
+    println!("cargo:rerun-if-changed={}", menubar.display());
+    let menubar = std::fs::canonicalize(&menubar).map(|m| m.to_string_lossy().into_owned()).unwrap_or_default();
+    let out = format!("{out}pub const MENUBAR: &str = {menubar:?};\n");
     // The network settings a network has until its admins set them (`setting` steps).
     let mut settings = String::new();
     for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {

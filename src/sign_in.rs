@@ -8,12 +8,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use data_encoding::BASE64URL_NOPAD as B64U;
+use one::config::{CLI, NAME};
+use one_client::sign_in::{Asked, Auth};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::Digest;
-
-use crate::config::{CLI, NAME};
 
 /// What's kept: the network's address, this machine's client there, and its tokens.
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -32,7 +30,7 @@ pub struct Kept {
 /// Where it's kept: in the person's config, one for each node this CLI reaches (`<CLI>_ADDR`); a throwaway network's, in its
 /// folder, which stopping it deletes.
 pub fn path() -> PathBuf {
-    if let crate::mode::Mode::Throwaway(t) = crate::mode::here() {
+    if let one::mode::Mode::Throwaway(t) = one::mode::here() {
         return t.home().join("sign-in.json");
     }
     let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| ".".into())).join(".config"));
@@ -68,14 +66,6 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into()
 }
 
-fn meta(address: &str) -> Result<Value> {
-    let mut resp = agent().get(format!("{address}/.well-known/oauth-authorization-server")).call().with_context(|| format!("auth at {address} isn't answering"))?;
-    if resp.status() != 200 {
-        bail!("auth at {address} isn't answering");
-    }
-    Ok(resp.body_mut().read_json()?)
-}
-
 fn said(out: &Value, otherwise: &str) -> String {
     out["error_description"].as_str().or(out["error"].as_str()).or(out["message"].as_str()).unwrap_or(otherwise).to_string()
 }
@@ -85,65 +75,35 @@ fn back(address: &str) -> String {
     format!("{address}/sign-in/code/done")
 }
 
-fn client(address: &str, meta: &Value) -> Result<String> {
-    if let Some(kept) = kept().filter(|k| k.address == address && !k.client.is_empty()) {
+/// This machine's client of `auth`: as it registered, or registered now.
+fn client(auth: &Auth) -> Result<String> {
+    if let Some(kept) = kept().filter(|k| k.address == auth.address && !k.client.is_empty()) {
         return Ok(kept.client);
     }
-    let body = serde_json::json!({
-        "client_name": format!("{NAME} on {}", hostname()),
-        "redirect_uris": [back(address)],
-        "token_endpoint_auth_method": "none",
-        "grant_types": ["authorization_code", "refresh_token"],
-        "response_types": ["code"],
-    });
-    let mut resp = agent().post(meta["registration_endpoint"].as_str().context("auth takes no new clients")?).send_json(&body)?;
-    let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-    match out["client_id"].as_str() {
-        Some(id) if resp.status().is_success() => Ok(id.to_string()),
-        _ => bail!("this machine couldn't sign up to sign in: {}", said(&out, "auth said no")),
-    }
+    Ok(auth.register(&format!("{NAME} on {}", hostname()), &back(&auth.address), false)?)
 }
 
 /// A sign-in under way: the code the person approves, and what turns it into tokens here.
 pub struct Started {
     pub code: String,
     pub url: String,
-    address: String,
     client: String,
-    state: String,
-    verifier: String,
-    meta: Value,
+    auth: Auth,
+    asked: Asked,
 }
 
 /// Starts signing in to the network at `address`, for the device `join` names (its key ‖ seal key, hex), if it's one
 /// that then asks to be let in: → the code the person approves, and its link.
 pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
-    let address = address.trim_end_matches('/').to_string();
-    let meta = meta(&address)?;
-    let client = client(&address, &meta)?;
-    let verifier = B64U.encode(&rand::random::<[u8; 32]>());
-    let state = B64U.encode(&rand::random::<[u8; 32]>());
-    let challenge = B64U.encode(&sha2::Sha256::digest(verifier.as_bytes()));
-    let redirect = back(&address);
-    let mut asked = vec![
-        ("response_type", "code"),
-        ("client_id", &client),
-        ("redirect_uri", &redirect),
-        ("scope", "openid profile offline_access"),
-        ("code_challenge", &challenge),
-        ("code_challenge_method", "S256"),
-        ("state", &state),
-        ("prompt", "consent"),
-    ];
-    // Its sign-in names it, so the person's devices can let it in by it.
-    asked.extend(join.map(|j| ("join", j)));
-    let query = form(&asked);
-    let mut resp = agent().post(format!("{address}/sign-in/code")).send_json(serde_json::json!({ "query": query }))?;
+    let auth = Auth::at(address)?;
+    let client = client(&auth)?;
+    let asked = auth.ask(&client, &back(&auth.address), join);
+    let mut resp = agent().post(format!("{}/sign-in/code", auth.address)).send_json(serde_json::json!({ "query": asked.query }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     let (Some(code), Some(url)) = (out["code"].as_str(), out["url"].as_str()) else {
         bail!("auth gave no code: {}", said(&out, "it may need updating"));
     };
-    Ok(Started { code: code.into(), url: url.into(), address, client, state, verifier, meta })
+    Ok(Started { code: code.into(), url: url.into(), client, auth, asked })
 }
 
 /// Approves a sign-in as a throwaway network's first person would in a browser, with no passkey: a code's link (the CLI's) or
@@ -193,8 +153,9 @@ pub fn approved_on_throwaway(address: &str, url: &str, person: Option<&str>) -> 
 }
 
 pub fn finish(started: Started) -> Result<()> {
+    let address = &started.auth.address;
     let code = loop {
-        let mut resp = agent().post(format!("{}/sign-in/code/take", started.address)).send_json(serde_json::json!({ "state": started.state }))?;
+        let mut resp = agent().post(format!("{address}/sign-in/code/take")).send_json(serde_json::json!({ "state": started.asked.state }))?;
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         match resp.status().as_u16() {
             202 => std::thread::sleep(Duration::from_secs(2)),
@@ -202,29 +163,25 @@ pub fn finish(started: Started) -> Result<()> {
             _ => bail!("{}", said(&out, "signing in didn't work")),
         }
     };
-    let mut kept = Kept { address: started.address.clone(), client: started.client.clone(), ..Default::default() };
-    grant(&started.meta, &mut kept, &[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", &back(&started.address)), ("client_id", &started.client), ("code_verifier", &started.verifier)])?;
-    Ok(())
+    let mut kept = Kept { address: address.clone(), client: started.client.clone(), ..Default::default() };
+    keep_tokens(&mut kept, started.auth.code(&started.asked, &code))
 }
 
-/// Swaps a code or refresh token for tokens, and keeps them: each refresh token works once, so the new one is kept
-/// before anything else can ask. A refusal means this machine is signed out.
-fn grant(meta: &Value, kept: &mut Kept, fields: &[(&str, &str)]) -> Result<()> {
-    let endpoint = meta["token_endpoint"].as_str().context("auth gives no tokens")?;
-    let mut resp = agent().post(endpoint).header("content-type", "application/x-www-form-urlencoded").send(form(fields))?;
-    let status = resp.status().as_u16();
-    let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-    let Some(access) = out["access_token"].as_str().filter(|_| status == 200) else {
-        if matches!(status, 400 | 401) {
+/// What a grant gave, kept: each refresh token works once, so the new one is kept before anything else can ask. A
+/// refusal means this machine is signed out.
+fn keep_tokens(kept: &mut Kept, tokens: Result<one_client::sign_in::Tokens, one_client::sign_in::Failed>) -> Result<()> {
+    let tokens = match tokens {
+        Ok(t) => t,
+        Err(e) if e.signed_out => {
             let _ = std::fs::remove_file(path());
-            bail!("this machine is signed out ({}): {CLI} sign-in", said(&out, "its sign-in was refused"));
+            bail!("this machine is signed out ({e}): {CLI} sign-in");
         }
-        bail!("auth said {status}: {}", said(&out, "nothing"));
+        Err(e) => return Err(e.into()),
     };
-    kept.access = Some(access.to_string());
-    kept.until = now_ms() + out["expires_in"].as_u64().unwrap_or(3600) * 1000;
-    if let Some(refresh) = out["refresh_token"].as_str() {
-        kept.refresh = Some(refresh.to_string());
+    kept.access = Some(tokens.access);
+    kept.until = now_ms() + tokens.expires_in * 1000;
+    if let Some(refresh) = tokens.refresh {
+        kept.refresh = Some(refresh);
     }
     keep(kept)
 }
@@ -244,8 +201,8 @@ pub fn token() -> Result<Option<String>> {
         return Ok(Some(access));
     }
     let refresh = kept.refresh.clone().context(format!("this machine is signed out: {CLI} sign-in"))?;
-    let client = kept.client.clone();
-    grant(&meta(&kept.address)?, &mut kept, &[("grant_type", "refresh_token"), ("refresh_token", &refresh), ("client_id", &client)])?;
+    let tokens = Auth::at(&kept.address)?.refresh(&kept.client, &refresh);
+    keep_tokens(&mut kept, tokens)?;
     Ok(kept.access)
 }
 
@@ -256,10 +213,8 @@ pub fn sign_out() -> Result<bool> {
     let _lock = Lock::take()?;
     let Some(kept) = kept() else { return Ok(false) };
     let _ = std::fs::remove_file(path());
-    if let (Some(refresh), Ok(meta)) = (&kept.refresh, meta(&kept.address))
-        && let Some(revoke) = meta["revocation_endpoint"].as_str()
-    {
-        let _ = agent().post(revoke).header("content-type", "application/x-www-form-urlencoded").send(form(&[("token", refresh), ("token_type_hint", "refresh_token"), ("client_id", &kept.client)]));
+    if let (Some(refresh), Ok(auth)) = (&kept.refresh, Auth::at(&kept.address)) {
+        auth.revoke(&kept.client, refresh);
     }
     Ok(true)
 }
@@ -284,10 +239,6 @@ impl Drop for Lock {
         use std::os::fd::AsRawFd;
         unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
     }
-}
-
-fn form(fields: &[(&str, &str)]) -> String {
-    fields.iter().map(|(k, v)| format!("{}={}", crate::url_encode(k), crate::url_encode(v))).collect::<Vec<_>>().join("&")
 }
 
 pub fn hostname() -> String {

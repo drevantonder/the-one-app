@@ -117,9 +117,9 @@ fn inside(network: &Throwaway, rest: &[String]) -> Result<()> {
 /// `sign-in`, as the throwaway network's person, with no passkey: its auth asks for none.
 fn sign_in() -> Result<()> {
     let address = crate::node().get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
-    let started = one::sign_in::start(&address, None)?;
-    one::sign_in::approve_on_throwaway(&address, &started.url, None)?;
-    one::sign_in::finish(started)?;
+    let started = crate::sign_in::start(&address, None)?;
+    crate::sign_in::approve_on_throwaway(&address, &started.url, None)?;
+    crate::sign_in::finish(started)?;
     let me = crate::node().get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
     println!("Signed in as {me}. {CLI} throwaway and {CLI} throwaway mcp act as them until {CLI} throwaway sign-out.");
     Ok(())

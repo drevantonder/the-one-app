@@ -35,12 +35,12 @@ pub fn commands() -> Command {
                 ["sign-out"] => {
                     // A device takes itself out of its person's devices first, while its sign-in still says who it is; git
                     // here then no longer reaches its repos, which a node here still serves.
-                    let address = one::sign_in::kept().map(|k| k.address).filter(|_| !client_device::node_here());
+                    let address = crate::sign_in::kept().map(|k| k.address).filter(|_| !client_device::node_here());
                     let device = client_device::sign_out();
                     if let Some(address) = address {
                         one::git_wire::unwire(&address);
                     }
-                    match one::sign_in::sign_out()? || device {
+                    match crate::sign_in::sign_out()? || device {
                         true if device => println!("Signed out: this computer is no longer one of your devices, and {CLI} here no longer acts as you."),
                         true => println!("Signed out: {CLI} on this machine no longer acts as you."),
                         false => println!("This machine isn't signed in."),
@@ -100,14 +100,14 @@ fn sign_in(node: &Client, flags: &Map<String, Value>) -> Result<()> {
     let address = match flags.get("address").and_then(Value::as_str).map(str::to_string).or_else(|| invite.as_ref().and_then(|(a, _)| a.clone())) {
         Some(a) => a,
         // With no node here, it's the address it was signed in at before, or the one given.
-        None if !client_device::node_here() => one::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
+        None if !client_device::node_here() => crate::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
         None => {
             let state = request(agent().get(format!("http://{}/v1/state", api::addr())).call())?;
             state["network"]["settings"]["address"].as_str().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
         }
     };
     let join = (!client_device::node_here()).then(|| client_device::signing_in_for(&address)).transpose()?;
-    let started = one::sign_in::start(&address, join.as_deref())?;
+    let started = crate::sign_in::start(&address, join.as_deref())?;
     let with = if one::config::SIGN_IN == one::config::SignIn::Google { "Google" } else { "your passkey" };
     // Someone new joins first, in a browser, which then signs this in as them.
     let link = match &invite {
@@ -123,10 +123,10 @@ fn sign_in(node: &Client, flags: &Map<String, Value>) -> Result<()> {
             started.url.clone()
         }
     };
-    if one::sign_in::has_screen() && one::sign_in::open(&link) {
+    if crate::sign_in::has_screen() && crate::sign_in::open(&link) {
         println!("It's open in your browser here.");
     }
-    one::sign_in::finish(started)?;
+    crate::sign_in::finish(started)?;
     if let Err(err) = one::git_wire::wire(&address) {
         eprintln!("{err:#}");
     }
@@ -139,7 +139,7 @@ fn sign_in(node: &Client, flags: &Map<String, Value>) -> Result<()> {
     client_device::join(&address, invite.as_ref().map(|(_, secret)| secret.as_str()))?;
     let state = node.get("/v1/state")?;
     let me = state["user"]["name"].as_str().unwrap_or("you");
-    println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", one::sign_in::hostname());
+    println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", crate::sign_in::hostname());
     Ok(())
 }
 
@@ -147,7 +147,7 @@ fn sign_in(node: &Client, flags: &Map<String, Value>) -> Result<()> {
 /// node's there before, so it isn't sent, and once the node is in a network it's let go.
 fn unsigned_post(path: &str, body: Value) -> Result<Value> {
     let r = Client::new(Http { signed_in: false }, false).post(path, body)?;
-    let _ = one::sign_in::sign_out();
+    let _ = crate::sign_in::sign_out();
     Ok(r)
 }
 

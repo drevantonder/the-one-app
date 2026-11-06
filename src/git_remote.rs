@@ -60,7 +60,7 @@ fn here(asked: &str) -> Result<String> {
     if !crate::client_device::active() {
         bail!("this computer isn't one of your devices yet: {CLI} sign-in --address {asked}, then try again");
     }
-    Ok(one::sign_in::kept().map(|k| k.address.trim_end_matches('/').to_string()).unwrap_or_default())
+    Ok(crate::sign_in::kept().map(|k| k.address.trim_end_matches('/').to_string()).unwrap_or_default())
 }
 
 /// Carries what git asks of an app's address on this machine's node, or its person's nodes, until this program exits.
