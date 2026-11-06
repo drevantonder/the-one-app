@@ -74,7 +74,7 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or_default();
     let fetched = if answered { json!(now) } else { kept["fetched"].clone() };
-    let mut cache = json!({ "network": state["network"]["name"], "widgets": items, "fetched": fetched });
+    let mut cache = json!({ "network": state.network.as_ref().map(|n| &n.name), "widgets": items, "fetched": fetched });
     if cache["fetched"].is_null() {
         cache.as_object_mut().unwrap().remove("fetched");
     }
