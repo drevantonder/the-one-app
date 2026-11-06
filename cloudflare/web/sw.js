@@ -11,6 +11,7 @@ const KEPT = "one.page";
 const PLACES = /^\/($|page\/|accounts\/|app\/|settings($|\/)|vault$)/;
 /// The custom build's name, which the Workers' build writes in (Settings::web).
 const NAME = "";
+const FALLBACK = "";
 
 addEventListener("install", (e) => e.waitUntil(caches.open(KEPT).then((c) => c.add("/index.html")).catch(() => {}).then(() => skipWaiting())));
 addEventListener("activate", (e) => e.waitUntil(clients.claim()));
@@ -31,7 +32,7 @@ addEventListener("push", (e) => e.waitUntil(show(e.data ? unb64u(e.data.text()) 
 
 async function show(sealed) {
   const note = sealed && (await opened(sealed).catch(() => null));
-  if (!note?.title) return registration.showNotification(NAME, { body: "You have a new notification.", icon: "/icon.png" });
+  if (!note?.title) return registration.showNotification(NAME, { body: FALLBACK, icon: "/icon.png" });
   const link = note.app ? { app: note.app, screen: note.screen || "main", params: note.params || {} } : null;
   return registration.showNotification(note.title, { body: note.body || "", tag: note.id || undefined, icon: "/icon.png", data: { link } });
 }

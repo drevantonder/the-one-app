@@ -67,11 +67,11 @@ export function server(version) {
   const glue = import(`${base}one_client.js`).then(async (g) => (await g.default({ module_or_path: await compiled }), g));
   glue.catch(() => {});
   // Imported here, not above, so the WebAssembly is fetched first.
-  const code = Promise.all([import("/shared/crypto.js"), import("/kept.js")]);
+  const code = Promise.all([import("/shared/crypto.js"), import("/shared/protocol.js"), import("/kept.js")]);
   /// Of `keys`, the nodes the network's signed entries, as this browser last checked them (`global`), list as running
   /// something of `user`'s: all of them before it's checked any. A node the relay or a node names besides isn't asked.
   async function theirs(user, keys, kept) {
-    const k = (kept === undefined ? await (await code)[1].get(`global:${user}`) : kept)?.members;
+    const k = (kept === undefined ? await (await code)[2].get(`global:${user}`) : kept)?.members;
     if (!k) return keys;
     const theirs = k.people?.[user]?.nodes || [];
     return keys.filter((key) => theirs.includes(key));
@@ -81,7 +81,7 @@ export function server(version) {
   /// checked by the client (client/src/members.rs), then kept. The first time, of the network its approval named
   /// (`root:<user>`), if it named one.
   async function global(user, steps) {
-    const [, { get, put }] = await code;
+    const [, , { get, put }] = await code;
     const kept = await get(`global:${user}`);
     if (!steps && kept?.steps?.truth && kept?.members?.people?.[user]?.app_schedules) return kept.members;
     const { Global } = await glue;
@@ -110,7 +110,7 @@ export function server(version) {
     const took = {};
     let mark = performance.now();
     const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
-    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken, FRESH, SESSION }, { getAll, put }] = await code;
+    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION }, { getAll, put }] = await code;
     // In one read: the device's key, the nodes it asked before and who runs what, as it replayed it.
     const [mine, nodes, members] = await getAll([`device:${user}`, `nodes:${user}`, `global:${user}`]);
     const device = as || mine;
@@ -132,7 +132,7 @@ export function server(version) {
     const ask = async (certificate) => {
       let answer;
       await untilTaken(async (at) => {
-        const body = JSON.stringify(await signedRequest(key, endpoint, "one/relay", { computes: true, certificate }, at));
+        const body = JSON.stringify(await signedRequest(key, endpoint, RELAY, { computes: true, certificate }, at));
         answer = await fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body });
         return answer.status === 403 || answer.ok ? "" : (await answer.clone().json().catch(() => null))?.error;
       });
@@ -197,7 +197,7 @@ export function server(version) {
     const s = await session?.ready.catch(() => null);
     if (s?.client !== client) return;
     try {
-      const [{ certify, hex, FRESH, SESSION }, { get }] = await code;
+      const [{ certify, hex }, { FRESH, SESSION }, { get }] = await code;
       const device = await get(`device:${user}`);
       if (!device) return;
       const until = Date.now() + SESSION - FRESH;
@@ -254,7 +254,7 @@ export function server(version) {
           }
           case "nodes": {
             const nodes = await theirs(m.user, m.nodes);
-            await (await code)[1].put(`nodes:${m.user}`, nodes);
+            await (await code)[2].put(`nodes:${m.user}`, nodes);
             const s = await session?.ready;
             // Each one's run priority, where the state said it: those on the same one are raced at once.
             const ranks = nodes.filter((k) => Number.isInteger(m.ranks?.[k]));

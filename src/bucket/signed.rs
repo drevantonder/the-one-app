@@ -50,7 +50,7 @@ impl Signer {
     pub fn ask(&self, mut fields: Value) -> Result<Value> {
         let address = (self.address)()?;
         fields["reads"] = serde_json::json!(crate::database::READS);
-        let body = crate::keys::signed_request(&self.key, "one/urls", fields, now_ms());
+        let body = crate::keys::signed_request(&self.key, crate::protocol::URLS, fields, now_ms());
         let mut resp = super::place::signer_requests().post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})")))?;
         let status = resp.status().as_u16();
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);

@@ -10,7 +10,8 @@
 // scope database and its permissions (client/src/members.rs, `Who`), and only looked up here. A hacked node holds no
 // keys, and gets none this way.
 
-import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signStep, signedRequest, READS, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
+import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signStep, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
+import { PUSH, READS, RELAY, SIGN_IN_DOMAIN, URLS, databasePrefix } from "../shared/protocol.js";
 import { del, get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -405,7 +406,7 @@ export class Device {
     const prefix = prefixOf({ scope: "global", app: "node", database: "scope" });
     const out = [];
     for (let at = from + 1; ; at += 32) {
-      const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { get: [{ steps: prefix, from: at, to: at + 31 }], reads: READS })) });
+      const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed(URLS, { get: [{ steps: prefix, from: at, to: at + 31 }], reads: READS })) });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || "Your One App network's storage didn't answer. Try again.");
       const sealed = Object.keys(body.get).sort().map((name) => body.get[name]);
@@ -423,7 +424,7 @@ export class Device {
   /// none, as the URL signer reads it, which a browser can't itself.
   async hints(needs) {
     const newest = [...new Set(needs.map(prefixOf))];
-    const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { newest, reads: READS })) });
+    const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed(URLS, { newest, reads: READS })) });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.error || "Your One App network's storage didn't answer. Try again.");
     return out.newest || {};
@@ -461,7 +462,7 @@ export class Device {
   /// its seal key, which what's pushed to it is sealed to (cloudflare/push/), and its person, whom sign-in pushes about
   /// their devices joining.
   async registerPush({ endpoint, keys }) {
-    const body = await this.signed("one/push", { route: "POST /push/register", via: "webpush", address: endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, seal: this.me.seal, user: this.user });
+    const body = await this.signed(PUSH, { route: "POST /push/register", via: "webpush", address: endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, seal: this.me.seal, user: this.user });
     const r = await fetch("/push/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Your One App network's push service didn't take this browser.");
   }
@@ -469,7 +470,7 @@ export class Device {
   /// Tells the relay to let a key in (`{ add, admin? }`) or take one out (`{ remove }`), signed by `as`.
   async tell(fields, as = this.me) {
     const said = await untilTaken(async (at) => {
-      const r = await fetch("/relay/tell", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await signedRequest(as.sign, hex.decode(as.key), "one/relay", fields, at)) });
+      const r = await fetch("/relay/tell", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await signedRequest(as.sign, hex.decode(as.key), RELAY, fields, at)) });
       return r.ok ? "" : (await r.json().catch(() => null))?.error || "Your One App network didn't take that.";
     });
     if (said) throw new Error(said);
@@ -478,13 +479,13 @@ export class Device {
   /// When each of the network's devices was last let onto its network, as the relay says: `{ key: ms }`, or none from a
   /// relay that doesn't say.
   async seen() {
-    const r = await fetch("/relay/seen", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/relay", { seen: true })) });
+    const r = await fetch("/relay/seen", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed(RELAY, { seen: true })) });
     return r.ok ? (await r.json()).seen || {} : {};
   }
 
   /// One of sign-in's routes, signed by this browser: a GET's or DELETE's request in `x-one-request`, `query` after it.
   async authSigned(method, path, fields = {}, query = "") {
-    const request = await this.signed("one/auth", { route: `${method} ${path}`, ...fields });
+    const request = await this.signed(SIGN_IN_DOMAIN, { route: `${method} ${path}`, ...fields });
     const init = method === "POST" ? { method, headers: { "content-type": "application/json" }, body: JSON.stringify(request) } : { method, headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(request))) } };
     return answer(await fetch(path + query, init));
   }
@@ -495,7 +496,7 @@ export class Device {
   /// they invited from this browser, whose proof is right. Each with its code.
   async requests() {
     // Signed too, so sign-in knows this browser's device as its person's, to push to.
-    const mine = await this.signed("one/auth", { route: "GET /api/auth/devices/requests" });
+    const mine = await this.signed(SIGN_IN_DOMAIN, { route: "GET /api/auth/devices/requests" });
     const own = (await answer(await this.bearer("/api/auth/devices/requests", { headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(mine))) } }))).requests || [];
     const invited = (await this.checked()).people[this.user]?.invites ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
     const all = [...own, ...invited].filter((r, i, a) => !r.service && r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
@@ -668,7 +669,7 @@ const noting = (_, fetch) => fetch();
 const kindOf = (scope) => (scope === "global" ? "everyone" : scope.startsWith("group:") ? "group" : "user");
 
 /// Where a database of `need`'s is in the bucket (src/bucket.rs `folder`).
-const prefixOf = (n) => `${n.scope.replace(":", "-")}/${n.app}/${n.database}`;
+const prefixOf = (n) => databasePrefix(n.scope, n.app, n.database);
 
 /// A response's JSON, or its error, thrown.
 async function answer(r) {

@@ -783,8 +783,14 @@ pub fn module(entry: &str) -> Result<Vec<u8>> {
     module_from(crate::config::CLOUDFLARE.iter().map(|(p, b)| (p.to_string(), b.to_vec())).collect(), entry)
 }
 
+/// The module of what the Workers and the web client share with the Rust (`protocol::javascript`), in `cloudflare/`.
+pub const PROTOCOL: &str = "shared/protocol.js";
+
 /// A Worker's module, built from `files` (paths in `cloudflare/`).
-pub fn module_from(files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec<u8>> {
+pub fn module_from(mut files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec<u8>> {
+    // What they say that Rust says too, as this build says it (`protocol`): never a file of the repo.
+    files.retain(|(path, _)| path != PROTOCOL);
+    files.push((PROTOCOL.into(), crate::protocol::javascript().into_bytes()));
     let mut hash = Sha256::new();
     for (path, bytes) in &files {
         hash.update(format!("{path}\0{}\0", bytes.len()));
@@ -1107,7 +1113,7 @@ pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: 
         fields["email"] = json!(email);
     }
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-    let mut resp = agent.post(format!("{address}/api/auth/invites")).send_json(crate::keys::signed_request(key, "one/auth", fields, now))?;
+    let mut resp = agent.post(format!("{address}/api/auth/invites")).send_json(crate::keys::signed_request(key, crate::protocol::SIGN_IN_DOMAIN, fields, now))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("sign-in made no invite"));
     Ok(Invite { link: format!("{address}/invite#{secret}"), user, until })

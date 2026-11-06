@@ -272,7 +272,7 @@ impl Node {
         tokio::task::spawn_blocking(move || {
             let mut fields = fields;
             fields["route"] = json!(format!("{method} {}", path.split('?').next().unwrap_or_default()));
-            let signed = crate::keys::signed_request(&key, "one/auth", fields, now_ms());
+            let signed = crate::keys::signed_request(&key, crate::protocol::SIGN_IN_DOMAIN, fields, now_ms());
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
             let url = format!("{address}{path}");
             let header = B64U.encode(&serde_json::to_vec(&signed)?);
@@ -321,7 +321,7 @@ impl Node {
             let mut again = true;
             loop {
                 let at = crate::keys::next_at(now_ms());
-                let body = crate::keys::signed_request(&key, "one/relay", fields.clone(), at);
+                let body = crate::keys::signed_request(&key, crate::protocol::RELAY, fields.clone(), at);
                 let mut resp = agent.post(format!("{address}/relay/tell")).send_json(&body)?;
                 let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
                 let said = out["error"].as_str().unwrap_or("no");

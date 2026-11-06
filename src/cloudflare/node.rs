@@ -34,6 +34,7 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
         ("one_cloudflare_node.js".into(), "application/javascript+module", glue),
         ("one_cloudflare_node_bg.wasm".into(), "application/wasm", wasm),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
+        ("protocol.js".into(), "application/javascript+module", crate::protocol::javascript().into_bytes()),
     ];
     out.extend(services.iter().map(|(name, bytes)| (format!("service-{name}.js"), "application/javascript+module", bytes.to_vec())));
     out

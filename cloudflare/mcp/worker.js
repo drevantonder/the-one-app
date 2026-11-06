@@ -30,16 +30,15 @@
 import { DurableObject } from "cloudflare:workers";
 import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, device_keys, following } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
-import { b64u, ed25519Public, hex, joinCode, mayHand, random, READS, sealHandoff, signedRequest, untilTaken } from "../shared/crypto.js";
+import { b64u, ed25519Public, hex, joinCode, mayHand, random, sealHandoff, signedRequest, untilTaken } from "../shared/crypto.js";
+import { READS, RELAY, URLS } from "../shared/protocol.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
 
 initSync({ module: wasm });
 
 const IDLE = 30_000;
-/// What a device asks the relay and the URL signer with, and the MCP requests' headers a node is given and gives back.
-const RELAY = "one/relay";
-const URLS = "one/urls";
+/// The MCP requests' headers a node is given and gives back.
 const TO_NODE = ["content-type", "accept", "mcp-session-id", "mcp-protocol-version"];
 const FROM_NODE = ["content-type", "mcp-session-id"];
 /// The most a request to the Worker may be.

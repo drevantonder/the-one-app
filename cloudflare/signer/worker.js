@@ -24,12 +24,12 @@
 // an older build says nothing) is 426, telling it to update, if it would create, replace or remove, or comes from a
 // client alone. A machine that runs things still reads, so a node takes the release it updates to.
 
-import { b64u, checkRequest, READS } from "../shared/crypto.js";
+import { b64u, behind, checkRequest, rolesOf } from "../shared/crypto.js";
+import { COPY, MOST_URLS, NEWEST, STEP_DIGITS, URLS, copyName, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { bucketUrls } from "../shared/s3.js";
 
-/// How long URLs work, in seconds, the most it signs at once, and the most objects it confirms at once.
+/// How long URLs work, in seconds, and the most objects it confirms at once.
 const EXPIRES = 15 * 60;
-const MOST = 256;
 const CONFIRM = 100;
 /// How long the relay's answer about a key is kept here: a removed endpoint is refused within this.
 const ALLOWED_FOR = 5_000;
@@ -55,8 +55,8 @@ const isName = (name) => typeof name === "string" && name.length <= 1024 && name
 function names(item) {
   if (typeof item === "string") return isName(item) ? [item] : fail(400, `${item} isn't a name in the bucket`);
   const { steps, from, to } = item || {};
-  if (!isName(steps) || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 1 || to < from || to - from >= MOST) fail(400, "steps are { steps, from, to }, from 1, at most 256");
-  return Array.from({ length: to - from + 1 }, (_, i) => `${steps}/${String(from + i).padStart(12, "0")}`);
+  if (!isName(steps) || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 1 || to < from || to - from >= MOST_URLS) fail(400, `steps are { steps, from, to }, from 1, at most ${MOST_URLS}`);
+  return Array.from({ length: to - from + 1 }, (_, i) => stepName(steps, from + i));
 }
 
 const list = (v) => (v === undefined ? [] : Array.isArray(v) ? v : fail(400, "each kind is a list"));
@@ -88,7 +88,7 @@ async function confirm(env, bucket, asked) {
 
 /// Each database's newest hint, by its prefix: its text, or null if it has none.
 async function newest(env, bucket, prefixes) {
-  const names = prefixes.map((p) => `${p}/newest`);
+  const names = prefixes.map(newestName);
   const reads = env.R2 ? null : (await bucketUrls(bucket, { read: names }, 60)).read;
   const out = {};
   await Promise.all(prefixes.map(async (p, i) => {
@@ -116,14 +116,13 @@ async function present(env, bucket, names) {
 /// What must be in the bucket before `name` is created, any one of: the step before a step, the copy up to it, or its
 /// database's `tidied`; and a copy's own step. None for anything else, or a database's first step.
 function after(name) {
-  const step = /^(.+)\/(\d{12})$/.exec(name);
+  const step = new RegExp(`^(.+)/(\\d{${STEP_DIGITS}})$`).exec(name);
   if (!step) return null;
   const [, prefix, n] = step;
   const at = Number(n);
-  const pad = (i) => String(i).padStart(12, "0");
-  const copy = /^(.+)\/copy$/.exec(prefix);
+  const copy = new RegExp(`^(.+)/${COPY}$`).exec(prefix);
   if (copy) return [`${copy[1]}/${n}`];
-  return at > 1 ? [`${prefix}/${pad(at - 1)}`, `${prefix}/copy/${pad(at - 1)}`, `${prefix}/tidied`] : null;
+  return at > 1 ? [stepName(prefix, at - 1), copyName(prefix, at - 1), tidiedName(prefix)] : null;
 }
 
 /// Of `names` to create, those whose turn it is (`after`): → them, in their order.
@@ -153,7 +152,7 @@ async function urls(request, env) {
   const body = await request.json().catch(() => fail(400, "the body isn't JSON"));
   let checked;
   try {
-    checked = await checkRequest("one/urls", body);
+    checked = await checkRequest(URLS, body);
   } catch (err) {
     fail(401, err.message);
   }
@@ -170,16 +169,15 @@ async function urls(request, env) {
   const hints = list(fields.newest);
   const gets = list(fields.get).flatMap(names);
   if (gets.length > 32) fail(400, "at most 32 objects got at once");
-  if (read.length + head.length + create.length + replace.length + remove.length + pages.length > MOST) fail(400, `at most ${MOST} URLs at once`);
+  if (read.length + head.length + create.length + replace.length + remove.length + pages.length > MOST_URLS) fail(400, `at most ${MOST_URLS} URLs at once`);
   if (confirms.length + hints.length > CONFIRM) fail(400, `at most ${CONFIRM} objects confirmed or hints read at once`);
   if (!hints.every(isName)) fail(400, "each newest is a database's prefix");
   for (const r of [...replace, ...confirms]) if (!isName(r?.name) || typeof r.etag !== "string" || !r.etag) fail(400, "give each a name and its ETag");
-  if (!replace.every((r) => r.name.endsWith("/newest"))) fail(403, "only a database's newest is replaced");
+  if (!replace.every((r) => r.name.endsWith(`/${NEWEST}`))) fail(403, "only a database's newest is replaced");
   for (const name of remove) if (!isName(name)) fail(400, `${name} isn't a name in the bucket`);
   if (remove.length && !who.admin) fail(403, "only an admin's device removes from the bucket");
-  const reads = Number.isSafeInteger(fields.reads) ? fields.reads : 0;
-  const client = String(who.role || "").split(" ").every((r) => r === "client");
-  if ((client || create.length + replace.length + remove.length) && reads < READS) fail(426, `Update this device: ${env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
+  const client = rolesOf(who.role).every((r) => r === "client");
+  if ((client || create.length + replace.length + remove.length) && behind(fields.reads)) fail(426, updateRefusal(env.YOURS));
   for (const p of pages) {
     const ok = p && (p.prefix === "" || (typeof p.prefix === "string" && p.prefix.endsWith("/") && isName(p.prefix.slice(0, -1))));
     if (!ok || ![undefined, "/"].includes(p.delimiter) || ![undefined, null].includes(p.token) && typeof p.token !== "string") fail(400, "a list is { prefix, delimiter?, token? }, its prefix a folder's, ending in /");

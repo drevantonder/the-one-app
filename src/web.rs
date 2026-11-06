@@ -8,6 +8,8 @@ use serde_json::json;
 pub fn files() -> Vec<(String, Vec<u8>)> {
     let mut files: Vec<(String, Vec<u8>)> =
         crate::config::CLOUDFLARE.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
+    // What the client says that Rust says too, imported by the formats it holds keys in (`protocol`).
+    files.push(("shared/protocol.js".into(), crate::protocol::javascript().into_bytes()));
     // The page says whose it is before anyone signs in: the custom build's name.
     let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
     files.push(("icons.json".into(), crate::screen::ICONS.to_vec()));
@@ -18,9 +20,12 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
         "icons": [{ "src": "/icon.png", "sizes": "192x192 512x512 1024x1024", "type": "image/png", "purpose": "any" }],
     });
     files.push(("manifest.webmanifest".into(), manifest.to_string().into_bytes()));
-    // The service worker shows a note it can't open with the custom build's name.
+    // The service worker shows a note it can't open with the custom build's name, and what push says of it.
     if let Some((_, sw)) = files.iter_mut().find(|(path, _)| path == "sw.js") {
-        *sw = String::from_utf8_lossy(sw).replacen("const NAME = \"\";", &format!("const NAME = {};", json!(crate::config::NAME)), 1).into_bytes();
+        *sw = String::from_utf8_lossy(sw)
+            .replacen("const NAME = \"\";", &format!("const NAME = {};", json!(crate::config::NAME)), 1)
+            .replacen("const FALLBACK = \"\";", &format!("const FALLBACK = {};", json!(crate::protocol::NOTE_FALLBACK)), 1)
+            .into_bytes();
     }
     // The client's own screens, which it shows from here and never from a node (`screen::client_template`).
     files.extend(crate::screen::client_screens().map(|name| (format!("screens/{name}.html"), crate::screen::client_template(name).into_bytes())));

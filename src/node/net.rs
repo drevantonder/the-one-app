@@ -826,7 +826,7 @@ impl Node {
             let mut wait = Duration::from_secs(1);
             for _ in 0..5 {
                 let at = crate::keys::next_at(now_ms());
-                let body = crate::keys::signed_request(&key, "one/relay", fields.clone(), at);
+                let body = crate::keys::signed_request(&key, crate::protocol::RELAY, fields.clone(), at);
                 let url = url.clone();
                 let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
                 let sent = tokio::task::spawn_blocking(move || {

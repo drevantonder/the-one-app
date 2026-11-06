@@ -10,7 +10,8 @@
 // keys it needs.
 import * as answers from "./answers.js";
 import { del, put } from "./kept.js";
-import { BEHIND, waited } from "../shared/crypto.js";
+import { waited } from "../shared/crypto.js";
+import { BEHIND, CODES } from "../shared/protocol.js";
 import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf, signingInFor } from "./device.js";
 import { members } from "./members.js";
 import { net } from "./net.js";
@@ -266,7 +267,7 @@ const h = OneUI.react.createElement;
       if (opened.length) trace.fetches.at(-1).handed = handedIn(opened);
       // A node that doesn't list this browser may not have read its approval yet: the relay says if it's out, else it's
       // asked again in a moment (`BEHIND`), as every client does.
-      if (r.status === 403 && (await r.clone().json().catch(() => null))?.code === "not_let_in") {
+      if (r.status === 403 && (await r.clone().json().catch(() => null))?.code === CODES.notLetIn) {
         if (await takenOut()) throw gone();
         if (behind < BEHIND.length) {
           await sleep(BEHIND[behind++]);

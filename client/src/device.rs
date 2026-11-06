@@ -363,11 +363,11 @@ impl Device {
         let url = format!("{}/relay/computes", self.address);
         // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
         let mut at = keys::next_at(now());
-        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true, "reads": one::database::READS }), at))).await?;
+        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, json!({ "computes": true, "reads": one::database::READS }), at))).await?;
         if error(&out).is_some_and(|e| keys::taken_already(&e)) {
             tokio::time::sleep(keys::again_in(at)).await;
             at = keys::next_at(now());
-            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true, "reads": one::database::READS }), at))).await?;
+            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, one::protocol::RELAY, json!({ "computes": true, "reads": one::database::READS }), at))).await?;
         }
         // The relay answers 403 only for a key it doesn't let in.
         if status == 403 {
@@ -692,7 +692,7 @@ impl Device {
                 let bytes = response.body.bytes().await?;
                 // A node that doesn't list this device may not have read its approval yet: the relay says if it's out,
                 // else it's asked again in a moment, once it has.
-                if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == "not_let_in") {
+                if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == one::protocol::code::NOT_LET_IN) {
                     if !self.let_in().await {
                         return Err(refused());
                     }

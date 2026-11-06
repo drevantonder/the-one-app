@@ -30,9 +30,10 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps, reads } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
+import { CODES, MOST_URLS, READS, URLS } from "./protocol.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -192,9 +193,9 @@ class Bucket {
   }
 
   /// Asks the URL signer, signed by this node's endpoint key: it gives URLs to the network's endpoints alone. With what
-  /// this build reads of who's who (`reads`), which a write must.
+  /// this build reads of who's who (`READS`), which a write must.
   async sign(fields) {
-    const request = signed(this.env.NODE_KEY, "one/urls", JSON.stringify({ ...fields, reads: reads() }), Date.now());
+    const request = signed(this.env.NODE_KEY, URLS, JSON.stringify({ ...fields, reads: READS }), Date.now());
     const r = await this.env.SIGNER.fetch(`${this.env.ADDRESS}/urls`, { method: "POST", headers: { "content-type": "application/json" }, body: request });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(`the URL signer said: ${out.error || r.status}`), { unanswered: r.status >= 500 });
@@ -211,8 +212,8 @@ class Bucket {
         this.wanted = null;
         // At most as many as the URL signer signs at once.
         const all = [...wanted.keys()];
-        for (let at = 0; at < all.length; at += 256) {
-          const names = all.slice(at, at + 256);
+        for (let at = 0; at < all.length; at += MOST_URLS) {
+          const names = all.slice(at, at + MOST_URLS);
           this.sign({ read: names }).then(
             (out) => {
               for (const n of names) {
@@ -474,7 +475,7 @@ class Person {
       this.handed.delete(who.hash);
       if (removed) refuse(403, "You were removed: an admin adds you back.");
       // As a node on a machine says it, so a device let in a moment ago asks again once this node has read that.
-      throw Object.assign(new Refused(403, "this isn't one of your devices: approve it on one that is"), { said: { code: "not_let_in" } });
+      throw Object.assign(new Refused(403, "this isn't one of your devices: approve it on one that is"), { said: { code: CODES.notLetIn } });
     }
     if (who.offered) this.take(who, who.offered);
     who.offered = null;

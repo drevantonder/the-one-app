@@ -1,5 +1,6 @@
 // The Workers' own tests, run by `workerd test` (tests/cloudflare.rs runs them with cargo test).
-import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, ed25519Public, random, READS, sealAppKey, sealTo, sealUnder, signedRequest } from "../shared/crypto.js";
+import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, ed25519Public, random, sealAppKey, sealTo, sealUnder, signedRequest } from "../shared/crypto.js";
+import { READS, URLS } from "../shared/protocol.js";
 import signer from "../signer/worker.js";
 import { presign } from "../shared/s3.js";
 import { verify } from "../shared/token.js";
@@ -104,7 +105,7 @@ async function browsersReadStepsFromTheBucket() {
   const device = random(32);
   const env = { R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({}) } };
   const ask = async (fields, e = env, key = device) => {
-    const body = await signedRequest(key, await ed25519Public(key), "one/urls", { reads: READS, ...fields }, Date.now());
+    const body = await signedRequest(key, await ed25519Public(key), URLS, { reads: READS, ...fields }, Date.now());
     return signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(body) }), e);
   };
   const r = await ask({ get: [{ steps: "global/node/scope", from: 1, to: 3 }] });
@@ -126,7 +127,7 @@ async function anOlderBuildWritesNothing() {
   // A new device each time: the signer keeps what the relay said of a key for a few seconds.
   const ask = async (fields, e) => {
     const device = random(32);
-    return (await signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(await signedRequest(device, await ed25519Public(device), "one/urls", fields, Date.now())) }), e)).status;
+    return (await signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(await signedRequest(device, await ed25519Public(device), URLS, fields, Date.now())) }), e)).status;
   };
   const write = { create: ["s/a/blobs/x"] }, read = { read: ["s/a/blobs/x"] };
   equal([await ask(write, env("compute")), await ask(write, env("client compute"))], [426, 426], "an older node writes nothing");
@@ -144,7 +145,7 @@ async function stepsAreCreatedInTurn() {
   const device = random(32);
   const env = { R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({}) } };
   const ask = async (fields) => {
-    const body = await signedRequest(device, await ed25519Public(device), "one/urls", { reads: READS, ...fields }, Date.now());
+    const body = await signedRequest(device, await ed25519Public(device), URLS, { reads: READS, ...fields }, Date.now());
     return signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(body) }), env);
   };
   const created = async (create) => {

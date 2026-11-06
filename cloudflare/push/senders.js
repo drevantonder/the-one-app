@@ -16,6 +16,7 @@
 //   note goes as base64url text: Edge's push service drops a payload that isn't text.
 
 import { b64u } from "../shared/crypto.js";
+import { NOTE_FALLBACK } from "../shared/protocol.js";
 
 const text = new TextEncoder();
 const concat = (...parts) => {
@@ -56,9 +57,6 @@ const forget = (whose) => tokens.delete(whose);
 
 // MARK: APNs
 
-/// What Apple shows if the app's extension can't open a note in time: nothing of the note.
-export const APNS_FALLBACK = "You have a new notification.";
-
 /// `config`: `{ team, key_id, key }` (the .p8's text). `device`: `{ address, env, topic }`. `note`: the sealed bytes.
 /// `legacy`: a plain alert's payload, for a phone that registered the old way and can't open notes.
 export async function apns(fetch, config, device, { note, quiet, name, payload }) {
@@ -72,7 +70,7 @@ export async function apns(fetch, config, device, { note, quiet, name, payload }
     ? payload
     : quiet
       ? { aps: { "content-available": 1 }, n: b64u.encode(note) }
-      : { aps: { alert: { title: name, body: APNS_FALLBACK }, "mutable-content": 1, sound: "default" }, n: b64u.encode(note) };
+      : { aps: { alert: { title: name, body: NOTE_FALLBACK }, "mutable-content": 1, sound: "default" }, n: b64u.encode(note) };
   const host = device.env === "sandbox" || device.env === "development" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
   const resp = await fetch(`https://${host}/3/device/${device.address}`, {
     method: "POST",

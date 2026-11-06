@@ -65,7 +65,8 @@ import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx }
 import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { b64u, checkRequest, hex, joinChallenge, joinCode, joinNonce, READS } from "../shared/crypto.js";
+import { b64u, behind, checkRequest, hex, joinChallenge, joinCode, joinNonce } from "../shared/crypto.js";
+import { SIGN_IN_DOMAIN, updateRefusal } from "../shared/protocol.js";
 import { bearer, verify } from "../shared/token.js";
 import { codePage, invitePage, passkeysPage, signInPage, throwawayPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
@@ -114,8 +115,6 @@ const FRESH = 5 * 60_000;
 const STARTED = 15 * 60_000;
 /// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
-/// What endpoints sign for sign-in.
-const DOMAIN = "one/auth";
 /// Where Better Auth makes a session with a passkey: the only places an admin's is made.
 const BY_PASSKEY = ["/passkey/verify-authentication", "/passkey/verify-registration"];
 const KEY = /^[0-9a-f]{64}$/;
@@ -383,7 +382,7 @@ export class Auth extends DurableObject {
       if (!header) return null;
       try { asked = JSON.parse(new TextDecoder().decode(b64u.decode(header))); } catch { refuse(400, "x-one-request isn't a signed request"); }
     }
-    const { by, fields } = await checkRequest(DOMAIN, asked).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
+    const { by, fields } = await checkRequest(SIGN_IN_DOMAIN, asked).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
     if (fields.route !== route) refuse(403, `That request was signed for ${fields.route}, not ${route}.`);
     const sql = this.ctx.storage.sql;
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * 60_000);
@@ -543,7 +542,7 @@ export class Auth extends DurableObject {
     if (!KEY.test(key || "") || !KEY.test(seal || "")) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
     // A device whose build reads less of who's who than this one (an older one says nothing) would be let in to what it
     // can't read: it's told to update first.
-    if ((Number.isSafeInteger(reads) ? reads : 0) < READS) refuse(426, `Update this device: ${this.env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
+    if (behind(reads)) refuse(426, updateRefusal(this.env.YOURS));
     if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the device's name, up to 64 characters");
     if (proof != null && !KEY.test(proof)) refuse(400, "a proof is 64 hex characters");
     if (device != null && !KEY.test(device)) refuse(400, "a device is 64 hex characters");

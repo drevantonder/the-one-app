@@ -1,5 +1,6 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signStep, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
+import { appOf, askedFor, b64u, canonical, certify, checkCertificate, epochHash, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signStep, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
+import { copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { members } from "../web/members.js";
 
 const ops = {
@@ -71,7 +72,16 @@ const ops = {
   /// What a client does with a node's 428 and sign-in's word while it waits to be let in: `[[route, node, answer]]` → what
   /// each asks it to hand, or null; `[[status, said]]` → what each says.
   async joining({ asked, said }) {
-    return { asked: asked.map(([route, node, answer]) => askedFor(route, node, answer)), said: said.map(([status, body]) => waited(status, body)), most: MOST_NEEDED, behind: BEHIND };
+    return { asked: asked.map(([route, node, answer]) => askedFor(route, node, answer)), said: said.map(([status, body]) => waited(status, body)) };
+  },
+  /// The bucket's names and the refusal the Workers make: `[prefix, n]` → each of the names, and `[scope, app, database]`
+  /// → its prefix.
+  async names({ names, prefixes, yours }) {
+    return {
+      names: names.map(([prefix, n]) => [stepName(prefix, n), copyName(prefix, n), tidiedName(prefix), newestName(prefix)]),
+      prefixes: prefixes.map(([scope, app, database]) => databasePrefix(scope, app, database)),
+      refusal: updateRefusal(yours),
+    };
   },
   async openUnder({ secret, sealed }) {
     return { plain: b64u.encode(await openUnder(secret, b64u.decode(sealed))) };

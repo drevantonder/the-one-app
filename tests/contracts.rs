@@ -4,14 +4,6 @@
 
 use serde_json::{Value, json};
 
-/// What the Workers' JavaScript says a browser and the remote MCP server's devices read of who's who is what this build
-/// reads, which the URL signer, the relay and sign-in check.
-#[test]
-fn the_workers_say_they_read_what_this_build_reads() {
-    let crypto = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../cloudflare/shared/crypto.js")).unwrap();
-    assert!(crypto.contains(&format!("export const READS = {};", one::database::READS)), "cloudflare/shared/crypto.js's READS is src/database.rs's");
-}
-
 /// The Workers (JavaScript, `cloudflare/shared/crypto.js`) and nodes (`src/cloudflare.rs`) each open what the
 /// other seals: app keys under scope keys, keys to key pairs and under secrets; and derive the same database keys.
 #[test]
@@ -329,9 +321,9 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
 
     // A client device's way in, the same in a browser (cloudflare/web) as in a native app and the CLI (one-client): what a
     // node's 428 may ask it to hand (`keys::asked_for`), what sign-in's word on its request to be let in means
-    // (`keys::waited`), and how long it waits for a node that doesn't list it yet (`keys::BEHIND`).
+    // (`keys::waited`).
     {
-        use one::keys::{BEHIND, MOST_NEEDED, Need, Waited, asked_for, waited};
+        use one::keys::{MOST_NEEDED, Need, Waited, asked_for, waited};
         let node = "ab".repeat(32);
         let need = |app: &str, database: &str| json!({ "scope": "global", "epoch": 1, "app": app, "database": database });
         let every = |n: usize| (0..n).map(|i| need(&format!("app{i}"), "main")).collect::<Vec<_>>();
@@ -413,8 +405,17 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let welcomed = waited(200, &said[6].1);
         assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if one::database::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copy()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");
         assert_eq!(said.iter().filter(|(s, b)| matches!(waited(*s, b), Waited::Approved { welcome: Some(_), .. })).count(), 3, "only a welcome that's one is taken");
-        assert_eq!(out["most"], json!(MOST_NEEDED));
-        assert_eq!(out["behind"], json!(BEHIND));
+    }
+
+    // The bucket's names as the Workers (the URL signer, the web client) make them, and the refusal of a device that reads less.
+    {
+        use one::database::stored::{copy_name, newest_name, step_name, tidied_name};
+        let prefix = one::database::steps::prefix("user:abc");
+        let out = js(json!({ "op": "names", "names": [[prefix, 1], [prefix, 4_000_000_000_000u64]], "prefixes": [["user:abc", "tally", "main"], ["global", "node", "scope"]], "yours": "your One App network" }));
+        let rust = |p: &str, n: u64| json!([step_name(p, n), copy_name(p, n), tidied_name(p), newest_name(p)]);
+        assert_eq!(out["names"], json!([rust(&prefix, 1), rust(&prefix, 4_000_000_000_000)]), "the names of a database's objects in the bucket");
+        assert_eq!(out["prefixes"], json!(["user-abc/tally/main", "global/node/scope"]), "where an app's database of a scope is");
+        assert_eq!(out["refusal"], json!(one::protocol::update_refusal("your One App network")), "what a device that reads less is told");
     }
 
     let _ = child.kill();

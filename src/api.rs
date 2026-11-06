@@ -483,7 +483,7 @@ async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, m
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
     let Some((user, name)) = node.client_now(&key).await else {
-        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": "not_let_in" }))).into_response()).await;
+        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": crate::protocol::code::NOT_LET_IN }))).into_response()).await;
     };
     let token = crate::node::client_token(&key);
     if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
@@ -493,7 +493,7 @@ async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, m
     }
     // A client older than what this build reads of who's who is told to update before it does anything.
     if crate::database::reads_of(req.headers().get(crate::database::HEADER).and_then(|h| h.to_str().ok())) < crate::database::READS {
-        return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": format!("Update this device: {YOURS}'s other devices have moved on to what this one doesn't read yet."), "code": "update" }))).into_response()).await;
+        return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": crate::protocol::update_refusal(YOURS), "code": crate::protocol::code::UPDATE }))).into_response()).await;
     }
     req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, token: Some(token) }, sign_in: Some(name) });
     next.run(req).await

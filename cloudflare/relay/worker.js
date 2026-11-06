@@ -29,7 +29,7 @@
 // endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; and `online`, those
 // of them connected here now, which a client races first. 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows. A device's own request
-// that says it reads less of who's who than this build (`reads`, shared/crypto.js's `READS`; an older build's says
+// that says it reads less of who's who than this build (`reads`, protocol.js's `READS`; an older build's says
 // nothing) is 426, telling it to update. A browser's session runs the code the address serves, the newest, so it isn't
 // asked.
 //
@@ -58,14 +58,14 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
-import { b64u, checkCertificate, checkRequest, FRESH, READS, SOCKET, SOCKET_FRESH } from "../shared/crypto.js";
+import { b64u, behind, checkCertificate, checkRequest, rolesOf } from "../shared/crypto.js";
+import { FRESH, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
 
 initSync({ module: wasm });
 
 /// The WebSocket subprotocol iroh's endpoints ask for: version 2 of its relay protocol.
 const PROTOCOL = "iroh-relay-v2";
-/// What a tell is signed for, and its most bytes.
-const TELL = "one/relay";
+/// A tell's most bytes.
 const TELL_BYTES = 4096;
 /// How long a socket may take to answer its challenge, how many sockets that haven't may come from one place (an IPv4
 /// address, an IPv6 /64), from one IPv6 /48 (a site's, which holds 65,536 /64s) and from everywhere, how long a
@@ -78,9 +78,8 @@ const PAIRING_FOR = 7 * 86_400_000;
 /// How often an endpoint's last time here is noted.
 const HOUR = 3_600_000;
 const PAIRINGS_PER_DEVICE = 8;
-const ROLES = ["client", "compute", "service"];
 /// Whether a key on the list plays `role`.
-const is = (it, role) => !!it && it.role.split(" ").includes(role);
+const is = (it, role) => !!it && rolesOf(it.role).includes(role);
 /// How often a sender is told that an endpoint it sends to isn't here, and how many such it remembers.
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
@@ -141,7 +140,7 @@ export default class extends WorkerEntrypoint {
       const body = await request.arrayBuffer();
       if (body.byteLength > TELL_BYTES) throw new Error("a tell is small");
       const signed = JSON.parse(new TextDecoder().decode(body));
-      await checkRequest(TELL, signed);
+      await checkRequest(RELAY, signed);
       const error = await this.relay().tell(signed);
       return error ? refuse(403, error) : new Response(null, { status: 204 });
     } catch (e) {
@@ -157,7 +156,7 @@ export default class extends WorkerEntrypoint {
       if (request.method !== "POST") throw new Error(`ask for ${what} with a POST`);
       const body = await request.arrayBuffer();
       if (body.byteLength > TELL_BYTES) throw new Error("that's too big");
-      const { by, fields } = await checkRequest(TELL, JSON.parse(new TextDecoder().decode(body)));
+      const { by, fields } = await checkRequest(RELAY, JSON.parse(new TextDecoder().decode(body)));
       if (fields[what] !== true) throw new Error(`ask with { ${what}: true }, signed`);
       asked = { by, at: fields.at, reads: Number.isSafeInteger(fields.reads) ? fields.reads : 0 };
       if (fields.certificate !== undefined) {
@@ -169,7 +168,7 @@ export default class extends WorkerEntrypoint {
       return refuse(400, String(e.message || e));
     }
     const said = await this.relay()[what](asked.by, asked);
-    if (said?.update) return refuse(426, `Update this device: ${this.env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
+    if (said?.update) return refuse(426, updateRefusal(this.env.YOURS));
     // And which of them are connected now, which a client races first.
     if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
     if (said && typeof said === "object") return Response.json({ [what]: said });
@@ -247,7 +246,7 @@ export class Relay extends DurableObject {
       CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
       for (const { key, role, admin } of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
-        if (isKey(key) && String(role).split(" ").every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'network', ?, ?)", key, admin === true ? 1 : 0, role);
+        if (isKey(key) && rolesOf(role).every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'network', ?, ?)", key, admin === true ? 1 : 0, role);
       }
     }
     /// Each proven endpoint's socket, by its key; kept in the sockets' attachments across hibernation.
@@ -296,7 +295,7 @@ export class Relay extends DurableObject {
   computes(by, asked) {
     const may = this.asks(by, asked);
     if (may !== true) return may;
-    if (asked && !asked.session && asked.reads < READS) return { update: true };
+    if (asked && !asked.session && behind(asked.reads)) return { update: true };
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     return this.env.BOUND ? [...keys, this.env.BOUND] : keys;
   }
@@ -473,7 +472,7 @@ export class Relay extends DurableObject {
   async bind(request, name) {
     let fields;
     try {
-      ({ fields } = await checkRequest(TELL, request));
+      ({ fields } = await checkRequest(RELAY, request));
       if (!this.take(fields.by, fields.at)) throw new Error("that binding was taken already");
     } catch (e) {
       return { error: String(e.message || e) };
@@ -641,7 +640,7 @@ export class Relay extends DurableObject {
     const now = Date.now();
     let told;
     try {
-      ({ fields: told } = await checkRequest(TELL, signed));
+      ({ fields: told } = await checkRequest(RELAY, signed));
     } catch (e) {
       return String(e.message || e);
     }

@@ -1,0 +1,123 @@
+//! What the Workers' JavaScript and the Rust say to each other and must say the same: the names requests are signed
+//! under, how long they count, the roles a device has, the names objects have in the bucket and the answers refused
+//! requests get. Rust is where each is written; `javascript` is the module the Workers and the web client import
+//! (`shared/protocol.js`), made from it whenever they're built, so nothing is copied by hand.
+
+use serde_json::json;
+
+/// What a device signs its requests to the URL signer under.
+pub const URLS: &str = "one/urls";
+/// What a device signs its requests to the relay under.
+pub const RELAY: &str = "one/relay";
+pub use crate::push::DOMAIN as PUSH;
+/// What a device signs its requests to sign-in under. (Sign-in's Worker is still `auth`: `WORKERS`.)
+pub const SIGN_IN_DOMAIN: &str = "one/auth";
+/// What a session's endpoint signs to open its relay socket.
+pub const SOCKET: &str = "one/socket";
+/// How old a session's proof for its relay socket may be, either way: a socket is opened as soon as it's made.
+pub const SOCKET_FRESH: u64 = 10_000;
+
+/// The most objects the URL signer signs URLs for at once, and a step range it names may be.
+pub const MOST_URLS: usize = 256;
+
+/// What a database keeps in the bucket beside its steps (`<prefix>/<n>`): the newest step's hint, where its steps
+/// were deleted past (`tidied`), and the copy of its steps up to one, in a folder of its own.
+pub const NEWEST: &str = "newest";
+pub const TIDIED: &str = "tidied";
+pub const COPY: &str = "copy";
+/// The digits of a step's position in its name, so names sort in order.
+pub const STEP_DIGITS: usize = 12;
+
+/// The roles a device has, as the relay lists them (`scopes::Kind`, joined by spaces).
+pub const ROLES: [&str; 3] = ["client", "compute", "service"];
+
+/// What a request from a device that reads less of who's who than this build (`database::READS`) is refused with, status 426:
+/// `{yours}` is the network's name as people say it.
+pub const UPDATE_REFUSAL: &str = "Update this device: {yours}'s other devices have moved on to what this one doesn't read yet.";
+
+/// The refusal as a sentence, for `yours`.
+pub fn update_refusal(yours: &str) -> String {
+    UPDATE_REFUSAL.replace("{yours}", yours)
+}
+
+/// What a push of a note whose text the phone can't open shows, as Apple's service shows it for the app that can't
+/// (and the browser's, which can't open it either).
+pub const NOTE_FALLBACK: &str = "You have a new notification.";
+
+/// The codes the node's errors carry beside their text (`{ error, code }`), which callers act on, never on the text.
+pub mod code {
+    /// A device that reads less of who's who than this build.
+    pub const UPDATE: &str = "update";
+    /// A device the network doesn't list.
+    pub const NOT_LET_IN: &str = "not_let_in";
+    /// What was asked isn't the caller's to do, or needs `--confirm`.
+    pub const REFUSED: &str = "refused";
+    /// The node, or the service it asked, is starting: asking again in a moment answers.
+    pub const RESTARTING: &str = "restarting";
+    /// An app that isn't installed, or isn't on the person's pages.
+    pub const NOT_INSTALLED: &str = "not_installed";
+}
+
+/// `shared/protocol.js`: the constants above, and what the Workers need to say names of the bucket in them.
+pub fn javascript() -> String {
+    format!(
+        "// What the Workers and the web client say that the Rust does too, written by src/protocol.rs when they're built:\n\
+         // never edit it, and it isn't kept in git.\n\
+         export const URLS = {urls};\n\
+         export const RELAY = {relay};\n\
+         export const PUSH = {push};\n\
+         export const SIGN_IN_DOMAIN = {sign_in};\n\
+         export const ENDPOINT = {endpoint};\n\
+         export const SOCKET = {socket};\n\
+         export const STEP = {step};\n\
+         export const FRESH = {fresh};\n\
+         export const SESSION = {session};\n\
+         export const SOCKET_FRESH = {socket_fresh};\n\
+         export const READS = {reads};\n\
+         export const MOST_URLS = {most_urls};\n\
+         export const MOST_NEEDED = {most_needed};\n\
+         export const BEHIND = {behind};\n\
+         export const ROLES = {roles};\n\
+         export const NEWEST = {newest};\n\
+         export const TIDIED = {tidied};\n\
+         export const COPY = {copy};\n\
+         export const STEP_DIGITS = {digits};\n\
+         export const NOTE_FALLBACK = {fallback};\n\
+         export const CODES = {codes};\n\
+         \n\
+         /// A scope's folder in the bucket: `user:<id>` is written `user-<id>`.\n\
+         export const folder = (scope) => scope.replace(\":\", \"-\");\n\
+         /// Where an app's database of a scope is in the bucket.\n\
+         export const databasePrefix = (scope, app, database) => `${{folder(scope)}}/${{app}}/${{database}}`;\n\
+         const at = (n) => String(n).padStart(STEP_DIGITS, \"0\");\n\
+         export const stepName = (prefix, n) => `${{prefix}}/${{at(n)}}`;\n\
+         export const copyName = (prefix, n) => `${{prefix}}/${{COPY}}/${{at(n)}}`;\n\
+         export const tidiedName = (prefix) => `${{prefix}}/${{TIDIED}}`;\n\
+         export const newestName = (prefix) => `${{prefix}}/${{NEWEST}}`;\n\
+         /// The refusal of a device that reads less than this build, for the network's name as people say it.\n\
+         export const updateRefusal = (yours) => {update}.replace(\"{{yours}}\", yours);\n\
+",
+        urls = json!(URLS),
+        relay = json!(RELAY),
+        push = json!(PUSH),
+        sign_in = json!(SIGN_IN_DOMAIN),
+        endpoint = json!(crate::keys::ENDPOINT),
+        socket = json!(SOCKET),
+        step = json!(crate::database::steps::DOMAIN),
+        fresh = crate::keys::FRESH,
+        session = crate::keys::SESSION,
+        socket_fresh = SOCKET_FRESH,
+        reads = crate::database::READS,
+        most_urls = MOST_URLS,
+        most_needed = crate::keys::MOST_NEEDED,
+        behind = json!(crate::keys::BEHIND),
+        roles = json!(ROLES),
+        newest = json!(NEWEST),
+        tidied = json!(TIDIED),
+        copy = json!(COPY),
+        digits = STEP_DIGITS,
+        fallback = json!(NOTE_FALLBACK),
+        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED }),
+        update = json!(UPDATE_REFUSAL),
+    )
+}

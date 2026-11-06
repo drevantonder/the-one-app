@@ -11,6 +11,8 @@
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
 // nonce ‖ AES-256-GCM(key, nonce, plain), with key and the copy's id both derived from the secret.
 
+import { ENDPOINT, FRESH, MOST_NEEDED, READS, SESSION, SOCKET, STEP } from "./protocol.js";
+
 const text = new TextEncoder();
 
 export const b64u = {
@@ -205,12 +207,12 @@ export async function verify(publicKey, domain, v, signature) {
   return crypto.subtle.verify({ name: "Ed25519" }, key, bytes(signature), signed(domain, v));
 }
 
-/// How old a signed request may be, in milliseconds, either way.
-export const FRESH = 60_000;
+/// Whether a device that says it reads `reads` of who's who (nothing, from an older build, is none) reads less than this
+/// build: the URL signer, the relay and sign-in tell it to update.
+export const behind = (reads) => (Number.isSafeInteger(reads) ? reads : 0) < READS;
 
-/// What this build reads of who's who (src/database.rs `READS`, which tests/contracts.rs holds it to): what a device
-/// says as it asks the URL signer, the relay and sign-in, which tell one that reads less to update.
-export const READS = 6;
+/// The roles in a role text (the relay's list's: roles joined by spaces).
+export const rolesOf = (text) => String(text || "").split(" ");
 
 let lastAt = 0;
 
@@ -254,21 +256,11 @@ async function checkSigned(domain, request) {
   return { by: fields.by, fields };
 }
 
-/// What a device signs to vouch for an endpoint of a session of its own, and for how long at most (ms).
-export const ENDPOINT = "one/endpoint";
-export const SESSION = 24 * 3_600_000;
-
 /// A device's word (`key`, its public half `by`) that `endpoint` (bytes) is its own until `until`: base64url JSON, as
 /// the relay and nodes take it (keys::certify).
 export async function certify(key, by, endpoint, until, at = Date.now()) {
   return b64u.encode(canonical(await signedRequest(key, by, ENDPOINT, { endpoint: hex.encode(endpoint), until }, at)));
 }
-
-/// What a session's endpoint signs to open its relay socket.
-export const SOCKET = "one/socket";
-
-/// How old a session's proof for its relay socket may be, either way: a socket is opened as soon as it's made.
-export const SOCKET_FRESH = 10_000;
 
 /// A session's endpoint's word (its key's seed `secret`, its public half `endpoint`) that it's opening a relay socket
 /// now, with a nonce of its own: base64url JSON, shown after its certificate (`<certificate>.<proof>`), so the relay
@@ -299,20 +291,11 @@ export async function checkCertificate(certificate, now = Date.now()) {
 export async function signStep(key, by, { log, at, time, user, epoch }, body) {
   body = bytes(body);
   const header = { v: 1, author: hex.encode(by), log, seq: at, backlink: null, previous: [], time, user, epoch, body: hex.encode(await sha256(body)), size: body.length };
-  return { header: canonical(header), signature: await sign(key, "one/step", header), body };
+  return { header: canonical(header), signature: await sign(key, STEP, header), body };
 }
-
-/// A scope's folder in the bucket: `user:<id>` is written `user-<id>`.
-const folder = (scope) => scope.replace(":", "-");
-
-/// Where epoch `n` of a scope is kept sealed to `to` (an endpoint's key, hex, or `recovery`).
-export const epochName = (scope, n, to) => `${folder(scope)}/_epochs/${n}/${to}`;
 
 /// What an `epoch` entry says of its key: HKDF-SHA256(key, "one/epoch-hash"), hex.
 export const epochHash = async (key) => hex.encode(await hkdf(key, "one/epoch-hash"));
-
-/// Where an app's key in epoch `n` is kept, sealed under that epoch's key.
-export const appKeyName = (scope, app, n) => `${folder(scope)}/${app}/_key/${n}`;
 
 /// Seals an object under an epoch's key and its name: epoch (u32, big-endian) ‖ nonce ‖ AES-256-GCM(aad = name).
 export async function seal(epoch, key, name, plain) {
@@ -410,9 +393,6 @@ export function mayHand(route, need) {
   return node(["log"]);
 }
 
-/// The most keys a node's 428 may ask one request to hand. As src/keys.rs `MOST_NEEDED`, which says why.
-export const MOST_NEEDED = 64;
-
 /// What a node's 428 (`answer`) asks a request of `route` to hand, from the node that answered (`node`, hex): its
 /// `need`, once each, or null if it asks for anything it mayn't. As src/keys.rs `asked_for`, which says why.
 export function askedFor(route, node, answer) {
@@ -422,9 +402,6 @@ export function askedFor(route, node, answer) {
   const need = [...new Map(answer.need.map(({ scope, epoch, app, database }) => [JSON.stringify([scope, epoch, app, database]), { scope, epoch, app, database }])).values()];
   return need.length && need.length <= MOST_NEEDED && need.every((n) => mayHand(route, n)) ? need : null;
 }
-
-/// How long a client waits, each time, to ask again a node that doesn't list it yet. As src/keys.rs `BEHIND`.
-export const BEHIND = [2_000, 4_000];
 
 /// What sign-in said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
 /// `{ approved, root? }`, `{ gone }`, or `{}` while it waits. As src/keys.rs `waited`, which says what each means.

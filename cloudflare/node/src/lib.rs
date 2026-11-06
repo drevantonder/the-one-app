@@ -572,12 +572,6 @@ fn scope_truth(truth: &one::database::steps::Truth, start: Option<&one::database
     Ok(took.db)
 }
 
-/// What this build reads of who's who (`one::database::READS`), which its writes to the bucket say.
-#[wasm_bindgen]
-pub fn reads() -> u32 {
-    one::database::READS
-}
-
 thread_local! {
     /// The network's root, as the device that deployed this node holds it (`pin_root`).
     static ROOT: RefCell<Option<Hash>> = const { RefCell::new(None) };

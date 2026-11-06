@@ -877,14 +877,14 @@ pub async fn tidy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeS
         return Ok(0);
     }
     let copy = held.at;
-    let copies = bucket.objects(&format!("{}/copy", prefix)).await?;
-    let newest = copies.iter().find(|(n, _)| *n == format!("{copy:012}")).map(|(_, written)| *written);
+    let copies = bucket.objects(&copies_folder(prefix)).await?;
+    let newest = copies.iter().find(|(n, _)| *n == position_text(copy)).map(|(_, written)| *written);
     if newest.is_none_or(|w| w + KEEP_OLDER_COPIES_FOR > now) {
         return Ok(0);
     }
     let mut gone = 0;
     for (n, _) in copies.iter().filter(|(n, _)| n.parse::<u64>().is_ok_and(|n| n < copy)) {
-        bucket.delete(&format!("{}/copy/{n}", prefix)).await?;
+        bucket.delete(&format!("{}/{n}", copies_folder(prefix))).await?;
         gone += 1;
     }
     if keeps_every_step(prefix) || held.check.hash != Some(true) {
@@ -921,7 +921,7 @@ async fn holding(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSe
         let copies = match (listed, list) {
             (false, _) => vec![hinted],
             (true, false) => break,
-            (true, true) => match bucket.objects(&format!("{prefix}/copy")).await {
+            (true, true) => match bucket.objects(&copies_folder(prefix)).await {
                 Ok(listed) => {
                     let mut listed: Vec<u64> = listed.iter().filter_map(|(n, _)| n.parse().ok()).filter(|n| *n != hinted).collect();
                     listed.sort_unstable_by(|a, b| b.cmp(a));
@@ -1027,7 +1027,7 @@ pub fn refused(from: Option<u64>, at: u64, step: &[u8], signed: Option<&Result<S
 
 /// What says a database's steps may have been deleted (`tidy`): created before the first goes.
 pub fn tidied_name(prefix: &str) -> String {
-    format!("{prefix}/tidied")
+    format!("{prefix}/{}", crate::protocol::TIDIED)
 }
 
 /// How long an object whose answer was lost is sent again for, waiting longer each time, before it may have been
@@ -1071,15 +1071,25 @@ fn unanswered(err: &anyhow::Error) -> bool {
 
 /// A database's objects in the bucket, by its prefix: its newest hint, step `n`, and its copy after step `n`.
 pub fn newest_name(prefix: &str) -> String {
-    format!("{prefix}/newest")
+    format!("{prefix}/{}", crate::protocol::NEWEST)
+}
+
+/// A step's position as its name says it.
+fn position_text(n: u64) -> String {
+    format!("{n:0width$}", width = crate::protocol::STEP_DIGITS)
 }
 
 pub fn step_name(prefix: &str, n: u64) -> String {
-    format!("{prefix}/{n:012}")
+    format!("{prefix}/{}", position_text(n))
+}
+
+/// The folder a database's copies are in.
+pub fn copies_folder(prefix: &str) -> String {
+    format!("{prefix}/{}", crate::protocol::COPY)
 }
 
 pub fn copy_name(prefix: &str, n: u64) -> String {
-    format!("{prefix}/copy/{n:012}")
+    format!("{}/{}", copies_folder(prefix), position_text(n))
 }
 
 /// The signature beside step `n`.

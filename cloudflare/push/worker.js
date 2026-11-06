@@ -28,10 +28,10 @@
 // each device's address, in its Durable Object.
 
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
-import { b64u, checkRequest, sealTo, hex } from "../shared/crypto.js";
+import { b64u, checkRequest, sealTo, hex, rolesOf } from "../shared/crypto.js";
+import { PUSH } from "../shared/protocol.js";
 import { apns, fcm, isWebPushEndpoint, isWnsChannel, vapidKey, webPush, wns } from "./senders.js";
 
-const DOMAIN = "one/push";
 const VIAS = ["apns", "fcm", "wns", "webpush"];
 /// The most a sender sends a minute, the most notes one device gets a minute, the most in one send, and the most a
 /// sealed note may be: it has to fit in a push, 4 KB at Apple and in Web Push.
@@ -107,7 +107,7 @@ export class Push extends DurableObject {
   }
 
   async answer(what, route, body) {
-    const { by, fields } = await checkRequest(DOMAIN, body).catch((err) => fail(403, `That request isn't signed as it should be: ${err.message}.`));
+    const { by, fields } = await checkRequest(PUSH, body).catch((err) => fail(403, `That request isn't signed as it should be: ${err.message}.`));
     if (fields.route !== route) fail(403, `That request was signed for ${fields.route}, not ${route}.`);
     const sql = this.ctx.storage.sql;
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * MINUTE);
@@ -115,7 +115,7 @@ export class Push extends DurableObject {
     sql.exec("insert into signed (sig, at) values (?, ?)", body.sig, Date.now());
     const allowed = await this.env.RELAY.allowed(by);
     if (!allowed) fail(403, "That device isn't one of the network's.");
-    const node = String(allowed.role || "").split(" ").includes("compute");
+    const node = rolesOf(allowed.role).includes("compute");
     if (what === "register") return this.register(by, fields);
     if (what === "unregister") return this.unregister(by);
     if (what === "devices") return this.devices(node, fields);
