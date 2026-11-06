@@ -803,7 +803,9 @@ const h = OneUI.react.createElement;
   /// What this browser keeps of the screens it showed, until it signs out: each route's page as the node last gave it
   /// (`page`), and its still (`still`), the page as it last looked here without its scripts, which bridge.js sends.
   const kept = {
-    url: (kind, key) => `/${kind}/${encodeURIComponent(key)}`,
+    // An https URL of its own, which the cache takes on any page's origin (the app's tauri:// one too, where it
+    // takes only http and https).
+    url: (kind, key) => `https://kept.invalid/${kind}/${encodeURIComponent(key)}`,
     async get(kind, key) {
       try {
         return (await (await (await caches.open(KEPT_SCREENS)).match(kept.url(kind, key)))?.text()) ?? null;
@@ -813,7 +815,16 @@ const h = OneUI.react.createElement;
     },
     put(kind, key, html) {
       if (typeof html !== "string" || html.length > 2_000_000) return;
-      window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html))).catch(() => {});
+      const at = { "x-kept-at": String(Date.now()) };
+      window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html, { headers: at }))).catch(() => {});
+    },
+    /// When it was kept (ms), if it says.
+    async when(kind, key) {
+      try {
+        return Number((await (await caches.open(KEPT_SCREENS)).match(kept.url(kind, key)))?.headers.get("x-kept-at")) || null;
+      } catch {
+        return null;
+      }
     },
   };
   /// Two pages the same but for their nonce.
@@ -905,13 +916,14 @@ const h = OneUI.react.createElement;
     const fresh = screenPage(r);
     // The client's own aren't kept: one kept before they came from its files came from a node.
     const looking = developer.on() && r.kind !== "own" && { what: "page", app: r.app, screen: r.screen, source: "kept", at: Date.now(), started: performance.now() };
-    Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
+    const tried = Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
       if (looking && page) developer.keep(looking);
       if (f.page) return;
       if (still) showStill(f, still);
       if (page) draw(page);
     });
-    fresh.then(async (page) => {
+    /// The page as its node gives it now: drawn, or, if it's changed since the kept one, the screen started again.
+    const update = async (page) => {
       if (!f.html) return draw(page);
       if (same(page, f.page)) return;
       f.page = page;
@@ -919,8 +931,60 @@ const h = OneUI.react.createElement;
       if (f.page !== page) return;
       f.html = html;
       frame.src = asset("frame.html");
-    }, (err) => f.html || ((f.loaded = true), failed(into, one.plain(err).title)));
+    };
+    // A kept page whose fresh one is slow to come (its devices gone quiet, not refusing) says so too.
+    let came = false;
+    setTimeout(() => came || tried.then(() => !came && f.page && offline(f, update)), 5000);
+    fresh.then((page) => ((came = true), f.offlineDone?.(), update(page)), async (err) => {
+      await tried;
+      if (f.page) return offline(f, update);
+      f.loaded = true;
+      failed(into, one.plain(err).title);
+    });
     return f;
+  }
+
+  /// A screen showing its kept page because its devices didn't answer, as the native apps showed it: a note at its top
+  /// after a moment, "Offline", or from when it was kept, with Try Now; asked again by itself until they answer, when
+  /// what they give replaces it (`update`).
+  async function offline(f, update) {
+    if (f.offline || f.route.kind === "own") return;
+    const at = await kept.when("page", f.key);
+    const note = Object.assign(document.createElement("div"), { className: "screen-offline" });
+    note.setAttribute("role", "status");
+    const text = document.createElement("span");
+    const button = Object.assign(document.createElement("button"), { type: "button", textContent: "Try Now" });
+    note.append(text, button);
+    f.offline = note;
+    const ago = (ms) => {
+      const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+      const mins = Math.round((Date.now() - ms) / 60_000);
+      return mins < 60 ? rtf.format(-mins, "minute") : mins < 2880 ? rtf.format(-Math.round(mins / 60), "hour") : rtf.format(-Math.round(mins / 1440), "day");
+    };
+    const say = () => (text.textContent = !at || Date.now() - at < 60_000 ? "Offline" : `Offline · from ${ago(at)}`);
+    say();
+    setTimeout(() => f.offline === note && f.into.isConnected && f.into.append(note), 1500);
+    const every = setInterval(say, 30_000);
+    let misses = 1, timer = null;
+    // Gone once its devices answer, by its own asking or the first.
+    f.offlineDone = () => (clearInterval(every), clearTimeout(timer), note.remove(), (f.offline = f.offlineDone = null));
+    const again = async () => {
+      clearTimeout(timer);
+      if (!f.into.isConnected) return f.offlineDone?.();
+      button.disabled = true;
+      text.textContent = "Trying again…";
+      try {
+        const page = await screenPage(f.route);
+        f.offlineDone?.();
+        await update(page);
+      } catch {
+        say();
+        button.disabled = false;
+        timer = setTimeout(again, Math.max(5000, retryWait(misses++)));
+      }
+    };
+    button.addEventListener("click", again);
+    timer = setTimeout(again, 5000);
   }
 
   // MARK: Stills

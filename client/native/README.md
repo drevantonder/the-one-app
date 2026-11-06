@@ -33,13 +33,15 @@ Shared, every platform:
 - [ ] Taken out (removed) → signed out, says why
 - [x] `<cli>://open?app=&screen=&params=&scope=`; one instance, a second start (with a link) going to the first
       (checked, Linux)
-- [ ] The old apps' other links: `<cli>://vault?id=&scope=`, `<cli>://page?scope=[&folder=accounts]`,
-      `<cli>://settings[/<item>]`
+- [x] The old apps' other links: `<cli>://vault?id=&scope=`, `<cli>://page?scope=[&folder=accounts]`,
+      `<cli>://settings[/<item>]`, `<cli>://open?scope=`, links to the address's own pages (web.js `opened`)
 - [x] Closing the window leaves it running in the tray (menu bar), with Open and Quit (built; no tray host to see it
       under Xvfb)
 - [ ] Window size and place kept (tauri-plugin-window-state, built, unchecked); sidebar state (web's, kept)
 - [ ] Keyboard shortcuts of the old apps
-- [ ] Offline: last window shown at once, "Can't Reach Your Devices", trying again
+- [x] Offline: last window shown at once, "Can't Reach Your Devices", trying again; a screen's kept page shown at once
+      with "Offline · from …" and Try Now when its devices don't answer, gone once they do (checked, Linux, the
+      throwaway's node stopped and started; the app's pages are now kept at all, which tauri:// had refused)
 - [ ] Speed: usable within 1.5 s of a cold open (ARCHITECTURE.md), measured
 - [ ] Icons and names from config.toml (custom builds)
 - [x] Every page's widgets kept for the platform's own widgets (`src/widgets.rs`: `widgets.json` in the iPhone
