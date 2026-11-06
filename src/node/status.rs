@@ -162,72 +162,79 @@ impl Node {
     pub(super) async fn say(&self, scope: &Scope, said: Said) -> Result<()> {
         let now = now_ms();
         let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await?;
-        db.lock()
-            .await
-            .write(&self.bucket()?, |c| {
-                let ex = |sql: &str, params: &[Value]| crate::db::execute(c, sql, params).map(|_| ());
-                match &said {
-                    Said::Used { app, user, client, agent, day } => ex(
-                        "insert into used values (?, ?, ?, 1, ?, ?, ?) on conflict (app, user, client) do update set
-                           days = days + (excluded.day > day), day = max(day, excluded.day), last = max(last, excluded.last), agent = coalesce(excluded.agent, agent)",
-                        &[json!(app), json!(user), json!(client), json!(day), json!(now), json!(agent)],
-                    ),
-                    Said::Failed { app, op, error, user } => ex(
-                        "insert into errors values (?, ?, ?, 1, ?, ?, ?) on conflict (app, op, error) do update set
-                           count = count + 1, first = min(first, excluded.first), last = max(last, excluded.last), user = excluded.user",
-                        &[json!(app), json!(op), json!(error), json!(now), json!(now), json!(user)],
-                    ),
-                    Said::Cost { app, model, usd, input, output } => ex(
-                        "insert into cost values (?, ?, ?, ?, ?, 1) on conflict (app, model) do update set
-                           usd = usd + excluded.usd, input = input + excluded.input, output = output + excluded.output, calls = calls + 1",
-                        &[json!(app), json!(model), json!(usd.max(0.0)), json!(input), json!(output)],
-                    ),
-                    Said::Ran { app, schedule, run } => {
-                        ex(
-                            "insert or replace into runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            &[json!(app), json!(schedule), json!(run.slot), json!(run.time), json!(hex(&run.device)), json!(run.user), json!(run.ok), json!(run.error), json!(run.ms), json!(run.spec.to_string())],
-                        )?;
-                        ex(
-                            "delete from runs where app = ? and schedule = ? and slot not in (select slot from runs where app = ? and schedule = ? order by slot desc limit ?)",
-                            &[json!(app), json!(schedule), json!(app), json!(schedule), json!(RUNS_KEPT)],
-                        )
-                    }
-                    Said::Build { device, build, target } => ex("insert or replace into builds values (?, ?, ?, ?)", &[json!(hex(device)), json!(build), json!(target), json!(now)]),
-                    Said::Reads { device, reads, build } => ex("insert or replace into reads values (?, ?, ?, ?)", &[json!(hex(device)), json!(reads), json!(build), json!(now)]),
-                    Said::BackedUp(r) => {
-                        ex(
-                            "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
-                            &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?)],
-                        )?;
-                        // Beyond the newest, each scope's last run that backed it up stays, as what's covered is read from
-                        // them: a scope that hasn't changed would otherwise look a day late once busier ones fill these.
-                        ex(
-                            "delete from backups where place = ? and time not in (select time from backups where place = ? order by time desc limit ?) \
-                             and time not in (select max(b.time) from backups b, json_each(b.snapshots) j where b.place = ? and b.error is null group by json_extract(j.value, '$.scope'))",
-                            &[json!(r.place), json!(r.place), json!(BACKUP_RUNS_KEPT), json!(r.place)],
-                        )
-                    }
-                    Said::Alerted { place } => ex("insert or replace into alerts values (?, ?)", &[json!(place), json!(now)]),
-                    Said::Checked(r) => {
-                        ex("insert or replace into checks values (?, ?, ?, ?, ?)", &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.report.to_string())])?;
-                        ex("delete from checks where place = ? and time not in (select time from checks where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(CHECKS_KEPT)])
-                    }
+        // As every write is, so a step that says the log may be frozen is answered, not the end of every row here.
+        self.write_in(scope, &mut *db.lock().await, &self.bucket()?, |c| {
+            let ex = |sql: &str, params: &[Value]| crate::db::execute(c, sql, params).map(|_| ());
+            match &said {
+                Said::Used { app, user, client, agent, day } => ex(
+                    "insert into used values (?, ?, ?, 1, ?, ?, ?) on conflict (app, user, client) do update set
+                       days = days + (excluded.day > day), day = max(day, excluded.day), last = max(last, excluded.last), agent = coalesce(excluded.agent, agent)",
+                    &[json!(app), json!(user), json!(client), json!(day), json!(now), json!(agent)],
+                ),
+                Said::Failed { app, op, error, user } => ex(
+                    "insert into errors values (?, ?, ?, 1, ?, ?, ?) on conflict (app, op, error) do update set
+                       count = count + 1, first = min(first, excluded.first), last = max(last, excluded.last), user = excluded.user",
+                    &[json!(app), json!(op), json!(error), json!(now), json!(now), json!(user)],
+                ),
+                Said::Cost { app, model, usd, input, output } => ex(
+                    "insert into cost values (?, ?, ?, ?, ?, 1) on conflict (app, model) do update set
+                       usd = usd + excluded.usd, input = input + excluded.input, output = output + excluded.output, calls = calls + 1",
+                    &[json!(app), json!(model), json!(usd.max(0.0)), json!(input), json!(output)],
+                ),
+                Said::Ran { app, schedule, run } => {
+                    ex(
+                        "insert or replace into runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        &[json!(app), json!(schedule), json!(run.slot), json!(run.time), json!(hex(&run.device)), json!(run.user), json!(run.ok), json!(run.error), json!(run.ms), json!(run.spec.to_string())],
+                    )?;
+                    ex(
+                        "delete from runs where app = ? and schedule = ? and slot not in (select slot from runs where app = ? and schedule = ? order by slot desc limit ?)",
+                        &[json!(app), json!(schedule), json!(app), json!(schedule), json!(RUNS_KEPT)],
+                    )
                 }
-            })
-            .await?;
+                Said::Build { device, build, target } => ex("insert or replace into builds values (?, ?, ?, ?)", &[json!(hex(device)), json!(build), json!(target), json!(now)]),
+                Said::Reads { device, reads, build } => ex("insert or replace into reads values (?, ?, ?, ?)", &[json!(hex(device)), json!(reads), json!(build), json!(now)]),
+                Said::BackedUp(r) => {
+                    ex(
+                        "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
+                        &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?)],
+                    )?;
+                    // Beyond the newest, each scope's last run that backed it up stays, as what's covered is read from
+                    // them: a scope that hasn't changed would otherwise look a day late once busier ones fill these.
+                    ex(
+                        "delete from backups where place = ? and time not in (select time from backups where place = ? order by time desc limit ?) \
+                         and time not in (select max(b.time) from backups b, json_each(b.snapshots) j where b.place = ? and b.error is null group by json_extract(j.value, '$.scope'))",
+                        &[json!(r.place), json!(r.place), json!(BACKUP_RUNS_KEPT), json!(r.place)],
+                    )
+                }
+                Said::Alerted { place } => ex("insert or replace into alerts values (?, ?)", &[json!(place), json!(now)]),
+                Said::Checked(r) => {
+                    ex("insert or replace into checks values (?, ?, ?, ?, ?)", &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.report.to_string())])?;
+                    ex("delete from checks where place = ? and time not in (select time from checks where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(CHECKS_KEPT)])
+                }
+            }
+        })
+        .await?;
         self.read_status(scope).await
     }
 
     /// What a device said it reads of who's who (`database::switch`), kept in `global`'s node database when it
-    /// changed. Kept here first, so the requests that say it again while it's written don't write it again.
+    /// changed. Noted here first, so the requests that say it again while it's written don't write it again, and put
+    /// back as it was if the write doesn't land, so the next request writes it again.
     pub(crate) async fn said_reads(&self, device: Key, reads: u32, build: &str) {
         let kept = crate::database::switch::Reads { reads, build: build.to_string(), time: now_ms() };
-        let changed = self.with(|i| Ok(i.reads.get(&device).is_none_or(|r| r.reads != reads || r.build != build).then(|| i.reads.insert(device, kept.clone())).is_some()));
-        if !changed.unwrap_or(false) {
-            return;
-        }
+        let was = self.with(|i| Ok(i.reads.get(&device).is_none_or(|r| r.reads != reads || r.build != build).then(|| i.reads.insert(device, kept.clone()))));
+        let Ok(Some(was)) = was else { return };
         if let Err(err) = self.say(&Scope::Global, Said::Reads { device, reads, build: build.to_string() }).await {
             tracing::debug!("keeping what {} reads: {err:#}", short(&device));
+            let _ = self.with(|i| {
+                if i.reads.get(&device) == Some(&kept) {
+                    match was {
+                        Some(was) => i.reads.insert(device, was),
+                        None => i.reads.remove(&device),
+                    };
+                }
+                Ok(())
+            });
         }
     }
 
@@ -332,5 +339,34 @@ impl Node {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A step in `global`'s node database that says the log may be frozen, which anyone with its key can write, is
+    /// answered before the node writes there: what a device says it reads still lands, so the gate can open.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn what_a_device_reads_lands_after_a_step_that_says_the_log_may_be_frozen() {
+        let dir = std::env::temp_dir().join(format!("one-reads-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "a" }).to_string()).unwrap();
+        let a = Node::start(&dir).await.unwrap();
+        a.create("Home", "Andre").await.unwrap();
+        let (app, database) = NODE_DATABASE;
+        let bucket = a.bucket().unwrap();
+        let keys = a.database_keys(&Scope::Global, app, database, true).await.unwrap();
+        let mut fake = crate::db::Db::open_switched(&bucket, &format!("{}/{app}/{database}", crate::bucket::folder("global")), keys).await.unwrap();
+        fake.sign_as(SigningKey::from_bytes(&rand::random()));
+        fake.write(&bucket, |c| crate::db::execute(c, "insert or replace into alerts values ('fake', 1)", &[]).map(|_| ())).await.unwrap();
+        assert!(fake.signed_from().is_some());
+
+        let device = rand::random();
+        a.said_reads(device, 2, "b").await;
+        let reads = |i: &Install| i.status.get("global").and_then(|s| s.reads.get(&device)).map(|r| r.reads);
+        assert_eq!(a.with(|i| Ok(reads(i))).unwrap(), Some(2), "its row landed, and was read back");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
