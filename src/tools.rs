@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail, ensure};
 use one::config::CLI;
 use serde_json::{Map, Value, json};
 
-use crate::{agent_from_env, get, post};
+use crate::{agent_from_env, get};
 
 /// Files up to this size go inline, as base64, in a tool's input.
 pub const FILE_LIMIT: usize = 10 << 20;
@@ -132,11 +132,13 @@ pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
     }
     let call = match node_app(app) {
         true => crate::dispatch(&format!("{app}_{tool}"), input, agent_from_env().as_deref(), "cli", Some((a.clone(), o.clone()))).map(|ok| json!({ "ok": ok })),
-        false => post("/v1/call", json!({ "device": device, "scopes": scopes, "app": app, "op": tool, "input": input, "agent": agent_from_env(), "client": "cli" })),
+        false => crate::post_call(json!({ "device": device, "scopes": scopes, "app": app, "op": tool, "input": input, "agent": agent_from_env(), "client": "cli" })),
     };
     let mut r = match call {
         Ok(r) => r,
         Err(e) => {
+            // The trace matters most when it failed.
+            crate::print_trace();
             let said = in_cli_words(&format!("{e:#}"));
             return Err(match e.downcast::<Failed>() {
                 Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
@@ -147,12 +149,15 @@ pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
     };
     if let Some(none) = none_said(a, tool, &r["ok"], true).filter(|_| !json()) {
         println!("{none}");
+        crate::print_trace();
         return Ok(());
     }
     if let Some(text) = r["ok"].as_str() {
         r["ok"] = json!(in_cli_words(text));
     }
-    show(app, tool, &r["ok"], out.as_deref())
+    let shown = show(app, tool, &r["ok"], out.as_deref());
+    crate::print_trace();
+    shown
 }
 
 /// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
@@ -767,6 +772,10 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
     }
     if runs_on_devices(app) && !own_device(tool) {
         schema["properties"]["device"] = json!({ "type": "string", "description": device_about(app) });
+    }
+    // Every app's call runs on a device, which can say what it did; the node's own tools run here.
+    if !node_app(app["name"].as_str().unwrap_or("")) {
+        schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
     }
     if tool["confirm"] == true {
         schema["properties"]["confirm"] = one::skills::confirm_input();

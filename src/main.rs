@@ -139,6 +139,10 @@ fn every_command() -> String {
                                        put your checkout's build of an app's service on a device of yours (here by
                                        default, else over ssh by its name) and switch it on, until a newer one is
                                        published
+  {CLI} logs <device> [--service <name>] [--since <10m>] [--grep <text>] [--lines <n>]
+                                       a device's node log, or one of its services', read over the network, newest
+                                       last, capped (the last 200 lines, at most 1000 or 48 KiB); only its person and
+                                       the network's admins read them. --since takes s, m, h or d
   {CLI} devices run_schedules|stop_schedules <app> on <device> [--scope user|global|<group>] [--days <n>]
                                        run an app's schedules on one of your devices (with that app's keys alone, for
                                        30 days and longer as you use it), or stop them
@@ -151,7 +155,9 @@ fn every_command() -> String {
                                        repeat a flag, required inputs not given are read as JSON from stdin
                                        (a last word - reads it anyway), --file
                                        <input>=<path> gives a file and --out <path> saves what it gives back.
-                                       --device <name> runs it on that device
+                                       --device <name> runs it on that device; --trace prints, after its answer
+                                       (or why it failed), what it did: the devices tried, the one that ran it, each
+                                       wait in ms, where its data came from, and the total
   {CLI} throwaway [<command>]          a throwaway network for this checkout, on this machine beside yours, with only
                                        what every new one starts with: to look around and test in. {CLI} throwaway
                                        <command> runs a command in it ({CLI} throwaway mcp for an agent), {CLI} throwaway
@@ -206,7 +212,7 @@ fn help() -> String {
 A tool's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
 from stdin. --file <input>=<path> gives a file, --out <path> saves what comes back, --device <name> runs it there,
 and --confirm goes ahead with what sends or can't be undone, once the person agreed. --json prints what comes back
-as JSON.
+as JSON. --trace prints what the call did, and where, after its answer: use it, and {CLI} logs <device>, before ssh.
 
 Exit codes: 0 done, 2 what was typed is wrong, 3 refused (needs --confirm, not allowed, or not signed in), 1 anything
 else. Data goes to stdout, messages to stderr.
@@ -279,7 +285,13 @@ fn run(args: Vec<String>) -> Result<()> {
     if args[..end].iter().any(|a| a == "--json") {
         tools::JSON.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || *a != "--json").map(|(_, a)| a.clone()).collect();
+    // --trace too: a call prints what it did, and where, after its answer.
+    let traced = args[..end].iter().any(|a| a == "--trace");
+    // (A throwaway's command runs this again with it already taken out.)
+    if traced {
+        TRACE_ASKED.with(|t| t.set(true));
+    }
+    let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || (*a != "--json" && *a != "--trace")).map(|(_, a)| a.clone()).collect();
     if args.first().map(String::as_str) == Some("throwaway") {
         return throwaway::run(&args[1..]);
     }
@@ -910,6 +922,24 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/name", json!({ "name": name.join(" ") }))?;
             println!("This device is now {}.", name.join(" "));
         }
+        ["logs", device] => {
+            takes_only(&flags, &["service", "since", "grep", "lines"])?;
+            let mut input = flags.clone();
+            input.insert("device".into(), json!(device));
+            let read = logs_read(&input);
+            if read.is_err() {
+                print_trace();
+            }
+            let (lines, note) = logs_said(&read.map_err(|e| anyhow::anyhow!(tools::in_cli_words(&format!("{e:#}"))))?, device);
+            match tools::json() {
+                true => println!("{}", serde_json::to_string_pretty(&lines)?),
+                false => {
+                    lines.as_array().into_iter().flatten().filter_map(Value::as_str).for_each(|l| println!("{l}"));
+                    note.iter().for_each(|n| eprintln!("{n}"));
+                }
+            }
+            print_trace();
+        }
         [app] if !app.starts_with('-') => {
             // The node's own apps (Devices, Widgets) aren't in its app list, but read the same.
             let apps = get("/v1/apps")?;
@@ -1122,8 +1152,27 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).middleware(client_device::instead).middleware(api::as_this_machine).build().into()
 }
 
+thread_local! {
+    /// What the last MCP call that asked for its trace did, as text for its answer.
+    static TRACE_TEXT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    /// Whether the calls this thread makes ask their node for a trace (`--trace`, or `trace: true` in MCP), and what the
+    /// last one's node said it did (its `x-one-trace`).
+    static TRACE_ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TRACED: std::cell::RefCell<Option<Value>> = const { std::cell::RefCell::new(None) };
+}
+
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
-    let mut resp = resp.map_err(unreached)?;
+    let mut resp = match resp {
+        Ok(resp) => resp,
+        // Not even reached: the nodes tried are all there is to say.
+        Err(err) => return Err(unreached(err)),
+    };
+    if let Some(trace) = resp.headers().get(one::node::trace::HEADER).and_then(|h| data_encoding::BASE64.decode(h.as_bytes()).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
+        TRACED.with(|t| *t.borrow_mut() = Some(trace));
+    }
     let refused = matches!(resp.status().as_u16(), 401 | 403);
     let body: Value = resp.body_mut().read_json()?;
     if let Some(err) = body.get("error") {
@@ -1248,6 +1297,64 @@ fn get(path: &str) -> Result<Value> {
 
 fn post(path: &str, body: Value) -> Result<Value> {
     request(to_node(agent().post(format!("http://{}{path}", addr()))).send_json(&body))
+}
+
+/// A call, asking for its trace if `--trace` (or MCP's `trace`) did: what it did stays for `print_trace`.
+fn post_call(body: Value) -> Result<Value> {
+    let asked = TRACE_ASKED.with(|t| t.get());
+    TRACED.with(|t| *t.borrow_mut() = None);
+    drop(client_device::take_tries());
+    let request_ = to_node(agent().post(format!("http://{}/v1/call", addr())));
+    let request_ = if asked { request_.header(one::node::trace::HEADER, "1") } else { request_ };
+    request(request_.send_json(&body))
+}
+
+/// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
+/// node there says no unless the caller may remove that device (src/node/calls.rs).
+fn logs_read(input: &Map<String, Value>) -> Result<Value> {
+    let device = input.get("device").and_then(Value::as_str).context("which device? one devices lists them")?;
+    let mut asked = input.clone();
+    asked.remove("device");
+    asked.remove("trace");
+    one::logs::Ask::from_json(&Value::Object(asked.clone())).map_err(|e| tools::Failed::Typed(format!("{e:#}")))?;
+    Ok(post_call(json!({ "device": device, "app": one::database::scopes::APP, "op": "logs", "input": asked, "agent": agent_from_env(), "client": "cli" }))?["ok"].take())
+}
+
+/// What a log read gives, as its lines and, if there's something to say about them, a note.
+fn logs_said(r: &Value, device: &str) -> (Value, Option<String>) {
+    let (shown, matched) = (r["shown"].as_u64().unwrap_or(0), r["matched"].as_u64().unwrap_or(0));
+    let note = if shown == 0 {
+        let from = r["oldest"].as_u64().map(|ms| format!("; its log goes back to {}", say_time(ms))).unwrap_or_default();
+        Some(format!("{device}'s {} log has no lines like that{from}.", r["log"].as_str().unwrap_or("node")))
+    } else if matched > shown {
+        Some(format!("{shown} of the {matched} lines that match, the newest: narrow it with --since or --grep."))
+    } else {
+        None
+    };
+    (r["lines"].clone(), note)
+}
+
+/// What the last call did, as lines (`one::node::trace::said`), if it asked for a trace: after its answer, or the
+/// reason it failed. Empty if it didn't ask, or made no call.
+fn trace_lines() -> Vec<String> {
+    if !TRACE_ASKED.with(|t| t.get()) {
+        return Vec::new();
+    }
+    let (node, tries) = (TRACED.with(|t| t.borrow_mut().take()), client_device::take_tries());
+    let named = || get("/v1/state").ok().and_then(|s| s["device"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "the device that answered".into());
+    if node.is_none() && tries.is_none() {
+        return vec![format!("no trace: this ran in {CLI} here, not on a device")];
+    }
+    let answered = if node.is_some() { String::new() } else { named() };
+    one::node::trace::said(tries.as_ref(), node.as_ref(), &answered)
+}
+
+/// Prints a call's trace, after its answer, to stderr, so what's on stdout stays the answer.
+fn print_trace() {
+    let lines = trace_lines();
+    if !lines.is_empty() {
+        eprintln!("\ntrace:\n  {}", lines.join("\n  "));
+    }
 }
 
 /// For a node in no network yet, which no one is signed in to: a sign-in this CLI kept for its address was another
@@ -1462,7 +1569,10 @@ fn oned(args: &[String]) -> Result<()> {
 
 #[tokio::main]
 async fn serve(is_try: bool, args: &[String]) -> Result<()> {
+    // What it says is kept too, for `one logs`.
+    one::logs::keep(one::logs::NODE);
     tracing_subscriber::fmt()
+        .with_writer(one::logs::Tee)
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
     // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
@@ -2319,6 +2429,21 @@ fn deploy_tool() -> Value {
     })
 }
 
+fn logs_tool() -> Value {
+    json!({
+        "name": "logs",
+        "description": "Read a device's node log, or one of its services', over the network, instead of ssh: the newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's person and the network's admins may.",
+        "inputSchema": { "type": "object", "required": ["device"], "properties": {
+            "device": { "type": "string", "description": "the device's name (devices_requests and groups_list name them; the status command lists them)" },
+            "service": { "type": "string", "description": "a service's name, like whatsapp; omit for the node's own log" },
+            "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d" },
+            "grep": { "type": "string", "description": "only lines with this text in them, whatever its case" },
+            "lines": { "type": "integer", "description": "how many of the newest to give" },
+        } },
+        "annotations": one::skills::hints(true, false),
+    })
+}
+
 /// What `deploy` did, and what's next: its tools, putting it on a page, and undoing it.
 fn deploy_said(app: &str, r: &Value, installed: bool) -> String {
     let short = |b: &Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
@@ -2345,6 +2470,10 @@ fn deploy_said(app: &str, r: &Value, installed: bool) -> String {
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     let mut tools = vec![deploy_tool()];
+    // A sign-in from elsewhere can't ask a device for its log.
+    if !signed_in() {
+        tools.push(logs_tool());
+    }
     tools.extend(one::vault::tools());
     tools.extend(one::skills::groups_tools());
     // Backups are this machine's to run: a sign-in from elsewhere can't.
@@ -2382,7 +2511,7 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
     // This server's own tools, checked as apps' are, in dispatch.
-    let own = [code::search_tool(mode), code::execute_tool(), deploy_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
+    let own = [code::search_tool(mode), code::execute_tool(), deploy_tool(), logs_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
     if let Some(Err(e)) = own.map(|t| tools::check(&t["inputSchema"], &Value::Object(input.clone()))) {
         return failed(format!("{e:#}"));
     }
@@ -2421,19 +2550,35 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
                 Err(e) => failed(format!("{e:#}")),
             }
         }
+        "logs" => match logs_read(&input) {
+            Ok(r) => {
+                let (lines, note) = logs_said(&r, input.get("device").and_then(Value::as_str).unwrap_or(""));
+                let text: Vec<&str> = lines.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                json!({ "content": [{ "type": "text", "text": format!("{}{}", text.join("\n"), note.map(|n| format!("\n{n}")).unwrap_or_default()) }] })
+            }
+            Err(e) => failed(format!("{e:#}")),
+        },
         "execute" => match code::execute(input.get("code").and_then(Value::as_str).unwrap_or(""), agent, "mcp") {
             Ok(result) => json!({ "isError": result["ok"] != true, "content": [{ "type": "text", "text": code::shown(&result) }] }),
             Err(e) => failed(format!("{e:#}")),
         },
-        _ => match dispatch(name, input, agent, "mcp", None) {
+        _ => with_trace(match dispatch(name, input, agent, "mcp", None) {
             // A script gets an empty list as it is; an agent reading gets it in words.
             Ok(ok) => match ["accounts", "devices"].into_iter().find_map(|tool| Some((name.strip_suffix(&format!("_{tool}"))?, tool))).filter(|_| ok == json!([])).and_then(|(app, tool)| Some((tools::find(app, tool)?.0, tool))).and_then(|(a, tool)| tools::none_said(&a, tool, &ok, false)) {
                 Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
                 None => json!({ "content": tools::mcp_content(&ok) }),
             },
             Err(e) => failed(format!("{e:#}")),
-        },
+        }),
     }
+}
+
+/// A tool's answer with its trace after it, when it asked for one (`trace: true`), as well as when it failed.
+fn with_trace(mut out: Value) -> Value {
+    if let (Some(text), Some(content)) = (TRACE_TEXT.with(|t| t.borrow_mut().take()), out["content"].as_array_mut()) {
+        content.push(json!({ "type": "text", "text": text }));
+    }
+    out
 }
 
 /// What to say for a tool nobody here lists: an app's tools when the app is right, else the nearest tools.
@@ -2464,6 +2609,9 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     let spec = Some(spec);
     let device = if tools::node_app(app) || spec.as_ref().is_some_and(tools::own_device) { None } else { input.remove("device") };
     let confirmed = input.remove("confirm") == Some(json!(true));
+    // `trace: true` gives, beside the answer, what the call did and where (`one <app> <tool> --trace`).
+    let traced = input.remove("trace") == Some(json!(true));
+    TRACE_TEXT.with(|t| *t.borrow_mut() = None);
     if let Some(spec) = &spec {
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
     }
@@ -2499,5 +2647,14 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     if let Some(spec) = spec {
         tools::mcp_files(&spec, &mut input)?;
     }
-    Ok(post("/v1/call", json!({ "device": device, "app": app, "op": tool, "input": input, "agent": agent, "client": client }))?["ok"].take())
+    if traced {
+        TRACE_ASKED.with(|t| t.set(true));
+    }
+    let called = post_call(json!({ "device": device, "app": app, "op": tool, "input": input, "agent": agent, "client": client }));
+    if traced {
+        let lines = trace_lines();
+        TRACE_ASKED.with(|t| t.set(false));
+        TRACE_TEXT.with(|t| *t.borrow_mut() = Some(format!("trace:\n  {}", lines.join("\n  "))));
+    }
+    Ok(called?["ok"].take())
 }

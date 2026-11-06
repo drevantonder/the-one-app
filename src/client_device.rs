@@ -247,6 +247,14 @@ fn for_clients(path: &str) -> bool {
         })
 }
 
+/// The nodes the last request that asked for a trace tried, as a client device sent it.
+static TRIES: Mutex<Option<serde_json::Value>> = Mutex::new(None);
+
+/// What `TRIES` holds, once.
+pub fn take_tries() -> Option<serde_json::Value> {
+    TRIES.lock().unwrap().take()
+}
+
 fn answer(status: u16, error: String) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
     let body = ureq::Body::builder().mime_type("application/json").data(json!({ "error": error }).to_string());
     Ok(ureq::http::Response::builder().status(status).header("content-type", "application/json").body(body)?)
@@ -280,7 +288,13 @@ pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware:
     }
     let method = parts.method.to_string();
     let body = sent.sent();
-    let response = match run(move || async move { device.fetch(&method, &path, headers, body).await }) {
+    let fetched = run(move || async move { device.fetch(&method, &path, headers, body).await });
+    // A request that asked for a trace (`--trace`): the nodes this device tried, which a node's own trace doesn't say.
+    *TRIES.lock().unwrap() = match &fetched {
+        Ok(response) => response.trace.as_ref().map(|t| t["tries"].clone()),
+        Err(err) => err.trace.as_ref().map(|t| t["tries"].clone()),
+    };
+    let response = match fetched {
         Ok(response) => response,
         Err(err) if err.not_let_in => return answer(403, not_let_in()),
         Err(err) => return Err(ureq::Error::Io(std::io::Error::other(format!("couldn't reach your devices: {err}")))),

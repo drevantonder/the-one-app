@@ -648,7 +648,7 @@ impl Device {
     /// `fetch`'s request, each send's trace kept in `fetches` if it's asked for one.
     async fn request(&self, method: &str, path: &str, mut headers: Vec<(String, String)>, body: Sent, mut fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
         let route = route(path, body.bytes());
-        if fetches.is_some() {
+        if fetches.is_some() && !headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(TRACE_HEADER)) {
             headers.push((TRACE_HEADER.into(), "1".into()));
         }
         let (mut needed, mut behind) = (0, 0);

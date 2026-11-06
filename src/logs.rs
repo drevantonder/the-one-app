@@ -1,0 +1,273 @@
+//! What this node and each of its services say, kept in a file of its own so a person's agent can read it over the
+//! network (`one logs <device>`), without ssh and without knowing where the machine's supervisor puts it (systemd's
+//! journal isn't readable by the node's own user). Each is `<home>/logs/<name>.log`, `node` or the service's name, each
+//! line `<ms since 1970> <text>`, and the one before it, `.log.1`, once it passes `KEPT`: so at most twice that is kept.
+//!
+//! The text is what `tracing` and the services' programs write to stderr, which still goes there too. Nothing here
+//! chooses what's logged: nothing may log a key, token or password (one found is made not to), and what a reader gets is
+//! capped (`MOST_LINES`, `MOST_BYTES`).
+
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use anyhow::{Result, bail, ensure};
+use serde_json::{Value, json};
+
+/// What the node's own log is called.
+pub const NODE: &str = "node";
+/// The most a log file holds before the next line starts a new one.
+const KEPT: u64 = 4 << 20;
+/// The most of one line that's kept.
+const LINE: usize = 2000;
+/// What a read gives at most: lines, and bytes of them. The newest.
+pub const MOST_LINES: usize = 1000;
+pub const MOST_BYTES: usize = 48 << 10;
+pub const LINES: usize = 200;
+
+struct Sink {
+    path: PathBuf,
+    file: std::fs::File,
+    size: u64,
+}
+
+static SINK: Mutex<Option<Sink>> = Mutex::new(None);
+
+fn file(home: &Path, name: &str) -> PathBuf {
+    home.join("logs").join(format!("{name}.log"))
+}
+
+/// Starts keeping what this process says, as `name`'s log (`NODE`, or a service's name), in this machine's home.
+pub fn keep(name: &str) {
+    let path = file(&crate::home(), name);
+    let opened = path.parent().map(std::fs::create_dir_all).transpose().and_then(|_| std::fs::OpenOptions::new().create(true).append(true).open(&path));
+    if let Ok(file) = opened {
+        let size = file.metadata().map_or(0, |m| m.len());
+        *SINK.lock().unwrap() = Some(Sink { path, file, size });
+    }
+}
+
+/// Keeps `text`, each line of it as of now.
+pub fn record(text: &str) {
+    let mut sink = SINK.lock().unwrap();
+    let Some(sink) = sink.as_mut() else { return };
+    let now = now_ms();
+    let mut out = String::new();
+    for line in plain(text).lines().filter(|l| !l.trim().is_empty()) {
+        out.push_str(&format!("{now} {}\n", line.chars().take(LINE).collect::<String>()));
+    }
+    if out.is_empty() {
+        return;
+    }
+    if sink.size >= KEPT {
+        let _ = std::fs::rename(&sink.path, sink.path.with_extension("log.1"));
+        if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&sink.path) {
+            (sink.file, sink.size) = (file, 0);
+        }
+    }
+    if sink.file.write_all(out.as_bytes()).is_ok() {
+        sink.size += out.len() as u64;
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// `text` as it's kept: no terminal colours or other escapes, and nothing that may be a secret. Nothing logs one, but a
+/// library's error may quote the URL it asked (a signed one's query is its key), or a header: a URL's query and a
+/// bearer token are left out, whatever says them.
+fn plain(text: &str) -> String {
+    let (text, mut out) = (strip(text), String::new());
+    let mut rest = text.as_str();
+    while let Some(at) = [rest.find("://"), rest.find("Bearer ")].into_iter().flatten().min() {
+        let (head, tail) = rest.split_at(at);
+        let end = |s: &str, from: usize, stops: &str| s[from..].find(|c: char| c.is_whitespace() || stops.contains(c)).map_or(s.len(), |i| from + i);
+        if tail.starts_with("Bearer ") {
+            let to = end(tail, 7, "\"')");
+            out.push_str(head);
+            out.push_str("Bearer …");
+            rest = &tail[to..];
+            continue;
+        }
+        let to = end(tail, 3, "\"')>]");
+        let url = &tail[..to];
+        out.push_str(head);
+        match url.split_once(['?', '#']) {
+            Some((before, _)) => out.push_str(&format!("{before}?…")),
+            None => out.push_str(url),
+        }
+        rest = &tail[to..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `text` without terminal colours and other escapes.
+fn strip(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for e in chars.by_ref() {
+                if e.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// What `tracing` writes to: stderr as before, and the log.
+#[derive(Clone, Copy)]
+pub struct Tee;
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Tee {
+    type Writer = Tee;
+    fn make_writer(&'a self) -> Tee {
+        Tee
+    }
+}
+
+impl Write for Tee {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::stderr().write_all(buf);
+        record(&String::from_utf8_lossy(buf));
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::stderr().flush()
+    }
+}
+
+/// Keeps what a program says as it says it (a service's, whose output nobody else reads), and passes it to stderr.
+pub fn tee(from: impl std::io::Read + Send + 'static) {
+    std::thread::spawn(move || {
+        let mut from = std::io::BufReader::new(from);
+        let mut line = Vec::new();
+        while from.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
+            let text = String::from_utf8_lossy(&line).to_string();
+            eprint!("{text}");
+            record(&text);
+            line.clear();
+        }
+    });
+}
+
+/// What a reader asks for.
+pub struct Ask {
+    /// A service's log; none, the node's.
+    pub service: Option<String>,
+    /// Only the last this long.
+    pub since: Option<Duration>,
+    /// Only lines with this in them, whatever its case.
+    pub grep: Option<String>,
+    pub lines: usize,
+}
+
+impl Ask {
+    pub fn from_json(input: &Value) -> Result<Ask> {
+        // What a command line says as 5 is as much text as "5" is.
+        let text = |k: &str| match &input[k] {
+            Value::String(s) if !s.is_empty() => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        };
+        Ok(Ask {
+            service: text("service"),
+            since: text("since").map(|s| since(&s)).transpose()?,
+            grep: text("grep"),
+            lines: input["lines"].as_u64().map_or(LINES, |n| (n as usize).clamp(1, MOST_LINES)),
+        })
+    }
+}
+
+/// `10m`, `2h`, `30s` or `1d`, as a time.
+pub fn since(text: &str) -> Result<Duration> {
+    let text = text.trim();
+    let split = text.find(|c: char| !c.is_ascii_digit()).unwrap_or(text.len());
+    let (n, unit) = text.split_at(split);
+    let n: u64 = n.parse().map_err(|_| anyhow::anyhow!("--since is a number and s, m, h or d: 10m, 2h"))?;
+    let unit = match unit {
+        "s" => 1,
+        "m" => 60,
+        "h" => 3600,
+        "d" => 86400,
+        _ => bail!("--since is a number and s, m, h or d: 10m, 2h"),
+    };
+    Ok(Duration::from_secs(n * unit))
+}
+
+/// A log as a reader gets it: the newest lines that match, up to the caps, oldest first, each starting with when if it
+/// doesn't say.
+pub fn read(home: &Path, ask: &Ask) -> Result<Value> {
+    let name = ask.service.as_deref().unwrap_or(NODE);
+    ensure!(!name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'), "{name} isn't a service's name");
+    let path = file(home, name);
+    let mut stored = std::fs::read_to_string(path.with_extension("log.1")).unwrap_or_default();
+    match std::fs::read_to_string(&path) {
+        Ok(now) => stored.push_str(&now),
+        Err(_) if stored.is_empty() => bail!("{name} has no log here{}", if name == NODE { " (this node started before it kept one)" } else { ": it hasn't run on this device" }),
+        Err(_) => {}
+    }
+    let from = ask.since.map_or(0, |s| now_ms().saturating_sub(s.as_millis() as u64));
+    let grep = ask.grep.as_ref().map(|g| g.to_lowercase());
+    let all: Vec<(u64, &str)> = stored.lines().filter_map(|l| l.split_once(' ')).filter_map(|(t, text)| Some((t.parse().ok()?, text))).collect();
+    let oldest = all.first().map(|l| l.0);
+    let matched: Vec<&(u64, &str)> = all.iter().filter(|(t, text)| *t >= from && grep.as_ref().is_none_or(|g| text.to_lowercase().contains(g))).collect();
+    let mut shown: Vec<String> = matched.iter().rev().take(ask.lines).map(|(t, text)| stamped(*t, text)).collect();
+    let mut bytes = 0;
+    shown.retain(|l| {
+        bytes += l.len() + 1;
+        bytes <= MOST_BYTES
+    });
+    shown.reverse();
+    Ok(json!({ "log": name, "matched": matched.len(), "shown": shown.len(), "oldest": oldest, "lines": shown }))
+}
+
+/// A line, with its time before it unless it starts with its own (tracing's).
+fn stamped(ms: u64, text: &str) -> String {
+    let own = text.len() > 20 && text.as_bytes()[..4].iter().all(u8::is_ascii_digit) && text.as_bytes()[4] == b'-';
+    if own {
+        return text.to_string();
+    }
+    let at = jiff::Timestamp::from_millisecond(ms as i64).map_or_else(|_| ms.to_string(), |t| t.strftime("%Y-%m-%dT%H:%M:%SZ").to_string());
+    format!("{at} {text}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_read_is_capped_filtered_and_only_a_services_name() {
+        let home = std::env::temp_dir().join(format!("logs-test-{}", now_ms()));
+        std::fs::create_dir_all(home.join("logs")).unwrap();
+        let now = now_ms();
+        let mut text = String::new();
+        for i in 0..3000 {
+            text.push_str(&format!("{} line {i} {}\n", now - 3_600_000 + i, if i % 2 == 0 { "ERROR" } else { "fine" }));
+        }
+        std::fs::write(home.join("logs/node.log"), text).unwrap();
+        let ask = |service: Option<&str>, since: Option<&str>, grep: Option<&str>, lines: u64| Ask::from_json(&json!({ "service": service, "since": since, "grep": grep, "lines": lines })).unwrap();
+        let all = read(&home, &ask(None, None, None, 100_000)).unwrap();
+        assert_eq!(all["shown"], MOST_LINES, "never more lines than the cap");
+        assert!(all["lines"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().len() + 1).sum::<usize>() <= MOST_BYTES);
+        let errors = read(&home, &ask(None, None, Some("error"), 5)).unwrap();
+        assert_eq!(errors["matched"], 1500);
+        assert!(errors["lines"].as_array().unwrap().iter().all(|l| l.as_str().unwrap().contains("ERROR")));
+        assert!(errors["lines"][4].as_str().unwrap().contains("line 2998"), "the newest, last");
+        assert_eq!(read(&home, &ask(None, Some("1m"), None, 10)).unwrap()["matched"], 0, "nothing in the last minute");
+        assert!(read(&home, &ask(Some("../node"), None, None, 10)).is_err(), "a service's name is not a path");
+        assert!(read(&home, &ask(Some("whatsapp"), None, None, 10)).is_err(), "a service that never ran has no log");
+        assert!(since("soon").is_err());
+        let kept = plain("\x1b[31mWARN\x1b[0m asked https://bucket.example/a/b?X-Amz-Signature=abc123&k=v Bearer s3cr3t and http://127.0.0.1:4747/v1/state ok");
+        assert_eq!(kept, "WARN asked https://bucket.example/a/b?… Bearer … and http://127.0.0.1:4747/v1/state ok");
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+}

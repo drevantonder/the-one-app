@@ -611,6 +611,41 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
     assert!(!said.contains("private thought") && !said.contains(&a.user().unwrap()), "a trace holds names and timings alone: {said}");
 }
 
+/// A device's log is read over the network by whoever may remove the device (its person, and the network's admins), never
+/// by another member, and what's returned is capped.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_devices_person_or_an_admin_reads_its_logs() {
+    use one::node::Invited;
+    let dir = temp("logs");
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    let a = Node::start(&dir).await.unwrap();
+    a.create("Home", "Andre").await.unwrap();
+    let andre = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let now = one::node::now_ms();
+    let log: String = (0..3000).map(|i| format!("{} line {i}\n", now - 1000 + i)).collect();
+    std::fs::create_dir_all(dir.join("logs")).unwrap();
+    std::fs::write(dir.join("logs/node.log"), log).unwrap();
+    let logs = |input: Value| CallRequest { app: "node".into(), tool: "logs".into(), device: Some("mac".into()), input, ..Default::default() };
+
+    let read = a.call_as(logs(json!({ "grep": "line 29" })), andre.clone()).await.unwrap();
+    assert_eq!(read["matched"], 111, "{read}");
+    let all = a.call_as(logs(json!({ "lines": 100000 })), andre.clone()).await.unwrap();
+    assert!(all["shown"].as_u64().unwrap() <= one::logs::MOST_LINES as u64, "a read is capped");
+
+    // Sam, invited as a member, may not; once an admin, may.
+    let sam = Invited { secret: "s".into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
+    let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let e = one::keys::Endpoint::of(&key);
+    let request = one::node::DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's".into(), user: sam.user.clone(), person: String::new(), proof: Some(one::keys::invite_proof(b"s", &e)), device: None, made: None, place: None, sign_in: None };
+    a.approve_request(&andre, &request, Some(&sam)).await.unwrap();
+    let from_sam = one::node::Caller { key: a.id(), user: sam.user.clone(), agent: None, token: None };
+    let refused = a.call_as(logs(json!({})), from_sam.clone()).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("reads its logs"), "{refused:#}");
+    assert!(!a.may_read_logs(&sam.user).unwrap() && a.may_read_logs(&andre.user).unwrap());
+    a.member_as(&andre, "role", json!({ "user": sam.user, "role": one::database::scopes::Role::Admin })).await.unwrap();
+    assert!(a.may_read_logs(&sam.user).unwrap(), "an admin of the network reads any device's logs");
+}
+
 /// A node runs a build of an app's service only if its app's latest deploy names it: one whose bytes aren't that hash's
 /// is refused, a deploy naming none for this platform runs none, and only someone who may deploy the app names one.
 #[tokio::test(flavor = "multi_thread")]

@@ -93,3 +93,90 @@ pub fn bucket(took: std::time::Duration, found: bool) {
         t.note(json!({ "step": "bucket", "asks": 1, "found": found as u64 }), took);
     });
 }
+
+/// A call's trace as a few readable lines, in the Developer panel's words (src/screen/settings/devtools.jsx): the devices
+/// the client tried (`tries`, from the client library), what the one that answered did (`node`, its `x-one-trace`),
+/// each wait with its milliseconds, and the total. `answered` names the device when its node sent no trace, which an
+/// older one doesn't.
+pub fn said(tries: Option<&Value>, node: Option<&Value>, answered: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let names = node.map(|n| n["names"].clone()).unwrap_or_default();
+    let name = |key: &str| names[key].as_str().map(str::to_string).unwrap_or_else(|| format!("a device ({})", key.get(..6).unwrap_or(key)));
+    let mut total = node.and_then(|n| n["ms"].as_u64()).unwrap_or(0);
+    for t in tries.and_then(Value::as_array).into_iter().flatten() {
+        let (who, ms) = (name(t["node"].as_str().unwrap_or("")), t["ms"].as_u64().unwrap_or(0));
+        if let Some(connect) = t["connect"].as_u64() {
+            out.push(format!("connected to {who}: {connect} ms"));
+        }
+        out.push(match t["result"].as_str().unwrap_or("") {
+            "answered" => format!("asked {who}, which answered: {ms} ms there and back"),
+            "elsewhere" => format!("asked {who}, which said to ask elsewhere: {ms} ms"),
+            r => format!("asked {who}: {}, gave up after {ms} ms", r.replace("no connection", "couldn't connect").replace("no answer", "didn't answer")),
+        });
+        total = total.max(t["at"].as_u64().unwrap_or(0) + ms);
+    }
+    match node {
+        Some(node) => steps(node, node["device"].as_str().unwrap_or(answered), &mut out),
+        None => out.push(format!("no trace from {answered}")),
+    }
+    out.push(format!("total {total} ms"));
+    out
+}
+
+/// What one device did, step by step, and the devices it passed the call to, in theirs.
+fn steps(trace: &Value, lane: &str, out: &mut Vec<String>) {
+    let mut listed = 0;
+    for s in trace["steps"].as_array().into_iter().flatten() {
+        let ms = s["ms"].as_u64().unwrap_or(0);
+        let (app, op) = (s["app"].as_str().unwrap_or(""), s["op"].as_str().unwrap_or(""));
+        match s["step"].as_str().unwrap_or("") {
+            "device" => {
+                let to = s["device"].as_str().unwrap_or("a device");
+                let result = s["result"].as_str().unwrap_or("");
+                // The device that is running it says what it did in its own steps.
+                if s["here"] == true && result == "ran" {
+                    continue;
+                }
+                listed += ms;
+                match result {
+                    r if s["here"] == true => out.push(format!("{app}.{op} on {lane}: {r}{}: {ms} ms", s["why"].as_str().map(|w| format!(" ({w})")).unwrap_or_default())),
+                    "ran" => out.push(format!("{lane} passed {app}.{op} to {to}: {ms} ms")),
+                    r => out.push(format!("{lane} tried {to}: {}{}: {ms} ms", r.replace("no answer", "didn't answer"), s["why"].as_str().map(|w| format!(" ({w})")).unwrap_or_default())),
+                }
+                if s["trace"].is_object() {
+                    steps(&s["trace"], to, out);
+                }
+            }
+            "bucket" => {
+                listed += ms;
+                out.push(format!("{lane} fetched {} of {} from the bucket: {ms} ms", s["found"], s["asks"]));
+            }
+            "behind" => {
+                listed += ms;
+                out.push(format!("{lane} asked the bucket first: {}: {ms} ms", s["result"].as_str().unwrap_or("")));
+            }
+            "data" => {
+                listed += ms;
+                let new = s["new"].as_u64().filter(|n| *n > 0).map(|n| format!(", {n} new steps")).unwrap_or_default();
+                out.push(format!("{lane} read {app} data for {} from its copy{new}: {ms} ms", s["scope"].as_str().unwrap_or("")));
+            }
+            "open" => {
+                listed += ms;
+                out.push(format!("{lane} opened {app} data: {ms} ms"));
+            }
+            "logs" if ms >= 5 => {
+                listed += ms;
+                out.push(format!("{lane} read who's who: {ms} ms"));
+            }
+            "run" => {
+                listed += ms;
+                out.push(format!("{app}.{op} ran on {lane}: {ms} ms"));
+            }
+            _ => {}
+        }
+    }
+    let rest = trace["ms"].as_u64().unwrap_or(0).saturating_sub(listed);
+    if rest >= 1 && trace["steps"].as_array().is_some_and(|s| !s.is_empty()) {
+        out.push(format!("other work on {lane}: {rest} ms"));
+    }
+}

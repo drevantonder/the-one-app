@@ -925,8 +925,19 @@ impl Node {
                 self.changed_there(&scope, wrote, None, None);
                 Ok(json!(null))
             }
+            // A person reading this device's log (or its services'), over the network (`one logs`).
+            "logs" => {
+                ensure!(self.may_read_logs(&me.user)?, "only {}'s person, or an admin of {}, reads its logs", self.device_name(), crate::config::YOURS);
+                crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)
+            }
             other => bail!("the node has no network message {other}"),
         }
+    }
+
+    /// Whether `user` may read this device's logs: whoever may remove it from the network, its person and the network's
+    /// admins (who may remove any device), since they could stop it anyway. Nothing in a log is a key or someone's data.
+    pub fn may_read_logs(&self, user: &str) -> Result<bool> {
+        self.with(|i| Ok(i.r.db().may(user, "remove", &scopes::device(&self.0.id))))
     }
 
     /// Lets the requests of a call, widget or hook of `app` through the node as `caller`'s, while it runs.

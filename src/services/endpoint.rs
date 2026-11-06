@@ -226,7 +226,14 @@ impl Service {
             tokio::spawn(async move {
                 while let Ok((mut said, _)) = log.accept().await {
                     tokio::spawn(async move {
-                        let _ = tokio::io::copy(&mut said, &mut tokio::io::stderr()).await;
+                        // As it says it, to stderr and the log.
+                        let mut line = String::new();
+                        let mut said = tokio::io::BufReader::new(&mut said);
+                        while tokio::io::AsyncBufReadExt::read_line(&mut said, &mut line).await.is_ok_and(|n| n > 0) {
+                            eprint!("{line}");
+                            crate::logs::record(&line);
+                            line.clear();
+                        }
                     });
                 }
             });
@@ -722,7 +729,9 @@ static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new
 /// waits for the one before to stop.
 pub fn run(name: &str) -> Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into());
-    let _ = tracing_subscriber::fmt().with_writer(std::io::stderr).with_env_filter(filter).try_init();
+    // What it and its program say is kept too, for `one logs --service <name>`.
+    crate::logs::keep(name);
+    let _ = tracing_subscriber::fmt().with_writer(crate::logs::Tee).with_env_filter(filter).try_init();
     let dir = folder(name);
     std::fs::create_dir_all(&dir)?;
     let parent = std::os::unix::process::parent_id();
@@ -915,7 +924,16 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
     if crate::oned::helper(name).is_some() {
         return Ok(Running::Own(disclaimed(&command).with_context(|| format!("starting {}", program.display()))?));
     }
-    Ok(Running::Child(command.spawn().with_context(|| format!("starting {}", program.display()))?))
+    // What it says goes to this part's stderr as before, and to its log.
+    command.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    let mut child = command.spawn().with_context(|| format!("starting {}", program.display()))?;
+    if let Some(out) = child.stdout.take() {
+        crate::logs::tee(out);
+    }
+    if let Some(err) = child.stderr.take() {
+        crate::logs::tee(err);
+    }
+    Ok(Running::Child(child))
 }
 
 /// Runs a service's program in another language, started again whenever it stops, until `stop`. One that can't start
