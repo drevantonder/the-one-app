@@ -1,7 +1,6 @@
 //! Old names, read as this release names them: what a release from before the network and app schedules had their
 //! names wrote, in the scope database's copies and in signed steps and entries, which can't be written again. A reader
-//! turns them into this release's names as it reads them, here and nowhere else; nothing writes the old ones (Andre,
-//! 2026-11-06). The network's table and type were `install`; app schedules' tables `keeps` and `keep_keys`, and their
+//! turns them into this release's names as it reads them, here and nowhere else; nothing writes the old ones. The network's table and type were `install`; app schedules' tables `keeps` and `keep_keys`, and their
 //! step `grant`; the permission to choose which devices keep a scope's apps running, run its calls and open its Vault
 //! was `keep`. The setting that names the Cloudflare node was `serverless`. The Vault's agents, in an item's apps and a
 //! request's app, were `agents`, the AGENTS.md app's name, which never used the Vault.

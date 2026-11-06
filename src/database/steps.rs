@@ -72,7 +72,6 @@ use super::scope::RULE;
 /// The node's database of a scope that its steps are: its `scope`.
 pub const NAME: &str = "scope";
 
-/// Where a scope's database's steps are in the bucket.
 pub fn prefix(scope: &str) -> String {
     crate::bucket::database_prefix(scope, scopes::APP, NAME)
 }
@@ -83,7 +82,6 @@ pub const DOMAIN: &str = "one/step";
 /// The most any number in a step's header may be: 2^53 - 1, the most JavaScript's JSON keeps exactly.
 pub const NUMBER_MAX: u64 = (1 << 53) - 1;
 
-/// A step's header, as signed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Header {
     pub author: Key,
@@ -92,7 +90,6 @@ pub struct Header {
     pub time: u64,
     pub user: String,
     pub epoch: u32,
-    /// The sha256 of the body.
     pub body: [u8; 32],
     pub size: u64,
 }
@@ -123,7 +120,6 @@ impl Header {
     }
 }
 
-/// A checked step with its decoded content.
 #[derive(Clone, Debug)]
 pub struct Step {
     pub header: Header,
@@ -197,7 +193,6 @@ impl Step {
     }
 }
 
-/// A step of `scope`'s database for position `at`, signed by `key` as `user`, the scope at `epoch`.
 pub fn sign(key: &SigningKey, scope: &Scope, at: u64, user: &str, epoch: u32, time: u64, content: Content) -> Result<Step> {
     let seq = u32::try_from(at).context("that database has more steps than a step can name")?;
     let body = serde_json::to_vec(&content)?;
@@ -244,14 +239,12 @@ pub fn given(scope: &Scope, at: u64, opened: Option<&[u8]>) -> Option<Given> {
     opened.and_then(|b| decode(scope, at, b).ok())
 }
 
-/// A step as `given` takes it.
 pub fn encoded(given: &Given) -> Vec<u8> {
     encode(&given.step, given.copy.as_deref())
 }
 
 /// What a sealed step is to a reader with `keys`, its log's keys by epoch.
 pub enum Opened {
-    /// A step.
     Step(Given),
     /// Nothing that will ever be one: it doesn't open with its epoch's key, isn't a step for its place, or is under an
     /// epoch above every one made.
@@ -341,7 +334,6 @@ pub const MOST_STEPS: u64 = 1 << 53;
 /// Where the log was frozen, as its freeze says it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Freeze {
-    /// The freeze's position.
     pub at: u64,
     /// The state hash its copy comes to, as it is (`stored::state_hash`).
     pub hash: String,
@@ -350,7 +342,6 @@ pub struct Freeze {
 }
 
 impl Freeze {
-    /// The freeze `step` at position `at` says.
     pub fn of(step: &Step, at: u64) -> Result<Freeze> {
         ensure!(step.content.app == scopes::APP && step.content.kind == FREEZE && step.scope() == Scope::Global, "not a freeze");
         Freeze::from_data(&step.content.data, at)
@@ -389,7 +380,6 @@ pub fn seal(keys: &crate::database::stored::Keys, name: &str, bytes: &[u8]) -> R
     Ok(crate::keys::seal(*epoch, key, name, bytes))
 }
 
-/// The database a copy is, as bytes.
 pub fn connection(bytes: &[u8]) -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
     conn.deserialize_read_exact("main", bytes, bytes.len(), false)?;
@@ -434,8 +424,6 @@ pub fn start_name(scope: &Scope) -> String {
     crate::database::stored::step_name(&prefix(&scope.to_string()), 0)
 }
 
-/// `scope`'s start, step 0 of its database, signed by `key` as `user`, the scope at `epoch`: `db`, what its frozen log's
-/// entries added up to at the freeze.
 pub fn start(key: &SigningKey, scope: &Scope, user: &str, epoch: u32, now: u64, db: &mut ScopeDb) -> Result<Given> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
     let hash = crate::database::stored::state_hash(db.conn())?;
@@ -660,7 +648,6 @@ impl Sealed {
         out
     }
 
-    /// The epochs they're sealed under.
     pub fn epochs(&self) -> std::collections::BTreeSet<u32> {
         let all = self.steps.values().chain(&self.freeze).chain(self.start.as_ref().map(|(_, b)| b));
         all.filter_map(|b| crate::keys::epoch_of(b).ok()).collect()
@@ -712,7 +699,6 @@ impl Reader {
         Reader { root, truth: None, looked: 0 }
     }
 
-    /// The network's root, once known.
     pub fn root(&self) -> Option<Hash> {
         self.root
     }
@@ -730,7 +716,6 @@ impl Reader {
         self.truth
     }
 
-    /// The last step taken.
     pub fn at(&self) -> u64 {
         self.truth.as_ref().map_or(self.looked, |t| t.at)
     }
@@ -822,7 +807,6 @@ impl Reader {
         Ok(None)
     }
 
-    /// `global`'s steps after the last taken, from `bucket` (`fetch`, `add`).
     pub async fn read(&mut self, bucket: &impl crate::bucket::Bucket, keys: &crate::database::stored::Keys, now: u64) -> Result<Option<u32>> {
         let sealed = fetch(bucket, self.at(), None).await?;
         self.add(&sealed, keys, None, now, |_, _, _| {})
@@ -902,7 +886,6 @@ pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Re
     Ok((epochs, keys))
 }
 
-/// What a step that counts made of the database it was applied to: the database it leaves.
 pub struct Applied {
     pub db: Connection,
 }

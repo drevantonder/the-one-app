@@ -15,7 +15,6 @@ use crate::permissions;
 
 pub use super::scope::{app, device, group, object, person, service};
 
-/// The network, as an object of permissions.
 pub const NETWORK: &str = permissions::NETWORK;
 
 /// One scope database, and the time it was built at, which `may` asks as of. Nothing in it lasts until a time yet but
@@ -36,7 +35,6 @@ pub fn app_relations(app: &Connection) -> Vec<Relation> {
     read().unwrap_or_default()
 }
 
-/// A text column that names a person (`person:<id>`), as an id.
 fn id(of: &str) -> String {
     of.strip_prefix("person:").or_else(|| of.strip_prefix("group:")).unwrap_or(of).to_string()
 }
@@ -96,7 +94,6 @@ fn machine(r: &rusqlite::Row) -> rusqlite::Result<Machine> {
 }
 
 impl ScopeDb {
-    /// `scope`'s database with nothing in it yet, as of `now`.
     pub fn empty(scope: &Scope, now: u64) -> Result<ScopeDb> {
         Self::open(super::scope::empty(scope)?, now)
     }
@@ -108,17 +105,14 @@ impl ScopeDb {
         Ok(ScopeDb { db, now })
     }
 
-    /// The whole database, as a copy of it is kept.
     pub fn bytes(&mut self) -> Result<Vec<u8>> {
         Ok(self.db.serialize("main")?.to_vec())
     }
 
-    /// The time it answers `may` as of.
     pub fn now(&self) -> u64 {
         self.now
     }
 
-    /// Its connection, for reading it as it is.
     pub fn conn(&self) -> &Connection {
         &self.db
     }
@@ -137,8 +131,6 @@ impl ScopeDb {
             None
         })
     }
-
-    // Who may do what.
 
     /// Whether `user` may do `verb` to `object` (`object(scope)`, `group(id)`, `device(key)`, …). Unknown means no, and
     /// so does a database that can't answer.
@@ -205,7 +197,6 @@ impl ScopeDb {
         })
     }
 
-    /// Whether the device `key` runs `scope`'s calls.
     pub fn runs_for(&self, key: &Key, scope: &Scope) -> bool {
         self.device_may(key, "run", &object(scope))
     }
@@ -218,13 +209,11 @@ impl ScopeDb {
         })
     }
 
-    /// The scopes `user` may `verb`: `may` of every scope.
     pub fn may_scopes(&self, user: &str, verb: &str) -> Vec<Scope> {
         let may = self.objects(&person(user), verb);
         self.scopes().into_iter().filter(|s| permissions::allows(&may, &object(s))).collect()
     }
 
-    /// The scopes whose calls the device `key` runs: `runs_for` of every scope.
     pub fn run_by(&self, key: &Key) -> Vec<Scope> {
         let runs = self.objects(&device(key), "run");
         self.scopes().into_iter().filter(|s| permissions::allows(&runs, &object(s))).collect()
@@ -280,19 +269,14 @@ impl ScopeDb {
         self.computes().into_iter().filter(|c| c.user != user && self.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect()
     }
 
-    // Who's who.
-
-    /// The network's name.
     pub fn name(&self) -> String {
         self.row("SELECT name FROM network", [], |r| r.get(0)).unwrap_or_default()
     }
 
-    /// The network's root, its id.
     pub fn root(&self) -> Option<Hash> {
         self.row("SELECT root FROM network", [], |r| r.get::<_, Option<String>>(0)).flatten().and_then(|h| Hash::from_hex(&h).ok())
     }
 
-    /// When the network's devices last changed.
     pub fn devices_at(&self) -> u64 {
         self.row("SELECT devices_at FROM network", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as u64
     }
@@ -304,7 +288,6 @@ impl ScopeDb {
             .map(|(t, u)| (t as u64, id(&u)))
     }
 
-    /// The network's recovery key, and when it was set.
     pub fn recovery(&self) -> Option<Key> {
         self.row("SELECT key FROM recovery WHERE set_at IS NOT NULL ORDER BY n DESC LIMIT 1", [], |r| r.get::<_, String>(0)).map(|k| key(&k))
     }
@@ -367,7 +350,6 @@ impl ScopeDb {
         Some(Group { id: g.to_string(), name, handle, members, invited })
     }
 
-    /// A person's role in a group, if they're in it.
     pub fn group_role(&self, user: &str, g: &str) -> Option<Role> {
         self.row(
             "SELECT min(relation) FROM relations WHERE subject = ?1 AND object = ?2 AND relation IN ('admin', 'member') HAVING count(*) > 0",
@@ -377,7 +359,6 @@ impl ScopeDb {
         .map(|r| role_of(&r))
     }
 
-    /// The groups a person is in, with their role in each.
     pub fn groups_of(&self, user: &str) -> BTreeMap<String, Role> {
         self.rows(
             "SELECT object, min(relation) FROM relations WHERE subject = ?1 AND substr(object, 1, 6) = 'group:' AND relation IN ('admin', 'member') GROUP BY object",
@@ -450,8 +431,6 @@ impl ScopeDb {
         out
     }
 
-    // Devices.
-
     /// Every device ever listed, removed ones too, by key.
     pub fn machines(&self) -> Vec<Machine> {
         self.rows(&format!("{MACHINE} ORDER BY d.key"), [], machine)
@@ -467,7 +446,6 @@ impl ScopeDb {
         self.row(&format!("{MACHINE} WHERE d.key = ?1"), [hex(k)], machine)
     }
 
-    /// Every device of the network that does `kind`, by key.
     fn listed(&self, kind: Kind) -> Vec<Machine> {
         self.machines().into_iter().filter(|m| !m.removed && m.is(kind)).collect()
     }
@@ -482,7 +460,6 @@ impl ScopeDb {
         self.machine(k).filter(|m| m.is(Kind::Compute))
     }
 
-    /// A service endpoint.
     pub fn service(&self, k: &Key) -> Option<Machine> {
         self.machine(k).filter(|m| m.is(Kind::Service))
     }
@@ -508,7 +485,6 @@ impl ScopeDb {
         self.listed(Kind::Service).into_iter().filter(|m| m.service.as_deref() == Some(name)).collect()
     }
 
-    /// The key things are sealed to for a device of the network.
     pub fn seal_key(&self, k: &Key) -> Option<Key> {
         self.machine(k).map(|m| m.seal)
     }
@@ -536,19 +512,15 @@ impl ScopeDb {
         .collect()
     }
 
-    /// The latest switch of a part of a device, on or off.
     pub fn switch(&self, k: &Key, name: &str) -> Option<Switch> {
         self.switches().remove(&(*k, name.to_string()))
     }
-
-    // Keys.
 
     /// A scope's current epoch: 0 while it has none yet.
     pub fn epoch(&self, scope: &Scope) -> u32 {
         self.row("SELECT max(epoch) FROM epochs WHERE scope = ?1", [scope.to_string()], |r| r.get::<_, Option<u32>>(0)).flatten().unwrap_or(0)
     }
 
-    /// Each epoch's hash of a scope, by number.
     pub fn epoch_hashes(&self, scope: &Scope) -> BTreeMap<u32, String> {
         self.rows("SELECT epoch, key_hash FROM epochs WHERE scope = ?1", [scope.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).into_iter().collect()
     }
@@ -558,7 +530,6 @@ impl ScopeDb {
         self.row("SELECT key_hash FROM epochs WHERE scope = ?1 AND epoch = ?2", params![scope.to_string(), n], |r| r.get(0))
     }
 
-    /// Every scope with an epoch, and its current one.
     pub fn epochs(&self) -> BTreeMap<Scope, u32> {
         self.rows("SELECT scope, max(epoch) FROM epochs GROUP BY scope", [], |r| Ok((r.get::<_, String>(0)?, r.get(1)?)))
             .into_iter()
@@ -574,7 +545,6 @@ impl ScopeDb {
             .collect()
     }
 
-    /// Scopes that owe a new epoch.
     pub fn owed(&self) -> Vec<Scope> {
         self.rows("SELECT scope FROM owed", [], |r| r.get::<_, String>(0)).iter().filter_map(|s| Scope::parse(s).ok()).collect()
     }
@@ -601,20 +571,17 @@ impl ScopeDb {
         self.app_schedules().into_iter().filter(|((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.may(&g.by, "choose-devices", &object(s))).collect()
     }
 
-    /// A scope's current Vault key, if it has one.
     pub fn vault(&self, scope: &Scope) -> Option<VaultKey> {
         let (n, public) = self.row("SELECT n, public FROM vault WHERE scope = ?1 ORDER BY n DESC LIMIT 1", [scope.to_string()], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?;
         let to = self.rows("SELECT device FROM vault_opens WHERE scope = ?1", [scope.to_string()], |r| r.get::<_, String>(0)).iter().map(|k| key(k)).collect();
         Some(VaultKey { n, public: key(&public), to })
     }
 
-    /// Every scope with a Vault key.
     pub fn vaults(&self) -> BTreeMap<Scope, VaultKey> {
         let scopes = self.rows("SELECT DISTINCT scope FROM vault", [], |r| r.get::<_, String>(0));
         scopes.iter().filter_map(|s| Scope::parse(s).ok()).filter_map(|s| Some((s.clone(), self.vault(&s)?))).collect()
     }
 
-    /// A scope's Vault keys' public halves, by number.
     pub fn vault_publics(&self, scope: &Scope) -> BTreeMap<u32, Key> {
         self.rows("SELECT n, public FROM vault WHERE scope = ?1", [scope.to_string()], |r| Ok((r.get(0)?, key(&r.get::<_, String>(1)?)))).into_iter().collect()
     }
@@ -623,8 +590,6 @@ impl ScopeDb {
     pub fn opens_vault(&self, k: &Key, scope: &Scope) -> bool {
         self.vault(scope).is_some_and(|v| v.to.contains(k)) && self.machine(k).is_some()
     }
-
-    // Apps and settings.
 
     /// Every app ever made, erased ones too, by name.
     pub fn apps(&self) -> Vec<App> {
@@ -651,7 +616,6 @@ impl ScopeDb {
         Some(app)
     }
 
-    /// The network's settings its admins set: each name's latest value.
     pub fn settings(&self) -> BTreeMap<String, String> {
         self.rows("SELECT name, value FROM settings", [], |r| Ok((r.get(0)?, r.get(1)?))).into_iter().collect()
     }
@@ -660,9 +624,6 @@ impl ScopeDb {
         self.row("SELECT value FROM settings WHERE name = ?1", [name], |r| r.get(0))
     }
 
-    // A scope's own.
-
-    /// The apps installed in this scope.
     pub fn installed(&self) -> BTreeSet<String> {
         self.rows("SELECT app FROM installs WHERE installed = 1", [], |r| r.get(0)).into_iter().collect()
     }
@@ -683,12 +644,10 @@ impl ScopeDb {
         named || self.row("SELECT 1 FROM deploys WHERE bundle = ?1", [blob], |_| Ok(())).is_some()
     }
 
-    /// Every blob the scope still needs (`names_blob`).
     pub fn blobs(&self) -> BTreeSet<String> {
         self.rows("SELECT blob FROM blobs WHERE pinned OR blob NOT IN (SELECT blob FROM forgotten) UNION SELECT bundle FROM deploys", [], |r| r.get(0)).into_iter().collect()
     }
 
-    /// A scope's own state, as its own tables keep it: what its steps made of it.
     pub fn state(&self) -> ScopeState {
         let mut s = ScopeState::default();
         for (app, installed, by, at) in self.rows("SELECT app, installed, installed_by, installed_at FROM installs", [], |r| {
@@ -736,8 +695,6 @@ impl ScopeDb {
     }
 }
 
-// Who's who, as a device reads it, and what names and lists a step may give.
-
 /// The node's own steps and databases. Apps never see them.
 pub const APP: &str = "node";
 /// The setting that names the Cloudflare node's endpoint (its key, hex).
@@ -763,7 +720,6 @@ pub enum Role {
 pub enum Principal {
     User(String),
     Group(String),
-    /// The network's admins.
     Admins,
 }
 
@@ -1078,7 +1034,6 @@ impl std::fmt::Display for Scope {
     }
 }
 
-/// User and group ids: 16 random hex characters.
 pub fn is_id(s: &str) -> bool {
     s.len() == 16 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }

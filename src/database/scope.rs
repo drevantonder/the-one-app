@@ -212,27 +212,22 @@ CREATE TABLE releases (
 ) STRICT;
 ";
 
-/// A person, as the scope database names them.
 pub fn person(id: &str) -> String {
     format!("person:{id}")
 }
 
-/// A group, as the scope database names it.
 pub fn group(id: &str) -> String {
     format!("group:{id}")
 }
 
-/// A device, as an object or subject of permissions.
 pub fn device(key: &Key) -> String {
     format!("device:{}", hex(key))
 }
 
-/// A service endpoint, as an object of permissions.
 pub fn service(key: &Key) -> String {
     format!("service:{}", hex(key))
 }
 
-/// An app, as an object of permissions.
 pub fn app(name: &str) -> String {
     format!("app:{name}")
 }
@@ -246,7 +241,6 @@ pub fn object(scope: &Scope) -> String {
     }
 }
 
-/// A role in the network or a group, as `permissions` names it.
 pub fn role(r: Role) -> &'static str {
     match r {
         Role::Admin => "admin",
@@ -254,7 +248,6 @@ pub fn role(r: Role) -> &'static str {
     }
 }
 
-/// An app's owner, as the scope database names it.
 pub fn owner(p: &Principal) -> String {
     match p {
         Principal::User(id) => person(id),

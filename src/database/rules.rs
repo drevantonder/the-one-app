@@ -101,13 +101,11 @@ pub fn first(out: &Connection, root: Hash, data: &Value, now: u64) -> Result<()>
     out.execute("INSERT INTO recovery VALUES (0, ?, ?)", params![hex(&unhex(&text("recovery")?)?), time])?;
     add_person(out, &user, &text("user_name")?, Role::Admin)?;
     put(out, &machine)?;
-    // `global`'s first epoch, made with the network, before anything is sealed under it.
     out.execute("INSERT INTO epochs VALUES ('global', 1, ?)", [&hash])?;
     out.execute("INSERT INTO sealed VALUES ('global', 1, ?)", [hex(&machine.key)])?;
     Ok(())
 }
 
-/// One of `global`'s own steps, being applied.
 struct Change<'a> {
     who: &'a ScopeDb,
     out: &'a Connection,
@@ -147,7 +145,6 @@ impl Change<'_> {
         self.who.may(self.w, verb, object)
     }
 
-    /// Whether the writer may make `object`, new, with its first row `(subject, relation, object)` (`permissions::may_make`).
     fn may_make(&self, verb: &str, container: &str, subject: &str, relation: &str, object: &str) -> bool {
         crate::permissions::may_make(self.who.conn(), &person(self.w), verb, container, subject, relation, object, self.who.now()).unwrap_or(false)
     }
@@ -162,7 +159,6 @@ impl Change<'_> {
         Ok(())
     }
 
-    /// That `scope` owes a new epoch, if it has one to follow.
     fn owe(&self, scope: &Scope) -> Result<()> {
         if self.who.epoch(scope) > 0 {
             self.out.execute("INSERT OR IGNORE INTO owed VALUES (?)", [scope.to_string()])?;
@@ -383,7 +379,6 @@ impl Change<'_> {
         Ok(())
     }
 
-    /// Taking up an invite: the role it gave.
     fn accept(&self) -> Result<()> {
         let g = self.id("group")?;
         let invited = self.who.group(&g).context("no such group")?.invited.get(self.w).copied().context("not invited")?;
@@ -415,7 +410,6 @@ impl Change<'_> {
         set_role(self.out, &person(&user), &group(&g), to)
     }
 
-    /// A device's, person's or group's name, or a person's or group's handle: by who may `rename` it.
     fn rename(&self) -> Result<()> {
         let (it, row) = if let Ok(key) = self.key("key") {
             self.who.machine(&key).context("no such key")?;
@@ -429,7 +423,6 @@ impl Change<'_> {
             (group(&g), Some(Principal::Group(g)))
         };
         ensure!(self.may("rename", &it), crate::protocol::Coded::refused("not allowed to rename that"));
-        // A person's or group's handle: one that's taken (wherever it sorts) or malformed doesn't count.
         if let Some(handle) = self.data.get("handle") {
             let handle = handle.as_str().context("a handle is text")?;
             ensure!(valid_handle(handle), "a handle is lowercase letters, digits and single hyphens, up to 39, like {}", handle_from(handle, "name"));
@@ -633,7 +626,6 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
     Ok(())
 }
 
-/// Someone new in the network, with their role in it.
 fn add_person(out: &Connection, user: &str, name: &str, r: Role) -> Result<()> {
     out.execute("INSERT INTO principals VALUES (?, 'person', ?, ?, 0)", params![person(user), name, pick_handle(out, name, "person")?])?;
     set_role(out, &person(user), NETWORK, Some(r))
@@ -664,7 +656,6 @@ fn pick_handle(out: &Connection, name: &str, fallback: &str) -> Result<String> {
     unreachable!()
 }
 
-/// A device as it's listed, in place of how it was.
 fn put(out: &Connection, d: &Machine) -> Result<()> {
     out.execute(
         "INSERT OR REPLACE INTO devices VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -689,14 +680,12 @@ fn put(out: &Connection, d: &Machine) -> Result<()> {
     Ok(())
 }
 
-/// The `hash` an `epoch` step (or `epoch`, a new network's first, `content::first`) names its key by: `keys::epoch_hash`, 64 hex characters.
 fn epoch_hash_of(hash: &Value) -> Result<String> {
     let hash = hash.as_str().context("an epoch names its key's hash")?;
     ensure!(hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "an epoch's hash is 64 hex characters");
     Ok(hash.to_string())
 }
 
-/// A device as a `device` step (or a new network's first, `content::first`) lists it, for `user`, by them.
 fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
     let text = |key: &str| data[key].as_str().with_context(|| format!("no {key}"));
     let roles: BTreeSet<Kind> = serde_json::from_value(data["roles"].clone()).context("roles are client, compute or service")?;
@@ -744,7 +733,6 @@ mod tests {
     const BOTH: &[Kind] = &[Kind::Client, Kind::Compute];
     const H: &str = "e";
 
-    /// A device, writing steps.
     struct Dev(SigningKey);
 
     impl Dev {
@@ -792,7 +780,6 @@ mod tests {
         }
     }
 
-    /// Andre's network, his mac a client and node.
     fn setup() -> (Dev, Net) {
         let mac = Dev::new(1);
         let net = Net::new(&mac, BOTH, &[7; 32]);

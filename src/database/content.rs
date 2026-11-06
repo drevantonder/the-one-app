@@ -63,12 +63,10 @@ pub fn role(user: &str, role: Role) -> Content {
     node("role", json!({ "user": user, "role": role }))
 }
 
-/// Takes a person out.
 pub fn remove_user(user: &str) -> Content {
     node("remove", json!({ "user": user }))
 }
 
-/// Takes a device out.
 pub fn remove_device(key: &Key) -> Content {
     node("remove", json!({ "key": hex(key) }))
 }
