@@ -3,6 +3,27 @@
 
 use super::*;
 
+/// What databases keep while the node runs.
+#[derive(Default)]
+pub(super) struct State {
+    /// Each database of each scope, by its app and name (`tally/main`), as this device last read it.
+    dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
+    /// The databases another device said it wrote whose step isn't in this device's copy yet, which a read catches up
+    /// from the bucket.
+    pub(super) behind: Mutex<std::collections::HashSet<(Scope, String)>>,
+    /// Each scope's epochs this device opens, by number, once it has looked.
+    pub(super) epochs: Mutex<HashMap<Scope, crate::database::stored::Keys>>,
+    /// Each database's keys by epoch as this device opens them (`database_keys`), with the newest epoch they're as of.
+    database_keys: Mutex<HashMap<(Scope, String), (u32, crate::database::stored::Keys)>>,
+    /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
+    junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
+    /// When this device last tidied each database (by prefix), ms.
+    tidied: Mutex<HashMap<String, u64>>,
+    /// The newest hint each database's last write wants moved on to, by its prefix, while one is waiting its turn
+    /// (`hint_after`): (last step, newest copy, its epoch).
+    hints: Mutex<HashMap<String, (u64, u64, u32)>>,
+}
+
 /// How many times a database is opened again after finding junk or a newer epoch before it gives up.
 const TRIES: usize = 20;
 /// How often each database open here is tidied (`stored::tidy`).
@@ -59,7 +80,7 @@ impl Node {
         let epochs = self.epoch_keys(scope, make).await?;
         let newest = epochs.keys().next_back().copied().unwrap_or(0);
         let id = (scope.clone(), format!("{app}/{database}"));
-        if let Some((n, keys)) = self.0.database_keys.lock().unwrap().get(&id)
+        if let Some((n, keys)) = self.0.databases.database_keys.lock().unwrap().get(&id)
             && *n == newest
         {
             return Ok(keys.clone());
@@ -71,7 +92,7 @@ impl Node {
                 out.insert(*n, crate::cloudflare::database_key(&app_key, database));
             }
         }
-        self.0.database_keys.lock().unwrap().insert(id, (newest, out.clone()));
+        self.0.databases.database_keys.lock().unwrap().insert(id, (newest, out.clone()));
         Ok(out)
     }
 
@@ -89,14 +110,14 @@ impl Node {
             bail!(NotGiven(scope.clone(), self.device_name()));
         }
         ensure!(keys.contains_key(&newest), NotGiven(scope.clone(), self.device_name()));
-        self.0.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
+        self.0.databases.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
         Ok(keys)
     }
 
     /// The epochs of a scope this device opens, as `epoch_keys` finds them, even while it wasn't given the newest (as
     /// between its own new epoch's entry and its seals), and the newest's number: 0 for none.
     pub(super) async fn epochs_held(&self, scope: &Scope) -> Result<(crate::database::stored::Keys, u32)> {
-        let kept = self.0.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
+        let kept = self.0.databases.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
         // Before this device has read `global`'s freeze, those it was given as it made the network, or checked against
         // the steps as it first read them (`first_global_read`): what it reads the freeze with.
         if *scope == Scope::Global && !self.frozen() {
@@ -137,8 +158,8 @@ impl Node {
     /// Forgets the epochs this device knows of a scope, so the next use looks in the bucket for newer ones: after a
     /// step under one it wasn't given.
     pub(super) fn forget_epochs(&self, scope: &Scope) {
-        self.0.epochs.lock().unwrap().remove(scope);
-        self.0.database_keys.lock().unwrap().retain(|(s, _), _| s != scope);
+        self.0.databases.epochs.lock().unwrap().remove(scope);
+        self.0.databases.database_keys.lock().unwrap().retain(|(s, _), _| s != scope);
     }
 
     /// `global`'s epochs, for a device that has read nothing of who's who yet, so knows no epoch's hash: those sealed
@@ -180,7 +201,7 @@ impl Node {
             let hashes = who.epoch_hashes(&Scope::Global);
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| hashes.get(*n) != Some(&crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
-                self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
+                self.0.databases.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
                 return Ok(candidates);
             }
             tracing::warn!("global's epochs {wrong:?} sealed to {} aren't the keys who's who made: passed over", self.device_name());
@@ -229,7 +250,7 @@ impl Node {
         }
         tracing::info!("made {scope}'s first epoch");
         let keys = crate::database::stored::Keys::from([(1, key)]);
-        self.0.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
+        self.0.databases.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
         Ok(keys)
     }
 
@@ -249,7 +270,7 @@ impl Node {
     pub(super) fn seal_epochs(&self) {
         let node = self.clone();
         tokio::spawn(async move {
-            let known: Vec<(Scope, crate::database::stored::Keys)> = node.0.epochs.lock().unwrap().iter().map(|(s, k)| (s.clone(), k.clone())).collect();
+            let known: Vec<(Scope, crate::database::stored::Keys)> = node.0.databases.epochs.lock().unwrap().iter().map(|(s, k)| (s.clone(), k.clone())).collect();
             for (scope, keys) in known {
                 if let Err(err) = node.seal_epoch(&scope, &keys).await {
                     tracing::warn!("sealing {scope}'s epochs: {err:#}");
@@ -278,7 +299,7 @@ impl Node {
     /// step isn't here yet is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,
     /// never wrong.
     pub(super) async fn read_ready(&self, id: &(Scope, String), db: &mut Db, bucket: &Copied) -> Result<()> {
-        if self.0.behind.lock().unwrap().remove(id) {
+        if self.0.databases.behind.lock().unwrap().remove(id) {
             // A notice said another device wrote it: the bucket is asked first, for what that write was.
             let started = Instant::now();
             let result = match tokio::time::timeout(BUCKET_WAIT, db.catch_up(bucket)).await {
@@ -344,7 +365,7 @@ impl Node {
     /// bucket about it once or twice. A hint that fails is the next write's to make.
     fn hint_after(&self, bucket: Copied, (prefix, at, copy, epoch): (String, u64, u64, u32)) {
         let waiting = {
-            let mut hints = self.0.hints.lock().unwrap();
+            let mut hints = self.0.databases.hints.lock().unwrap();
             hints.insert(prefix.clone(), (at, copy, epoch)).is_some()
         };
         if waiting {
@@ -353,11 +374,11 @@ impl Node {
         let node = self.clone();
         tokio::spawn(async move {
             loop {
-                let Some((at, copy, epoch)) = node.0.hints.lock().unwrap().get(&prefix).copied() else { return };
+                let Some((at, copy, epoch)) = node.0.databases.hints.lock().unwrap().get(&prefix).copied() else { return };
                 if let Err(err) = crate::database::stored::hint(&bucket, &prefix, at, copy, epoch).await {
                     tracing::debug!("{prefix}'s hint: {err:#}");
                 }
-                let mut hints = node.0.hints.lock().unwrap();
+                let mut hints = node.0.databases.hints.lock().unwrap();
                 if hints.get(&prefix) == Some(&(at, copy, epoch)) {
                     hints.remove(&prefix);
                     return;
@@ -382,7 +403,7 @@ impl Node {
             return Ok(true);
         }
         tracing::warn!("{prefix}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);
-        self.0.junk.lock().unwrap().entry(prefix.to_string()).or_default().insert(ahead.at);
+        self.0.databases.junk.lock().unwrap().entry(prefix.to_string()).or_default().insert(ahead.at);
         Ok(false)
     }
 
@@ -411,11 +432,11 @@ impl Node {
         let now = now_ms();
         for (_, db) in self.open_dbs() {
             let Ok((prefix, keys)) = db.try_lock().map(|db| (db.prefix().to_string(), db.keys().clone())) else { continue };
-            if self.0.tidied.lock().unwrap().get(&prefix).is_some_and(|t| now < t + TIDY_EVERY) {
+            if self.0.databases.tidied.lock().unwrap().get(&prefix).is_some_and(|t| now < t + TIDY_EVERY) {
                 continue;
             }
-            self.0.tidied.lock().unwrap().insert(prefix.clone(), now);
-            let junk = self.0.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
+            self.0.databases.tidied.lock().unwrap().insert(prefix.clone(), now);
+            let junk = self.0.databases.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
             match crate::database::stored::tidy(&bucket, &prefix, &keys, &junk, now).await {
                 Ok(0) => {}
                 Ok(n) => tracing::info!("{prefix}: deleted {n} objects no reader needs"),
@@ -427,7 +448,7 @@ impl Node {
     /// Every database open here, by (scope, `app/database`): with this device's own keys, and with keys calls were
     /// handed.
     pub(super) fn open_dbs(&self) -> Vec<((Scope, String), Arc<tokio::sync::Mutex<Db>>)> {
-        let mut open: Vec<_> = self.0.dbs.lock().unwrap().iter().map(|(id, db)| (id.clone(), db.clone())).collect();
+        let mut open: Vec<_> = self.0.databases.dbs.lock().unwrap().iter().map(|(id, db)| (id.clone(), db.clone())).collect();
         open.extend(self.0.sessions.opened.lock().unwrap().iter().flat_map(|(id, all)| all.iter().map(|o| (id.clone(), o.db.clone()))));
         open
     }
@@ -435,7 +456,7 @@ impl Node {
     /// Forgets the open databases `close` names, by scope and `app/database`, whichever keys opened them: read again
     /// when next used.
     pub(super) fn close_dbs(&self, close: impl Fn(&Scope, &str) -> bool) {
-        self.0.dbs.lock().unwrap().retain(|(scope, db), _| !close(scope, db));
+        self.0.databases.dbs.lock().unwrap().retain(|(scope, db), _| !close(scope, db));
         self.0.sessions.opened.lock().unwrap().retain(|(scope, db), _| !close(scope, db));
     }
 
@@ -462,7 +483,7 @@ impl Node {
         };
         let id = (scope.clone(), format!("{app}/{database}"));
         let handed = (!own).then(|| self.opened_with(&id, &keys, until)).flatten();
-        let cached = self.0.dbs.lock().unwrap().get(&id).cloned();
+        let cached = self.0.databases.dbs.lock().unwrap().get(&id).cloned();
         for db in handed.into_iter().chain(cached) {
             let mut open = db.lock().await;
             if open.opens_for(&keys) {
@@ -485,7 +506,7 @@ impl Node {
         let (mut keys, mut tries) = (keys, 0);
         let mut db = loop {
             tries += 1;
-            let junk = self.0.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
+            let junk = self.0.databases.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
             let err = match Db::open_passing(&bucket, &prefix, keys.clone(), junk).await {
                 Ok(db) => break db,
                 Err(err) if tries > TRIES => return Err(err),
@@ -513,7 +534,7 @@ impl Node {
             self.keep_opened(id, keys, until, app_schedules, db.clone());
             return Ok(db);
         }
-        let mut dbs = self.0.dbs.lock().unwrap();
+        let mut dbs = self.0.databases.dbs.lock().unwrap();
         match dbs.get(&id) {
             Some(open) if open.try_lock().is_ok_and(|d| d.opens_for(&keys) && d.keys().last_key_value() == keys.last_key_value()) => Ok(open.clone()),
             _ => Ok(dbs.entry(id).insert_entry(db).get().clone()),
@@ -525,7 +546,7 @@ impl Node {
     pub(super) async fn destroy_keys(&self, app: &str) -> Result<()> {
         let bucket = self.bucket()?;
         self.close_dbs(|_, db| db.split('/').next() == Some(app));
-        self.0.database_keys.lock().unwrap().retain(|(_, db), _| db.split('/').next() != Some(app));
+        self.0.databases.database_keys.lock().unwrap().retain(|(_, db), _| db.split('/').next() != Some(app));
         for folder in bucket.folders()? {
             bucket.forget(&format!("{folder}/{app}"))?;
         }

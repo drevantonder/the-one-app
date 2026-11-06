@@ -64,14 +64,6 @@ pub mod widgets;
 
 /// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);
-/// A service's call may take longer, as a browser or a desktop starts: as long as a service is waited for.
-const SERVICE_LIMIT: Duration = Duration::from_secs(600);
-/// How much longer a call may take for each MiB put for it (a git push's pack), which it reads and may keep in the bucket.
-const PER_MIB: Duration = Duration::from_secs(1);
-/// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
-pub const MAX_DEPTH: u32 = 3;
-/// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
-pub const RATE_LIMIT: u32 = 600;
 /// A device whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
 const FAR: Duration = Duration::from_millis(250);
 
@@ -81,24 +73,10 @@ fn full(load: &crate::load::Load) -> bool {
     load.memory.is_some_and(|m| m.total > 0 && m.used * 10 > m.total * 9) || busy > 90
 }
 
-/// How long an app that looped stays stopped on a device, unless it's deployed again sooner.
-const STOPPED_FOR: u64 = 15 * 60_000;
 /// How often a device reads what other devices wrote and said.
 const TICK: Duration = Duration::from_secs(10);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
-/// The largest step a notice carries: a bigger one, the devices it tells read from the bucket.
-const SENT_STEP: usize = 1 << 20;
-/// How long a blob a scope forgot stays in the bucket, in case an entry another device wrote names it again.
-const FORGOTTEN_KEPT: Duration = Duration::from_secs(600);
-/// How long a call's work may carry on after it returns (`ctx.waitUntil`).
-const LATER_LIMIT: Duration = Duration::from_secs(600);
-/// How many of an app's failures a device records an hour; the rest are only counted on the next hour's.
-const FAILURES_KEPT: u32 = 30;
-/// How long a request for an item waits for its answer.
-const REQUEST_LIFE: u64 = 86_400_000;
-/// How long an app's page says a deploy changed or removed one of its schedules.
-const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 /// The object in a network's bucket that says whose it is: the network's root.
 const NETWORK_OBJECT: &str = "network";
 
@@ -226,7 +204,6 @@ struct Pairing {
 /// What a machine's node is: the device its person's CLI, MCP and Mac app sign with, and compute.
 pub const MACHINE: &[scopes::Kind] = &[scopes::Kind::Client, scopes::Kind::Compute];
 
-const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
 #[derive(Serialize, Deserialize)]
 struct PairingCode {
@@ -440,31 +417,16 @@ pub struct Inner {
     logos: crate::logos::Logos,
     /// The calls, widgets and hooks running now, by the token their requests carry.
     grants: Mutex<HashMap<String, Grant>>,
-    /// The blobs sign-ins put here (their files in an MCP answer, say), by hash: for whom, so they may read them back.
-    put_by: Mutex<HashMap<String, std::collections::HashSet<String>>>,
-    /// The files put from elsewhere this last hour, which count against their person's room (`put_blob_from`).
-    remote_puts: Mutex<Vec<blobs::RemotePut>>,
     /// The port apps' requests go out through.
     outbound: u16,
-    /// What each app did in its last minute, and the apps stopped here for looping.
-    guard: Mutex<Guard>,
-    /// The calls that returned with work still running (`ctx.waitUntil`), by token: told when it's done.
-    later: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
-    /// Who used which app today from which client, as recorded here: (app, user, client, day).
-    seen: Mutex<std::collections::HashSet<(String, String, String, u64)>>,
-    /// How many failures of each app were recorded here each hour.
-    failures: Mutex<HashMap<(String, u64), u32>>,
+    /// What calls keep while the node runs.
+    calls: calls::State,
     /// What backups keep while the node runs.
     backups: backups::State,
-    /// Each database of each scope, by its app and name (`tally/main`), as this device last read it.
-    dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
-    /// The databases another device said it wrote whose step isn't in this device's copy yet, which a read catches up
-    /// from the bucket.
-    behind: Mutex<std::collections::HashSet<(Scope, String)>>,
-    /// Each scope's epochs this device opens, by number, once it has looked.
-    epochs: Mutex<HashMap<Scope, crate::database::stored::Keys>>,
-    /// Each database's keys by epoch as this device opens them (`database_keys`), with the newest epoch they're as of.
-    database_keys: Mutex<HashMap<(Scope, String), (u32, crate::database::stored::Keys)>>,
+    /// What blobs keep while the node runs.
+    blobs: blobs::State,
+    /// What databases keep while the node runs.
+    databases: databases::State,
     /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
     sent: Mutex<Option<Vec<sync::Sent>>>,
     /// Whether this device is moving to the network's new storage now.
@@ -478,23 +440,8 @@ pub struct Inner {
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
     /// Held while this device makes a scope's first epoch.
     making_keys: tokio::sync::Mutex<()>,
-    /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
-    junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
-    /// When this device last tidied each database (by prefix), ms.
-    tidied: Mutex<HashMap<String, u64>>,
-    /// The blobs this device has put in the bucket, as `<scope> <hash>`, kept in `network/shared` too.
-    shared: Mutex<std::collections::HashSet<String>>,
-    /// The blobs of entries this device wrote that the bucket didn't take then, tried again each minute.
-    unshared: Mutex<Vec<(Scope, String)>>,
-    /// `<scope> <hash>` of blobs a call put in the bucket before writing the steps that keep them, which don't again.
-    put_first: Mutex<std::collections::HashSet<String>>,
-    /// The newest hint each database's last write wants moved on to, by its prefix, while one is waiting its turn
-    /// (`hint_after`): (last step, newest copy, its epoch).
-    hints: Mutex<HashMap<String, (u64, u64, u32)>>,
     /// Requests to join, by their device's key, that their person said weren't theirs, not shown again while it runs.
     refused: Mutex<std::collections::HashSet<String>>,
-    /// Held while `network/forgotten` changes.
-    forgotten: Mutex<()>,
     /// What the vault gave this device for the sign-ins its calls came with.
     sessions: sessions::Sessions,
     /// Apps whose deploy doesn't start here, by the bundle that didn't: left out until they're deployed again.
@@ -517,17 +464,6 @@ pub struct Inner {
 
 /// Set once this process's node is handing over to the next: it opens nothing only one of them may hold.
 static HANDING_OVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
-/// device is stopped here for `STOPPED_FOR`, or until it's deployed again.
-#[derive(Default)]
-struct Guard {
-    /// Each app's calls or runs since the minute it started counting (milliseconds): a minute from its first, not
-    /// the clock's, so a loop that runs across the turn of a minute is still caught.
-    counts: HashMap<(String, &'static str), (u64, u32)>,
-    /// Each app stopped here: why, until when, and the bundle it was running.
-    stopped: HashMap<String, (String, u64, Option<String>)>,
-}
 
 /// What a running call may do through the node: whose it is, which app's, and which scopes it reaches.
 #[derive(Clone, Debug)]
@@ -601,32 +537,18 @@ impl Node {
             named_images: Mutex::new(HashMap::new()),
             logos: crate::logos::Logos::open(dir),
             grants: Mutex::new(HashMap::new()),
-            put_by: Mutex::new(HashMap::new()),
-            remote_puts: Mutex::new(Vec::new()),
             outbound: outbound.local_addr()?.port(),
-            guard: Mutex::new(Guard::default()),
-            later: Mutex::new(HashMap::new()),
-            seen: Mutex::new(Default::default()),
-            failures: Mutex::new(HashMap::new()),
+            calls: Default::default(),
             backups: Default::default(),
-            dbs: Mutex::new(HashMap::new()),
-            behind: Mutex::new(Default::default()),
-            epochs: Mutex::new(HashMap::new()),
-            database_keys: Mutex::new(HashMap::new()),
+            blobs: Default::default(),
+            databases: Default::default(),
             sent: Mutex::new(None),
             moving: Mutex::new(false),
             recovery_told: Mutex::new(Default::default()),
             caught_up: tokio::sync::Mutex::new(None),
             moved: Arc::default(),
             making_keys: tokio::sync::Mutex::new(()),
-            junk: Mutex::new(HashMap::new()),
-            tidied: Mutex::new(HashMap::new()),
-            shared: Mutex::new(Default::default()),
-            unshared: Mutex::new(Vec::new()),
-            put_first: Mutex::new(Default::default()),
-            hints: Mutex::new(HashMap::new()),
             refused: Mutex::default(),
-            forgotten: Mutex::new(()),
             sessions: Default::default(),
             broken: Default::default(),
             app_schedules: Default::default(),
@@ -883,7 +805,7 @@ impl Node {
         for (to, seal) in [("recovery".to_string(), recovery_seal), (hex(&me.key), me.seal)] {
             crate::database::stored::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::cloudflare::seal_to(&seal, &global)?).await?;
         }
-        self.0.epochs.lock().unwrap().insert(Scope::Global, crate::database::stored::Keys::from([(1, global)]));
+        self.0.databases.epochs.lock().unwrap().insert(Scope::Global, crate::database::stored::Keys::from([(1, global)]));
         // Who's who, as the freeze its recovery key signs at step 1 of its scope database.
         let keys = self.step_keys(&Scope::Global).await?;
         self.with(|i| {

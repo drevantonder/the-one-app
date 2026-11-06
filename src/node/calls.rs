@@ -12,6 +12,45 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
 
+/// A service's call may take longer, as a browser or a desktop starts: as long as a service is waited for.
+const SERVICE_LIMIT: Duration = Duration::from_secs(600);
+/// How much longer a call may take for each MiB put for it (a git push's pack), which it reads and may keep in the bucket.
+const PER_MIB: Duration = Duration::from_secs(1);
+/// How long an app that looped stays stopped on a device, unless it's deployed again sooner.
+const STOPPED_FOR: u64 = 15 * 60_000;
+/// How long a call's work may carry on after it returns (`ctx.waitUntil`).
+const LATER_LIMIT: Duration = Duration::from_secs(600);
+/// How many of an app's failures a device records an hour; the rest are only counted on the next hour's.
+const FAILURES_KEPT: u32 = 30;
+/// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
+pub const MAX_DEPTH: u32 = 3;
+/// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
+pub const RATE_LIMIT: u32 = 600;
+
+/// What calls keep while the node runs.
+#[derive(Default)]
+pub(super) struct State {
+    /// What each app did in its last minute, and the apps stopped here for looping.
+    guard: Mutex<Guard>,
+    /// The calls that returned with work still running (`ctx.waitUntil`), by token: told when it's done.
+    later: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+    /// Who used which app today from which client, as recorded here: (app, user, client, day).
+    seen: Mutex<std::collections::HashSet<(String, String, String, u64)>>,
+    /// How many failures of each app were recorded here each hour.
+    failures: Mutex<HashMap<(String, u64), u32>>,
+}
+
+/// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
+/// device is stopped here for `STOPPED_FOR`, or until it's deployed again.
+#[derive(Default)]
+struct Guard {
+    /// Each app's calls or runs since the minute it started counting (milliseconds): a minute from its first, not
+    /// the clock's, so a loop that runs across the turn of a minute is still caught.
+    counts: HashMap<(String, &'static str), (u64, u32)>,
+    /// Each app stopped here: why, until when, and the bundle it was running.
+    stopped: HashMap<String, (String, u64, Option<String>)>,
+}
+
 /// How long an app's prompt hook may take before it's left out: the agent's harness waits for them all.
 const PROMPT_LIMIT: Duration = Duration::from_secs(2);
 /// How many times a call that writes is tried with one id, each after the one before failed having written nothing.
@@ -435,7 +474,7 @@ impl Node {
         for (hash, data) in blobs {
             let bytes = data_encoding::BASE64.decode(data.as_str().context("a file a call came with is base64")?.as_bytes())?;
             ensure!(self.put_blob(&bytes)? == *hash, "a file a call came with isn't the one it names");
-            self.0.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(me.user.clone());
+            self.0.blobs.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(me.user.clone());
             puts.push(hash.clone());
         }
         Ok(puts)
@@ -642,14 +681,14 @@ impl Node {
         let said = match error {
             None => {
                 let day = now / 86_400_000;
-                if !self.0.seen.lock().unwrap().insert((app.to_string(), me.user.clone(), client.clone(), day)) {
+                if !self.0.calls.seen.lock().unwrap().insert((app.to_string(), me.user.clone(), client.clone(), day)) {
                     return;
                 }
                 status::Said::Used { app: app.into(), user: me.user.clone(), client, agent: me.agent.clone(), day }
             }
             Some(error) => {
                 let hour = now / 3_600_000;
-                let mut failures = self.0.failures.lock().unwrap();
+                let mut failures = self.0.calls.failures.lock().unwrap();
                 let n = failures.entry((app.to_string(), hour)).or_default();
                 *n += 1;
                 if *n > FAILURES_KEPT {
@@ -800,7 +839,7 @@ impl Node {
     pub(super) async fn write_prepared(&self, app: &str, prepared: Prepared, scopes: &[Scope], me: &Caller) -> Result<()> {
         let Prepared { statements, mut writes, items, installs, put } = prepared;
         // The blobs it put in the bucket aren't put again by the steps that keep them.
-        self.0.put_first.lock().unwrap().extend(put.iter().cloned());
+        self.0.blobs.put_first.lock().unwrap().extend(put.iter().cloned());
         let wrote = async {
             let wrote = !statements.is_empty();
             for (scope, list, kept) in statements {
@@ -836,7 +875,7 @@ impl Node {
             Ok(())
         }
         .await;
-        let mut first = self.0.put_first.lock().unwrap();
+        let mut first = self.0.blobs.put_first.lock().unwrap();
         for p in &put {
             first.remove(p);
         }
@@ -848,11 +887,11 @@ impl Node {
     /// `LATER_LIMIT` at most.
     pub(super) fn keep_for_later(&self, granted: Granted) {
         let done = Arc::new(tokio::sync::Notify::new());
-        self.0.later.lock().unwrap().insert(granted.1.clone(), done.clone());
+        self.0.calls.later.lock().unwrap().insert(granted.1.clone(), done.clone());
         let node = self.clone();
         tokio::spawn(async move {
             let _ = tokio::time::timeout(LATER_LIMIT, done.notified()).await;
-            node.0.later.lock().unwrap().remove(&granted.1);
+            node.0.calls.later.lock().unwrap().remove(&granted.1);
             drop(granted);
         });
     }
@@ -973,7 +1012,7 @@ impl Node {
     pub(super) async fn count(&self, app: &str, kind: &'static str) -> Result<()> {
         let now = now_ms();
         let tripped = {
-            let mut g = self.0.guard.lock().unwrap();
+            let mut g = self.0.calls.guard.lock().unwrap();
             let (since, n) = g.counts.entry((app.to_string(), kind)).or_insert((now, 0));
             if now.saturating_sub(*since) >= 60_000 {
                 (*since, *n) = (now, 0);
@@ -985,7 +1024,7 @@ impl Node {
             let what = if kind == "call" { "called other apps" } else { "ran its schedules" };
             let why = format!("{} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.title(app).await, self.device_name(), STOPPED_FOR / 60_000);
             let bundle = self.with(|i| Ok(i.r.db().app(app).and_then(|a| a.bundle.clone()))).ok().flatten();
-            self.0.guard.lock().unwrap().stopped.insert(app.to_string(), (why.clone(), now_ms() + STOPPED_FOR, bundle));
+            self.0.calls.guard.lock().unwrap().stopped.insert(app.to_string(), (why.clone(), now_ms() + STOPPED_FOR, bundle));
             tracing::warn!("{why}");
         }
         match self.stopped(app) {
@@ -997,7 +1036,7 @@ impl Node {
     /// Why `app` is stopped here, if it is: it looped, and hasn't been deployed again or waited out its time since.
     pub(super) fn stopped(&self, app: &str) -> Option<String> {
         let latest = self.with(|i| Ok(i.r.db().app(app).and_then(|a| a.bundle.clone()))).ok().flatten();
-        let mut g = self.0.guard.lock().unwrap();
+        let mut g = self.0.calls.guard.lock().unwrap();
         let (why, until, bundle) = g.stopped.get(app)?;
         if now_ms() < *until && *bundle == latest {
             return Some(why.clone());
@@ -1165,7 +1204,7 @@ impl Node {
                     g.puts.push(hash.clone());
                     // Someone not of this machine's own programs reads back what their call put, as what they put.
                     if g.caller.token.is_some() {
-                        self.0.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(g.caller.user.clone());
+                        self.0.blobs.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(g.caller.user.clone());
                     }
                 }
                 ok(json!({ "blob": hash }))
@@ -1180,7 +1219,7 @@ impl Node {
                 self.blob(hash).await?.into_response()
             }
             ("POST", "/appends") => {
-                ensure!(self.0.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
+                ensure!(self.0.calls.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
                 let req: Value = serde_json::from_slice(&body)?;
                 let appends = crate::call::appends(&req["appends"])?;
                 self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller, grant.from.as_deref()).await?;
@@ -1191,7 +1230,7 @@ impl Node {
                 if let Some(err) = req["error"].as_str() {
                     tracing::warn!("{}'s work after a call failed: {err}", grant.app);
                 }
-                if let Some(done) = self.0.later.lock().unwrap().remove(token) {
+                if let Some(done) = self.0.calls.later.lock().unwrap().remove(token) {
                     done.notify_one();
                 }
                 ok(json!({}))

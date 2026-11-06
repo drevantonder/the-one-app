@@ -4,6 +4,26 @@
 
 use super::*;
 
+/// How long a blob a scope forgot stays in the bucket, in case an entry another device wrote names it again.
+const FORGOTTEN_KEPT: Duration = Duration::from_secs(600);
+
+/// What blobs keep while the node runs.
+#[derive(Default)]
+pub(super) struct State {
+    /// The blobs sign-ins put here (their files in an MCP answer, say), by hash: for whom, so they may read them back.
+    pub(super) put_by: Mutex<HashMap<String, std::collections::HashSet<String>>>,
+    /// The files put from elsewhere this last hour, which count against their person's room (`put_blob_from`).
+    remote_puts: Mutex<Vec<blobs::RemotePut>>,
+    /// Held while `network/forgotten` changes.
+    forgotten: Mutex<()>,
+    /// The blobs this device has put in the bucket, as `<scope> <hash>`, kept in `network/shared` too.
+    shared: Mutex<std::collections::HashSet<String>>,
+    /// The blobs of entries this device wrote that the bucket didn't take then, tried again each minute.
+    unshared: Mutex<Vec<(Scope, String)>>,
+    /// `<scope> <hash>` of blobs a call put in the bucket before writing the steps that keep them, which don't again.
+    pub(super) put_first: Mutex<std::collections::HashSet<String>>,
+}
+
 impl Node {
     /// Keeps `bytes` as a blob.
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
@@ -37,14 +57,14 @@ impl Node {
     pub(super) async fn share_blob(&self, scope: &Scope, hash: &str, noted: bool) -> Result<()> {
         use crate::bucket::Bucket;
         let marker = format!("{scope} {hash}");
-        if (noted && self.0.shared.lock().unwrap().contains(&marker)) || self.0.put_first.lock().unwrap().contains(&marker) {
+        if (noted && self.0.blobs.shared.lock().unwrap().contains(&marker)) || self.0.blobs.put_first.lock().unwrap().contains(&marker) {
             return Ok(());
         }
         let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
         let keys = self.database_keys(scope, scopes::APP, crate::bucket::BLOBS, false).await?;
         let name = crate::bucket::blob_name(&scope.to_string(), hash);
         Bucket::create(&self.bucket()?.place, &name, &crate::database::steps::seal(&keys, &name, &bytes)?).await?;
-        self.0.shared.lock().unwrap().insert(marker.clone());
+        self.0.blobs.shared.lock().unwrap().insert(marker.clone());
         self.note_shared(&marker)
     }
 
@@ -57,11 +77,11 @@ impl Node {
 
     /// Tries again to put in the bucket the blobs it didn't take when their steps were written.
     pub(super) async fn share_unshared(&self) {
-        let unshared = std::mem::take(&mut *self.0.unshared.lock().unwrap());
+        let unshared = std::mem::take(&mut *self.0.blobs.unshared.lock().unwrap());
         for (scope, hash) in unshared {
             if let Err(err) = self.share_blob(&scope, &hash, false).await {
                 tracing::debug!("putting blob {} in the bucket: {err:#}", &hash[..12.min(hash.len())]);
-                self.0.unshared.lock().unwrap().push((scope, hash));
+                self.0.blobs.unshared.lock().unwrap().push((scope, hash));
             }
         }
     }
@@ -70,7 +90,7 @@ impl Node {
     pub(super) async fn share_blobs(self) {
         let noted = std::fs::read_to_string(self.network_dir().join("shared")).unwrap_or_default();
         {
-            let mut shared = self.0.shared.lock().unwrap();
+            let mut shared = self.0.blobs.shared.lock().unwrap();
             for line in noted.lines() {
                 match line.strip_prefix("- ") {
                     Some(gone) => drop(shared.remove(gone)),
@@ -146,15 +166,15 @@ impl Node {
     /// under `REMOTE_WAITING`, since anyone signed in could fill this machine's disk. One nothing names an hour on is
     /// deleted (`sweep_remote_puts`). → its hash and size.
     pub async fn put_blob_from(&self, caller: &Caller, body: axum::body::Body) -> Result<(String, u64)> {
-        let waiting: u64 = self.0.remote_puts.lock().unwrap().iter().filter(|p| p.user == caller.user).map(|p| p.size).sum();
+        let waiting: u64 = self.0.blobs.remote_puts.lock().unwrap().iter().filter(|p| p.user == caller.user).map(|p| p.size).sum();
         let room = REMOTE_WAITING.saturating_sub(waiting);
         ensure!(room > 0, "you've put {} MiB of files from your other devices that nothing kept yet: wait an hour, when they're cleared, and try again", waiting >> 20);
         let (hash, size) = self.put_blob_streamed(body, room.min(REMOTE_PUT)).await.map_err(|err| match err.downcast_ref::<Full>() {
             Some(_) if room < REMOTE_PUT => anyhow!("you've put {} MiB of files from your other devices that nothing kept yet, and this one doesn't fit under {} MiB: wait an hour, when they're cleared, and try again", waiting >> 20, REMOTE_WAITING >> 20),
             _ => err,
         })?;
-        self.0.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(caller.user.clone());
-        self.0.remote_puts.lock().unwrap().push(RemotePut { hash: hash.clone(), user: caller.user.clone(), size, at: now_ms() });
+        self.0.blobs.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(caller.user.clone());
+        self.0.blobs.remote_puts.lock().unwrap().push(RemotePut { hash: hash.clone(), user: caller.user.clone(), size, at: now_ms() });
         Ok((hash, size))
     }
 
@@ -163,8 +183,8 @@ impl Node {
         if self.0.built_in.values().any(|b| b == hash) || self.blob_named(hash, |_| true).unwrap_or(true) {
             return;
         }
-        self.0.remote_puts.lock().unwrap().retain(|p| p.hash != hash);
-        self.0.put_by.lock().unwrap().remove(hash);
+        self.0.blobs.remote_puts.lock().unwrap().retain(|p| p.hash != hash);
+        self.0.blobs.put_by.lock().unwrap().remove(hash);
         if let Ok(path) = release::blob_path(&self.0.dir, hash) {
             let _ = std::fs::remove_file(path);
         }
@@ -174,13 +194,13 @@ impl Node {
     pub(super) fn sweep_remote_puts(&self) {
         let due = now_ms().saturating_sub(REMOTE_KEPT.as_millis() as u64);
         let old: Vec<RemotePut> = {
-            let mut puts = self.0.remote_puts.lock().unwrap();
+            let mut puts = self.0.blobs.remote_puts.lock().unwrap();
             let (old, young) = std::mem::take(&mut *puts).into_iter().partition(|p| p.at <= due);
             *puts = young;
             old
         };
         for put in old {
-            if !self.0.remote_puts.lock().unwrap().iter().any(|p| p.hash == put.hash) {
+            if !self.0.blobs.remote_puts.lock().unwrap().iter().any(|p| p.hash == put.hash) {
                 self.drop_put(&put.hash);
             }
         }
@@ -189,7 +209,7 @@ impl Node {
     /// Keeps `bytes` as a blob a sign-in put, which its person may then read back.
     pub fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String> {
         let hash = self.put_blob(bytes)?;
-        self.0.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(caller.user.clone());
+        self.0.blobs.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(caller.user.clone());
         Ok(hash)
     }
 
@@ -200,7 +220,7 @@ impl Node {
     }
 
     pub(super) fn may_read_blob(&self, user: &str, hash: &str) -> Result<bool> {
-        Ok(self.0.put_by.lock().unwrap().get(hash).is_some_and(|users| users.contains(user)) || self.blob_named_for(hash, user)?)
+        Ok(self.0.blobs.put_by.lock().unwrap().get(hash).is_some_and(|users| users.contains(user)) || self.blob_named_for(hash, user)?)
     }
 
     /// Whether the database of a scope `holds` says yes to names the blob, and that scope still needs it: a blob a
@@ -263,7 +283,7 @@ impl Node {
                 continue;
             }
             let marker = format!("{log} {blob}");
-            self.0.shared.lock().unwrap().remove(&marker);
+            self.0.blobs.shared.lock().unwrap().remove(&marker);
             let _ = self.note_shared(&format!("- {marker}"));
             done.push(line.to_string());
         }
@@ -276,7 +296,7 @@ impl Node {
 
     /// Adds lines to `network/forgotten`, `<due> <scope> <hash>`, and takes out the ones `done`.
     fn note_forgotten(&self, add: &[String], done: &[String]) -> Result<()> {
-        let _file = self.0.forgotten.lock().unwrap();
+        let _file = self.0.blobs.forgotten.lock().unwrap();
         let path = self.network_dir().join("forgotten");
         let was = std::fs::read_to_string(&path).unwrap_or_default();
         let lines: String = was.lines().filter(|l| !done.iter().any(|d| d == l)).chain(add.iter().map(String::as_str)).map(|l| format!("{l}\n")).collect();

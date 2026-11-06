@@ -10,6 +10,9 @@ use crate::vault::{Items, Lookup};
 
 use super::*;
 
+/// How long a request for an item waits for its answer.
+const REQUEST_LIFE: u64 = 86_400_000;
+
 pub mod app;
 pub mod cli;
 pub(crate) mod routes;

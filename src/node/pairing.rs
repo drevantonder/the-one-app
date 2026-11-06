@@ -3,6 +3,8 @@
 use crate::config::YOURS;
 use super::*;
 
+const PAIRING_LIFE: u64 = 7 * 86_400_000;
+
 impl Node {
     /// Makes a one-time pairing code for another of the local user's machines, which joins as a device.
     pub fn pair(&self) -> Result<String> {

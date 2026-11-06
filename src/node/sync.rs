@@ -3,6 +3,9 @@
 
 use super::*;
 
+/// The largest step a notice carries: a bigger one, the devices it tells read from the bucket.
+const SENT_STEP: usize = 1 << 20;
+
 impl Node {
     /// Reads what each scope this device holds has in the bucket after what it last read, `global` first, until it
     /// holds no scope it didn't.
@@ -113,7 +116,7 @@ impl Node {
             return;
         };
         let id = (scope, format!("{app}/{database}"));
-        self.0.behind.lock().unwrap().insert(id.clone());
+        self.0.databases.behind.lock().unwrap().insert(id.clone());
         let open = self.open_dbs().iter().any(|(open, _)| *open == id);
         match step.filter(|_| open) {
             Some(step) => self.confirm_sent(Sent { name: crate::database::stored::step_name(&database_prefix(&id.0, &app, &database), at), step, sig, id, at }),
@@ -184,7 +187,7 @@ impl Node {
                 _ => false,
             };
             if filled {
-                self.0.behind.lock().unwrap().remove(id);
+                self.0.databases.behind.lock().unwrap().remove(id);
             }
             apps.extend(id.1.split('/').next().filter(|app| *app != scopes::APP && !apps.iter().any(|a: &String| a == app)).map(str::to_string));
         }
