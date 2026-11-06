@@ -46,3 +46,12 @@ pub fn position(name: &str) -> Option<(&str, u64)> {
     let n = last.strip_suffix(".sig").unwrap_or(last).parse::<u64>().ok().filter(|n| *n > 0)?;
     [step_name(prefix, n), sig_name(prefix, n)].contains(&name.to_string()).then_some((prefix, n))
 }
+
+/// If `name` is a database's step, or the signature beside one: the signature beside it, and the `n` steps after it,
+/// each with the signature beside it: what's read next. A scope's log's steps have none.
+pub fn following(name: &str, n: u32) -> Vec<String> {
+    let Some((prefix, at)) = position(name) else { return Vec::new() };
+    let signed = signed_beside(prefix);
+    let names = (at..=at + u64::from(n)).flat_map(|i| [Some(step_name(prefix, i)), signed.then(|| sig_name(prefix, i))]).flatten();
+    names.filter(|other| other.as_str() > name).collect()
+}

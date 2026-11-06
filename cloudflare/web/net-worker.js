@@ -73,37 +73,14 @@ export function server(version) {
     return listed?.length ? keys.filter((key) => listed.includes(key)) : keys;
   }
 
-  /// What `user`'s device (`me`, its keys as kept) reaches through JavaScript (one-client's `js::On`): the bucket,
-  /// through the URL signer's `get`, for who's who and the keys sealed there; the network's address, and a JSON request
-  /// to it; what it keeps, in IndexedDB by person, or in `memory` for one asked as for a while; whether the relay still
+  /// What `user`'s device (`me`, its keys as kept) reaches through JavaScript (one-client's `js::On`, which reads the
+  /// bucket through the URL signer with these): the network's address, and a JSON request to it; what it keeps, in IndexedDB by person, or in `memory` for one asked as for a while; whether the relay still
   /// lets it in (`still`); its key's signature, and the secret its seal key agrees with another's, neither key read.
   async function reaches(user, me, still, memory) {
-    const [{ b64u, hex, signBytes, signedRequest }, { READS, URLS, Yours }, { del, get, put }] = await code;
-    const { following } = await glue;
-    // Steps and what's sealed beside them never change once written: those read with one asked for, kept until asked.
-    const ahead = new Map();
-    const bucket = {
-      async get(name) {
-        if (ahead.has(name)) {
-          const had = ahead.get(name);
-          ahead.delete(name);
-          return had;
-        }
-        const names = [name, ...JSON.parse(following(name, 15))].slice(0, 32);
-        const body = JSON.stringify(await signedRequest(me.sign, hex.decode(me.key), URLS, { get: names, reads: READS }));
-        const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body });
-        const out = await r.json().catch(() => ({}));
-        if (!r.ok) throw Object.assign(new Error(out.error || `${Yours}'s storage didn't answer. Try again.`), { unanswered: r.status >= 500 });
-        const object = (n) => (out.get?.[n] ? { bytes: b64u.decode(out.get[n]), tag: "" } : null);
-        for (const n of names.slice(1)) if (out.get?.[n]) ahead.set(n, object(n));
-        return object(name);
-      },
-      wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    };
+    const [{ signBytes }, , { del, get, put }] = await code;
     const text = new TextEncoder();
     const kept = memory ? { get: async (k) => memory.get(k), put: async (k, v) => void memory.set(k, v), del: async (k) => void memory.delete(k) } : { get, put, del };
     return {
-      bucket,
       get: async (name) => {
         const v = await kept.get(`${name}:${user}`);
         return v == null ? null : typeof v === "string" ? text.encode(v) : v;

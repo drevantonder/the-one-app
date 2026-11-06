@@ -64,14 +64,12 @@ pub fn said(err: JsValue) -> anyhow::Error {
     anyhow!("{}", err.as_string().or_else(|| Reflect::get(&err, &"message".into()).ok().and_then(|m| m.as_string())).unwrap_or_else(|| format!("{err:?}")))
 }
 
-/// What a device's object hands its keyring: `{ bucket, address, get(name), put(name, bytes), delete(name), letIn(),
-/// ask(method, url, header, value, body), sign(bytes) }`: the bucket (`Js`); the network's address; what it keeps, by
-/// name; whether the relay still lets it in; a JSON request to the address (→ `{ status, body }`, its JSON, or null);
-/// and its key's signature of `bytes`. Each method a promise.
+/// What a device's object hands its keyring: `{ address, get(name), put(name, bytes), delete(name), letIn(), ask(method,
+/// url, header, value, body), sign(bytes) }`: the network's address; what it keeps, by name; whether the relay still lets
+/// it in; a JSON request to the address (→ `{ status, body }`, its JSON, or null); and its key's signature of `bytes`.
+/// Each method a promise. The bucket it reads through the URL signer, as itself (`Urls`).
 pub struct On {
-    bucket: Js,
-    address: String,
-    key: [u8; 32],
+    bucket: Urls,
     js: Js,
 }
 
@@ -79,11 +77,18 @@ impl On {
     /// `key`: the device's own, which `sign` signs with.
     pub fn of(on: JsValue, key: [u8; 32]) -> On {
         let address = Reflect::get(&on, &"address".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
-        On { bucket: Js(Reflect::get(&on, &"bucket".into()).unwrap_or(JsValue::NULL)), address, key, js: Js(on) }
+        On { bucket: Urls { me: Me { js: Js(on.clone()), key, address }, ahead: Default::default() }, js: Js(on) }
     }
 }
 
-impl one::keys::Signs for On {
+/// The device as JavaScript signs and asks for it.
+struct Me {
+    js: Js,
+    key: [u8; 32],
+    address: String,
+}
+
+impl one::keys::Signs for Me {
     fn public(&self) -> [u8; 32] {
         self.key
     }
@@ -91,6 +96,65 @@ impl one::keys::Signs for On {
     async fn sign_bytes(&self, bytes: &[u8]) -> Result<[u8; 64]> {
         let got = self.js.ask("sign", &[Uint8Array::from(bytes).into()]).await?;
         Uint8Array::new(&got).to_vec().try_into().map_err(|_| anyhow!("a signature is 64 bytes"))
+    }
+}
+
+impl one::keys::Signs for On {
+    fn public(&self) -> [u8; 32] {
+        self.bucket.me.key
+    }
+
+    async fn sign_bytes(&self, bytes: &[u8]) -> Result<[u8; 64]> {
+        self.bucket.me.sign_bytes(bytes).await
+    }
+}
+
+/// The bucket as a device reads it where it runs as WebAssembly: each object's bytes from the URL signer (`get`), for a
+/// request it signs (`one/urls`), as it can't reach the bucket itself. Reading a step also reads the ones after it, in
+/// the same request, as they're read next: those are answered from here.
+pub struct Urls {
+    me: Me,
+    ahead: std::cell::RefCell<std::collections::HashMap<String, Option<Object>>>,
+}
+
+impl Bucket for Urls {
+    async fn get(&self, name: &str) -> Result<Option<Object>> {
+        if let Some(found) = self.ahead.borrow_mut().remove(name) {
+            return Ok(found);
+        }
+        let mut names = vec![name.to_string()];
+        names.extend(one::database::stored::following(name, 15));
+        names.truncate(32);
+        let fields = serde_json::json!({ "get": names, "reads": one::database::READS });
+        let signed = one::keys::signed_request_by(&self.me, one::protocol::URLS, fields, one::keys::next_at(crate::keyring::now())).await?;
+        let args = ["POST".into(), format!("{}/urls", self.me.address).into(), JsValue::NULL, JsValue::NULL, signed.to_string().into()];
+        let got = self.me.js.ask("ask", &args).await.map_err(|e| Failed(Trouble::Unreachable, format!("{e}")))?;
+        let status = Reflect::get(&got, &"status".into()).ok().and_then(|s| s.as_f64()).unwrap_or(0.0) as u16;
+        let out: serde_json::Value = Reflect::get(&got, &"body".into()).ok().and_then(|b| b.as_string()).and_then(|b| serde_json::from_str(&b).ok()).unwrap_or_default();
+        if status != 200 {
+            let said = crate::keyring::error(&out).unwrap_or_else(|| format!("{}'s storage didn't answer ({status}). Try again.", one::config::YOURS));
+            return Err(if status >= 500 || status == 0 { Failed(Trouble::Unreachable, said).into() } else { anyhow!(said) });
+        }
+        let object = |n: &str| out["get"][n].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.trim_end_matches('=').as_bytes()).ok()).map(|bytes| Object { bytes, tag: String::new() });
+        let mut ahead = self.ahead.borrow_mut();
+        for n in &names[1..] {
+            if let Some(o) = object(n) {
+                ahead.insert(n.clone(), Some(o));
+            }
+        }
+        Ok(object(name))
+    }
+
+    async fn create(&self, _: &str, _: &[u8]) -> Result<bool> {
+        anyhow::bail!("a client device only reads the bucket")
+    }
+
+    async fn replace(&self, _: &str, _: &[u8], _: Option<&str>) -> Result<bool> {
+        anyhow::bail!("a client device only reads the bucket")
+    }
+
+    async fn wait(&self, ms: u64) {
+        n0_future::time::sleep(std::time::Duration::from_millis(ms)).await
     }
 }
 
@@ -110,9 +174,9 @@ impl Keep for On {
 }
 
 impl Address for On {
-    type Bucket = Js;
+    type Bucket = Urls;
 
-    fn bucket(&self) -> &Js {
+    fn bucket(&self) -> &Urls {
         &self.bucket
     }
 
@@ -122,7 +186,7 @@ impl Address for On {
     }
 
     fn address(&self) -> &str {
-        &self.address
+        &self.bucket.me.address
     }
 
     async fn ask(&self, method: &str, url: &str, header: Option<(&str, String)>, body: Option<serde_json::Value>) -> Result<(u16, serde_json::Value), crate::Error> {

@@ -329,12 +329,8 @@ impl Response {
     }
 }
 
-/// If `name` is a database's step, or the signature beside one: the signature beside it, and the `n` steps after it,
-/// each with the signature beside it, as JSON: what's read next. A scope's log's steps have none.
+/// What's read next after `name` (`stored::following`), as JSON.
 #[wasm_bindgen]
 pub fn following(name: &str, n: u32) -> String {
-    let Some((prefix, at)) = one::database::stored::position(name) else { return "[]".into() };
-    let signed = one::database::stored::signed_beside(prefix);
-    let names = (at..=at + n as u64).flat_map(|i| [Some(one::database::stored::step_name(prefix, i)), signed.then(|| one::database::stored::sig_name(prefix, i))]).flatten();
-    serde_json::Value::from(names.filter(|other| other.as_str() > name).collect::<Vec<_>>()).to_string()
+    serde_json::Value::from(one::database::stored::following(name, n)).to_string()
 }

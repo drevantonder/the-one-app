@@ -26,10 +26,10 @@
 // optional).
 
 import { DurableObject } from "cloudflare:workers";
-import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, following } from "./one_cloudflare_node.js";
+import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
-import { b64u, ed25519Public, hex, joinCode, random, signedRequest, untilTaken } from "../shared/crypto.js";
-import { CODES, READS, RELAY, URLS } from "../shared/protocol.js";
+import { b64u, ed25519Public, hex, joinCode, random, signBytes, signedRequest, untilTaken } from "../shared/crypto.js";
+import { CODES, READS, RELAY } from "../shared/protocol.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
 
@@ -186,42 +186,6 @@ function answerAll(body, text) {
   const out = Array.isArray(msg) ? msg.map(one).filter(Boolean) : one(msg);
   if (!out || (Array.isArray(out) && !out.length)) return { status: 202, headers: {}, body: null };
   return { status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(out) };
-}
-
-/// The bucket as the device's Rust reads it (cloudflare/node/src/lib.rs `Js`), through the URL signer, signed with the
-/// device's key: it gives URLs only to the network's endpoints. The steps after one are signed with it, as they're read
-/// next.
-class Bucket {
-  constructor(env, me) {
-    Object.assign(this, { env, me, urls: new Map() });
-  }
-
-  /// With what this build reads of who's who (`READS`), which the URL signer asks of a client once it's switched.
-  async sign(fields) {
-    const body = await signedRequest(this.me.seed, hex.decode(this.me.key), URLS, { ...fields, reads: READS });
-    const r = await this.env.SIGNER.fetch(`${origin(this.env)}/urls`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const out = await r.json().catch(() => ({}));
-    if (!r.ok) throw Object.assign(new Error(`the URL signer said: ${out.error || r.status}`), { unanswered: r.status >= 500 });
-    return out;
-  }
-
-  async get(name) {
-    let kept = this.urls.get(name);
-    if (!kept || kept.until < Date.now() + 60_000) {
-      const names = [name, ...JSON.parse(following(name, 8))];
-      const out = await this.sign({ read: names });
-      for (const n of names) if (out.read?.[n]) this.urls.set(n, { url: out.read[n], until: out.until });
-      kept = this.urls.get(name);
-    }
-    const r = await fetch(kept.url);
-    if (r.status === 404) return null;
-    if (!r.ok) throw Object.assign(new Error(`the bucket said ${r.status} to reading ${name}`), { unanswered: r.status >= 500 });
-    return { bytes: new Uint8Array(await r.arrayBuffer()), tag: r.headers.get("etag") || "" };
-  }
-
-  wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }
 
 export class Client extends DurableObject {
@@ -438,12 +402,20 @@ export class Client extends DurableObject {
     } catch {}
   }
 
-  /// What its device's keyring is handed (cloudflare/node/src/clients.rs `On`): the bucket, through the URL signer,
-  /// this object's storage, and whether the relay still lets it in.
+  /// What its device's keyring is handed (cloudflare/node/src/clients.rs `On`, one-client's `js::On`): the network's
+  /// address, and its URL signer, which the keyring reads the bucket through; its key's signature; this object's
+  /// storage; and whether the relay still lets it in.
   on(me) {
     const storage = this.ctx.storage;
     return {
-      bucket: new Bucket(this.env, me),
+      address: origin(this.env),
+      async ask(method, url, name, value, body) {
+        if (new URL(url).pathname !== "/urls") throw new Error("the remote MCP server's devices ask only the URL signer");
+        const r = await this.signer.fetch(url, { method, headers: { "content-type": "application/json" }, body });
+        return { status: r.status, body: await r.text() };
+      },
+      signer: this.env.SIGNER,
+      sign: (bytes) => signBytes(me.seed, bytes),
       get: async (name) => (await storage.get(KEPT + name)) ?? null,
       put: (name, bytes) => storage.put(KEPT + name, bytes),
       delete: (name) => storage.delete(KEPT + name),
