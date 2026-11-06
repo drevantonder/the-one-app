@@ -27,6 +27,9 @@ pub struct Copied<B = Place> {
     /// Where the network's data went, if it moved since `place` was taken: held to write, and taken whole while it
     /// moves, so a write waits for the move and then goes where the data is, never only to where it was.
     moved: Arc<tokio::sync::RwLock<Option<B>>>,
+    /// The position of the last step of each database this device found in the bucket that its copy lacked: two in a row
+    /// say it's behind by more than one, and the ones after are fetched at once (`read_ahead`).
+    found: Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>>,
 }
 
 impl<B: Bucket + Clone> Copied<B> {
@@ -36,7 +39,7 @@ impl<B: Bucket + Clone> Copied<B> {
 
     /// The bucket `place` and this device's copy in `dir`, following each move of the network's data in `moved`.
     pub fn moving(place: B, dir: PathBuf, moved: Arc<tokio::sync::RwLock<Option<B>>>) -> Copied<B> {
-        Copied { place, here: Place::Folder(dir), reach: true, moved }
+        Copied { place, here: Place::Folder(dir), reach: true, moved, found: Arc::default() }
     }
 
     /// Only this device's copy: what it lacks isn't there, and nothing is written.
@@ -116,6 +119,36 @@ impl<B: Bucket + Clone> Copied<B> {
     }
 }
 
+impl<B: Bucket> Copied<B> {
+    /// After a step of a database was found in the bucket: if the one before it was too, the next steps are
+    /// fetched at once (seven), and kept here as they come, so a device far behind reads them from its copy, not one round
+    /// trip each. A device behind by one asks for no more than it did.
+    async fn read_ahead(&self, name: &str, place: &B) {
+        let Some((prefix, at)) = crate::database::stored::position(name).filter(|_| !name.ends_with(".sig")) else { return };
+        let behind = {
+            let mut found = self.found.lock().unwrap();
+            let behind = found.get(prefix).is_some_and(|last| *last + 1 == at);
+            found.insert(prefix.to_string(), at);
+            behind
+        };
+        if !behind {
+            return;
+        }
+        let fetch = |k: u64| async move {
+            let name = crate::database::stored::step_name(prefix, at + k);
+            if matches!(Bucket::get(&self.here, &name).await, Ok(Some(_))) {
+                return;
+            }
+            if let Ok(Some(o)) = Bucket::get(place, &name).await
+                && let Err(err) = self.here.create(&name, &o.bytes)
+            {
+                tracing::debug!("keeping {name}: {err:#}");
+            }
+        };
+        tokio::join!(fetch(1), fetch(2), fetch(3), fetch(4), fetch(5), fetch(6), fetch(7));
+    }
+}
+
 /// Whether an object is written once and kept here: a database's step, the signature beside one, or a copy, named by
 /// its 12-digit position.
 fn kept(name: &str) -> bool {
@@ -149,6 +182,7 @@ impl<B: Bucket> Bucket for Copied<B> {
             if let Err(err) = self.here.create(name, &o.bytes) {
                 tracing::debug!("keeping {name}: {err:#}");
             }
+            self.read_ahead(name, moved.as_deref().and_then(Option::as_ref).unwrap_or(&self.place)).await;
         }
         Ok(got)
     }
