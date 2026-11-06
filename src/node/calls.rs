@@ -13,6 +13,8 @@ use super::*;
 const PROMPT_LIMIT: Duration = Duration::from_secs(2);
 /// How many times a call that writes is tried with one id, each after the one before failed having written nothing.
 const LEASE_TRIES: u32 = 10;
+/// The most a call passed on to another device takes of the files put for it: under `net::MESSAGE_LIMIT` once in base64.
+const CARRIED: usize = 40 << 20;
 
 /// A call a client device picked this node for that this node can't run: the API answers 421 with the nodes that can,
 /// in the order to ask them (`{ error, elsewhere }`), which the client asks itself, handing each its own keys.
@@ -318,9 +320,41 @@ impl Node {
         {
             request["keys"] = json!(keys);
         }
+        let carried = self.carried(req)?;
+        if !carried.is_empty() {
+            request["blobs"] = Value::Object(carried);
+        }
         let mut reply = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await?;
         let theirs = reply.get_mut("trace").map(Value::take).filter(Value::is_object);
         Ok((Reply::from_json(reply), theirs))
+    }
+
+    /// The files put here for a call that go with it to the device that runs it (`CallRequest::puts`), as
+    /// `{ <hash>: <base64> }`: up to `CARRIED` in all, since they go in the one message that asks it.
+    fn carried(&self, req: &CallRequest) -> Result<serde_json::Map<String, Value>> {
+        let mut out = serde_json::Map::new();
+        let mut size = 0;
+        for hash in &req.puts {
+            let bytes = std::fs::read(release::blob_path(&self.0.dir, hash)?).with_context(|| format!("the file put for that call isn't on {}", self.device_name()))?;
+            size += bytes.len();
+            ensure!(size <= CARRIED, "that's {} MiB, and a call another device runs takes at most {} MiB with it: send it from a device that runs it first in run priority", size >> 20, CARRIED >> 20);
+            out.insert(hash.clone(), json!(data_encoding::BASE64.encode(&bytes)));
+        }
+        Ok(out)
+    }
+
+    /// Keeps the files a call another device passed on came with (`carried`), as its caller's: they read them back
+    /// while it runs, and they're deleted once it's answered unless something keeps them. → their hashes.
+    fn take_carried(&self, me: &Caller, request: &Value) -> Result<Vec<String>> {
+        let Some(blobs) = request["blobs"].as_object() else { return Ok(Vec::new()) };
+        let mut puts = Vec::new();
+        for (hash, data) in blobs {
+            let bytes = data_encoding::BASE64.decode(data.as_str().context("a file a call came with is base64")?.as_bytes())?;
+            ensure!(self.put_blob(&bytes)? == *hash, "a file a call came with isn't the one it names");
+            self.0.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(me.user.clone());
+            puts.push(hash.clone());
+        }
+        Ok(puts)
     }
 
     /// Runs a call here, for `me`, or says why it can't, or what keys it lacks.
@@ -1043,7 +1077,17 @@ impl Node {
     /// for its own person, whose device that is.
     pub(super) async fn accept_call(&self, remote: Key, request: &Value) -> Reply {
         match self.accept(remote, request).await {
-            Ok((req, me)) => self.run(&req, &me).await,
+            Ok((mut req, me)) => {
+                req.puts = match self.take_carried(&me, request) {
+                    Ok(puts) => puts,
+                    Err(err) => return Reply::Error(format!("{err:#}")),
+                };
+                let reply = self.run(&req, &me).await;
+                for hash in &req.puts {
+                    self.drop_put(hash);
+                }
+                reply
+            }
             Err(err) => Reply::Error(format!("{err:#}")),
         }
     }

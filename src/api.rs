@@ -1191,7 +1191,7 @@ async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(Str
     };
     let body = body.and_then(|(hash, size)| (size > 0).then_some(hash));
     let input = json!({ "method": method, "path": path, "query": query, "body": body });
-    let mut call = CallRequest { app, op: "_http".into(), input, ..Default::default() };
+    let mut call = CallRequest { app, op: "_http".into(), input, puts: body.iter().cloned().collect(), ..Default::default() };
     if remote {
         call = node.for_sign_in(call)?;
     }

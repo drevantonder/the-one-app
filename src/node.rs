@@ -278,6 +278,10 @@ pub struct CallRequest {
     /// What made it, for its app's insights: `cli`, `mcp`, `mac`, `phone`, `browser`, `schedule` or `app`.
     #[serde(default)]
     pub client: Option<String>,
+    /// Files put on this device for this call alone (an app's `_http` body), which go with it to the device that runs
+    /// it (`Node::carried`): never a client's to name.
+    #[serde(skip)]
+    pub puts: Vec<String>,
 }
 
 /// What a device says to a call.
