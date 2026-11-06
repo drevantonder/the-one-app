@@ -687,7 +687,8 @@ pub fn run() {
             show();
             argv.iter().for_each(|a| opened(a));
         }))
-        .plugin(tauri_plugin_window_state::Builder::new().build());
+        // The window as it was left; the panel shows only when its item is clicked.
+        .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["panel"]).build());
     builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
