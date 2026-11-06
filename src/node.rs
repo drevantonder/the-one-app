@@ -60,6 +60,8 @@ mod vault;
 const CALL_LIMIT: Duration = Duration::from_secs(30);
 /// A service's call may take longer, as a browser or a desktop starts: as long as a service is waited for.
 const SERVICE_LIMIT: Duration = Duration::from_secs(600);
+/// How much longer a call may take for each MiB put for it (a git push's pack), which it reads and may keep in the bucket.
+const PER_MIB: Duration = Duration::from_secs(1);
 /// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
 pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
@@ -465,6 +467,8 @@ pub struct Inner {
     shared: Mutex<std::collections::HashSet<String>>,
     /// The blobs of entries this device wrote that the bucket didn't take then, tried again each minute.
     unshared: Mutex<Vec<(Scope, String)>>,
+    /// `<scope> <hash>` of blobs a call put in the bucket before writing the steps that keep them, which don't again.
+    put_first: Mutex<std::collections::HashSet<String>>,
     /// Requests to join, by their device's key, that their person said weren't theirs, not shown again while it runs.
     refused: Mutex<std::collections::HashSet<String>>,
     /// Held while `install/forgotten` changes.
@@ -607,6 +611,7 @@ impl Node {
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
             unshared: Mutex::new(Vec::new()),
+            put_first: Mutex::new(Default::default()),
             refused: Mutex::default(),
             forgotten: Mutex::new(()),
             sessions: Default::default(),

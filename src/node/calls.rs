@@ -2,10 +2,13 @@
 //!
 //! A call runs once. It names the scopes it touches before it runs, so a device that can't run it says so before doing
 //! anything; one that writes takes a lease in the bucket first, so failing over never repeats it. It writes nothing if
-//! it fails. A node a client picked runs a call itself if it runs every scope the call reaches; if it doesn't, it answers
+//! it fails, or is stopped at its limit, which happens only before it writes: what it keeps goes in the bucket first,
+//! and once it writes, it's waited for. A node a client picked runs a call itself if it runs every scope the call reaches; if it doesn't, it answers
 //! 421 with the nodes that do, and the client asks one itself, with keys for it, rather than the node passing it on,
 //! which nodes do only for a service's call and for older clients. Calls go to the devices in run priority's order
 //! (`src/rank.rs`).
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
 
@@ -15,6 +18,34 @@ const PROMPT_LIMIT: Duration = Duration::from_secs(2);
 const LEASE_TRIES: u32 = 10;
 /// The most a call passed on to another device takes of the files put for it: under `net::MESSAGE_LIMIT` once in base64.
 const CARRIED: usize = 40 << 20;
+
+/// One of a call's statements: its SQL, its parameters, and what it fails with when its check finds nothing.
+type Statement = (String, Vec<Value>, Option<String>);
+
+/// A call's appends, checked, with the blobs they keep put in the bucket: what `write_prepared` writes.
+pub(super) struct Prepared {
+    statements: Vec<(Scope, Vec<Statement>, Vec<String>)>,
+    writes: Vec<(Scope, Content)>,
+    items: Vec<Append>,
+    installs: Vec<Append>,
+    /// `<scope> <hash>` of each blob put in the bucket.
+    put: Vec<String>,
+}
+
+/// What a call stopped at its limit says.
+fn stopped(limit: Duration) -> String {
+    format!("it took longer than {}s and was stopped, having written nothing", limit.as_secs())
+}
+
+/// Runs `work` until `deadline`, when it's stopped (None) unless it's writing by then, which it's left to finish.
+async fn unless_writing<T>(deadline: tokio::time::Instant, writing: &AtomicBool, work: impl Future<Output = T>) -> Option<T> {
+    let mut work = std::pin::pin!(work);
+    tokio::select! {
+        done = &mut work => return Some(done),
+        _ = tokio::time::sleep_until(deadline) => {}
+    }
+    if writing.load(Ordering::Relaxed) { Some(work.await) } else { None }
+}
 
 /// A call a client device picked this node for that this node can't run: the API answers 421 with the nodes that can,
 /// in the order to ask them (`{ error, elsewhere }`), which the client asks itself, handing each its own keys.
@@ -362,32 +393,39 @@ impl Node {
         self.run_or_need(req, me).await.unwrap_or_else(Reply::Needs)
     }
 
-    /// `run`, but a call that lacks keys its caller can hand fails with what it needs.
+    /// `run`, but a call that lacks keys its caller can hand fails with what it needs. A call is stopped at its limit
+    /// only before it writes: one that's writing is waited for, and answers as it went.
     pub(super) async fn run_or_need(&self, req: &CallRequest, me: &Caller) -> Result<Reply, sessions::Needs> {
         let req = &self.resolve(req.clone());
         let limit = self.limit(req).await;
-        let result = tokio::time::timeout(limit, self.run_here(req, me, limit)).await;
+        let writing = AtomicBool::new(false);
+        let result = unless_writing(tokio::time::Instant::now() + limit, &writing, self.run_here(req, me, limit, &writing)).await;
         Ok(match result {
-            Ok(Ok(reply)) => reply,
-            Ok(Err(err)) => match err.downcast::<sessions::Needs>() {
+            Some(Ok(reply)) => reply,
+            Some(Err(err)) => match err.downcast::<sessions::Needs>() {
                 Ok(need) => return Err(need),
                 Err(err) => Reply::Error(format!("{err:#}")),
             },
-            Err(_) => Reply::Error(format!("it took longer than {}s and was stopped", limit.as_secs())),
+            None => Reply::Error(stopped(limit)),
         })
     }
 
     /// How long a call may run: an app's, CALL_LIMIT; a service's, and that of an app that uses services or other apps
-    /// (which wait on theirs, and may be calls of services), SERVICE_LIMIT.
+    /// (which wait on theirs, and may be calls of services), SERVICE_LIMIT; and a second more for each MiB put for it
+    /// (`PER_MIB`), which it reads and may keep.
     pub(super) async fn limit(&self, req: &CallRequest) -> Duration {
         if req.app == members::APP {
             return CALL_LIMIT;
         }
         let (apps, services) = self.uses_here(&req.app).await;
-        if req.service.is_some() || !apps.is_empty() || !services.is_empty() { SERVICE_LIMIT } else { CALL_LIMIT }
+        let limit = if req.service.is_some() || !apps.is_empty() || !services.is_empty() { SERVICE_LIMIT } else { CALL_LIMIT };
+        let put: u64 = req.puts.iter().filter_map(|h| std::fs::metadata(release::blob_path(&self.0.dir, h).ok()?).ok()).map(|m| m.len()).sum();
+        limit + PER_MIB * put.div_ceil(1 << 20) as u32
     }
 
-    pub(super) async fn run_here(&self, req: &CallRequest, me: &Caller, limit: Duration) -> Result<Reply> {
+    pub(super) async fn run_here(&self, req: &CallRequest, me: &Caller, limit: Duration, writing: &AtomicBool) -> Result<Reply> {
+        // Just under the call's own limit, so a call that's stopped is recorded first.
+        let deadline = tokio::time::Instant::now() + limit.saturating_sub(Duration::from_secs(1));
         let input = if req.input.is_null() { json!({}) } else { req.input.clone() };
         let reading = Instant::now();
         self.read_callers_logs(me).await?;
@@ -471,23 +509,29 @@ impl Node {
         let mut ctx = ctx;
         ctx.from = req.from.clone();
         let granted = self.grant(&req.app, me, &mut ctx, req.depth);
-        // Just under the call's own limit, so a call that's stopped is recorded first.
+        // What a call writes comes with its answer, and what it keeps is put in the bucket first, all while it may be
+        // stopped; then its steps are written whatever happens to whoever's waiting.
         let running = Instant::now();
-        let app_failed = std::sync::atomic::AtomicBool::new(false);
-        let ran = tokio::time::timeout(limit - Duration::from_secs(1), async {
-            let mut outcome = self.0.apps.call(&req.app, &req.tool, input, &ctx, limit).await.inspect_err(|_| app_failed.store(true, std::sync::atomic::Ordering::Relaxed))?;
+        let answered = AtomicBool::new(false);
+        let ran = unless_writing(deadline, writing, async {
+            let ran = self.0.apps.call(&req.app, &req.tool, input, &ctx, deadline.saturating_duration_since(tokio::time::Instant::now())).await;
+            answered.store(true, Ordering::Relaxed);
+            let mut outcome = ran?;
             trace::note(json!({ "step": "run", "app": req.app, "op": req.tool }), running.elapsed());
-            self.write_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
+            let prepared = self.prepare_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
+            writing.store(true, Ordering::Relaxed);
+            let (node, app, scopes, me) = (self.clone(), req.app.clone(), scopes.clone(), me.clone());
+            tokio::spawn(async move { node.write_prepared(&app, prepared, &scopes, &me).await }).await??;
             anyhow::Ok(outcome)
         })
         .await
-        .unwrap_or_else(|_| Err(anyhow!("it took longer than {}s and was stopped", limit.as_secs())));
+        .unwrap_or_else(|| Err(anyhow!(stopped(limit))));
         let outcome = match ran {
             Ok(outcome) => outcome,
             Err(err) => {
-                // The app failed, so it wrote nothing (a call's writes are one transaction): its next try may run. Not
-                // when it was stopped, or failed after, when it may have written.
-                if let Some(lease) = lease.filter(|_| app_failed.load(std::sync::atomic::Ordering::Relaxed))
+                // The app answered and the call wrote nothing (a call's writes are one transaction): its next try may
+                // run. Not when the app was stopped, as it may still be running, nor when it failed writing.
+                if let Some(lease) = lease.filter(|_| answered.load(Ordering::Relaxed) && !writing.load(Ordering::Relaxed))
                     && let Err(err) = crate::bucket::Bucket::create(&self.bucket()?, &format!("{lease}.failed"), b"").await
                 {
                     tracing::warn!("saying a call failed, so it may run again: {err:#}");
@@ -626,9 +670,15 @@ impl Node {
         })
     }
 
-    /// Writes a call's appends as its caller. Every one is checked before any is written: a call that fails writes
-    /// nothing. Installs come last, since installing a built-in app the network doesn't have yet adds it first.
+    /// Writes a call's appends as its caller: `prepare_appends`, then `write_prepared`.
     pub(super) async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller, from: Option<&str>) -> Result<()> {
+        let prepared = self.prepare_appends(app, appends, scopes, me, from).await?;
+        self.write_prepared(app, prepared, scopes, me).await
+    }
+
+    /// A call's appends, checked, before any is written: a call that fails writes nothing. The blobs its steps keep go
+    /// in the bucket now, so what's slow and may fail comes before it writes.
+    pub(super) async fn prepare_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller, from: Option<&str>) -> Result<Prepared> {
         // What it spent on AI counts against the app that called it, if one did.
         let (costs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Cost { .. }));
         for cost in costs {
@@ -648,7 +698,6 @@ impl Node {
         let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
         let (items, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Vault { .. }));
         // Each scope's statements, in the order the call ran them, and the blobs they keep.
-        type Statement = (String, Vec<Value>, Option<String>);
         let mut statements: Vec<(Scope, Vec<Statement>, Vec<String>)> = Vec::new();
         for exec in execs {
             let Append::Exec { scope, sql, params, blobs, check } = exec else { continue };
@@ -671,38 +720,62 @@ impl Node {
             };
             writes.push(self.with(|i| check_append(i, append, scopes, me, &title))?);
         }
-        let wrote = !statements.is_empty();
-        for (scope, list, kept) in statements {
-            let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;
-            let mut db = db.lock().await;
-            let at = db.at();
-            self.write_in(&scope, &mut db, &bucket, |c| crate::db::statements(c, &list)).await?;
-            if db.at() > at {
-                self.ping(&scope, Some((app, DATABASE, db.at())));
+        let mut kept: Vec<(Scope, String)> = statements.iter().flat_map(|(s, _, kept)| kept.iter().map(|b| (s.clone(), b.clone()))).collect();
+        kept.extend(writes.iter().flat_map(|(s, c)| c.blobs.iter().map(|b| (s.clone(), b.clone()))));
+        let mut put = Vec::new();
+        for (scope, blob) in kept {
+            self.share_blob(&scope, &blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
+            put.push(format!("{scope} {blob}"));
+        }
+        Ok(Prepared { statements, writes, items, installs, put })
+    }
+
+    /// Writes a call's prepared appends as its caller. Installs come last, since installing a built-in app the network
+    /// doesn't have yet adds it first.
+    pub(super) async fn write_prepared(&self, app: &str, prepared: Prepared, scopes: &[Scope], me: &Caller) -> Result<()> {
+        let Prepared { statements, mut writes, items, installs, put } = prepared;
+        // The blobs it put in the bucket aren't put again by the steps that keep them.
+        self.0.put_first.lock().unwrap().extend(put.iter().cloned());
+        let wrote = async {
+            let wrote = !statements.is_empty();
+            for (scope, list, kept) in statements {
+                let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;
+                let mut db = db.lock().await;
+                let at = db.at();
+                self.write_in(&scope, &mut db, &bucket, |c| crate::db::statements(c, &list)).await?;
+                if db.at() > at {
+                    self.ping(&scope, Some((app, DATABASE, db.at())));
+                }
+                drop(db);
+                if !kept.is_empty() {
+                    writes.push((scope, Content { blobs: kept, ..members::node("keep", json!({})) }));
+                }
             }
-            drop(db);
-            if !kept.is_empty() {
-                writes.push((scope, Content { blobs: kept, ..members::node("keep", json!({})) }));
+            if wrote {
+                self.emit(Event::Changed { apps: vec![app.to_string()] });
             }
-        }
-        if wrote {
-            self.emit(Event::Changed { apps: vec![app.to_string()] });
-        }
-        for item in items {
-            if let Append::Vault { id, scope, data, same, release } = item {
-                self.call_item(app, me, scopes, &id, scope, data, same, release).await?;
+            for item in items {
+                if let Append::Vault { id, scope, data, same, release } = item {
+                    self.call_item(app, me, scopes, &id, scope, data, same, release).await?;
+                }
             }
-        }
-        for append in installs {
-            if let Append::Install { app, scope, installed } = append {
-                let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
-                writes.extend(self.install_entries(me, &app, &scope, installed).await?);
+            for append in installs {
+                if let Append::Install { app, scope, installed } = append {
+                    let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
+                    writes.extend(self.install_entries(me, &app, &scope, installed).await?);
+                }
             }
+            for (scope, content) in writes {
+                self.append_as(&scope, &me.user, content).await?;
+            }
+            Ok(())
         }
-        for (scope, content) in writes {
-            self.append_as(&scope, &me.user, content).await?;
+        .await;
+        let mut first = self.0.put_first.lock().unwrap();
+        for p in &put {
+            first.remove(p);
         }
-        Ok(())
+        wrote
     }
 
     /// Keeps a call's grant after it returned, while the work it left running (`ctx.waitUntil`) goes on: its requests
@@ -1256,4 +1329,27 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
     }
     let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None, address: address(m), handles: m.handles(), labs: crate::labs::on_keys(&m.settings()) };
     Ok(Ok((ctx, scopes)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A call is stopped at its limit only before it writes: one that's writing by then is waited for, so a call said
+    /// to be stopped wrote nothing, and one that wrote is never said to be stopped.
+    #[tokio::test(start_paused = true)]
+    async fn a_call_is_stopped_at_its_limit_only_before_it_writes() {
+        let ran = |writing: &'static AtomicBool, writes_at: u64| async move {
+            tokio::time::sleep(Duration::from_secs(writes_at)).await;
+            writing.store(true, Ordering::Relaxed);
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            "wrote"
+        };
+        let deadline = || tokio::time::Instant::now() + Duration::from_secs(30);
+        let before: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+        assert_eq!(unless_writing(deadline(), before, ran(before, 40)).await, None);
+        assert!(!before.load(Ordering::Relaxed), "it was stopped before it wrote");
+        let writing: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+        assert_eq!(unless_writing(deadline(), writing, ran(writing, 20)).await, Some("wrote"));
+    }
 }
