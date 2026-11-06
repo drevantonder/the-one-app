@@ -737,14 +737,27 @@ const h = OneUI.react.createElement;
   /// Where each of the sidebar's links goes, as the window last drew them.
   const links = new Map();
 
+  /// The sidebar's badges, every one, as the native app counts them on its icon: said as the window is first drawn,
+  /// then only when it changes.
+  let badged = -1;
+  function countBadges(drawn) {
+    const total = drawn.flatMap((s) => s.items).reduce((n, i) => n + Math.max(0, i.badge || 0), 0);
+    if (total !== badged) native?.badge?.((badged = total));
+  }
+
   function drawWindow() {
     windowShown = true;
+<<<<<<< HEAD
     if (phone()) {
       const r = route();
       return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: !(r.kind === "own" && r.name === "pages"), onBack: back, screen: detail, banner: offline.banner() }));
     }
+=======
+    const drawn = sections();
+    countBadges(drawn);
+>>>>>>> 2287bbfa (wip: windows on tauri)
     show(h(ui.Shell, {
-      sections: sections(),
+      sections: drawn,
       title: barTitle,
       back: !!history.state?.back,
       onBack: back,

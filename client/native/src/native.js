@@ -35,6 +35,8 @@
     /// Something changed on the person's devices: the app's own widgets are drawn again.
     changed: () => invoke("changed").catch(() => {}),
     signOut: () => invoke("sign_out"),
+    /// What waits for the person, counted on the app's icon (the taskbar's, the dock's): 0 for none.
+    badge: (count) => invoke("badge", { count }).catch(() => {}),
     notify: (ask) => invoke("notify", { ask }),
     copy: (text) => invoke("copy", { text }),
     open: (url) => invoke("open", { url }),

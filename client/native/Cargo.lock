@@ -3995,6 +3995,8 @@ name = "one-native"
 version = "0.1.0"
 dependencies = [
  "data-encoding",
+ "ico",
+ "image",
  "keyring",
  "one",
  "one-client",
@@ -4014,6 +4016,8 @@ dependencies = [
  "tokio",
  "ureq",
  "url",
+ "windows",
+ "windows-registry",
 ]
 
 [[package]]

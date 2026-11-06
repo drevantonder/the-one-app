@@ -6,6 +6,8 @@
 //! - `--widgets`: the pages' widgets kept again where the platform's own read them (`widgets`) → `{ "dir": "…" }`
 //! - `--open-note <pushed>`: a pushed note (its `n`), opened with this device's key → the note, or `{ "error" }`
 //! - `--answer-join <code> approve|refuse`: a device asking to join, let in or turned down → `{ "ok": null }`
+//! - `--register-push <via> <address>`: this device's push address (a WNS channel, from Windows' helper) registered
+//!   with the push Worker, which carries its notes → `{ "ok": null }`
 
 use std::path::PathBuf;
 
@@ -27,7 +29,7 @@ fn dirs_local() -> Option<PathBuf> {
 
 /// Answers `args` if they ask for one of these → whether they did.
 pub fn answer(args: &[String]) -> bool {
-    let Some(what) = args.get(1).filter(|a| a.starts_with("--") && ["--call", "--widgets", "--open-note", "--answer-join"].contains(&a.as_str())) else {
+    let Some(what) = args.get(1).filter(|a| a.starts_with("--") && ["--call", "--widgets", "--open-note", "--answer-join", "--register-push"].contains(&a.as_str())) else {
         return false;
     };
     let out = tauri::async_runtime::block_on(run(what, &args[2..])).unwrap_or_else(|e| json!({ "error": e }));
@@ -95,6 +97,11 @@ async fn run(what: &str, rest: &[String]) -> Result<Value, String> {
                 "approve" => post(&device, "/v1/devices/approve", json!({ "code": code, "confirm": true })).await?,
                 _ => post(&device, "/v1/devices/refuse", json!({ "code": code })).await?,
             };
+            Ok(json!({ "ok": null }))
+        }
+        "--register-push" => {
+            let address = one::push::Address { via: arg(0)?, address: arg(1)?, ..Default::default() };
+            device(&data).await?.register_push(&address).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": null }))
         }
         _ => Err("Unknown".into()),

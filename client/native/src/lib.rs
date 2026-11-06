@@ -9,6 +9,8 @@ mod headless;
 mod secrets;
 mod signin;
 mod widgets;
+#[cfg(windows)]
+mod windows;
 
 pub use headless::answer as headless;
 
@@ -44,7 +46,8 @@ fn identifier() -> String {
 
 /// What the person calls this device, as their other devices list it.
 fn device_name() -> String {
-    let host = std::env::var("HOSTNAME").ok().or_else(|| std::fs::read_to_string("/etc/hostname").ok()).map(|h| h.trim().to_string()).filter(|h| !h.is_empty());
+    // Windows names it in COMPUTERNAME.
+    let host = std::env::var("HOSTNAME").ok().or_else(|| std::env::var("COMPUTERNAME").ok()).or_else(|| std::fs::read_to_string("/etc/hostname").ok()).map(|h| h.trim().to_string()).filter(|h| !h.is_empty());
     host.unwrap_or_else(|| platform().into())
 }
 
@@ -71,7 +74,8 @@ fn env(name: &str) -> Option<String> {
 }
 
 /// The device this app is on, which signing in again replaces its sign-in under: the computer's own node's key, where
-/// one runs here (as the Mac app's was); else, on Linux, the machine's id, hashed.
+/// one runs here (as the Mac app's was); else the machine's own id, hashed: Linux's machine-id, or Windows' MachineGuid,
+/// which outlives reinstalling Windows' apps (as the Windows app's was).
 fn this_device() -> Option<String> {
     let token = std::fs::read_to_string(one::home().join("local-token")).ok();
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(2))).build().into();
@@ -82,6 +86,9 @@ fn this_device() -> Option<String> {
     });
     node.or_else(|| {
         use sha2::{Digest, Sha256};
+        #[cfg(windows)]
+        let id = windows::machine_guid()?;
+        #[cfg(not(windows))]
         let id = ["/etc/machine-id", "/var/lib/dbus/machine-id"].iter().find_map(|p| std::fs::read_to_string(p).ok())?;
         Some(data_encoding::HEXLOWER.encode(&Sha256::digest(format!("this device {}", id.trim()).as_bytes())))
     })
@@ -181,6 +188,14 @@ fn keep_widgets() {
     });
 }
 
+/// Let in, now or as it starts: the platform's own widgets kept, and on Windows, its push channel registered (by the
+/// package's helper, which has the Windows App SDK), since a channel lasts 30 days.
+fn let_in() {
+    keep_widgets();
+    #[cfg(windows)]
+    windows::register_push();
+}
+
 /// Something changed on the person's devices (the page's events say): the widgets kept for the platform's own again.
 #[tauri::command]
 fn changed() {
@@ -190,6 +205,21 @@ fn changed() {
             eprintln!("widgets: {e}");
         }
     });
+}
+
+/// What waits for the person (every app's badge on every page, and Settings'), counted on the app's icon: Windows'
+/// taskbar button (BadgeUpdateManager, by the package's identity), elsewhere what Tauri sets (the dock's, the
+/// launcher's); none at 0.
+#[tauri::command]
+fn badge(count: u32) {
+    #[cfg(windows)]
+    windows::badge(count);
+    #[cfg(all(desktop, not(windows)))]
+    if let Some(w) = app().handle.get_webview_window("main") {
+        let _ = w.set_badge_count((count > 0).then_some(count as i64));
+    }
+    #[cfg(mobile)]
+    let _ = count;
 }
 
 /// An access token, from the refresh token in the secret store (a request to sign-in, so off the async threads).
@@ -302,7 +332,7 @@ async fn join() -> Result<Value, String> {
     };
     match device.connect().await {
         Ok(true) => {
-            keep_widgets();
+            let_in();
             println!("Let in.");
             return Ok(json!({ "in": true }));
         }
@@ -326,7 +356,7 @@ async fn wait() -> Result<(), String> {
         let token = token().await?;
         if device.wait(&token).await.map_err(|e| e.to_string())? {
             app().keep("invite", None);
-            keep_widgets();
+            let_in();
             println!("Let in.");
             return Ok(());
         }
@@ -393,6 +423,7 @@ async fn sign_out() -> Result<(), String> {
     }
     a.keep("user", None);
     widgets::forget(&widgets_dir());
+    badge(0);
     Ok(())
 }
 
@@ -601,10 +632,12 @@ fn opened(url: &str) {
     }
 }
 
-/// Opening at login. Linux: an XDG autostart entry, where XDG_CONFIG_HOME says.
+/// Opening at login. Linux: an XDG autostart entry, where XDG_CONFIG_HOME says; Windows: the package's startup task.
 #[cfg(desktop)]
 mod login {
-    use tauri::{AppHandle, Manager};
+    use tauri::AppHandle;
+    #[cfg(target_os = "linux")]
+    use tauri::Manager;
 
     #[cfg(target_os = "linux")]
     fn entry(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -613,13 +646,18 @@ mod login {
 
     /// Whether the app switches it on this platform yet.
     pub fn supported() -> bool {
-        cfg!(target_os = "linux")
+        cfg!(any(target_os = "linux", windows))
     }
 
     pub fn on(app: &AppHandle) -> bool {
         #[cfg(target_os = "linux")]
         return entry(app).is_some_and(|e| e.exists());
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        return {
+            let _ = app;
+            crate::windows::login()
+        };
+        #[cfg(not(any(target_os = "linux", windows)))]
         return {
             let _ = app;
             false
@@ -636,6 +674,8 @@ mod login {
             let _ = std::fs::create_dir_all(entry.parent().unwrap());
             let _ = std::fs::write(entry, format!("[Desktop Entry]\nType=Application\nName={}\nExec=\"{}\"\nTerminal=false\n", one::config::NAME, exe.display()));
         }
+        #[cfg(windows)]
+        crate::windows::set_login(on);
         let _ = (app, on);
     }
 }
@@ -728,7 +768,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, quit, panel, fit])
+        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, quit, panel, fit, badge])
         .setup(|app| {
             // Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
             let data = app.path().app_local_data_dir()?;

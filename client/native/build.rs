@@ -26,11 +26,17 @@ fn main() {
         "android" => "android",
         _ => "linux",
     };
+    // The custom build's app icon, as the web client's files have it; on Windows, the program's own too (its window's,
+    // the taskbar's), an .ico.
+    let mut icons = vec!["gen/web/icon.png"];
+    if platform == "windows" {
+        windows_icon(&dist.join("icon.png"), Path::new("gen/icon.ico"));
+        icons.push("gen/icon.ico");
+    }
     let config = serde_json::json!({
         "productName": one::config::NAME,
         "identifier": identifier(platform),
-        // The custom build's app icon, as the web client's files have it.
-        "bundle": { "icon": ["gen/web/icon.png"] },
+        "bundle": { "icon": icons },
         // `<cli>://open?app=&screen=&params=&scope=`, as the address's /back passes a sign-in elsewhere on to the app.
         "plugins": { "deep-link": { "desktop": { "schemes": [one::config::CLI] } } },
     });
@@ -38,6 +44,20 @@ fn main() {
     unsafe { std::env::set_var("TAURI_CONFIG", config.to_string()) };
     println!("cargo:rustc-env=TAURI_CONFIG={config}");
     println!("cargo:rerun-if-env-changed=CONFIG");
-    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit"]);
+    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit", "badge"]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands)).expect("the app's build")
+}
+
+/// The icon as Windows wants a program's: an .ico of each size it draws, from the icon drawn on Apple's Mac grid (an
+/// 824-point tile in a clear 100-point margin in 1024), its tile filling each, its corners clear.
+fn windows_icon(png: &Path, to: &Path) {
+    let icon = image::open(png).expect("the custom build's icon").into_rgba8();
+    let margin = icon.width() * 100 / 1024;
+    let tile = image::imageops::crop_imm(&icon, margin, margin, icon.width() - 2 * margin, icon.height() - 2 * margin).to_image();
+    let mut dir = ico::IconDir::new(ico::ResourceType::Icon);
+    for size in [16, 24, 32, 48, 64, 128, 256] {
+        let small = image::imageops::resize(&tile, size, size, image::imageops::FilterType::Lanczos3);
+        dir.add_entry(ico::IconDirEntry::encode(&ico::IconImage::from_rgba_data(size, size, small.into_raw())).unwrap());
+    }
+    dir.write(std::fs::File::create(to).unwrap()).unwrap();
 }

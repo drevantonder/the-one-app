@@ -148,6 +148,15 @@ pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
 /// an authorization (an app's, which then comes back to it). Only a throwaway network's sign-in signs anyone in this way
 /// (`cloudflare/auth`'s `throwawayNetwork`). `person`, someone who joined it, signs in as them instead.
 pub fn approve_on_throwaway(address: &str, url: &str, person: Option<&str>) -> Result<()> {
+    let back = approved_on_throwaway(address, url, person)?;
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
+    agent.get(back).call()?;
+    Ok(())
+}
+
+/// `approve_on_throwaway`, but for an app on another machine, where it comes back to (its loopback redirect, which
+/// only that machine reaches): → that URL, for it to open there.
+pub fn approved_on_throwaway(address: &str, url: &str, person: Option<&str>) -> Result<String> {
     let address = address.trim_end_matches('/');
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
     let went = |resp: &ureq::http::Response<ureq::Body>| resp.headers().get("location").and_then(|l| l.to_str().ok()).map(str::to_string);
@@ -178,8 +187,7 @@ pub fn approve_on_throwaway(address: &str, url: &str, person: Option<&str>) -> R
     let mut resp = agent.post(format!("{address}/sign-in/accept")).header("origin", address).header("cookie", &cookie).send_json(serde_json::json!({ "oauth_query": oauth_query }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     let done = out["url"].as_str().with_context(|| said(&out, "signing in didn't work"))?;
-    agent.get(to(done.to_string())).call()?;
-    Ok(())
+    Ok(to(done.to_string()))
 }
 
 /// Waits for the person to approve the code, then keeps the tokens it gives.
