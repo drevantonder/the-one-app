@@ -856,7 +856,8 @@ mod tests {
         tokio::spawn(super::serve(listener, router));
         let token = node.local_token().to_string();
         let asked = tokio::task::spawn_blocking(move || {
-            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+            // A refusal can close its connection (`refuse`), so none is kept for the next request.
+            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_idle_connections(0).build().into();
             let mut asked = Vec::new();
             for (route, who) in who {
                 let path: String = route.split('/').map(|s| if s.starts_with('{') { "x" } else { s }).collect::<Vec<_>>().join("/");
