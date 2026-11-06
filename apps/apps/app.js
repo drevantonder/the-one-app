@@ -91,7 +91,7 @@ async function usedWithService(ctx, a) {
     const name = next.shift();
     if (seen.has(name)) continue;
     seen.add(name);
-    const used = await find(ctx, name).catch(() => ({ name }));
+    const used = await find(ctx, name).catch(() => ({ name })); // an app this network doesn't have has no service to list
     next.push(...(used.uses?.apps || []));
     if (hasService(used)) out.push(used);
   }

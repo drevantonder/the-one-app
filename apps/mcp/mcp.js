@@ -305,7 +305,7 @@ async function finish(ctx, code, name) {
     refused = u.searchParams.get("error_description") || u.searchParams.get("error");
     state = u.searchParams.get("state");
     code = u.searchParams.get("code") || code;
-  } catch {}
+  } catch {} // a bare code, not the address it came in
   if (state && state !== p.state) throw new Error("that address is from an older sign-in: use the newest link sign_in gave");
   if (refused) return failed(ctx, `Sign-in failed: ${refused}. Start again with sign_in.`);
   const r = await fetch(p.token_endpoint, {

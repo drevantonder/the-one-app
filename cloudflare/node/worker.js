@@ -355,7 +355,7 @@ class Person {
     if (sealed) {
       try {
         who.offered = JSON.parse(handoff(this.env.NODE_KEY, who.device, sealed, Date.now(), who.until));
-      } catch {}
+      } catch {} // a bundle that doesn't open is no keys offered: the call asks for them (a 428)
     }
     return who;
   }
@@ -378,7 +378,7 @@ class Person {
       kept.keys.get(id)[k.epoch] = k.key;
       try {
         wanted.push(newestOf(k.scope, k.app, k.database));
-      } catch {}
+      } catch {} // a scope it can't name has no newest hint to fetch ahead; the key is kept all the same
     }
     this.handed.set(who.hash, kept);
     this.bucket.prefetch(wanted);
@@ -766,7 +766,10 @@ class Run {
           for (const other of (w.sizes || []).filter((s) => s !== size)) await draw(other, {}).then((t) => (sizes[other] = t), () => {});
           one.sizes = sizes;
           one.root = root;
-          if (w.options?.length) one.options = await this.run(app, "options", { name: w.name }, scopes).catch(() => w.options);
+          if (w.options?.length) one.options = await this.run(app, "options", { name: w.name }, scopes).catch((err) => {
+            console.error(`${app.name}'s options for ${w.name}: ${err.message}`);
+            return w.options;
+          });
           const mine = {};
           for (const item of placed.filter((i) => i.app === app.name && i.widget === w.name)) {
             const at = item.size || size;
@@ -789,7 +792,10 @@ class Run {
     await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
       const d = await this.person.describe(this.who, app).catch(keysFirst);
       if (d?.badge !== true || !servedHere(this.view, d)) return;
-      const n = await this.run(app, "badge", {}, scopes).catch(() => 0);
+      const n = await this.run(app, "badge", {}, scopes).catch((err) => {
+        console.error(`${app.name}'s badge: ${err.message}`);
+        return 0;
+      });
       if (n > 0) out[app.name] = n;
     }));
     return out;
@@ -844,7 +850,10 @@ async function ownService(run, q, d) {
   const cloudflare = String(q.device || "").toLowerCase() === "cloudflare";
   if (q.device === "all") {
     const here = await hereCall(run.env, q.app, q.function, q.input).catch((err) => ({ ok: { error: err.message } }));
-    const there = await machineCall(run, q, d).catch(() => ({ ok: {} }));
+    const there = await machineCall(run, q, d).catch((err) => {
+      console.error(`${q.app}'s ${q.function} on the devices: ${err.message}`);
+      return { ok: {} };
+    });
     return { ok: { ...there.ok, ...(here ? { Cloudflare: here.ok } : {}) } };
   }
   const here = !q.device || cloudflare ? await hereCall(run.env, q.app, q.function, q.input) : null;
@@ -872,7 +881,7 @@ class ForCall extends RpcTarget {
     let text = null;
     try {
       text = bytes && new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {}
+    } catch {} // bytes that aren't UTF-8 go as `null` text, on purpose
     const filled = JSON.parse(vault_fill(await this.call.vault(), this.app.name, this.run.who.user, host, JSON.stringify({ url: q.url, headers: q.headers || {}, body: text })));
     const r = await fetch(filled.url, { method: q.method, headers: filled.headers, body: text === null ? bytes : filled.body, redirect: "manual" });
     const got = new Uint8Array(await r.arrayBuffer());

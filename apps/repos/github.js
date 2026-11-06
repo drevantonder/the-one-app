@@ -353,7 +353,7 @@ export const run = {
     const names = c.json.slice(0, 100).map((e) => e.name);
     const fields = names.map((n, i) => `e${i}: history(first: 1, path: ${JSON.stringify((path ? path + "/" : "") + n)}) { nodes { oid messageHeadline authoredDate author { name } } }`).join("\n");
     const data = await graphql(o.app, o.c, `query($owner: String!, $name: String!, $sha: GitObjectID!) { repository(owner: $owner, name: $name) { object(oid: $sha) { ... on Commit { ${fields} } } } }`,
-      { owner: o.r.owner.login, name: o.r.name, sha: h.sha }).catch(() => null);
+      { owner: o.r.owner.login, name: o.r.name, sha: h.sha }).catch(() => null); // the listing stands without each entry's last commit
     const obj = data?.repository?.object || {};
     const out = {};
     names.forEach((n, i) => {
@@ -365,7 +365,7 @@ export const run = {
   async branches(ctx, { repo }) {
     const o = await open(ctx, repo);
     const data = await graphql(o.app, o.c, `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { refs(refPrefix: "refs/heads/", first: 100) { nodes { name target { ... on Commit { oid messageHeadline authoredDate committedDate author { name } } } } } } }`,
-      { owner: o.r.owner.login, name: o.r.name }).catch(() => null);
+      { owner: o.r.owner.login, name: o.r.name }).catch(() => null); // a token GraphQL refuses: REST lists them below
     if (data) return data.repository.refs.nodes.map((b) => ({ branch: b.name, head: b.target.oid, pushed_by: null, time: b.target.committedDate, subject: b.target.messageHeadline, author: b.target.author?.name || null, committed: b.target.committedDate }));
     const r = await send(o.app, o.c, "GET", `/repos/${o.full}/branches?per_page=100`, null, { ok: [409] });
     return r.status === 409 ? [] : r.json.map((b) => ({ branch: b.name, head: b.commit.sha, pushed_by: null, time: null, subject: null, author: null, committed: null }));

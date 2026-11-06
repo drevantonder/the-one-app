@@ -425,7 +425,7 @@ export class Relay extends DurableObject {
     if (other) {
       try {
         return other.send(out.subarray(33));
-      } catch {}
+      } catch {} // a socket that closed since it was listed: the packet is lost, as the network may lose it
     }
     // Its sender drops its path through here sooner.
     const pair = `${said.id} ${to}`;
@@ -469,7 +469,7 @@ export class Relay extends DurableObject {
       else
         try {
           to.send(to_client(unhex(this.env.BOUND), seg, contents));
-        } catch {}
+        } catch {} // closed since it was listed: this packet is lost
     }
     return [...gone];
   }
@@ -548,7 +548,7 @@ export class Relay extends DurableObject {
       else
         try {
           to.send(to_client(unhex(key), seg, contents));
-        } catch {}
+        } catch {} // closed since it was listed: this packet is lost
     }
     return [...gone];
   }
@@ -604,7 +604,7 @@ export class Relay extends DurableObject {
         other.serializeAttachment({});
         try {
           other.close(1000, "the endpoint connected again");
-        } catch {}
+        } catch {} // already closed
       }
     }
     ws.serializeAttachment(attachment);
@@ -622,7 +622,7 @@ export class Relay extends DurableObject {
     ws.serializeAttachment({});
     try {
       ws.close(1008, why);
-    } catch {}
+    } catch {} // already closed
   }
 
   /// An alarm at `until`, if none is sooner, to close pairing codes' computers once their codes expire, and sessions'
@@ -749,7 +749,7 @@ export class Relay extends DurableObject {
     this.gone(ws);
     try {
       ws.close(code === 1005 ? 1000 : code, "closed");
-    } catch {}
+    } catch {} // the peer already closed it
   }
 
   webSocketError(ws) {

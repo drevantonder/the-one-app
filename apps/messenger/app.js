@@ -194,7 +194,7 @@ function structured(got) {
     try {
       const v = JSON.parse(item.text);
       if (v && typeof v === "object" && !Array.isArray(v)) return v;
-    } catch {}
+    } catch {} // browser tools answer in prose too: only the JSON one is wanted
   }
   return {};
 }
@@ -371,7 +371,7 @@ class Browser {
     try {
       await this.tool("browser_navigate", { url });
       return;
-    } catch {}
+    } catch {} // the tab is gone: open it again
     await this.open();
     await this.tool("browser_navigate", { url });
   }
@@ -470,7 +470,7 @@ class Browser {
     for (let n = 0; n < 10; n++) {
       const p = await this.list();
       let c = null;
-      try { c = pick(p.chats(), name); } catch {}
+      try { c = pick(p.chats(), name); } catch {} // not listed yet: the page is still settling
       if (c && words(c.last) === want) return `Sent to ${c.name}.`;
       await sleep(500);
       this.dirty = true;
