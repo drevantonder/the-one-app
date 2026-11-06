@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use one::config::{CLI, NAME, YOURS};
+use one::cli::{Command, Given};
 use one::skills::Mode;
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
@@ -15,171 +16,19 @@ mod tools;
 mod throwaway;
 mod update;
 
+/// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
+fn commands() -> Vec<Command> {
+    use one::node::{backups, groups, storage, vault};
+    vec![network(), groups::commands(), apps(), vault::cli::commands(), cloudflare_commands(), storage::cli::commands(), backups::cli::commands(), running(), releases(), agents(), throwaway::command(), generic()]
+}
+
 /// Every built-in command, with what it takes: `help all` prints it, and `<command> --help` its lines.
 fn every_command() -> String {
-    format!(
-        "Usage:
-  {CLI} status                         this device, and the people, groups and devices in {YOURS}
-  {CLI} status --until <commit> [--device <name>[,<name>…]] [--timeout <10m>]
-                                       wait until every device (or those named) runs that commit, or a later build, and
-                                       its services answer, or a build fails; says what each did, and fails unless all
-                                       made it. After {CLI} update: {CLI} status --until $(git rev-parse HEAD)
-  {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
-                                       your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't
-                                       run, this computer becomes one of your devices, once you approve its next
-                                       code too, and asks your devices for everything
-  {CLI} sign-in --invite <link>        join with the invite link someone sent you, on your first computer: you make
-                                       your passkey in a browser, and they approve this computer's code
-  {CLI} sign-out                       sign this machine out, and take it out of your devices if it's one
-  {CLI} create <name> --as <your name> [--user <id>]
-                                       create a network, with you as its first admin (--user: who you were in one
-                                       it replaces, so your sign-in is still yours)
-  {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
-  {CLI} join <code>                    join {YOURS} with a pairing code
-  {CLI} rename <name>                  rename this device
-  {CLI} role <user> admin|member       (admins)
-  {CLI} settings [<name> <value>|--default]   the network's settings (admins set them)
-  {CLI} groups                         who's in {YOURS}, then every group: who's in it, as admin or member,
-                                       and who's invited
-  {CLI} group create <name>            a group, with you as its admin
-  {CLI} group invite <group> <user> [--admin]
-  {CLI} group accept <group>
-  {CLI} group remove <group> <user>    or leave it, giving yourself
-  {CLI} apps                           every app and its tools
-  {CLI} deploy <dir> [--name <app>] [--owner <owner>]
-                                       build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and
-                                       deploy it, with its source; makes the app if it's new (owner: you, a group or admins).
-                                       React screens (screens/<name>.jsx) are built first, into dist/<name>.html, with
-                                       this machine's Bun or Node
-  {CLI} deploy <app> --version <hash>  deploy an earlier version again (deploys lists them): a rollback
-  {CLI} deploys <app>                  an app's deploys, newest last
-  {CLI} source <app> [path] [--version <hash>]
-                                       an app's code as deployed: its files, or one of them
-  {CLI} install <app> [--scope user|global|<group>]
-                                       install an app, and the apps it uses, for you, a group you admin or everyone
-  {CLI} uninstall <app> [--scope s]
-  {CLI} fork <app> <name> [--owner <owner>]
-                                       a new app from <app>'s code, with data of its own
-  {CLI} vault [--scope user|global|<group>]
-                                       the Vault's items you may change: fields (secret ones never shown), the sites
-                                       they're sent to and the apps switched on for each
-  {CLI} vault set <item> <field> [--secret] [--hosts a,b] [--app <app>] [--scope s]
-                                       set a field of an item (by title or id; a new one by that title), its value
-                                       read from stdin (a line typed, or a whole file); for a person's value, vault
-                                       request asks them instead
-  {CLI} vault use <item> <app> [--off] switch an app on (or off) for an item; only the person lets agents use one
-  {CLI} vault grant <device> [--off] [--scope s]
-                                       let a machine open a Vault's secrets and fill them in (or no longer); only
-                                       its admins say, and nobody else, not even its people, reads a secret back
-  {CLI} vault fetch <url> [--method M] [--headers <json object>] [--body text]
-                                       make a request with {{{{field}}}} filled in from the items the person lets
-                                       agents use, a secret field only for its item's sites: you get the answer,
-                                       never the secret
-  {CLI} vault remove <item> [<field>] [--scope s]
-                                       delete an item, or one of its fields
-  {CLI} vault request [<app>] (--need <name> | --title <t> --fields a,b [--secret-fields b] --hosts a,b) [--why text]
-                                       ask the person for an item an app may use (with no app, for vault fetch): a
-                                       link to a sheet where they pick or make one, so you never see it; vault status
-                                       <id> says how it went
-  {CLI} vault requests                 the requests waiting for you; vault answer <id> [--item <id> | --decline]
-                                       answers one, a new item's values on stdin (one line, or a JSON object)
-  {CLI} cloudflare                     the network's Workers on Cloudflare, as this machine has them: their addresses and settings
-  {CLI} cloudflare serve [--address <url>]
-                                       run the network's Workers in workerd (sign-in, the relay, the URL signer, and the gateway people reach
-                                       at the network's address) on this machine; the first time, with that address
-  {CLI} cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]
-                                       deploy the network's Workers to Cloudflare, with an API token that
-                                       may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
-                                       domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless
-                                       --address says, for good: passkeys belong to it), or at its workers.dev address;
-                                       and the Cloudflare node with it, once cloudflare node deploy put it there; beside a
-                                       node of the network, whose devices its relay takes, unless --new
-  {CLI} cloudflare invite <name> [--admin] [--user <id>] [--email <email>]
-                                       a link that lets someone join, once and for a few days, as who they'll be in the network (--user, or this machine's person if they're called that; else someone
-                                       new, as devices invite does), signed with this machine's key, an admin's
-                                       device's; where people sign in with Google, --email is the account they sign up
-                                       with. Nobody joins uninvited, the first person too
-  {CLI} cloudflare node deploy [--account <id>]
-                                       put the network's Cloudflare node in its Workers' Cloudflare account (a node as
-                                       a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over
-                                       iroh when none of your machines answers
-  {CLI} cloudflare set <setting> <value>  change one: sign-in-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
-                                       android (the SHA-256 fingerprints of the certificates the Android app is signed
-                                       with, comma-separated, or -: links to the address open the app)
-  {CLI} cloudflare use <address>
-                                       point this network at its Workers: its nodes take sign-ins made at the address
-  {CLI} storage                        where the network's data is kept
-  {CLI} storage move --endpoint <url> --bucket <name> [--region <r>]
-                                       move it to S3-compatible storage (R2, S3, GCS, MinIO), whose key is the
-                                       Workers' BUCKET: every device reaches it through the URL signer, and moves there
-  {CLI} backups                        how backups are going: each place, its last backup, what's failing
-  {CLI} backups now                    back up now, without waiting for the hour
-  {CLI} backups place add <folder> [--title t]
-                                       back up to a folder on this device, like a USB disk's: tried before it's added
-  {CLI} backups place add --endpoint <url> [--title t]
-                                       back up to S3-compatible storage (R2, B2, MinIO): piped a JSON object of
-                                       bucket, key_id and secret (and region) it tries and adds it; otherwise it asks
-                                       the person for them, with a link to a sheet on their device
-  {CLI} backups place remove <place>   stop backing up to a place (what's there stays)
-  {CLI} backups check [--folder <path>]
-                                       restore each place's newest backup into a throwaway copy, check every entry and
-                                       blob, and say what came back; with --folder, any backup on a disk, opened with
-                                       the recovery key on stdin, with or without a network here
-  {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
-  {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
-  {CLI} services                       what each of your devices can run, each on or off, and what it's doing
-  {CLI} services on|off <name> [--device <name>]
-                                       switch a service on or off on a device of yours (here by default), which its
-                                       oned starts or stops, fetching its program as it's published (a Mac app
-                                       carries its own); apps is its app service. An admin's --device cloudflare
-                                       switches a service built for Cloudflare on the Cloudflare node (Models: Workers AI)
-  {CLI} services sandbox | sudo sh    let this machine run services in their sandbox, each as its own user (Linux;
-                                       the installer does it)
-  {CLI} services try apps/<name> [--device <name>]
-                                       put your checkout's build of an app's service on a device of yours (here by
-                                       default, else over ssh by its name) and switch it on, until a newer one is
-                                       published
-  {CLI} logs <device> [--service <name>] [--since <10m>] [--grep <text>] [--lines <n>]
-                                       a device's node log, or one of its services', read over the network, newest
-                                       last, capped (the last 200 lines, at most 1000 or 48 KiB); only its person and
-                                       the network's admins read them. --since takes s, m, h or d
-  {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
-                                       switch an app's schedule on (it then runs as you) or off
-  {CLI} <app>                          an app's tools
-  {CLI} <app> <tool> [words] [--input value]
-                                       run a tool, e.g. {CLI} repos list; --help says what
-                                       it takes. Words fill its main inputs in order (--help shows which), lists
-                                       repeat a flag, required inputs not given are read as JSON from stdin
-                                       (a last word - reads it anyway), --file
-                                       <input>=<path> gives a file and --out <path> saves what it gives back.
-                                       --device <name> runs it on that device; --trace prints, after its answer
-                                       (or why it failed), what it did: the devices tried, the one that ran it, each
-                                       wait in ms, where its data came from, and the total
-  {CLI} throwaway [<command>]          a throwaway network for this checkout, on this machine beside yours, with only
-                                       what every new one starts with: to look around and test in. {CLI} throwaway
-                                       <command> runs a command in it ({CLI} throwaway mcp for an agent), {CLI} throwaway
-                                       client web, linux, mac, iphone, android or windows gives a client of this
-                                       checkout's build signed in to it, and {CLI} throwaway stop deletes it
-  {CLI} update                         build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere
-  {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
-  {CLI} publish [binary]               sign and publish a build you made; every device on its platform updates
-  {CLI} file put <file>                keep a file in the network, for apps and agents; prints its hash
-  {CLI} file get <hash> <file>         get a kept file from this device or another
-  {CLI} version                        this build
-  {CLI} skills [<name> [<file>]]       the skills agents load: {NAME}'s own (how to connect, the rules, which MCP to
-                                       add; also {CLI} guide, and /llms.txt), and each area's and app's
-  {CLI} search <words>                 the tools for a task in every app: how to call each, and its app's guide
-  {CLI} run <file>                     run a short script that calls tools, as tools.<app>.<tool>({{ ... }}) (- reads
-                                       it from stdin), and print what it returns; {CLI} search gives each call
-  {CLI} mcp [--code]                   the local MCP server, over stdio, for agents: every tool, or with --code, search and execute
-  {CLI} help [all]                     what to start with; with all, this
-
-{NAME} holds one network. For another context, run that context's own app."
-    )
+    format!("Usage:\n{}\n{NAME} holds one network. For another context, run that context's own app.", one::cli::help(&commands()))
 }
 
 /// The built-in commands, by their first word, as the full list says them.
-fn commands() -> Vec<String> {
+fn command_words() -> Vec<String> {
     let mut out: Vec<String> = every_command().lines().filter_map(|l| l.strip_prefix(&format!("  {CLI} "))).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase() || c == '-')).map(String::from).collect();
     out.dedup();
     out
@@ -299,655 +148,624 @@ fn run(args: Vec<String>) -> Result<()> {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
         unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     }
-    // --help shows help, whatever the command: never runs it.
-    if (flags.contains_key("help") || positional.iter().any(|p| p == "-h"))
-        && let Some(text) = command_help(&positional)
-    {
-        print!("{text}");
+    let agent = agent_from_env();
+    let given = Given { words: &positional, flags: &flags, args: &args, node: &Local, agent: agent.as_deref() };
+    // --help shows help, whatever the command: never runs it. An app's tool's is the app's own.
+    if flags.contains_key("help") || positional.iter().any(|p| p == "-h") {
+        match command_help(&positional) {
+            Some(text) => print!("{text}"),
+            None => _ = (generic().run)(&given)?,
+        }
         return Ok(());
     }
-    match positional.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
-        [] | ["help"] => {
-            println!("{}", help());
-            println!("\n{}", connection());
+    for command in commands() {
+        if (command.run)(&given)? {
+            return Ok(());
         }
-        ["help", "all"] => println!("{}", every_command()),
-        ["help", rest @ ..] => match command_help(&rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
-            Some(text) => print!("{text}"),
-            None => bail!("{}", tools::unknown(rest[0], None, true)?),
-        },
-        ["sign-in"] => sign_in(&flags)?,
-        ["sign-out"] => {
-            // A device takes itself out of its person's devices first, while its sign-in still says who it is; git
-            // here then no longer reaches its repos, which a node here still serves.
-            let address = one::sign_in::kept().map(|k| k.address).filter(|_| !client_device::node_here());
-            let device = client_device::sign_out();
-            if let Some(address) = address {
-                git_remote::unwire(&address);
-            }
-            match one::sign_in::sign_out()? || device {
-                true if device => println!("Signed out: this computer is no longer one of your devices, and {CLI} here no longer acts as you."),
-                true => println!("Signed out: {CLI} on this machine no longer acts as you."),
-                false => println!("This machine isn't signed in."),
-            }
-        }
-        ["mcp"] => mcp(if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
-        ["run", file] => {
-            let script = match *file {
-                "-" => std::io::read_to_string(std::io::stdin())?,
-                file => std::fs::read_to_string(file).with_context(|| format!("read {file}"))?,
-            };
-            let result = code::execute(&script, agent_from_env().as_deref(), "cli")?;
-            for line in result["logs"].as_array().into_iter().flatten() {
-                eprintln!("{}", line.as_str().map(String::from).unwrap_or_else(|| line.to_string()));
-            }
-            match result["ok"] == true {
-                true => println!("{}", match &result["value"] {
-                    Value::String(s) => s.clone(),
-                    v if std::io::IsTerminal::is_terminal(&std::io::stdout()) => serde_json::to_string_pretty(v)?,
-                    v => serde_json::to_string(v)?,
-                }),
-                false => bail!("{}", code::shown(&result)),
-            }
-        }
-        // `guide` was the root skill's name before there were skills.
-        ["guide"] => print!("{}", skills()[0].skill_md()),
-        ["skills"] => {
-            let skills = skills();
-            let width = skills.iter().map(|s| s.name.len()).max().unwrap_or(0);
-            for s in &skills {
-                println!("{:width$}  {}", s.name, s.description);
-            }
-            println!("\n{CLI} skills <name> prints one; {CLI} skills <name> <file> one of its other files.");
-        }
-        ["skills", name, path @ ..] => {
-            let skill = skills().into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", one::skills::server_name())) == Some(*name));
-            let skill = skill.with_context(|| format!("no skill {name}: {CLI} skills lists them"))?;
-            let path = path.first().copied().unwrap_or("SKILL.md");
-            print!("{}", skill.file(path).with_context(|| format!("{} has no {path}: it has {}", skill.name, skill.all_files().iter().map(|f| f.0.as_str()).collect::<Vec<_>>().join(", ")))?);
-        }
-        ["search", words @ ..] if !words.is_empty() => {
-            let limit = flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
-            let (apps, addable) = code::catalogs()?;
-            println!("{}", code::search(&apps, &addable, &words.join(" "), limit, code::For::Cli));
-        }
-        ["status"] if flags.contains_key("until") => update::wait(&args)?,
-        ["status"] => status(&get("/v1/state")?),
-        ["apps"] => {
-            let groups = get("/v1/state")?["network"]["groups"].clone();
-            // Where it's added, as the App Store says it: you, a group by its name, everyone.
-            let place = |scope: &str| match scope.split_once(':') {
-                Some(("group", id)) => groups.as_array().into_iter().flatten().find(|g| g["id"] == id).and_then(|g| g["name"].as_str()).unwrap_or(id).to_string(),
-                Some(("user", _)) => "you".to_string(),
-                _ => "everyone".to_string(),
-            };
-            for app in get("/v1/apps")?.as_array().into_iter().flatten() {
-                let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
-                let installed: Vec<String> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
-                let installed = if installed.is_empty() { String::new() } else { format!(", added for {}", installed.join(", ")) };
-                println!("{} ({}{from}{installed})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
-                tools::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
-            }
-        }
-        ["create", name @ ..] if !name.is_empty() => {
-            let user_name = flags.get("as").and_then(Value::as_str).context("say what to call you with --as <your name>")?;
-            let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": flags.get("user") }))?;
-            println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
-        }
-        ["pair"] => {
-            let r = post("/v1/pair", json!({ "user": flags.get("user") }))?;
-            println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
-        }
-        ["join", code] => {
-            unsigned_post("/v1/join", json!({ "code": code }))?;
-            println!("Joined. Syncing now; {CLI} status shows progress.");
-        }
-        ["settings"] => {
-            let state = get("/v1/state")?;
-            for (name, value) in state["network"]["settings"].as_object().context("not in a network yet")? {
-                println!("{name} = {value}");
-            }
-        }
-        ["settings", name, value @ ..] => {
-            let value = if flags.contains_key("default") { Value::Null } else { json!(value.join(" ")) };
-            post("/v1/settings", json!({ "name": name, "value": value }))?;
-            println!("Set {name}.");
-        }
-        ["role", user, role] => {
-            post("/v1/role", json!({ "user": user, "role": role }))?;
-            println!("{user} is now {role}.");
-        }
-        ["groups"] | ["group"] | ["groups", "list"] => {
-            takes_only(&flags, &[])?;
-            print!("{}", one::node::groups::said(&get("/v1/state")?));
-            println!("\n{CLI} group create <name>, {CLI} group invite <group> <user> [--admin], {CLI} group accept <group> and {CLI} group remove <group> <user> change them.");
-        }
-        ["group", "create", name @ ..] if !name.is_empty() => {
-            let r = post("/v1/group", json!({ "name": name.join(" ") }))?;
-            println!("Created {} ({}).", name.join(" "), r["group"].as_str().unwrap_or(""));
-        }
-        ["group", "invite", group, user] => {
-            post("/v1/invite", json!({ "group": group, "user": user, "role": if flags.contains_key("admin") { "admin" } else { "member" } }))?;
-            println!("Invited {user}; they join with {CLI} group accept {group}.");
-        }
-        ["group", "accept", group] => {
-            post("/v1/accept", json!({ "group": group }))?;
-            println!("You're in {group}.");
-        }
-        ["group", "remove", group, user] => {
-            post("/v1/member", json!({ "group": group, "user": user, "role": null }))?;
-            println!("{user} is no longer in {group}.");
-        }
-        ["deploy", app] if flags.contains_key("version") => {
-            let version = flags["version"].as_str().context("give --version <hash>")?;
-            let here = post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?["here"] == true;
-            println!("{}", deployed_said(&format!("Deployed {app} ({version}) again."), here));
-        }
-        ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
-        ["deploys", app] => {
-            let apps = get("/v1/apps")?;
-            let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}"))?;
-            for d in found["history"].as_array().into_iter().flatten() {
-                let current = if d["bundle"] == found["bundle"] { "  (running)" } else { "" };
-                println!("{}  {}{current}", &d["bundle"].as_str().unwrap_or("")[..12], ago(d["time"].as_u64().unwrap_or(0)));
-            }
-        }
-        ["source", app, rest @ ..] => {
-            let mut q = Vec::new();
-            if let Some(b) = flags.get("version").and_then(Value::as_str) {
-                q.push(format!("bundle={b}"));
-            }
-            if let [path] = rest {
-                q.push(format!("path={path}"));
-            }
-            let r = get(&format!("/v1/source/{app}?{}", q.join("&")))?;
-            match (&r["text"], &r["files"]) {
-                (Value::String(text), _) => print!("{text}"),
-                (_, Value::Array(files)) => files.iter().for_each(|f| println!("{:>8}  {}", f["size"], f["path"].as_str().unwrap_or(""))),
-                _ => bail!("that file isn't text"),
-            }
-        }
-        ["uninstall", app] => {
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            post("/v1/install", json!({ "app": app, "scope": scope, "installed": false }))?;
-            println!("{app} is no longer installed in {scope}.");
-        }
-        ["fork", app, name] => {
-            post("/v1/fork", json!({ "app": app, "name": name, "owner": flags.get("owner") }))?;
-            println!("Forked {app} as {name}; deploy your changes with {CLI} deploy <dir> --name {name}.");
-        }
-        ["install", app] => {
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
-            println!("{app} is {} in {scope}.", if flags.contains_key("remove") { "no longer installed" } else { "installed" });
-        }
-        ["cloudflare"] => print!("{}", cloudflare_said(&one::cloudflare::Settings::load()?)),
-        ["cloudflare", "serve"] => {
-            let settings = match one::cloudflare::Settings::load() {
-                Ok(settings) => settings,
-                Err(err) => {
-                    one::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
-                    let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the network, with --address https://…")?;
-                    let settings = one::cloudflare::Settings::new(NAME, url);
-                    settings.save()?;
-                    settings
+    }
+    unreachable!("any word is an app's name, if not a command's")
+}
+
+/// Who's in the network and this device: status, signing in and out, making or joining a network, settings.
+fn network() -> Command {
+    Command {
+        help: vec![
+            ("status".into(), format!("this device, and the people, groups and devices in {YOURS}")),
+            ("status --until <commit> [--device <name>[,<name>…]] [--timeout <10m>]".into(), format!("wait until every device (or those named) runs that commit, or a later build, and its services answer, or a build fails; says what each did, and fails unless all made it. After {CLI} update: {CLI} status --until $(git rev-parse HEAD)")),
+            ("sign-in [--address <url>]".into(), format!("sign this machine in, as you: approve its code by signing in on any of your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't run, this computer becomes one of your devices, once you approve its next code too, and asks your devices for everything")),
+            ("sign-in --invite <link>".into(), "join with the invite link someone sent you, on your first computer: you make your passkey in a browser, and they approve this computer's code".into()),
+            ("sign-out".into(), "sign this machine out, and take it out of your devices if it's one".into()),
+            ("create <name> --as <your name> [--user <id>]".into(), "create a network, with you as its first admin (--user: who you were in one it replaces, so your sign-in is still yours)".into()),
+            ("pair [--user <name>]".into(), "a pairing code for another of your machines (or, for admins, someone else's)".into()),
+            ("join <code>".into(), format!("join {YOURS} with a pairing code")),
+            ("rename <name>".into(), "rename this device".into()),
+            ("role <user> admin|member".into(), "(admins)".into()),
+            ("settings [<name> <value>|--default]".into(), "the network's settings (admins set them)".into()),
+        ],
+        run: |g| {
+            let (flags, args) = (g.flags, g.args);
+            match g.words().as_slice() {
+                ["sign-in"] => sign_in(&flags)?,
+                ["sign-out"] => {
+                    // A device takes itself out of its person's devices first, while its sign-in still says who it is; git
+                    // here then no longer reaches its repos, which a node here still serves.
+                    let address = one::sign_in::kept().map(|k| k.address).filter(|_| !client_device::node_here());
+                    let device = client_device::sign_out();
+                    if let Some(address) = address {
+                        git_remote::unwire(&address);
+                    }
+                    match one::sign_in::sign_out()? || device {
+                        true if device => println!("Signed out: this computer is no longer one of your devices, and {CLI} here no longer acts as you."),
+                        true => println!("Signed out: {CLI} on this machine no longer acts as you."),
+                        false => println!("This machine isn't signed in."),
+                    }
                 }
-            };
-            print!("{}", cloudflare_said(&settings));
-            let settings = devices_here(settings, false)?;
-            one::cloudflare::serve(&settings)?
-        }
-        ["cloudflare", "deploy"] => {
-            let loaded = one::cloudflare::Settings::load();
-            let cf = cloudflare(&flags, loaded.as_ref().ok())?;
-            let settings = match loaded {
-                Ok(settings) => settings,
-                Err(err) => {
-                    one::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
-                    // Workers already in the account were made elsewhere: new settings here would replace their secrets.
-                    let made = cf.scripts()?.contains_key(&one::cloudflare::worker_name("auth"));
-                    anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has this network's Workers already, made on another machine: deploy them there, where their settings are, or bring them here ({} and .env.local). --new replaces them, and everything they hold can't be read again", one::cloudflare::Settings::path().display());
-                    let domain = flags.get("domain").and_then(Value::as_str).map(|d| d.trim_matches('.').to_string());
-                    let (domain, address) = match domain {
-                        Some(domain) => (domain.clone(), format!("https://{CLI}.{domain}")),
-                        None => {
-                            let domain = format!("{}.workers.dev", cf.subdomain()?);
-                            (domain.clone(), format!("https://{}.{domain}", one::cloudflare::worker_name("gateway")))
+                ["status"] if flags.contains_key("until") => update::wait(&args)?,
+                ["status"] => status(&get("/v1/state")?),
+                ["create", name @ ..] if !name.is_empty() => {
+                    let user_name = flags.get("as").and_then(Value::as_str).context("say what to call you with --as <your name>")?;
+                    let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": flags.get("user") }))?;
+                    println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
+                }
+                ["pair"] => {
+                    let r = post("/v1/pair", json!({ "user": flags.get("user") }))?;
+                    println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
+                }
+                ["join", code] => {
+                    unsigned_post("/v1/join", json!({ "code": code }))?;
+                    println!("Joined. Syncing now; {CLI} status shows progress.");
+                }
+                ["settings"] => {
+                    let state = get("/v1/state")?;
+                    for (name, value) in state["network"]["settings"].as_object().context("not in a network yet")? {
+                        println!("{name} = {value}");
+                    }
+                }
+                ["settings", name, value @ ..] => {
+                    let value = if flags.contains_key("default") { Value::Null } else { json!(value.join(" ")) };
+                    post("/v1/settings", json!({ "name": name, "value": value }))?;
+                    println!("Set {name}.");
+                }
+                ["role", user, role] => {
+                    post("/v1/role", json!({ "user": user, "role": role }))?;
+                    println!("{user} is now {role}.");
+                }
+                ["rename", name @ ..] if !name.is_empty() => {
+                    post("/v1/name", json!({ "name": name.join(" ") }))?;
+                    println!("This device is now {}.", name.join(" "));
+                }
+                _ => return Ok(false),
+            }
+            Ok(true)
+        },
+    }
+}
+
+/// Apps: listing, deploying, their code, adding them and forking them.
+fn apps() -> Command {
+    Command {
+        help: vec![
+            ("apps".into(), "every app and its tools".into()),
+            ("deploy <dir> [--name <app>] [--owner <owner>]".into(), "build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and deploy it, with its source; makes the app if it's new (owner: you, a group or admins). React screens (screens/<name>.jsx) are built first, into dist/<name>.html, with this machine's Bun or Node".into()),
+            ("deploy <app> --version <hash>".into(), "deploy an earlier version again (deploys lists them): a rollback".into()),
+            ("deploys <app>".into(), "an app's deploys, newest last".into()),
+            ("source <app> [path] [--version <hash>]".into(), "an app's code as deployed: its files, or one of them".into()),
+            ("install <app> [--scope user|global|<group>]".into(), "install an app, and the apps it uses, for you, a group you admin or everyone".into()),
+            ("uninstall <app> [--scope s]".into(), "".into()),
+            ("fork <app> <name> [--owner <owner>]".into(), "a new app from <app>'s code, with data of its own".into()),
+        ],
+        run: |g| {
+            let flags = g.flags;
+            match g.words().as_slice() {
+                ["apps"] => {
+                    let groups = get("/v1/state")?["network"]["groups"].clone();
+                    // Where it's added, as the App Store says it: you, a group by its name, everyone.
+                    let place = |scope: &str| match scope.split_once(':') {
+                        Some(("group", id)) => groups.as_array().into_iter().flatten().find(|g| g["id"] == id).and_then(|g| g["name"].as_str()).unwrap_or(id).to_string(),
+                        Some(("user", _)) => "you".to_string(),
+                        _ => "everyone".to_string(),
+                    };
+                    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+                        let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
+                        let installed: Vec<String> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
+                        let installed = if installed.is_empty() { String::new() } else { format!(", added for {}", installed.join(", ")) };
+                        println!("{} ({}{from}{installed})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
+                        tools::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
+                    }
+                }
+                ["deploy", app] if flags.contains_key("version") => {
+                    let version = flags["version"].as_str().context("give --version <hash>")?;
+                    let here = post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?["here"] == true;
+                    println!("{}", deployed_said(&format!("Deployed {app} ({version}) again."), here));
+                }
+                ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
+                ["deploys", app] => {
+                    let apps = get("/v1/apps")?;
+                    let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}"))?;
+                    for d in found["history"].as_array().into_iter().flatten() {
+                        let current = if d["bundle"] == found["bundle"] { "  (running)" } else { "" };
+                        println!("{}  {}{current}", &d["bundle"].as_str().unwrap_or("")[..12], ago(d["time"].as_u64().unwrap_or(0)));
+                    }
+                }
+                ["source", app, rest @ ..] => {
+                    let mut q = Vec::new();
+                    if let Some(b) = flags.get("version").and_then(Value::as_str) {
+                        q.push(format!("bundle={b}"));
+                    }
+                    if let [path] = rest {
+                        q.push(format!("path={path}"));
+                    }
+                    let r = get(&format!("/v1/source/{app}?{}", q.join("&")))?;
+                    match (&r["text"], &r["files"]) {
+                        (Value::String(text), _) => print!("{text}"),
+                        (_, Value::Array(files)) => files.iter().for_each(|f| println!("{:>8}  {}", f["size"], f["path"].as_str().unwrap_or(""))),
+                        _ => bail!("that file isn't text"),
+                    }
+                }
+                ["uninstall", app] => {
+                    let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+                    post("/v1/install", json!({ "app": app, "scope": scope, "installed": false }))?;
+                    println!("{app} is no longer installed in {scope}.");
+                }
+                ["fork", app, name] => {
+                    post("/v1/fork", json!({ "app": app, "name": name, "owner": flags.get("owner") }))?;
+                    println!("Forked {app} as {name}; deploy your changes with {CLI} deploy <dir> --name {name}.");
+                }
+                ["install", app] => {
+                    let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+                    post("/v1/install", json!({ "app": app, "scope": scope, "installed": true }))?;
+                    println!("{app} is installed in {scope}.");
+                }
+                _ => return Ok(false),
+            }
+            Ok(true)
+        },
+    }
+}
+
+/// The network's Workers on Cloudflare, from the device that's their home.
+fn cloudflare_commands() -> Command {
+    Command {
+        help: vec![
+            ("cloudflare".into(), "the network's Workers on Cloudflare, as this machine has them: their addresses and settings".into()),
+            ("cloudflare serve [--address <url>]".into(), "run the network's Workers in workerd (sign-in, the relay, the URL signer, and the gateway people reach at the network's address) on this machine; the first time, with that address".into()),
+            ("cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]".into(), format!("deploy the network's Workers to Cloudflare, with an API token that may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless --address says, for good: passkeys belong to it), or at its workers.dev address; and the Cloudflare node with it, once cloudflare node deploy put it there; beside a node of the network, whose devices its relay takes, unless --new")),
+            ("cloudflare invite <name> [--admin] [--user <id>] [--email <email>]".into(), "a link that lets someone join, once and for a few days, as who they'll be in the network (--user, or this machine's person if they're called that; else someone new, as devices invite does), signed with this machine's key, an admin's device's; where people sign in with Google, --email is the account they sign up with. Nobody joins uninvited, the first person too".into()),
+            ("cloudflare node deploy [--account <id>]".into(), "put the network's Cloudflare node in its Workers' Cloudflare account (a node as a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over iroh when none of your machines answers".into()),
+            ("cloudflare set <setting> <value>".into(), "change one: sign-in-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or android (the SHA-256 fingerprints of the certificates the Android app is signed with, comma-separated, or -: links to the address open the app)".into()),
+            ("cloudflare use <address>".into(), "point this network at its Workers: its nodes take sign-ins made at the address".into()),
+        ],
+        run: |g| {
+            let flags = g.flags;
+            match g.words().as_slice() {
+                ["cloudflare"] => print!("{}", cloudflare_said(&one::cloudflare::Settings::load()?)),
+                ["cloudflare", "serve"] => {
+                    let settings = match one::cloudflare::Settings::load() {
+                        Ok(settings) => settings,
+                        Err(err) => {
+                            one::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
+                            let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the network, with --address https://…")?;
+                            let settings = one::cloudflare::Settings::new(NAME, url);
+                            settings.save()?;
+                            settings
                         }
                     };
-                    let at = |service: &str| format!("https://{}.{domain}", one::cloudflare::worker_name(service));
-                    let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
-                    let mut settings = one::cloudflare::Settings::new(NAME, &address);
-                    settings.sign_in_url = at("auth");
+                    print!("{}", cloudflare_said(&settings));
+                    let settings = devices_here(settings, false)?;
+                    one::cloudflare::serve(&settings)?
+                }
+                ["cloudflare", "deploy"] => {
+                    let loaded = one::cloudflare::Settings::load();
+                    let cf = cloudflare(&flags, loaded.as_ref().ok())?;
+                    let settings = match loaded {
+                        Ok(settings) => settings,
+                        Err(err) => {
+                            one::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
+                            // Workers already in the account were made elsewhere: new settings here would replace their secrets.
+                            let made = cf.scripts()?.contains_key(&one::cloudflare::worker_name("auth"));
+                            anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has this network's Workers already, made on another machine: deploy them there, where their settings are, or bring them here ({} and .env.local). --new replaces them, and everything they hold can't be read again", one::cloudflare::Settings::path().display());
+                            let domain = flags.get("domain").and_then(Value::as_str).map(|d| d.trim_matches('.').to_string());
+                            let (domain, address) = match domain {
+                                Some(domain) => (domain.clone(), format!("https://{CLI}.{domain}")),
+                                None => {
+                                    let domain = format!("{}.workers.dev", cf.subdomain()?);
+                                    (domain.clone(), format!("https://{}.{domain}", one::cloudflare::worker_name("gateway")))
+                                }
+                            };
+                            let at = |service: &str| format!("https://{}.{domain}", one::cloudflare::worker_name(service));
+                            let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
+                            let mut settings = one::cloudflare::Settings::new(NAME, &address);
+                            settings.sign_in_url = at("auth");
+                            settings.save()?;
+                            println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an tool(tool://…) reference in its place.\n", one::cloudflare::Settings::path().with_file_name(".env.local").display());
+                            // People signing in with Google need its OAuth client, which is put beside the secrets first.
+                            match one::config::SIGN_IN {
+                                "google" => one::cloudflare::Settings::load()?,
+                                _ => settings,
+                            }
+                        }
+                    };
+                    let mut settings = settings;
+                    at_home(&mut settings)?;
+                    let settings = devices_here(settings, !flags.contains_key("new"))?;
+                    let modules = one::cloudflare::WORKERS.iter().map(|(_, entry, _)| one::cloudflare::module(entry)).collect::<Result<Vec<_>>>()?;
+                    let mut web = settings.web();
+                    web.extend(one::cloudflare::precompressed(&web)?);
+                    one::cloudflare::deploy(&cf, &settings, &modules, &web)?;
+                    if settings.cloudflare_node {
+                        one::cloudflare::node::deploy(&cf, &settings)?;
+                    }
+                    // The Google client its people sign in with, signed by this admin's device: a new device's sign-in counts
+                    // only for it (`sign_in_proof::CLIENTS`), whatever sign-in says.
+                    if let Some((id, _)) = &settings.google {
+                        let clients = format!("https://accounts.google.com {id}");
+                        let had = get("/v1/state").ok().and_then(|s| s["network"]["settings"][one::sign_in_proof::CLIENTS].as_str().map(str::to_string));
+                        if had.as_deref() != Some(clients.as_str())
+                            && let Err(err) = post("/v1/settings", json!({ "name": one::sign_in_proof::CLIENTS, "value": clients }))
+                        {
+                            eprintln!("A new device's Google sign-in won't let it in by itself until an admin's device runs {CLI} settings {} {clients}: {err:#}", one::sign_in_proof::CLIENTS);
+                        }
+                    }
+                    print!("Deployed.\n{}", cloudflare_said(&settings));
+                }
+                ["cloudflare", "node", "deploy"] => {
+                    let mut settings = one::cloudflare::Settings::load()?;
+                    at_home(&mut settings)?;
+                    let mut settings = devices_here(settings, true)?;
+                    let cf = cloudflare(&flags, Some(&settings))?;
+                    // Its endpoint's key, made once and kept with the Workers' secrets.
+                    if settings.cloudflare_node_endpoint().is_none() {
+                        settings.cloudflare_node_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+                        settings.set_secret("CLOUDFLARE_NODE_KEY", &settings.cloudflare_node_key)?;
+                    }
+                    // The relay it deploys again binds the Cloudflare node's endpoint only for a network that has one.
+                    let was = std::mem::replace(&mut settings.cloudflare_node, true);
+                    one::cloudflare::node::deploy(&cf, &settings)?;
+                    if !was {
+                        settings.save()?;
+                    }
+                    // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
+                    // things run in.
+                    post("/v1/settings", json!({ "name": "serverless", "value": settings.cloudflare_node_endpoint() }))?;
+                    println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
+                }
+                ["cloudflare", "invite", name] => {
+                    let settings = one::cloudflare::Settings::load()?;
+                    // This machine's person, inviting themselves to their own network, is who they are in it.
+                    let user = match flags.get("user").and_then(Value::as_str) {
+                        Some(user) => Some(user.to_string()),
+                        None => get("/v1/state").ok().filter(|s| s["user"]["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
+                    };
+                    let email = flags.get("email").and_then(Value::as_str);
+                    // Someone new is invited by this machine's node, which keeps the secret for their first device's approval.
+                    if user.is_none() && email.is_none() {
+                        println!("{}", one::node::devices::app::invited_said(name, &post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
+                    } else {
+                        let key = one::node::device_key(&one::home())?;
+                        let invite = one::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;
+                        let days = one::cloudflare::INVITE_DAYS;
+                        let how = if one::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
+                        println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
+                        // Their first device besides this machine: this machine lets it in.
+                        let me = get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string));
+                        if user.is_some() && user == me {
+                            println!("\nIt opens their browser waiting for approval, with a code: approve it here with {CLI} devices approve <code> --confirm.");
+                        }
+                    }
+                }
+                ["cloudflare", "set", name, value] => {
+                    let mut settings = one::cloudflare::Settings::load()?;
+                    let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
+                    match *name {
+                        "sign-in-url" => settings.sign_in_url = value.trim_end_matches('/').to_string(),
+                        "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
+                        "bucket" if *value == "-" => {
+                            let bucket = piped()?;
+                            settings.set_secret("BUCKET", &bucket.to_string())?;
+                            settings.bucket = Some(bucket);
+                        }
+                        "bucket" => bail!("pipe its JSON object on stdin and give - as its value, so it's in no shell's history"),
+                        "android" => {
+                            // As assetlinks.json writes them: 32 pairs of hex digits, in capitals, between colons.
+                            let mut prints = Vec::new();
+                            for given in value.split(',').map(str::trim).filter(|p| !p.is_empty() && *p != "-") {
+                                let hex = given.replace(':', "").to_uppercase();
+                                anyhow::ensure!(hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()), "{given} isn't a certificate's SHA-256 fingerprint (apksigner verify --print-certs <apk> says it)");
+                                prints.push(hex.as_bytes().chunks(2).map(|p| std::str::from_utf8(p).unwrap()).collect::<Vec<_>>().join(":"));
+                            }
+                            settings.android = prints;
+                        }
+                        _ => bail!("no Cloudflare setting {name}: sign-in-url, resources, bucket or android"),
+                    }
                     settings.save()?;
-                    println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an tool(tool://…) reference in its place.\n", one::cloudflare::Settings::path().with_file_name(".env.local").display());
-                    // People signing in with Google need its OAuth client, which is put beside the secrets first.
-                    match one::config::SIGN_IN {
-                        "google" => one::cloudflare::Settings::load()?,
-                        _ => settings,
-                    }
+                    println!("Set {name}. {CLI} cloudflare serve takes it at its next start, and {CLI} cloudflare deploy when it next runs.");
                 }
-            };
-            let mut settings = settings;
-            at_home(&mut settings)?;
-            let settings = devices_here(settings, !flags.contains_key("new"))?;
-            let modules = one::cloudflare::WORKERS.iter().map(|(_, entry, _)| one::cloudflare::module(entry)).collect::<Result<Vec<_>>>()?;
-            let mut web = settings.web();
-            web.extend(one::cloudflare::precompressed(&web)?);
-            one::cloudflare::deploy(&cf, &settings, &modules, &web)?;
-            if settings.cloudflare_node {
-                one::cloudflare::node::deploy(&cf, &settings)?;
-            }
-            // The Google client its people sign in with, signed by this admin's device: a new device's sign-in counts
-            // only for it (`sign_in_proof::CLIENTS`), whatever sign-in says.
-            if let Some((id, _)) = &settings.google {
-                let clients = format!("https://accounts.google.com {id}");
-                let had = get("/v1/state").ok().and_then(|s| s["network"]["settings"][one::sign_in_proof::CLIENTS].as_str().map(str::to_string));
-                if had.as_deref() != Some(clients.as_str())
-                    && let Err(err) = post("/v1/settings", json!({ "name": one::sign_in_proof::CLIENTS, "value": clients }))
-                {
-                    eprintln!("A new device's Google sign-in won't let it in by itself until an admin's device runs {CLI} settings {} {clients}: {err:#}", one::sign_in_proof::CLIENTS);
+                ["cloudflare", "use", address] => {
+                    post("/v1/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
+                    println!("This network is at {address}: its nodes take sign-ins made there.");
                 }
+                _ => return Ok(false),
             }
-            print!("Deployed.\n{}", cloudflare_said(&settings));
-        }
-        ["cloudflare", "node", "deploy"] => {
-            let mut settings = one::cloudflare::Settings::load()?;
-            at_home(&mut settings)?;
-            let mut settings = devices_here(settings, true)?;
-            let cf = cloudflare(&flags, Some(&settings))?;
-            // Its endpoint's key, made once and kept with the Workers' secrets.
-            if settings.cloudflare_node_endpoint().is_none() {
-                settings.cloudflare_node_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
-                settings.set_secret("CLOUDFLARE_NODE_KEY", &settings.cloudflare_node_key)?;
-            }
-            // The relay it deploys again binds the Cloudflare node's endpoint only for a network that has one.
-            let was = std::mem::replace(&mut settings.cloudflare_node, true);
-            one::cloudflare::node::deploy(&cf, &settings)?;
-            if !was {
-                settings.save()?;
-            }
-            // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
-            // things run in.
-            post("/v1/settings", json!({ "name": "serverless", "value": settings.cloudflare_node_endpoint() }))?;
-            println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
-        }
-        ["cloudflare", "invite", name] => {
-            let settings = one::cloudflare::Settings::load()?;
-            // This machine's person, inviting themselves to their own network, is who they are in it.
-            let user = match flags.get("user").and_then(Value::as_str) {
-                Some(user) => Some(user.to_string()),
-                None => get("/v1/state").ok().filter(|s| s["user"]["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
-            };
-            let email = flags.get("email").and_then(Value::as_str);
-            // Someone new is invited by this machine's node, which keeps the secret for their first device's approval.
-            if user.is_none() && email.is_none() {
-                println!("{}", one::node::devices::app::invited_said(name, &post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
-            } else {
-                let key = one::node::device_key(&one::home())?;
-                let invite = one::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;
-                let days = one::cloudflare::INVITE_DAYS;
-                let how = if one::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
-                println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
-                // Their first device besides this machine: this machine lets it in.
-                let me = get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string));
-                if user.is_some() && user == me {
-                    println!("\nIt opens their browser waiting for approval, with a code: approve it here with {CLI} devices approve <code> --confirm.");
-                }
-            }
-        }
-        ["cloudflare", "set", name, value] => {
-            let mut settings = one::cloudflare::Settings::load()?;
-            let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
-            match *name {
-                "sign-in-url" => settings.sign_in_url = value.trim_end_matches('/').to_string(),
-                "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
-                "bucket" if *value == "-" => {
-                    let bucket = piped()?;
-                    settings.set_secret("BUCKET", &bucket.to_string())?;
-                    settings.bucket = Some(bucket);
-                }
-                "bucket" => bail!("pipe its JSON object on stdin and give - as its value, so it's in no shell's history"),
-                "android" => {
-                    // As assetlinks.json writes them: 32 pairs of hex digits, in capitals, between colons.
-                    let mut prints = Vec::new();
-                    for given in value.split(',').map(str::trim).filter(|p| !p.is_empty() && *p != "-") {
-                        let hex = given.replace(':', "").to_uppercase();
-                        anyhow::ensure!(hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()), "{given} isn't a certificate's SHA-256 fingerprint (apksigner verify --print-certs <apk> says it)");
-                        prints.push(hex.as_bytes().chunks(2).map(|p| std::str::from_utf8(p).unwrap()).collect::<Vec<_>>().join(":"));
-                    }
-                    settings.android = prints;
-                }
-                _ => bail!("no Cloudflare setting {name}: sign-in-url, resources, bucket or android"),
-            }
-            settings.save()?;
-            println!("Set {name}. {CLI} cloudflare serve takes it at its next start, and {CLI} cloudflare deploy when it next runs.");
-        }
-        ["cloudflare", "use", address] => {
-            post("/v1/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
-            println!("This network is at {address}: its nodes take sign-ins made there.");
-        }
-        ["storage"] => {
-            let s = get("/v1/storage")?;
-            match s["kind"].as_str() {
-                Some("folder") => println!("The network's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url> --bucket <name>.", s["device"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
-                Some(_) => println!("The network's data is kept in {} at {}.", s["where"].as_str().unwrap_or(""), s["endpoint"].as_str().unwrap_or("")),
-                None => println!("This device can't reach the network's data: an admin moves it to S3-compatible storage with {CLI} storage move."),
-            }
-        }
-        ["storage", "move"] => {
-            let get = |k: &str| flags.get(k).and_then(Value::as_str);
-            let endpoint = get("endpoint").context("give --endpoint, like https://<account>.r2.cloudflarestorage.com")?;
-            let bucket = get("bucket").context("give --bucket, the bucket's name: its key is the Workers' (BUCKET, which only the URL signer holds)")?;
-            let r = post("/v1/storage", json!({ "endpoint": endpoint, "bucket": bucket, "region": get("region") }))?;
-            print!("{}", tried_said(&r));
-            if r["kept"] == true {
-                println!("Every device moves the network's data there now.");
-            }
-            if r["moving"] == true {
-                println!("This device is putting what it holds there, and keeps the network's data there from now on. Do the same on each of your other devices.");
-            }
-        }
-        ["backups"] => {
-            takes_only(&flags, &[])?;
-            print!("{}", backups_said(&get("/v1/backups")?));
-        }
-        ["backups", "now"] => {
-            takes_only(&flags, &[])?;
-            post("/v1/backups/now", json!({}))?;
-            println!("Backing up now. {CLI} backups says how it went.");
-        }
-        ["backups", "place", "add"] | ["backups", "place", "add", _] => {
-            takes_only(&flags, &["title", "endpoint"])?;
-            let title = flags.get("title").cloned();
-            let r = match (positional.get(3), flags.get("endpoint").and_then(Value::as_str)) {
-                (Some(path), None) => post("/v1/backups/place", json!({ "path": std::path::absolute(path)?, "title": title }))?,
-                (None, Some(endpoint)) if !std::io::IsTerminal::is_terminal(&std::io::stdin()) => {
-                    let mut body: Value = serde_json::from_reader(std::io::stdin()).context("pipe a JSON object of bucket, key_id and secret")?;
-                    body["endpoint"] = json!(endpoint);
-                    body["title"] = title.unwrap_or(Value::Null);
-                    post("/v1/backups/place", body)?
-                }
-                (None, Some(endpoint)) => {
-                    let r = post("/v1/backups/request", json!({ "endpoint": endpoint, "title": title, "agent": agent_from_env() }))?;
-                    println!("Open this on your device to give the bucket and its key: {}\nIt's also waiting in Settings, under Requests.", r["link"].as_str().unwrap_or(""));
-                    return Ok(());
-                }
-                _ => anyhow::bail!("give a folder, or --endpoint for S3-compatible storage"),
-            };
-            print!("{}", tried_said(&r));
-            println!("{}", if r["id"].is_string() { "Added: the first backup starts now, then every hour that something changes." } else { "Not added." });
-        }
-        ["backups", "place", "remove", place] => {
-            takes_only(&flags, &["confirm"])?;
-            tools::agreed(flags.contains_key("confirm"), &format!("{CLI} backups place remove"))?;
-            let asked = one::node::own::Asked { node: &Local, agent: None, client: "cli", confirmed: true };
-            println!("No longer backing up to {}. What's there stays.", one::node::backups::app::remove_place(&asked, place)?);
-        }
-        ["backups", "check"] => {
-            takes_only(&flags, &["folder"])?;
-            let r = match flags.get("folder").and_then(Value::as_str) {
-                Some(folder) => check_folder(folder)?,
-                None => post("/v1/backups/check", json!({}))?,
-            };
-            for place in r.as_array().into_iter().flatten() {
-                print!("{}", checked_said(place));
-            }
-        }
-        ["vault"] | ["vault", "list"] => {
-            takes_only(&flags, &["scope"])?;
-            let scope = flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
-            for it in get(&format!("/v1/vault{scope}"))?.as_array().into_iter().flatten() {
-                println!("{}", one::node::vault::app::item_line(it));
-            }
-        }
-        ["vault", "set", item, field] => {
-            takes_only(&flags, &["value", "scope", "hosts", "secret", "app"])?;
-            let value = match flags.get("value").and_then(Value::as_str) {
-                Some(v) => v.to_string(),
-                None => {
-                    // Typed, one line; from a file (a key's PEM), all of it.
-                    let mut v = String::new();
-                    match std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                        true => std::io::stdin().read_line(&mut v)?,
-                        false => std::io::Read::read_to_string(&mut std::io::stdin(), &mut v)?,
-                    };
-                    v.trim_end_matches(['\n', '\r']).to_string()
-                }
-            };
-            anyhow::ensure!(!value.is_empty(), "give the value on stdin");
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            let hosts = flags.get("hosts").and_then(Value::as_str).map(|h| h.split(',').map(|h| h.trim().to_string()).collect());
-            println!("{}", one::node::vault::app::set(&Local, scope, item, field, &value, flags.get("secret").map(|_| true), hosts, flags.get("app").and_then(Value::as_str), agent_from_env().as_deref())?);
-        }
-        ["vault", "use", item, app] => {
-            takes_only(&flags, &["scope", "off"])?;
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            println!("{}", one::node::vault::app::switch(&Local, scope, item, app, !flags.contains_key("off"), agent_from_env().as_deref())?);
-        }
-        ["vault", "grant", device] => {
-            takes_only(&flags, &["scope", "off"])?;
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            println!("{}", post("/v1/vault/grant", json!({ "scope": scope, "device": device, "on": !flags.contains_key("off") }))?["said"].as_str().unwrap_or(""));
-        }
-        ["vault", "fetch", url] => {
-            takes_only(&flags, &["method", "headers", "body"])?;
-            let r = post("/v1/vault/fetch", json!({ "url": url, "method": flags.get("method"), "headers": flags.get("headers"), "body": flags.get("body"), "agent": agent_from_env() }))?;
-            eprintln!("{}", r["status"]);
-            match r["body"].as_str() {
-                Some(body) => println!("{body}"),
-                None => println!("{}", r["body_base64"].as_str().unwrap_or("")),
-            }
-            if let Some(cut) = r["cut"].as_str() {
-                eprintln!("({cut})");
-            }
-        }
-        ["vault", "remove", item] | ["vault", "remove", item, _] => {
-            takes_only(&flags, &["scope", "confirm"])?;
-            tools::agreed(flags.contains_key("confirm"), &format!("{CLI} vault remove"))?;
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            println!("{}", one::node::vault::app::remove(&Local, scope, item, positional.get(3).map(String::as_str))?);
-        }
-        ["vault", "request", app @ ..] if app.len() < 2 => {
-            takes_only(&flags, &["scope", "need", "title", "fields", "secret-fields", "hosts", "why"])?;
-            // With no app, it's for agents: the person's own, with vault fetch.
-            let app = app.first().copied().unwrap_or("agents");
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            let list = |k: &str| flags.get(k).and_then(Value::as_str).map(|v| v.split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
-            let secret = list("secret-fields");
-            let fields: Map<String, Value> = list("fields").into_iter().map(|f| (f.clone(), json!({ "secret": secret.contains(&f) }))).collect();
-            let body = json!({ "scope": scope, "app": app, "need": flags.get("need"), "title": flags.get("title"), "fields": fields, "hosts": list("hosts"), "why": flags.get("why"), "agent": agent_from_env() });
-            let r = post("/v1/vault/request", body)?;
-            println!("Give the person this link: {}\nTell them; {CLI} vault status {} says how it went once they say they've done it.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""));
-        }
-        ["vault", "status", id] => {
-            takes_only(&flags, &[])?;
-            let r = one::node::vault::app::request(&Local, id)?;
-            println!("{} for {} in {}: {}", r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
-        }
-        ["vault", "requests"] => {
-            takes_only(&flags, &[])?;
-            for r in get("/v1/vault/requests")?.as_array().into_iter().flatten() {
-                println!("{}  {} for {} in {}  {}  {}", r["id"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["why"].as_str().unwrap_or(""));
-            }
-        }
-        ["vault", "answer", id] => {
-            takes_only(&flags, &["scope", "decline", "item"])?;
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            let mut body = json!({ "scope": scope, "id": id });
-            if flags.contains_key("decline") {
-                body["declined"] = json!(true);
-            } else if let Some(item) = flags.get("item").and_then(Value::as_str) {
-                body["item"] = json!(item);
-            } else {
-                let r = one::node::vault::app::request(&Local, id)?;
-                let mut text = String::new();
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
-                let text = text.trim_end_matches(['\n', '\r']);
-                body["fields"] = match serde_json::from_str::<Value>(text) {
-                    Ok(v) if v.is_object() => v,
-                    _ => json!({ r["fields"][0]["name"].as_str().unwrap_or(""): text }),
-                };
-            }
-            post("/v1/vault/answer", body)?;
-            println!("Answered.");
-        }
-        ["app", how @ ("delete" | "restore" | "erase"), app] => {
-            let past = match *how { "delete" => "deleted", "restore" => "restored", _ => "erased" };
-            post("/v1/retire", json!({ "app": app, "how": past }))?;
-            println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
-        }
-        ["services"] => {
-            let state = get("/v1/state")?;
-            let all: Vec<Value> = state["network"]["devices"].as_array().cloned().unwrap_or_default();
-            for s in &all {
-                let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
-                let off = s["off_services"].as_array().cloned().unwrap_or_default();
-                // What a device that says it can run, each on or off, and what it's doing or what went wrong.
-                if let Some(parts) = s["parts"].as_array() {
-                    println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
-                    for p in parts {
-                        let name = p["name"].as_str().unwrap_or("");
-                        let version = installed.iter().find(|d| d["name"] == name).and_then(|d| d["version"].as_str()).map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
-                        let doing = p["doing"].as_str().map(|d| format!(", {}", d.to_lowercase())).unwrap_or_default();
-                        let problem = p["problem"].as_str().map(|w| format!(": {w}")).unwrap_or_default();
-                        let held = match (p["sandbox"].as_str(), p["person"] == true) {
-                            (Some(why), _) => format!(", without its sandbox: {why}"),
-                            (None, true) => ", as you".into(),
-                            _ => String::new(),
-                        };
-                        println!("  {name}{version}  {}{doing}{held}{problem}", if p["on"] == true { "on" } else { "off" });
-                    }
-                    continue;
-                }
-                if installed.is_empty() && off.is_empty() {
-                    continue;
-                }
-                println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
-                for d in &installed {
-                    let by = match (&d["installed_by"], d["built_in"] == true) {
-                        (_, true) => format!("built into {NAME}"),
-                        (Value::String(by), _) => format!("installed by {by}"),
-                        _ => String::new(),
-                    };
-                    let version = d["version"].as_str().map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
-                    println!("  {}{version}  {} ({by})", d["name"].as_str().unwrap_or(""), d["title"].as_str().unwrap_or(""));
-                }
-                for d in &off {
-                    println!("  {}  switched off {}", d["name"].as_str().unwrap_or(""), ago(d["time"].as_u64().unwrap_or(0)));
-                }
-            }
-            // The Cloudflare node, whose services an admin switches (`--device cloudflare`).
-            if let Some(parts) = state["network"]["serverless"]["parts"].as_array() {
-                println!("Cloudflare");
-                for p in parts {
-                    println!("  {}  {}", p["name"].as_str().unwrap_or(""), if p["on"] == true { "on" } else { "off" });
-                }
-            }
-        }
-        // What lets this machine's person start services in their sandbox, for root to run once: `| sudo sh`.
-        ["services", "sandbox"] => print!("{}", one::services::sandbox::setup_script()?),
-        ["services", "try", dir] => update::try_service(std::path::Path::new(dir), flags.get("device").and_then(Value::as_str))?,
-        ["services", how @ ("on" | "off"), name] => {
-            let device = flags.get("device").and_then(Value::as_str);
-            post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
-            let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
-            match (*how, *name == one::database::scopes::APPS_PART) {
-                _ if device.is_some_and(|d| d.eq_ignore_ascii_case(one::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
-                ("off", true) => println!("Apps' calls no longer run {there}."),
-                (_, true) => println!("Apps' calls run {there} again."),
-                ("off", _) => println!("{name} is switched off {there}: its oned stops it."),
-                _ => println!("{name} is switched on {there}: its oned sets it up and starts it; {CLI} services says when it's running."),
-            }
-        }
-        ["schedules"] => {
-            for app in get("/v1/apps")?.as_array().into_iter().flatten() {
-                for s in app["schedules"].as_array().into_iter().flatten() {
-                    let state = match (&s["invalid"], s["removed"] == true, s["on"] == true) {
-                        (Value::String(why), ..) => format!("doesn't make sense: {why}"),
-                        (_, true, _) => "removed by a deploy".into(),
-                        (_, _, true) => format!("{}, as {}", s["when"].as_str().unwrap_or(""), s["runs_as"].as_str().unwrap_or("nobody")),
-                        _ => "off".into(),
-                    };
-                    let last = match &s["last"] {
-                        Value::Null => String::new(),
-                        l if l["ok"] == true => format!("; ran {}", ago(l["time"].as_u64().unwrap_or(0))),
-                        l => format!("; failed {}: {}", ago(l["time"].as_u64().unwrap_or(0)), l["error"].as_str().unwrap_or("")),
-                    };
-                    println!("{} {}  in {}  {state}{last}", app["name"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), s["scope"].as_str().unwrap_or(""));
-                }
-            }
-        }
-        ["schedule", on @ ("on" | "off"), app, name] => {
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            post("/v1/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
-            println!("{app}'s schedule {name} is {on} in {scope}.");
-        }
-        ["update"] => update::run(None)?,
-        ["release", tag] => update::run(Some(tag))?,
-        ["publish", rest @ ..] => {
-            let path = match rest {
-                [path] => std::fs::canonicalize(path)?,
-                _ => std::env::current_exe()?,
-            };
-            publish(&path, &flags, &update::release_key()?)?;
-        }
-        // `blob`: what `update` scripts made by builds before `file` call.
-        ["file" | "blob", "put", file] => {
-            let read = std::fs::File::open(file).with_context(|| format!("read {file}"))?;
-            println!("{}", request(agent().post(format!("http://{}/v1/blobs", addr())).send(read))?["blob"].as_str().unwrap_or(""));
-        }
-        ["file" | "blob", "get", hash, file] => {
-            let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().map_err(unreached)?;
-            if !resp.status().is_success() {
-                bail!("{}", resp.body_mut().read_json::<Value>()?["error"].as_str().unwrap_or("failed"));
-            }
-            std::fs::write(file, resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)?;
-        }
-        ["version"] if tools::json() => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
-        ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
-        ["rename", name @ ..] if !name.is_empty() => {
-            post("/v1/name", json!({ "name": name.join(" ") }))?;
-            println!("This device is now {}.", name.join(" "));
-        }
-        ["logs", device] => {
-            takes_only(&flags, &["service", "since", "grep", "lines"])?;
-            let mut input = flags.clone();
-            input.insert("device".into(), json!(device));
-            let read = logs_read(&input);
-            if read.is_err() {
-                print_trace();
-            }
-            let (lines, note) = logs_said(&read.map_err(|e| anyhow::anyhow!(tools::in_cli_words(&format!("{e:#}"))))?, device);
-            match tools::json() {
-                true => println!("{}", serde_json::to_string_pretty(&lines)?),
-                false => {
-                    lines.as_array().into_iter().flatten().filter_map(Value::as_str).for_each(|l| println!("{l}"));
-                    note.iter().for_each(|n| eprintln!("{n}"));
-                }
-            }
-            print_trace();
-        }
-        [app] if !app.starts_with('-') => {
-            // The node's own apps (Devices, Widgets) aren't in its app list, but read the same.
-            let apps = get("/v1/apps")?;
-            let own = one::node::own::listed();
-            let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", tools::unknown(app, None, true)?) };
-            println!("{} ({app})", found["title"].as_str().unwrap_or(app));
-            if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
-                println!("\n{i}\n");
-            }
-            tools::list(std::slice::from_ref(found)).iter().for_each(|l| println!("{l}"));
-            println!("\n{CLI} {app} <tool> --help says what a tool takes.");
-        }
-        [app, tool, ..] => {
-            // The words and flags after `<app> <tool>`, as written.
-            let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
-            tools::run(app, tool, &args[at(tool, at(app, 0))..])?
-        }
-        [first, ..] => bail!("{}", tools::unknown(first, None, true)?),
+            Ok(true)
+        },
     }
-    Ok(())
+}
+
+/// What runs where: apps deleted and restored, schedules, services and logs.
+fn running() -> Command {
+    Command {
+        help: vec![
+            ("app delete|restore|erase <app>".into(), "delete an app you own (to Recently Deleted), restore it, or erase it for good".into()),
+            ("schedules".into(), "every schedule of the apps installed for you: when, as whom, and how it last went".into()),
+            ("services".into(), "what each of your devices can run, each on or off, and what it's doing".into()),
+            ("services on|off <name> [--device <name>]".into(), "switch a service on or off on a device of yours (here by default), which its oned starts or stops, fetching its program as it's published (a Mac app carries its own); apps is its app service. An admin's --device cloudflare switches a service built for Cloudflare on the Cloudflare node (Models: Workers AI)".into()),
+            ("services sandbox | sudo sh".into(), "let this machine run services in their sandbox, each as its own user (Linux; the installer does it)".into()),
+            ("services try apps/<name> [--device <name>]".into(), "put your checkout's build of an app's service on a device of yours (here by default, else over ssh by its name) and switch it on, until a newer one is published".into()),
+            ("logs <device> [--service <name>] [--since <10m>] [--grep <text>] [--lines <n>]".into(), "a device's node log, or one of its services', read over the network, newest last, capped (the last 200 lines, at most 1000 or 48 KiB); only its person and the network's admins read them. --since takes s, m, h or d".into()),
+            ("schedule on|off <app> <name> [--scope user|global|<group>]".into(), "switch an app's schedule on (it then runs as you) or off".into()),
+        ],
+        run: |g| {
+            let flags = g.flags;
+            match g.words().as_slice() {
+                ["app", how @ ("delete" | "restore" | "erase"), app] => {
+                    let past = match *how { "delete" => "deleted", "restore" => "restored", _ => "erased" };
+                    post("/v1/retire", json!({ "app": app, "how": past }))?;
+                    println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
+                }
+                ["services"] => {
+                    let state = get("/v1/state")?;
+                    let all: Vec<Value> = state["network"]["devices"].as_array().cloned().unwrap_or_default();
+                    for s in &all {
+                        let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
+                        let off = s["off_services"].as_array().cloned().unwrap_or_default();
+                        // What a device that says it can run, each on or off, and what it's doing or what went wrong.
+                        if let Some(parts) = s["parts"].as_array() {
+                            println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
+                            for p in parts {
+                                let name = p["name"].as_str().unwrap_or("");
+                                let version = installed.iter().find(|d| d["name"] == name).and_then(|d| d["version"].as_str()).map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
+                                let doing = p["doing"].as_str().map(|d| format!(", {}", d.to_lowercase())).unwrap_or_default();
+                                let problem = p["problem"].as_str().map(|w| format!(": {w}")).unwrap_or_default();
+                                let held = match (p["sandbox"].as_str(), p["person"] == true) {
+                                    (Some(why), _) => format!(", without its sandbox: {why}"),
+                                    (None, true) => ", as you".into(),
+                                    _ => String::new(),
+                                };
+                                println!("  {name}{version}  {}{doing}{held}{problem}", if p["on"] == true { "on" } else { "off" });
+                            }
+                            continue;
+                        }
+                        if installed.is_empty() && off.is_empty() {
+                            continue;
+                        }
+                        println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
+                        for d in &installed {
+                            let by = match (&d["installed_by"], d["built_in"] == true) {
+                                (_, true) => format!("built into {NAME}"),
+                                (Value::String(by), _) => format!("installed by {by}"),
+                                _ => String::new(),
+                            };
+                            let version = d["version"].as_str().map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
+                            println!("  {}{version}  {} ({by})", d["name"].as_str().unwrap_or(""), d["title"].as_str().unwrap_or(""));
+                        }
+                        for d in &off {
+                            println!("  {}  switched off {}", d["name"].as_str().unwrap_or(""), ago(d["time"].as_u64().unwrap_or(0)));
+                        }
+                    }
+                    // The Cloudflare node, whose services an admin switches (`--device cloudflare`).
+                    if let Some(parts) = state["network"]["serverless"]["parts"].as_array() {
+                        println!("Cloudflare");
+                        for p in parts {
+                            println!("  {}  {}", p["name"].as_str().unwrap_or(""), if p["on"] == true { "on" } else { "off" });
+                        }
+                    }
+                }
+                // What lets this machine's person start services in their sandbox, for root to run once: `| sudo sh`.
+                ["services", "sandbox"] => print!("{}", one::services::sandbox::setup_script()?),
+                ["services", "try", dir] => update::try_service(std::path::Path::new(dir), flags.get("device").and_then(Value::as_str))?,
+                ["services", how @ ("on" | "off"), name] => {
+                    let device = flags.get("device").and_then(Value::as_str);
+                    post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
+                    let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
+                    match (*how, *name == one::database::scopes::APPS_PART) {
+                        _ if device.is_some_and(|d| d.eq_ignore_ascii_case(one::rank::CLOUDFLARE)) => println!("{name} is switched {how} on the Cloudflare node."),
+                        ("off", true) => println!("Apps' calls no longer run {there}."),
+                        (_, true) => println!("Apps' calls run {there} again."),
+                        ("off", _) => println!("{name} is switched off {there}: its oned stops it."),
+                        _ => println!("{name} is switched on {there}: its oned sets it up and starts it; {CLI} services says when it's running."),
+                    }
+                }
+                ["schedules"] => {
+                    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+                        for s in app["schedules"].as_array().into_iter().flatten() {
+                            let state = match (&s["invalid"], s["removed"] == true, s["on"] == true) {
+                                (Value::String(why), ..) => format!("doesn't make sense: {why}"),
+                                (_, true, _) => "removed by a deploy".into(),
+                                (_, _, true) => format!("{}, as {}", s["when"].as_str().unwrap_or(""), s["runs_as"].as_str().unwrap_or("nobody")),
+                                _ => "off".into(),
+                            };
+                            let last = match &s["last"] {
+                                Value::Null => String::new(),
+                                l if l["ok"] == true => format!("; ran {}", ago(l["time"].as_u64().unwrap_or(0))),
+                                l => format!("; failed {}: {}", ago(l["time"].as_u64().unwrap_or(0)), l["error"].as_str().unwrap_or("")),
+                            };
+                            println!("{} {}  in {}  {state}{last}", app["name"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), s["scope"].as_str().unwrap_or(""));
+                        }
+                    }
+                }
+                ["schedule", on @ ("on" | "off"), app, name] => {
+                    let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+                    post("/v1/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
+                    println!("{app}'s schedule {name} is {on} in {scope}.");
+                }
+                ["logs", device] => {
+                    takes_only(&flags, &["service", "since", "grep", "lines"])?;
+                    let mut input = flags.clone();
+                    input.insert("device".into(), json!(device));
+                    let read = logs_read(&input);
+                    if read.is_err() {
+                        print_trace();
+                    }
+                    let (lines, note) = logs_said(&read.map_err(|e| anyhow::anyhow!(tools::in_cli_words(&format!("{e:#}"))))?, device);
+                    match tools::json() {
+                        true => println!("{}", serde_json::to_string_pretty(&lines)?),
+                        false => {
+                            lines.as_array().into_iter().flatten().filter_map(Value::as_str).for_each(|l| println!("{l}"));
+                            note.iter().for_each(|n| eprintln!("{n}"));
+                        }
+                    }
+                    print_trace();
+                }
+                _ => return Ok(false),
+            }
+            Ok(true)
+        },
+    }
+}
+
+/// Builds: updating every device, releases, and files kept in the network.
+fn releases() -> Command {
+    Command {
+        help: vec![
+            ("update".into(), "build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere".into()),
+            ("release <vX.Y.Z>".into(), "the same, signed off and published on GitHub for the installer".into()),
+            ("publish [binary]".into(), "sign and publish a build you made; every device on its platform updates".into()),
+            ("file put <file>".into(), "keep a file in the network, for apps and agents; prints its hash".into()),
+            ("file get <hash> <file>".into(), "get a kept file from this device or another".into()),
+        ],
+        run: |g| {
+            let flags = g.flags;
+            match g.words().as_slice() {
+                ["update"] => update::run(None)?,
+                ["release", tag] => update::run(Some(tag))?,
+                ["publish", rest @ ..] => {
+                    let path = match rest {
+                        [path] => std::fs::canonicalize(path)?,
+                        _ => std::env::current_exe()?,
+                    };
+                    publish(&path, &flags, &update::release_key()?)?;
+                }
+                ["file", "put", file] => {
+                    let read = std::fs::File::open(file).with_context(|| format!("read {file}"))?;
+                    println!("{}", request(agent().post(format!("http://{}/v1/blobs", addr())).send(read))?["blob"].as_str().unwrap_or(""));
+                }
+                ["file", "get", hash, file] => {
+                    let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().map_err(unreached)?;
+                    if !resp.status().is_success() {
+                        bail!("{}", resp.body_mut().read_json::<Value>()?["error"].as_str().unwrap_or("failed"));
+                    }
+                    std::fs::write(file, resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)?;
+                }
+                _ => return Ok(false),
+            }
+            Ok(true)
+        },
+    }
+}
+
+/// This build, and what agents use: skills, search, scripts, MCP and help.
+fn agents() -> Command {
+    Command {
+        help: vec![
+            ("version".into(), "this build".into()),
+            ("skills [<name> [<file>]]".into(), format!("the skills agents load: {NAME}'s own (how to connect, the rules, which MCP to add; also /llms.txt), and each area's and app's")),
+            ("search <words>".into(), "the tools for a task in every app: how to call each, and its app's guide".into()),
+            ("run <file>".into(), format!("run a short script that calls tools, as tools.<app>.<tool>({{ ... }}) (- reads it from stdin), and print what it returns; {CLI} search gives each call")),
+            ("mcp [--code]".into(), "the local MCP server, over stdio, for agents: every tool, or with --code, search and execute".into()),
+            ("help [all]".into(), "what to start with; with all, this".into()),
+        ],
+        run: |g| {
+            let flags = g.flags;
+            match g.words().as_slice() {
+                [] | ["help"] => {
+                    println!("{}", help());
+                    println!("\n{}", connection());
+                }
+                ["help", "all"] => println!("{}", every_command()),
+                ["help", rest @ ..] => match command_help(&rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
+                    Some(text) => print!("{text}"),
+                    None => bail!("{}", tools::unknown(rest[0], None, true)?),
+                },
+                ["mcp"] => mcp(if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
+                ["run", file] => {
+                    let script = match *file {
+                        "-" => std::io::read_to_string(std::io::stdin())?,
+                        file => std::fs::read_to_string(file).with_context(|| format!("read {file}"))?,
+                    };
+                    let result = code::execute(&script, agent_from_env().as_deref(), "cli")?;
+                    for line in result["logs"].as_array().into_iter().flatten() {
+                        eprintln!("{}", line.as_str().map(String::from).unwrap_or_else(|| line.to_string()));
+                    }
+                    match result["ok"] == true {
+                        true => println!("{}", match &result["value"] {
+                            Value::String(s) => s.clone(),
+                            v if std::io::IsTerminal::is_terminal(&std::io::stdout()) => serde_json::to_string_pretty(v)?,
+                            v => serde_json::to_string(v)?,
+                        }),
+                        false => bail!("{}", code::shown(&result)),
+                    }
+                }
+                ["skills"] => {
+                    let skills = skills();
+                    let width = skills.iter().map(|s| s.name.len()).max().unwrap_or(0);
+                    for s in &skills {
+                        println!("{:width$}  {}", s.name, s.description);
+                    }
+                    println!("\n{CLI} skills <name> prints one; {CLI} skills <name> <file> one of its other files.");
+                }
+                ["skills", name, path @ ..] => {
+                    let skill = skills().into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", one::skills::server_name())) == Some(*name));
+                    let skill = skill.with_context(|| format!("no skill {name}: {CLI} skills lists them"))?;
+                    let path = path.first().copied().unwrap_or("SKILL.md");
+                    print!("{}", skill.file(path).with_context(|| format!("{} has no {path}: it has {}", skill.name, skill.all_files().iter().map(|f| f.0.as_str()).collect::<Vec<_>>().join(", ")))?);
+                }
+                ["search", words @ ..] if !words.is_empty() => {
+                    let limit = flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
+                    let (apps, addable) = code::catalogs()?;
+                    println!("{}", code::search(&apps, &addable, &words.join(" "), limit, code::For::Cli));
+                }
+                ["version"] if tools::json() => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
+                ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
+                _ => return Ok(false),
+            }
+            Ok(true)
+        },
+    }
+}
+
+/// Any app's tools, after every built-in command.
+fn generic() -> Command {
+    Command {
+        help: vec![
+            ("<app>".into(), "an app's tools".into()),
+            ("<app> <tool> [words] [--input value]".into(), format!("run a tool, e.g. {CLI} repos list; --help says what it takes. Words fill its main inputs in order (--help shows which), lists repeat a flag, required inputs not given are read as JSON from stdin (a last word - reads it anyway), --file <input>=<path> gives a file and --out <path> saves what it gives back. --device <name> runs it on that device; --trace prints, after its answer (or why it failed), what it did: the devices tried, the one that ran it, each wait in ms, where its data came from, and the total")),
+        ],
+        run: |g| {
+            let args = g.args;
+            match g.words().as_slice() {
+                [app] if !app.starts_with('-') => {
+                    // The node's own apps (Devices, Widgets) aren't in its app list, but read the same.
+                    let apps = get("/v1/apps")?;
+                    let own = one::node::own::listed();
+                    let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", tools::unknown(app, None, true)?) };
+                    println!("{} ({app})", found["title"].as_str().unwrap_or(app));
+                    if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
+                        println!("\n{i}\n");
+                    }
+                    tools::list(std::slice::from_ref(found)).iter().for_each(|l| println!("{l}"));
+                    println!("\n{CLI} {app} <tool> --help says what a tool takes.");
+                }
+                [app, tool, ..] => {
+                    // The words and flags after `<app> <tool>`, as written.
+                    let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
+                    tools::run(app, tool, &args[at(tool, at(app, 0))..])?
+                }
+                [first, ..] => bail!("{}", tools::unknown(first, None, true)?),
+                _ => return Ok(false),
+            }
+            Ok(true)
+        },
+    }
 }
 
 /// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform
@@ -1069,10 +887,10 @@ fn command_help(words: &[String]) -> Option<String> {
         out
     };
     let commands: Vec<&String> = words.iter().take_while(|w| !w.starts_with('-')).collect();
-    let out = (1..=commands.len()).rev().map(|n| lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" "))).find(|o| !o.is_empty()).unwrap_or_default();
+    let (said, out) = (1..=commands.len()).rev().map(|n| (n, lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")))).find(|(_, o)| !o.is_empty()).unwrap_or_default();
     let app = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().chain(&one::node::own::listed()).any(|a| a["name"] == first.as_str());
     match (app, out.is_empty()) {
-        (true, _) if words.len() > 1 => None,
+        (true, _) if words.len() > 1 && said < commands.len() => None,
         (true, true) => None,
         (false, true) => Some(format!("{}\n", help())),
         (_, false) => Some(format!("Usage:\n{out}")),
@@ -1083,7 +901,7 @@ fn command_help(words: &[String]) -> Option<String> {
 /// commands run here, as the person, so `--device` among them.
 fn takes_only(flags: &Map<String, Value>, takes: &[&str]) -> Result<()> {
     match flags.keys().find(|k| !takes.contains(&k.as_str())) {
-        Some(other) => Err(tools::Failed::Typed(format!("--{other} isn't an input of this: see --help")).into()),
+        Some(other) => Err(one::cli::Failed::Typed(format!("--{other} isn't an input of this: see --help")).into()),
         None => Ok(()),
     }
 }
@@ -1170,7 +988,7 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
         let err = err.as_str().unwrap_or("failed").to_string();
         let code = body.get("code").and_then(Value::as_str).map(str::to_string);
         return Err(match refused || code.as_deref() == Some(one::protocol::code::REFUSED) {
-            true => tools::Failed::Refused(err).into(),
+            true => one::cli::Failed::Refused(err).into(),
             false => one::protocol::Coded::or_plain(code, err),
         });
     }
@@ -1318,7 +1136,7 @@ fn logs_read(input: &Map<String, Value>) -> Result<Value> {
     let mut asked = input.clone();
     asked.remove("device");
     asked.remove("trace");
-    one::logs::Ask::from_json(&Value::Object(asked.clone())).map_err(|e| tools::Failed::Typed(format!("{e:#}")))?;
+    one::logs::Ask::from_json(&Value::Object(asked.clone())).map_err(|e| one::cli::Failed::Typed(format!("{e:#}")))?;
     Ok(post_call(json!({ "device": device, "app": one::database::scopes::APP, "op": "logs", "input": asked, "agent": agent_from_env(), "client": "cli" }))?["ok"].take())
 }
 
@@ -1955,7 +1773,7 @@ fn instructions(mode: Mode) -> String {
 /// Makes this device the Workers' home, or refuses (exit 3, which `one update` passes over) where it isn't.
 fn at_home(settings: &mut one::cloudflare::Settings) -> Result<()> {
     settings.at_home().map_err(|err| match err.downcast::<one::cloudflare::NotHome>() {
-        Ok(not) => tools::Failed::Refused(not.0).into(),
+        Ok(not) => one::cli::Failed::Refused(not.0).into(),
         Err(err) => err,
     })
 }
@@ -1986,92 +1804,6 @@ fn cloudflare_said(s: &one::cloudflare::Settings) -> String {
     }
     out
 }
-
-/// Backups' status, for people.
-fn backups_said(r: &Value) -> String {
-    let mut out = String::new();
-    let places = r["places"].as_array().cloned().unwrap_or_default();
-    if places.is_empty() {
-        return format!("Nothing is backed up yet: add a place with {CLI} backups place add.\n");
-    }
-    for p in &places {
-        let when = |t: &Value| t.as_u64().map(|t| one::node::own::say_time(t)).unwrap_or_default();
-        let last = match &p["last"] {
-            Value::Null => "not backed up yet".to_string(),
-            l => format!("backed up {} by {}", when(&l["time"]), l["device"].as_str().unwrap_or("")),
-        };
-        out.push_str(&format!("{} ({}): {last}\n", p["title"].as_str().unwrap_or(""), p["where"].as_str().unwrap_or("")));
-        if let Some(problem) = p["problem"].as_object() {
-            out.push_str(&format!("  {} {} (since {})\n", problem["text"].as_str().unwrap_or(""), problem["fix"].as_str().unwrap_or(""), when(&problem["since"])));
-        }
-    }
-    out
-}
-
-/// Each step of trying a place, and whether it was added.
-fn tried_said(r: &Value) -> String {
-    let mut out = String::new();
-    for s in r["tried"].as_array().into_iter().flatten() {
-        match s["error"].as_str() {
-            None => out.push_str(&format!("✓ {}\n", s["step"].as_str().unwrap_or(""))),
-            Some(e) => out.push_str(&format!("✗ {}: {e}\n", s["step"].as_str().unwrap_or(""))),
-        }
-    }
-    out
-}
-
-/// What a check restored, by name.
-fn checked_said(r: &Value) -> String {
-    let problems: Vec<&str> = r["problems"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-    if let Some(e) = r["error"].as_str().filter(|_| problems.is_empty()) {
-        return format!("✗ {}: {e}\n", r["place"].as_str().unwrap_or(""));
-    }
-    if !problems.is_empty() {
-        return format!("✗ {}: its newest backup didn't restore as it should:\n{}", r["place"].as_str().unwrap_or(""), problems.iter().map(|p| format!("  ✗ {p}\n")).collect::<String>());
-    }
-    let list = |k: &str| r[k].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
-    let place = r["place"].as_str().unwrap_or("A disk");
-    if r["scopes"].as_array().is_none_or(Vec::is_empty) {
-        return match list("unchecked").as_str() {
-            "" => format!("{place}: nothing backed up there yet\n"),
-            unchecked => format!("{place}: not checked here, without their keys: {unchecked}\n"),
-        };
-    }
-    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} databases, {} blobs, from {})", s["name"].as_str().or(s["scope"].as_str()).unwrap_or(""), s["databases"], s["blobs"], one::node::own::say_time(s["time"].as_u64().unwrap_or(0)))).collect();
-    let mut out = format!(
-        "{}: {} came back, checked, from {:.1} MB there\n  ✓ who's who from its steps, every blob as its hash says: {}\n",
-        place,
-        r["network"].as_str().unwrap_or(""),
-        r["bytes"].as_f64().unwrap_or(0.0) / 1e6,
-        scopes.join("; "),
-    );
-    if r["databases"] == true {
-        out.push_str("  ✓ every database restores to its newest step, as the network has it\n");
-    }
-    out.push_str(&format!("  ✓ people: {}\n  ✓ apps: {}\n", list("people"), list("apps")));
-    if !list("unchecked").is_empty() {
-        out.push_str(&format!("  – not checked here, without their keys: {}\n", list("unchecked")));
-    }
-    out
-}
-
-/// Checks a backup on a disk with the recovery key alone, here, without a device: every network it holds.
-fn check_folder(folder: &str) -> Result<Value> {
-    let mut key = String::new();
-    std::io::stdin().read_line(&mut key)?;
-    let secret = one::keys::unhex(key.trim()).context("give the recovery key on stdin: 64 hex characters")?;
-    let place = one::bucket::Place::Folder(folder.into());
-    let mut out = Vec::new();
-    for network in one::backups::networks(&place)? {
-        let keys = one::backups::open_keys(&place, &network, &secret)?;
-        let mut r = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None })?.0;
-        r["place"] = json!(folder);
-        out.push(r);
-    }
-    anyhow::ensure!(!out.is_empty(), "no backup in {folder}");
-    Ok(json!(out))
-}
-
 
 /// MCP's `deploy`, `{CLI} deploy` for an agent with no shell: the app's files as text, built where it's asked.
 fn deploy_tool() -> Value {

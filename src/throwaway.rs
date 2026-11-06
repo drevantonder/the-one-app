@@ -79,7 +79,7 @@ pub fn run(rest: &[String]) -> Result<()> {
             println!("{}", usage());
             return Ok(());
         }
-        Some(cmd) if help && crate::commands().iter().any(|c| c == cmd) => return crate::run(rest.to_vec()),
+        Some(cmd) if help && crate::command_words().iter().any(|c| c == cmd) => return crate::run(rest.to_vec()),
         _ => {}
     }
     let Some((dir, checkout)) = folder() else {
@@ -1406,4 +1406,14 @@ Start-ScheduledTask -TaskName one-throwaway-app"#
     std::fs::write(&signed_in, &here)?;
     println!("  Run JavaScript in its page: {CLI} agent-devices run --device {device} \"Invoke-WebRequest -UseBasicParsing -Method Post -Body '<js>' http://127.0.0.1:{control}/eval\"; what it said is in %TEMP%\\one-throwaway-app.log there");
     Ok(())
+}
+
+/// `throwaway`'s help: it runs before the words after it are read, as their own command (`run`).
+pub fn command() -> one::cli::Command {
+    one::cli::Command {
+        help: vec![
+            ("throwaway [<command>]".into(), format!("a throwaway network for this checkout, on this machine beside yours, with only what every new one starts with: to look around and test in. {CLI} throwaway <command> runs a command in it ({CLI} throwaway mcp for an agent), {CLI} throwaway client web, linux, mac, iphone, android or windows gives a client of this checkout's build signed in to it, and {CLI} throwaway stop deletes it")),
+        ],
+        run: |_| Ok(false),
+    }
 }

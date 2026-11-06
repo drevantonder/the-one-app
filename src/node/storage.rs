@@ -8,6 +8,7 @@ use crate::config::YOURS;
 use super::*;
 
 pub(crate) mod routes;
+pub mod cli;
 
 /// The setting that says where the network keeps its data: S3's `endpoint`, `bucket` and `region`, as JSON.
 pub const STORAGE: &str = "storage";

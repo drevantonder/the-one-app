@@ -55,7 +55,7 @@ pub use app_schedules::APP_SCHEDULES_DAYS;
 mod state;
 mod status;
 mod steps;
-pub(crate) mod storage;
+pub mod storage;
 pub mod trace;
 pub mod vault;
 pub mod own;

@@ -4,6 +4,7 @@
 use super::*;
 
 pub mod app;
+pub mod cli;
 pub(crate) mod routes;
 use super::status::{BackedUp, BackupRun, CheckRun, Said};
 use std::collections::BTreeSet;

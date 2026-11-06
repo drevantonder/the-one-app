@@ -48,6 +48,8 @@ pub mod replica;
 pub mod harnesses;
 #[cfg(feature = "node")]
 pub mod api;
+#[cfg(feature = "node")]
+pub mod cli;
 pub mod app;
 #[cfg(feature = "node")]
 pub mod handoff;

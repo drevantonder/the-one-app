@@ -965,7 +965,7 @@ pub fn wait(args: &[String]) -> Result<()> {
     let (mut commit, mut names, mut limit) = (None, Vec::new(), Duration::from_secs(10 * 60));
     let mut words = args.iter().skip_while(|a| *a != "status").skip(1);
     while let Some(flag) = words.next() {
-        let typed = |m: String| anyhow::Error::from(crate::tools::Failed::Typed(m));
+        let typed = |m: String| anyhow::Error::from(one::cli::Failed::Typed(m));
         let value = words.next().filter(|v| !v.starts_with("--")).ok_or_else(|| typed(format!("{flag} takes a value: see {CLI} status --help")))?;
         match flag.as_str() {
             "--until" => commit = Some(value.to_lowercase()),

@@ -10,6 +10,8 @@ use anyhow::{Context, Result, bail, ensure};
 use one::config::CLI;
 use serde_json::{Map, Value, json};
 
+use one::cli::{Failed, agreed};
+
 use crate::{agent_from_env, get};
 
 /// Files up to this size go inline, as base64, in a tool's input.
@@ -32,23 +34,6 @@ pub static JSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 pub fn json() -> bool {
     JSON.load(std::sync::atomic::Ordering::Relaxed)
 }
-
-/// Why a command failed, when its exit code says more than 1: what was typed is wrong (2), or it was refused (3).
-#[derive(Debug)]
-pub enum Failed {
-    Typed(String),
-    Refused(String),
-}
-
-impl std::fmt::Display for Failed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Failed::Typed(m) | Failed::Refused(m) => f.write_str(m),
-        }
-    }
-}
-
-impl std::error::Error for Failed {}
 
 /// A command's exit code for what went wrong: 2 what was typed is wrong, 3 refused (it needs --confirm, the person
 /// isn't allowed, or isn't signed in), 1 anything else.
@@ -88,7 +73,7 @@ pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
     let device = if own_device(o) || own { None } else { take("device") };
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
-    let confirmed = flags.remove("confirm").is_some() || flags.remove("yes").is_some();
+    let confirmed = flags.remove("confirm").is_some();
     let files: Vec<String> = flags.remove("file").unwrap_or_default().into_iter().flatten().collect();
     let schema = o["input"].clone();
     let places = places(o);
@@ -242,37 +227,15 @@ pub fn unknown(app: &str, tool: Option<&str>, cli: bool) -> Result<String> {
         return Ok(format!("no app {app}: did you mean {CLI} {command}{}?", tool.map(|o| format!(" {o}")).unwrap_or_default()));
     }
     let names: Vec<String> = apps.iter().filter(|a| a["deleted"].is_null()).filter_map(|a| a["name"].as_str()).map(String::from).collect();
-    let commands = if cli { crate::commands() } else { Vec::new() };
+    let commands = if cli { crate::command_words() } else { Vec::new() };
     let all: Vec<&str> = names.iter().chain(&commands).map(String::as_str).collect();
     Ok(match nearest(app, &all).first() {
+        Some(n) if *n == app && commands.contains(n) => format!("{CLI} {app} takes more than that: {CLI} {app} --help says what"),
         Some(n) if commands.contains(n) && !names.contains(n) => format!("no command {app}: did you mean {CLI} {n}? {CLI} help says the rest"),
         Some(n) => format!("no app {app}: did you mean {n}?"),
         None if cli => format!("no command or app {app}: {CLI} help says the commands, {CLI} search <words> finds tools"),
         None => format!("no app {app}: search finds the tools for a task"),
     })
-}
-
-/// Goes ahead with `command`, which sends or can't be undone, given --confirm; else asks at a terminal, and elsewhere
-/// (an agent, or piped) refuses.
-pub fn agreed(confirmed: bool, command: &str) -> Result<()> {
-    if confirmed {
-        return Ok(());
-    }
-    ask(&format!("{command} sends or can't be undone. Go ahead?"), &format!("{command} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))
-}
-
-/// Asks at a terminal; elsewhere (piped, or an agent) it fails with `otherwise`.
-fn ask(question: &str, otherwise: &str) -> Result<()> {
-    if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
-        return Err(Failed::Refused(otherwise.to_string()).into());
-    }
-    eprint!("{question} [y/N] ");
-    let mut answer = String::new();
-    std::io::stdin().read_line(&mut answer)?;
-    if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes") {
-        return Err(Failed::Refused("stopped; nothing changed".into()).into());
-    }
-    Ok(())
 }
 
 /// Splits words from `--flag value`s. A flag given again adds to a list; a flag with no value is None.

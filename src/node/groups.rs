@@ -3,7 +3,8 @@
 use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
 
-use crate::config::YOURS;
+use crate::cli::{Command, Given};
+use crate::config::{CLI, YOURS};
 use crate::node::own::{Asked, NodeApp, text};
 use crate::skills::hints;
 
@@ -79,4 +80,45 @@ pub fn said(state: &Value) -> String {
         }
     }
     out
+}
+
+pub fn commands() -> Command {
+    Command {
+        help: vec![
+            ("groups".into(), format!("who's in {YOURS}, then every group: who's in it, as admin or member, and who's invited")),
+            ("group create <name>".into(), "a group, with you as its admin".into()),
+            ("group invite <group> <user> [--admin]".into(), "".into()),
+            ("group accept <group>".into(), "".into()),
+            ("group remove <group> <user>".into(), "or leave it, giving yourself".into()),
+        ],
+        run: cli,
+    }
+}
+
+fn cli(g: &Given) -> Result<bool> {
+    match g.words().as_slice() {
+        ["groups"] => {
+            g.takes_only(&[])?;
+            print!("{}", said(&g.node.get("/v1/state")?));
+            println!("\n{CLI} group create <name>, {CLI} group invite <group> <user> [--admin], {CLI} group accept <group> and {CLI} group remove <group> <user> change them.");
+        }
+        ["group", "create", name @ ..] if !name.is_empty() => {
+            let r = g.node.post("/v1/group", json!({ "name": name.join(" ") }))?;
+            println!("Created {} ({}).", name.join(" "), r["group"].as_str().unwrap_or(""));
+        }
+        ["group", "invite", group, user] => {
+            g.node.post("/v1/invite", json!({ "group": group, "user": user, "role": if g.has("admin") { "admin" } else { "member" } }))?;
+            println!("Invited {user}; they join with {CLI} group accept {group}.");
+        }
+        ["group", "accept", group] => {
+            g.node.post("/v1/accept", json!({ "group": group }))?;
+            println!("You're in {group}.");
+        }
+        ["group", "remove", group, user] => {
+            g.node.post("/v1/member", json!({ "group": group, "user": user, "role": null }))?;
+            println!("{user} is no longer in {group}.");
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
 }

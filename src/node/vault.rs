@@ -11,6 +11,7 @@ use crate::vault::{Items, Lookup};
 use super::*;
 
 pub mod app;
+pub mod cli;
 pub(crate) mod routes;
 
 /// The node's database of a scope's items.
