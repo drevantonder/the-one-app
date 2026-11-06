@@ -117,6 +117,6 @@ fn removed_said(r: &Value) -> String {
 }
 
 pub fn invited_said(name: &str, r: &Value) -> String {
-    let days = crate::cloudflare::INVITE_DAYS;
+    let days = crate::protocol::INVITE_DAYS;
     format!("Send {name} this link. It works once, for {days} days: opening it, they join. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
 }

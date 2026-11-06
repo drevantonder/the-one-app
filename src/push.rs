@@ -134,13 +134,18 @@ pub struct Address {
 /// naming its seal key `seal`, which only the network's own Workers seal to, and its person `user`, as its own entries
 /// list it, whom sign-in pushes about their devices joining.
 pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, user: Option<&str>, at: u64) -> Result<Value> {
+    Ok(crate::keys::signed_request(key, DOMAIN, register_fields(seal, address, user)?, at))
+}
+
+/// What `register_request` signs.
+pub fn register_fields(seal: &[u8; 32], address: &Address, user: Option<&str>) -> Result<Value> {
     let mut fields = serde_json::to_value(address)?;
     fields["seal"] = json!(HEXLOWER.encode(seal));
     if let Some(user) = user {
         fields["user"] = json!(user);
     }
     fields["route"] = json!("POST /push/register");
-    Ok(crate::keys::signed_request(key, DOMAIN, fields, at))
+    Ok(fields)
 }
 
 /// What a device sends the push Worker to stop getting pushes (`POST <address>/push/unregister`).

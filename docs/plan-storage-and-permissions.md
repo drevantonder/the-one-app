@@ -13,7 +13,6 @@ what was 85 hand-written checks, plus 35 admin checks elsewhere and each app's o
 ## Left, and why
 
 - **Readers of stored data under old shapes stay**, since the data is signed or sealed and can't be written again: `database::migrate` (steps' old kinds and names), steps with no signature beside them (`stored`), `_grants` (`keys::app_schedules_key_name_before`, sealed today), a bucket whose root is under `install` (`node::bucket_root`, which writes `network` the first time it's read), and a scope database copy whose services name no scope.
-- **`members.js`** stays: it builds the content of the steps a browser signs (`database::content`'s, which `tests/contracts.rs` holds it to).
 - **`src/key/`, `src/blob/` and `src/call/`** are each one file or the node's today, so they wait until there's more than one file to put there.
 - **The frozen logs** (`<scope>/node/log/`) stay in the bucket untouched, as history: nothing reads them, and backups copy them as any database ("history").
 

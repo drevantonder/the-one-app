@@ -132,7 +132,7 @@ pub async fn device_fetch(me: String, method: String, path: String, headers: Vec
     let keyring = KEYRINGS.with(|k| k.borrow().get(&me).cloned()).ok_or_else(|| failed(&one_client::keyring::refused()))?;
     let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
     let request = one_client::Request { method, path, headers, body: body.into() };
-    let response = keyring.request(&client, &On::of(on), request, until as u64, None).await.map_err(|e| failed(&e))?;
+    let response = keyring.request(&client, &On::of(on, me), request, until as u64, None).await.map_err(|e| failed(&e))?;
     let node = data_encoding::HEXLOWER.encode(&response.node);
     let body = response.body.bytes_within(ANSWER_MOST).await.map_err(|e| failed(&e))?;
     let out = js_sys::Object::new();
@@ -169,7 +169,7 @@ pub async fn device_view(me: String, seal: Vec<u8>, on: JsValue) -> Result<Strin
     let me = key(&me).map_err(JsValue::from)?;
     let seal: Key = seal.try_into().map_err(|_| JsValue::from(thrown("a seal key's secret is 32 bytes")))?;
     let keyring = KEYRINGS.with(|k| k.borrow_mut().entry(me).or_insert_with(|| Rc::new(Keyring::new(me, seal))).clone());
-    keyring.read(&On::of(on)).await.map_err(|e| failed(&e))?;
+    keyring.read(&On::of(on, me)).await.map_err(|e| failed(&e))?;
     let nodes: Vec<_> = keyring.nodes().iter().map(|(key, seal)| json!({ "key": one::keys::hex(key), "seal": one::keys::hex(seal) })).collect();
     Ok(json!({ "user": keyring.user(), "nodes": nodes }).to_string())
 }

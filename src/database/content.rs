@@ -1,6 +1,5 @@
 //! What a step says, as a device writes it: the content of each kind of the node's steps (`rules` says who may
-//! write each, and what it does). The web client builds the same content (cloudflare/web/members.js), and
-//! tests/contracts.rs checks it does.
+//! write each, and what it does).
 
 use std::collections::BTreeMap;
 

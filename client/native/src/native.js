@@ -37,8 +37,6 @@
     join: () => invoke("join"),
     wait: () => invoke("wait"),
     removed: () => invoke("removed"),
-    /// What Settings changes that this device signs itself → its answer, or null for a path a node answers.
-    signs: (method, path, body) => invoke("signs", { method, path, body }),
     /// The window in front (at a `<cli>://` link, if given), from the menu bar panel; Open at Login switched; Quit.
     main: (link) => invoke("main", { link: link ?? null }),
     login: (on) => invoke("login", { on }),

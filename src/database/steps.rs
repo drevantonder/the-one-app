@@ -194,13 +194,29 @@ impl Step {
 }
 
 pub fn sign(key: &SigningKey, scope: &Scope, at: u64, user: &str, epoch: u32, time: u64, content: Content) -> Result<Step> {
+    let (header, body) = unsigned(&key.verifying_key().to_bytes(), scope, at, user, epoch, time, &content)?;
+    let signature = crate::keys::sign(key, DOMAIN, &header.json());
+    Ok(Step::signed(header, signature, body, content))
+}
+
+/// `sign`, by what signs (a browser's key, which can't be read).
+pub async fn sign_by(signs: &impl crate::keys::Signs, scope: &Scope, at: u64, user: &str, epoch: u32, time: u64, content: Content) -> Result<Step> {
+    let (header, body) = unsigned(&signs.public(), scope, at, user, epoch, time, &content)?;
+    let signature = crate::keys::sign_by(signs, DOMAIN, &header.json()).await?;
+    Ok(Step::signed(header, signature, body, content))
+}
+
+fn unsigned(author: &[u8; 32], scope: &Scope, at: u64, user: &str, epoch: u32, time: u64, content: &Content) -> Result<(Header, Vec<u8>)> {
     let seq = u32::try_from(at).context("that database has more steps than a step can name")?;
-    let body = serde_json::to_vec(&content)?;
-    let header = Header { author: key.verifying_key().to_bytes(), log: scope.to_string(), seq, time, user: user.into(), epoch, body: crate::keys::sha256(&body), size: body.len() as u64 };
-    let v = header.json();
-    let signature = crate::keys::sign(key, DOMAIN, &v);
-    let raw = crate::keys::canonical(&v);
-    Ok(Step { hash: Hash::from_bytes(crate::keys::sha256(&raw)), header, raw, signature, body, content })
+    let body = serde_json::to_vec(content)?;
+    Ok((Header { author: *author, log: scope.to_string(), seq, time, user: user.into(), epoch, body: crate::keys::sha256(&body), size: body.len() as u64 }, body))
+}
+
+impl Step {
+    fn signed(header: Header, signature: [u8; 64], body: Vec<u8>, content: Content) -> Step {
+        let raw = crate::keys::canonical(&header.json());
+        Step { hash: Hash::from_bytes(crate::keys::sha256(&raw)), header, raw, signature, body, content }
+    }
 }
 
 /// A step as a reader has it: the step, and the copy a freeze carries.

@@ -11,9 +11,10 @@
 // secret it agrees (`shared`).
 //
 // A tab says `start` with its person; then each `fetch` is answered with its status and headers, its body's parts as
-// they come, and `done` (or `error`); `cancel` stops one. `members` gives who's who as the keyring read it (with what's
-// new in the bucket if `fresh`). `nodes` gives the order to ask nodes in, which is remembered; `reconnect` starts a
-// fresh endpoint, after the network came back.
+// they come, and `done` (or `error`); `cancel` stops one. What changes who can do what is a `fetch` too, of the path a
+// node's route has, which the keyring answers itself, signing it (one-client's `settings`). `settle`, `renew` and `push`
+// are the rest a device does as itself. `nodes` gives the order to ask nodes in, which is remembered; `reconnect`
+// starts a fresh endpoint, after the network came back.
 
 /// How long before a session's certificate ends it's renewed, and how long after a renewal that failed it's tried again.
 const RENEW = 3_600_000;
@@ -72,11 +73,11 @@ export function server(version) {
   }
 
   /// What `user`'s device (`me`, its keys as kept) reaches through JavaScript (one-client's `js::On`): the bucket,
-  /// through the URL signer's `get`, for who's who and the keys sealed there; what it keeps, in IndexedDB by person, or
-  /// in `memory` for one asked as for a while; whether the relay still lets it in (`still`); and the secret its seal key
-  /// agrees with another's.
+  /// through the URL signer's `get`, for who's who and the keys sealed there; the network's address, and a JSON request
+  /// to it; what it keeps, in IndexedDB by person, or in `memory` for one asked as for a while; whether the relay still
+  /// lets it in (`still`); its key's signature, and the secret its seal key agrees with another's, neither key read.
   async function reaches(user, me, still, memory) {
-    const [{ b64u, hex, signedRequest }, { READS, URLS, Yours }, { del, get, put }] = await code;
+    const [{ b64u, hex, signBytes, signedRequest }, { READS, URLS, Yours }, { del, get, put }] = await code;
     const { following } = await glue;
     // Steps and what's sealed beside them never change once written: those read with one asked for, kept until asked.
     const ahead = new Map();
@@ -109,6 +110,13 @@ export function server(version) {
       put: (name, bytes) => kept.put(`${name}:${user}`, bytes),
       delete: (name) => kept.del(`${name}:${user}`),
       letIn: () => still(),
+      address: location.origin,
+      async ask(method, url, name, value, body) {
+        const headers = { ...(name ? { [name]: value } : {}), ...(body != null ? { "content-type": "application/json" } : {}) };
+        const r = await fetch(url, { method, headers, body: body ?? undefined });
+        return { status: r.status, body: await r.text() };
+      },
+      sign: (bytes) => signBytes(me.sign, bytes),
       async shared(share) {
         const theirs = await crypto.subtle.importKey("raw", share, { name: "X25519" }, false, []);
         return new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: theirs }, me.seal, 256));
@@ -125,13 +133,21 @@ export function server(version) {
     const took = {};
     let mark = performance.now();
     const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
-    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { del, getAll, put }] = await code;
+    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { del, getAll, named, put }] = await code;
     const [mine, nodes, global, root] = await getAll([`device:${user}`, `nodes:${user}`, `global:${user}`, `root:${user}`]);
     // Who's who as this browser checked it before its keyring kept it.
     if (global) {
       if (global.steps) await put(`who.json:${user}`, new TextEncoder().encode(JSON.stringify(global.steps)));
       if (global.root && !root) await put(`root:${user}`, global.root);
       await del(`global:${user}`);
+    }
+    // The invites this browser made, as it kept them before its keyring did.
+    const invites = await named("invite:");
+    if (invites.length) {
+      const kept = JSON.parse(new TextDecoder().decode((await getAll([`invites.json:${user}`]))[0] || new Uint8Array()) || "{}");
+      for (const [id, i] of invites) if (i?.until > Date.now()) kept[i.user || id.slice(7)] = { secret: i.secret, name: i.name, role: "member", until: i.until };
+      await put(`invites.json:${user}`, new TextEncoder().encode(JSON.stringify(kept)));
+      for (const [id] of invites) await del(id);
     }
     const device = as || mine;
     if (!device) return null;
@@ -276,21 +292,24 @@ export function server(version) {
             if (m.wakes && nodes.includes(m.wakes)) s?.client.wakes(m.wakes);
             return s?.client.nodes(nodes);
           }
-          // Who's who as this device reads it, from what's new in the bucket if `fresh`.
-          case "members": {
+          // As each start of a client does: its person's own things, settled if they aren't.
+          case "settle": {
+            const s = await session?.ready;
+            if (s) await s.keyring.settle();
+            return post({ id });
+          }
+          // Its person's app schedules of `app`, renewed as they use it.
+          case "renew": {
+            const s = await session?.ready;
+            if (s) await s.keyring.renewAppSchedules(m.app);
+            return post({ id });
+          }
+          // This browser's push subscription, registered with the network's push Worker.
+          case "push": {
             const s = await session?.ready;
             if (!s) throw new Error("This browser isn't one of your devices yet.");
-            await (m.fresh ? s.keyring.read() : s.keyring.load());
-            return post({ id, members: JSON.parse(s.keyring.members() || "null") });
-          }
-          // A new device's sign-in, checked by the client (`signedInWith`), its issuer's keys fetched from where it
-          // publishes them.
-          case "signedInWith": {
-            const { issuerKeysAt, signedInWith } = await glue;
-            const proof = JSON.stringify(m.proof);
-            const at = issuerKeysAt(proof, m.address);
-            const keys = at ? await (await fetch(at)).text() : "";
-            return post({ id, account: JSON.parse(signedInWith(proof, m.key, m.seal, m.address, m.root, m.clients || "", keys, m.accounts ? JSON.stringify(m.accounts) : undefined, Date.now())) });
+            await s.keyring.registerPush(JSON.stringify(m.subscription));
+            return post({ id });
           }
           case "reconnect": {
             const s = await session?.ready;

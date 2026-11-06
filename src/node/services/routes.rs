@@ -13,7 +13,7 @@ use crate::node::Node;
 
 pub fn routes() -> Routes {
     Routes::default()
-        .route("/v1/service", Who::SignedIn, post(service))
+        .route("/v1/service", Who::ThisMachine, post(service))
         .route("/v1/services/{app}", Who::ThisMachine, post(register))
         .route("/v1/services/{app}/calls", Who::ThisMachine, get(next_call))
         .route("/v1/services/{app}/calls/{id}", Who::ThisMachine, post(reply))

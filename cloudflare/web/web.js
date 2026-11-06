@@ -6,13 +6,12 @@
 // The bridge (src/screen/), loaded after this, gives `one`; this page answers it for its own use (`__one.host`).
 // The window itself, and what it shows over screens (menus, alerts, sheets), is @one/ui's (src/screen/ui), whose
 // ui.js, loaded before this, keeps it on `OneUI`.
-// This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
-// keys it needs.
+// This browser is a device of its person (device.js, and one-client's keyring in net-worker.js): it signs what changes
+// who can do what, and hands each call the keys it needs.
 import * as answers from "./answers.js";
 import { del, put } from "./kept.js";
 import { waited } from "../shared/crypto.js";
-import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf, signingInFor } from "./device.js";
-import { members } from "./members.js";
+import { answer, browserKeys, browserName, codeOf, joinAsk, passkeyKeysOf, signingInFor } from "./device.js";
 import { net } from "./net.js";
 import { qrSvg } from "./qr.js";
 
@@ -335,15 +334,15 @@ const h = OneUI.react.createElement;
   async function forgetDevice() {
     events?.abort();
     const user = auth.user();
-    if (user) await Promise.all(["device", "nodes", "root", "welcome", "who.json", "needs.json"].map((k) => del(`${k}:${user}`))).catch(() => {});
+    if (user) await Promise.all(["device", "nodes", "root", "welcome", "who.json", "needs.json", "invites.json"].map((k) => del(`${k}:${user}`))).catch(() => {});
   }
 
-  /// Signs out as a device: out of its person's devices first (`Device.leave`), so signing in again replaces it, then its
+  /// Signs out as a device: out of its person's devices first (removing itself, which its keyring does as `leave`), so signing in again replaces it, then its
   /// key goes. One that can't get out in a few seconds (no node answering) goes anyway, and stays listed, last seen when
   /// it signed out, until it's removed in Settings › Devices.
   async function signOut() {
     if (native) return auth.signOut();
-    if (device) await Promise.race([device.leave(), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
+    if (device) await Promise.race([api("/v1/remove", { method: "POST", body: { key: device.key } }), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
     await navigator.serviceWorker?.getRegistration().then((r) => r?.pushManager.getSubscription()).then((s) => s?.unsubscribe()).catch(() => {});
     localStorage.removeItem(PUSHED);
     await forgetDevice();
@@ -409,7 +408,7 @@ const h = OneUI.react.createElement;
     const asked = api("/v1/call", { method: "POST", body: { app, tool, input, client: about?.client || "web" } }).then((r) => r.ok);
     if (same) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
     const out = await asked;
-    device?.renewAppSchedules(app);
+    if (device) net.renew(app).catch((err) => console.warn(`renewing ${app}'s schedules:`, err));
     return out;
   }
   const reading = new Map();
@@ -1206,7 +1205,7 @@ const h = OneUI.react.createElement;
           appearance: (m) => (m.value != null && setAppearance(String(m.value)), appearance()),
           // A Mac's widgets' own menu bar items: shown again, or hidden, from its panel.
           menubar: async (m) => (native && about.menubar ? (about.menubar = await native.menubar(String(m.kind || ""), !!m.show)) : []),
-          device: () => (native ? { name: about.device, signOut: true, keys: true, notify: nativeNotify } : { name: browserName(), signOut: true, keys: !!device, notify: notifyState(), ...(device ? { key: device.me.key } : {}) }),
+          device: () => (native ? { name: about.device, signOut: true, keys: true, notify: nativeNotify } : { name: browserName(), signOut: true, keys: !!device, notify: notifyState(), ...(device ? { key: device.key } : {}) }),
           notify: () => notifications(true),
           request: async (m) => (await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true,
           cache: (m) => {
@@ -1233,101 +1232,30 @@ const h = OneUI.react.createElement;
   const settingTitle = (name) => settingsItems().find((i) => i.name === name)?.title || "Settings";
 
   /// `one.api` for a client's own screen: the node's /v1 at this origin, as this person; nothing else here. What
-  /// changes who can do what, and letting devices in, this browser does itself (`signs`).
+  /// changes who can do what, and letting devices in, this device answers itself, as its keyring signs it
+  /// (one-client's `settings`), at the same paths. A passkey to list is this tab's: WebAuthn's PRF comes only to a page.
   async function clientApi(m) {
     const url = new URL(String(m.path || ""), location.origin);
     if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn’t on your devices.");
     const method = String(m.method || "GET").toUpperCase();
-    const body = method === "GET" ? undefined : m.body ?? {};
+    let body = method === "GET" ? undefined : m.body ?? {};
     if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = about?.client || "web";
-    if (native) {
-      const out = await native.signs(method, url.pathname, body || {});
-      if (out != null) {
-        await refreshState().catch(() => {});
-        return out;
-      }
-    }
-    const own = !native && signs[`${method} ${url.pathname}`];
-    if (own) {
-      if (!device) throw new Error("This device hasn't been approved yet.");
-      const out = await own(body || {});
-      await refreshState().catch(() => {});
-      return out ?? {};
+    if (url.pathname === "/v1/devices/passkey") {
+      const p = passkeyToList();
+      if (method === "GET") return { passkey: !!p };
+      if (!p) throw new Error("Sign in with your passkey first.");
+      body = { prf: b64u(p.prf), credential: p.credential };
     }
     if (method === "GET" && !url.search && url.pathname === "/v1/state") return withWaiting(await shared(url.pathname));
     if (method === "GET" && !url.search && url.pathname === "/v1/apps") return shared(url.pathname);
-    return api(url.pathname + url.search, { method, body });
+    const out = await api(url.pathname + url.search, { method, body });
+    if (method !== "GET") {
+      if (url.pathname === "/v1/devices/passkey") sessionStorage.removeItem("one.prf");
+      if (url.pathname === "/v1/devices/refuse") (notMine.add(String(body?.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "")), localStorage.setItem(NOT_MINE, JSON.stringify([...notMine].slice(-50))));
+      await refreshState().catch(() => {});
+    }
+    return out;
   }
-
-  const write = (content, log = "global") => device.write(log, content);
-
-  /// What Settings' screens change that this browser signs itself, as its person's device: what a node's route of the
-  /// same path would do, built here (members.js), never by a node.
-  const signs = {
-    "POST /v1/role": (b) => write(members.role({ user: b.user, role: b.role })),
-    "POST /v1/remove": (b) => (b.user ? device.removePerson(String(b.user)) : device.remove(String(b.key || ""))),
-    // Where this person's own things run besides their own machines: their device's say, nobody else's.
-    "POST /v1/runs": (b) => write(members.runs({ on: (b.on || []).map(String) })),
-    "POST /v1/settings": (b) => write(members.setting({ name: b.name, value: b.value ?? null })),
-    "POST /v1/group": async (b) => {
-      const name = String(b.name || "").trim();
-      if (!name) throw new Error("Give the group a name.");
-      const group = Array.from(crypto.getRandomValues(new Uint8Array(8)), (x) => x.toString(16).padStart(2, "0")).join("");
-      await write(members.group({ group, name }));
-      return { group };
-    },
-    "POST /v1/invite": (b) => write(members.invite({ group: b.group, user: b.user, role: b.role || "member" })),
-    "POST /v1/accept": (b) => write(members.accept({ group: b.group })),
-    "POST /v1/member": (b) => write(members.member({ group: b.group, user: b.user, role: b.role ?? null })),
-    "POST /v1/handle": (b) => write(members.handle({ ...(b.group ? { what: "group", id: String(b.group) } : { what: "user", id: me().id }), handle: String(b.handle || "").trim() })),
-    // `key`: one of this person's devices; none, this browser.
-    "POST /v1/name": (b) => write(members.rename({ what: "key", id: String(b.key || device.me.key), name: String(b.name || "").trim() })),
-    // A service removed from one of this person's devices (`device`, its key), or with `installed` let register again.
-    "POST /v1/service": (b) => write(members.service({ device: String(b.device || ""), name: String(b.name || ""), on: b.on === true })),
-    "POST /v1/retire": (b) => write(members.retire({ app: b.app, owner: app(b.app)?.owner, how: b.how })),
-    // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
-    "POST /v1/add": (b) => (b.scope === "global" ? write(members.add({ app: b.app, added: b.added !== false })) : api("/v1/add", { method: "POST", body: b })),
-    "POST /v1/invite-link": (b) => device.invite(String(b.name || "")),
-    // As a machine's node answers it: `device` by its key; `scope` user (theirs), global or group:<id>; `days`, 0 to stop.
-    "POST /v1/app-schedules": (b) => device.setAppSchedules({ endpoint: String(b.device || ""), app: String(b.app || ""), scope: !b.scope || b.scope === "user" ? `user:${me().id}` : String(b.scope), days: b.days ?? undefined }),
-    "GET /v1/devices/passkey": async () => ({ passkey: !!passkeyToList() }),
-    // `{ key: ms }`: when each device was last let onto the network.
-    "GET /v1/devices/seen": () => device.seen(),
-    // As a machine's node answers it, each with its code, which the device asking shows too, to compare, and what
-    // approving it records as what they sign in with.
-    "GET /v1/devices/requests": async () =>
-      Promise.all((await waitingNow()).map(async (r) => {
-        const signIn = await signedInWith(r, undefined);
-        return { device: r.name, person: r.person, code: r.code, made: r.made, ...(r.place ? { place: r.place } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.mine ? { yours: true } : { new: true }) };
-      })),
-    // `{ key }`: what one of this person's devices signed in with, forgotten.
-    "POST /v1/devices/forget-sign-in": (b) => write(members.forgetSignIn({ key: String(b.key || "") })),
-    // `{ code }`: one waiting turned down, and not asked about again here; one of their own, by every device of theirs.
-    "POST /v1/devices/refuse": async (b) => {
-      const code = String(b.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
-      const r = (await device.requests()).find((x) => x.code.replace(" ", "") === code);
-      if (!r) return;
-      notMine.add(r.key);
-      localStorage.setItem(NOT_MINE, JSON.stringify([...notMine].slice(-50)));
-      await device.refuse(r);
-    },
-    // As a machine's node answers it: without `confirm`, which device it is; with, it's let in.
-    "POST /v1/devices/approve": async (b) => {
-      const code = String(b.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
-      const found = (await device.requests()).filter((x) => x.code.replace(" ", "") === code);
-      if (!found.length) throw new Error("No device is waiting with that code. Check it, or start again on that device.");
-      if (found.length > 1) throw new Error("Two devices are waiting with that code, so neither was let in. Start again on yours, for a new code.");
-      const [r] = found;
-      if (b.confirm !== true) return { device: r.name, person: r.person, new: !r.mine };
-      await device.approve(r, undefined, { signIn: await signedInWith(r, undefined) });
-    },
-    "POST /v1/devices/passkey": async () => {
-      const p = passkeyToList();
-      if (!p) throw new Error("Sign in with your passkey first.");
-      await device.listPasskey(p.prf, p.credential);
-      sessionStorage.removeItem("one.prf");
-    },
-  };
 
   /// Devices waiting that this browser may let in, as last asked: Settings › Devices has a badge for each, and the
   /// first time one is seen here, Devices opens to ask about it. Those its person said aren't theirs aren't asked again.
@@ -1337,42 +1265,9 @@ const h = OneUI.react.createElement;
   const seen = new Set();
   let prompting = false;
 
-  /// What a device waiting signed in with, checked here: against `accounts`, its person's as their devices record them,
-  /// for one this browser lets in by it, or with none, for one approved by its code. → null if it doesn't check out.
-  const signedInWith = async (r, accounts) => {
-    if (!r.sign_in) return null;
-    const k = await device.checked().catch(() => null);
-    if (!k?.root) return null;
-    return net.signedInWith(r.sign_in, r.key, r.seal, location.origin, { root: k.root, clients: k.sign_in_clients || "" }, accounts).catch(() => null);
-  };
-
-  /// Requests whose sign-in was checked here and didn't let them in, with the accounts it was checked against: left
-  /// for the person, by code, unless their accounts change.
-  const notBySignIn = new Set();
-
-  /// Lets in each of this person's devices waiting whose sign-in shows it's theirs, as approving it would. → those it
-  /// didn't.
-  async function bySignIn(waiting) {
-    const asked = waiting.filter((r) => r.mine && r.sign_in);
-    if (!asked.length) return waiting;
-    const accounts = await device.checked(true).then((k) => k.people[device.user]?.sign_ins || [], () => []);
-    const left = [];
-    for (const r of waiting) {
-      const tried = `${r.key} ${JSON.stringify(accounts)}`;
-      const account = accounts.length && asked.includes(r) && !notBySignIn.has(tried) ? await signedInWith(r, accounts) : null;
-      if (!account) {
-        if (accounts.length && asked.includes(r)) notBySignIn.add(tried);
-        left.push(r);
-        continue;
-      }
-      await device.approve(r, undefined, { signIn: account }).catch((err) => (console.warn(`letting ${r.name} in by its sign-in: ${err.message}`), left.push(r)));
-    }
-    return left;
-  }
-
   /// Asks auth which devices wait now, and tells the window and its screens if that changed. → them.
   async function waitingNow() {
-    const now = native ? (await native.signs("GET", "/v1/devices/requests", {})).map((r) => ({ ...r, key: r.code })) : await bySignIn((await device.requests()).filter((r) => !notMine.has(r.key)));
+    const now = (await api("/v1/devices/requests")).map((r) => ({ ...r, key: r.code.replace(" ", "") })).filter((r) => !notMine.has(r.key));
     const changed = now.map((r) => r.key).join() !== waiting.map((r) => r.key).join();
     waiting = now;
     if (changed) {
@@ -1490,10 +1385,10 @@ const h = OneUI.react.createElement;
   async function join(user) {
     const keys = await browserKeys(user);
     if (await net.start(user).catch(() => false)) return keys;
-    if (await byPasskey(user, keys)) return keys;
     const invite = sessionStorage.getItem("one.invite");
     const ask = async () => answer(await bearer("/api/auth/devices/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await joinAsk(keys, browserName(), invite)) }));
     await ask();
+    if (await byPasskey(user, keys)) return keys;
     await showJoin(await codeOf(keys.key, keys.seal), !!invite);
     // Auth says once it was approved; then the relay lets it in. One gone from auth (approved and cleared, refused, or
     // waited 15 minutes) is asked again, unless it's in. As every client does (`waited`).
@@ -1515,7 +1410,7 @@ const h = OneUI.react.createElement;
   }
 
   /// Lets this browser in by a passkey its person listed, whose PRF output this tab has from signing in: it asks as that
-  /// passkey's device, which approves this browser. → whether it's in.
+  /// passkey's device, which approves this browser's request by its code. → whether it's in.
   async function byPasskey(user, keys) {
     const prf = sessionStorage.getItem("one.prf");
     if (!prf) return false;
@@ -1523,8 +1418,7 @@ const h = OneUI.react.createElement;
     try {
       const pk = await passkeyKeysOf(bytes);
       if (!(await net.start(user, true, { key: pk.key, sign: pk.sign, seal: pk.opens.secret, sealKey: pk.seal }))) return false;
-      await refreshState();
-      await new Device(keys, { user, state: () => store.state, api, bearer }).approveByPasskey(bytes);
+      await api("/v1/devices/approve", { method: "POST", body: { code: await codeOf(keys.key, keys.seal), confirm: true } });
       return await net.start(user, true);
     } catch (err) {
       console.warn("the passkey didn't let this browser in:", err);
@@ -1536,7 +1430,7 @@ const h = OneUI.react.createElement;
 
   /// Once it's in: its person's own things' first key and where they run, made by the first of their devices.
   async function settle() {
-    await device.settleOwn().catch((err) => console.warn("making this person's own keys:", err));
+    await net.settle().catch((err) => console.warn("making this person's own keys:", err));
     await refreshState().catch(() => {});
   }
 
@@ -1673,7 +1567,7 @@ const h = OneUI.react.createElement;
       // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
       if (native) await nativeJoin();
       else {
-        device = new Device(await join(user), { user, state: () => store.state, api, bearer });
+        device = await join(user);
       }
     } catch (err) {
       if (err.signedOut) return err.removed ? undefined : showSignedOut();
@@ -1731,9 +1625,9 @@ const h = OneUI.react.createElement;
     const was = JSON.parse(localStorage.getItem(PUSHED) || "null");
     if (sub && was && was.vapid !== vapid) await sub.unsubscribe(), (sub = null);
     sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(vapid.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)) });
-    if (was?.endpoint !== sub.endpoint || was?.key !== device.me.key || was?.vapid !== vapid || Date.now() - was.at > 86_400_000) {
-      await device.registerPush(sub.toJSON());
-      localStorage.setItem(PUSHED, JSON.stringify({ endpoint: sub.endpoint, key: device.me.key, vapid, at: Date.now() }));
+    if (was?.endpoint !== sub.endpoint || was?.key !== device.key || was?.vapid !== vapid || Date.now() - was.at > 86_400_000) {
+      await net.push(sub.toJSON());
+      localStorage.setItem(PUSHED, JSON.stringify({ endpoint: sub.endpoint, key: device.key, vapid, at: Date.now() }));
     }
     return notifyState();
   }

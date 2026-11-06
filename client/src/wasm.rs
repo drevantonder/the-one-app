@@ -105,7 +105,7 @@ impl Keyring {
     #[wasm_bindgen(constructor)]
     pub fn new(key: String, seal: String, on: JsValue) -> Result<Keyring, JsError> {
         let opens = crate::js::Seal { public: self::key(&seal)?, js: crate::js::Js(on.clone()) };
-        Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), on: crate::js::On::of(on), client: Default::default() })
+        Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), on: crate::js::On::of(on, self::key(&key)?), client: Default::default() })
     }
 
     /// The session's client, which its requests go through.
@@ -128,16 +128,6 @@ impl Keyring {
     /// Who's who, with what's new in the bucket.
     pub async fn read(&self) -> Result<(), Failed> {
         self.keyring.read(&self.on).await.map_err(Failed::of)
-    }
-
-    /// Who's who as it last read it, as JSON (`members::view_of`), with where it read to (`welcome`, `steps::Welcome`),
-    /// as it welcomes a device it approves: "" before it has.
-    pub fn members(&self) -> Result<String, JsError> {
-        let Some(mut view) = self.keyring.who(crate::members::view_of).transpose().map_err(js)? else { return Ok(String::new()) };
-        if let Some(welcome) = self.keyring.welcome() {
-            view["welcome"] = welcome.to_string().into();
-        }
-        Ok(view.to_string())
     }
 
     /// The nodes it may ask, hex (`nodes`), with each one's run priority (`ranks`, by key), and the Cloudflare node's
@@ -172,6 +162,29 @@ impl Keyring {
         let response = sent.map_err(|e| Failed { trace: traced.clone(), ..Failed::of(e) })?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
         Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace: traced, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
+    }
+
+    /// As each start of a client does: its person's own things it settles if they aren't (`Keyring::settle_own`).
+    pub async fn settle(&self) -> Result<(), Failed> {
+        self.keyring.load(&self.on).await.map_err(Failed::of)?;
+        let client = self.client.borrow().clone().ok_or_else(|| Failed::of(crate::keyring::refused()))?;
+        self.keyring.settle_own(&client, &self.on, None).await.map_err(Failed::of)
+    }
+
+    /// Renews its person's app schedules of `app` as they use it (`Keyring::renew_app_schedules`).
+    #[wasm_bindgen(js_name = renewAppSchedules)]
+    pub async fn renew_app_schedules(&self, app: String) {
+        let Some(client) = self.client.borrow().clone() else { return };
+        self.keyring.renew_app_schedules(&client, &self.on, &app).await
+    }
+
+    /// Registers this browser's push subscription (`{ endpoint, keys }`, JSON) with the network's push Worker.
+    #[wasm_bindgen(js_name = registerPush)]
+    pub async fn register_push(&self, subscription: String) -> Result<(), Failed> {
+        let sub: serde_json::Value = serde_json::from_str(&subscription).map_err(|e| Failed::of(crate::unsent(e)))?;
+        let address = one::push::Address { via: "webpush".into(), address: sub["endpoint"].as_str().unwrap_or_default().into(), env: String::new(), topic: String::new(), keys: Some(serde_json::json!({ "p256dh": sub["keys"]["p256dh"], "auth": sub["keys"]["auth"] })) };
+        self.keyring.load(&self.on).await.map_err(Failed::of)?;
+        self.keyring.register_push(&self.on, &address).await.map_err(Failed::of)
     }
 
     /// Forgets all it knew and kept but the network's root, as a device that's out does.
@@ -272,38 +285,6 @@ impl Response {
     pub fn cancel(&self) {
         self.body.borrow_mut().take();
     }
-}
-
-/// Where the issuer of a new device's sign-in (`proof`, as auth passed it on, JSON) publishes its keys, for the issuers
-/// devices of the network at `address` take: "" for a passkey's, or any other issuer.
-#[wasm_bindgen(js_name = issuerKeysAt)]
-pub fn issuer_keys_at(proof: String, address: String) -> String {
-    let proof: Option<one::sign_in_proof::Proof> = serde_json::from_str(&proof).ok();
-    proof.and_then(|p| p.issuer()).and_then(|i| one::sign_in_proof::keys_at(&i, &address)).unwrap_or_default()
-}
-
-/// What a new device (`key`, `seal`, hex) signed in with, as its sign-in (`proof`, JSON) shows, checked here
-/// (`one::sign_in_proof`): with its issuer's `keys` (JSON, or "" for a passkey's), for the network at `address` whose
-/// root is `root` (hex) and whose people sign in with `clients` (its `sign_in_clients` setting, as
-/// its entries say, or ""); against `accounts` (its person's, as their devices record them, JSON), for one let in by
-/// it, or with none, for one approved by its code. → the account, as JSON, to record with it; throws why it doesn't
-/// check out.
-#[wasm_bindgen(js_name = signedInWith)]
-#[allow(clippy::too_many_arguments)]
-pub fn signed_in_with(proof: String, key: String, seal: String, address: String, root: String, clients: String, keys: String, accounts: Option<String>, now: f64) -> Result<String, JsError> {
-    let proof: one::sign_in_proof::Proof = serde_json::from_str(&proof).map_err(js)?;
-    let device = one::keys::Endpoint { key: self::key(&key)?, seal: self::key(&seal)? };
-    let network = one::sign_in_proof::Network::new(&address, self::key(&root)?, Some(&clients));
-    let keys: Option<serde_json::Value> = (!keys.is_empty()).then(|| serde_json::from_str(&keys)).transpose().map_err(js)?;
-    let now = now as u64;
-    let account = match accounts {
-        Some(theirs) => {
-            let theirs: Vec<one::sign_in_proof::Account> = serde_json::from_str(&theirs).map_err(js)?;
-            one::sign_in_proof::vouches(&proof, &device, &network, keys.as_ref(), &theirs, now)
-        }
-        None => one::sign_in_proof::check(&proof, &device, &network, keys.as_ref(), now),
-    };
-    Ok(serde_json::to_string(&account.map_err(js)?).map_err(js)?)
 }
 
 /// If `name` is a database's step, or the signature beside one: the signature beside it, and the `n` steps after it,

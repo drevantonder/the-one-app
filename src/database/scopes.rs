@@ -292,6 +292,46 @@ impl ScopeDb {
         Ok(self.rows("SELECT key FROM recovery WHERE set_at IS NULL ORDER BY n", [], |r| r.get::<_, String>(0))?.iter().map(|k| key(k)).collect())
     }
 
+    /// A device as someone gives it, by its name or the start of its key: the device, not the parts of it named for it.
+    pub fn find_machine(&self, name: &str) -> Result<Key> {
+        let listed: Vec<Machine> = self.machines()?.into_iter().filter(|m| !m.removed).collect();
+        let named: Vec<&Machine> = listed.iter().filter(|m| !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).collect();
+        let part = |d: &Machine| d.device.is_some_and(|of| named.iter().any(|n| n.key == of));
+        match named.iter().filter(|d| !part(d)).collect::<Vec<_>>().as_slice() {
+            [one] => Ok(one.key),
+            [] => bail!("no device called {name}: your devices are {}", listed.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ")),
+            _ => bail!("several devices match {name}"),
+        }
+    }
+
+    /// A node, which runs calls, as someone gives it, by its name or the start of its key.
+    pub fn find_node(&self, name: &str) -> Result<Key> {
+        let nodes = self.computes()?;
+        match nodes.iter().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).collect::<Vec<_>>().as_slice() {
+            [one] => Ok(one.key),
+            [] => Err(crate::protocol::Coded::error(crate::protocol::code::NOT_LISTED, format!("no device called {name}: your devices are {}", nodes.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ")))),
+            _ => bail!("several devices match {name}"),
+        }
+    }
+
+    /// A person as someone gives them, by their id or name.
+    pub fn find_user(&self, name: &str) -> Result<String> {
+        match self.users()?.into_iter().filter(|u| !u.removed && (u.id == name || u.name.eq_ignore_ascii_case(name))).collect::<Vec<_>>().as_slice() {
+            [one] => Ok(one.id.clone()),
+            [] => bail!("no user called {name}"),
+            _ => bail!("several users are called {name}; give their id"),
+        }
+    }
+
+    /// A group as someone gives it, by its id or name.
+    pub fn find_group(&self, name: &str) -> Result<String> {
+        match self.groups()?.into_iter().filter(|g| g.id == name || g.name.eq_ignore_ascii_case(name)).collect::<Vec<_>>().as_slice() {
+            [one] => Ok(one.id.clone()),
+            [] => bail!("no group called {name}"),
+            _ => bail!("several groups are called {name}; give its id"),
+        }
+    }
+
     /// Everyone who's been in the network, removed people too, by id.
     pub fn users(&self) -> Result<Vec<User>> {
         self.rows(

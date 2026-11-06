@@ -136,11 +136,11 @@ pub(crate) mod routes {
 
     pub fn routes() -> Routes {
         Routes::default()
-            .route("/v1/group", Who::SignedIn, post(group))
-            .route("/v1/invite", Who::SignedIn, post(invite))
-            .route("/v1/accept", Who::SignedIn, post(accept))
-            .route("/v1/member", Who::SignedIn, post(member))
-            .route("/v1/handle", Who::SignedIn, post(handle))
+            .route("/v1/group", Who::ThisMachine, post(group))
+            .route("/v1/invite", Who::ThisMachine, post(invite))
+            .route("/v1/accept", Who::ThisMachine, post(accept))
+            .route("/v1/member", Who::ThisMachine, post(member))
+            .route("/v1/handle", Who::ThisMachine, post(handle))
     }
 
     #[derive(Deserialize)]

@@ -12,6 +12,8 @@ pub const RELAY: &str = "one/relay";
 pub use crate::push::DOMAIN as PUSH;
 /// What a device signs its requests to auth under.
 pub const AUTH_DOMAIN: &str = "one/auth";
+/// How many days an invite link works.
+pub const INVITE_DAYS: u64 = 3;
 /// What a session's endpoint signs to open its relay socket.
 pub const SOCKET: &str = "one/socket";
 /// How old a session's proof for its relay socket may be, either way: a socket is opened as soon as it's made.

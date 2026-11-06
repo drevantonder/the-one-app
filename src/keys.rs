@@ -254,6 +254,37 @@ pub fn sign(key: &SigningKey, domain: &str, v: &Value) -> [u8; 64] {
     key.sign(&signed_bytes(domain, v)).to_bytes()
 }
 
+/// What signs as a device: its key, or where that can't be read (a browser's WebCrypto key), what signs with it.
+pub trait Signs {
+    /// Its Ed25519 public key.
+    fn public(&self) -> [u8; 32];
+    fn sign_bytes(&self, bytes: &[u8]) -> impl Future<Output = Result<[u8; 64]>>;
+}
+
+impl Signs for SigningKey {
+    fn public(&self) -> [u8; 32] {
+        self.verifying_key().to_bytes()
+    }
+
+    async fn sign_bytes(&self, bytes: &[u8]) -> Result<[u8; 64]> {
+        Ok(self.sign(bytes).to_bytes())
+    }
+}
+
+/// `sign`, by what signs.
+pub async fn sign_by(signs: &impl Signs, domain: &str, v: &Value) -> Result<[u8; 64]> {
+    signs.sign_bytes(&signed_bytes(domain, v)).await
+}
+
+/// `signed_request`, by what signs.
+pub async fn signed_request_by(signs: &impl Signs, domain: &str, mut fields: Value, at: u64) -> Result<Value> {
+    fields["at"] = json!(at);
+    fields["by"] = json!(HEXLOWER.encode(&signs.public()));
+    let sig = sign_by(signs, domain, &fields).await?;
+    fields["sig"] = json!(B64U.encode(&sig));
+    Ok(fields)
+}
+
 pub fn verify(key: &[u8; 32], domain: &str, v: &Value, signature: &[u8]) -> Result<()> {
     let key = VerifyingKey::from_bytes(key).map_err(|_| anyhow!("not an Ed25519 key"))?;
     let signature = ed25519_dalek::Signature::from_slice(signature).map_err(|_| anyhow!("not a signature"))?;

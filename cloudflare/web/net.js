@@ -183,20 +183,19 @@ export const net = {
     if (net.has) send({ op: "nodes", user, nodes, ranks, wakes });
   },
 
-  /// Who's who as `global`'s scope database's steps say it, as this browser's device read and checked them itself
-  /// (one-client's `members::view_of`), with what's new in the bucket if `fresh`: null before it has.
-  async members(fresh = false) {
-    if (!net.has) throw new Error("This device can't check who's who in your One App network.");
-    return (await ask({ op: "members", fresh })).members;
+  /// As each start of a client does: this person's own things, settled by this device if they aren't.
+  async settle() {
+    if (net.has) await ask({ op: "settle" });
   },
 
-  /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as auth passed it on) shows, checked
-  /// by the client at the network's `address`, whose root is `root` (hex) and whose people sign in
-  /// with `clients` (its `sign_in_clients` setting, as its steps say): against `accounts`, its person's, for one let in
-  /// by it, or with none, for one approved by its code. → the account; throws why it doesn't check out.
-  async signedInWith(proof, key, seal, address, { root, clients }, accounts) {
-    if (!net.has) throw new Error("This device can't check a sign-in.");
-    return (await ask({ op: "signedInWith", proof, key, seal, address, root, clients, accounts })).account;
+  /// This person's app schedules of `app`, renewed by this device as they use it.
+  async renew(app) {
+    if (net.has) await ask({ op: "renew", app });
+  },
+
+  /// This browser's push subscription (`{ endpoint, keys }`), registered with the network's push Worker as this device.
+  async push(subscription) {
+    await ask({ op: "push", subscription });
   },
 
   still() {

@@ -828,9 +828,8 @@ impl Node {
     /// entries, and a new epoch of each scope it could open (as a client:
     /// compute holds no epochs) that `caller` starts epochs of, sealed to every client left that opens it and the
     /// recovery key; databases move to it at their next routine copy. A scope `caller` can't start a new epoch of is
-    /// said: one of its own admins' devices does. A device removing itself (as it signs out) forgets its own keys, so
-    /// its scopes keep theirs (ARCHITECTURE.md), its `remove` entry saying so (`itself`); it's told off the relay last,
-    /// since it hears no answer after. → what was done.
+    /// said: one of its own admins' devices does. Off the relay first, then unlisted. A device removing itself (as it
+    /// signs out) does it itself, never through a node. → what was done.
     pub async fn remove_device(&self, caller: &Caller, device: &str) -> Result<Value> {
         let key = self.find_machine(device)?;
         let (gone, keys, scopes) = self.with(|i| {
@@ -846,29 +845,17 @@ impl Node {
             Ok((d.name, keys.clone(), db.scopes()?.into_iter().filter(opens).collect::<Vec<_>>()))
         })?;
         ensure!(!keys.contains(&self.0.id), "{gone} is this device: remove it from another of your devices");
-        // A device taking itself out (signing out) is told last: off the relay, it hears no answer, so everything else is done.
-        let itself = keys.contains(&caller.key);
-        let off_relay = || async {
-            let mut said = Vec::new();
-            for k in &keys {
-                if let Err(err) = self.tell_relay_now(json!({ "remove": hex(k) })).await {
-                    said.push(format!("{err:#}"));
-                }
-            }
-            (!said.is_empty()).then(|| said.join("; "))
-        };
-        let mut relay = if itself { None } else { off_relay().await };
+        let mut relay = Vec::new();
         for k in &keys {
-            let mut said = content::remove_device(k).data;
-            if itself {
-                said["itself"] = json!(true);
+            if let Err(err) = self.tell_relay_now(json!({ "remove": hex(k) })).await {
+                relay.push(format!("{err:#}"));
             }
-            self.member_as(caller, "remove", said).await?;
         }
-        let (renewed, left) = if itself { Default::default() } else { self.renew(caller, scopes).await };
-        if itself {
-            relay = off_relay().await;
+        let relay = (!relay.is_empty()).then(|| relay.join("; "));
+        for k in &keys {
+            self.member_content(caller, content::remove_device(k)).await?;
         }
+        let (renewed, left) = self.renew(caller, scopes).await;
         Ok(json!({ "removed": gone, "new_epochs": renewed, "not_renewed": left, "relay": relay }))
     }
 
@@ -1000,7 +987,7 @@ impl Node {
         }
     }
 
-    /// What a person's first device does once it's in, here for a machine (cloudflare/web/device.js for a browser): where
+    /// What a person's first device does once it's in, here for a machine (one-client's `settle_own` for a client): where
     /// their own things run besides their own machines, if their devices never said (the network's machines that run
     /// everyone's, chosen without asking), and their own scope's first epoch, if it isn't made.
     pub(super) fn settle_own(&self) {

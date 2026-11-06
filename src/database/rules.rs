@@ -268,9 +268,9 @@ impl Change<'_> {
             let key = self.key("key")?;
             let gone = self.who.machine(&key)?.context("no such key")?;
             ensure!(self.may("remove", &super::scopes::device(&key)), "only its person or an admin removes a device");
-            // A device signing itself out deletes its own keys: signed by it, or by a node of its person's it asked
-            // (`itself`). So does a sign-in before on a device signed in again (`Node::approve_request`). One removed
-            // otherwise may still hold them.
+            // A device signing itself out deletes its own keys: signed by it, or, in steps written before devices
+            // signed their own, by a node of its person's it asked (`itself`). So does a sign-in before on a device
+            // signed in again (`Node::approve_request`). One removed otherwise may still hold them.
             let author = self.step.author();
             let itself = author == key || (self.data["itself"] == true && self.who.machine_ever(&author)?.is_some_and(|a| a.user == gone.user));
             let again = gone.device.is_some() && gone.passkey.is_none() && self.who.clients()?.iter().any(|c| c.key != key && c.user == gone.user && c.device == gone.device && c.passkey.is_none());

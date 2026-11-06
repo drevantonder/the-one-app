@@ -16,7 +16,7 @@ struct Formats {
 impl Formats {
     fn start() -> Self {
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("cloudflare");
-        let mut files: Vec<(String, Vec<u8>)> = ["shared/crypto.js", "shared/token.js", "web/members.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap())).to_vec();
+        let mut files: Vec<(String, Vec<u8>)> = ["shared/crypto.js", "shared/token.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap())).to_vec();
         files.push(("screen/agents.js".into(), std::fs::read(root.join("../src/screen/settings/agents.js")).unwrap()));
         let dir = crate::temp("formats");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -242,74 +242,6 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     add(&mut fresh, &json!({ "steps": [junk, sealed(2, &first.step, first.copy.as_deref())] })).unwrap();
     assert_eq!(fresh.at(), 2, "a browser reads past junk");
     Ok(())
-}
-
-/// The content of steps for who can do what (`src/database/content.rs`), as the web client builds what a browser signs
-/// (`cloudflare/web/members.js`).
-#[test]
-fn the_web_client_builds_the_content_of_steps_as_rust_does() {
-    let formats = Formats::start();
-    let js = |body: Value| formats.js(body);
-
-    use one::database::scopes::Scope;
-    use one::database::content;
-    use one::database::scopes::{Kind, Role};
-    let endpoint = one::keys::Endpoint { key: rand::random(), seal: rand::random() };
-    let (key, seal) = (data_encoding::HEXLOWER.encode(&endpoint.key), data_encoding::HEXLOWER.encode(&endpoint.seal));
-    let (user, group) = ("0123456789abcdef", "fedcba9876543210");
-    let both = [
-        (content::device(&endpoint, user, "Chrome on Mac", &[Kind::Client], None), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Chrome on Mac" }])),
-        (
-            {
-                let mut c = content::device(&endpoint, user, "phone", &[Kind::Client], None);
-                c.data["device"] = json!(seal.clone());
-                c
-            },
-            json!(["device", { "key": key, "seal": seal, "user": user, "name": "phone", "device": seal }]),
-        ),
-        (
-            {
-                // Let in by its sign-in, from where it asked.
-                let mut c = content::device(&endpoint, user, "phone", &[Kind::Client], None);
-                c.data["sign_in"] = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
-                c.data["place"] = json!("Sydney");
-                c
-            },
-            json!(["device", { "key": key, "seal": seal, "user": user, "name": "phone", "signIn": { "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } }, "place": "Sydney" }]),
-        ),
-        (content::device(&endpoint, user, "Sam's Chrome", &[Kind::Client], Some(("Sam", Role::Member))), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Sam's Chrome", "newUser": { "name": "Sam", "role": "member" } }])),
-        (content::passkey(&endpoint, user, "Passkey", "cred-1"), json!(["passkey", { "key": key, "seal": seal, "user": user, "name": "Passkey", "credential": "cred-1" }])),
-        (content::role(user, Role::Admin), json!(["role", { "user": user, "role": "admin" }])),
-        (content::remove_user(user), json!(["removeUser", { "user": user }])),
-        (content::remove_device(&endpoint.key), json!(["removeDevice", { "key": key }])),
-        (content::refuse(&endpoint, "MacBook Pro"), json!(["refuse", { "key": key, "seal": seal, "name": "MacBook Pro" }])),
-        (content::forget_sign_in(&endpoint.key), json!(["forgetSignIn", { "key": key }])),
-        (content::setting("name", Some("Home")), json!(["setting", { "name": "name", "value": "Home" }])),
-        (content::setting("name", None), json!(["setting", { "name": "name" }])),
-        (content::group(group, "Family"), json!(["group", { "group": group, "name": "Family" }])),
-        (content::invite(group, user, Role::Member), json!(["invite", { "group": group, "user": user, "role": "member" }])),
-        (content::accept(group), json!(["accept", { "group": group }])),
-        (content::member(group, user, Some(Role::Admin)), json!(["member", { "group": group, "user": user, "role": "admin" }])),
-        (content::member(group, user, None), json!(["member", { "group": group, "user": user }])),
-        (content::rename("key", &key, "Work Mac"), json!(["rename", { "what": "key", "id": key, "name": "Work Mac" }])),
-        (content::rename("group", group, "Kin"), json!(["rename", { "what": "group", "id": group, "name": "Kin" }])),
-        (content::handle("user", user, "sam-2"), json!(["handle", { "what": "user", "id": user, "handle": "sam-2" }])),
-        (content::epoch(&Scope::User(user.into()), 2, &[endpoint.key], &seal), json!(["epoch", { "scope": format!("user:{user}"), "n": 2, "to": [key], "hash": seal }])),
-        (content::app_schedules(&endpoint.key, &Scope::Group(group.into()), "whatsapp", 0, &Default::default()), json!(["appSchedules", { "endpoint": key, "scope": format!("group:{group}"), "app": "whatsapp", "until": 0 }])),
-        (content::app_schedules(&endpoint.key, &Scope::User(user.into()), "whatsapp", 1_800_000_000_000, &[(1, seal.clone()), (2, key.clone())].into()), json!(["appSchedules", { "endpoint": key, "scope": format!("user:{user}"), "app": "whatsapp", "until": 1_800_000_000_000_u64, "keys": { "1": seal, "2": key } }])),
-        (content::retire("notes", "admins", "deleted").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "deleted" }])),
-        (content::retire("notes", "admins", "restored").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "restored" }])),
-        (content::added("notes", false), json!(["add", { "app": "notes", "added": false }])),
-        (content::runs(&[endpoint.key]), json!(["runs", { "on": [key] }])),
-        (content::runs(&[]), json!(["runs", { "on": [] }])),
-        (content::service(&endpoint.key, "shell", false, None), json!(["service", { "device": key, "name": "shell" }])),
-        (content::service(&endpoint.key, "shell", true, None), json!(["service", { "device": key, "name": "shell", "on": true }])),
-        (content::service(&endpoint.key, "shell", true, Some(&Scope::Global)), json!(["service", { "device": key, "name": "shell", "on": true, "scope": "global" }])),
-    ];
-    let out = js(json!({ "op": "members", "calls": both.iter().map(|(_, call)| call.clone()).collect::<Vec<_>>() }));
-    for ((rust, call), js) in both.iter().zip(out["contents"].as_array().expect("contents")) {
-        assert_eq!(js, &serde_json::to_value(rust).unwrap(), "{call}");
-    }
 }
 
 /// What sign-in's word on a device's request to be let in means (`keys::waited`): the web client reads it as native apps

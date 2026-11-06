@@ -186,7 +186,7 @@ pub fn commands() -> Command {
                     } else {
                         let key = crate::node::device_key(&crate::home())?;
                         let invite = crate::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;
-                        let days = crate::cloudflare::INVITE_DAYS;
+                        let days = crate::protocol::INVITE_DAYS;
                         let how = if crate::config::SIGN_IN == crate::config::SignIn::Google { "they sign in with Google and join" } else { "they make their passkey and join" };
                         println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
                         let me = node.get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string));

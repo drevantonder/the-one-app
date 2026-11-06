@@ -186,7 +186,12 @@ export function twinPublic(edPublic) {
 }
 
 async function sign(key, domain, v) {
-  return new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, await signingKey(key), signed(domain, v)));
+  return signBytes(key, signed(domain, v));
+}
+
+/// `key`'s Ed25519 signature of `data` (`signingKey`'s).
+export async function signBytes(key, data) {
+  return new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, await signingKey(key), data));
 }
 
 async function verify(publicKey, domain, v, signature) {

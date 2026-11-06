@@ -1,6 +1,6 @@
 //! What a client device knows of its network, the keys it opened, and how it asks a node with them, the same on every
 //! client that runs this crate: the CLI and native apps (`device.rs`), and the remote MCP server's devices
-//! (cloudflare/node/src/clients.rs). cloudflare/web/device.js is the same in a browser.
+//! (cloudflare/node/src/clients.rs), and browsers (`wasm::Keyring`, in cloudflare/web/net-worker.js).
 //!
 //! It trusts no node, nor the relay, for who's who: it reads `global`'s scope database's steps from the bucket itself,
 //! opens them with the epochs sealed to it, and applies them by the node's own rules (`steps::Reader`). It asks only
@@ -18,12 +18,14 @@ use n0_future::time::{Duration, Instant};
 use one::config::YOURS;
 use one::database::scopes::{Scope, ScopeDb};
 use one::database::steps::{Reader, Welcome};
-use one::keys::{self, Handed, Handoff, Hash, Need, Opens, hex};
+use one::keys::{self, Handed, Handoff, Hash, Need, Opens, Signs, hex};
 use serde_json::{Value, json};
 
 use crate::{Body, Client, Error, Request, Response, TRACE_HEADER, not_let_in, unsent};
 
 const REREAD: u64 = 30_000;
+/// How long a node keeps the keys a request handed it.
+pub const HANDED_FOR: u64 = 3_600_000;
 /// The most kinds of request whose needs are kept: the remote MCP server keeps one for each tool an MCP client calls.
 const KINDS_KEPT: usize = 128;
 const ROOT: &str = "root";
@@ -40,13 +42,17 @@ pub trait Keep {
     fn delete(&self, name: &str) -> impl Future<Output = ()>;
 }
 
-/// What a device reaches at its network's address: the bucket, through the URL signer, and the relay, which alone says
-/// whether it's still let in.
+/// What a device reaches at its network's address: the bucket, through the URL signer; the relay, which alone says
+/// whether it's still let in; and sign-in, the relay and the push Worker as it asks them itself (`ask`).
 pub trait Address {
     type Bucket: one::bucket::Bucket;
     fn bucket(&self) -> &Self::Bucket;
     /// False only if the relay says it no longer lets this device in.
     fn let_in(&self) -> impl Future<Output = bool>;
+    /// The network's address: `https://…`.
+    fn address(&self) -> &str;
+    /// A request to `url`, JSON in and out, with `header` if there's one: → its status and JSON (null if it wasn't).
+    fn ask(&self, method: &str, url: &str, header: Option<(&str, String)>, body: Option<Value>) -> impl Future<Output = Result<(u16, Value), Error>>;
 }
 
 pub fn now() -> u64 {
@@ -119,6 +125,8 @@ pub struct Keyring<O = [u8; 32]> {
     needs: Mutex<Option<BTreeMap<String, (String, Vec<Need>)>>>,
     /// Held while a kind of request learns from a 428: another of its kind waits for it, and goes with what it learned.
     learning: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// When it last read who's who to renew app schedules (`settings::renew_app_schedules`).
+    renew_checked: Mutex<u64>,
 }
 
 impl<O: Opens> Keyring<O> {
@@ -133,7 +141,23 @@ impl<O: Opens> Keyring<O> {
             app_keys: Mutex::default(),
             needs: Mutex::default(),
             learning: Mutex::default(),
+            renew_checked: Mutex::default(),
         }
+    }
+
+    /// What opens what's sealed to it.
+    pub fn opens(&self) -> &O {
+        &self.opens
+    }
+
+    /// Whether it's been `every` (ms) since this was last true.
+    pub(crate) fn renew_checked(&self, every: u64) -> bool {
+        let mut at = self.renew_checked.lock().unwrap();
+        let due = now() > *at + every;
+        if due {
+            *at = now();
+        }
+        due
     }
 
     /// Reads who's who from the bucket: the first time from the network's first freeze, or where the device that let it
@@ -269,7 +293,22 @@ impl<O: Opens> Keyring<O> {
     /// sent to until `until` (ms). One a node needs others for (428) is sent again with them, a few times, as a node may
     /// find what it needs as it goes (the Cloudflare node, its logs' keys first, then a call's); one a node refuses as
     /// it doesn't list this device yet, again in a moment while the relay lets it in. `fetches` gets each try's trace.
-    pub async fn request(&self, client: &Client, on: &(impl Address + Keep), mut request: Request, until: u64, mut fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
+    /// One this device answers itself (`answer`: what it signs as its person) never reaches a node.
+    pub async fn request(&self, client: &Client, on: &(impl Address + Keep + Signs), request: Request, until: u64, fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
+        if let Some(answer) = self.answer(client, on, &request.method, &request.path, request.body.bytes()).await {
+            let (status, out) = match answer {
+                Ok(out) => (200, out),
+                Err(err) if err.not_let_in => return Err(err),
+                Err(err) => (400, json!({ "error": err.to_string(), "code": err.code })),
+            };
+            let headers = vec![("content-type".to_string(), "application/json".to_string())];
+            return Ok(Response { node: [0; 32], status, headers, body: Body::whole(out.to_string().into_bytes()), trace: None });
+        }
+        self.to_nodes(client, on, request, until, fetches).await
+    }
+
+    /// `request`, of its nodes.
+    async fn to_nodes(&self, client: &Client, on: &(impl Address + Keep), mut request: Request, until: u64, mut fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
         let kind = Kind::of(&request.path, request.body.bytes());
         if fetches.is_some() && !request.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(TRACE_HEADER)) {
             request.headers.push((TRACE_HEADER.into(), "1".into()));
@@ -367,19 +406,20 @@ impl<O: Opens> Keyring<O> {
         }
         let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
         let response = self.send(client, Request { method: method.into(), path: path.into(), headers, body: body.into() }, &[], 0).await?;
-        let status = response.status;
-        let out: Value = match serde_json::from_slice(&response.body.bytes().await?) {
-            Ok(out) => out,
-            // A proxy's own error page isn't JSON: the status says it.
-            Err(_) if status != 200 => Value::Null,
-            Err(err) => return Err(failed(format!("{path} answered with a reply that wasn't JSON: {err}"))),
-        };
-        if status != 200 {
-            let said = error(&out).unwrap_or_else(|| format!("{path} answered {status}"));
-            return Err(Error { code: out["code"].as_str().map(str::to_string), ..failed(said) });
-        }
-        Ok(out)
+        json_of(response, path).await
     }
+
+    /// A request's JSON, handing the keys its kind needs (`request`): what a device writes as its person.
+    pub(crate) async fn asked(&self, client: &Client, on: &(impl Address + Keep), method: &str, path: &str, body: Option<Value>) -> Result<Value, Error> {
+        let mut headers = Vec::new();
+        if body.is_some() {
+            headers.push(("content-type".into(), "application/json".into()));
+        }
+        let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
+        let response = self.to_nodes(client, on, Request { method: method.into(), path: path.into(), headers, body: body.into() }, now() + HANDED_FOR, None).await?;
+        json_of(response, path).await
+    }
+
 
     /// The keys a kind of request needed last time (`needs`), opened: none it can't open. Each node it's sent to is
     /// handed only those of the scopes it runs (`sealed_for`).
@@ -520,7 +560,7 @@ impl<O: Opens> Keyring<O> {
     }
 
     /// An app's key in epoch `n` of a scope: the one sealed under the epoch, or one made now if it has none yet.
-    async fn app_key(&self, client: &Client, on: &(impl Address + Keep), scope: &str, app: &str, n: u32) -> Result<[u8; 32], Error> {
+    pub(crate) async fn app_key(&self, client: &Client, on: &(impl Address + Keep), scope: &str, app: &str, n: u32) -> Result<[u8; 32], Error> {
         let id = (scope.to_string(), app.to_string(), n);
         if let Some(key) = self.app_keys.lock().unwrap().get(&id) {
             return Ok(*key);
@@ -640,6 +680,22 @@ fn kind(scope: &str) -> &'static str {
         s if s.starts_with("group:") => "group",
         _ => "user",
     }
+}
+
+/// A node's answer as JSON: its error, with its code, unless it's 200.
+async fn json_of(response: Response, path: &str) -> Result<Value, Error> {
+    let status = response.status;
+    let out: Value = match serde_json::from_slice(&response.body.bytes().await?) {
+        Ok(out) => out,
+        // A proxy's own error page isn't JSON: the status says it.
+        Err(_) if status != 200 => Value::Null,
+        Err(err) => return Err(failed(format!("{path} answered with a reply that wasn't JSON: {err}"))),
+    };
+    if status != 200 {
+        let said = error(&out).unwrap_or_else(|| format!("{path} answered {status}"));
+        return Err(Error { code: out["code"].as_str().map(str::to_string), ..failed(said) });
+    }
+    Ok(out)
 }
 
 pub fn query(s: &str) -> String {

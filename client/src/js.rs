@@ -64,16 +64,33 @@ pub fn said(err: JsValue) -> anyhow::Error {
     anyhow!("{}", err.as_string().or_else(|| Reflect::get(&err, &"message".into()).ok().and_then(|m| m.as_string())).unwrap_or_else(|| format!("{err:?}")))
 }
 
-/// What a device's object hands its keyring: `{ bucket, get(name), put(name, bytes), delete(name), letIn() }`, the
-/// bucket (`Js`), what it keeps, by name, and whether the relay still lets it in, each a promise.
+/// What a device's object hands its keyring: `{ bucket, address, get(name), put(name, bytes), delete(name), letIn(),
+/// ask(method, url, header, value, body), sign(bytes) }`: the bucket (`Js`); the network's address; what it keeps, by
+/// name; whether the relay still lets it in; a JSON request to the address (→ `{ status, body }`, its JSON, or null);
+/// and its key's signature of `bytes`. Each method a promise.
 pub struct On {
     bucket: Js,
+    address: String,
+    key: [u8; 32],
     js: Js,
 }
 
 impl On {
-    pub fn of(on: JsValue) -> On {
-        On { bucket: Js(Reflect::get(&on, &"bucket".into()).unwrap_or(JsValue::NULL)), js: Js(on) }
+    /// `key`: the device's own, which `sign` signs with.
+    pub fn of(on: JsValue, key: [u8; 32]) -> On {
+        let address = Reflect::get(&on, &"address".into()).ok().and_then(|a| a.as_string()).unwrap_or_default();
+        On { bucket: Js(Reflect::get(&on, &"bucket".into()).unwrap_or(JsValue::NULL)), address, key, js: Js(on) }
+    }
+}
+
+impl one::keys::Signs for On {
+    fn public(&self) -> [u8; 32] {
+        self.key
+    }
+
+    async fn sign_bytes(&self, bytes: &[u8]) -> Result<[u8; 64]> {
+        let got = self.js.ask("sign", &[Uint8Array::from(bytes).into()]).await?;
+        Uint8Array::new(&got).to_vec().try_into().map_err(|_| anyhow!("a signature is 64 bytes"))
     }
 }
 
@@ -102,6 +119,19 @@ impl Address for On {
     /// Unless the relay says it doesn't, as a relay that didn't answer may still.
     async fn let_in(&self) -> bool {
         self.js.ask("letIn", &[]).await.ok().is_none_or(|v| v.is_truthy())
+    }
+
+    fn address(&self) -> &str {
+        &self.address
+    }
+
+    async fn ask(&self, method: &str, url: &str, header: Option<(&str, String)>, body: Option<serde_json::Value>) -> Result<(u16, serde_json::Value), crate::Error> {
+        let (name, value) = header.map(|(n, v)| (JsValue::from(n), JsValue::from(v))).unwrap_or((JsValue::NULL, JsValue::NULL));
+        let body = body.map(|b| JsValue::from(b.to_string())).unwrap_or(JsValue::NULL);
+        let got = self.js.ask("ask", &[method.into(), url.into(), name, value, body]).await.map_err(|e| crate::unsent(format!("Couldn't reach {}: {e}", one::config::YOURS)))?;
+        let status = Reflect::get(&got, &"status".into()).ok().and_then(|s| s.as_f64()).unwrap_or(0.0) as u16;
+        let said = Reflect::get(&got, &"body".into()).ok().and_then(|b| b.as_string()).and_then(|b| serde_json::from_str(&b).ok()).unwrap_or_default();
+        Ok((status, said))
     }
 }
 

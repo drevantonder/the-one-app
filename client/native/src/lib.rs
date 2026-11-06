@@ -443,17 +443,6 @@ fn cancel(id: u64) {
     }
 }
 
-/// What Settings changes that this device signs itself (`Device::settings`) → its answer, or null for a path it leaves
-/// to a node.
-#[tauri::command]
-async fn signs(method: String, path: String, body: Value) -> Result<Value, String> {
-    let device = app().device()?;
-    match device.settings(&method, &path, &body).await {
-        Some(out) => out.map_err(|e| e.to_string()),
-        None => Ok(Value::Null),
-    }
-}
-
 /// Whether this device was taken out of its person's devices, as the relay says.
 #[tauri::command]
 async fn removed() -> bool {

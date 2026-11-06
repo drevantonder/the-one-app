@@ -13,16 +13,16 @@ use crate::node::{Caller, Node};
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/pair", Who::SignedIn, post(pair))
-        .route("/v1/name", Who::SignedIn, post(name))
-        .route("/v1/remove", Who::SignedIn, post(remove))
+        .route("/v1/name", Who::ThisMachine, post(name))
+        .route("/v1/remove", Who::ThisMachine, post(remove))
         .route("/v1/erase", Who::SignedIn, post(erase))
-        .route("/v1/invite-link", Who::SignedIn, post(invite_link))
-        .route("/v1/devices/requests", Who::SignedIn, get(device_requests))
-        .route("/v1/devices/approve", Who::SignedIn, post(approve))
-        .route("/v1/devices/refuse", Who::SignedIn, post(refuse_device))
-        .route("/v1/devices/forget-sign-in", Who::SignedIn, post(forget_sign_in))
+        .route("/v1/invite-link", Who::ThisMachine, post(invite_link))
+        .route("/v1/devices/requests", Who::ThisMachine, get(device_requests))
+        .route("/v1/devices/approve", Who::ThisMachine, post(approve))
+        .route("/v1/devices/refuse", Who::ThisMachine, post(refuse_device))
+        .route("/v1/devices/forget-sign-in", Who::ThisMachine, post(forget_sign_in))
         .route("/v1/app-schedules", Who::ThisMachine, post(app_schedules))
-        .route("/v1/runs", Who::SignedIn, post(runs))
+        .route("/v1/runs", Who::ThisMachine, post(runs))
 }
 
 #[derive(Deserialize)]

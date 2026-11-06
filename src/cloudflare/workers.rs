@@ -1143,7 +1143,6 @@ pub struct Invite {
     pub until: u64,
 }
 
-pub const INVITE_DAYS: u64 = 3;
 
 /// Invites someone to join the network at `address`, `name` only a label, as `user` (who they'll be in the network; a
 /// new id if not given), and where people sign in with Google, as the Google account `email`. The link's secret is
@@ -1155,7 +1154,7 @@ pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: 
     let user = user.map(str::to_string).unwrap_or_else(crate::database::scopes::new_id);
     let secret = B64U.encode(&rand::random::<[u8; 32]>());
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
-    let until = now + INVITE_DAYS * 86_400_000;
+    let until = now + crate::protocol::INVITE_DAYS * 86_400_000;
     let mut fields = json!({ "route": "POST /api/auth/invites", "id": data_encoding::HEXLOWER.encode(&crate::keys::sha256(secret.as_bytes())), "name": name.trim(), "user": user, "until": until });
     if let Some(email) = email {
         fields["email"] = json!(email);

@@ -183,13 +183,7 @@ impl Node {
     }
 
     pub fn find_device(&self, name: &str) -> Result<Key> {
-        let found: Vec<Key> = self.with(|i| Ok(i.r.db().computes()?.into_iter().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
-        let names = || self.with_or(Default::default(), |i| Ok(i.r.db().computes()?.into_iter().map(|m| m.name.clone()).collect::<Vec<_>>().join(", ")));
-        match found.as_slice() {
-            [one] => Ok(*one),
-            [] => return Err(crate::protocol::Coded::error(crate::protocol::code::NOT_LISTED, format!("no device called {name}: your devices are {}", names()))),
-            _ => bail!("several devices match {name}"),
-        }
+        self.with(|i| i.r.db().find_node(name))
     }
 
     /// The service endpoint offering `service` on the device called `name` (or by key prefix) that serves `user`, if
@@ -223,28 +217,11 @@ impl Node {
 
     /// Finds a device or client of the network by name or key prefix.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
-        let found: Vec<Key> = self.with(|i| {
-            let m = i.r.db();
-            let named: Vec<scopes::Machine> = m.machines()?.into_iter().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).collect();
-            // A device, by its name, rather than the parts of it named for it.
-            let part = |d: &scopes::Machine| d.device.is_some_and(|of| named.iter().any(|n| n.key == of));
-            Ok(named.iter().filter(|d| !part(d)).map(|d| d.key).collect())
-        })?;
-        let names = || self.with_or(Default::default(), |i| Ok(i.r.db().machines()?.into_iter().filter(|m| !m.removed).map(|m| m.name.clone()).collect::<Vec<_>>().join(", ")));
-        match found.as_slice() {
-            [one] => Ok(*one),
-            [] => bail!("no device called {name}: your devices are {}", names()),
-            _ => bail!("several devices match {name}"),
-        }
+        self.with(|i| i.r.db().find_machine(name))
     }
 
     pub fn find_user(&self, name: &str) -> Result<String> {
-        let found: Vec<String> = self.with(|i| Ok(i.r.db().users()?.into_iter().filter(|u| !u.removed && (u.id == name || u.name.eq_ignore_ascii_case(name))).map(|u| u.id.clone()).collect()))?;
-        match found.as_slice() {
-            [one] => Ok(one.clone()),
-            [] => bail!("no user called {name}"),
-            _ => bail!("several users are called {name}; give their id"),
-        }
+        self.with(|i| i.r.db().find_user(name))
     }
 
     /// A scope as someone gives it: `user` (their own), `global`, `group:<id>`, or a group's name or id.
@@ -253,12 +230,7 @@ impl Node {
     }
 
     pub fn find_group(&self, name: &str) -> Result<String> {
-        let found: Vec<String> = self.with(|i| Ok(i.r.db().groups()?.into_iter().filter(|g| g.id == name || g.name.eq_ignore_ascii_case(name)).map(|g| g.id.clone()).collect()))?;
-        match found.as_slice() {
-            [one] => Ok(one.clone()),
-            [] => bail!("no group called {name}"),
-            _ => bail!("several groups are called {name}; give its id"),
-        }
+        self.with(|i| i.r.db().find_group(name))
     }
 
     pub(super) fn name_of(&self, key: &Key) -> String {

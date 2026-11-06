@@ -1,7 +1,6 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
 import { b64u, canonical, certify, checkCertificate, epochHash, checkRequest, ed25519Public, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, openAppKey, openNote, openSealed, openUnder, passkeyKeys, sealAppKey, sealTo, sealUnder, signStep, signedRequest, twinPublic, waited, x25519Public } from "../shared/crypto.js";
 import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
-import { members } from "../web/members.js";
 import { AGENTS } from "../screen/agents.js";
 
 const ops = {
@@ -55,10 +54,6 @@ const ops = {
   /// Who the Settings screens say agents are in an item's apps.
   async agents() {
     return AGENTS;
-  },
-  /// The content of steps for who can do what, as the web client builds it: `[[builder, args]]` → each content.
-  async members({ calls }) {
-    return { contents: calls.map(([name, args]) => members[name](args)) };
   },
   /// What auth's word says while a device waits to be let in: `[[status, said]]` → what each says.
   async joining({ said }) {
