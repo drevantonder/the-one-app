@@ -1008,11 +1008,11 @@ const h = OneUI.react.createElement;
     };
     const say = () => (text.textContent = !at || Date.now() - at < 60_000 ? "Offline" : `Offline · from ${ago(at)}`);
     say();
-    setTimeout(() => f.offline === note && f.into.isConnected && f.into.append(note), 1500);
+    setTimeout(() => f.offline === note && f.into.isConnected && (f.into.append(note), f.into.classList.add("offline")), 1500);
     const every = setInterval(say, 30_000);
     let misses = 1, timer = null;
     // Gone once its devices answer, by its own asking or the first.
-    f.offlineDone = () => (clearInterval(every), clearTimeout(timer), note.remove(), (f.offline = f.offlineDone = null));
+    f.offlineDone = () => (clearInterval(every), clearTimeout(timer), note.remove(), f.into.classList.remove("offline"), (f.offline = f.offlineDone = null));
     const again = async () => {
       clearTimeout(timer);
       if (!f.into.isConnected) return f.offlineDone?.();
@@ -1137,6 +1137,11 @@ const h = OneUI.react.createElement;
     const r = f.route, mine = r.kind === "own";
     if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
     if (typeof e.data?.oneSheets === "number") return void shade(f, e.data.oneSheets > 0);
+    // The panel's window fits its screen, as the Mac app's did, up to most of the screen.
+    if (typeof e.data?.oneHeight === "number") {
+      if (panel && !f.sheet) native.fit(Math.min(e.data.oneHeight, window.screen.availHeight - 80) + ($(".panel-head")?.offsetHeight || 0) + ($(".panel-rows")?.offsetHeight || 0) + 2);
+      return;
+    }
     if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill));
     const { one: m, id } = e.data || {};
     if (!m || typeof m !== "object") return;
@@ -1187,7 +1192,8 @@ const h = OneUI.react.createElement;
         title: (title, m) => {
           // Empty while the screen shows its own large title, as the Mac app's bar is; the tab is named by what the
           // screen says it's called.
-          if (f.sheet) f.sheet.title(title || titleOf(r));
+          // A sheet too says nothing while the screen's large title shows (`one.largeTitle`, which names it).
+          if (f.sheet) f.sheet.title(title || (m.name ? "" : titleOf(r)));
           // Developer's panel has the bar of the screen it's under.
           else if (!f.dock && f.into.isConnected) {
             if (windowShown && title !== barTitle) (barTitle = title), drawWindow();

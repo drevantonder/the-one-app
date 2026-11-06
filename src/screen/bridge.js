@@ -34,7 +34,14 @@
       window.parent.postMessage({ oneStill: `<!doctype html>${page.outerHTML}` }, "*");
     };
     const later = () => (clearTimeout(still), (still = setTimeout(snap, 1000)));
+    // How tall its content is, for a page that fits a window to it (the native app's menu bar panel).
+    let tall = 0;
+    const measure = () => {
+      const now = Math.ceil(document.body?.scrollHeight || 0);
+      if (now !== tall) window.parent.postMessage({ oneHeight: (tall = now) }, "*");
+    };
     addEventListener("load", () => {
+      if (window.ResizeObserver && document.body) new ResizeObserver(measure).observe(document.body);
       new MutationObserver(later).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
       addEventListener("scroll", later, { passive: true });
       later();

@@ -3,5 +3,5 @@
   "identifier": "window",
   "description": "The window's own page (the web client's, from the app), and the menu bar panel's (the same page), alone may ask the app's commands. Screens are sandboxed frames in it with no origin of their own, which reach none: they ask the page, which answers each as its app.",
   "windows": ["main", "panel"],
-  "permissions": ["allow-native", "allow-address", "allow-sign-in", "allow-join", "allow-wait", "allow-fetch", "allow-read", "allow-cancel", "allow-removed", "allow-sign-out", "allow-notify", "allow-copy", "allow-open", "allow-save", "allow-changed", "allow-main", "allow-login", "allow-quit", "allow-panel"]
+  "permissions": ["allow-native", "allow-address", "allow-sign-in", "allow-join", "allow-wait", "allow-fetch", "allow-read", "allow-cancel", "allow-removed", "allow-sign-out", "allow-notify", "allow-copy", "allow-open", "allow-save", "allow-changed", "allow-main", "allow-login", "allow-quit", "allow-panel", "allow-fit"]
 }

@@ -30,6 +30,8 @@
     main: (link) => invoke("main", { link: link ?? null }),
     login: (on) => invoke("login", { on }),
     quit: () => invoke("quit"),
+    /// The menu bar panel this tall (CSS pixels), its top where it is.
+    fit: (height) => invoke("fit", { height }),
     /// Something changed on the person's devices: the app's own widgets are drawn again.
     changed: () => invoke("changed").catch(() => {}),
     signOut: () => invoke("sign_out"),

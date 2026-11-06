@@ -160,7 +160,7 @@ function Accounts() {
           </section>
         )
       })}
-      {!withAccounts.length && <Empty className="mr-auto max-w-md px-0 text-left items-start" action={may ? { label: "Add Account", run: () => home.addAccountApp()?.() } : undefined}>The accounts your apps sign in to, like your email and chats, show here.</Empty>}
+      {!withAccounts.length && <Empty className="mr-auto max-w-md px-0 py-0 text-left items-start" action={may ? { label: "Add Account", run: () => home.addAccountApp()?.() } : undefined}>The accounts your apps sign in to, like your email and chats, show here.</Empty>}
       {may && withAccounts.length > 0 && <Button variant="outline" className="self-start" onClick={() => home.addAccountApp()?.()}>Add Account for Another App</Button>}
     </div>
   )

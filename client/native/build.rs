@@ -38,6 +38,6 @@ fn main() {
     unsafe { std::env::set_var("TAURI_CONFIG", config.to_string()) };
     println!("cargo:rustc-env=TAURI_CONFIG={config}");
     println!("cargo:rerun-if-env-changed=CONFIG");
-    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel"]);
+    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit"]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands)).expect("the app's build")
 }

@@ -482,6 +482,24 @@ fn login(on: bool) -> Option<bool> {
     login_now(&app().handle)
 }
 
+/// The panel this tall, as its screen is: under its item it grows down, over one (a taskbar) up.
+#[tauri::command]
+fn fit(height: f64) {
+    #[cfg(desktop)]
+    if let Some(p) = app().handle.get_webview_window("panel") {
+        let height = height.clamp(160.0, 900.0);
+        let scale = p.scale_factor().unwrap_or(1.0);
+        let was = p.outer_size().map(|s| s.height as f64).unwrap_or(PANEL.1 * scale);
+        let _ = p.set_size(tauri::LogicalSize::new(PANEL.0, height));
+        if let (Ok(at), Some(m)) = (p.outer_position(), p.current_monitor().ok().flatten())
+            && (at.y as f64) > m.position().y as f64 + m.size().height as f64 / 2.0
+        {
+            let _ = p.set_position(tauri::PhysicalPosition::new(at.x, at.y + (was - height * scale) as i32));
+        }
+    }
+    let _ = height;
+}
+
 #[tauri::command]
 fn quit() {
     app().handle.exit(0);
@@ -494,6 +512,10 @@ fn panel() {
     toggle_panel(None);
 }
 
+/// The panel's size, as the Mac app's was wide.
+#[cfg(desktop)]
+const PANEL: (f64, f64) = (340.0, 560.0);
+
 #[cfg(desktop)]
 fn toggle_panel(at: Option<tauri::Rect>) {
     let Some(p) = app().handle.get_webview_window("panel") else { return };
@@ -501,15 +523,20 @@ fn toggle_panel(at: Option<tauri::Rect>) {
         let _ = p.hide();
         return;
     }
-    let size = p.outer_size().unwrap_or_default();
+    // Its size as made: a window never shown yet says none.
+    let scale = p.scale_factor().unwrap_or(1.0);
+    let size = tauri::PhysicalSize::new((PANEL.0 * scale) as u32, (PANEL.1 * scale) as u32);
     if let Some(at) = at {
-        let scale = p.scale_factor().unwrap_or(1.0);
         let (pos, item) = (at.position.to_physical::<f64>(scale), at.size.to_physical::<f64>(scale));
         let x = pos.x + item.width / 2.0 - size.width as f64 / 2.0;
         // Under an item at the top of the screen (a Mac's menu bar), over one at the bottom (a Windows taskbar).
         let top = p.current_monitor().ok().flatten().map(|m| (m.position().y as f64 + m.size().height as f64 / 2.0) > pos.y).unwrap_or(true);
         let y = if top { pos.y + item.height } else { pos.y - size.height as f64 };
         let _ = p.set_position(tauri::PhysicalPosition::new(x.max(0.0), y.max(0.0)));
+    } else if let Some(m) = p.current_monitor().ok().flatten() {
+        // With no item to sit under (opened by its command), at the screen's top right, as a menu bar item's would.
+        let margin = (8.0 * m.scale_factor()) as i32;
+        let _ = p.set_position(tauri::PhysicalPosition::new(m.position().x + m.size().width as i32 - size.width as i32 - margin, m.position().y + margin));
     }
     let _ = p.show();
     let _ = p.set_focus();
@@ -649,7 +676,7 @@ fn show() {
 }
 
 /// In a debug build, a loopback port an agent drives the window by (`CONTROL`): `POST /eval` runs its body in the
-/// window's page. Never in a build people use.
+/// window's page (`/eval/<label>`, another window's). Never in a build people use.
 #[cfg(debug_assertions)]
 fn control(port: u16) {
     use std::io::{BufRead, BufReader, Read, Write};
@@ -671,9 +698,11 @@ fn control(port: u16) {
             }
             let mut body = vec![0; len];
             r.read_exact(&mut body).ok();
-            let out = match app().handle.get_webview_window("main") {
+            // `/eval` the window's page, `/eval/<label>` another's (the panel's).
+            let label = line.split(' ').nth(1).and_then(|p| p.strip_prefix("/eval/")).unwrap_or("main").to_string();
+            let out = match app().handle.get_webview_window(&label) {
                 Some(w) if line.starts_with("POST /eval") => w.eval(String::from_utf8_lossy(&body)).map(|_| "ok".to_string()).unwrap_or_else(|e| e.to_string()),
-                _ => "POST /eval".into(),
+                _ => "POST /eval or /eval/<window>".into(),
             };
             let mut s = &s;
             let _ = write!(s, "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{out}", out.len());
@@ -699,7 +728,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, quit, panel])
+        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, quit, panel, fit])
         .setup(|app| {
             // Its local folder, not one a domain profile roams (Windows): the client's is this device's alone.
             let data = app.path().app_local_data_dir()?;
@@ -763,8 +792,9 @@ pub fn run() {
                     .title(one::config::NAME)
                     .initialization_script(include_str!("native.js"))
                     .use_https_scheme(true)
-                    .inner_size(340.0, 560.0)
-                    .resizable(false)
+                    .inner_size(PANEL.0, PANEL.1)
+                    // Sized by its screen (`fit`), which GTK refuses a window that isn't resizable; with no edges to
+                    // drag, a person can't.
                     .decorations(false)
                     .always_on_top(true)
                     .skip_taskbar(true)
