@@ -79,7 +79,7 @@ struct Entry: TimelineEntry {
 /// widget that asks to be drawn again at `next` gets a reload then.
 struct Provider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> Entry {
-        Entry(widget: .init(title: appName, icon: "app", root: WidgetNode(t: "col", c: [
+        Entry(widget: .init(id: "placeholder", title: appName, icon: "app", root: WidgetNode(t: "col", c: [
             WidgetNode(t: "text", text: "MacBook Air", size: "sm", weight: "medium"),
             WidgetNode(t: "text", text: "Deployed the new build to every device.", lines: 3),
         ])))
