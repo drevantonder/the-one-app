@@ -66,19 +66,40 @@ pub fn chrome() -> Option<std::process::Command> {
 }
 
 /// Builds the app in `dir` into a bundle: `app.js`, the ES module Bun makes from its entry and npm packages, and
-/// `src/`, the folder's files as written (without `node_modules` and dot files), and `services`, its service's builds
-/// by platform, as blobs (`bundle::SERVICES`).
+/// `src/`, the folder's files as written (without `node_modules` and dot files; what its links go to is in it), and
+/// `services`, its service's builds by platform, as blobs (`bundle::SERVICES`).
 pub fn build(dir: &Path, services: &std::collections::BTreeMap<String, String>) -> Result<Vec<u8>> {
-    let mut files = crate::app::bundle::unpack(&bundle(dir, true)?)?;
+    screens(dir)?;
+    let sources = crate::app::bundle::sources(dir)?;
+    let mut files = crate::app::bundle::unpack(&compile(&sources, false)?)?;
     if !services.is_empty() {
         files.insert(1, (crate::app::bundle::SERVICES.to_string(), serde_json::to_vec(services)?));
     }
     crate::app::bundle::pack(&files)
 }
 
-/// `build`, with the React screens built first (`screens`) or, for a built-in app, whose `dist/` was built when it was
-/// committed, taken as they are, which needs only the pinned Bun.
-fn bundle(dir: &Path, build_screens: bool) -> Result<Vec<u8>> {
+/// A folder's files built into a bundle, in a folder of their own: so only the files given are what it's built from,
+/// never what's beside the app's folder, and it builds the same wherever the files came from.
+fn compile(files: &[(String, Vec<u8>)], build_screens: bool) -> Result<Vec<u8>> {
+    let dir = tempdir()?;
+    let built = (|| {
+        for (path, bytes) in files {
+            let path = dir.join(path);
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            std::fs::write(path, bytes)?;
+        }
+        // The screens it builds are among its files, as they're built.
+        if build_screens {
+            screens(&dir)?;
+            return bundle(&dir, &crate::app::bundle::sources(&dir)?);
+        }
+        bundle(&dir, files)
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    built
+}
+
+fn bundle(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
     let entry = ENTRIES.iter().find(|e| dir.join(e).is_file()).with_context(|| format!("{} has none of {}", dir.display(), ENTRIES.join(", ")))?;
     let bun = bun()?;
     let cache = bun.parent().unwrap().join("cache");
@@ -93,9 +114,6 @@ fn bundle(dir: &Path, build_screens: bool) -> Result<Vec<u8>> {
     // someone else's, maybe from elsewhere, on this machine.
     if dir.join("package.json").is_file() {
         run(&["install", "--ignore-scripts"], "bun install")?;
-    }
-    if build_screens {
-        screens(dir)?;
     }
     let out = tempdir()?;
     let outfile = out.join("app.js");
@@ -115,7 +133,7 @@ fn bundle(dir: &Path, build_screens: bool) -> Result<Vec<u8>> {
         "bun build",
     );
     let module = built.and_then(|_| {
-        // Every file it read is the folder's (Bun names them from it, links followed): never /etc/… or ../….
+        // Every file it read is the folder's, and its links are files of it by now (`bundle::sources`): never /etc/… or ../….
         let meta: serde_json::Value = serde_json::from_slice(&std::fs::read(&meta)?)?;
         for input in meta["inputs"].as_object().into_iter().flatten().map(|(path, _)| path) {
             let path = Path::new(input);
@@ -124,9 +142,9 @@ fn bundle(dir: &Path, build_screens: bool) -> Result<Vec<u8>> {
         Ok(std::fs::read(&outfile)?)
     });
     let _ = std::fs::remove_dir_all(&out);
-    let mut files = vec![("app.js".to_string(), module?)];
-    files.extend(crate::app::bundle::sources(dir)?.into_iter().map(|(path, bytes)| (format!("src/{path}"), bytes)));
-    crate::app::bundle::pack(&files)
+    let mut packed = vec![("app.js".to_string(), module?)];
+    packed.extend(files.iter().map(|(path, bytes)| (format!("src/{path}"), bytes.clone())));
+    crate::app::bundle::pack(&packed)
 }
 
 /// Whether an app's files, by path, have a React screen: `screens/<name>.jsx` or `.tsx`, which `screens` builds.
@@ -247,16 +265,8 @@ fn build_kept(files: &[(&str, &[u8])], build_screens: bool) -> Result<Vec<u8>> {
     if let Ok(bundle) = std::fs::read(&kept) {
         return Ok(bundle);
     }
-    let dir = tempdir()?;
-    let built = (|| {
-        for (path, bytes) in files {
-            let path = dir.join(path);
-            std::fs::create_dir_all(path.parent().unwrap())?;
-            std::fs::write(path, bytes)?;
-        }
-        bundle(&dir, build_screens)
-    })();
-    let _ = std::fs::remove_dir_all(&dir);
+    let files: Vec<(String, Vec<u8>)> = files.iter().map(|(path, bytes)| (path.to_string(), bytes.to_vec())).collect();
+    let built = compile(&files, build_screens);
     let bundle = built?;
     std::fs::create_dir_all(kept.parent().unwrap())?;
     let part = kept.with_extension(format!("{}.part", rand::random::<u64>()));

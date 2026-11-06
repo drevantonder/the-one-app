@@ -558,13 +558,15 @@ fn add_where(moved: &[(String, Vec<String>)]) {
     }
 }
 
-/// Deploys the built-in apps named, as they are in `src`, where the network has them.
-fn deploy_apps(src: &Path, names: &[String]) -> Result<()> {
-    if names.is_empty() {
+/// Deploys the built-in apps as they are in `src`, where the network has them and what they're built from changed (an
+/// app's folder, or one beside it that its links go to, which is why not only the folders named are looked at: an app
+/// whose bundle is what's deployed already is left).
+fn deploy_apps(src: &Path, changed: &[String]) -> Result<()> {
+    if changed.is_empty() {
         return Ok(());
     }
     for app in get("/v1/apps")?.as_array().into_iter().flatten() {
-        let Some(name) = app["name"].as_str().filter(|n| app["built_in"].is_string() && names.iter().any(|m| m == n)) else { continue };
+        let Some(name) = app["name"].as_str().filter(|_| app["built_in"].is_string()) else { continue };
         let dir = src.join("apps").join(name);
         if !dir.join("app.js").is_file() {
             continue;

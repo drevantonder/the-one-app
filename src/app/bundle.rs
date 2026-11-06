@@ -8,28 +8,39 @@ use std::path::Path;
 use anyhow::{Context, Result, bail, ensure};
 
 /// An app folder's files, as written: everything but `node_modules`, dot files and its service's source (`service/`,
-/// built apart), sorted.
+/// built apart), sorted. A link in it to a file or folder of the same git repository is followed, so apps beside each
+/// other share code with a link (`apps/gmail/google` → `../google`); a link out of the repository, or to a folder that
+/// holds itself, is refused.
 pub fn sources(dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+    let dir = dir.canonicalize()?;
+    let repo = dir.ancestors().find(|a| a.join(".git").exists());
     let mut files = Vec::new();
-    walk(dir, dir, &mut files)?;
+    walk(&dir, "", repo, 0, &mut files)?;
     files.retain(|(path, _)| !path.starts_with("service/"));
     files.sort();
     Ok(files)
 }
 
-fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) -> Result<()> {
+/// `dir`'s files, each named from the app's folder by `prefix` and its own name; `links` how many links led here.
+fn walk(dir: &Path, prefix: &str, repo: Option<&Path>, links: usize, out: &mut Vec<(String, Vec<u8>)>) -> Result<()> {
+    ensure!(links < 8, "{prefix} links to a folder that links back: an app's links go to other folders");
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') || name == "node_modules" {
             continue;
         }
+        let rel = format!("{prefix}{name}");
         let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            walk(root, &path, out)?;
+        let linked = entry.file_type()?.is_symlink();
+        let target = if linked { path.canonicalize().with_context(|| format!("{rel} links to nothing"))? } else { path };
+        if linked {
+            ensure!(repo.is_some_and(|repo| target.starts_with(repo)), "{rel} links out of its git repository: an app is built from its own folder and what that links to in the same repository");
+        }
+        if target.is_dir() {
+            walk(&target, &format!("{rel}/"), repo, links + usize::from(linked), out)?;
         } else {
-            let rel = path.strip_prefix(root)?.to_string_lossy().replace('\\', "/");
-            out.push((rel, std::fs::read(&path)?));
+            out.push((rel, std::fs::read(&target)?));
         }
     }
     Ok(())
