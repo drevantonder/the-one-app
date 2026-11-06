@@ -8,19 +8,14 @@
 // the network's endpoints: `{ via, address, env?, topic?, keys?, seal }`, `via` one of apns (address: the APNs token,
 // hex; topic: the app's bundle id, one of `APNS_TOPICS`; env: sandbox or production), fcm (its FCM token), wns (its
 // channel URI) or webpush (its subscription's endpoint, with `keys: { p256dh, auth }`), and `seal`, its seal key (hex),
-// which only the network's own Workers seal to (below); and `user`, its person, as its own entries list it, which an
-// older device doesn't say. `POST /push/unregister` forgets it.
+// which only the network's own Workers seal to (below); and `user`, its person, as who's who lists it, once the device
+// knows. `POST /push/unregister` forgets it.
 //
-// One of the network's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }],
-// legacy? }`, each `note` base64url bytes sealed to `to`'s seal key by the sender, which takes that key from the
+// One of the network's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }] }`,
+// each `note` base64url bytes sealed to `to`'s seal key by the sender, which takes that key from the
 // network's signed entries, never from here. It says, of each `to`, `sent`, `none` (it registered no address), `gone`
 // (its address stopped working, or the relay no longer lists it, so it's forgotten) or `failed`. `quiet` wakes the
 // device without a visible alert, where the platform can (APNs' background push); a browser always shows one.
-//
-// Phones registered before notes, by their node's `push register` (src/push.rs), can't open one: a node registers them
-// here as `{ legacy: { user, token, env, name } }`, their person's, and a send's `legacy: { user, title, body, link,
-// badge }` reaches them as the plain alert they understand, until each registers itself with the same token, which
-// replaces it.
 //
 // The network's own Workers send through the `Sender` entrypoint, by binding: sign-in, for a device asking to join, whose
 // note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`); and asks
@@ -96,10 +91,7 @@ export class Push extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     const sql = ctx.storage.sql;
-    sql.exec("create table if not exists devices (key text primary key, via text not null, address text not null, env text not null default '', topic text not null default '', keys text, seal text not null, at integer not null)");
-    // Its person, as the device said, if it did.
-    if (!sql.exec("pragma table_info(devices)").toArray().some((c) => c.name === "user")) sql.exec("alter table devices add column user text");
-    sql.exec("create table if not exists legacy (token text primary key, user text not null, env text not null, name text not null default '', by text not null, at integer not null)");
+    sql.exec("create table if not exists devices (key text primary key, via text not null, address text not null, env text not null default '', topic text not null default '', keys text, seal text not null, at integer not null, user text)");
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     /// Sends and notes counted this minute, by sender and by device.
     this.counted = new Map();
@@ -124,10 +116,10 @@ export class Push extends DurableObject {
     const allowed = await this.env.RELAY.allowed(by);
     if (!allowed) fail(403, "That device isn't one of the network's.");
     const node = String(allowed.role || "").split(" ").includes("compute");
-    if (what === "register") return fields.legacy ? this.registerLegacy(by, node, fields.legacy) : this.register(by, fields);
-    if (what === "unregister") return fields.legacy ? this.unregisterLegacy(node, fields.legacy) : this.unregister(by);
+    if (what === "register") return this.register(by, fields);
+    if (what === "unregister") return this.unregister(by);
     if (what === "devices") return this.devices(node, fields);
-    return this.send(by, fields.notes, fields.legacy);
+    return this.send(by, fields.notes);
   }
 
   register(by, { via, address, env = "", topic = "", keys, seal, user }) {
@@ -157,8 +149,6 @@ export class Push extends DurableObject {
       "insert or replace into devices (key, via, address, env, topic, keys, seal, at, user) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       by, via, address, env, topic, via === "webpush" ? JSON.stringify({ p256dh: keys.p256dh, auth: keys.auth }) : null, seal, Date.now(), user ?? null,
     );
-    // A phone that registered the old way, registering itself now: only the new way from here.
-    if (via === "apns") sql.exec("delete from legacy where token = ?", address);
     return { registered: true };
   }
 
@@ -171,30 +161,12 @@ export class Push extends DurableObject {
     return { unregistered: true };
   }
 
-  /// Only a node registers a phone for its person, the old way.
-  registerLegacy(by, node, { user, token, env, name = "" }) {
-    if (!node) fail(403, "Only a node registers a phone the old way.");
-    if (typeof user !== "string" || !user) fail(400, "say whose phone it is");
-    if (typeof token !== "string" || !/^[0-9a-f]{16,200}$/.test(token)) fail(400, "an APNs token is hex");
-    const sql = this.ctx.storage.sql;
-    if (sql.exec("select 1 from devices where via = 'apns' and address = ?", token).toArray().length) return { registered: true };
-    sql.exec("insert or replace into legacy (token, user, env, name, by, at) values (?, ?, ?, ?, ?, ?)", token, user, env === "sandbox" ? "sandbox" : "production", String(name).slice(0, 200), by, Date.now());
-    return { registered: true };
-  }
-
-  unregisterLegacy(node, { user, token }) {
-    if (!node) fail(403, "Only a node unregisters a phone the old way.");
-    this.ctx.storage.sql.exec("delete from legacy where token = ? and user = ?", String(token), String(user));
-    return { unregistered: true };
-  }
-
-  /// A node asks which of a person's devices (`keys`) registered, and their phones registered the old way.
+  /// A node asks which of a person's devices (`keys`) registered.
   devices(node, { user, keys = [] }) {
     if (!node) fail(403, "Only a node asks which devices registered.");
     const sql = this.ctx.storage.sql;
     const registered = keys.filter(isKey).flatMap((key) => sql.exec("select key, via, env, at from devices where key = ?", key).toArray());
-    const legacy = sql.exec("select token, env, name, at from legacy where user = ?", String(user)).toArray().map((r) => ({ token: `${r.token.slice(0, 8)}…`, env: r.env, name: r.name, at: r.at }));
-    return { registered, legacy };
+    return { registered };
   }
 
   /// Counts one more against `who` this minute: whether it's within `most`.
@@ -209,7 +181,7 @@ export class Push extends DurableObject {
     return ++c.n <= most;
   }
 
-  async send(by, notes = [], legacy = null) {
+  async send(by, notes = []) {
     if (!Array.isArray(notes) || notes.length > MOST) fail(400, `notes is a list of at most ${MOST}`);
     if (!this.count(`sender:${by}`, SENDS)) fail(429, "That device sent too many pushes this minute. Try again in a minute.");
     const out = {};
@@ -237,9 +209,7 @@ export class Push extends DurableObject {
         out[to] = said.sent ? { sent: true } : said.gone ? { gone: true } : { failed: said.failed };
       }),
     );
-    const result = { to: out };
-    if (legacy && by !== "workers") result.legacy = await this.sendLegacy(legacy);
-    return result;
+    return { to: out };
   }
 
   deliver(device, what) {
@@ -254,25 +224,5 @@ export class Push extends DurableObject {
     if (!this.env.VAPID_KEY) return null;
     this.vapidKey ||= vapidKey(this.env.VAPID_KEY).then((k) => ({ ...k, subject: this.env.ADDRESS }));
     return this.vapidKey;
-  }
-
-  /// A plain alert to a person's phones that registered the old way: `{ sent, phones, failed? }`.
-  async sendLegacy({ user, title, body = "", link = null, badge }) {
-    if (typeof user !== "string" || typeof title !== "string" || !title) return { sent: 0, phones: 0 };
-    const sql = this.ctx.storage.sql;
-    const phones = sql.exec("select * from legacy where user = ?", user).toArray();
-    const aps = { alert: { title: title.slice(0, 200), body: String(body).slice(0, 1000) }, sound: "default" };
-    if (Number.isInteger(badge)) aps.badge = badge;
-    const config = { team: this.env.APNS_TEAM_ID, key_id: this.env.APNS_KEY_ID, key: this.env.APNS_KEY };
-    const topic = JSON.parse(this.env.APNS_TOPICS || "[]")[0];
-    let sent = 0, failed;
-    for (const phone of phones) {
-      if (!this.count(`to:${phone.token}`, NOTES)) continue;
-      const said = await apns(fetch, config, { address: phone.token, env: phone.env, topic }, { payload: { aps, link } }).catch((err) => ({ failed: err.message }));
-      if (said.sent) sent++;
-      if (said.gone) sql.exec("delete from legacy where token = ?", phone.token);
-      failed ||= said.failed;
-    }
-    return { sent, phones: phones.length, ...(failed ? { failed } : {}) };
   }
 }

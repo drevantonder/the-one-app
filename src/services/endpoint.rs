@@ -64,10 +64,6 @@ impl Network {
     /// its folder goes.
     pub fn give(&self, dir: &Path) -> Result<()> {
         std::fs::create_dir_all(dir)?;
-        // As a build from before it was called a network kept it.
-        if dir.join("install.json").exists() && !Self::path(dir).exists() {
-            std::fs::rename(dir.join("install.json"), Self::path(dir))?;
-        }
         match std::fs::read(Self::path(dir)).ok().map(|b| serde_json::from_slice::<Network>(&b)).transpose()? {
             Some(kept) => ensure!(kept == *self, "{} is someone else's, or in another network ({}): remove it to move it", dir.display(), kept.address),
             None => write_private(&Self::path(dir), &serde_json::to_vec_pretty(self)?)?,

@@ -176,14 +176,14 @@ function context(ask, body, appends, later) {
     /// The port this node's local API answers on at 127.0.0.1, the custom build's (config.toml) unless it was started
     /// on another: where a sign-in sends the person's browser back. Null on a node with none (the Cloudflare node).
     port: body.port ?? null,
-    /// The network's address (`https://…`, no last `/`), or null on a node from before it was given: a sign-in at
+    /// The network's address (`https://…`, no last `/`), or null in a network with no address yet: a sign-in at
     /// another site sends the person back to `<address>/back?state=<app>/<screen>&…`, which opens that screen of this
     /// app with `params.back`, that whole address.
     address: body.address ?? null,
     /// Everyone's and every group's handle in the network, what apps call them by in addresses and lists:
     /// [{ handle, id: "user:<id>" | "group:<id>", name }], a removed person's with removed: true, a group's with its
-    /// members: { <user id>: "admin" | "member" }; null on a node from before handles. `me.handle` is the caller's.
-    handles: body.handles ?? null,
+    /// members: { <user id>: "admin" | "member" }. `me.handle` is the caller's.
+    handles: body.handles,
     /// Says what this call spent on AI, { model, usd, input, output }: it shows in the insights of the app that called
     /// it (ctx.from), or else of this one.
     cost: (spent) => {

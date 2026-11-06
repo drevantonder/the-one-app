@@ -338,9 +338,7 @@ impl Device {
         let client = Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?;
         client.set_ranks(&self.ranks())?;
         client.set_wakes(self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node))?;
-        if let Some(online) = online {
-            client.set_online(&online)?;
-        }
+        client.set_online(&online)?;
         *stage = Stage::In(client);
         // Kept, with its key, so this key is known as one that was in, to its person's sign-in once the relay takes it
         // out, not to approve; a new key in the same folder (signed in again) is one to approve.
@@ -360,8 +358,8 @@ impl Device {
     }
 
     /// Whether the relay lets this device in: → the compute endpoints on its network, which it says are there, not
-    /// what they may do; and those on it now, if it says (an older relay doesn't).
-    async fn computes(&self) -> Result<Option<(Vec<[u8; 32]>, Option<Vec<[u8; 32]>>)>, Error> {
+    /// what they may do; and those on it now.
+    async fn computes(&self) -> Result<Option<(Vec<[u8; 32]>, Vec<[u8; 32]>)>, Error> {
         let url = format!("{}/relay/computes", self.address);
         // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
         let mut at = keys::next_at(now());
@@ -379,7 +377,7 @@ impl Device {
             return Err(failed(error(&out).unwrap_or_else(|| format!("Your One App network answered {status}."))));
         }
         let keys = |v: &Value| v.as_array().into_iter().flatten().filter_map(|c| keys::unhex(c.as_str().unwrap_or("")).ok()).collect::<Vec<_>>();
-        Ok(Some((keys(&out["computes"]), out.get("online").map(keys))))
+        Ok(Some((keys(&out["computes"]), keys(&out["online"]))))
     }
 
     /// Whether the relay still lets this device in: false only if it says it doesn't. Who it says is on its network
@@ -387,7 +385,7 @@ impl Device {
     async fn let_in(&self) -> bool {
         match self.computes().await {
             Ok(None) => false,
-            Ok(Some((_, Some(online)))) => {
+            Ok(Some((_, online))) => {
                 if let Some(client) = self.client().await {
                     let _ = client.set_online(&online);
                 }

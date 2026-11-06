@@ -141,12 +141,6 @@ pub fn describe() -> Value {
                 "badge": { "type": "integer", "description": "the number on the app's icon; 0 clears it" },
                 "link": { "type": "object", "description": "{ app, screen, params }, as app, screen and params" },
               }}},
-            { "name": "register", "reads": false, "description": "A phone from before notes registers for push: its APNs device token (hex), env sandbox or production, and a name. Newer devices register themselves.",
-              "input": { "type": "object", "required": ["token"], "properties": {
-                "token": { "type": "string", "description": "the phone's APNs device token, in hex" }, "platform": { "type": "string", "description": "ios" }, "env": { "type": "string", "description": "sandbox or production" }, "name": { "type": "string", "description": "what the phone's called" },
-              }}},
-            { "name": "unregister", "reads": false, "description": "A phone from before notes stops getting pushes.",
-              "input": { "type": "object", "required": ["token"], "properties": { "token": { "type": "string", "description": "the phone's APNs device token, in hex, as it registered" } }}},
             { "name": "devices", "reads": true, "description": "Your devices that get notifications.", "input": { "type": "object", "properties": {} }},
             { "name": "status", "reads": true, "description": format!("Which push services {} sends through: apns, fcm, wns, webpush.", crate::config::YOURS), "input": { "type": "object", "properties": {} }},
         ],

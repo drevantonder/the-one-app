@@ -170,7 +170,7 @@ export default class extends WorkerEntrypoint {
     }
     const said = await this.relay()[what](asked.by, asked);
     if (said?.update) return refuse(426, `Update this device: ${this.env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
-    // Which computes are connected now, which a client races first (an older one reads only `computes`).
+    // And which of them are connected now, which a client races first.
     if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
     if (said && typeof said === "object") return Response.json({ [what]: said });
     return said === null ? refuse(403, `the relay takes only ${this.env.YOURS}'s devices`) : refuse(400, said);
@@ -244,15 +244,7 @@ export class Relay extends DurableObject {
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
       CREATE TABLE IF NOT EXISTS proofs (nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');
-      CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
-      DROP TABLE IF EXISTS switched;`);
-    // A binding made before tickets: none shows one, so each is made again.
-    try {
-      this.sql.exec("ALTER TABLE bound ADD COLUMN ticket TEXT NOT NULL DEFAULT ''");
-    } catch {}
-    this.sql.exec("DELETE FROM bound WHERE ticket = ''");
-    // The first devices were let in by the network, which a release from before it was called one wrote as `install`.
-    this.sql.exec("UPDATE keys SET by = 'network' WHERE by = 'install'");
+      CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
       for (const { key, role, admin } of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
         if (isKey(key) && String(role).split(" ").every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'network', ?, ?)", key, admin === true ? 1 : 0, role);

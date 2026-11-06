@@ -636,7 +636,6 @@ impl Node {
                 tracing::warn!("apps' outbound requests stopped: {err:#}");
             }
         });
-        move_network_folder(&dir).context("move this device's network from install/ to network/")?;
         if dir.join(NETWORK_DIR).join(NETWORK_FILE).exists() {
             node.open_network().context("open the network")?;
             if let Err(err) = node.bucket().and_then(|b| b.forget_sent()) {
@@ -1330,9 +1329,6 @@ fn load_device(dir: &Path) -> Result<DeviceFile> {
     if let Ok(bytes) = std::fs::read(&path) {
         return Ok(serde_json::from_slice(&bytes)?);
     }
-    // This device's key, from before devices were called devices: a new key would quietly make it a new device.
-    let was = dir.join("server.json");
-    ensure!(!was.exists(), "{} holds this device's key: rename it to device.json, then start again", was.display());
     let file = DeviceFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
     write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
     Ok(file)
@@ -1361,21 +1357,3 @@ fn hostname() -> String {
         .unwrap_or_else(|| "device".into())
 }
 
-/// Moves what a device kept of its network in `install/` (and its `install.json`), as a build from before it was called
-/// a network kept it, to `network/`, with the paths in that file that were inside it.
-fn move_network_folder(home: &Path) -> Result<()> {
-    let (old, new) = (home.join("install"), home.join(NETWORK_DIR));
-    if !old.join("install.json").exists() || new.exists() {
-        return Ok(());
-    }
-    std::fs::rename(&old, &new)?;
-    let path = new.join(NETWORK_FILE);
-    std::fs::rename(new.join("install.json"), &path)?;
-    let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(&path)?)?;
-    for v in file.bucket.iter_mut().flat_map(|b| b.values_mut()).chain(file.folders.values_mut()) {
-        if let Ok(inside) = Path::new(v.as_str()).strip_prefix(&old) {
-            *v = new.join(inside).display().to_string();
-        }
-    }
-    write_private(&path, &serde_json::to_vec_pretty(&file)?)
-}

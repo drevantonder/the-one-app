@@ -354,9 +354,8 @@ type arrival struct {
 // it's here, or _moved said it isn't, the move's answer never changes: one
 // device holds the link.
 func (w *whatsapp) take(from, move string, part, parts int, data string) (holding, error) {
-	legacy := move == "" // from a device before moves had ids, which never asks _moved
-	if legacy {
-		move = "from " + from
+	if move == "" {
+		return holding{}, fmt.Errorf("a move from %s names no move", from)
 	}
 	w.inMu.Lock()
 	locked := true
@@ -365,7 +364,7 @@ func (w *whatsapp) take(from, move string, part, parts int, data string) (holdin
 			w.inMu.Unlock()
 		}
 	}()
-	if done := w.moved[move]; done != "" && !legacy {
+	if done := w.moved[move]; done != "" {
 		return holding{}, fmt.Errorf("that move from %s is %s here already", from, done)
 	}
 	a := w.arriving[move]
@@ -407,20 +406,16 @@ func (w *whatsapp) take(from, move string, part, parts int, data string) (holdin
 	// The move's id goes in the database before it's a link here, so the
 	// answer to _moved is in the same file as the link: a crash between
 	// leaves neither or both.
-	if !legacy {
-		if err := stamp(received, move); err != nil {
-			return holding{}, err
-		}
+	if err := stamp(received, move); err != nil {
+		return holding{}, err
 	}
 	path := filepath.Join(w.dir, fmt.Sprintf("whatsapp-%d.db", time.Now().UnixNano()))
 	if err := os.Rename(received, path); err != nil {
 		return holding{}, err
 	}
-	if !legacy {
-		w.moved[move] = "taken"
-		if err := w.saveMoved(); err != nil {
-			log.Printf("%v", err) // the link's database says so too
-		}
+	w.moved[move] = "taken"
+	if err := w.saveMoved(); err != nil {
+		log.Printf("%v", err) // the link's database says so too
 	}
 	l, err := open(path, w.node)
 	if err != nil {

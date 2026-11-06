@@ -1050,7 +1050,7 @@ mod tests {
         let (asked, said) = (Dev::new(12), Dev::new(13));
         net.step(&bobs, BOB, device(&asked.endpoint(), BOB, "app", &[Kind::Client], None));
         net.step(&bobs, BOB, device(&said.endpoint(), BOB, "app", &[Kind::Client], None));
-        let gone = |k: &Dev| node("remove", json!({ "key": hex(&k.id()), "seq": null, "itself": true }));
+        let gone = |k: &Dev| node("remove", json!({ "key": hex(&k.id()), "itself": true }));
         assert!(net.step(&bobs, BOB, gone(&asked)));
         assert!(net.owed().is_empty() && net.db.machine(&asked.id()).is_none(), "its own node signing it out owes nothing");
         assert!(net.step(&mac, ANDRE, gone(&said)));

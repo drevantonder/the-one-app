@@ -178,32 +178,22 @@ export class Auth extends DurableObject {
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
     // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`;
     // `approved`, when a device said it let it in, `root`, the network it said it let it into, and `welcome`, where
-    // it said to start reading who's who from; `place`, the city it asked from.
-    sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, root text)");
-    const columns = sql.exec("pragma table_info(requests)").toArray().map((c) => c.name);
-    if (!columns.includes("approved")) sql.exec("alter table requests add column approved integer");
-    if (columns.includes("genesis")) sql.exec("alter table requests rename column genesis to root");
-    else if (!columns.includes("root")) sql.exec("alter table requests add column root text");
-    if (!columns.includes("welcome")) sql.exec("alter table requests add column welcome text");
-    if (!columns.includes("place")) sql.exec("alter table requests add column place text");
-    if (!columns.includes("device")) sql.exec("alter table requests add column device text");
-    // Whether its sign-in was finished from a link opened elsewhere (`signsInHere`), and when its person was pushed
-    // that it wants in.
-    if (!columns.includes("by_link")) sql.exec("alter table requests add column by_link integer");
-    if (!columns.includes("told")) sql.exec("alter table requests add column told integer");
+    // it said to start reading who's who from; `place`, the city it asked from; `device`, the device it's part of;
+    // `by_link`, whether its sign-in was finished from a link opened elsewhere (`signsInHere`); and `told`, when its
+    // person was pushed that it wants in.
+    sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, root text, welcome text, place text, device text, by_link integer, told integer)");
+    // Its `root` was `genesis` until the network's root was called that: renamed once.
+    if (sql.exec("pragma table_info(requests)").toArray().some((c) => c.name === "genesis")) sql.exec("alter table requests rename column genesis to root");
     // A person's devices, by key, as they asked to join here or said they're theirs, for pushes.
     sql.exec("create table if not exists devices (key text primary key, user text not null, at integer not null)");
     // Devices whose request was turned down, whose person isn't pushed again when they ask again.
     sql.exec("create table if not exists refused (key text primary key, at integer not null)");
-    // Services asked to join here before oned listed them itself.
-    for (const old of ["services", "enrollments", "service_requests", "service_asks"]) sql.exec(`drop table if exists ${old}`);
     // The people who sign in only with a passkey: admins.
     sql.exec("create table if not exists passkey_only (user text primary key)");
     // Signed requests taken, until they're too old to take again.
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
-    sql.exec("create table if not exists google_starts (id text primary key, query text not null, made integer not null)");
-    if (!sql.exec("pragma table_info(google_starts)").toArray().some((c) => c.name === "join_for")) sql.exec("alter table google_starts add column join_for text");
+    sql.exec("create table if not exists google_starts (id text primary key, query text not null, made integer not null, join_for text)");
     // What a person's sign-in for a device showed (`{ id_token }` or `{ passkey }`), by that device's key and the person,
     // for its request to join to carry.
     sql.exec("create table if not exists proofs (key text not null, user text not null, proof text not null, made integer not null, primary key (key, user))");

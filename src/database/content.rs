@@ -63,14 +63,14 @@ pub fn role(user: &str, role: Role) -> Content {
     node("role", json!({ "user": user, "role": role }))
 }
 
-/// Takes a person out, with an empty `seqs`, which devices from before 2026-11-06 still look for.
+/// Takes a person out.
 pub fn remove_user(user: &str) -> Content {
-    node("remove", json!({ "user": user, "seqs": {} }))
+    node("remove", json!({ "user": user }))
 }
 
-/// Takes a device out, with an empty `seq`, which devices from before 2026-11-06 still look for.
+/// Takes a device out.
 pub fn remove_device(key: &Key) -> Content {
-    node("remove", json!({ "key": hex(key), "seq": null }))
+    node("remove", json!({ "key": hex(key) }))
 }
 
 /// One of the network's settings; `None` puts back the custom build's default.

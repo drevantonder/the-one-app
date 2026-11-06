@@ -14,7 +14,7 @@ pub mod stored;
 /// that reads less is told to update, by nodes (`HEADER`), the relay, sign-in and the URL signer (`reads` in what it
 /// asks them, `cloudflare/shared/crypto.js`'s `READS`, which `tests/contracts.rs` holds to this). A release that changes
 /// `scope::SCHEMA`, `permissions::SCHEMA` or `permissions::defaults`, or takes away a route older devices use, reads one more.
-pub const READS: u32 = 5;
+pub const READS: u32 = 6;
 
 /// The header a client says what it reads in.
 pub const HEADER: &str = "x-one-reads";

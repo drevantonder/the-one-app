@@ -391,7 +391,7 @@ export class Device {
     if (!k.devices.some((d) => d.key === node && d.seal)) throw new Error("A device that isn’t one of yours asked for keys, so none were given.");
     // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
     const [hints] = await Promise.all([note({ step: "newest", databases: new Set(need.map(prefixOf)).size }, () => this.hints(need)), this.fetchKeys(need, note)]);
-    const handed = hints ? need.filter((n) => n.epoch >= oldestNeeded(n.database, hints[prefixOf(n)] ?? null, k.epochs[n.scope]?.n || 0)) : need;
+    const handed = need.filter((n) => n.epoch >= oldestNeeded(n.database, hints[prefixOf(n)] ?? null, k.epochs[n.scope]?.n || 0));
     if (!handed.length) throw new Error("A device asked for older keys than it needs, so none were given.");
     await Promise.all(handed.map((n) => this.databaseKey(n, note)));
     this.needs[route] = { need: handed };
@@ -408,8 +408,6 @@ export class Device {
       const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { get: [{ steps: prefix, from: at, to: at + 31 }], reads: READS })) });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || "Your One App network's storage didn't answer. Try again.");
-      // A URL signer older than its `get`, which only Workers deployed before the switch are.
-      if (!body.get) return out;
       const sealed = Object.keys(body.get).sort().map((name) => body.get[name]);
       const end = sealed.indexOf(null);
       out.push(...sealed.slice(0, end >= 0 ? end : sealed.length).map((b, i) => ({ at: at + i, sealed: b })));
@@ -422,13 +420,13 @@ export class Device {
   }
 
   /// Each database of `needs`' newest hint, by its prefix in the bucket (`prefixOf`): its text, or null if it has
-  /// none, as the URL signer reads it, which a browser can't itself. Null if the signer doesn't say (an older one).
+  /// none, as the URL signer reads it, which a browser can't itself.
   async hints(needs) {
     const newest = [...new Set(needs.map(prefixOf))];
     const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { newest, reads: READS })) });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.error || "Your One App network's storage didn't answer. Try again.");
-    return out.newest || null;
+    return out.newest || {};
   }
 
   // Signing.

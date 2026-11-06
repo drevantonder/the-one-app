@@ -47,11 +47,8 @@ const SHA = { type: "string", description: "a commit's sha, full or its first 7 
 const USER = { type: "string", description: "a person's handle, from groups_list, like sam" };
 const CONFIRM = { type: "boolean", description: "true once the person agreed: it changes who may push" };
 
-/// Everyone's and every group's handle; a node from before handles has none.
-function handles(ctx) {
-  if (!ctx.handles) throw new Error("this device's node is from before handles: it takes the update that has them soon, then try again");
-  return ctx.handles;
-}
+/// Everyone's and every group's handle.
+const handles = (ctx) => ctx.handles;
 const byId = (ctx, id) => handles(ctx).find((h) => h.id === id) || null;
 const byHandle = (ctx, handle) => handles(ctx).find((h) => h.handle === handle) || null;
 
@@ -154,8 +151,8 @@ async function rights(g, r) {
   return { yours, push };
 }
 
-/// Where git reaches a repo, the same on every computer: <the network's address>/repos/<owner>/<name>.git; null on a
-/// node from before it was given the address.
+/// Where git reaches a repo, the same on every computer: <the network's address>/repos/<owner>/<name>.git; null in a
+/// network with no address yet.
 const address = (ctx, path) => (ctx.address ? `${ctx.address}/repos/${path}.git` : null);
 
 /// The paths of the repos with these ids, by id.
@@ -465,7 +462,7 @@ const app = {
     ...github.tools({ global }),
     _address: {
       reads: true,
-      description: "Where git reaches repos, for the screens: base, <address>/repos/ (null on a node from before it had the address), and the caller's handle.",
+      description: "Where git reaches repos, for the screens: base, <address>/repos/ (null in a network with no address yet), and the caller's handle.",
       input: { type: "object", properties: {} },
       run: (ctx) => ({ base: ctx.address ? `${ctx.address}/repos/` : null, handle: ctx.me.handle || null }),
     },

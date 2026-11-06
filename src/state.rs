@@ -48,8 +48,7 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
     let address = settings.get("address").and_then(|a| a.as_str()).filter(|a| !a.is_empty());
     let passkeys = address.filter(|_| here.passkeys).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
     let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""), passkeys.as_deref())).unwrap_or_default();
-    // `push` is for phones from before notes, which register with a node while it's set (src/push.rs).
-    let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "store": settings["store"], "push": crate::push::NAME, "install": install_line() });
+    let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "store": settings["store"], "install": install_line() });
     let mut state = json!({
         "config": config,
         "me": here.me,

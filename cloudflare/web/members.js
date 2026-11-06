@@ -8,9 +8,8 @@ export const members = {
     node("device", { key, seal, user, name, roles, ...(newUser ? { user_name: newUser.name, role: newUser.role } : {}), ...(device ? { device } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(place ? { place } : {}) }),
   passkey: ({ key, seal, user, name, credential }) => node("device", { key, seal, user, name, roles: ["client"], passkey: credential }),
   role: ({ user, role }) => node("role", { user, role }),
-  /// With an empty `seqs` or `seq`, which devices from before 2026-11-06 still look for.
-  removeUser: ({ user }) => node("remove", { user, seqs: {} }),
-  removeDevice: ({ key }) => node("remove", { key, seq: null }),
+  removeUser: ({ user }) => node("remove", { user }),
+  removeDevice: ({ key }) => node("remove", { key }),
   /// A device that asked to join as this person's, turned down ("Not Me") before it was listed.
   refuse: ({ key, seal, name }) => node("refuse", { key, seal, name }),
   /// What one of this person's devices signed in with, forgotten.

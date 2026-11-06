@@ -242,9 +242,6 @@ pub fn erase(dir: &std::path::Path) {
 /// each asks. What each is doing meanwhile, and what went wrong, its hello says (`parts`). In a thread of its own for
 /// good, so what it starts is its child for as long as oned runs.
 pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
-    // Push was a part once; now every node answers it through the push Worker, so its folder (the phones it registered,
-    // which register again) would only list a part that runs nothing.
-    let _ = std::fs::remove_dir_all(crate::services::endpoint::folder(crate::push::NAME));
     std::thread::spawn(move || {
         // Each part running, and when it started.
         let mut running: BTreeMap<String, (std::process::Child, Instant)> = BTreeMap::new();
