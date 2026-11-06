@@ -139,7 +139,6 @@ pub fn describe() -> Value {
                 "screen": { "type": "string", "description": "the screen it opens" },
                 "params": { "type": "object", "description": "that screen's params" },
                 "badge": { "type": "integer", "description": "the number on the app's icon; 0 clears it" },
-                "link": { "type": "object", "description": "{ app, screen, params }, as app, screen and params" },
               }}},
             { "name": "devices", "reads": true, "description": "Your devices that get notifications.", "input": { "type": "object", "properties": {} }},
             { "name": "status", "reads": true, "description": format!("Which push services {} sends through: apns, fcm, wns, webpush.", crate::config::YOURS), "input": { "type": "object", "properties": {} }},
@@ -157,7 +156,6 @@ pub struct Send {
     pub app: String,
     pub screen: String,
     pub params: Option<Map<String, Value>>,
-    pub link: Option<Map<String, Value>>,
     pub badge: Option<i64>,
 }
 
@@ -168,13 +166,8 @@ impl Send {
     pub fn note(&self, from: &str) -> Result<Note> {
         ensure!(!self.title.trim().is_empty(), "give it a title");
         let first = |a: &str, b: &str| if a.is_empty() { b.to_string() } else { a.to_string() };
-        let (mut app, mut screen, mut params) = (first(from, &self.app), self.screen.clone(), self.params.clone());
-        if let Some(link) = &self.link {
-            let text = |name: &str| link.get(name).and_then(Value::as_str).unwrap_or_default().to_string();
-            (app, screen) = (first(&app, &text("app")), first(&screen, &text("screen")));
-            params = params.or_else(|| link.get("params").and_then(Value::as_object).cloned());
-        }
-        let screen = if app.is_empty() { String::new() } else { first(&screen, "main") };
+        let (app, params) = (first(from, &self.app), self.params.clone());
+        let screen = if app.is_empty() { String::new() } else { first(&self.screen, "main") };
         let title: String = self.title.trim().chars().take(200).collect();
         let body: String = self.body.chars().take(2000).collect();
         Ok(Note { id: HEXLOWER.encode(&rand::random::<[u8; 8]>()), title, body, params: params.filter(|p| !p.is_empty() && !app.is_empty()), app, screen, badge: self.badge, action: None })

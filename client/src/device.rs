@@ -402,10 +402,6 @@ impl Device {
         let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
         let (epochs, log_keys) = global_keys(&bucket, &self.key).await?;
         let pinned = self.dir.join("root");
-        // Kept as `genesis` until the network's root was called that: moved once.
-        if !pinned.exists() {
-            let _ = std::fs::rename(self.dir.join("genesis"), &pinned);
-        }
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut global = crate::members::Global::new(kept);
         // From where the device that let it in read who's who to, if it said (its Welcome), else from the first.

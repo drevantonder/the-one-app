@@ -88,11 +88,6 @@ impl std::fmt::Debug for Item {
     }
 }
 
-/// A field's name, as a placeholder names it: letters, digits, `_`, `-` and `.`.
-pub fn valid_field(name: &str) -> bool {
-    crate::database::scopes::valid_secret_name(name)
-}
-
 /// Applies a change to an item (`{ id, title?, type?, domain?, fields?, hosts?, apps?, app?, deleted? }`), made by
 /// `user` at `time`, to `items`. `known` says whether an app name may be switched on (it isn't erased). Fails,
 /// changing nothing, if it doesn't make sense.
@@ -119,7 +114,7 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
     if let Some(fields) = data["fields"].as_object() {
         let before = item.fields.clone();
         for (name, field) in fields {
-            ensure!(valid_field(name), "a field's name is letters, digits, _, - and .");
+            ensure!(crate::database::scopes::valid_secret_name(name), "a field's name is letters, digits, _, - and .");
             if field.is_null() {
                 item.fields.remove(name);
                 continue;
@@ -447,7 +442,7 @@ fn placeholder(name: &str) -> bool {
         (None, None) => name,
         _ => return false,
     };
-    valid_field(field)
+    crate::database::scopes::valid_secret_name(field)
 }
 
 /// The Vault is the node's, not an app's: agents list its items (never a secret field's value), set and remove
