@@ -50,6 +50,9 @@ Shared, every platform:
 - [ ] Speed: usable within 1.5 s of a cold open (ARCHITECTURE.md). Linux, a debug build under Xvfb (software
       rendering) with its keyring daemon starting first: window 1.0 s, the sidebar as it was 1.3 s, the home screen
       1.65 s. Still to measure: release builds, on each platform's real device
+- [x] Phones' home is the pages side by side with dots, as the old phone apps' (Andre's decision): no sidebar; what's
+      opened from them has a bar with Back (web.js `phone`, @one/ui Shell `phone`; checked on Linux as an iPhone with
+      `ONE_PLATFORM=iPhone`, a debug build's)
 - [x] A custom build serving one network (config.toml `address`) never asks where
 - [x] Icons and names from config.toml (custom builds): product name, identifier `app.<cli>.<platform>`, app icon
 - [x] Every page's widgets kept for the platform's own widgets (`src/widgets.rs`: `widgets.json` in the iPhone

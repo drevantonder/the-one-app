@@ -48,8 +48,12 @@ fn device_name() -> String {
     host.unwrap_or_else(|| platform().into())
 }
 
-/// The platform, as people say it.
+/// The platform, as people say it (in a debug build, `PLATFORM` for a test: a phone's look on a computer).
 fn platform() -> &'static str {
+    #[cfg(debug_assertions)]
+    if let Some(p) = env("PLATFORM") {
+        return if p == "iPhone" { "iPhone" } else if p == "Android" { "Android" } else { "Linux" };
+    }
     match std::env::consts::OS {
         "macos" => "Mac",
         "windows" => "Windows",

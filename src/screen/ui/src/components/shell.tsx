@@ -29,8 +29,9 @@ type ShellSection = { key: string; title: string; href: string; selected?: boole
 /// with the title over what's open (`children`, or `screen`, an element the client keeps its screens' frames in, put
 /// here as it is). Where its room is narrow, the sidebar is a sheet behind the bar's button. `onGo` is told of a plain
 /// click on a row or a page's name (a click with a modifier opens the link as the browser does); `back`, a Back button
-/// before the title; `end`, what the bar ends with.
-function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, open, onOpenChange, screen, children, className }: {
+/// before the title; `end`, what the bar ends with. A `phone`'s has no sidebar: its home is the pages side by side
+/// (their own titles, no bar), and what's opened from them has a bar with Back, as the native phone apps had.
+function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, open, onOpenChange, screen, children, className, phone }: {
   sections: ShellSection[]
   title?: string
   back?: boolean
@@ -43,7 +44,28 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
   screen?: HTMLElement
   children?: React.ReactNode
   className?: string
+  phone?: boolean
 }) {
+  const body = (
+    <div data-slot="shell-screen" className="relative flex min-h-0 flex-1 flex-col">
+      {screen ? <Kept element={screen} /> : children}
+    </div>
+  )
+  if (phone) {
+    return (
+      <div className={cn("flex h-full flex-col pt-[env(safe-area-inset-top)]", className)}>
+        {back && (
+          <header data-slot="shell-bar" className="grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center px-1">
+            <Button variant="ghost" className="justify-self-start px-2" onClick={onBack} aria-label="Back">
+              <CaretLeftIcon />
+            </Button>
+            <h1 className="min-w-0 truncate text-[15px] font-semibold">{title}</h1>
+          </header>
+        )}
+        {body}
+      </div>
+    )
+  }
   return (
     <SidebarProvider open={open} onOpenChange={onOpenChange} className={cn("h-full", className)}>
       <Sidebar>
@@ -67,9 +89,7 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
             </Button>
           )}
         </header>
-        <div data-slot="shell-screen" className="relative flex min-h-0 flex-1 flex-col">
-          {screen ? <Kept element={screen} /> : children}
-        </div>
+        {body}
       </SidebarInset>
     </SidebarProvider>
   )

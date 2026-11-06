@@ -26,6 +26,8 @@ let about = null;
 /// The app's menu bar (tray) panel, a small window of its own: this page showing only the client's own `panel` screen,
 /// with the app's rows under it.
 const panel = !!native && new URLSearchParams(location.search).has("panel");
+/// The app on a phone: its home is the pages side by side, with no sidebar (`Shell`'s `phone`), as Andre decided.
+const phone = () => !!native && ["iPhone", "Android"].includes(about?.platform);
 const h = OneUI.react.createElement;
 
 (() => {
@@ -603,6 +605,12 @@ const h = OneUI.react.createElement;
   /// (a Settings screen), `/app/<app>/<screen>?params=&scope=`; and `/vault?id=&scope=`, a request for an item, as a sheet
   /// over You. Each is a screen: the client's own (`own`, by name), or an app's.
   function route(at = location) {
+    const r = routeAt(at);
+    // On a phone every page, Settings too, is the pages side by side, opened at that one.
+    if (phone() && r.kind === "own" && r.name === "pages") return own("pages", { swipe: true, scope: JSON.parse(r.params).scope || "user" });
+    return r;
+  }
+  function routeAt(at) {
     const path = at.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     const q = new URLSearchParams(at.search);
     if (path[0] === "page" && path[1]) return own("pages", { scope: path[1] });
@@ -729,6 +737,10 @@ const h = OneUI.react.createElement;
 
   function drawWindow() {
     windowShown = true;
+    if (phone()) {
+      const r = route();
+      return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: !(r.kind === "own" && r.name === "pages"), onBack: back, screen: detail }));
+    }
     show(h(ui.Shell, {
       sections: sections(),
       title: barTitle,
