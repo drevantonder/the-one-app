@@ -21,8 +21,8 @@ const DOWN_FOR: Duration = Duration::from_secs(20);
 /// doesn't help, how much longer each time: up to `QUIET_MAX`.
 const QUIET: Duration = Duration::from_secs(2 * 60);
 const QUIET_MAX: Duration = Duration::from_secs(30 * 60);
-/// How long a notice waits to be taken before it's sent again on a new connection.
-const NOTICE_WAIT: Duration = Duration::from_millis(500);
+/// How long a `changed` waits to be taken before it's sent again on a new connection.
+const CHANGED_WAIT: Duration = Duration::from_millis(500);
 /// The most an ask or its answer may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// The most a computer that isn't the network's yet may send: one ask to join.
@@ -303,8 +303,9 @@ impl Node {
                         answer
                     }
                     Some("ask") => node.accept_call(remote, &msg["body"]["call"]).await.json(),
-                    Some("notice") => {
-                        node.changed_from(&msg["body"]["changed"]);
+                    Some("hello") => node.hello_from(&remote, &msg["body"]).map(|()| Value::Null).unwrap_or_else(|err| json!({ "error": format!("{err:#}") })),
+                    Some("changed") => {
+                        node.changed_from(&msg["body"]);
                         Value::Null
                     }
                     _ => json!({ "error": "that isn't something devices ask each other" }),
@@ -563,7 +564,7 @@ impl Node {
         joined.unwrap_or_else(|err| json!({ "error": format!("{err:#}") }))
     }
 
-    /// A notice that something changed: `{ scope, app?, database?, at?, step?, sig? }`, `step` the sealed step written
+    /// Another device's `changed`, that something changed: `{ scope, app?, database?, at?, step?, sig? }`, `step` the sealed step written
     /// at `at` and `sig` the signature beside it, base64.
     fn changed_from(&self, changed: &Value) {
         let Ok(scope) = Scope::parse(changed["scope"].as_str().unwrap_or("")) else { return };
@@ -715,6 +716,15 @@ impl Node {
         self.send(&to, "ask", &body, true, limit).await
     }
 
+    /// Says hello to another device: what runs here and its load. → once it's taken.
+    pub(super) async fn say_hello_to(&self, to: &Key, hello: &Value) -> Result<()> {
+        let answer = self.send(to, "hello", hello, true, CONNECT).await?;
+        match answer["error"].as_str() {
+            Some(err) => bail!("{err}"),
+            None => Ok(()),
+        }
+    }
+
     /// Says hello to a service endpoint, with how many of `global`'s steps this device has:
     /// it answers what it offers once it lists this device as one that may call it; until then, that it's behind, and
     /// is sent them, which it checks itself. → what it offers, and whom it serves.
@@ -752,12 +762,12 @@ impl Node {
     /// Tells each of `to` that something changed, expecting no answer.
     pub(super) fn notify(&self, to: &[Key], changed: &Value) {
         for device in to.iter().copied() {
-            let (node, body) = (self.clone(), json!({ "changed": changed }));
+            let (node, body) = (self.clone(), changed.clone());
             tokio::spawn(async move {
                 // Answered, so one lost on a connection that died unseen is sent again on a new one.
-                if let Err(err) = node.send(&device, "notice", &body, true, NOTICE_WAIT).await {
+                if let Err(err) = node.send(&device, "changed", &body, true, CHANGED_WAIT).await {
                     node.drop_conn(&device);
-                    if let Err(err) = node.send(&device, "notice", &body, true, NOTICE_WAIT).await {
+                    if let Err(err) = node.send(&device, "changed", &body, true, CHANGED_WAIT).await {
                         tracing::debug!("telling {}: {err:#}", short(&device));
                     }
                     tracing::debug!("telling {}, tried again: {err:#}", short(&device));

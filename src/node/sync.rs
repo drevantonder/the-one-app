@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// The largest step a notice carries: a bigger one, the devices it tells read from the bucket.
+/// The largest step a `changed` carries: a bigger one, the devices it tells read from the bucket.
 const SENT_STEP: usize = 1 << 20;
 
 impl Node {
@@ -205,18 +205,17 @@ impl Node {
     /// Says hello to every other device: as now and then, and when this device's services change. How far each is, is
     /// the round trip iroh measures to it.
     pub(super) fn say_hello(&self) {
-        let Ok((devices, me, services, parts)) = self.with(|i| {
+        let Ok((devices, services, parts)) = self.with(|i| {
             let devices: Vec<Key> = i.r.db().computes().into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((devices, Caller::own(self.0.id, i.user.clone()), self.services_here(i), self.parts_here(i)))
+            Ok((devices, self.services_here(i), self.parts_here(i)))
         }) else {
             return;
         };
-        let input = json!({ "services": services, "load": crate::load::current(), "parts": parts });
-        let req = CallRequest { app: scopes::APP.into(), tool: "hello".into(), input, ..Default::default() };
+        let hello = json!({ "services": services, "load": crate::load::current(), "parts": parts });
         for device in devices {
-            let (node, req, me) = (self.clone(), req.clone(), me.clone());
+            let (node, hello) = (self.clone(), hello.clone());
             tokio::spawn(async move {
-                if node.ask_device(device, &req, &me).await.is_ok()
+                if node.say_hello_to(&device, &hello).await.is_ok()
                     && let Some(far) = node.round_trip(&device)
                 {
                     let _ = node.with(|i| Ok(i.far.insert(device, far)));
@@ -224,6 +223,44 @@ impl Node {
             });
         }
         self.hello_services();
+    }
+
+    /// Another device's hello (`say_hello`), `from` a device of the network.
+    pub(super) fn hello_from(&self, from: &Key, hello: &Value) -> Result<()> {
+        let mut services: Vec<Service> = serde_json::from_value(hello["services"].clone()).unwrap_or_default();
+        // Whom each serves, no more than the entries allow: that device's own person, and for one that
+        // serves everyone, those the device serves.
+        self.with(|i| {
+            let m = i.r.db();
+            let owner = m.compute(from).map(|c| c.user).unwrap_or_default();
+            for (_, users, describe) in &mut services {
+                let everyone = describe["serves"] == "everyone";
+                users.retain(|u| *u == owner || (everyone && m.serves(from, u)));
+            }
+            Ok(())
+        })?;
+        let load = serde_json::from_value(hello["load"].clone()).ok();
+        let parts = hello["parts"].as_array().map(|_| hello["parts"].clone());
+        // The services that came, went or changed there, whose apps shells list again.
+        let (new, changed) = self.with(|i| {
+            let before = i.peers.get(from).map(|p| p.services.clone());
+            let parts_changed = i.peers.get(from).is_some_and(|p| p.parts != parts);
+            let was = before.as_deref().unwrap_or_default();
+            let missing = |a: &[Service], b: &[Service]| a.iter().filter(|s| !b.contains(s)).map(|s| s.0.clone()).collect::<Vec<_>>();
+            let mut changed = missing(&services, was);
+            changed.extend(missing(was, &services));
+            changed.sort();
+            changed.dedup();
+            i.peers.insert(*from, Peer { services, load, parts, seen: Instant::now() });
+            Ok((before.is_none() || parts_changed, changed))
+        })?;
+        if new || !changed.is_empty() {
+            self.emit(Event::Devices);
+        }
+        if !changed.is_empty() {
+            self.emit(Event::Changed { apps: changed });
+        }
+        Ok(())
     }
 
     /// Says hello to each service endpoint of the network, which says what it offers and whom it serves: it's listed

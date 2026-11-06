@@ -630,9 +630,6 @@ async fn call_for(node: &Node, me: Me, body: Value, picks: bool) -> anyhow::Resu
     let mut req: CallRequest = serde_json::from_value(body)?;
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
-    if me.sign_in.is_some() {
-        req = node.for_sign_in(req)?;
-    }
     if picks {
         return Ok(json!({ "ok": node.call_picked(req, me.caller).await? }));
     }
@@ -751,10 +748,7 @@ async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(Str
     };
     let body = body.and_then(|(hash, size)| (size > 0).then_some(hash));
     let input = json!({ "method": method, "path": path, "query": query, "body": body });
-    let mut call = CallRequest { app, tool: "_http".into(), input, puts: body.iter().cloned().collect(), ..Default::default() };
-    if me.sign_in.is_some() {
-        call = node.for_sign_in(call)?;
-    }
+    let call = CallRequest { app, tool: "_http".into(), input, puts: body.iter().cloned().collect(), ..Default::default() };
     let out = node.call_as(call, me.caller.clone()).await;
     if let Some(hash) = &body {
         node.drop_put(hash);

@@ -93,7 +93,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     for (sam, handed_for) in [(client, one::keys::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
         let handoff = one::keys::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
         a.hand(&sam.credential, &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
-        let call = |req: CallRequest| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
+        let call = |req: CallRequest| a.call_as(req, sam.clone());
 
         // His push, deleting main and making a branch of his at its head, is refused, and nothing moves.
         let (body, _) = a.put_blob_from(&sam, axum::body::Body::from(push(&[(&head, &zero, "refs/heads/main"), (&zero, &head, "refs/heads/sams")], &[]))).await.unwrap();
@@ -110,7 +110,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
         both.push(sam);
     }
     let [client, signed_in] = <[Caller; 2]>::try_from(both).unwrap();
-    let call = |req: CallRequest, sam: &Caller| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
+    let call = |req: CallRequest, sam: &Caller| a.call_as(req, sam.clone());
 
     // Its issues: Sam opens one and comments, as anyone may, and edits and closes his own; he doesn't close, edit or
     // delete Andre's, label his own or make a label, which only those who push do, nor delete his own, which only its
@@ -305,13 +305,13 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let sams_list = async || {
         let req = CallRequest { scopes: Some(vec!["global".into()]), ..repos("list", json!({ "source": "github" })) };
         let before = seen.lock().unwrap().len();
-        let list = a.call_as(a.for_sign_in(req).unwrap(), client.clone()).await.unwrap();
+        let list = a.call_as(req, client.clone()).await.unwrap();
         (names(list), seen.lock().unwrap()[before..].to_vec())
     };
 
     // Not in Team, he sees none of GitHub's repos, and nothing goes to GitHub for him.
     assert_eq!(sams_list().await, (Vec::<String>::new(), vec![]));
-    let refused = a.call_as(a.for_sign_in(CallRequest { scopes: Some(vec!["global".into()]), ..repos("tree", json!({ "repo": "github.com/andre-gh/mine" })) }).unwrap(), client.clone()).await.unwrap_err();
+    let refused = a.call_as(CallRequest { scopes: Some(vec!["global".into()]), ..repos("tree", json!({ "repo": "github.com/andre-gh/mine" })) }, client.clone()).await.unwrap_err();
     assert!(format!("{refused:#}").contains("Sign in to GitHub first"), "{refused:#}");
 
     // Once he's in Team, he sees the organization's repo, as its installation, and never Andre's, nor with his token.

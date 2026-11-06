@@ -114,15 +114,6 @@ impl Node {
         self.route(req, me).await
     }
 
-    /// A call from someone signed in at the network's address, which is its person's in every way but one: the node's own network messages are its
-    /// devices' to send, and a sign-in's caller has this device's key.
-    pub fn for_sign_in(&self, req: CallRequest) -> Result<CallRequest> {
-        let req = self.resolve(req);
-        // Only reading a log is one a client may ask of the node's own: it checks who asks itself.
-        ensure!(req.app != scopes::APP || req.tool == "logs", "a sign-in can't ask that");
-        Ok(req)
-    }
-
     /// Runs a call for a client device that picks the node it asks itself (`x-one-elsewhere`), as `me`: here if this
     /// node runs every scope it reaches, whatever the order things run in would pick, as the client raced its way here.
     /// One it can't run (it doesn't run them all, or isn't ready for that app) is `Elsewhere`, naming those that can,
@@ -131,7 +122,7 @@ impl Node {
     pub async fn call_picked(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let me = Caller { agent: req.agent.clone().or(me.agent), ..me };
         let req = self.identified(req)?;
-        if req.service.is_some() || req.device.is_some() || req.app == scopes::APP {
+        if req.service.is_some() || req.device.is_some() {
             return self.route(req, me).await;
         }
         let req = self.reaching(req, &me)?;
@@ -528,9 +519,6 @@ impl Node {
     /// (which wait on theirs, and may be calls of services), SERVICE_LIMIT; and a second more for each MiB put for it
     /// (`PER_MIB`), which it reads and may keep.
     pub(super) async fn limit(&self, req: &CallRequest) -> Duration {
-        if req.app == scopes::APP {
-            return CALL_LIMIT;
-        }
         let (apps, services) = self.uses_here(&req.app).await;
         let limit = if req.service.is_some() || !apps.is_empty() || !services.is_empty() { SERVICE_LIMIT } else { CALL_LIMIT };
         let put: u64 = req.puts.iter().filter_map(|h| std::fs::metadata(release::blob_path(&self.0.dir, h).ok()?).ok()).map(|m| m.len()).sum();
@@ -547,7 +535,7 @@ impl Node {
             trace::note(json!({ "step": "logs" }), reading.elapsed());
         }
         if req.app == scopes::APP {
-            return self.network_message(&req.tool, &input, me).await.map(Reply::Ok);
+            return self.read_logs(&req.tool, &input, me).map(Reply::Ok);
         }
         if req.service.as_deref() == Some(crate::push::NAME) {
             return Ok(match self.push(&req.tool, &input, me, req.from.as_deref()).await {
@@ -958,59 +946,12 @@ impl Node {
         Ok(used.into_inner().unwrap())
     }
 
-    /// The network messages other nodes send this one over iroh: `hello` and `changed`.
-    pub(super) async fn network_message(&self, message: &str, input: &Value, me: &Caller) -> Result<Value> {
-        match message {
-            // Another node's, which only a device of the network sends.
-            "hello" | "changed" if self.with(|i| Ok(i.r.db().compute(&me.key).is_some()))? => {
-                if message == "hello" {
-                    let mut services: Vec<Service> = serde_json::from_value(input["services"].clone()).unwrap_or_default();
-                    // Whom each serves, no more than the entries allow: that device's own person, and for one that
-                    // serves everyone, those the device serves.
-                    self.with(|i| {
-                        let m = i.r.db();
-                        let owner = m.compute(&me.key).map(|c| c.user).unwrap_or_default();
-                        for (_, users, describe) in &mut services {
-                            let everyone = describe["serves"] == "everyone";
-                            users.retain(|u| *u == owner || (everyone && m.serves(&me.key, u)));
-                        }
-                        Ok(())
-                    })?;
-                    let load = serde_json::from_value(input["load"].clone()).ok();
-                    let parts = input["parts"].as_array().map(|_| input["parts"].clone());
-                    // The services that came, went or changed there, whose apps shells list again.
-                    let (new, changed) = self.with(|i| {
-                        let before = i.peers.get(&me.key).map(|p| p.services.clone());
-                        let parts_changed = i.peers.get(&me.key).is_some_and(|p| p.parts != parts);
-                        let was = before.as_deref().unwrap_or_default();
-                        let missing = |a: &[Service], b: &[Service]| a.iter().filter(|s| !b.contains(s)).map(|s| s.0.clone()).collect::<Vec<_>>();
-                        let mut changed = missing(&services, was);
-                        changed.extend(missing(was, &services));
-                        changed.sort();
-                        changed.dedup();
-                        i.peers.insert(me.key, Peer { services, load, parts, seen: Instant::now() });
-                        Ok((before.is_none() || parts_changed, changed))
-                    })?;
-                    if new || !changed.is_empty() {
-                        self.emit(Event::Devices);
-                    }
-                    if !changed.is_empty() {
-                        self.emit(Event::Changed { apps: changed });
-                    }
-                    return Ok(json!(null));
-                }
-                let scope = Scope::parse(input["scope"].as_str().unwrap_or(""))?;
-                let wrote = input["app"].as_str().zip(input["database"].as_str()).map(|(app, db)| (app, db, input["at"].as_u64().unwrap_or(0)));
-                self.changed_there(&scope, wrote, None, None);
-                Ok(json!(null))
-            }
-            // A person reading this device's log (or its services'), over the network (`one logs`).
-            "logs" => {
-                ensure!(self.may_read_logs(&me.user)?, "only {}'s person, or an admin of {}, reads its logs", self.device_name(), crate::config::YOURS);
-                crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)
-            }
-            other => bail!("the node has no network message {other}"),
-        }
+    /// Reads this device's log (or one of its services'), for a person over the network (`one logs`): the one tool of the
+    /// node's own a call asks.
+    pub(super) fn read_logs(&self, tool: &str, input: &Value, me: &Caller) -> Result<Value> {
+        ensure!(tool == "logs", "the node has no tool {tool}");
+        ensure!(self.may_read_logs(&me.user)?, "only {}'s person, or an admin of {}, reads its logs", self.device_name(), crate::config::YOURS);
+        crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)
     }
 
     /// Whether `user` may read this device's logs: whoever may remove it from the network, its person and the network's
@@ -1361,7 +1302,7 @@ impl Node {
         // sign-in a node passes on.
         let resolved = self.resolve(req.clone());
         ensure!(own || resolved.service.is_none() || self.0.services.serves_everyone(&resolved.app), "{} runs only for its person's own devices", resolved.app);
-        if !own && req.service.is_none() && req.app != scopes::APP {
+        if !own && req.service.is_none() {
             let req = self.resolve(req.clone());
             let named = req.scopes.clone();
             self.with(|i| {
@@ -1394,21 +1335,19 @@ impl Node {
     }
 
     /// Who a call another device passed on is for: with a sign-in's token, someone that device's node serves or whose
-    /// client it is; with none, only the person whose client device `remote` is, asking itself. The node's own network messages
-    /// (`hello`, `changed`) come from any compute endpoint of the network, as itself; a person's service asks as them, as itself.
+    /// client it is; with none, only the person whose client device `remote` is, asking itself; a person's service asks as
+    /// them, as itself.
     pub(super) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
         let token = request["me"]["token"].as_str().is_some();
         // Passed on by another node with no sign-in, the keys it was handed with it, which `take_passed` checks.
         let passed = !token && request["keys"].is_string();
-        let hint = request["app"] == scopes::APP && matches!(request["op"].as_str(), Some("hello" | "changed"));
         self.with(|i| {
             let m = i.r.db();
             let client = m.client(&remote).is_some_and(|c| c.user == user);
             let service = m.service(&remote).is_some_and(|s| s.user == user);
             let allowed = match () {
-                _ if hint => remote == key && m.compute(&remote).is_some(),
                 _ if token => client || m.serves(&remote, &user),
                 _ if passed => remote == key && m.compute(&remote).is_some(),
                 _ => (client || service) && remote == key,

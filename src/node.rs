@@ -291,7 +291,7 @@ pub struct CallRequest {
     /// The service whose function this is, when it is one: an app and the service it wraps may share a name.
     #[serde(default)]
     pub service: Option<String>,
-    /// The tool it runs, or for a call to the node itself, its network message: `op` on the wire, which older devices read.
+    /// The tool it runs: `op` on the wire, which older devices read.
     #[serde(rename = "op")]
     pub tool: String,
     #[serde(default)]

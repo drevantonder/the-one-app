@@ -286,7 +286,7 @@ pub fn logs_read(node: &Client, input: &Map<String, Value>, agent: Option<&str>,
     if let Err(e) = crate::logs::Ask::from_json(&Value::Object(asked.clone())) {
         return crate::api::client::Called { ok: Err(crate::cli::Failed::Typed(format!("{e:#}")).into()), trace: None };
     }
-    node.call(&json!({ "device": device, "app": crate::database::scopes::APP, "op": "logs", "input": asked, "agent": agent, "client": client }), trace)
+    node.call(&json!({ "device": device, "app": crate::database::scopes::APP, "op": "logs", "scopes": [], "input": asked, "agent": agent, "client": client }), trace)
 }
 
 /// What a log read gives, as its lines and, if there's something to say about them, a note.

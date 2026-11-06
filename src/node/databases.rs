@@ -248,13 +248,13 @@ impl Node {
         Ok(())
     }
 
-    /// Brings a database up to date for a call that reads it, as far as this device's copy goes: a notice of another
-    /// device's write fetches its step into the copy, and `fill_copies` keeps up with the bucket. Only while a notice's
+    /// Brings a database up to date for a call that reads it, as far as this device's copy goes: a `changed` from another
+    /// device's write fetches its step into the copy, and `fill_copies` keeps up with the bucket. Only while a `changed`'s
     /// step isn't here yet is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,
     /// never wrong.
     pub(super) async fn read_ready(&self, id: &(Scope, String), db: &mut Db, bucket: &Copied) -> Result<()> {
         if self.0.databases.behind.lock().unwrap().remove(id) {
-            // A notice said another device wrote it: the bucket is asked first, for what that write was.
+            // A `changed` said another device wrote it: the bucket is asked first, for what that write was.
             let started = Instant::now();
             let result = match tokio::time::timeout(BUCKET_WAIT, db.catch_up(bucket)).await {
                 Ok(Ok(_)) => {
@@ -362,7 +362,7 @@ impl Node {
     }
 
     /// Fetches into this device's copy what the bucket has of each database open here that it lacks, every tick: what
-    /// a lost notice would have said. A database a call is using is left for the next.
+    /// a lost `changed` would have said. A database a call is using is left for the next.
     pub(super) async fn fill_copies(&self) {
         let Ok(bucket) = self.bucket() else { return };
         let mut changed = Vec::new();
