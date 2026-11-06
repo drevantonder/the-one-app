@@ -28,7 +28,7 @@ export const members = {
   appSchedules: ({ endpoint, scope, app, until, keys = {} }) => node("grant", { endpoint, scope, app, until, keys }),
   runs: ({ on }) => node("runs", { on }),
   /// A part of a device's oned (a service, or `apps`, the app service) switched on or off there.
-  service: ({ device, name, on = false }) => node("service", { device, name, on: !!on }),
+  service: ({ device, name, on = false, scope }) => node("service", { device, name, on: !!on, ...(scope ? { scope } : {}) }),
   retire({ app, owner, how }) {
     const change = { deleted: { deleted: true }, restored: { deleted: false }, erased: { erased: true } }[how];
     if (!change) throw new Error(`an app is deleted, restored or erased, not ${how}`);

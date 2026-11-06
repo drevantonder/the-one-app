@@ -136,6 +136,7 @@ CREATE TABLE services (
   switched_on INTEGER NOT NULL,
   switched_by TEXT NOT NULL,
   switched_at INTEGER NOT NULL,
+  scope TEXT,
   PRIMARY KEY (device, name)
 ) STRICT;
 CREATE TABLE settings (
@@ -356,7 +357,7 @@ fn network(db: &Connection, m: &Members) -> Result<()> {
         }
     }
     for ((key, name), s) in &m.services {
-        db.execute("INSERT INTO services VALUES (?, ?, ?, ?, ?)", params![hex(key), name, s.on, person(&s.by), int(s.time)])?;
+        db.execute("INSERT INTO services VALUES (?, ?, ?, ?, ?, ?)", params![hex(key), name, s.on, person(&s.by), int(s.time), s.scope])?;
     }
     for (name, value) in &m.settings {
         db.execute("INSERT INTO settings VALUES (?, ?)", params![name, value])?;

@@ -41,7 +41,7 @@ impl Node {
     pub async fn set_service(&self, caller: &Caller, device: Option<&str>, name: &str, on: bool) -> Result<()> {
         ensure!(device.is_some() || caller.key == self.0.id, "say which device");
         let device = device.map(str::to_string).unwrap_or_else(|| self.device_name());
-        let content = self.with(|i| service_entry(i.r.db(), &caller.user, &device, name, on))?;
+        let content = self.with(|i| service_entry(i.r.db(), &caller.user, &device, name, on, added_scope(i, &caller.user, name).filter(|_| on).as_ref()))?;
         self.member_content(caller, content).await?;
         self.say_hello();
         Ok(())
@@ -61,6 +61,26 @@ impl Node {
             let on = i.r.db().switches().into_iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name, s.time)).collect();
             Ok((crate::service::Network { address: address.clone(), root, user: i.user.clone() }, on))
         })
+    }
+
+    /// Each service switched on here before a service named the scope of the app it runs for, switched on again naming
+    /// it, once: so removing the app, or moving its service, reaches it. It goes on running throughout.
+    pub async fn name_services_scopes(&self) {
+        let Ok(caller) = self.own_caller() else { return };
+        let named = self.with(|i| {
+            let m = i.r.db();
+            Ok(m.switches()
+                .into_iter()
+                .filter(|((k, name), s)| *k == self.0.id && s.on && s.scope.is_none() && name != members::APPS_PART)
+                .filter_map(|((_, name), _)| added_scope(i, &caller.user, &name).map(|scope| (name, scope)))
+                .filter_map(|(name, scope)| service_entry(m, &caller.user, &hex(&self.0.id), &name, true, Some(&scope)).ok())
+                .collect::<Vec<_>>())
+        });
+        for content in named.unwrap_or_default() {
+            if let Err(err) = self.member_content(&caller, content).await {
+                tracing::info!("naming a service's scope: {err:#}");
+            }
+        }
     }
 
     /// What a part of this device is doing changed: its screens and the other devices are told.

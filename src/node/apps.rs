@@ -170,6 +170,8 @@ impl Node {
         let listed = self.with(|i| {
             let m = i.r.db();
             let apps = m.apps();
+            let switches = m.switches();
+            let parts_here = self.parts_here(i);
             Ok(apps
                 .iter()
                 .filter(|a| !a.erased)
@@ -185,7 +187,8 @@ impl Node {
                     let reach = reachable(i, &a.name, &viewer.user);
                     let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
                     let forks: Vec<&String> = apps.iter().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
-                    let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
+                    let runs_on = runs_on(self, i, &switches, &parts_here, &a.name, &installed, &viewer.user);
+                    let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed, "runs_on": runs_on });
                     if let Some(bundle) = self.built_in(a) {
                         info["built_in"] = json!(bundle);
                     }
@@ -215,7 +218,7 @@ impl Node {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
                     // A fork's module may still give its first name; the network's name for it is the one that counts.
                     let declared = Schedule::all(&Value::Object(d.clone()));
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "connector" | "needs" | "advanced" | "labs"))) {
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "service" | "connector" | "needs" | "advanced" | "labs"))) {
                         info[k] = v;
                     }
                     // A tool of a lab that's off isn't there.
@@ -331,9 +334,11 @@ impl Node {
         (list("apps"), list("services"))
     }
 
-    /// The entries that network (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing
-    /// also installs each app it uses, and each they use, that isn't installed there yet.
-    pub(super) async fn install_entries(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<Vec<(Scope, Content)>> {
+    /// The entries that install (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing
+    /// also installs each app it uses, and each they use, that isn't installed there yet, and runs their services for
+    /// it on `node` (a device's name, or `cloudflare`), one node each: added again with another node, a service moves
+    /// there. Uninstalling stops its services there.
+    pub(super) async fn install_entries(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool, node: Option<&str>) -> Result<Vec<(Scope, Content)>> {
         let mut wanted = vec![app.to_string()];
         let mut i = 0;
         while installed && i < wanted.len() {
@@ -344,6 +349,10 @@ impl Node {
                 }
             }
             i += 1;
+        }
+        let mut services = Vec::new();
+        for name in &wanted {
+            services.extend(self.uses(name).await.1);
         }
         self.with(|i| {
             let m = i.r.db();
@@ -358,14 +367,31 @@ impl Node {
                     out.push((scope.clone(), members::node(if installed { "install" } else { "uninstall" }, json!({ "app": name }))));
                 }
             }
+            // Where each service runs for this scope now: stopped where it no longer should, started where it should.
+            let ours = |s: &members::Switch| s.on && s.scope.as_deref() == Some(scope.to_string().as_str());
+            let switches = m.switches();
+            for service in &services {
+                let running: Vec<Key> = switches.iter().filter(|((_, n), s)| n == service && ours(s)).map(|((k, _), _)| *k).collect();
+                let to = match node.filter(|_| installed) {
+                    Some(node) => Some(service_entry(m, &caller.user, node, service, true, Some(scope))?),
+                    None => None,
+                };
+                let to_key = to.as_ref().and_then(|c| c.data["device"].as_str()).and_then(|k| unhex(k).ok());
+                for k in running.iter().filter(|k| !installed || (to_key.is_some() && Some(**k) != to_key)) {
+                    out.push((Scope::Global, service_entry(m, &caller.user, &hex(k), service, false, None)?));
+                }
+                if let Some(to) = to.filter(|_| !running.contains(&to_key.unwrap_or_default())) {
+                    out.push((Scope::Global, to));
+                }
+            }
             Ok(out)
         })
     }
 
-    /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses.
-    pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<()> {
+    /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses, its services on `node`.
+    pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool, node: Option<&str>) -> Result<()> {
         self.read_callers_logs(caller).await?;
-        let entries = self.install_entries(caller, app, scope, installed).await?;
+        let entries = self.install_entries(caller, app, scope, installed, node).await?;
         for (scope, content) in entries {
             self.append_as(&scope, &caller.user, content).await?;
         }
@@ -466,4 +492,27 @@ fn built_in_source(app: &str) -> Option<String> {
     let repo = crate::config::REPO;
     let commit = crate::config::BUILD.split(['-', '+']).next().filter(|c| !crate::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));
     (!repo.is_empty()).then(|| format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
+}
+
+/// Where `app`'s service runs for the scopes `installed` names, and for `user` on their own nodes: `{ scope, node,
+/// name, online, problem }` each, `name` none once that node was removed, `problem` what its node said went wrong.
+fn runs_on(node: &Node, i: &Network, switches: &BTreeMap<(Key, String), members::Switch>, parts_here: &[Value], app: &str, installed: &[String], user: &str) -> Vec<Value> {
+    let m = i.r.db();
+    let cloudflare = m.cloudflare_node();
+    switches
+        .iter()
+        .filter(|((k, n), s)| n == app && s.on && s.scope.as_ref().map_or(m.machine(k).is_some_and(|d| d.user == user), |s| installed.contains(s)))
+        .map(|((k, _), s)| {
+            let here = *k == node.0.id;
+            let name = if Some(*k) == cloudflare { Some(crate::rank::CLOUDFLARE.to_string()) } else { m.machine(k).filter(|d| !d.removed).map(|d| d.name) };
+            let parts = if here { Some(Value::from(parts_here.to_vec())) } else { i.peers.get(k).and_then(|p| p.parts.clone()) };
+            let part = parts.and_then(|p| match p {
+                Value::Array(list) => list.into_iter().find(|v| v["name"] == app),
+                Value::Object(map) => map.get(app).cloned(),
+                _ => None,
+            });
+            let online = here || Some(*k) == cloudflare || i.online(k);
+            json!({ "scope": s.scope, "node": hex(k), "name": name, "online": online, "problem": part.and_then(|p| p["problem"].as_str().map(str::to_string)) })
+        })
+        .collect()
 }

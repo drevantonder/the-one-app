@@ -1361,29 +1361,58 @@ fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, titl
             let link = members::source_link(&json!(link))?;
             (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
-        Append::Service { device, name, on } => (Scope::Global, service_entry(i.r.db(), &me.user, &device, &name, on)?),
+        Append::Service { device, name, on, scope } => {
+            let scope = match scope {
+                Some(s) => Some(if s == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&s)? }),
+                None if on => added_scope(i, &me.user, &name),
+                None => None,
+            };
+            (Scope::Global, service_entry(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
+        }
         Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("installs, costs, statements and items are written on their own"),
     })
 }
 
 /// The `service` entry that switches a part of a device's oned on or off, the device found by name or key prefix; for
-/// the device's person.
-fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool) -> Result<Content> {
+/// the device's person, or to switch it off, for who may add apps where it ran. A service runs for the app added in
+/// `scope`, which its writer may add apps to.
+fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, scope: Option<&Scope>) -> Result<Content> {
+    if let Some(s) = scope.filter(|_| on) {
+        ensure!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
+    }
+    let managed = |k: &Key| !on && db.switch(k, name).and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)));
     // The Cloudflare node, by its name in run priority or its key: its admins switch its parts.
     if let Some(k) = db.cloudflare_node().filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
-        ensure!(db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
+        ensure!(managed(&k) || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
         // It always runs apps; what else it can run is the services built for it that it carries.
-        ensure!(crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
-        return Ok(members::service(&k, name, on));
+        ensure!(!on || crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
+        return Ok(members::service(&k, name, on, scope));
     }
     let mut found: Vec<members::Machine> = db.machines().into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     // A machine's services are named for it: by its name, it's its node.
     if found.len() > 1 {
         found.retain(|s| s.is(members::Kind::Compute));
     }
-    let [s] = found.as_slice() else { bail!("no one device called {device}") };
-    ensure!(db.may(user, "switch", &scopes::device(&s.key)), "only {}'s person switches what it runs", s.name);
-    Ok(members::service(&s.key, name, on))
+    let key = match found.as_slice() {
+        [s] => s.key,
+        // A node that was removed still has its records, which who added the app may switch off.
+        _ => match unhex(device).ok().filter(|k| managed(k)) {
+            Some(k) => k,
+            None => bail!("no one device called {device}"),
+        },
+    };
+    ensure!(managed(&key) || db.may(user, "switch", &scopes::device(&key)), "only {device}'s person switches what it runs");
+    Ok(members::service(&key, name, on, scope))
+}
+
+/// The scope whose added app `name` is, as `user` sees it, for a service switched on with none said: their own, if
+/// it's added there, then everyone's, then one of their groups'.
+fn added_scope(i: &Network, user: &str, name: &str) -> Option<Scope> {
+    let added = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|(_, v)| v.installed.contains(name));
+    let own = Scope::User(user.to_string());
+    let db = i.r.db();
+    let groups = db.groups().into_iter().filter(|g| db.group_role(user, &g.id).is_some()).map(|g| Scope::Group(g.id));
+    [own, Scope::Global].into_iter().chain(groups).find(|s| added(s) && db.may(user, "add-apps", &scopes::object(s)))
 }
 
 /// A scope as people call it: Everyone, a person's name, or a group's.

@@ -326,8 +326,9 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             (members::install("notes", false), json!(["install", { "app": "notes", "installed": false }])),
             (members::runs(&[endpoint.key]), json!(["runs", { "on": [key] }])),
             (members::runs(&[]), json!(["runs", { "on": [] }])),
-            (members::service(&endpoint.key, "shell", false), json!(["service", { "device": key, "name": "shell" }])),
-            (members::service(&endpoint.key, "shell", true), json!(["service", { "device": key, "name": "shell", "on": true }])),
+            (members::service(&endpoint.key, "shell", false, None), json!(["service", { "device": key, "name": "shell" }])),
+            (members::service(&endpoint.key, "shell", true, None), json!(["service", { "device": key, "name": "shell", "on": true }])),
+            (members::service(&endpoint.key, "shell", true, Some(&Scope::Global)), json!(["service", { "device": key, "name": "shell", "on": true, "scope": "global" }])),
         ];
         let out = js(json!({ "op": "members", "calls": both.iter().map(|(_, call)| call.clone()).collect::<Vec<_>>() }));
         for ((rust, call), js) in both.iter().zip(out["contents"].as_array().expect("contents")) {

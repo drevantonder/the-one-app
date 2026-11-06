@@ -15,7 +15,7 @@ const MENU = "More options for ";
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-const NEEDS = "Messenger needs Agent Devices on one of your devices. Add it in the App Store: whoever owns a device installs it there, and the App Store's Agent Devices page shows where. Then messenger_sign_in signs in.";
+const NEEDS = "Messenger needs Agent Devices on one of your nodes. Add it in the App Store, choosing the node it runs on; its page there shows where it runs. Then messenger_sign_in signs in.";
 
 /// Runs a tool of Agent Devices (`agent-devices`) or Computer Use (`computer`) for the caller. When none of their
 /// devices runs Agent Devices, says what's needed instead of how the call failed.

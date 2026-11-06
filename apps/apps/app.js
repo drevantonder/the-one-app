@@ -79,7 +79,8 @@ async function described(ctx, bundle) {
   const code = all.slice(Math.max(0, all.search(/^export default/m)));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
   const list = (kind) => code.match(new RegExp(`\\buses:\\s*\\{[^}]*\\b${kind}:\\s*\\[([^\\]]*)\\]`))?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
-  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: list("apps"), services: list("services") } };
+  const platforms = code.match(/\bservice:\s*\{[^}]*\bplatforms:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1));
+  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: list("apps"), services: list("services") }, ...(platforms ? { service: { platforms } } : {}) };
 }
 
 /// What an app offers besides its tools: screens (a main screen or a widget, so it has a place on a home page), and
@@ -93,24 +94,45 @@ async function offers(ctx, a) {
   return { screens: /\bmain:\s*\{/.test(code) || /\bwidgets:\s*\{\s*[\w"]/.test(code), accounts: /^\s*accounts:\s*\{/m.test(code) };
 }
 
-/// Where a service runs, in a few words, and what each of the caller's devices offers for it: "Runs on linux, mac",
-/// or what it needs (its `needs`) when none of their devices runs it; the devices they own it may be installed on (where
-/// it can run, set up when it's switched on, or an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its device parts are the
-/// services it uses, by their names.
+/// The platform a device's build is for, as an app's service names them.
+const platformOf = (target) => (/apple|darwin/.test(target || "") ? "mac" : /windows/.test(target || "") ? "windows" : /linux/.test(target || "") ? "linux" : null);
+
+/// Whether an app has a service.
+const hasService = (a) => !!(a.service || a.uses?.services?.length);
+
+/// Where an app's service runs, and where it may: `runs_on` (each node it runs on for a place where it's added, by
+/// `name`, none once that node was removed, with `scope`, `online` and `problem`); `nodes`, the names of the caller's
+/// own nodes on a platform its service is built for, and the Cloudflare node's for an admin when it's built for it; and
+/// `problem`, its one problem box when no node it runs on is on and well, with `move` true when moving it fixes that.
+/// Null for an app with no service.
 async function where(ctx, a) {
+  if (!hasService(a)) return null;
+  const platforms = a.service?.platforms;
   const devices = await ctx.devices();
-  const parts = a.uses?.services || [];
-  if (!parts.length) return null;
-  const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
-  const runs = devices.filter((s) => (s.services || []).some((d) => parts.includes(d)));
-  const can = (s) => (s.parts || []).some((p) => parts.includes(p.name) && !p.on) || (s.off_services || []).some((d) => parts.includes(d.name));
-  const removed = devices.filter((s) => !runs.includes(s) && can(s));
-  const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your devices";
-  return {
-    line, runs: runs.map((s) => s.name), needs: a.needs || null,
-    install: removed.filter(owns).map((s) => s.name), remove: runs.filter(owns).map((s) => s.name),
-    ask: !runs.some(owns) && !removed.some(owns),
-  };
+  const nodes = devices.filter((d) => !d.service && d.user === ctx.me.user && (!platforms || platforms.includes(platformOf(d.target)))).map((d) => d.name);
+  if (platforms?.includes("cloudflare") && ctx.me.role === "admin") nodes.push("cloudflare");
+  const runs_on = a.runs_on || [];
+  const title = a.title || a.name;
+  let problem = null;
+  if (a.installed?.length && !runs_on.some((r) => r.name && r.online && !r.problem)) {
+    const r = runs_on[0];
+    const text = !r ? "Choose the node it runs on." : !r.name ? "The node it ran on was removed. Choose where it runs now." : !r.online ? `${r.name} is off. Turn it on, or move it to another node.` : r.problem;
+    problem = nodes.length || r ? { title: `${title} needs its service on a node that's on`, text, move: nodes.length > 0 } : { title: `${title} can't run on your devices yet`, text: "None of them is a platform its service is built for.", move: false };
+  }
+  return { runs_on, nodes, problem };
+}
+
+/// The node an app added in `scope` runs its service on: `node` if given, or the only one it may; none for an app with
+/// no service. Asks where when there's a choice.
+async function nodeFor(ctx, a, node) {
+  const w = await where(ctx, a);
+  if (!w) return undefined;
+  if (node) {
+    if (!w.nodes.some((n) => n.toLowerCase() === String(node).toLowerCase())) throw new Error(`${a.title || a.name} can't run on ${node}: it can run on ${w.nodes.join(", ") || "none of your nodes"}`);
+    return node;
+  }
+  if (w.nodes.length > 1) throw new Error(`Where should ${a.title || a.name} run? Give node: ${w.nodes.join(" or ")}.`);
+  return w.nodes[0];
 }
 
 async function find(ctx, name) {
@@ -137,7 +159,7 @@ async function listed(ctx, { full, gone }) {
       tagline: d.tagline || a.tagline || null, description: d.description || a.description || null,
       owner: a.owner, owner_name: name(a.owner),
       from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
-      installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], services: [] },
+      installed_names: (a.installed || []).map(name), uses: d.uses || a.uses || { apps: [], services: [] }, service: d.service || a.service || null, runs_on: a.runs_on || [],
       advanced: !!(d.advanced || a.advanced), built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
       source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: offered[i].screens, keeps_accounts: offered[i].accounts,
     };
@@ -147,6 +169,12 @@ async function listed(ctx, { full, gone }) {
 }
 
 const APP = { type: "string", description: "an app's name, from apps_list, like gmail" };
+const NODE = { type: "string", description: "the node that runs its service: one of yours by name, or cloudflare, as apps_devices lists them" };
+
+/// An app with what its code says of its service, for one not added yet that nothing runs.
+async function withService(ctx, a) {
+  return a.uses || a.service || !a.built_in ? a : { ...a, ...(await described(ctx, a.built_in).catch(() => ({}))) };
+}
 
 /// Times in what `health` gives, ms since 1970, as ISO 8601.
 function iso(v) {
@@ -188,12 +216,25 @@ export default {
     },
     add: {
       reads: false,
-      description: "Install an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page.",
-      input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
-      async run(ctx, { app, scope }) {
-        const a = await find(ctx, app);
-        ctx.install(app, placeOf(ctx, scope));
+      description: "Install an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page. An app with a service runs it on node, one of your nodes it can run on (apps_devices lists them), or for everyone's or a group's, the Cloudflare node; asked when there's a choice.",
+      input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput, node: NODE } },
+      async run(ctx, { app, scope, node }) {
+        const a = await withService(ctx, await find(ctx, app));
+        ctx.install(app, placeOf(ctx, scope), true, await nodeFor(ctx, a, node));
         return `Added ${a.title || app}.`;
+      },
+    },
+    move: {
+      reads: false,
+      description: "Move an app's service to another node, for a place it's added to (by default where it runs now): it stops on the node it ran on and starts afresh on this one. apps_devices lists the nodes it can run on.",
+      input: { type: "object", required: ["app", "node"], properties: { app: APP, node: NODE, scope: placeInput } },
+      async run(ctx, { app, node, scope }) {
+        const a = await withService(ctx, await find(ctx, app));
+        if (!hasService(a)) throw new Error(`${a.title || app} has no service to move`);
+        const place = scope ? placeOf(ctx, scope) : a.runs_on?.find((r) => r.scope)?.scope || a.installed?.find((s) => places(ctx).some((p) => p.may && p.id === s));
+        if (!place) throw new Error(`${a.title || app} isn't added anywhere you may move it: apps_add adds it`);
+        ctx.install(app, place === `user:${ctx.me.user}` ? "user" : place, true, await nodeFor(ctx, a, node));
+        return `${a.title || app} runs on ${node}.`;
       },
     },
     remove: {
@@ -290,37 +331,10 @@ export default {
     },
     devices: {
       reads: true,
-      description: "Where an app's service runs (\"Runs on linux, mac\"), or what it needs when none of your devices runs it; the devices you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a device's owner to install it.",
-      input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "the name of an app with a service, like imessage" } } },
+      description: "Where an app's service runs (runs_on: each node, whether it's on, and what went wrong), the nodes it can run on (nodes, for apps_add and apps_move), and its problem when it runs on no node that's on.",
+      input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "the name of an app with a service, like whatsapp" } } },
       async run(ctx, { app }) {
-        const a = await find(ctx, app);
-        return where(ctx, a.ops || a.uses ? a : { ...a, ...(await described(ctx, a.built_in).catch(() => ({}))) });
-      },
-    },
-    install_on: {
-      reads: false,
-      description: "Install an app's service on a device you own that can run it: the device sets it up and runs it, as switching it on in Settings › Devices does. apps_devices says where it may go.",
-      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "the name of an app with a service, like imessage" }, device: { type: "string", description: "a device's name, from apps_devices' install" } } },
-      async run(ctx, { app, device }) {
-        const a = await find(ctx, app);
-        const all = await ctx.devices();
-        if (!all.some((s) => s.name === device)) throw new Error(`no device called ${device}: your devices are ${all.map((s) => s.name).join(", ")}`);
-        for (const part of a.uses?.services || []) ctx.service(part, device, true);
-        return `${a.title || app} is installed on ${device}.`;
-      },
-    },
-    remove_from: {
-      reads: false,
-      confirm: true,
-      description: "Remove an app's service from a device you own: it stops running there, and goes on running on your other devices that have it. What it keeps on that device stays, and install_on puts it back.",
-      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "the name of an app with a service, like imessage" }, device: { type: "string", description: "a device's name, from apps_devices' remove" } } },
-      async run(ctx, { app, device }) {
-        const a = await find(ctx, app);
-        const all = await ctx.devices();
-        const there = all.find((s) => s.name === device);
-        if (!there) throw new Error(`no device called ${device}: your devices are ${all.map((s) => s.name).join(", ")}`);
-        for (const part of a.uses?.services || []) if ((there?.services || []).includes(part)) ctx.service(part, device, false);
-        return `${a.title || app} is removed from ${device}.`;
+        return where(ctx, await withService(ctx, await find(ctx, app)));
       },
     },
     code: {

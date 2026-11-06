@@ -53,7 +53,7 @@ async fn add_notes(a: &Node) {
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let bundle = a.put_blob(&one::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
-    a.install(&me, "notes", &one::entry::Scope::Global, true).await.unwrap();
+    a.install(&me, "notes", &one::entry::Scope::Global, true, None).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

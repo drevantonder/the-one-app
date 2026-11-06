@@ -2,7 +2,7 @@
 // isn't (app.jsx): its icon and name, where it runs, its schedules, what it works with, its source, and, for its owners,
 // its activity and deleting it.
 import { useEffect, useRef, useState } from "react"
-import { AppIcon, Button, Empty, List, ListRow, Problem, Spinner, Switch } from "@one/ui"
+import { AppIcon, Button, Empty, List, ListRow, Problem, Switch } from "@one/ui"
 import { Section, said, useCall } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
@@ -105,10 +105,9 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
     run("switch", () => one.call("switch", { app: name, schedule: s.name, scope: s.scope, on })).then(() => setFlipped((f) => ({ ...f, [key]: undefined })))
   }
 
-  // Its service's devices, under Runs On (or what it needs, where it runs on none): those it runs on, with Remove for
-  // their owners, then those of theirs an owner removed it from, to install it again.
+  // Where its service runs (each node it runs on), and its one problem box when none of them is on and well.
   const w = where.data
-  const devices = w ? [...w.runs.map((s) => [s, w.remove.includes(s) && "remove_from"]), ...w.install.map((s) => [s, "install_on"])] : []
+  const move = () => one.open("add", { app: name }, undefined, { sheet: true }).then(refresh)
   const owner = a.mine && a.added && !a.deleted
   const busyAny = !!health.data && !!(health.data.activity?.length || health.data.insights?.errors?.length || health.data.insights?.usage?.length || health.data.insights?.cost?.length)
   const repo = a.source && /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(a.source)?.[2]
@@ -133,29 +132,21 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
 
       {error && <Problem title={error} />}
 
-      {w && (devices.length ? (
-        <Section title={w.runs.length ? "Runs On" : w.needs || "Runs On"}>
+      {w?.problem && <Problem warn title={w.problem.title} text={w.problem.text} action={w.problem.move ? { label: "Move", run: move } : undefined} />}
+      {w && w.runs_on.length > 0 && (
+        <Section title="Runs On">
           <List>
-            {devices.map(([device, op]) => (
+            {w.runs_on.map((r) => (
               <ListRow
-                key={device}
-                title={device}
-                trailing={op && (
-                  <Button
-                    size="sm"
-                    variant={op === "install_on" ? "secondary" : "outline"}
-                    disabled={busy === op + device}
-                    onClick={() => run(op + device, () => one.call(op, { app: name, device, confirm: true }))}
-                  >
-                    {busy === op + device && <Spinner className="text-current" />}
-                    {op === "install_on" ? "Install" : "Remove"}
-                  </Button>
-                )}
+                key={r.node + r.scope}
+                title={r.name || "A removed node"}
+                sub={r.name && (!r.online ? "Off" : r.problem)}
+                trailing={w.nodes.length > 0 && <Button size="sm" variant="outline" onClick={move}>Move</Button>}
               />
             ))}
           </List>
         </Section>
-      ) : <p className="text-sm text-muted-foreground">{w.line}</p>)}
+      )}
 
       {schedules.length > 0 && (
         <div className="flex flex-col gap-4">

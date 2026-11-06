@@ -156,6 +156,9 @@ pub struct Switch {
     pub on: bool,
     pub by: String,
     pub time: u64,
+    /// The scope whose added app it runs for (a service's), if its writer said: removing the app there, or moving its
+    /// service, switches it off, and that scope's admins may.
+    pub scope: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -992,14 +995,22 @@ impl Members {
                 let device = key_of("device")?;
                 let name = text("name")?;
                 ensure!(valid_app_name(&name), "service names are lowercase words joined by -");
+                let on = data["on"] == true;
+                let scope = data["scope"].as_str().map(Scope::parse).transpose()?;
+                // Who manages the scope it ran for may switch it off there: removing the app, or moving its service.
+                let was = self.services.get(&(device, name.clone())).and_then(|s| s.scope.as_deref().map(Scope::parse)).and_then(Result::ok);
+                let managed = !on && was.as_ref().is_some_and(|s| manages_scope(self, &w, s));
                 // The Cloudflare node is a node of the network's, not a person's device: its admins switch its parts.
                 if self.cloudflare_node() == Some(device) {
-                    ensure!(self.is_admin(&w), "only an admin switches what the Cloudflare node runs");
+                    ensure!(managed || self.is_admin(&w), "only an admin switches what the Cloudflare node runs");
                 } else {
                     let owner = self.machine(&device).context("no such device")?.user.clone();
-                    ensure!(w == owner, "only a device's person switches what it runs");
+                    ensure!(managed || w == owner, "only a device's person switches what it runs");
                 }
-                self.services.insert((device, name), Switch { on: data["on"] == true, by: w, time: e.time() });
+                // A service runs for an app only its adder may add there.
+                ensure!(!on || scope.as_ref().is_none_or(|s| manages_scope(self, &w, s)), "only who may add apps there runs its service for it");
+                let scope = scope.or(was.filter(|_| !on)).map(|s| s.to_string());
+                self.services.insert((device, name), Switch { on, by: w, time: e.time(), scope });
             }
             "install" | "uninstall" | "node-release" | "service-release" => {}
             other => bail!("unknown kind {other}"),
@@ -1406,9 +1417,14 @@ pub fn vault(scope: &Scope, n: u32, public: &[u8; 32], to: &[Key]) -> Content {
     node("vault", json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
 }
 
-/// A part of a device's oned (a service, or `apps`, the app service) switched on or off there.
-pub fn service(device: &Key, name: &str, on: bool) -> Content {
-    node("service", json!({ "device": hex(device), "name": name, "on": on }))
+/// A part of a device's oned (a service, or `apps`, the app runtime) switched on or off there; a service, for the app
+/// added in `scope`.
+pub fn service(device: &Key, name: &str, on: bool, scope: Option<&Scope>) -> Content {
+    let mut data = json!({ "device": hex(device), "name": name, "on": on });
+    if let Some(scope) = scope {
+        data["scope"] = json!(scope.to_string());
+    }
+    node("service", data)
 }
 
 /// Where its writer's own things run besides their own machines: the network's others that run their own scope.
@@ -1597,6 +1613,32 @@ mod tests {
     }
 
     #[test]
+    fn a_service_runs_for_a_scope_its_adder_may_add_to_and_its_scopes_admins_may_stop_it() {
+        let (mut mac, mut entries) = setup();
+        let mut bobs = Dev::new(3);
+        let mut linux = Dev::new(4);
+        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's computer", BOTH, Some(("Bob", Role::Member))));
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
+        let (linux_id, bobs_id) = (linux.id(), bobs.id());
+        let whatsapp = |m: &Members, k: &Key| m.services.get(&(*k, "whatsapp".to_string())).map(|s| (s.on, s.scope.clone()));
+        // Bob runs it on his own node for himself, not for everyone; Andre runs it on his for everyone.
+        add(&mut entries, &mut bobs, BOB, service(&bobs_id, "whatsapp", true, Some(&Scope::Global)));
+        assert_eq!(whatsapp(&members(&entries), &bobs_id), None);
+        add(&mut entries, &mut bobs, BOB, service(&bobs_id, "whatsapp", true, Some(&Scope::User(BOB.into()))));
+        add(&mut entries, &mut linux, ANDRE, service(&linux_id, "whatsapp", true, Some(&Scope::Global)));
+        // Bob may not stop everyone's on Andre's node, nor Andre Bob's own on Bob's.
+        add(&mut entries, &mut bobs, BOB, service(&linux_id, "whatsapp", false, None));
+        add(&mut entries, &mut mac, ANDRE, service(&bobs_id, "whatsapp", false, None));
+        let m = members(&entries);
+        assert_eq!(whatsapp(&m, &linux_id), Some((true, Some("global".into()))));
+        assert_eq!(whatsapp(&m, &bobs_id), Some((true, Some(format!("user:{BOB}")))));
+        // Once Bob is an admin, he stops everyone's on Andre's node (moving it, or removing the app), and it stays named.
+        add(&mut entries, &mut mac, ANDRE, role(BOB, Role::Admin));
+        add(&mut entries, &mut bobs, BOB, service(&linux_id, "whatsapp", false, None));
+        assert_eq!(whatsapp(&members(&entries), &linux_id), Some((false, Some("global".into()))));
+    }
+
+    #[test]
     fn only_a_devices_person_switches_its_parts_and_lists_them_as_its_own() {
         let (mut mac, mut entries) = setup();
         let mut bobs = Dev::new(3);
@@ -1605,10 +1647,10 @@ mod tests {
         add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
         // Bob, even with Andre's listing, switches nothing on Andre's linux; Andre's own linux does.
         let (linux_id, bobs_id, mac_id) = (linux.id(), bobs.id(), mac.id());
-        add(&mut entries, &mut bobs, BOB, service(&linux_id, "whatsapp", true));
+        add(&mut entries, &mut bobs, BOB, service(&linux_id, "whatsapp", true, None));
         assert!(members(&entries).services.is_empty());
-        add(&mut entries, &mut linux, ANDRE, service(&linux_id, "whatsapp", true));
-        add(&mut entries, &mut mac, ANDRE, service(&linux_id, APPS_PART, false));
+        add(&mut entries, &mut linux, ANDRE, service(&linux_id, "whatsapp", true, None));
+        add(&mut entries, &mut mac, ANDRE, service(&linux_id, APPS_PART, false, None));
         let m = members(&entries);
         assert!(m.services[&(linux.id(), "whatsapp".into())].on && !m.services[&(linux.id(), APPS_PART.into())].on);
         // linux lists its part; it lists it again naming itself, which an old listing lacked; Bob's device can't.

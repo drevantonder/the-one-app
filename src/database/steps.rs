@@ -1247,10 +1247,18 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
             }
         }
         (members::APP, "deploy") => may("deploy", &scopes::app(&text("app")?)),
-        (members::APP, "service") => match unhex(&text("device")?)? {
-            k if db.cloudflare_node() == Some(k) => may("change-settings", scopes::NETWORK),
-            k => may("switch", &scopes::device(&k)),
-        },
+        (members::APP, "service") => {
+            let k = unhex(&text("device")?)?;
+            let on = data["on"] == true;
+            let adds = |s: &str| Scope::parse(s).is_ok_and(|s| may("add-apps", &scopes::object(&s)));
+            // Its scope's adders switch it off there (removing the app, or moving its service), whoever's node it is.
+            let was = db.switch(&k, &text("name")?).and_then(|s| s.scope);
+            let theirs = match db.cloudflare_node() == Some(k) {
+                true => may("change-settings", scopes::NETWORK),
+                false => may("switch", &scopes::device(&k)),
+            };
+            (theirs || (!on && was.as_deref().is_some_and(adds))) && (!on || data["scope"].as_str().is_none_or(adds))
+        }
         (members::APP, "install" | "uninstall" | "schedule" | "vault-request") => may("add-apps", &scopes::object(scope)) || runs_it(db, scope, step),
         (members::APP, "keep" | "forget") => may("use", &scopes::object(scope)) || runs_it(db, scope, step),
         // A release, which every node checks is signed with the release key before it takes it.
@@ -1902,7 +1910,7 @@ pub(crate) mod tests {
         assert!(apply(&db, None, &Scope::Global, &step(2, READS)).is_err(), "the same release's again changes nothing");
         // What each `READS` reads, from the first that reads the scope database (2): add `(READS, hash)`
         // when a release changes them, and read one more.
-        const PINNED: &[(u32, &str)] = &[(2, "1a26a7b14a1b8998d5edcf6b6d00db14a698c6109eb865f7bd8e7c86dcd295a4")];
+        const PINNED: &[(u32, &str)] = &[(2, "1a26a7b14a1b8998d5edcf6b6d00db14a698c6109eb865f7bd8e7c86dcd295a4"), (3, "e614e4c705368711133be27dd44ff51c24ff89da7fe059001ad3990f0b454a67")];
         let mut h = blake3::Hasher::new();
         h.update(super::super::scope::SCHEMA.as_bytes());
         h.update(permissions::SCHEMA.as_bytes());

@@ -527,10 +527,13 @@ impl ScopeDb {
         Some(self.rows("SELECT device FROM runs WHERE principal = ?1", [person(user)], |r| r.get::<_, String>(0)).iter().map(|k| key(k)).collect())
     }
 
-    /// The parts of each device its person switched on or off, by (device, part).
+    /// The parts of each device its person switched on or off, by (device, part), each service's with the scope whose
+    /// added app it runs for. A copy from before services named their scope reads as naming none.
     pub fn switches(&self) -> BTreeMap<(Key, String), Switch> {
-        self.rows("SELECT device, name, switched_on, switched_by, switched_at FROM services", [], |r| {
-            Ok(((key(&r.get::<_, String>(0)?), r.get::<_, String>(1)?), Switch { on: r.get(2)?, by: id(&r.get::<_, String>(3)?), time: r.get::<_, i64>(4)? as u64 }))
+        let scoped = self.row("SELECT 1 FROM pragma_table_info('services') WHERE name = 'scope'", [], |_| Ok(())).is_some();
+        let sql = format!("SELECT device, name, switched_on, switched_by, switched_at, {} FROM services", if scoped { "scope" } else { "NULL" });
+        self.rows(&sql, [], |r| {
+            Ok(((key(&r.get::<_, String>(0)?), r.get::<_, String>(1)?), Switch { on: r.get(2)?, by: id(&r.get::<_, String>(3)?), time: r.get::<_, i64>(4)? as u64, scope: r.get(5)? }))
         })
         .into_iter()
         .collect()
@@ -538,9 +541,7 @@ impl ScopeDb {
 
     /// The latest switch of a part of a device, on or off.
     pub fn switch(&self, k: &Key, name: &str) -> Option<Switch> {
-        self.row("SELECT switched_on, switched_by, switched_at FROM services WHERE device = ?1 AND name = ?2", params![hex(k), name], |r| {
-            Ok(Switch { on: r.get(0)?, by: id(&r.get::<_, String>(1)?), time: r.get::<_, i64>(2)? as u64 })
-        })
+        self.switches().remove(&(*k, name.to_string()))
     }
 
     // Keys.

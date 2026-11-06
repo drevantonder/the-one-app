@@ -1075,11 +1075,11 @@ async fn source(State(node): State<Node>, Path(app): Path<String>, Query(q): Que
     Ok(Json(node.source(&app, q.bundle.as_deref(), q.path.as_deref()).await?))
 }
 
-/// `{ app, scope, installed }`: `scope` is `user`, `group:<id>` (or a group's name) or `global`.
-/// Installing an app also installs the apps it uses.
+/// `{ app, scope, installed, node }`: `scope` is `user`, `group:<id>` (or a group's name) or `global`; `node`, the
+/// device (by name, or `cloudflare`) that runs its services. Installing an app also installs the apps it uses.
 async fn install(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let scope = node.scope_for(&me.caller, text(&body, "scope")?)?;
-    node.install(&me.caller, text(&body, "app")?, &scope, body["installed"] != false).await?;
+    node.install(&me.caller, text(&body, "app")?, &scope, body["installed"] != false, body["node"].as_str()).await?;
     done()
 }
 

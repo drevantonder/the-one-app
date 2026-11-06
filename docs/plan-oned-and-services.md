@@ -231,6 +231,16 @@ bucket and see the node refuse it, with the problem box on the app.
 Check: in `one throwaway`, add WhatsApp and pick the node; see it run there; stop the throwaway node and see the box on
 WhatsApp; Move; remove WhatsApp and see the service stop and its folder go. `--as sam` for an app a group's admin adds.
 
+Done (2026-11-06), simpler than the above: the record is `global`'s `services` row (a `service` step, which every node
+reads), naming beside its node the scope whose added app it runs for. Adding with a node (`ctx.install(app, scope,
+true, node)`, `apps_add`'s `node`, the Add to… sheet's Runs On) writes the install and that row, and stops the service
+on the scope's other node; `apps_move` is adding again elsewhere; removing switches off the scope's rows. Whoever may
+add apps to that scope may switch its row off on anyone's node, so any admin moves everyone's app. Settings › Devices
+and `one services on` write the same rows, naming the scope where the person sees the app added, and each node names
+the scope of its own rows from before, once, without stopping them. The App Store's page and an agent's failed call say
+the problem (off, removed, or what the node said). Not done: a service's folder stays on its node when it's removed or
+moved; Settings › Devices still lists services by node; built-in bundles still name no builds.
+
 ### Phase 7: oned and the app runtime are two programs
 
 - The app runtime (today's node) becomes a program oned starts like any service, but signed by the release key, with

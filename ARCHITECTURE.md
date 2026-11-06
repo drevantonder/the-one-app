@@ -33,7 +33,6 @@ Your devices, and your team's, as one place for apps and agents. A network is on
 - Backups' recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
 - Each app one folder in `apps/`, its service's source beside its `app.js`, and each service its own program: none built into the Mac app (iMessage, Calendar, Contacts and Reminders, whose macOS permissions belong to the Mac app, so they may ship as helpers inside it).
-- Adding an app as desired state: the App Store only records it, and the core deploys it and runs its service on the node the person chose while adding it.
 - The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.
 

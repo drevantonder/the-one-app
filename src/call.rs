@@ -8,7 +8,8 @@ pub enum Append {
     /// A statement that writes the app's database of a scope, which keeps the blobs it names; or with `check`, a query
     /// whose first value must be true as the write runs, else the call fails with that message.
     Exec { scope: String, sql: String, params: Vec<Value>, blobs: Vec<String>, check: Option<String> },
-    Install { app: String, scope: String, installed: bool },
+    /// Adds (or removes) an app in a scope; added, with its service run on `node` (a device's name, or `cloudflare`).
+    Install { app: String, scope: String, installed: bool, node: Option<String> },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     Switch { app: String, schedule: String, scope: String, on: bool },
     /// Says a scope no longer needs a blob it kept: once no scope does, devices delete it.
@@ -17,8 +18,9 @@ pub enum Append {
     Retire { app: String, how: String },
     /// Sets (or with an empty link, clears) where an app's code is kept, with the caller's own rights.
     Source { app: String, link: String },
-    /// Removes a service from a device (or lets it register there again), for someone acting for one of its owners.
-    Service { device: String, name: String, on: bool },
+    /// Runs an app's service on a device (or stops it there), for the app added in `scope` (by default where the caller
+    /// sees it added): for the device's person, or to stop it, for who may add apps where it ran.
+    Service { device: String, name: String, on: bool, scope: Option<String> },
     /// What the call spent on AI: `{ model, usd, input, output }`, for the insights of the app that called it.
     Cost { data: Value },
     /// Makes, changes or lets go of (`release`) a Vault item: `scope` for one it makes, `same` a plain field by
@@ -42,7 +44,7 @@ pub fn appends(list: &Value) -> Result<Vec<Append>> {
             continue;
         }
         if let Some(name) = a["service"].as_str() {
-            appends.push(Append::Service { device: a["device"].as_str().unwrap_or("").into(), name: name.into(), on: a["on"] == true });
+            appends.push(Append::Service { device: a["device"].as_str().unwrap_or("").into(), name: name.into(), on: a["on"] == true, scope: a["scope"].as_str().map(str::to_string) });
             continue;
         }
         if let Some(name) = a["retire"].as_str() {
@@ -62,7 +64,7 @@ pub fn appends(list: &Value) -> Result<Vec<Append>> {
             continue;
         }
         if let Some(name) = a["install"].as_str() {
-            appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false });
+            appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false, node: a["node"].as_str().map(str::to_string) });
             continue;
         }
         let sql = a["exec"].as_str().context("an app writes its database with exec")?.to_string();

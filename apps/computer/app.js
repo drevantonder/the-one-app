@@ -109,7 +109,7 @@ export default {
     remove: {
       reads: false,
       confirm: true,
-      description: "Stop agents using one of your devices or the agent devices on it: removes Computer Use from that device, for one of its owners. Its agent devices and backups stay there, and apps_install_on puts it back.",
+      description: "Stop agents using one of your devices or the agent devices on it: removes Computer Use from that device, for one of its owners. Its agent devices and backups stay there, and switching Computer Use on for that device in Settings › Devices puts it back.",
       input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "a device's name, from computer_devices" } } },
       run: async (ctx, { device }) => {
         const all = await ctx.devices();

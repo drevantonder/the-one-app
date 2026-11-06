@@ -260,9 +260,9 @@ function context(ask, body, appends, later) {
       return (await ask("order")).json();
     },
     /// Installs (or with `installed: false`, uninstalls) an app in a scope, with the caller's own rights there.
-    install: (name, scope, installed = true) => {
+    install: (name, scope, installed = true, node) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ install: name, scope, installed });
+      appends.push({ install: name, scope, installed, ...(node ? { node } : {}) });
     },
     /// Deletes an app ("deleted": to Recently Deleted), restores it ("restored") or erases it for good ("erased"),
     /// for someone acting for its owner.
@@ -276,10 +276,11 @@ function context(ask, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ app_source: name, link: String(link ?? "") });
     },
-    /// Switches a service on or off on a device (by name), for the device's person.
-    service: (name, device, on = false) => {
+    /// Runs an app's service on a device (by name) or stops it there, for the app added in `scope` (by default where the
+    /// caller sees it added): for the device's person, or to stop it, for who may add apps where it ran.
+    service: (name, device, on = false, scope) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ service: name, device, on });
+      appends.push({ service: name, device, on, ...(scope ? { scope } : {}) });
     },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     schedule: (name, schedule, scope, on = true) => {

@@ -215,10 +215,35 @@ impl Node {
                 }
             }
         }
+        if req.service.is_some()
+            && let Some(problem) = self.service_problem(&req.app, &me).await
+        {
+            bail!("{problem}");
+        }
         if why.is_empty() {
             bail!("None of your devices can do this: no device runs {} for you", req.app);
         }
         bail!("None of your devices can do this now. Try again soon. ({})", why.join("; "))
+    }
+
+    /// Why `app`'s service runs nowhere for `me` though it was put on a node, as its problem box in the App Store says
+    /// it: that node is off, was removed, or said what went wrong.
+    async fn service_problem(&self, app: &str, me: &Caller) -> Option<String> {
+        let title = self.title(app).await;
+        let info = self.catalog(me, false).await.ok()?.into_iter().find(|a| a["name"] == app)?;
+        let runs: Vec<Value> = info["runs_on"].as_array().cloned().unwrap_or_default();
+        let added = info["installed"].as_array().is_some_and(|a| !a.is_empty());
+        if !added || runs.iter().any(|r| r["name"].is_string() && r["online"] == true && r["problem"].is_null()) {
+            return None;
+        }
+        let r = runs.first().unwrap_or(&Value::Null);
+        let why = match (r["name"].as_str(), r["online"] == true, r["problem"].as_str()) {
+            _ if runs.is_empty() => "it runs on none".to_string(),
+            (None, ..) => "the node it ran on was removed".to_string(),
+            (Some(node), false, _) => format!("{node} is off"),
+            (Some(node), true, problem) => format!("on {node}, {}", problem.unwrap_or("it isn't running")),
+        };
+        Some(format!("{title} needs its service on a node that's on: {why}. Turn it on, or move it with apps_move {app} <node> (apps_devices {app} lists them)."))
     }
 
     /// Runs a service's call on every device that runs it for the caller, one at a time: `{ <device>: answer }`, or
@@ -760,9 +785,9 @@ impl Node {
                 }
             }
             for append in installs {
-                if let Append::Install { app, scope, installed } = append {
+                if let Append::Install { app, scope, installed, node } = append {
                     let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
-                    writes.extend(self.install_entries(me, &app, &scope, installed).await?);
+                    writes.extend(self.install_entries(me, &app, &scope, installed, node.as_deref()).await?);
                 }
             }
             for (scope, content) in writes {

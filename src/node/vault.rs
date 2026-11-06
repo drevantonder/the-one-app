@@ -153,7 +153,7 @@ impl Node {
     }
 
     /// This device's own person, as its own work opens their data.
-    fn own_caller(&self) -> Result<Caller> {
+    pub(super) fn own_caller(&self) -> Result<Caller> {
         Ok(Caller { key: self.0.id, user: self.user()?, agent: None, token: None })
     }
 

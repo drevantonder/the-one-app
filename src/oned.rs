@@ -291,6 +291,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
             keep_runtime(&node, &runtime, &mut apps, &mut apps_stops);
             if looked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 released = runtime.block_on(node.service_builds());
+                runtime.block_on(node.name_services_scopes());
                 declared.clear();
                 looked = Some(Instant::now());
             }
@@ -302,8 +303,11 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                         // A Mac service's helper the Mac app carries runs unless its person switched it off there, as
                         // the Mac app's own services did; any other, only where it's switched on.
                         let wanted = on.contains_key(name) || (helper(name).is_some() && node.removed_here(name).is_none());
+                        // Switched on again while it runs fine (its record naming its scope), it goes on running.
+                        let troubled = !running.contains_key(name) || NOW.lock().unwrap().0.get(name).is_some_and(|n| n.problem.is_some());
                         if let Some(at) = on.get(name)
                             && switched.insert(name.clone(), *at).is_some_and(|was| was != *at)
+                            && troubled
                         {
                             failed.lock().unwrap().remove(name);
                             stops.remove(name);
