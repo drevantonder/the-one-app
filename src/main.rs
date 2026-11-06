@@ -200,7 +200,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
 }
 
 fn connection(node: &Client) -> String {
-    let state = match node.get("/v1/state") {
+    let state = match node.state() {
         Ok(state) => state,
         Err(err) if client_device::active() => return format!("This computer is one of your devices, but {err:#}."),
         Err(_) => return format!("{}.", client_device::not_here()),
@@ -208,15 +208,13 @@ fn connection(node: &Client) -> String {
     if let Some(said) = client_device::said(&state) {
         return format!("Connected as {said}. {CLI} status shows your devices; {CLI} apps what you can run.");
     }
-    let device = state["device"]["name"].as_str().unwrap_or("this device");
-    let i = &state["network"];
-    if i.is_null() {
+    let device = &state.device.name;
+    let Some(network) = &state.network else {
         return format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it, or {CLI} create <name> --as <your name> starts a new one.");
-    }
-    let network = i["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| format!("{YOURS} (still joining)"));
-    let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("");
-    let ready = if state["device"]["ready"] == true { "" } else { ", catching up" };
-    format!("Connected to {network} as {me}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
+    };
+    let network = if network.name.is_empty() { format!("{YOURS} (still joining)") } else { network.name.clone() };
+    let ready = if state.device.ready { "" } else { ", catching up" };
+    format!("Connected to {network} as {}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.", state.looking())
 }
 
 /// How the CLI asks this machine's node (`agent()`): as whom this machine is signed in as, when `signed_in`.

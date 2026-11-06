@@ -170,8 +170,8 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, reader: R
     // One that needs a part on a device, with none of yours running it: signing in can't work yet.
     let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
     let on_none = || {
-        let state = node.get("/v1/state").ok()?;
-        Some(!state["network"]["devices"].as_array().into_iter().flatten().any(|d| d["services"].as_array().into_iter().flatten().any(|s| parts.contains(&s))))
+        let state = node.state().ok()?;
+        Some(!state.network?.devices.iter().any(|d| d.now.services.iter().any(|s| parts.iter().any(|p| *p == s))))
     };
     Some(match (signs_in, app["needs"].as_str()) {
         (_, Some(needs)) if !parts.is_empty() && on_none() == Some(true) => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),

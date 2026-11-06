@@ -41,6 +41,19 @@ impl Priority {
     }
 }
 
+impl serde::Serialize for Priority {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.to_value().serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Priority {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        Priority::from_value(&value).ok_or_else(|| serde::de::Error::custom("a priority is a number from 1 or \"last\""))
+    }
+}
+
 /// What the admins set, by device key (hex) or `cloudflare`; what isn't a priority is skipped.
 pub fn set(settings: &BTreeMap<String, String>) -> BTreeMap<String, Priority> {
     let parsed: BTreeMap<String, Value> = settings.get(SETTING).and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();

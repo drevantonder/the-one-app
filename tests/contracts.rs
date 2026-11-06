@@ -641,3 +641,130 @@ fn every_renderer_of_a_widgets_tree_draws_the_same_types_and_tones() {
     }
     assert!(missing.is_empty(), "{}", missing.join("\n"));
 }
+
+/// Every `state.<field>` the screens, the web client and the Workers read of `GET /v1/state` is a field the node says
+/// (`one::state::State`): a field renamed or dropped there shows as a screen that reads nothing, which no one sees fail.
+/// The sample has a value in every field, so a field added to the Rust is added here (it won't compile otherwise).
+#[test]
+fn what_the_screens_read_of_the_state_is_what_the_node_says() {
+    use one::database::scopes::{Kind, Role};
+    use one::state::*;
+    let part = || Part { name: "apps".into(), on: true, title: Some("Apps".into()), fixed: true, doing: Some("Starting".into()), problem: Some("It stopped".into()), sandbox: Some("why".into()), person: true };
+    let sample = State {
+        config: Config { name: "The One App".into(), cli: "one".into(), store: "apps".into(), install: Some("curl".into()) },
+        me: Viewer { key: "k".into(), name: "n".into(), user: "u".into() },
+        device: Answering { key: "k".into(), name: "n".into(), ready: true, guide: Some("g".into()) },
+        user: Some(Person { id: "u".into(), name: "n".into(), role: Role::Admin }),
+        network: Some(Network {
+            name: "n".into(),
+            root: Some("r".into()),
+            user: "u".into(),
+            role: Some(Role::Admin),
+            recovery: Some("r".into()),
+            epochs: [("global".to_string(), Epoch { n: 1, hashes: Default::default() })].into(),
+            runs: Some(vec![]),
+            recovery_used: Some(RecoveryUsed { time: 1, user: "u".into() }),
+            recovery_set: 1,
+            member: true,
+            users: vec![NetworkUser { id: "u".into(), name: "n".into(), handle: "h".into(), role: Role::Admin, me: true }],
+            groups: vec![Group { id: "g".into(), name: "n".into(), handle: "h".into(), role: Some(Role::Admin), members: vec![Member { user: "u".into(), role: Role::Admin }], invited: vec![] }],
+            devices: vec![Device {
+                key: "k".into(),
+                seal: "s".into(),
+                name: "n".into(),
+                user: "u".into(),
+                roles: [Kind::Compute].into(),
+                since: 1,
+                kind: "laptop".into(),
+                priority: one::rank::Priority::Last,
+                order: 0,
+                serves_me: true,
+                runs_for: vec![],
+                off_services: vec![Switched { name: "n".into(), time: 1 }],
+                me: true,
+                now: DeviceNow {
+                    here: true,
+                    online: true,
+                    far: true,
+                    build: Some("b".into()),
+                    target: Some("t".into()),
+                    services: vec![],
+                    installed_services: vec![InstalledService { name: "n".into(), title: "t".into(), icon: Some("i".into()), color: Some("c".into()), domain: Some("d".into()), image: Some("i".into()), image_kind: Some("k".into()), description: Some("d".into()), version: Some("v".into()), built_in: true, installed_by: Some("u".into()), installed: Some(1), users: vec![] }],
+                    parts: Some(vec![part()]),
+                    load: Some(Default::default()),
+                    kind: None,
+                },
+            }],
+            devices_at: 1,
+            clients: vec![Client { key: "k".into(), seal: "s".into(), name: "n".into(), user: "u".into(), roles: [Kind::Client].into(), passkey: Some("p".into()), device: Some("d".into()), since: 1, place: Some("p".into()), me: true, sign_in: Some(one::sign_in_proof::Account::Passkey { credential: "c".into(), public_key: "k".into() }) }],
+            app_schedules: vec![AppSchedule { endpoint: "e".into(), scope: "s".into(), app: "a".into(), until: 1, by: "u".into(), keys: Default::default() }],
+            steps: 1,
+            settings: [("address".to_string(), "a".to_string())].into(),
+            cloudflare_node: Some(CloudflareNode { priority: one::rank::Priority::Last, key: "k".into(), runs_for: vec![], parts: vec![part()] }),
+        }),
+        pages: vec![Page { scope: "user".into(), title: "You".into(), subtitle: "".into(), hidden: false }],
+        vault_requests: 1,
+        arrangements: Default::default(),
+        backups: Some(json!({})),
+        settings_items: vec![SettingsItem { name: "n".into(), title: "t".into(), icon: "i".into(), color: "c".into(), url: Some("u".into()), badge: Some(1), app: Some("a".into()) }],
+        agent_prompt: "p".into(),
+        client: Some(ClientHere { key: "k".into(), name: "n".into() }),
+    };
+    let said = serde_json::to_value(&sample).unwrap();
+    assert_eq!(serde_json::from_value::<State>(said.clone()).map(|s| serde_json::to_value(s).unwrap()).unwrap(), said, "the state reads back as it's said");
+    // The fields of each object the readers go into.
+    let (user, me, device, config, client) = (&said["user"], &said["me"], &said["device"], &said["config"], &said["client"]);
+    let names = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<std::collections::BTreeSet<_>>();
+    let (top, network) = (names(&said), names(&said["network"]));
+    let objects = [("user", names(user)), ("me", names(me)), ("device", names(device)), ("config", names(config)), ("client", names(client)), ("network", network.clone())];
+
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let mut sources = vec![root.join("cloudflare/web/web.js"), root.join("cloudflare/node/worker.js"), root.join("cloudflare/mcp/worker.js")];
+    for dir in ["src/screen/home", "src/screen/settings"] {
+        let mut stack = vec![root.join(dir)];
+        while let Some(dir) = stack.pop() {
+            for f in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = f.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "js" || e == "jsx") {
+                    sources.push(path);
+                }
+            }
+        }
+    }
+    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    let mut unknown = Vec::new();
+    for path in &sources {
+        let source = std::fs::read_to_string(path).unwrap();
+        for (at, _) in source.match_indices("state") {
+            let (before, line_start) = (&source[..at], source[..at].rfind('\n').map_or(0, |n| n + 1));
+            // A word of its own, not the browser's `history.state` nor in a comment.
+            if before.chars().next_back().is_some_and(word) || before.ends_with("history.") || source[line_start..].trim_start().starts_with("//") {
+                continue;
+            }
+            // `state.a`, `state?.a`, then `.b` for what's an object: a, b.
+            let mut chain = Vec::new();
+            let mut rest = &source[at + 5..];
+            while chain.len() < 2 {
+                let Some(r) = rest.strip_prefix("?.").or_else(|| rest.strip_prefix('.')) else { break };
+                let len = r.find(|c: char| !word(c)).unwrap_or(r.len());
+                if len == 0 {
+                    break;
+                }
+                chain.push(&r[..len]);
+                rest = &r[len..];
+            }
+            let line = source[..at].matches('\n').count() + 1;
+            let Some(first) = chain.first() else { continue };
+            if !top.contains(*first) {
+                unknown.push(format!("{}:{line}: state.{first}", path.strip_prefix(root).unwrap().display()));
+            } else if let (Some(second), Some((_, fields))) = (chain.get(1), objects.iter().find(|(n, _)| n == first)) {
+                if !fields.contains(*second) {
+                    unknown.push(format!("{}:{line}: state.{first}.{second}", path.strip_prefix(root).unwrap().display()));
+                }
+            }
+        }
+    }
+    assert!(unknown.is_empty(), "these read what the node's state doesn't say (src/state.rs):\n{}", unknown.join("\n"));
+}

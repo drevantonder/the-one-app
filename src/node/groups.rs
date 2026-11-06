@@ -6,6 +6,7 @@ use serde_json::{Map, Value, json};
 use crate::cli::{Command, Given};
 use crate::config::{CLI, YOURS};
 use crate::core_tools::{Asked, Feature};
+use crate::state::State;
 
 pub fn feature() -> Feature {
     let guide = format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined. Each person and group has a handle, like andre or family, unique among them, which apps call them by (Repos' addresses are <handle>/<repo>); groups_handle changes yours, or a group's you're an admin of.");
@@ -21,7 +22,7 @@ fn tools() -> Vec<Value> {
 
 fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
     match tool {
-        "list" => Ok(json!(said(&asked.node.get("/v1/state")?))),
+        "list" => Ok(json!(said(&asked.node.state()?))),
         "handle" => {
             let handle = crate::settings_tools::HANDLE;
             let (path, body) = (handle.asks)(input).map_err(anyhow::Error::msg)?;
@@ -32,45 +33,42 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
 }
 
 /// A person or group as groups_list says them: their name, then their handle (`Andre @andre`).
-fn handled(v: &Value) -> String {
-    match v["handle"].as_str() {
-        Some(h) => format!("{} @{h}", v["name"].as_str().unwrap_or("")),
-        None => v["name"].as_str().unwrap_or("").to_string(),
+fn handled(name: &str, handle: &str) -> String {
+    match handle {
+        "" => name.to_string(),
+        handle => format!("{name} @{handle}"),
     }
 }
 
 /// The people in the network (`/v1/state`'s), you first, each with their role; then every group in words: its people
 /// with their roles, and who's invited.
-pub fn said(state: &Value) -> String {
-    let i = &state["network"];
-    let names: std::collections::HashMap<&str, String> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, handled(u)))).collect();
-    let me = i["user"].as_str();
-    let mut users: Vec<&Value> = i["users"].as_array().into_iter().flatten().collect();
-    users.sort_by_key(|u| u["me"] != true);
+pub fn said(state: &State) -> String {
+    let Some(i) = &state.network else { return format!("People in {YOURS}: none.\nNo groups yet.\n") };
+    let names: std::collections::HashMap<&str, String> = i.users.iter().map(|u| (u.id.as_str(), handled(&u.name, &u.handle))).collect();
+    let mut users: Vec<&crate::state::NetworkUser> = i.users.iter().collect();
+    users.sort_by_key(|u| !u.me);
     let everyone: Vec<String> = users.iter().map(|u| {
-        let (name, role) = (handled(u), u["role"].as_str().unwrap_or("member"));
-        if u["me"] == true { format!("{name} (you, {role})") } else { format!("{name} ({role})") }
+        let (name, role) = (handled(&u.name, &u.handle), u.role.as_str());
+        if u.me { format!("{name} (you, {role})") } else { format!("{name} ({role})") }
     }).collect();
     let mut out = format!("People in {YOURS}: {}.\n", everyone.join(", "));
-    let people = |list: &Value| -> Vec<String> {
-        list.as_array().into_iter().flatten().map(|m| {
-            let id = m["user"].as_str().unwrap_or("");
-            let (name, role) = (names.get(id).map_or(id, String::as_str), m["role"].as_str().unwrap_or("member"));
-            match me == Some(id) {
+    let people = |list: &[crate::state::Member]| -> Vec<String> {
+        list.iter().map(|m| {
+            let (name, role) = (names.get(m.user.as_str()).map_or(m.user.as_str(), String::as_str), m.role.as_str());
+            match i.user == m.user {
                 true => format!("{name} (you, {role})"),
                 false => format!("{name} ({role})"),
             }
         }).collect()
     };
-    let groups = i["groups"].as_array().cloned().unwrap_or_default();
-    if groups.is_empty() {
+    if i.groups.is_empty() {
         out.push_str("No groups yet.\n");
         return out;
     }
     out.push_str("Groups:\n");
-    for g in &groups {
-        out.push_str(&format!("  {}: {}\n", handled(g), people(&g["members"]).join(", ")));
-        let invited = people(&g["invited"]);
+    for g in &i.groups {
+        out.push_str(&format!("  {}: {}\n", handled(&g.name, &g.handle), people(&g.members).join(", ")));
+        let invited = people(&g.invited);
         if !invited.is_empty() {
             out.push_str(&format!("    invited, not joined yet: {}\n", invited.join(", ")));
         }

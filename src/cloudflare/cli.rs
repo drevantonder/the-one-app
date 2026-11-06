@@ -5,28 +5,28 @@ use serde_json::{Value, json};
 
 use crate::cli::{Command, Failed, Given};
 use crate::config::{CLI, NAME, YOURS};
+use crate::database::scopes::Role;
 use crate::api::Client;
 
 /// `settings` with the network's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
 /// node on this machine knows them, for the relay to take only them; none when no node answers here, which `needed`
 /// refuses, since that relay would take no one.
 fn devices_here(node: &Client, settings: crate::cloudflare::Settings, needed: bool) -> Result<crate::cloudflare::Settings> {
-    let state = node.get("/v1/state").unwrap_or_default();
-    let network = &state["network"];
-    let admin = |user: &Value| network["users"].as_array().into_iter().flatten().any(|u| u["id"] == *user && u["role"] == "admin");
-    let mut devices: Vec<Value> = ["devices", "clients"]
+    let network = node.state().ok().and_then(|s| s.network);
+    let admin = |user: &str| network.iter().flat_map(|n| &n.users).any(|u| u.id == user && u.role == Role::Admin);
+    let mut devices: Vec<Value> = network
         .iter()
-        .flat_map(|list| network[*list].as_array().into_iter().flatten())
-        .filter(|d| d["key"].as_str().is_some_and(|k| k.len() == 64))
-        .map(|d| {
-            let roles: Vec<&str> = d["roles"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-            json!({ "key": d["key"], "role": roles.join(" "), "admin": admin(&d["user"]) })
+        .flat_map(|n| n.devices.iter().map(|d| (&d.key, &d.roles, &d.user)).chain(n.clients.iter().map(|c| (&c.key, &c.roles, &c.user))))
+        .filter(|(key, ..)| key.len() == 64)
+        .map(|(key, roles, user)| {
+            let roles: Vec<&str> = roles.iter().map(|r| r.as_str()).collect();
+            json!({ "key": key, "role": roles.join(" "), "admin": admin(user) })
         })
         .collect();
     anyhow::ensure!(!needed || !devices.is_empty(), "no node of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new network, whose relay takes devices once this runs again beside one");
     // The network's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
-    devices.extend(network["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
-    let root = network["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
+    devices.extend(network.as_ref().and_then(|n| n.recovery.as_ref()).map(|k| json!({ "key": k, "role": "client", "admin": false })));
+    let root = network.and_then(|n| n.root).filter(|r| r.len() == 64);
     Ok(crate::cloudflare::Settings { devices, root, ..settings })
 }
 
@@ -143,7 +143,7 @@ pub fn commands() -> Command {
                     // only for it (`sign_in_proof::CLIENTS`), whatever auth says.
                     if let Some((id, _)) = &settings.google {
                         let clients = format!("https://accounts.google.com {id}");
-                        let had = node.get("/v1/state").ok().and_then(|s| s["network"]["settings"][crate::sign_in_proof::CLIENTS].as_str().map(str::to_string));
+                        let had = node.state().ok().and_then(|s| s.network?.settings.get(crate::sign_in_proof::CLIENTS).cloned());
                         if had.as_deref() != Some(clients.as_str())
                             && let Err(err) = node.post("/v1/settings", json!({ "name": crate::sign_in_proof::CLIENTS, "value": clients }))
                         {
@@ -177,7 +177,7 @@ pub fn commands() -> Command {
                     // This machine's person, inviting themselves to their own network, is who they are in it.
                     let user = match g.flag("user") {
                         Some(user) => Some(user.to_string()),
-                        None => node.get("/v1/state").ok().filter(|s| s["user"]["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
+                        None => node.state().ok().and_then(|s| s.user).filter(|u| u.name.eq_ignore_ascii_case(name)).map(|u| u.id),
                     };
                     let email = g.flag("email");
                     // Someone new is invited by this machine's node, which keeps the secret for their first device's approval.
@@ -189,7 +189,7 @@ pub fn commands() -> Command {
                         let days = crate::protocol::INVITE_DAYS;
                         let how = if crate::config::SIGN_IN == crate::config::SignIn::Google { "they sign in with Google and join" } else { "they make their passkey and join" };
                         println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
-                        let me = node.get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string));
+                        let me = node.state().ok().and_then(|s| s.user).map(|u| u.id);
                         if user.is_some() && user == me {
                             println!("\nIt opens their browser waiting for approval, with a code: approve it here with {CLI} devices approve <code> --confirm.");
                         }

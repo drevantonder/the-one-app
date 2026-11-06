@@ -776,6 +776,15 @@ pub enum Role {
     Member,
 }
 
+impl Role {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Admin => "admin",
+            Role::Member => "member",
+        }
+    }
+}
+
 /// Who owns an app.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Principal {
@@ -823,6 +832,19 @@ pub enum Kind {
     Client,
     Compute,
     Service,
+}
+
+impl Kind {
+    /// Every role, as the relay lists them (`protocol::javascript`'s `ROLES`).
+    pub const ALL: [Kind; 3] = [Kind::Client, Kind::Compute, Kind::Service];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Client => "client",
+            Kind::Compute => "compute",
+            Kind::Service => "service",
+        }
+    }
 }
 
 /// An endpoint of the network, listed by a `device` step (or a new network's first, `content::first`): its key, the key things are sealed to,

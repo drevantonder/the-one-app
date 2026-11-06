@@ -622,19 +622,19 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
         Some(m),
         me,
         one::state::Here {
-            me: json!({ "key": "", "name": client, "user": me }),
-            client: Some(json!({ "key": "", "name": client })),
-            device: json!({ "key": cloudflare.map(|k| one::keys::hex(&k)).unwrap_or_default(), "name": "Cloudflare", "ready": true, "guide": null }),
+            me: one::state::Viewer { key: String::new(), name: client.to_string(), user: me.to_string() },
+            client: Some(one::state::ClientHere { key: String::new(), name: client.to_string() }),
+            device: one::state::Answering { key: cloudflare.map(|k| one::keys::hex(&k)).unwrap_or_default(), name: "Cloudflare".into(), ready: true, guide: None },
+            looking: None,
             member: false,
             steps: 0,
             waiting: one::state::waiting(m, me, read(), now),
-            arrangements: json!(arrangements),
+            arrangements,
             backups: None,
             guide: None,
             // No throwaway network has a Cloudflare node.
             throwaway: false,
             device_now: &|_| Ok(Default::default()),
-            client_now: &|_| Default::default(),
         },
     )?;
     let runs = |s: &Scope| cloudflare.is_some_and(|k| m.runs_for(&k, s));

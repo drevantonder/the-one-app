@@ -372,10 +372,10 @@ impl Read for Streamed {
 }
 
 /// How this computer reaches its network, for the bare command and `status`: as a device, through the node that answered.
-pub fn said(state: &serde_json::Value) -> Option<String> {
+pub fn said(state: &one::state::State) -> Option<String> {
     let (name, key) = me()?;
-    let through = state["device"]["name"].as_str().unwrap_or("your devices");
-    let me = state["user"]["name"].as_str().unwrap_or("you");
-    let network = state["network"]["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| YOURS.to_string());
+    let through = Some(state.device.name.as_str()).filter(|n| !n.is_empty()).unwrap_or("your devices");
+    let me = state.user.as_ref().map_or("you", |u| u.name.as_str());
+    let network = state.network.as_ref().map(|n| n.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| YOURS.to_string());
     Some(format!("{name} ({}), one of {me}'s devices in {network}, asking {through}", &key[..8.min(key.len())]))
 }

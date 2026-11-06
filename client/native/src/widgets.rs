@@ -19,13 +19,13 @@ const IMAGE_MOST: usize = 2 << 20;
 pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), String> {
     static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _one = ONE.lock().await;
-    let state = crate::node(device, "GET", "/v1/state", None).await?;
+    let state: one::state::State = serde_json::from_value(crate::node(device, "GET", "/v1/state", None).await?).map_err(|e| e.to_string())?;
     let apps = crate::node(device, "GET", "/v1/apps", None).await?;
     let apps: Vec<Value> = apps.as_array().cloned().unwrap_or_default();
-    if state["user"]["id"].is_null() {
+    if state.user.is_none() {
         return Ok(());
     }
-    let pages: Vec<(String, String)> = state["pages"].as_array().into_iter().flatten().map(|p| (p["scope"].as_str().unwrap_or_default().to_string(), p["title"].as_str().unwrap_or_default().to_string())).collect();
+    let pages: Vec<(String, String)> = state.pages.into_iter().map(|p| (p.scope, p.title)).collect();
 
     let kept: Value = std::fs::read(dir.join("widgets.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let mut answered = true;

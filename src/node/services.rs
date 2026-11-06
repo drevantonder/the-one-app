@@ -3,6 +3,7 @@
 
 use crate::config::YOURS;
 use super::*;
+use crate::state::Part;
 
 pub(crate) mod routes;
 pub mod cli;
@@ -198,32 +199,32 @@ impl Node {
     /// its processes, its own or fetched from a release when switched on), with whether it's switched on and, while
     /// it isn't simply on or off, what it's doing (`doing`) or what went wrong (`problem`), and its title if it gives
     /// one. Devices that don't say this run only what they list as serving.
-    pub(super) fn parts_here(&self, i: &Network) -> Result<Vec<Value>> {
+    pub(super) fn parts_here(&self, i: &Network) -> Result<Vec<Part>> {
         let m = i.r.db();
         let on = |name: &str| -> Result<bool> { Ok(!Self::off(m, &self.0.id, name)?) };
-        let mut out: BTreeMap<String, Value> = BTreeMap::new();
-        out.insert(scopes::APPS_PART.into(), json!({ "name": scopes::APPS_PART, "on": on(scopes::APPS_PART)? }));
+        let mut out: BTreeMap<String, Part> = BTreeMap::new();
+        out.insert(scopes::APPS_PART.into(), Part { on: on(scopes::APPS_PART)?, ..Part::off(scopes::APPS_PART) });
         for (name, title) in self.offered_before() {
-            out.insert(name.clone(), json!({ "name": name, "title": title, "on": on(&name)? }));
+            out.insert(name.clone(), Part { on: on(&name)?, title: title.as_str().map(str::to_string), ..Part::off(&name) });
         }
         for name in self.0.services.offered() {
-            out.insert(name.clone(), json!({ "name": name, "title": self.service_title(&name), "on": on(&name)? }));
+            out.insert(name.clone(), Part { on: on(&name)?, title: Some(self.service_title(&name)), ..Part::off(&name) });
         }
         // A process of oned's is on only by its entry: with none, it's off; but a Mac helper the Mac app carries is on
         // unless switched off, as oned runs it.
         let switched = |name: &str| -> Result<bool> { Ok(m.switch(&self.0.id, name)?.is_some_and(|s| s.on) || (crate::oned::helper(name).is_some() && on(name)?)) };
         let (processes, now) = self.0.parts.now();
         for name in &processes {
-            out.insert(name.clone(), json!({ "name": name, "on": switched(name)? }));
+            out.insert(name.clone(), Part { on: switched(name)?, ..Part::off(name) });
         }
         for (name, now) in now {
-            if let (Some(Value::Object(part)), Value::Object(now)) = (out.get_mut(&name), json!(now)) {
-                part.extend(now);
+            if let Some(part) = out.get_mut(&name) {
+                (part.doing, part.problem) = (now.doing.map(str::to_string), now.problem);
             }
         }
         for (name, held) in self.0.parts.held() {
-            if let (Some(Value::Object(part)), Value::Object(held)) = (out.get_mut(&name), json!(held)) {
-                part.extend(held);
+            if let Some(part) = out.get_mut(&name) {
+                (part.sandbox, part.person) = (held.sandbox, held.person);
             }
         }
         // A registered one (the Mac app's), switched on but not registered now: starting while it registers again,
@@ -233,13 +234,13 @@ impl Node {
         let before = self.offered_before();
         for (name, part) in out.iter_mut() {
             let registered = lately.contains(name) || before.contains_key(name);
-            if !registered || processes.contains(name) || !on(name)? || self.0.services.has(name) || part.get("problem").is_some_and(|p| !p.is_null()) {
+            if !registered || processes.contains(name) || !on(name)? || self.0.services.has(name) || part.problem.is_some() {
                 continue;
             }
             if starting || lately.contains(name) {
-                part["doing"] = json!("Starting");
+                part.doing = Some("Starting".into());
             } else {
-                part["problem"] = json!("It stopped, and hasn’t started again. Its device’s log says why.");
+                part.problem = Some("It stopped, and hasn’t started again. Its device’s log says why.".into());
             }
         }
         Ok(out.into_values().collect())

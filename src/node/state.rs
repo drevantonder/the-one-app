@@ -1,6 +1,7 @@
 //! The network's members and settings, as people and their clients see them and change them, and finding them by name.
 
 use super::*;
+use crate::state::{Answering, ClientHere, DeviceNow, InstalledService, State, Viewer};
 
 impl Node {
     pub fn is_user(&self, user: &str) -> bool {
@@ -25,33 +26,33 @@ impl Node {
     }
 
     /// Everything a shell needs to draw this device and its network, for this device's local user.
-    pub fn state(&self) -> Result<Value> {
+    pub fn state(&self) -> Result<State> {
         let user = self.user().unwrap_or_default();
         self.state_for(&Caller::own(self.0.id, user))
     }
 
     /// The state as `viewer`, this device or a client it serves, sees it.
-    pub fn state_for(&self, viewer: &Caller) -> Result<Value> {
+    pub fn state_for(&self, viewer: &Caller) -> Result<State> {
         self.state_as(viewer, None)
     }
 
     /// The same for someone signed in at the network's address through `client` (its name), which is no device: not the
     /// device it reached, as the Cloudflare node says too.
-    pub fn state_for_sign_in(&self, viewer: &Caller, client: &str) -> Result<Value> {
+    pub fn state_for_sign_in(&self, viewer: &Caller, client: &str) -> Result<State> {
         self.state_as(viewer, Some(client))
     }
 
-    pub(super) fn state_as(&self, viewer: &Caller, sign_in: Option<&str>) -> Result<Value> {
+    pub(super) fn state_as(&self, viewer: &Caller, sign_in: Option<&str>) -> Result<State> {
         // The device looking, if it's one.
         let device = sign_in.is_none().then_some(viewer.key);
         let ready = self.ready();
         let waiting = self.waiting_requests(viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
-        let Ok(network) = self.0.network.lock() else { return Ok(json!({ "error": "this device couldn't answer that: a bug in it, which its log shows" })) };
+        let Ok(network) = self.0.network.lock() else { bail!("this device couldn't answer that: a bug in it, which its log shows") };
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { network.as_ref().map(|i| i.r.db().machine(&viewer.key)).transpose()?.flatten().map(|m| m.name.clone()).unwrap_or_default() };
         let backups = network.as_ref().map(|i| self.backup_problem(i, &viewer.user)).transpose()?.flatten();
         let here_services = network.as_ref().map(|i| self.services_here(i)).transpose()?.unwrap_or_default();
-        let here_parts = network.as_ref().map(|i| self.parts_here(i)).transpose()?.map_or(Value::Null, |parts| json!(parts));
+        let here_parts = network.as_ref().map(|i| self.parts_here(i)).transpose()?;
         // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
         let looking = match (device, network.as_ref()) {
             (Some(key), _) => Some(key),
@@ -59,8 +60,8 @@ impl Node {
             (None, None) => None,
         };
         let me = &viewer.user;
-        let device_now = |s: &scopes::Machine| -> Result<serde_json::Map<String, Value>> {
-            let Some(i) = network.as_ref() else { return Ok(serde_json::Map::new()) };
+        let device_now = |s: &scopes::Machine| -> Result<DeviceNow> {
+            let Some(i) = network.as_ref() else { return Ok(DeviceNow::default()) };
             let m = i.r.db();
             let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
             // The containers on a device are its person's business.
@@ -81,44 +82,38 @@ impl Node {
                     }
                 }
             }
-            let now = json!({
-                "kind": load.as_ref().map(|l| l.kind.clone()), "far": i.far.get(&s.key).is_some_and(|d| *d > FAR),
-                "me": Some(s.key) == looking, "here": s.key == self.0.id, "online": s.key == self.0.id || session.is_some(),
-                "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
-                "services": services.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
-                "installed_services": installed_services(m, s, &services, i.builds.get(&s.key).map(|r| r.commit.as_str()))?,
+            let build = i.builds.get(&s.key);
+            Ok(DeviceNow {
+                kind: load.as_ref().map(|l| l.kind.clone()),
+                far: i.far.get(&s.key).is_some_and(|d| *d > FAR),
+                here: s.key == self.0.id,
+                online: s.key == self.0.id || session.is_some(),
+                build: build.map(|r| r.commit.clone()),
+                target: build.map(|r| r.target.clone()),
+                services: services.iter().map(|d| d.0.clone()).collect(),
+                installed_services: installed_services(m, s, &services, build.map(|r| r.commit.as_str()))?,
                 // What it can run, its person's and the admins' to see.
-                "parts": if !m.may(me, "remove", &scopes::device(&s.key)) { Value::Null } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).unwrap_or(Value::Null) },
-                "load": load,
-            });
-            match now {
-                Value::Object(now) => Ok(now),
-                _ => unreachable!(),
-            }
-        };
-        let client_now = |c: &scopes::Machine| {
-            match json!({ "me": Some(c.key) == looking }) {
-                Value::Object(now) => now,
-                _ => unreachable!(),
-            }
+                parts: if !m.may(me, "remove", &scopes::device(&s.key)) { None } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).and_then(|p| serde_json::from_value(p).ok()) },
+                load,
+            })
         };
         let here = crate::state::Here {
             me: match sign_in {
-                None => json!({ "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user }),
-                Some(client) => json!({ "key": "", "name": client, "user": viewer.user }),
+                None => Viewer { key: hex(&viewer.key), name: viewer_name.clone(), user: viewer.user.clone() },
+                Some(client) => Viewer { key: String::new(), name: client.to_string(), user: viewer.user.clone() },
             },
-            client: (sign_in.is_none() && viewer.key != self.0.id).then(|| json!({ "key": hex(&viewer.key), "name": viewer_name })),
-            device: json!({ "key": hex(&self.0.id), "name": self.device_name(), "ready": ready, "guide": self.guide() }),
+            client: (sign_in.is_none() && viewer.key != self.0.id).then(|| ClientHere { key: hex(&viewer.key), name: viewer_name }),
+            device: Answering { key: hex(&self.0.id), name: self.device_name(), ready, guide: self.guide() },
+            looking,
             member: network.as_ref().map(|i| i.r.db().compute(&self.0.id)).transpose()?.flatten().is_some(),
             // `global`'s steps read.
             steps: network.as_ref().map(|i| i.r.at().unwrap_or(0)).unwrap_or(0),
             waiting,
-            arrangements: json!(arrangements),
+            arrangements,
             backups,
             guide: self.guide(),
             throwaway: matches!(crate::mode::here(), crate::mode::Mode::Throwaway(_)),
             device_now: &device_now,
-            client_now: &client_now,
         };
         crate::state::state(network.as_ref().map(|i| i.r.db()), me, here)
     }
@@ -254,10 +249,10 @@ impl Node {
     }
 }
 
-/// What a device says of each service serving there, as `GET /v1/state` lists it: what it is, its version (a
-/// service's own), whom it serves, and who installed it.
-fn installed_services(m: &ScopeDb, device: &scopes::Machine, services: &[Service], build: Option<&str>) -> Result<Vec<Value>> {
+/// What a device says of each service serving there, as `GET /v1/state` lists it.
+fn installed_services(m: &ScopeDb, device: &scopes::Machine, services: &[Service], build: Option<&str>) -> Result<Vec<InstalledService>> {
     let name_of = |u: &String| -> Result<Option<String>> { Ok(m.user_ever(u)?.map(|u| u.name)) };
+    let text = |v: &Value| v.as_str().map(str::to_string);
     let mut out = Vec::new();
     for (name, users, d) in services {
         let built_in = d["built_in"] == true;
@@ -272,11 +267,21 @@ fn installed_services(m: &ScopeDb, device: &scopes::Machine, services: &[Service
         for u in users {
             who.extend(name_of(u)?);
         }
-        out.push(json!({
-            "name": name, "title": d["title"].as_str().unwrap_or(name), "icon": d["icon"], "color": d["color"], "domain": d["domain"], "image": d["image"], "image_kind": d["image_kind"], "local_app": d["local_app"],
-            "description": d["description"], "version": d["version"].as_str().or(built_in.then_some(build).flatten()),
-            "built_in": built_in, "installed_by": by, "installed": installed.map(|i| i.time), "users": who,
-        }));
+        out.push(InstalledService {
+            name: name.clone(),
+            title: d["title"].as_str().unwrap_or(name).to_string(),
+            icon: text(&d["icon"]),
+            color: text(&d["color"]),
+            domain: text(&d["domain"]),
+            image: text(&d["image"]),
+            image_kind: text(&d["image_kind"]),
+            description: text(&d["description"]),
+            version: d["version"].as_str().or(built_in.then_some(build).flatten()).map(str::to_string),
+            built_in,
+            installed_by: by,
+            installed: installed.map(|i| i.time),
+            users: who,
+        });
     }
     Ok(out)
 }

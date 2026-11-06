@@ -116,19 +116,18 @@ fn inside(network: &Throwaway, rest: &[String]) -> Result<()> {
 
 /// `sign-in`, as the throwaway network's person, with no passkey: its auth asks for none.
 fn sign_in() -> Result<()> {
-    let address = crate::node().get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
+    let address = crate::node().state()?.address().context("the throwaway network has no address")?.to_string();
     let started = crate::sign_in::start(&address, None)?;
     crate::sign_in::approve_on_throwaway(&address, &started.url, None)?;
     crate::sign_in::finish(started)?;
-    let me = crate::node().get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
+    let me = crate::node().state()?.user.map_or("you".into(), |u| u.name);
     println!("Signed in as {me}. {CLI} throwaway and {CLI} throwaway mcp act as them until {CLI} throwaway sign-out.");
     Ok(())
 }
 
 fn say_where(dir: &Path, addr: &str) -> Result<()> {
-    let state = node_at(dir, addr).get("/v1/state")?;
-    let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
-    let address = state["network"]["settings"]["address"].as_str().unwrap_or("");
+    let state = node_at(dir, addr).state()?;
+    let (me, address) = (state.looking(), state.address().unwrap_or(""));
     println!(
         "This checkout's throwaway network is running on this machine: a new network, Throwaway, with only what every new network
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
@@ -145,7 +144,7 @@ recovery key; its Workers' settings are in {}.
 /// git is on a computer signed in to any network: this build's helper is linked in a folder of the throwaway network's, put
 /// first on git's PATH (the one the real network's CLI links is another build, reaching another node).
 fn git(dir: &Path, args: &[String]) -> Result<()> {
-    let address = crate::node().get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
+    let address = crate::node().state()?.address().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     one::git_wire::link_in(&bin)?;

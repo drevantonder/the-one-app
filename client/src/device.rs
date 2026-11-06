@@ -463,14 +463,8 @@ impl Device {
     /// The order things run in, from the node's `/v1/state`; a node it lists that this device didn't know of has it
     /// read `global` again (now and then), and only nodes its own reading lists are asked.
     async fn learn_order(&self, bytes: &[u8]) {
-        let Ok(state) = serde_json::from_slice::<Value>(bytes) else { return };
-        let mut said: Vec<(u64, [u8; 32])> = state["network"]["devices"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|d| d["serves_me"] == true)
-            .filter_map(|d| Some((d["order"].as_u64().unwrap_or(u64::MAX), keys::unhex(d["key"].as_str()?).ok()?)))
-            .collect();
+        let Ok(state) = serde_json::from_slice::<one::state::State>(bytes) else { return };
+        let mut said: Vec<(usize, [u8; 32])> = state.network.iter().flat_map(|n| &n.devices).filter(|d| d.serves_me).filter_map(|d| Some((d.order, keys::unhex(&d.key).ok()?))).collect();
         said.sort();
         let said: Vec<[u8; 32]> = said.into_iter().map(|s| s.1).collect();
         *self.order.lock().unwrap() = said.clone();

@@ -1,6 +1,6 @@
 //! Device services on the command line: what each device runs, and switching them on and off.
 
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::cli::{Command, ago};
 use crate::config::{CLI, NAME};
@@ -15,49 +15,47 @@ pub fn commands() -> Command {
         run: |g| {
             match g.words().as_slice() {
                 ["services"] => {
-                    let state = g.node.get("/v1/state")?;
-                    let all: Vec<Value> = state["network"]["devices"].as_array().cloned().unwrap_or_default();
-                    for s in &all {
-                        let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
-                        let off = s["off_services"].as_array().cloned().unwrap_or_default();
-                        if let Some(parts) = s["parts"].as_array() {
-                            println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
+                    let Some(network) = g.node.state()?.network else { return Ok(true) };
+                    for s in &network.devices {
+                        let (installed, off) = (&s.now.installed_services, &s.off_services);
+                        let offline = if s.now.online { "" } else { " (offline)" };
+                        if let Some(parts) = &s.now.parts {
+                            println!("{}{offline}", s.name);
                             for p in parts {
-                                let name = p["name"].as_str().unwrap_or("");
-                                let version = installed.iter().find(|d| d["name"] == name).and_then(|d| d["version"].as_str()).map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
-                                let doing = p["doing"].as_str().map(|d| format!(", {}", d.to_lowercase())).unwrap_or_default();
-                                let problem = p["problem"].as_str().map(|w| format!(": {w}")).unwrap_or_default();
-                                let held = match (p["sandbox"].as_str(), p["person"] == true) {
+                                let version = installed.iter().find(|d| d.name == p.name).and_then(|d| d.version.as_deref()).map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
+                                let doing = p.doing.as_ref().map(|d| format!(", {}", d.to_lowercase())).unwrap_or_default();
+                                let problem = p.problem.as_ref().map(|w| format!(": {w}")).unwrap_or_default();
+                                let held = match (&p.sandbox, p.person) {
                                     (Some(why), _) => format!(", without its sandbox: {why}"),
                                     (None, true) => ", as you".into(),
                                     _ => String::new(),
                                 };
-                                println!("  {name}{version}  {}{doing}{held}{problem}", if p["on"] == true { "on" } else { "off" });
+                                println!("  {}{version}  {}{doing}{held}{problem}", p.name, if p.on { "on" } else { "off" });
                             }
                             continue;
                         }
                         if installed.is_empty() && off.is_empty() {
                             continue;
                         }
-                        println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
-                        for d in &installed {
-                            let by = match (&d["installed_by"], d["built_in"] == true) {
+                        println!("{}{offline}", s.name);
+                        for d in installed {
+                            let by = match (&d.installed_by, d.built_in) {
                                 (_, true) => format!("built into {NAME}"),
-                                (Value::String(by), _) => format!("installed by {by}"),
+                                (Some(by), _) => format!("installed by {by}"),
                                 _ => String::new(),
                             };
-                            let version = d["version"].as_str().map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
-                            println!("  {}{version}  {} ({by})", d["name"].as_str().unwrap_or(""), d["title"].as_str().unwrap_or(""));
+                            let version = d.version.as_deref().map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
+                            println!("  {}{version}  {} ({by})", d.name, d.title);
                         }
-                        for d in &off {
-                            println!("  {}  switched off {}", d["name"].as_str().unwrap_or(""), ago(d["time"].as_u64().unwrap_or(0)));
+                        for d in off {
+                            println!("  {}  switched off {}", d.name, ago(d.time));
                         }
                     }
                     // The Cloudflare node, whose services an admin switches (`--device cloudflare`).
-                    if let Some(parts) = state["network"]["cloudflare_node"]["parts"].as_array() {
+                    if let Some(cloudflare) = &network.cloudflare_node {
                         println!("Cloudflare");
-                        for p in parts {
-                            println!("  {}  {}", p["name"].as_str().unwrap_or(""), if p["on"] == true { "on" } else { "off" });
+                        for p in &cloudflare.parts {
+                            println!("  {}  {}", p.name, if p.on { "on" } else { "off" });
                         }
                     }
                 }

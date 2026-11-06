@@ -8,7 +8,7 @@ use one::api::client::{Answer, Client, Via};
 use one::config::CLI;
 use one::cloudflare::Settings;
 use one::mode::{Throwaway, programs};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::agent;
 
@@ -94,8 +94,8 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
     stop(dir, true)?;
     // Called what the person is called in their own network, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
-    let mine = quick.get(format!("http://{}/v1/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
-    let me = mine.and_then(|s| s["user"]["name"].as_str().or(s["me"]["name"].as_str()).map(String::from));
+    let mine = quick.get(format!("http://{}/v1/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<one::state::State>().ok());
+    let me = mine.map(|s| s.looking().to_string());
     let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
     std::fs::create_dir_all(dir)?;
     let bucket = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
@@ -107,8 +107,7 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
     let created = node.post("/v1/create", json!({ "name": "Throwaway", "user_name": me }))?;
     let recovery = created["recovery"].as_str().context("the throwaway network gave no recovery key")?;
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
-    let state = node.get("/v1/state")?;
-    let person = (state["user"]["id"].as_str().context("the throwaway network has no person")?.to_string(), me);
+    let person = (node.state()?.user.context("the throwaway network has no person")?.id, me);
     let settings = Settings::for_throwaway(dir, &bucket, person)?;
     settings.save()?;
     // Read back as `cloudflare deploy` reads it, with its secrets.

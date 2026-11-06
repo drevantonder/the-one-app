@@ -26,10 +26,10 @@ pub fn commands() -> Command {
         run: |g| {
             match g.words().as_slice() {
                 ["apps"] => {
-                    let groups = g.node.get("/v1/state")?["network"]["groups"].clone();
+                    let groups = g.node.state()?.network.map(|n| n.groups).unwrap_or_default();
                     // Where it's added, as the App Store says it: you, a group by its name, everyone.
                     let place = |scope: &str| match scope.split_once(':') {
-                        Some(("group", id)) => groups.as_array().into_iter().flatten().find(|g| g["id"] == id).and_then(|g| g["name"].as_str()).unwrap_or(id).to_string(),
+                        Some(("group", id)) => groups.iter().find(|g| g.id == id).map_or(id, |g| g.name.as_str()).to_string(),
                         Some(("user", _)) => "you".to_string(),
                         _ => "everyone".to_string(),
                     };
@@ -136,7 +136,7 @@ fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
 
 /// What a deploy did, after `done`: which devices run it yet, as far as this one knows (`here`, whether it does).
 fn deployed_said(node: &Client, done: &str, here: bool) -> String {
-    let device = node.get("/v1/state").ok().and_then(|s| s["device"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "This device".into());
+    let device = node.state().map(|s| s.device.name).unwrap_or_else(|_| "This device".into());
     match here {
         true => format!("{done} {device} runs it now; your other devices take it within a few seconds."),
         false => format!("{done} Your devices take it within a few seconds: until then, its calls say they don't have its latest version yet."),

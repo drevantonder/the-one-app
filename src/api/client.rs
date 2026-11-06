@@ -6,7 +6,7 @@ use std::io::Read;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::node::Node;
@@ -74,6 +74,11 @@ impl Client {
         self.json(self.via.send("GET", path, &[], None, None)?)
     }
 
+    /// The network as this node says it (`GET /v1/state`).
+    pub fn state(&self) -> Result<crate::state::State> {
+        serde_json::from_value(self.get("/v1/state")?).context("the node's answer isn't a state: it may be a different build than this one")
+    }
+
     pub fn post(&self, path: &str, body: Value) -> Result<Value> {
         self.json(self.via.send("POST", path, &[("content-type", "application/json")], Some(serde_json::to_vec(&body)?), None)?)
     }
@@ -109,7 +114,7 @@ impl Client {
             }
             let answered = match node {
                 Some(_) => String::new(),
-                None => self.get("/v1/state").ok().and_then(|s| s["device"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "the device that answered".into()),
+                None => self.state().map(|s| s.device.name).unwrap_or_else(|_| "the device that answered".into()),
             };
             crate::node::trace::said(tries.as_ref(), node.as_ref(), &answered)
         });

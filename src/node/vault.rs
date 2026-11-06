@@ -552,7 +552,7 @@ impl Node {
         // At the network's address (where people sign in) the web client opens it in any browser; a
         // network without one has only its apps to.
         let web = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()?).remove("address")))?;
-        let link = match web.as_ref().and_then(Value::as_str).filter(|w| w.starts_with("https://") || w.starts_with("http://")) {
+        let link = match web.as_deref().filter(|w| w.starts_with("https://") || w.starts_with("http://")) {
             Some(web) => format!("{}/vault?id={id}&scope={scope}", web.trim_end_matches('/')),
             None => format!("{}://vault?id={id}&scope={scope}", crate::config::CLI),
         };

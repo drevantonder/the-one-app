@@ -4,8 +4,10 @@
 
 use anyhow::{Context, Result, bail};
 use one::api::Client;
-use one::cli::{Command, Given, ago};
+use one::cli::{Command, Given};
 use one::config::{CLI, NAME, YOURS};
+use one::rank::Priority;
+use one::state::State;
 use serde_json::{Value, json};
 
 use one::api;
@@ -56,7 +58,7 @@ pub fn commands() -> Command {
                     }
                 }
                 ["status"] if g.has("until") => update::wait(g)?,
-                ["status"] => status(g.node, &g.node.get("/v1/state")?),
+                ["status"] => status(g.node, &g.node.state()?),
                 ["create", name @ ..] if !name.is_empty() => {
                     let user_name = g.flag("as").context("say what to call you with --as <your name>")?;
                     let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": g.flag("user") }))?;
@@ -71,9 +73,8 @@ pub fn commands() -> Command {
                     println!("Joined. Syncing now; {CLI} status shows progress.");
                 }
                 ["settings"] => {
-                    let state = g.node.get("/v1/state")?;
-                    for (name, value) in state["network"]["settings"].as_object().context("not in a network yet")? {
-                        println!("{name} = {value}");
+                    for (name, value) in &g.node.state()?.network.context("not in a network yet")?.settings {
+                        println!("{name} = {value:?}");
                     }
                 }
                 ["settings", name, value @ ..] => {
@@ -112,8 +113,8 @@ fn sign_in(g: &Given) -> Result<()> {
         // With no node here, it's the address it was signed in at before, or the one given.
         None if !client_device::node_here() => crate::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
         None => {
-            let state = request(agent().get(format!("http://{}/v1/state", api::addr())).call())?;
-            state["network"]["settings"]["address"].as_str().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
+            let state: State = serde_json::from_value(request(agent().get(format!("http://{}/v1/state", api::addr())).call())?)?;
+            state.address().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
         }
     };
     let join = (!client_device::node_here()).then(|| client_device::signing_in_for(&address)).transpose()?;
@@ -141,14 +142,12 @@ fn sign_in(g: &Given) -> Result<()> {
         eprintln!("{err:#}");
     }
     if client_device::node_here() {
-        let state = node.get("/v1/state")?;
-        let me = state["user"]["name"].as_str().unwrap_or("you");
+        let me = node.state()?.user.map_or("you".into(), |u| u.name);
         println!("Signed in as {me}. {CLI} and {CLI} mcp on this machine act as you until {CLI} sign-out.");
         return Ok(());
     }
     client_device::join(&address, invite.as_ref().map(|(_, secret)| secret.as_str()))?;
-    let state = node.get("/v1/state")?;
-    let me = state["user"]["name"].as_str().unwrap_or("you");
+    let me = node.state()?.user.map_or("you".into(), |u| u.name);
     println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", crate::sign_in::hostname());
     Ok(())
 }
@@ -161,56 +160,48 @@ fn unsigned_post(path: &str, body: Value) -> Result<Value> {
     Ok(r)
 }
 
-fn status(node: &Client, state: &Value) {
-    let device = &state["device"];
+fn status(node: &Client, state: &State) {
+    let device = &state.device;
     match client_device::said(state) {
         Some(said) => println!("{said}"),
-        None => println!("{} ({}){}", device["name"].as_str().unwrap_or(""), &device["key"].as_str().unwrap_or("")[..8], if device["ready"] == true { "" } else { ", not ready yet" }),
+        None => println!("{} ({}){}", device.name, &device.key[..8.min(device.key.len())], if device.ready { "" } else { ", not ready yet" }),
     }
-    let i = &state["network"];
-    if i.is_null() {
+    let Some(i) = &state.network else {
         println!("\nNot in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one.");
         return;
-    }
-    let users: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
+    };
+    let users: std::collections::HashMap<&str, &str> = i.users.iter().map(|u| (u.id.as_str(), u.name.as_str())).collect();
     let name = |id: &str| users.get(id).copied().unwrap_or(id).to_string();
-    println!("\n{}  {} changes", i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), i["steps"]);
+    println!("\n{}  {} changes", if i.name.is_empty() { "(joining)" } else { &i.name }, i.steps);
     println!("\nUsers");
-    for u in i["users"].as_array().into_iter().flatten() {
-        let me = if u["me"] == true { " (you)" } else { "" };
-        println!("  {}{me}  {}", u["name"].as_str().unwrap_or(""), u["role"].as_str().unwrap_or(""));
+    for u in &i.users {
+        let me = if u.me { " (you)" } else { "" };
+        println!("  {}{me}  {}", u.name, u.role.as_str());
     }
-    let groups = i["groups"].as_array().cloned().unwrap_or_default();
-    if !groups.is_empty() {
+    if !i.groups.is_empty() {
         println!("\nGroups");
-        for g in &groups {
-            let members: Vec<String> = g["members"].as_array().into_iter().flatten().map(|m| format!("{} ({})", name(m["user"].as_str().unwrap_or("")), m["role"].as_str().unwrap_or("member"))).collect();
-            println!("  {}  {}", g["name"].as_str().unwrap_or(""), members.join(", "));
+        for g in &i.groups {
+            let members: Vec<String> = g.members.iter().map(|m| format!("{} ({})", name(&m.user), m.role.as_str())).collect();
+            println!("  {}  {}", g.name, members.join(", "));
         }
     }
     let apps = node.apps().unwrap_or_default();
     let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
-    let all = i["devices"].as_array().cloned().unwrap_or_default();
     println!("\nDevices");
-    for s in &all {
-        let dot = if s["online"] == true { "●" } else { "○" };
+    for s in &i.devices {
+        let dot = if s.now.online { "●" } else { "○" };
         // As a device, the node that answered is "here" to itself, not to this computer.
-        let here = if s["here"] == true && client_device::me().is_none() { " (this one)" } else { "" };
-        let serves = if s["serves_me"] == true { "" } else { ", doesn't run yours" };
-        let build = s["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
-        println!("  {dot} {}{here}  {}'s{serves}{build}", s["name"].as_str().unwrap_or(""), name(s["user"].as_str().unwrap_or("")));
+        let here = if s.now.here && client_device::me().is_none() { " (this one)" } else { "" };
+        let serves = if s.serves_me { "" } else { ", doesn't run yours" };
+        let build = s.now.build.as_ref().map(|b| format!("  {b}")).unwrap_or_default();
+        println!("  {dot} {}{here}  {}'s{serves}{build}", s.name, name(&s.user));
         // What it runs, as its own list says (its person's and the admins' to see), and the services it says run there;
         // the app runtime isn't one.
-        let named = |list: &Value, field: &str| list.as_array().into_iter().flatten().filter_map(|d| d[field].as_str().map(str::to_string)).collect::<Vec<_>>();
-        let parts = s["parts"].as_array().cloned().unwrap_or_default();
-        let off: std::collections::BTreeSet<String> = named(&s["off_services"], "name").into_iter().chain(parts.iter().filter(|p| p["on"] != true).filter_map(|p| p["name"].as_str().map(str::to_string))).collect();
-        let on: std::collections::BTreeSet<String> = named(&s["installed_services"], "name")
-            .into_iter()
-            .chain(parts.iter().filter(|p| p["on"] == true).filter_map(|p| p["name"].as_str().map(str::to_string)))
-            .filter(|n| !off.contains(n))
-            .collect();
-        let list = |names: &std::collections::BTreeSet<String>| {
-            let mut titles: Vec<String> = names.iter().filter(|n| n.as_str() != "apps").map(|n| title(n)).collect();
+        let parts = s.now.parts.as_deref().unwrap_or_default();
+        let off: std::collections::BTreeSet<&str> = s.off_services.iter().map(|o| o.name.as_str()).chain(parts.iter().filter(|p| !p.on).map(|p| p.name.as_str())).collect();
+        let on: std::collections::BTreeSet<&str> = s.now.installed_services.iter().map(|d| d.name.as_str()).chain(parts.iter().filter(|p| p.on).map(|p| p.name.as_str())).filter(|n| !off.contains(n)).collect();
+        let list = |names: &std::collections::BTreeSet<&str>| {
+            let mut titles: Vec<String> = names.iter().filter(|n| **n != "apps").map(|n| title(n)).collect();
             titles.sort_by_key(|t| t.to_lowercase());
             titles
         };
@@ -221,24 +212,24 @@ fn status(node: &Client, state: &Value) {
         }
     }
     // Not a device, but a node like the rest: woken when asked, in its place in run priority.
-    if let Some(priority) = i["cloudflare_node"].get("priority") {
-        let at = priority.as_u64().map_or("last".to_string(), |n| n.to_string());
+    if let Some(cloudflare) = &i.cloudflare_node {
+        let at = match cloudflare.priority {
+            Priority::Number(n) => n.to_string(),
+            Priority::Last => "last".to_string(),
+        };
         println!("  ● Cloudflare node  run priority {at}");
     }
     // A device that's only a client, a phone or a computer, is listed with them; a browser is a sign-in, not a device.
-    let clients = i["clients"].as_array().cloned().unwrap_or_default();
-    let (browsers, clients): (Vec<Value>, Vec<Value>) = clients.into_iter().partition(|c| c["passkey"] == true || is_browser(c["name"].as_str().unwrap_or("")));
-    let this = |c: &Value| if client_device::me().is_some_and(|(_, key)| c["key"] == key) { " (this one)" } else { "" };
+    let (browsers, clients): (Vec<&one::state::Client>, Vec<&one::state::Client>) = i.clients.iter().partition(|c| c.passkey.is_some() || is_browser(&c.name));
+    let this = |c: &one::state::Client| if client_device::me().is_some_and(|(_, key)| c.key == key) { " (this one)" } else { "" };
     for c in &clients {
-        // A phone keeps no log and holds no sessions: say when it last asked this device, not that it's offline.
-        let asked = c["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
-        let glyph = if is_phone(c["name"].as_str().unwrap_or("")) { "▯" } else { "▭" };
-        println!("  {glyph} {}{}  {}'s{asked}", c["name"].as_str().unwrap_or(""), this(c), name(c["user"].as_str().unwrap_or("")));
+        let glyph = if is_phone(&c.name) { "▯" } else { "▭" };
+        println!("  {glyph} {}{}  {}'s", c.name, this(c), name(&c.user));
     }
     if !browsers.is_empty() {
         println!("\nBrowsers");
         for c in &browsers {
-            println!("  {}{}  {}", c["name"].as_str().unwrap_or(""), this(c), name(c["user"].as_str().unwrap_or("")));
+            println!("  {}{}  {}", c.name, this(c), name(&c.user));
         }
     }
 }

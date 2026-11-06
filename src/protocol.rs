@@ -36,9 +36,6 @@ pub const STEP_DIGITS: usize = 12;
 /// `/relay`, to the relay.
 pub const IROH_PATHS: [(&str, &str); 3] = [("relay", "/relay"), ("ping", "/ping"), ("portal", "/generate_204")];
 
-/// The roles a device has, as the relay lists them (`scopes::Kind`, joined by spaces).
-pub const ROLES: [&str; 3] = ["client", "compute", "service"];
-
 /// What a request from a device that reads less of who's who than this build (`database::READS`) is refused with, status 426:
 /// `{yours}` is the network's name as people say it.
 pub const UPDATE_REFUSAL: &str = "Update this device: {yours}'s other devices have moved on to what this one doesn't read yet.";
@@ -214,7 +211,7 @@ pub fn javascript() -> String {
         most_needed = crate::keys::MOST_NEEDED,
         behind = json!(crate::keys::BEHIND),
         iroh = json!(IROH_PATHS.iter().copied().collect::<std::collections::BTreeMap<_, _>>()),
-        roles = json!(ROLES),
+        roles = json!(crate::database::scopes::Kind::ALL.map(crate::database::scopes::Kind::as_str)),
         newest = json!(NEWEST),
         tidied = json!(TIDIED),
         copy = json!(COPY),

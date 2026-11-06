@@ -51,10 +51,10 @@ async fn keys_post(State(node): State<Node>, me: Me, Body(body): Body<SealedKey>
 }
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Reply {
-    Ok(Json(match signed_in {
+    Ok(Json(json!(match signed_in {
         Some(me) => node.state_for_sign_in(&me.caller, me.sign_in.as_deref().unwrap_or_default())?,
         None => node.state()?,
-    }))
+    })))
 }
 
 /// A new network, named `name`, whose first person is `user_name` (with `user`, their id).

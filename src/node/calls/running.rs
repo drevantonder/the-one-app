@@ -285,17 +285,17 @@ impl Node {
                 let send: crate::push::Send = serde_json::from_slice(&body)?;
                 ok(json!({ "ok": self.push_note(&grant.caller.user, &send.note(&grant.app)?).await? }))
             }
-            ("GET", "/devices") => ok(self.state_for(&grant.caller)?["network"]["devices"].take()),
+            ("GET", "/devices") => ok(json!(self.state_for(&grant.caller)?.network.map(|n| n.devices).unwrap_or_default())),
             // Run priority's order, as the person the call is for: only an admin changes it.
             ("GET", "/order") => {
-                let network = self.state_for(&grant.caller)?["network"].take();
-                let mut order: Vec<Value> = network["devices"].as_array().cloned().unwrap_or_default().into_iter().map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "priority": s["priority"], "online": s["online"], "here": s["me"] })).collect();
-                if let Some(priority) = network["cloudflare_node"].get("priority") {
-                    order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": priority, "online": true, "here": false }));
+                let network = self.state_for(&grant.caller)?.network;
+                let mut order: Vec<Value> = network.iter().flat_map(|n| &n.devices).map(|s| json!({ "name": s.name, "key": s.key, "kind": s.kind, "priority": s.priority, "online": s.now.online, "here": s.me })).collect();
+                if let Some(cloudflare) = network.as_ref().and_then(|n| n.cloudflare_node.as_ref()) {
+                    order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": cloudflare.priority, "online": true, "here": false }));
                 }
                 let set = self.with(|i| Ok(rank::set(&i.r.db().settings()?)))?;
                 order.sort_by_cached_key(|s| (rank::priority(&set, s["key"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
-                ok(json!({ "order": order, "admin": network["role"] == "admin" }))
+                ok(json!({ "order": order, "admin": network.is_some_and(|n| n.role == Some(crate::database::scopes::Role::Admin)) }))
             }
             ("POST", "/priority") => {
                 ensure!(!grant.read_only, "this call only reads: it can't change run priority");
