@@ -688,8 +688,26 @@ fn appearance(value: String) {
     iphone::tell("appearance", json!({ "value": value }));
     #[cfg(target_os = "android")]
     android::tell("appearance", json!({ "value": value }));
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let _ = value;
+    #[cfg(desktop)]
+    {
+        app().keep("appearance", Some(&value).filter(|v| *v != "automatic").map(String::as_str));
+        app().handle.webview_windows().values().for_each(appear);
+    }
+}
+
+/// A window in the person's light or dark (the system's, for automatic): its title bar, and the colour it shows before
+/// its page draws, so a start in dark has no white frame.
+#[cfg(desktop)]
+fn appear(window: &tauri::WebviewWindow) {
+    let theme = match app().kept("appearance").as_deref() {
+        Some("dark") => Some(tauri::Theme::Dark),
+        Some("light") => Some(tauri::Theme::Light),
+        _ => None,
+    };
+    let _ = window.set_theme(theme);
+    // @one/ui's --background.
+    let dark = theme.or_else(|| window.theme().ok()) == Some(tauri::Theme::Dark);
+    let _ = window.set_background_color(Some(if dark { tauri::window::Color(10, 10, 10, 255) } else { tauri::window::Color(255, 255, 255, 255) }));
 }
 
 /// A widget's own menu bar item shown again, or hidden (a Mac's) → the kinds hidden now.
@@ -917,6 +935,7 @@ fn popup(handle: &AppHandle, label: &str, page: &str) -> tauri::Result<tauri::We
         .skip_taskbar(true)
         .visible(false)
         .build()?;
+    appear(&window);
     let hide = window.clone();
     window.on_window_event(move |e| {
         if let tauri::WindowEvent::Focused(false) = e {
@@ -1310,6 +1329,8 @@ pub fn run() {
             let window = window.title(one::config::NAME).inner_size(1000.0, 700.0).min_inner_size(360.0, 480.0);
             #[cfg_attr(mobile, allow(unused_variables))]
             let window = window.build()?;
+            #[cfg(desktop)]
+            appear(&window);
             // On a computer, closing the window leaves the app running, in the tray or menu bar, where Open shows it
             // again (or starting it again does); Quit quits.
             #[cfg(desktop)]

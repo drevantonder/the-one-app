@@ -1689,6 +1689,8 @@ const h = OneUI.react.createElement;
     schemed(document, appearance());
     if (native) {
       about = await native.about();
+      // The app draws its next start in it from the first frame (one kept before the app kept it too).
+      native.appearance?.(appearance());
       native.onOpen = opened;
       // A phone's Back, and its text size changing while this runs.
       native.onBack = hardwareBack;
