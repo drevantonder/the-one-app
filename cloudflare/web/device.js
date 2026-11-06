@@ -7,7 +7,7 @@
 // Who's who it takes only from the network's own signed entries, checked by its client's WebAssembly (`checked`), never
 // from what a node says (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must
 // have, which nodes may be handed a scope's keys, and who may approve or remove what. Each is answered there
-// (client/src/members.rs, `Who`) and only looked up here, so a hacked node gets no keys.
+// (`steps::Reader`, `view_of` in client/src/members.rs) and only looked up here, so a hacked node gets no keys.
 
 import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signStep, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
 import { CODES, NUMBER_MAX, PUSH, READS, RELAY, SIGN_IN_DOMAIN, URLS, databasePrefix } from "../shared/protocol.js";

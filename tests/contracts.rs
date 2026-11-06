@@ -220,7 +220,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(fresh.at(), 2, "a browser reads past junk");
     }
 
-    // Member entries' content (src/members.rs), as the web client builds what a browser signs (cloudflare/web/members.js).
+    // Member entries' content (src/database/content.rs), as the web client builds what a browser signs (cloudflare/web/members.js).
     {
         use one::database::scopes::Scope;
         use one::database::content;

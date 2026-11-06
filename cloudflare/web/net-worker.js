@@ -71,7 +71,7 @@ export function server(version) {
   }
 
   /// `user`'s who's who from `global`'s scope database's steps, as kept and those this browser read since (`steps`),
-  /// checked by the client (client/src/members.rs), then kept. The first time, of the network its approval named
+  /// checked by `steps::Reader` (client/src/wasm.rs), then kept. The first time, of the network its approval named
   /// (`root:<user>`), if it named one.
   async function global(user, steps) {
     const [, , { get, put }] = await code;

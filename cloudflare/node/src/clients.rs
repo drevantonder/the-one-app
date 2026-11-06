@@ -6,7 +6,7 @@
 //!
 //! A device trusts no node for who's who or for its keys: it reads `global`'s scope database's steps from the bucket
 //! itself, through the URL signer, with the epochs sealed to it that those steps made, as every client device does
-//! (one-client's `scopes::Global`), and asks who's who and who may of the database they leave
+//! (`one::database::steps::Reader`), and asks who's who and who may of the database they leave
 //! (`one::database::scopes`) (`device_view`); it opens the keys a call needs from the bucket too, each epoch checked
 //! against the hash who's who names (`device_keys`). So it asks only the compute endpoints the network
 //! lists as running its person's calls, and hands each only the keys of scopes it runs.

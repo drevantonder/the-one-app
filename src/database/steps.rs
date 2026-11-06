@@ -391,6 +391,7 @@ pub fn connection(bytes: &[u8]) -> Result<Connection> {
 /// form: what it says, built again here, with what only its steps said carried over (`carry`).
 pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
     ensure!(version(&copy)? <= READS, Newer);
+    super::migrate::database(&copy)?;
     ScopeDb::open(super::scope::fresh(&copy, scope)?, now)
 }
 

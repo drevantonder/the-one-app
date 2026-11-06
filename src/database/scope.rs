@@ -288,11 +288,10 @@ fn bare() -> Result<Connection> {
     Ok(db)
 }
 
-/// `from`, `scope`'s database as any release made it (a copy, or the one before a step), as this release makes it: its
-/// rows in this release's tables (`migrate`d first), only what a database of its kind of scope holds, and what follows
-/// from them worked out again (`derive`); its version, types, roles and rules as they were.
+/// `from`, `scope`'s database in this release's tables (`migrate`d if it came from another release), as this release
+/// makes it: only what a database of its kind of scope holds, and what follows from its rows worked out again
+/// (`derive`); its version, types, roles and rules as they were.
 pub fn fresh(from: &Connection, scope: &Scope) -> Result<Connection> {
-    super::migrate::database(from)?;
     let to = bare()?;
     to.pragma_update(None, "user_version", super::steps::version(from)?)?;
     let global = *scope == Scope::Global;

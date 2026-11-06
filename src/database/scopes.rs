@@ -98,9 +98,8 @@ impl ScopeDb {
         Self::open(super::scope::empty(scope)?, now)
     }
 
-    /// A scope database read as it is (a copy, or one its steps made): who holds what worked out again.
+    /// A scope database in this release's tables (`steps::normalize` does that for a copy): who holds what worked out again.
     pub fn open(db: Connection, now: u64) -> Result<ScopeDb> {
-        super::migrate::database(&db)?;
         permissions::close(&db, None)?;
         Ok(ScopeDb { db, now })
     }

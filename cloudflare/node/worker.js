@@ -986,7 +986,7 @@ async function route(p, request) {
     p.whom(request);
     return json(await sealedKeys(p.bucket, url.searchParams.get("scope") || "", url.searchParams.get("to"), url.searchParams.get("app")));
   }
-  // Who's who as the bucket holds it, for a device that checks it all itself (client/src/members.rs): `global`'s scope
+  // Who's who as the bucket holds it, for a device that checks it all itself (`steps::Reader`): `global`'s scope
   // database's steps, sealed.
   if (request.method === "GET" && path === "/v1/steps/global") {
     const who = p.whom(request);

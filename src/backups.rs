@@ -433,19 +433,6 @@ pub fn prune(place: &Place, network: &str, scopes: &BTreeMap<String, [u8; 32]>, 
     Ok(out)
 }
 
-/// Backups' tools, which are the node's, not an app's.
-pub fn tools() -> Vec<serde_json::Value> {
-    use crate::skills::{confirm_input, hints};
-    use serde_json::json;
-    vec![
-        json!({ "name": "backups_status", "description": "How backups are going: each place backed up to (a folder on a device's disk, or S3-compatible storage), when it last backed up and by which device, what's failing and since when, and the recent snapshots.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
-        json!({ "name": "backups_now", "description": "Back up now, without waiting for the hour: each device backs up what it holds to each place.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(false, false) }),
-        json!({ "name": "backups_add_place", "description": "Add S3-compatible storage (Cloudflare R2, Backblaze B2, MinIO…) to back up to. You give the endpoint; the person gets a link to a sheet on their own device where they type the bucket, access key ID and secret key, so you never see the key. backups_status then shows its first backup, or what went wrong.", "inputSchema": { "type": "object", "required": ["endpoint"], "properties": { "endpoint": { "type": "string", "description": "like https://<account id>.r2.cloudflarestorage.com" }, "title": { "type": "string", "description": "what the person calls it, like Cloudflare R2" } } }, "annotations": hints(false, false) }),
-        json!({ "name": "backups_remove_place", "description": "Stop backing up to a place. What's already there stays.", "inputSchema": { "type": "object", "required": ["place"], "properties": { "place": { "type": "string", "description": "its title or id, as backups_status lists it" }, "confirm": confirm_input() } }, "annotations": hints(false, true) }),
-        json!({ "name": "backups_check", "description": "Restore each place's newest backup into a throwaway copy now, as the weekly check does: who's who from its steps, every database to its newest step as the network has it, and every blob's hash. Says what came back, and what's wrong.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
-    ]
-}
-
 /// The installs a place holds backups of, by their folders.
 pub fn networks(place: &Place) -> Result<Vec<String>> {
     Ok(place.list("")?.into_iter().filter(|n| n.len() == 16 && n.bytes().all(|b| b.is_ascii_hexdigit())).collect())
