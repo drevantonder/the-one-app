@@ -185,7 +185,7 @@ impl View {
         let mut candidates = one::database::stored::Keys::new();
         for n in 1..=one::database::stored::EPOCHS_MAX {
             let Some(o) = one::bucket::Bucket::get(bucket, &one::keys::epoch_name("global", n, &mine)).await? else { break };
-            if let Some(k) = one::cloudflare::open_sealed(seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()) {
+            if let Some(k) = one::keys::open_sealed(seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()) {
                 candidates.insert(n, k);
             }
         }
@@ -193,8 +193,8 @@ impl View {
             ensure!(!candidates.is_empty(), "no keys of your One App network are sealed to this device yet");
             let mut log_keys = one::database::stored::Keys::new();
             for (n, epoch) in &candidates {
-                if let Ok(Some(app)) = one::database::stored::app_key(bucket, epoch, "global", scopes::APP, *n, false).await {
-                    log_keys.insert(*n, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME));
+                if let Ok(Some(app)) = one::keys::app_key(bucket, epoch, "global", scopes::APP, *n, false).await {
+                    log_keys.insert(*n, one::keys::database_key(&app, scopes::APP, one::database::steps::NAME));
                 }
             }
             let mut who = Global::new(None);
@@ -234,7 +234,7 @@ impl View {
                 continue;
             }
             let Some(o) = one::bucket::Bucket::get(bucket, &one::keys::epoch_name(&scope.to_string(), *n, &mine)).await? else { continue };
-            if let Some(k) = one::cloudflare::open_sealed(&self.seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()).filter(|k| one::keys::epoch_hash(k) == *hash) {
+            if let Some(k) = one::keys::open_sealed(&self.seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()).filter(|k| one::keys::epoch_hash(k) == *hash) {
                 keys.insert(*n, k);
             }
         }
@@ -323,11 +323,11 @@ pub async fn device_keys(me: String, need: String, bucket: JsValue) -> Result<St
                 let id = (scope.clone(), app.to_string(), *epoch);
                 let app_key = match view.apps.get(&id) {
                     Some(k) => Some(*k),
-                    None => one::database::stored::app_key(&bucket, epoch_key, &scope.to_string(), app, *epoch, *epoch == newest).await?,
+                    None => one::keys::app_key(&bucket, epoch_key, &scope.to_string(), app, *epoch, *epoch == newest).await?,
                 };
                 let Some(app_key) = app_key else { continue };
                 view.apps.insert(id, app_key);
-                let key = data_encoding::BASE64URL_NOPAD.encode(&one::cloudflare::database_key(&app_key, database));
+                let key = data_encoding::BASE64URL_NOPAD.encode(&one::keys::database_key(&app_key, app, database));
                 out.push(json!({ "scope": scope.to_string(), "epoch": epoch, "app": app, "database": database, "key": key }));
             }
         }

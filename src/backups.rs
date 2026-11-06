@@ -42,7 +42,7 @@ const KEY_ID: &str = "the one app 2026-11-01 backups: a key's id";
 
 /// Opens an epoch's key sealed to the recovery key, with the recovery key's secret (its Ed25519 seed).
 pub fn unseal(recovery_secret: &[u8; 32], sealed: &[u8]) -> Result<[u8; 32]> {
-    let key = crate::cloudflare::open_sealed(&crate::cloudflare::twin(recovery_secret).0, sealed).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
+    let key = crate::keys::open_sealed(&crate::keys::twin(recovery_secret).0, sealed).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
     key.try_into().map_err(|_| anyhow!("not a sealed key"))
 }
 
@@ -191,19 +191,19 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
         snap.bytes += bytes.len() as u64;
         Ok(true)
     };
-    for n in bucket.list(&format!("{folder}/_epochs"))? {
-        copy(&format!("{folder}/_epochs/{n}/recovery"), true)?;
+    for n in bucket.list(&crate::keys::epochs_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
+        copy(&crate::keys::epoch_name(scope, n, "recovery"), true)?;
     }
     // And each of its Vault's keys, sealed to the recovery key, so what's sealed in its items comes back with it.
-    for n in bucket.list(&format!("{folder}/_vault"))? {
-        copy(&format!("{folder}/_vault/{n}/recovery"), true)?;
+    for n in bucket.list(&crate::keys::vault_keys_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
+        copy(&crate::keys::vault_key_name(scope, n, "recovery"), true)?;
     }
     for app in bucket.list(&folder)?.into_iter().filter(|a| crate::database::scopes::valid_app_name(a) || a == crate::database::scopes::APP) {
-        for n in bucket.list(&format!("{folder}/{app}/_key"))? {
-            copy(&format!("{folder}/{app}/_key/{n}"), true)?;
+        for n in bucket.list(&crate::keys::app_keys_folder(scope, &app))?.iter().filter_map(|n| n.parse().ok()) {
+            copy(&crate::keys::app_key_name(scope, &app, n), true)?;
         }
         for database in bucket.list(&format!("{folder}/{app}"))?.into_iter().filter(|d| !d.starts_with('_')) {
-            let prefix = format!("{folder}/{app}/{database}");
+            let prefix = crate::bucket::database_prefix(scope, &app, &database);
             let Some(hint) = bucket.get(&crate::database::stored::newest_name(&prefix))? else { continue };
             let (_, hinted, epoch) = crate::database::stored::newest(&hint);
             let (mut at, mut copied) = snap.databases.get(&format!("{app}/{database}")).copied().unwrap_or((0, 0));
@@ -254,8 +254,8 @@ fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database
     let mut keys = crate::database::stored::Keys::new();
     for (n, epoch) in epochs {
         let Some(sealed) = bucket.get(&crate::keys::app_key_name(scope, app, *n))? else { continue };
-        if let Ok(key) = crate::cloudflare::open_app_key(epoch, app, &sealed) {
-            keys.insert(*n, crate::cloudflare::database_key(&key, database));
+        if let Ok(key) = crate::keys::open_database_key(epoch, app, database, &sealed) {
+            keys.insert(*n, key);
         }
     }
     let mut copies: Vec<u64> = bucket.list(&format!("{prefix}/copy"))?.iter().filter_map(|n| n.parse().ok()).filter(|n| *n != hinted).collect();
@@ -563,8 +563,8 @@ fn who(place: &Place, network: &str, root: Option<crate::keys::Hash>, keys: &[[u
     let mut step_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
     for n in 1..=(keys.len() as u32 + 8) {
         let Some(sealed) = place.get(&format!("{network}/bucket/{}", crate::keys::app_key_name("global", crate::database::scopes::APP, n)))? else { continue };
-        if let Some(app) = keys.iter().find_map(|k| crate::cloudflare::open_app_key(k, crate::database::scopes::APP, &sealed).ok()) {
-            step_keys.insert(n, crate::cloudflare::database_key(&app, steps::KEY_NAME));
+        if let Some(key) = keys.iter().find_map(|k| crate::keys::open_database_key(k, crate::database::scopes::APP, steps::NAME, &sealed).ok()) {
+            step_keys.insert(n, key);
         }
     }
     let prefix = steps::prefix("global");
@@ -616,12 +616,12 @@ impl crate::bucket::Bucket for Copy<'_> {
 /// `epochs` are the scope's epoch keys. → what's wrong, one line each; nothing when all is well.
 pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, epochs: &crate::database::stored::Keys, live: Option<&impl crate::bucket::Bucket>) -> Vec<String> {
     use crate::bucket::Bucket;
-    let (scope, folder) = (&snapshot.scope, folder(&snapshot.scope));
+    let scope = &snapshot.scope;
     let copy = Copy { place, root: format!("{network}/bucket/") };
     let mut out = Vec::new();
     for (database, (at, copied)) in &snapshot.databases {
         let Some((app, db)) = database.split_once('/') else { continue };
-        let prefix = format!("{folder}/{app}/{db}");
+        let prefix = crate::bucket::database_prefix(scope, app, db);
         // What a person calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
         let said = match (app, db) {
             (crate::database::scopes::APP, "vault") => "Vault".to_string(),
@@ -634,9 +634,8 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         let mut keys = crate::database::stored::Keys::new();
         for (n, epoch) in epochs {
             let Ok(Some(sealed)) = copy.get(&crate::keys::app_key_name(scope, app, *n)).await else { continue };
-            match crate::cloudflare::open_app_key(epoch, app, &sealed.bytes) {
-                // A scope database's steps are sealed as its log is (`database::steps`).
-                Ok(key) => drop(keys.insert(*n, crate::cloudflare::database_key(&key, if (app, db) == (crate::database::scopes::APP, crate::database::steps::NAME) { crate::database::steps::KEY_NAME } else { db }))),
+            match crate::keys::open_database_key(epoch, app, db, &sealed.bytes) {
+                Ok(key) => drop(keys.insert(*n, key)),
                 Err(err) => out.push(format!("{scope} {said}: its key in epoch {n}: {err:#}")),
             }
         }
@@ -710,8 +709,8 @@ mod tests {
 
         // Who's who: the freeze its recovery key signed.
         const ANDRE: &str = "0123456789abcdef";
-        let node = crate::database::stored::app_key(&bucket, &epoch, "global", crate::database::scopes::APP, 1, true).await.unwrap().unwrap();
-        let step_keys = crate::database::stored::Keys::from([(1, crate::cloudflare::database_key(&node, crate::database::steps::KEY_NAME))]);
+        let node = crate::keys::app_key(&bucket, &epoch, "global", crate::database::scopes::APP, 1, true).await.unwrap().unwrap();
+        let step_keys = crate::database::stored::Keys::from([(1, crate::keys::database_key(&node, crate::database::scopes::APP, crate::database::steps::NAME))]);
         let start = crate::database::content::first("Home", ANDRE, "Andre", &crate::keys::Endpoint::of(&device), "mac", &[crate::database::scopes::Kind::Client], recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&epoch));
         let root = crate::keys::Hash::from_bytes(rand::random());
         let first = crate::database::steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();
@@ -722,8 +721,8 @@ mod tests {
 
         // A database with more steps than one copy holds, so a reader starts from its copy.
         let prefix = "global/tally/main";
-        let app = crate::database::stored::app_key(&bucket, &epoch, "global", "tally", 1, true).await.unwrap().unwrap();
-        let keys = crate::database::stored::Keys::from([(1, crate::cloudflare::database_key(&app, "main"))]);
+        let app = crate::keys::app_key(&bucket, &epoch, "global", "tally", 1, true).await.unwrap().unwrap();
+        let keys = crate::database::stored::Keys::from([(1, crate::keys::database_key(&app, "tally", "main"))]);
         let mut db = crate::database::stored::Db::open(&bucket, prefix, keys).await.unwrap();
         db.sign_as(device.clone());
         db.migrate(&bucket, &["create table posts (text text)".to_string()]).await.unwrap();
@@ -746,7 +745,7 @@ mod tests {
             scope: "global",
             key: epoch,
             epochs: crate::database::stored::Keys::from([(1, epoch)]),
-            sealed: crate::cloudflare::seal_to(&crate::cloudflare::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
+            sealed: crate::keys::seal_to(&crate::keys::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
             device: *device.verifying_key().as_bytes(),
             now,
             previous,

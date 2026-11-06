@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 #[test]
 fn the_workers_and_nodes_agree_on_keys_and_seals() {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    use one::cloudflare;
+    use one::{cloudflare, keys};
 
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("cloudflare");
     let files = ["shared/crypto.js", "shared/token.js", "web/members.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
@@ -27,28 +27,28 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
     // An app's key, sealed under its scope's: each opens what the other sealed, and derives the same database key.
     let scope: [u8; 32] = rand::random();
     let app: [u8; 32] = rand::random();
-    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "sealed": B64U.encode(&cloudflare::seal_app_key(&scope, "tally", &app)), "database": "main" }));
+    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "sealed": B64U.encode(&keys::seal_app_key(&scope, "tally", &app)), "database": "main" }));
     assert_eq!(b(&opened["key"]), app, "JavaScript opens an app's key Rust sealed");
-    assert_eq!(b(&opened["database"]), cloudflare::database_key(&app, "main"), "a database's key");
+    assert_eq!(b(&opened["database"]), keys::database_key(&app, "tally", "main"), "a database's key");
     let sealed = js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "key": B64U.encode(&app) }));
-    assert_eq!(cloudflare::open_app_key(&scope, "tally", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
-    assert!(cloudflare::open_app_key(&scope, "calendar", &b(&sealed["sealed"])).is_err(), "only as that app's");
+    assert_eq!(keys::open_app_key(&scope, "tally", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
+    assert!(keys::open_app_key(&scope, "calendar", &b(&sealed["sealed"])).is_err(), "only as that app's");
 
     // Sealed to a key pair: JavaScript's pair, sealed in Rust; Rust's pair (the recovery key's twin), sealed in JavaScript.
     let pair = js(json!({ "op": "keyPair" }));
-    assert_eq!(cloudflare::public_of(&b(&pair["secret"]).try_into().unwrap()).to_vec(), b(&pair["public"]), "a key pair's public half");
-    let sealed = cloudflare::seal_to(&b(&pair["public"]).try_into().unwrap(), &scope).unwrap();
+    assert_eq!(keys::public_of(&b(&pair["secret"]).try_into().unwrap()).to_vec(), b(&pair["public"]), "a key pair's public half");
+    let sealed = keys::seal_to(&b(&pair["public"]).try_into().unwrap(), &scope).unwrap();
     let opened = js(json!({ "op": "openSealed", "secret": pair["secret"], "public": pair["public"], "sealed": B64U.encode(&sealed) }));
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens what Rust sealed to it");
-    let (secret, public) = cloudflare::twin(&rand::random());
+    let (secret, public) = keys::twin(&rand::random());
     let sealed = js(json!({ "op": "sealTo", "to": B64U.encode(&public), "plain": B64U.encode(&scope) }));
-    assert_eq!(cloudflare::open_sealed(&secret, &b(&sealed["sealed"])).unwrap(), scope, "Rust opens what JavaScript sealed to it");
+    assert_eq!(keys::open_sealed(&secret, &b(&sealed["sealed"])).unwrap(), scope, "Rust opens what JavaScript sealed to it");
 
     // Sealed under a secret, with the id it's kept by.
     let under = js(json!({ "op": "sealUnder", "secret": "a refresh token, as text", "plain": B64U.encode(&scope) }));
-    assert_eq!(under["id"], cloudflare::id_of(b"a refresh token, as text"), "a copy's id");
-    assert_eq!(cloudflare::open_under(b"a refresh token, as text", &b(&under["sealed"])).unwrap(), scope, "Rust opens a copy JavaScript sealed");
-    let sealed = cloudflare::seal_under(b"a code from the recovery key", &scope);
+    assert_eq!(under["id"], keys::id_of(b"a refresh token, as text"), "a copy's id");
+    assert_eq!(keys::open_under(b"a refresh token, as text", &b(&under["sealed"])).unwrap(), scope, "Rust opens a copy JavaScript sealed");
+    let sealed = keys::seal_under(b"a code from the recovery key", &scope);
     let opened = js(json!({ "op": "openUnder", "secret": "a code from the recovery key", "sealed": B64U.encode(&sealed) }));
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
 
@@ -68,12 +68,12 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
         let device_seal: [u8; 32] = rand::random();
         let prf: [u8; 32] = rand::random();
-        let (my_secret, my_public) = cloudflare::twin(&rand::random());
+        let (my_secret, my_public) = keys::twin(&rand::random());
         let out = js(json!({
             "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
             "request": request, "now": 1_000_000 + keys::FRESH, "epoch": 4, "key": B64U.encode(&epoch_key),
             "name": "global/tally/main/1", "plain": B64U.encode(b"from js"), "sealed": B64U.encode(&sealed),
-            "to": B64U.encode(&cloudflare::twin_public(&node.verifying_key().to_bytes()).unwrap()), "handoff": handoff,
+            "to": B64U.encode(&keys::twin_public(&node.verifying_key().to_bytes()).unwrap()), "handoff": handoff,
             "pair": { "secret": B64U.encode(&my_secret), "public": B64U.encode(&my_public), "sealed": keys::seal_handoff(&my_public, &handoff).unwrap(), "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
             "token": "a token", "secret": B64U.encode(b"an invite's secret"), "prf": B64U.encode(&prf),
         }));
@@ -90,7 +90,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["tokenId"], keys::token_id("a token"));
         assert_eq!(out["epochHash"], keys::epoch_hash(&epoch_key), "an epoch key's hash");
         assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
-        assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&cloudflare::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
+        assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&keys::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
         assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
         let asking = keys::Endpoint { key: device, seal: device_seal };
         assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
@@ -98,8 +98,8 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let (passkey, seal_secret) = keys::passkey_keys(&prf);
         assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
         assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
-        assert_eq!(out["passkey"]["sealPublic"], data_encoding::HEXLOWER.encode(&cloudflare::public_of(&seal_secret)), "and its public half");
-        assert_eq!(to, cloudflare::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
+        assert_eq!(out["passkey"]["sealPublic"], data_encoding::HEXLOWER.encode(&keys::public_of(&seal_secret)), "and its public half");
+        assert_eq!(to, keys::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
 
         // A session endpoint's certificate: made the same, and each takes and refuses the same ones.
         let endpoint: [u8; 32] = rand::random();
@@ -172,7 +172,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let out = js(json!({ "op": "step", "seed": B64U.encode(&browser_seed), "fields": fields, "body": String::from_utf8(body).unwrap() }));
         let signed = Step::decode(&b(&out["signed"]["header"]), &b(&out["signed"]["signature"]), &b(&out["signed"]["body"])).unwrap();
         let sealed_app = b(&js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&epoch), "app": scopes::APP, "key": B64U.encode(&app) }))["sealed"]);
-        let keys: one::database::stored::Keys = [(1, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME))].into();
+        let keys: one::database::stored::Keys = [(1, one::keys::database_key(&app, one::database::scopes::APP, one::database::steps::NAME))].into();
         let prefix = steps::prefix("global");
         let sealed = |at: u64, step: &Step, copy: Option<&[u8]>| {
             let name = one::database::stored::step_name(&prefix, at);

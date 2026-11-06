@@ -85,13 +85,7 @@ impl Node {
         {
             return Ok(keys.clone());
         }
-        let (bucket, name) = (self.bucket()?, scope.to_string());
-        let mut out = crate::database::stored::Keys::new();
-        for (n, epoch) in &epochs {
-            if let Some(app_key) = crate::database::stored::app_key(&bucket, epoch, &name, app, *n, *n == newest).await? {
-                out.insert(*n, crate::cloudflare::database_key(&app_key, database));
-            }
-        }
+        let out = crate::keys::database_keys(&self.bucket()?, &scope.to_string(), app, database, &epochs, true).await?;
         self.0.databases.database_keys.lock().unwrap().insert(id, (newest, out.clone()));
         Ok(out)
     }
@@ -145,7 +139,7 @@ impl Node {
     async fn sealed_epoch(&self, scope: &Scope, n: u32, hash: &str) -> Result<Option<[u8; 32]>> {
         let name = crate::keys::epoch_name(&scope.to_string(), n, &hex(&self.0.id));
         let Some(o) = crate::bucket::Bucket::get(&self.bucket()?, &name).await? else { return Ok(None) };
-        let key = crate::cloudflare::open_sealed(&self.seal_secret(), &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok());
+        let key = crate::keys::open_sealed(&self.seal_secret(), &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok());
         match key.filter(|k| crate::keys::epoch_hash(k) == hash) {
             Some(key) => Ok(Some(key)),
             None => {
@@ -179,7 +173,7 @@ impl Node {
                 continue;
             };
             missing = 0;
-            if let Some(key) = crate::cloudflare::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
+            if let Some(key) = crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
                 candidates.insert(n, key);
             }
         }
@@ -226,7 +220,7 @@ impl Node {
         let recovery = recovery.context("the network has no recovery key to seal its keys to")?;
         let key: [u8; 32] = rand::random();
         let (bucket, name) = (self.bucket()?, scope.to_string());
-        let sealed = crate::cloudflare::seal_to(&crate::cloudflare::twin_public(&recovery)?, &key)?;
+        let sealed = crate::keys::seal_to(&crate::keys::twin_public(&recovery)?, &key)?;
         if !crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, 1, "recovery"), &sealed).await? {
             // Another device is making it: its entry says so soon. If none does, what's there is junk, and this one's made.
             for _ in 0..50 {
@@ -246,7 +240,7 @@ impl Node {
             return self.settled_first_epoch(scope).await;
         }
         for c in &to {
-            crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, 1, &hex(&c.key)), &crate::cloudflare::seal_to(&c.seal, &key)?).await?;
+            crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, 1, &hex(&c.key)), &crate::keys::seal_to(&c.seal, &key)?).await?;
         }
         tracing::info!("made {scope}'s first epoch");
         let keys = crate::database::stored::Keys::from([(1, key)]);
@@ -287,7 +281,7 @@ impl Node {
             for c in &to {
                 let name = crate::keys::epoch_name(&scope.to_string(), *n, &hex(&c.key));
                 if Bucket::get(&bucket, &name).await?.is_none() {
-                    Bucket::create(&bucket, &name, &crate::cloudflare::seal_to(&c.seal, key)?).await?;
+                    Bucket::create(&bucket, &name, &crate::keys::seal_to(&c.seal, key)?).await?;
                 }
             }
         }
@@ -501,7 +495,7 @@ impl Node {
                 }
             }
         }
-        let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
+        let prefix = crate::bucket::database_prefix(&scope.to_string(), app, database);
         let opening = Instant::now();
         let (mut keys, mut tries) = (keys, 0);
         let mut db = loop {
@@ -553,7 +547,7 @@ impl Node {
         let (bucket, app) = (bucket.place, app.to_string());
         tokio::task::spawn_blocking(move || {
             for scope in bucket.list("")?.iter().map(|f| crate::bucket::scope_of(f)).filter(|s| Scope::parse(s).is_ok()) {
-                let folder = format!("{}/{app}/_key", crate::bucket::folder(&scope));
+                let folder = crate::keys::app_keys_folder(&scope, &app);
                 for n in bucket.list(&folder)? {
                     bucket.delete(&format!("{folder}/{n}"))?;
                 }

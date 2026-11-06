@@ -338,7 +338,7 @@ fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
 
 /// A database's keys in epoch 1, and in epochs 1 and 2.
 fn keys(seed: u64) -> (Keys, Keys) {
-    let (one, two) = (one::cloudflare::database_key(&[seed as u8; 32], "main"), one::cloudflare::database_key(&[!(seed as u8); 32], "main"));
+    let (one, two) = (one::keys::database_key(&[seed as u8; 32], "notes", "main"), one::keys::database_key(&[!(seed as u8); 32], "notes", "main"));
     (Keys::from([(1, one)]), Keys::from([(1, one), (2, two)]))
 }
 
@@ -598,7 +598,7 @@ async fn run_copied(seed: u64) {
         // Its copy alone opens to a step some device read, with the key and only with it.
         let alone = opened(&copy.here_only(), &key).await.unwrap_or_else(|e| panic!("seed {seed}: device {i}'s copy didn't open: {e:#}"));
         saw(&seen, &alone, seed);
-        let other = Keys::from([(1, one::cloudflare::database_key(&[!(seed as u8); 32], "main"))]);
+        let other = Keys::from([(1, one::keys::database_key(&[!(seed as u8); 32], "notes", "main"))]);
         assert!(Db::open(&copy.here_only(), "global/sim/main", other).await.is_ok_and(|db| db.version().unwrap() == 0), "seed {seed}: another key opened device {i}'s copy");
     }
     for (i, copy) in copies.iter().enumerate() {

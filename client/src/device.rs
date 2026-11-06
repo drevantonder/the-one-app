@@ -137,7 +137,7 @@ async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32,
     loop {
         let read = async |n: u32| -> Result<Option<[u8; 32]>, Error> {
             let Some(o) = one::bucket::Bucket::get(bucket, &keys::epoch_name("global", n, &me)).await.map_err(failed)? else { return Ok(None) };
-            one::cloudflare::open_sealed(&opens, &o.bytes).ok().and_then(|k| k.try_into().ok()).map(Some).ok_or_else(|| failed("A key for this didn't open."))
+            one::keys::open_sealed(&opens, &o.bytes).ok().and_then(|k| k.try_into().ok()).map(Some).ok_or_else(|| failed("A key for this didn't open."))
         };
         match read(n).await? {
             Some(key) => drop(epochs.insert(n, key)),
@@ -149,13 +149,8 @@ async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32,
             return Err(failed(format!("This device hasn't been given {YOURS}'s keys yet.")));
         }
     }
-    let mut log_keys = one::database::stored::Keys::new();
-    for (n, epoch) in &epochs {
-        let Some(o) = one::bucket::Bucket::get(bucket, &keys::app_key_name("global", scopes::APP, *n)).await.map_err(failed)? else { continue };
-        let app = one::cloudflare::open_app_key(epoch, scopes::APP, &o.bytes).map_err(failed)?;
-        log_keys.insert(*n, one::cloudflare::database_key(&app, one::database::steps::KEY_NAME));
-    }
-    Ok((epochs, log_keys))
+    let step_keys = keys::database_keys(bucket, "global", scopes::APP, one::database::steps::NAME, &epochs, false).await.map_err(failed)?;
+    Ok((epochs, step_keys))
 }
 
 impl Device {
@@ -846,7 +841,7 @@ impl Device {
         // Of each database, only epochs from the one its newest copy is under (`keys::oldest_needed`): older ones open
         // only its history.
         let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
-        let prefix = |n: &Need| format!("{}/{}/{}", one::bucket::folder(&n.scope), n.app, n.database);
+        let prefix = |n: &Need| one::bucket::database_prefix(&n.scope, &n.app, &n.database);
         // Each database's newest hint, all at once.
         let mut each: BTreeMap<String, &Scope> = BTreeMap::new();
         for (n, scope) in need.iter().zip(&scopes) {
@@ -900,7 +895,7 @@ impl Device {
             for (m, sealed) in kept.iter().flat_map(|k| k["sealed"].as_object()).flatten() {
                 let Ok(m) = m.parse::<u32>() else { continue };
                 let Some(epoch) = self.epochs.lock().unwrap().get(&(scope.to_string(), m)).copied() else { continue };
-                let opened = B64U.decode(sealed.as_str().unwrap_or("").trim().as_bytes()).ok().and_then(|b| one::cloudflare::open_app_key(&epoch, app, &b).ok());
+                let opened = B64U.decode(sealed.as_str().unwrap_or("").trim().as_bytes()).ok().and_then(|b| one::keys::open_app_key(&epoch, app, &b).ok());
                 if let Some(key) = opened {
                     self.app_keys.lock().unwrap().insert((scope.to_string(), app.to_string(), m), key);
                 }
@@ -918,7 +913,7 @@ impl Device {
             .flatten()
             .filter_map(|(m, sealed)| {
                 let m = m.parse::<u32>().ok()?;
-                let key = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| one::cloudflare::open_sealed(&self.opens(), &s).ok())?;
+                let key = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| one::keys::open_sealed(&self.opens(), &s).ok())?;
                 Some((m, <[u8; 32]>::try_from(key).ok()?))
             })
             .collect();
@@ -931,7 +926,7 @@ impl Device {
     }
 
     async fn database_key(&self, n: &Need) -> Result<[u8; 32], Error> {
-        Ok(one::cloudflare::database_key(&self.app_key(&n.scope, &n.app, n.epoch).await?, &n.database))
+        Ok(one::keys::database_key(&self.app_key(&n.scope, &n.app, n.epoch).await?, &n.app, &n.database))
     }
 
     /// An app's key in epoch `n` of a scope: the one sealed under the epoch, or one made now if it has none yet.
@@ -946,13 +941,13 @@ impl Device {
             Some(s) => s.to_string(),
             None => {
                 let made: [u8; 32] = rand::random();
-                let sealed = B64U.encode(&one::cloudflare::seal_app_key(&epoch, app, &made));
+                let sealed = B64U.encode(&one::keys::seal_app_key(&epoch, app, &made));
                 let out = self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": n, "app": app, "sealed": sealed }))).await?;
                 out["sealed"].as_str().unwrap_or_default().to_string()
             }
         };
         let bytes = B64U.decode(sealed.trim().as_bytes()).ok().ok_or_else(|| failed(format!("{app}'s key isn't one")))?;
-        let key = one::cloudflare::open_app_key(&epoch, app, &bytes).map_err(|_| failed(format!("{app}'s key didn't open")))?;
+        let key = one::keys::open_app_key(&epoch, app, &bytes).map_err(|_| failed(format!("{app}'s key didn't open")))?;
         self.app_keys.lock().unwrap().insert(id, key);
         Ok(key)
     }
@@ -998,10 +993,10 @@ impl Device {
         if self.known.lock().unwrap().as_ref().and_then(|k| k.who.epoch_hash(&parsed, 1)) != Some(hash) {
             return Err(failed("Another device made new keys for this just now. Try again."));
         }
-        let sealed = |to: &[u8; 32]| one::cloudflare::seal_to(to, &key).map(|s| B64U.encode(&s)).map_err(failed);
+        let sealed = |to: &[u8; 32]| one::keys::seal_to(to, &key).map(|s| B64U.encode(&s)).map_err(failed);
         // Not while there's none (the one there was forked `global`), until an admin names the next.
         if let Some(recovery) = recovery {
-            let recovery = one::cloudflare::twin_public(&recovery).map_err(failed)?;
+            let recovery = one::keys::twin_public(&recovery).map_err(failed)?;
             self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": 1, "to": "recovery", "sealed": sealed(&recovery)? }))).await?;
         }
         for e in &to {

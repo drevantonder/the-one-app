@@ -1,113 +1,13 @@
-//! The network's Workers on Cloudflare (`cloudflare/`: sign-in, the relay, the URL signer) as nodes meet them: the formats they agree on
-//! (`cloudflare/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
-//! and building and running the Workers in workerd.
+//! The network's Workers on Cloudflare (`cloudflare/`: sign-in, the relay, the URL signer) as nodes meet them:
+//! checking access tokens, and building and running the Workers in workerd.
 
 #[cfg(feature = "node")]
 use std::time::Duration;
 
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, KeyInit};
 use anyhow::{Context, Result, anyhow, ensure};
-use curve25519_dalek::edwards::CompressedEdwardsY;
-use curve25519_dalek::montgomery::MontgomeryPoint;
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde::Deserialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256, Sha512};
-
-// Keys.
-
-fn hkdf(ikm: &[u8], salt: &[u8], info: &[u8]) -> [u8; 32] {
-    let mut out = [0; 32];
-    hkdf::Hkdf::<Sha256>::new(Some(salt), ikm).expand(info, &mut out).expect("32 bytes is a valid length");
-    out
-}
-
-/// An app's key in a scope's epoch is random, kept sealed under the epoch's key (`keys::app_key_name`): nonce ‖
-/// AES-256-GCM(HKDF(epoch key, "one/app\0<app>"), nonce, app key). Erasing the app deletes it, which destroys the key
-/// and so the app's data.
-pub fn seal_app_key(epoch_key: &[u8; 32], app: &str, app_key: &[u8; 32]) -> Vec<u8> {
-    let nonce: [u8; 12] = rand::random();
-    let mut out = nonce.to_vec();
-    out.extend(cipher(&hkdf(epoch_key, &[], format!("one/app\0{app}").as_bytes())).encrypt(&nonce.into(), &app_key[..]).expect("encrypting in memory"));
-    out
-}
-
-/// An app's key, from its sealed copy and its epoch's key.
-pub fn open_app_key(epoch_key: &[u8; 32], app: &str, sealed: &[u8]) -> Result<[u8; 32]> {
-    ensure!(sealed.len() == 60, "not a sealed app key");
-    let plain = cipher(&hkdf(epoch_key, &[], format!("one/app\0{app}").as_bytes())).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that epoch's key doesn't open {app}'s"))?;
-    plain.try_into().map_err(|_| anyhow!("an app's key is 32 bytes"))
-}
-
-/// A database's key in an app, from the app's key.
-pub fn database_key(app_key: &[u8; 32], database: &str) -> [u8; 32] {
-    hkdf(app_key, &[], format!("one/database\0{database}").as_bytes())
-}
-
-fn cipher(key: &[u8; 32]) -> Aes256Gcm {
-    Aes256Gcm::new(key.into())
-}
-
-/// The public half of an X25519 secret.
-pub fn public_of(secret: &[u8; 32]) -> [u8; 32] {
-    MontgomeryPoint::mul_base_clamped(*secret).0
-}
-
-/// The X25519 twin of an Ed25519 key (the recovery key), as age and backups use it: → (secret, public).
-pub fn twin(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    let secret: [u8; 32] = Sha512::digest(seed)[..32].try_into().expect("64 bytes");
-    (secret, public_of(&secret))
-}
-
-/// The X25519 twin of an Ed25519 public key.
-pub fn twin_public(public: &[u8; 32]) -> Result<[u8; 32]> {
-    Ok(CompressedEdwardsY(*public).decompress().context("not an Ed25519 key")?.to_montgomery().0)
-}
-
-/// Seals `plain` to an X25519 public key: share ‖ AES-256-GCM(HKDF(shared, share ‖ to), zero nonce, plain).
-pub fn seal_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
-    let ephemeral: [u8; 32] = rand::random();
-    let share = public_of(&ephemeral);
-    let shared = MontgomeryPoint(*to).mul_clamped(ephemeral).0;
-    ensure!(shared != [0; 32], "not a public key");
-    let key = hkdf(&shared, &[&share[..], to].concat(), b"one/sealed-to");
-    let mut out = share.to_vec();
-    out.extend(cipher(&key).encrypt(&Default::default(), plain).map_err(|_| anyhow!("sealing failed"))?);
-    Ok(out)
-}
-
-/// Opens what was sealed to the public half of `secret`.
-pub fn open_sealed(secret: &[u8; 32], sealed: &[u8]) -> Result<Vec<u8>> {
-    ensure!(sealed.len() >= 48, "not sealed");
-    let share: [u8; 32] = sealed[..32].try_into()?;
-    let shared = MontgomeryPoint(share).mul_clamped(*secret).0;
-    let key = hkdf(&shared, &[&share[..], &public_of(secret)].concat(), b"one/sealed-to");
-    cipher(&key).decrypt(&Default::default(), &sealed[32..]).map_err(|_| anyhow!("that key doesn't open it"))
-}
-
-/// The id a copy sealed under `secret` is kept by.
-pub fn id_of(secret: &[u8]) -> String {
-    B64U.encode(&hkdf(secret, &[], b"one/id"))
-}
-
-/// Seals `plain` under a secret (a passkey's PRF output, a refresh token): nonce ‖ AES-256-GCM.
-pub fn seal_under(secret: &[u8], plain: &[u8]) -> Vec<u8> {
-    let nonce: [u8; 12] = rand::random();
-    let mut out = nonce.to_vec();
-    out.extend(cipher(&hkdf(secret, &[], b"one/sealed-under")).encrypt(&nonce.into(), plain).expect("encrypting in memory"));
-    out
-}
-
-/// Opens what was sealed under `secret`.
-pub fn open_under(secret: &[u8], sealed: &[u8]) -> Result<Vec<u8>> {
-    ensure!(sealed.len() >= 28, "not sealed");
-    cipher(&hkdf(secret, &[], b"one/sealed-under")).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that secret doesn't open it"))
-}
-
-pub fn decode_key(text: &str) -> Result<[u8; 32]> {
-    B64U.decode(text.as_bytes())?.try_into().map_err(|_| anyhow!("a key is 32 bytes"))
-}
 
 // Access tokens.
 

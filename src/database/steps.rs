@@ -74,7 +74,7 @@ pub const NAME: &str = "scope";
 
 /// Where a scope's database's steps are in the bucket.
 pub fn prefix(scope: &str) -> String {
-    format!("{}/{}/{}", crate::bucket::folder(scope), scopes::APP, NAME)
+    crate::bucket::database_prefix(scope, scopes::APP, NAME)
 }
 
 /// What a step's signature is for.
@@ -379,8 +379,8 @@ impl Freeze {
     }
 }
 
-/// The name the steps' key is derived under in each epoch (`cloudflare::database_key`): the frozen log's, whose key
-/// they took over.
+/// The name the steps' key goes by in each epoch (`keys::database_key`), and is asked for and handed by: the frozen
+/// log's, whose key they took over.
 pub const KEY_NAME: &str = "log";
 
 /// Seals a step or copy of a scope's database as `name` under the newest epoch `keys` has.

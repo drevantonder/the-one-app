@@ -75,9 +75,9 @@ impl Node {
             let newest = epochs.keys().next_back().copied().unwrap_or(0);
             let (bucket, name, to) = (self.bucket()?, scope.to_string(), hex(&endpoint));
             for (n, epoch) in &epochs {
-                let Some(key) = crate::database::stored::app_key(&bucket, epoch, &name, app, *n, *n == newest).await? else { continue };
+                let Some(key) = crate::keys::app_key(&bucket, epoch, &name, app, *n, *n == newest).await? else { continue };
                 // One there already is the same key, or junk the hash written beside it passes over.
-                crate::database::stored::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, &to, *n), &crate::cloudflare::seal_to(&seal, &key)?).await?;
+                crate::database::stored::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, &to, *n), &crate::keys::seal_to(&seal, &key)?).await?;
                 hashes.insert(*n, crate::keys::epoch_hash(&key));
             }
         }
@@ -179,7 +179,7 @@ impl Node {
                 tracing::warn!("{name} isn't in the bucket yet");
                 continue;
             };
-            match crate::cloudflare::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == *hash) {
+            match crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == *hash) {
                 Some(key) => drop(keys.insert(*n, key)),
                 None => tracing::warn!("{name} isn't the key its app schedules name: passed over"),
             }
@@ -209,7 +209,7 @@ impl Node {
             return Default::default();
         }
         let kept = self.0.app_schedules.keys.lock().unwrap();
-        kept.get(&(s, a.to_string())).map(|by| by.iter().map(|(n, k)| (*n, crate::cloudflare::database_key(k, database))).collect()).unwrap_or_default()
+        kept.get(&(s, a.to_string())).map(|by| by.iter().map(|(n, k)| (*n, crate::keys::database_key(k, app, database))).collect()).unwrap_or_default()
     }
 
     /// Until when an app schedules token's app schedules last: 0 once they're over.

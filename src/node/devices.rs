@@ -516,14 +516,14 @@ impl Node {
                 tracing::warn!("{scope}'s epoch {n} isn't sealed to the recovery key");
                 continue;
             };
-            let key = crate::cloudflare::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == hash);
+            let key = crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == hash);
             let Some(key) = key else {
                 tracing::warn!("{scope}'s epoch {n} sealed to the recovery key isn't the key its entry made: passed over");
                 continue;
             };
             let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
             if Bucket::get(&bucket, &at).await?.is_none() {
-                crate::database::stored::created(&bucket, &at, &crate::cloudflare::seal_to(&to.seal, &key)?).await?;
+                crate::database::stored::created(&bucket, &at, &crate::keys::seal_to(&to.seal, &key)?).await?;
             }
             opened += 1;
         }
@@ -793,7 +793,7 @@ impl Node {
         for (n, key) in self.epoch_keys(scope, false).await? {
             let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
             if Bucket::get(&bucket, &at).await?.is_none() {
-                crate::database::stored::created(&bucket, &at, &crate::cloudflare::seal_to(&to.seal, &key)?).await?;
+                crate::database::stored::created(&bucket, &at, &crate::keys::seal_to(&to.seal, &key)?).await?;
             }
         }
         Ok(())
@@ -1030,12 +1030,12 @@ impl Node {
         // Not while there's none (the one there was forked `global`), until an admin names the next: a removal still
         // takes keys away from whoever it removes.
         if let Some(recovery) = recovery
-            && !crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::cloudflare::seal_to(&crate::cloudflare::twin_public(&recovery)?, &key)?).await?
+            && !crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::keys::seal_to(&crate::keys::twin_public(&recovery)?, &key)?).await?
         {
             tracing::warn!("{scope}'s epoch {n} was sealed to the recovery key already, not with its key: the recovery key won't open it");
         }
         for c in &to {
-            crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&c.key)), &crate::cloudflare::seal_to(&c.seal, &key)?).await?;
+            crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&c.key)), &crate::keys::seal_to(&c.seal, &key)?).await?;
         }
         self.forget_epochs(scope);
         Ok(n)

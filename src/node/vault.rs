@@ -62,7 +62,7 @@ impl Node {
             }
             let name = crate::keys::vault_key_name(&scope.to_string(), n, &me);
             let Some(o) = crate::bucket::Bucket::get(&self.bucket()?, &name).await? else { continue };
-            match crate::cloudflare::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::cloudflare::public_of(k) == public) {
+            match crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::public_of(k) == public) {
                 Some(key) => {
                     self.0.app_schedules.vault.lock().unwrap().insert((scope.clone(), n), key);
                     out.insert(n, key);
@@ -108,13 +108,13 @@ impl Node {
     /// makes it), then its secret half sealed to each of them and to the recovery key.
     pub(super) async fn new_vault_key(&self, scope: &Scope, n: u32, to: &[Key], recovery: &Key) -> Result<()> {
         let secret: [u8; 32] = rand::random();
-        let public = crate::cloudflare::public_of(&secret);
+        let public = crate::keys::public_of(&secret);
         self.append(&Scope::Global, content::vault(scope, n, &public, to)).await?;
         ensure!(self.with(|i| Ok(i.r.db().vault_publics(scope).get(&n) == Some(&public)))?, "another device made {scope}'s Vault key {n} just now");
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let seals: Vec<(String, [u8; 32])> = self.with(|i| Ok(to.iter().filter_map(|k| i.r.db().seal_key(k).map(|s| (hex(k), s))).collect()))?;
-        for (at, seal) in std::iter::once(("recovery".to_string(), crate::cloudflare::twin_public(recovery)?)).chain(seals) {
-            crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::cloudflare::seal_to(&seal, &secret)?).await?;
+        for (at, seal) in std::iter::once(("recovery".to_string(), crate::keys::twin_public(recovery)?)).chain(seals) {
+            crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::keys::seal_to(&seal, &secret)?).await?;
         }
         if to.contains(&self.0.id) {
             self.0.app_schedules.vault.lock().unwrap().insert((scope.clone(), n), secret);

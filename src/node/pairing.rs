@@ -123,7 +123,7 @@ impl Node {
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
         let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no network")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
-        let endpoint = crate::keys::Endpoint { key, seal: crate::cloudflare::twin_public(&key)? };
+        let endpoint = crate::keys::Endpoint { key, seal: crate::keys::twin_public(&key)? };
         // A machine of the person's own is their device too. An admin lists another person's as compute, which runs
         // what that admin's listing may (`global`, groups) but never that person's own scope, until a device of theirs
         // lists it again (`scope::derive`'s runners).

@@ -104,10 +104,15 @@ pub fn folder(scope: &str) -> String {
     scope.replacen(':', "-", 1)
 }
 
+/// Where a database of an app's in a scope keeps its steps, copies and hint (`database::stored`).
+pub fn database_prefix(scope: &str, app: &str, database: &str) -> String {
+    format!("{}/{app}/{database}", folder(scope))
+}
+
 /// Where a blob named in `scope` is kept in the bucket, by its hash: under the scope's node folder, sealed with the key
 /// of the node's database `blobs` there. A deploy's bundle and a release's binary are `global`'s.
 pub fn blob_name(scope: &str, hash: &str) -> String {
-    format!("{}/{}/{BLOBS}/{hash}", folder(scope), crate::database::scopes::APP)
+    format!("{}/{hash}", database_prefix(scope, crate::database::scopes::APP, BLOBS))
 }
 
 pub const BLOBS: &str = "blobs";

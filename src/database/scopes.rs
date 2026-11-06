@@ -264,7 +264,7 @@ impl ScopeDb {
     pub fn nodes(&self) -> Vec<(Key, Key)> {
         let mut out: Vec<(Key, Key)> = self.computes().into_iter().map(|d| (d.key, d.seal)).collect();
         if let Some(k) = self.cloudflare_node()
-            && let Ok(seal) = crate::cloudflare::twin_public(&k)
+            && let Ok(seal) = crate::keys::twin_public(&k)
         {
             out.push((k, seal));
         }

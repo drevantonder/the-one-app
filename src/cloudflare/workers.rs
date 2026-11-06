@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail, ensure};
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use super::*;
 
@@ -596,7 +597,6 @@ pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, cloud
 /// The client's build, as the web client fetches it (`/client/<version>/`): what its files hash to, so a browser
 /// keeps one for good. None if this build has no client (`update` builds it, where Rust builds for WebAssembly).
 pub fn client_version() -> Option<String> {
-    use sha2::Digest;
     let mut hash = sha2::Sha256::new();
     for (name, bytes) in crate::config::CLIENT {
         hash.update(name.as_bytes());
@@ -643,7 +643,6 @@ impl Settings {
 /// letters and digits, then its publisher's (`CN=` and the name in letters, digits and spaces) hash, the first 8 bytes
 /// of the SHA-256 of it in UTF-16LE, in Crockford's base32.
 pub fn windows_package() -> String {
-    use sha2::Digest;
     let name = crate::config::NAME;
     let publisher = format!("CN={}", name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ').collect::<String>());
     let hash = sha2::Sha256::digest(publisher.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>());
@@ -698,7 +697,6 @@ for (const name of readdirSync("in")) {
 /// smaller than the edge's own quicker brotli makes it, the first thing a first visit waits on). The pinned Bun makes
 /// them, which is why it isn't a dependency of ours; one copy of each, by what the file is, is kept in the cache.
 pub fn precompressed(web: &[(String, Vec<u8>)]) -> Result<Vec<(String, Vec<u8>)>> {
-    use sha2::Digest;
     let wanted: Vec<&(String, Vec<u8>)> = web
         .iter()
         .filter(|(path, bytes)| bytes.len() >= 1024 && path != "index.html" && ["js", "css", "json", "html", "wasm", "svg"].contains(&path.rsplit('.').next().unwrap_or("")))

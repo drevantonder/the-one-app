@@ -13,32 +13,41 @@
 //! belongs. Epochs never go down along a database's positions (`src/database/stored.rs`).
 //!
 //! ```text
-//! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`cloudflare::seal_to`)
+//! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`keys::seal_to`)
 //! <folder>/_epochs/<n>/recovery             and to the network's recovery key
-//! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`cloudflare::seal_app_key`)
-//! <folder>/<app>/_app_schedules/<endpoint>/<n>  and sealed to an endpoint that runs its app schedules (`cloudflare::seal_to`)
+//! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`keys::seal_app_key`)
+//! <folder>/<app>/_app_schedules/<endpoint>/<n>  and sealed to an endpoint that runs its app schedules (`keys::seal_to`)
 //! <folder>/_vault/<n>/<endpoint key hex>     the scope's Vault secret key n, sealed to a machine its `vault` entry grants
 //! <folder>/_vault/<n>/recovery               and to the network's recovery key
+//! <folder>/<app>/<database>/…               its steps, sealed with its key in their epoch, from the app's (`database_keys`)
 //! ```
 //!
 //! An endpoint is known by its Ed25519 key, which signs, and things are sealed to its X25519 key: for one in Rust, its
 //! Ed25519 key's twin; a browser's is a WebCrypto key of its own. So each is listed with both, and nothing assumes twins.
 
 use aes_gcm::aead::{Aead, Payload};
+use curve25519_dalek::edwards::CompressedEdwardsY;
+use curve25519_dalek::montgomery::MontgomeryPoint;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use anyhow::{Context, Result, anyhow, ensure};
 use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD as B64U, HEXLOWER};
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
+use std::collections::BTreeMap;
 
 /// How old a signed request may be when it's checked, in milliseconds, either way.
 pub const FRESH: u64 = 60_000;
 
 fn hkdf(ikm: &[u8], info: &[u8]) -> [u8; 32] {
+    hkdf_salted(ikm, &[], info)
+}
+
+/// HKDF-SHA256 to 32 bytes. An empty salt is HMAC's zero key, as no salt is.
+fn hkdf_salted(ikm: &[u8], salt: &[u8], info: &[u8]) -> [u8; 32] {
     let mut out = [0; 32];
-    hkdf::Hkdf::<Sha256>::new(None, ikm).expand(info, &mut out).expect("32 bytes is a valid length");
+    hkdf::Hkdf::<Sha256>::new(Some(salt), ikm).expand(info, &mut out).expect("32 bytes is a valid length");
     out
 }
 
@@ -58,7 +67,7 @@ pub struct Endpoint {
 impl Endpoint {
     /// An endpoint in Rust: its signing key's public half, and its twin to seal to.
     pub fn of(key: &SigningKey) -> Endpoint {
-        let (_, seal) = crate::cloudflare::twin(&key.to_bytes());
+        let (_, seal) = twin(&key.to_bytes());
         Endpoint { key: key.verifying_key().to_bytes(), seal }
     }
 }
@@ -71,7 +80,141 @@ pub fn answers_key(key: &SigningKey) -> [u8; 32] {
 
 /// An endpoint's X25519 secret, for opening what's sealed to it, as `Endpoint::of` lists it.
 pub fn seal_secret(key: &SigningKey) -> [u8; 32] {
-    crate::cloudflare::twin(&key.to_bytes()).0
+    twin(&key.to_bytes()).0
+}
+
+// Sealing.
+
+/// An app's key in a scope's epoch is random, kept sealed under the epoch's key (`keys::app_key_name`): nonce ‖
+/// AES-256-GCM(HKDF(epoch key, "one/app\0<app>"), nonce, app key). Erasing the app deletes it, which destroys the key
+/// and so the app's data.
+pub fn seal_app_key(epoch_key: &[u8; 32], app: &str, app_key: &[u8; 32]) -> Vec<u8> {
+    let nonce: [u8; 12] = rand::random();
+    let mut out = nonce.to_vec();
+    out.extend(cipher(&hkdf(epoch_key, format!("one/app\0{app}").as_bytes())).encrypt(&nonce.into(), &app_key[..]).expect("encrypting in memory"));
+    out
+}
+
+/// An app's key, from its sealed copy and its epoch's key.
+pub fn open_app_key(epoch_key: &[u8; 32], app: &str, sealed: &[u8]) -> Result<[u8; 32]> {
+    ensure!(sealed.len() == 60, "not a sealed app key");
+    let plain = cipher(&hkdf(epoch_key, format!("one/app\0{app}").as_bytes())).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that epoch's key doesn't open {app}'s"))?;
+    plain.try_into().map_err(|_| anyhow!("an app's key is 32 bytes"))
+}
+
+/// A database's key in an app, from the app's key: HKDF(app key, "one/database\0" ‖ the name its key goes by,
+/// `key_name`).
+pub fn database_key(app_key: &[u8; 32], app: &str, database: &str) -> [u8; 32] {
+    hkdf(app_key, format!("one/database\0{}", key_name(app, database)).as_bytes())
+}
+
+/// The name a database's key goes by: its own, but a scope's database (`steps::NAME`) seals its steps with the key
+/// its frozen log had (`steps::KEY_NAME`), which is how every bucket's steps are sealed, and how it's asked for and
+/// handed: renamed, its key would be another, which opens none of them.
+fn key_name<'a>(app: &str, database: &'a str) -> &'a str {
+    use crate::database::steps;
+    if app == crate::database::scopes::APP && database == steps::NAME { steps::KEY_NAME } else { database }
+}
+
+/// A database's key in an epoch, from its app's key `sealed` under the epoch's key (`app_key_name`).
+pub fn open_database_key(epoch_key: &[u8; 32], app: &str, database: &str, sealed: &[u8]) -> Result<[u8; 32]> {
+    Ok(database_key(&open_app_key(epoch_key, app, sealed)?, app, database))
+}
+
+/// An app's key in epoch `n` of a scope, from its copy in the bucket (`app_key_name`), sealed under that epoch's
+/// key. The first to need it makes it, at random, unless `make` is false (an epoch nothing was written under yet,
+/// where a reader has nothing to open): whichever is written first is the key.
+pub async fn app_key(bucket: &impl crate::bucket::Bucket, epoch_key: &[u8; 32], scope: &str, app: &str, n: u32, make: bool) -> Result<Option<[u8; 32]>> {
+    let name = app_key_name(scope, app, n);
+    if let Some(o) = bucket.get(&name).await? {
+        return open_app_key(epoch_key, app, &o.bytes).map(Some);
+    }
+    if !make {
+        return Ok(None);
+    }
+    let key = rand::random();
+    if bucket.create(&name, &seal_app_key(epoch_key, app, &key)).await? {
+        return Ok(Some(key));
+    }
+    let made = bucket.get(&name).await?.context("an app's key went as it was made")?;
+    open_app_key(epoch_key, app, &made.bytes).map(Some)
+}
+
+/// A database's keys in a scope, by epoch, from `epochs`, the scope's epochs' keys: each from its app's key there
+/// (`app_key`), the newest epoch's made if `make` and it isn't yet. An epoch with no app key yet has none.
+pub async fn database_keys(bucket: &impl crate::bucket::Bucket, scope: &str, app: &str, database: &str, epochs: &BTreeMap<u32, [u8; 32]>, make: bool) -> Result<BTreeMap<u32, [u8; 32]>> {
+    let newest = epochs.keys().next_back().copied();
+    let mut out = BTreeMap::new();
+    for (n, epoch) in epochs {
+        if let Some(key) = app_key(bucket, epoch, scope, app, *n, make && Some(*n) == newest).await? {
+            out.insert(*n, database_key(&key, app, database));
+        }
+    }
+    Ok(out)
+}
+
+fn cipher(key: &[u8; 32]) -> Aes256Gcm {
+    Aes256Gcm::new(key.into())
+}
+
+/// The public half of an X25519 secret.
+pub fn public_of(secret: &[u8; 32]) -> [u8; 32] {
+    MontgomeryPoint::mul_base_clamped(*secret).0
+}
+
+/// The X25519 twin of an Ed25519 key (the recovery key), as age and backups use it: → (secret, public).
+pub fn twin(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let secret: [u8; 32] = Sha512::digest(seed)[..32].try_into().expect("64 bytes");
+    (secret, public_of(&secret))
+}
+
+/// The X25519 twin of an Ed25519 public key.
+pub fn twin_public(public: &[u8; 32]) -> Result<[u8; 32]> {
+    Ok(CompressedEdwardsY(*public).decompress().context("not an Ed25519 key")?.to_montgomery().0)
+}
+
+/// Seals `plain` to an X25519 public key: share ‖ AES-256-GCM(HKDF(shared, share ‖ to), zero nonce, plain).
+pub fn seal_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
+    let ephemeral: [u8; 32] = rand::random();
+    let share = public_of(&ephemeral);
+    let shared = MontgomeryPoint(*to).mul_clamped(ephemeral).0;
+    ensure!(shared != [0; 32], "not a public key");
+    let key = hkdf_salted(&shared, &[&share[..], to].concat(), b"one/sealed-to");
+    let mut out = share.to_vec();
+    out.extend(cipher(&key).encrypt(&Default::default(), plain).map_err(|_| anyhow!("sealing failed"))?);
+    Ok(out)
+}
+
+/// Opens what was sealed to the public half of `secret`.
+pub fn open_sealed(secret: &[u8; 32], sealed: &[u8]) -> Result<Vec<u8>> {
+    ensure!(sealed.len() >= 48, "not sealed");
+    let share: [u8; 32] = sealed[..32].try_into()?;
+    let shared = MontgomeryPoint(share).mul_clamped(*secret).0;
+    let key = hkdf_salted(&shared, &[&share[..], &public_of(secret)].concat(), b"one/sealed-to");
+    cipher(&key).decrypt(&Default::default(), &sealed[32..]).map_err(|_| anyhow!("that key doesn't open it"))
+}
+
+/// The id a copy sealed under `secret` is kept by.
+pub fn id_of(secret: &[u8]) -> String {
+    B64U.encode(&hkdf(secret, b"one/id"))
+}
+
+/// Seals `plain` under a secret (a passkey's PRF output, a refresh token): nonce ‖ AES-256-GCM.
+pub fn seal_under(secret: &[u8], plain: &[u8]) -> Vec<u8> {
+    let nonce: [u8; 12] = rand::random();
+    let mut out = nonce.to_vec();
+    out.extend(cipher(&hkdf(secret, b"one/sealed-under")).encrypt(&nonce.into(), plain).expect("encrypting in memory"));
+    out
+}
+
+/// Opens what was sealed under `secret`.
+pub fn open_under(secret: &[u8], sealed: &[u8]) -> Result<Vec<u8>> {
+    ensure!(sealed.len() >= 28, "not sealed");
+    cipher(&hkdf(secret, b"one/sealed-under")).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that secret doesn't open it"))
+}
+
+pub fn decode_key(text: &str) -> Result<[u8; 32]> {
+    B64U.decode(text.as_bytes())?.try_into().map_err(|_| anyhow!("a key is 32 bytes"))
 }
 
 // Canonical JSON and signatures.
@@ -189,9 +332,14 @@ pub fn check_certificate(certificate: &str, now: u64) -> Result<Session> {
 
 // Epochs.
 
+/// The folder of a scope's epochs, one folder each (`epoch_name`).
+pub fn epochs_folder(scope: &str) -> String {
+    format!("{}/_epochs", crate::bucket::folder(scope))
+}
+
 /// Where epoch `n` of a scope is kept sealed to `to`: an endpoint key, or `recovery`.
 pub fn epoch_name(scope: &str, n: u32, to: &str) -> String {
-    format!("{}/_epochs/{n}/{to}", crate::bucket::folder(scope))
+    format!("{}/{n}/{to}", epochs_folder(scope))
 }
 
 /// What an `epoch` entry says of its key, so a device takes a key from the bucket as epoch n only if it's the one the
@@ -200,9 +348,14 @@ pub fn epoch_hash(key: &[u8; 32]) -> String {
     HEXLOWER.encode(&hkdf(key, b"one/epoch-hash"))
 }
 
+/// The folder of an app's keys in a scope, one by epoch (`app_key_name`).
+pub fn app_keys_folder(scope: &str, app: &str) -> String {
+    format!("{}/{app}/_key", crate::bucket::folder(scope))
+}
+
 /// Where an app's key in epoch `n` of a scope is kept, sealed under that epoch's key.
 pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
-    format!("{}/{app}/_key/{n}", crate::bucket::folder(scope))
+    format!("{}/{n}", app_keys_folder(scope, app))
 }
 
 /// Where an app's key in epoch `n` of a scope is kept sealed to an endpoint that runs the app's schedules there: its
@@ -219,7 +372,12 @@ pub fn app_schedules_key_name_before(scope: &str, app: &str, endpoint: &str, n: 
 /// Where a scope's Vault secret key `n` is kept sealed to `to`: a machine's key granted it, or `recovery`. Its public
 /// half is in the scope's `vault` entry, and what's sealed to that opens only on those machines.
 pub fn vault_key_name(scope: &str, n: u32, to: &str) -> String {
-    format!("{}/_vault/{n}/{to}", crate::bucket::folder(scope))
+    format!("{}/{n}/{to}", vault_keys_folder(scope))
+}
+
+/// The folder of a scope's Vault secret keys, one folder each (`vault_key_name`).
+pub fn vault_keys_folder(scope: &str) -> String {
+    format!("{}/_vault", crate::bucket::folder(scope))
 }
 
 /// Seals an object under an epoch's key (or a key from it) and its name: epoch (u32, big-endian) ‖ nonce ‖
@@ -276,13 +434,13 @@ pub fn token_id(token: &str) -> String {
 
 /// A handoff sealed to the node's seal key, as base64url: the `x-one-keys` header's value.
 pub fn seal_handoff(to: &[u8; 32], handoff: &Handoff) -> Result<String> {
-    Ok(B64U.encode(&crate::cloudflare::seal_to(to, &serde_json::to_vec(handoff)?)?))
+    Ok(B64U.encode(&seal_to(to, &serde_json::to_vec(handoff)?)?))
 }
 
 /// Opens a handoff sealed to this node, with its seal secret.
 pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
     let bytes = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("the keys handed aren't base64url"))?;
-    let plain = crate::cloudflare::open_sealed(secret, &bytes).context("the keys handed weren't sealed to this device")?;
+    let plain = open_sealed(secret, &bytes).context("the keys handed weren't sealed to this device")?;
     serde_json::from_slice(&plain).context("the keys handed aren't a handoff")
 }
 
@@ -313,15 +471,6 @@ pub struct Need {
     pub database: String,
 }
 
-/// The node's databases of a scope: its Vault's items (`vault::DATABASE`) and its log (`log::NAME`), which hold who's
-/// who there.
-const VAULT: &str = "vault";
-const LOG: &str = "log";
-/// The node's database of the blobs a scope's entries name (`bucket::BLOBS`).
-const BLOBS: &str = "blobs";
-/// An app's own database.
-const APP_DATABASE: &str = "main";
-
 /// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
 /// or its screens (`/v1/screens/<app>`). None for any other.
 pub fn app_of(route: &str) -> Option<&str> {
@@ -340,8 +489,9 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
 /// never go with a request.
 pub fn may_hand(route: &str, need: &Need) -> bool {
+    use crate::{bucket::BLOBS, database::steps::KEY_NAME as LOG, vault::DATABASE as VAULT};
     let node = |of: &[&str]| need.app == crate::database::scopes::APP && of.contains(&need.database.as_str());
-    let apps = need.app != crate::database::scopes::APP && need.database == APP_DATABASE;
+    let apps = need.app != crate::database::scopes::APP && need.database == "main";
     let code = need.scope == "global" && node(&[BLOBS]);
     match (app_of(route), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,
@@ -360,7 +510,7 @@ pub fn may_hand(route: &str, need: &Need) -> bool {
 /// clients hand no older.
 /// `cloudflare/shared/crypto.js`'s `oldestNeeded` is the same.
 pub fn oldest_needed(database: &str, hint: Option<&[u8]>, newest: u32) -> u32 {
-    if database == BLOBS || database == LOG {
+    if database == crate::bucket::BLOBS || database == crate::database::steps::KEY_NAME {
         return 1;
     }
     let newest = newest.max(1);

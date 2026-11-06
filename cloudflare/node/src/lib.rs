@@ -91,7 +91,7 @@ fn failed(err: anyhow::Error) -> JsValue {
 /// A database's keys as `worker.js` keeps them: JSON, `{ <epoch>: <key, base64url> }`.
 fn keys_of(keys: &str) -> Result<one::database::stored::Keys> {
     let keys: BTreeMap<u32, String> = serde_json::from_str(keys)?;
-    keys.into_iter().map(|(n, k)| Ok((n, one::cloudflare::decode_key(&k)?))).collect()
+    keys.into_iter().map(|(n, k)| Ok((n, one::keys::decode_key(&k)?))).collect()
 }
 
 fn signing_key(seed: &str) -> Result<ed25519_dalek::SigningKey> {
@@ -398,7 +398,7 @@ fn prefix_of(scope: &str, app: &str, database: &str) -> Result<String> {
     let scope = Scope::parse(scope)?.to_string();
     let plain = |s: &str| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     anyhow::ensure!(plain(app) && plain(database), "{app}/{database} isn't an app's database");
-    Ok(format!("{}/{app}/{database}", one::bucket::folder(&scope)))
+    Ok(one::bucket::database_prefix(&scope, app, database))
 }
 
 #[wasm_bindgen]

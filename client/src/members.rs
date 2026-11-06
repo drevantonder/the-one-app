@@ -108,9 +108,9 @@ impl Global {
             let checked = |epoch: &[u8; 32]| g.truth.as_ref().is_none_or(|t| t.db.epoch_hash(&Scope::Global, e) == Some(one::keys::epoch_hash(epoch)));
             if !keys.contains_key(&e)
                 && let Some(epoch) = epochs.get(&e).filter(|k| checked(k))
-                && let Some(app) = apps.get(&e).and_then(|a| one::cloudflare::open_app_key(epoch, one::database::scopes::APP, a).ok())
+                && let Some(key) = apps.get(&e).and_then(|a| one::keys::open_database_key(epoch, one::database::scopes::APP, steps::NAME, a).ok())
             {
-                keys.insert(e, one::cloudflare::database_key(&app, steps::KEY_NAME));
+                keys.insert(e, key);
             }
         };
         let sealed_at = |n: u64| given["steps"].as_array().into_iter().flatten().find(|s| s["at"].as_u64() == Some(n)).and_then(|s| data_encoding::BASE64URL_NOPAD.decode(s["sealed"].as_str()?.as_bytes()).ok());
@@ -218,8 +218,8 @@ impl Global {
 fn all_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> one::database::stored::Keys {
     let mut keys = one::database::stored::Keys::new();
     for (e, epoch) in epochs {
-        if let Some(app) = apps.get(e).and_then(|a| one::cloudflare::open_app_key(epoch, one::database::scopes::APP, a).ok()) {
-            keys.insert(*e, one::cloudflare::database_key(&app, steps::KEY_NAME));
+        if let Some(key) = apps.get(e).and_then(|a| one::keys::open_database_key(epoch, one::database::scopes::APP, steps::NAME, a).ok()) {
+            keys.insert(*e, key);
         }
     }
     keys

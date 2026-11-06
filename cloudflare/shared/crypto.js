@@ -181,7 +181,7 @@ export async function x25519Public(secret) {
   return b64u.decode((await crypto.subtle.exportKey("jwk", key)).x);
 }
 
-/// The X25519 key an Ed25519 public key is the twin of (`cloudflare::twin_public`): what's sealed to a Rust endpoint, or
+/// The X25519 key an Ed25519 public key is the twin of (`keys::twin_public`): what's sealed to a Rust endpoint, or
 /// to the recovery key, is sealed to it. u = (1 + y) / (1 - y) mod 2^255 - 19.
 export function twinPublic(edPublic) {
   const b = bytes(edPublic), P = (1n << 255n) - 19n;

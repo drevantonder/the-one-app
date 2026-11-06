@@ -801,9 +801,9 @@ impl Node {
         self.save_network(&NetworkFile { root: root.to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
         self.open_network()?;
         let bucket = self.bucket()?;
-        let recovery_seal = crate::cloudflare::twin_public(recovery.verifying_key().as_bytes())?;
+        let recovery_seal = crate::keys::twin_public(recovery.verifying_key().as_bytes())?;
         for (to, seal) in [("recovery".to_string(), recovery_seal), (hex(&me.key), me.seal)] {
-            crate::database::stored::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::cloudflare::seal_to(&seal, &global)?).await?;
+            crate::database::stored::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::keys::seal_to(&seal, &global)?).await?;
         }
         self.0.databases.epochs.lock().unwrap().insert(Scope::Global, crate::database::stored::Keys::from([(1, global)]));
         // Who's who, as the freeze its recovery key signs at step 1 of its scope database.

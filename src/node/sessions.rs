@@ -429,7 +429,7 @@ impl Node {
         let bucket = self.bucket()?;
         // Each database's newest hint, all at once.
         let hints = futures_util::future::try_join_all(want.iter().map(|(scope, app, database)| {
-            let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
+            let prefix = crate::bucket::database_prefix(&scope.to_string(), app, database);
             let bucket = &bucket;
             async move { crate::bucket::Bucket::get(bucket, &crate::database::stored::newest_name(&prefix)).await }
         }))

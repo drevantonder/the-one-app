@@ -120,7 +120,7 @@ impl<B: Bucket + Clone> Copied<B> {
 /// its 12-digit position.
 fn kept(name: &str) -> bool {
     let mut segments = name.rsplit('/');
-    let position = |last: &str| last.len() == 12 && last.bytes().all(|b| b.is_ascii_digit());
+    let position = |last: &str| last.len() == crate::protocol::STEP_DIGITS && last.bytes().all(|b| b.is_ascii_digit());
     segments.next().is_some_and(|last| position(last.strip_suffix(".sig").unwrap_or(last))) && name.split('/').count() > 1 && name.split('/').all(segment)
 }
 
