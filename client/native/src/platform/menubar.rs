@@ -81,7 +81,7 @@ fn draw(handle: &AppHandle) {
             None => match made(handle, &kind, &label, &app) {
                 Ok(t) => t,
                 Err(e) => {
-                    eprintln!("menu bar item {kind}: {e}");
+                    one::logs::say(&format!("menu bar item {kind}: {e}"));
                     continue;
                 }
             },
@@ -141,7 +141,7 @@ fn toggle_widget(kind: &str, at: tauri::Rect) {
         }
         None => match crate::popup(handle, "widget", &page) {
             Ok(w) => w,
-            Err(e) => return eprintln!("the widget's window: {e}"),
+            Err(e) => return one::logs::say(&format!("the widget's window: {e}")),
         },
     };
     crate::toggle_under(&window, Some(at));

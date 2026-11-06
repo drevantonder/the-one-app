@@ -27,6 +27,25 @@
     return btoa(s);
   };
 
+  // What goes wrong in the page, for the device's log (`one logs <device>`): an error nothing caught, a promise nothing
+  // handled, a file that didn't load. Not what the page prints, which may hold anyone's data. One line, once in a row.
+  let last = "";
+  const log = (text) => {
+    if (text === last) return;
+    last = text;
+    invoke("log", { text }).catch(() => {});
+  };
+  const where = (url) => String(url || "").split(/[?#]/)[0];
+  addEventListener(
+    "error",
+    (e) =>
+      e.target !== window
+        ? log(`couldn't load ${where(e.target.src || e.target.href)}`)
+        : log(`${e.message} at ${where(e.filename)}:${e.lineno}:${e.colno}${e.error?.stack ? `\n${e.error.stack}` : ""}`),
+    true,
+  );
+  addEventListener("unhandledrejection", (e) => log(`unhandled rejection: ${e.reason?.stack || e.reason?.message || e.reason}`));
+
   window.__oneNative = {
     /// Who and where this is, and what this platform can do: lib.rs's `native` says each.
     about: () => invoke("native"),

@@ -146,7 +146,7 @@ pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Resu
 /// token into the secret store as this app keeps it. Its device keys are kept where they were.
 fn take_over() {
     if let Err(e) = host("takeOver", json!({ "scheme": one::config::CLI })) {
-        eprintln!("taking over the old app's sign-in: {e}");
+        one::logs::say(&format!("taking over the old app's sign-in: {e}"));
     }
 }
 

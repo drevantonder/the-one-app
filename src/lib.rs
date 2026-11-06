@@ -78,7 +78,6 @@ pub mod git_wire;
 pub mod handoff;
 #[cfg(feature = "node")]
 pub mod load;
-#[cfg(feature = "node")]
 pub mod logs;
 #[cfg(feature = "node")]
 pub mod logos;

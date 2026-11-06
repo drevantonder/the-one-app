@@ -50,7 +50,7 @@ pub fn set_login(on: bool) {
 pub fn start(app: &tauri::App) {
     super::desktop::start(app);
     if let Err(e) = launcher(app) {
-        eprintln!("the launcher's entry: {e}");
+        one::logs::say(&format!("the launcher's entry: {e}"));
     }
 }
 

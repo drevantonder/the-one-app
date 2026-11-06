@@ -11,6 +11,10 @@ Its own workspace, so the repo's `cargo build` and `cargo test` never build Taur
 and runs it signed in to your throwaway network; `cargo build` here, then `ONE_ADDRESS=<address> target/debug/one-native`
 on a desktop.
 
+Its log (`<data>/logs/client.log`, capped, `one::logs`) holds the page's uncaught errors and failed loads, page loads, panics
+and what the platform code says. `one logs <device>` reads it through a node the app is connected to, which asks the app on
+that connection (so only while it's open); the node checks who may, as for its own log. It keeps no keys or page content.
+
 ## Each platform
 
 Each keeps the old app's identity, so it installed over it in place and kept its sign-in: the Mac's `app.<cli>.mac`

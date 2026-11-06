@@ -85,7 +85,7 @@ pub fn start(app: &tauri::App) {
     start_node();
     match app_menu(app.handle()) {
         Ok(menu) => drop(app.set_menu(menu)),
-        Err(e) => eprintln!("the app's menu: {e}"),
+        Err(e) => one::logs::say(&format!("the app's menu: {e}")),
     }
     app.on_menu_event(|_, e| match e.id().as_ref() {
         "sidebar" | "join" => {

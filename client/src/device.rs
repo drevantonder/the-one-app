@@ -75,6 +75,8 @@ pub struct Device {
     /// The last answer of each call that only reads, for its app's screens (`kept`): a native app's keeps them
     /// (`keeping`), the CLI's doesn't.
     answers: Option<Answers<Files>>,
+    /// Where it keeps its log (`one::logs`), which a node asking for it is answered from.
+    logs: Option<PathBuf>,
 }
 
 impl Device {
@@ -94,7 +96,14 @@ impl Device {
             on: Mutex::default(),
             traces: Mutex::default(),
             answers: None,
+            logs: None,
         }
+    }
+
+    /// Answers a node that asks for its log, from the log kept in `dir` (`one::logs::keep_in`).
+    pub fn logging(mut self, dir: &std::path::Path) -> Device {
+        self.logs = Some(dir.to_path_buf());
+        self
     }
 
     /// Says which device it's on: that device's oned key (hex), on a machine with one, or an id of the device's own,
@@ -245,6 +254,9 @@ impl Device {
             return Err(failed("None of your devices runs your things yet."));
         }
         let client = Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?;
+        if let Some(dir) = self.logs.clone() {
+            client.answer_with(std::sync::Arc::new(move |ask| one::logs::answer(&dir, &ask)));
+        }
         client.set_ranks(&self.keyring.ranks())?;
         client.set_wakes(self.keyring.cloudflare_node())?;
         client.set_online(&online)?;

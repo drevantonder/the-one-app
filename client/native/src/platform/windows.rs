@@ -45,7 +45,7 @@ pub fn badge(count: u32) {
         updater.Update(&BadgeNotification::CreateBadgeNotification(&xml)?)
     };
     if let Err(e) = set() {
-        eprintln!("badge: {e}");
+        one::logs::say(&format!("badge: {e}"));
     }
 }
 
@@ -64,7 +64,7 @@ fn claim_now(address: Option<&str>) {
         links.SetAppAddedHostsAsync(&IIterable::<AppUriHandlerHost>::from(hosts.into_iter().collect::<Vec<_>>()))?.join()
     };
     if let Err(e) = set() {
-        eprintln!("links: {e}");
+        one::logs::say(&format!("links: {e}"));
     }
 }
 
@@ -107,7 +107,7 @@ pub fn let_in(_: Arc<one_client::Device>) {
     use std::os::windows::process::CommandExt;
     // No console window for it.
     if let Err(e) = std::process::Command::new(helper).arg("--register-push").creation_flags(0x0800_0000).spawn() {
-        eprintln!("push: {e}");
+        one::logs::say(&format!("push: {e}"));
     }
 }
 
@@ -127,7 +127,7 @@ pub fn set_login(on: bool) {
         if on { task.RequestEnableAsync()?.join().map(drop) } else { task.Disable() }
     };
     if let Err(e) = set() {
-        eprintln!("open at login: {e}");
+        one::logs::say(&format!("open at login: {e}"));
     }
 }
 

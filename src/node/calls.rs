@@ -464,6 +464,12 @@ impl Node {
                     return Ok(vec![found]);
                 }
             }
+            // A client's log is read through a node it's connected to, which only that node knows: each is tried.
+            if req.app == scopes::APP && self.with(|i| Ok(i.r.db().find_machine(device).and_then(|k| Ok(i.r.db().client(&k)?.is_some())).unwrap_or(false)))? {
+                let mut nodes = self.with(|i| Ok(i.r.db().computes()?.into_iter().map(|m| m.key).filter(|k| *k == self.0.id || i.online(k)).collect::<Vec<_>>()))?;
+                nodes.sort_by_key(|k| *k != self.0.id);
+                return Ok(nodes);
+            }
             return Ok(vec![self.find_device(device)?]);
         }
         let here = self.runs_service_here(&req.app);
@@ -558,7 +564,7 @@ impl Node {
             _ => false,
         } && self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
-        let mut request = req.named(json!({ "service": req.service, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } }));
+        let mut request = req.named(json!({ "service": req.service, "device": req.device, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } }));
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
         // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone: only those the
         // device runs, and only the call's app's.
@@ -681,7 +687,7 @@ impl Node {
             trace::note(json!({ "step": "logs" }), reading.elapsed());
         }
         if req.app == scopes::APP {
-            return self.read_logs(&req.tool, &input, me).map(Reply::Ok);
+            return self.read_logs(req, &input, me).await;
         }
         if req.service.is_some() {
             if !self.runs_service_here(&req.app) {

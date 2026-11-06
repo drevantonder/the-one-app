@@ -38,6 +38,9 @@ const CLIENT_CONNS: usize = 4;
 const CLIENT_BODY: usize = 4 << 20;
 /// How long a client device's request may take to send its body.
 const CLIENT_BODY_TIME: Duration = Duration::from_secs(60);
+/// How long a client device is waited for when this node asks it for something, and the most it may answer.
+const CLIENT_ASK: Duration = Duration::from_secs(10);
+const CLIENT_ANSWER: usize = 128 << 10;
 /// How long a client device's connection stays open with nothing asked on it.
 const CLIENT_IDLE: Duration = Duration::from_secs(10 * 60);
 /// How many connections of keys the network doesn't list (a session's endpoint, until its device's certificate is
@@ -717,6 +720,18 @@ impl Node {
         }
         let answer = tokio::time::timeout(limit, recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
         Ok(serde_json::from_slice(&answer)?)
+    }
+
+    /// Asks the client device `to` for its log, on a connection it opened to this node (`take_client`), where a client
+    /// answers whatever a node asks on one (client/src/lib.rs's `Asked`): → its answer, or None if it isn't connected here.
+    pub(super) async fn ask_client(&self, to: &Key, ask: &Value) -> Result<Option<Value>> {
+        let conn = self.0.net.clients.lock().unwrap().get(to).and_then(|open| open.iter().rev().map(|(c, _)| c).find(|c| c.close_reason().is_none()).cloned());
+        let Some(conn) = conn else { return Ok(None) };
+        let (mut send, mut recv) = tokio::time::timeout(CLIENT_ASK, conn.open_bi()).await.context("the client isn't taking requests")??;
+        send.write_all(ask.to_string().as_bytes()).await?;
+        send.finish()?;
+        let answer = tokio::time::timeout(CLIENT_ASK, recv.read_to_end(CLIENT_ANSWER)).await.context("the client didn't answer")??;
+        Ok(Some(serde_json::from_slice(&answer)?))
     }
 
     /// Asks another device to run a call, waiting `limit` for its answer. An error that's a `NotThere` means it never

@@ -193,7 +193,17 @@ struct Inner {
     conns: Mutex<HashMap<PublicKey, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
     /// The nodes that didn't answer, and when: asked after the others, until one is reached again.
     down: Mutex<HashMap<PublicKey, Down>>,
+    /// What answers a node that opens a stream on a connection of this client's, if anything does.
+    asked: Mutex<Option<Asked>>,
 }
+
+/// How a client answers a node that asks for its log over a connection the client opened: the ask as JSON (`logs`'s
+/// `since`, `grep` and `lines`), and the answer as JSON (`{ ok }` or `{ error }`). A node asks only for someone who may
+/// remove this device: its person and the network's admins (src/node/calls/running.rs).
+pub type Asked = Arc<dyn Fn(serde_json::Value) -> serde_json::Value + Send + Sync>;
+
+/// The most a node's ask may say.
+const ASKED_LIMIT: usize = 4 << 10;
 
 struct Down {
     since: Instant,
@@ -234,6 +244,7 @@ impl Client {
             endpoint: tokio::sync::Mutex::default(),
             conns: Mutex::default(),
             down: Mutex::default(),
+            asked: Mutex::default(),
         }));
         client.endpoint().await?;
         client.set_nodes(nodes)?;
@@ -249,6 +260,11 @@ impl Client {
     pub async fn certify(&self, certificate: String) {
         *self.0.certificate.lock().unwrap() = Some(certificate);
         self.reconnect().await;
+    }
+
+    /// Answers what a node asks of this client (`Asked`), on the connections it opens from now on.
+    pub fn answer_with(&self, asked: Asked) {
+        *self.0.asked.lock().unwrap() = Some(asked);
     }
 
     /// The nodes to ask, in the order things run on them, as the network's state says; connecting to them starts now.
@@ -558,6 +574,7 @@ impl Client {
                 Way::Custom(_) => EndpointAddr::from_parts(*node, [iroh::TransportAddr::Custom(relayed::through_relay(node.as_bytes()))]),
             };
             let conn = endpoint.connect(addr, &alpn()).await.map_err(|err| unsent(format!("the node couldn't be reached: {err}")))?;
+            self.answering(&conn);
             *held = Some(conn.clone());
             Ok((conn, false))
         };
@@ -577,6 +594,27 @@ impl Client {
                 Err(unsent("the node isn't connected"))
             }
         }
+    }
+
+    /// Answers the streams a node opens on `conn` (`Asked`), as long as it's open, with what answers when each comes: this
+    /// client's `answer_with` may be called after its connections start.
+    fn answering(&self, conn: &Connection) {
+        let (conn, me) = (conn.clone(), Arc::downgrade(&self.0));
+        n0_future::task::spawn(async move {
+            while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+                let me = me.clone();
+                n0_future::task::spawn(async move {
+                    let asked = me.upgrade().and_then(|me| me.asked.lock().unwrap().clone());
+                    let answer = match (asked, recv.read_to_end(ASKED_LIMIT).await.map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()))) {
+                        (None, _) => serde_json::json!({ "error": "this device keeps no log" }),
+                        (Some(asked), Ok(ask)) => asked(ask),
+                        (_, Err(err)) => serde_json::json!({ "error": format!("what the node asked didn't read: {err}") }),
+                    };
+                    let _ = send.write_all(answer.to_string().as_bytes()).await;
+                    let _ = send.finish();
+                });
+            }
+        });
     }
 
     async fn exchange(&self, node: &PublicKey, conn: &Connection, head: &[u8], req: &Request, last: bool) -> Result<Response, Error> {

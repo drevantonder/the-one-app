@@ -43,18 +43,38 @@ impl Node {
         Ok(used.into_inner().unwrap())
     }
 
-    /// Reads this device's log (or one of its services'), for a person over the network (`one logs`): the one tool of the
-    /// node's own a call asks.
-    pub(in crate::node) fn read_logs(&self, tool: &str, input: &Value, me: &Caller) -> Result<Value> {
-        ensure!(tool == "logs", "the node has no tool {tool}");
-        ensure!(self.may_read_logs(&me.user)?, "only {}'s person, or an admin of {}, reads its logs", self.device_name(), crate::config::YOURS);
-        crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)
+    /// Reads the log of the device a call names (this node's own, or one of its services'; or a client's, through the
+    /// connection it holds to this node, else `Elsewhere`: another node may hold it), for a person over the network
+    /// (`one logs`): the one tool of the node's own a call asks.
+    pub(in crate::node) async fn read_logs(&self, req: &CallRequest, input: &Value, me: &Caller) -> Result<Reply> {
+        ensure!(req.tool == "logs", "the node has no tool {}", req.tool);
+        let target = match &req.device {
+            Some(name) => self.with(|i| i.r.db().find_machine(name))?,
+            None => self.0.id,
+        };
+        let name = self.name_of(&target);
+        ensure!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s person, or an admin of {}, reads its logs", crate::config::YOURS);
+        if target == self.0.id {
+            return Ok(Reply::Ok(crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)?));
+        }
+        ensure!(self.with(|i| Ok(i.r.db().client(&target)?.is_some()))?, "{name} isn't a client, and a node reads its own log");
+        match self.ask_client(&target, input).await? {
+            Some(answer) => Ok(match answer.get("error") {
+                Some(e) => Reply::error(e.as_str().unwrap_or("it failed")),
+                None => Reply::Ok(answer["ok"].clone()),
+            }),
+            None => Ok(Reply::Elsewhere(format!("{name} isn't connected to {}: its log is read through a node it's connected to, while its app is open", self.device_name()))),
+        }
     }
 
     /// Whether `user` may read this device's logs: whoever may remove it from the network, its person and the network's
     /// admins (who may remove any device), since they could stop it anyway. Nothing in a log is a key or someone's data.
     pub fn may_read_logs(&self, user: &str) -> Result<bool> {
-        self.with(|i| Ok(i.r.db().may(user, "remove", &scopes::device(&self.0.id))))
+        self.may_read_logs_of(user, &self.0.id)
+    }
+
+    fn may_read_logs_of(&self, user: &str, device: &Key) -> Result<bool> {
+        self.with(|i| Ok(i.r.db().may(user, "remove", &scopes::device(device))))
     }
 
     /// Lets the requests of a call, widget or hook of `app` through the node as `caller`'s, while it runs.

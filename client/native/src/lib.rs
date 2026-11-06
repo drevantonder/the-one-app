@@ -110,7 +110,7 @@ fn address_in(data: &std::path::Path) -> Option<String> {
 
 /// This device's client for `id` (`<address> <user>`), its folder in `data` named by it.
 fn client(data: &std::path::Path, address: &str, id: &str, secret: [u8; 32]) -> one_client::Device {
-    one_client::Device::new(secret, address, &data.join("client").join(secrets::folder(id)).to_string_lossy()).keeping()
+    one_client::Device::new(secret, address, &data.join("client").join(secrets::folder(id)).to_string_lossy()).keeping().logging(data)
 }
 
 /// A device's code, as typed or pushed: its letters and digits.
@@ -174,7 +174,7 @@ async fn node(device: &one_client::Device, method: &str, path: &str, body: Optio
 /// The widgets kept for the platform's own again, and drawn again where the app runs.
 async fn widgets_changed(device: &one_client::Device) {
     if let Err(e) = widgets::refresh(device, &platform::widgets_dir()).await {
-        eprintln!("widgets: {e}");
+        one::logs::say(&format!("widgets: {e}"));
     }
     if APP.get().is_some() {
         platform::redraw_widgets();
@@ -511,6 +511,13 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
     platform::save(name, data, preview).await
 }
 
+/// What the page says went wrong (an error it didn't catch, a file that didn't load), for this device's log, which a person's
+/// agent reads through a node (`one logs <device>`). The log's own caps and filters keep it small and free of what's secret.
+#[tauri::command]
+fn log(text: String) {
+    one::logs::record(&format!("page: {text}"));
+}
+
 /// A phone's haptic: "selection" (a press), "medium" (a long press), "success" or "error"; elsewhere, nothing.
 #[tauri::command]
 fn haptic(style: String) {
@@ -818,7 +825,7 @@ fn tray_menu(app: &AppHandle) {
     };
     match made() {
         Ok(menu) => drop(tray.set_menu(Some(menu))),
-        Err(e) => eprintln!("the tray's menu: {e}"),
+        Err(e) => one::logs::say(&format!("the tray's menu: {e}")),
     }
 }
 
@@ -906,6 +913,13 @@ pub fn run() {
         })
         .setup(|app| {
             let data = platform::data(app)?;
+            one::logs::keep_in(&data, one::logs::CLIENT);
+            let earlier = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                one::logs::say(&format!("panic: {info}"));
+                earlier(info)
+            }));
+            one::logs::say(&format!("{} {} started on {}", one::config::NAME, env!("CARGO_PKG_VERSION"), device_name()));
             #[cfg(debug_assertions)]
             if let Some(port) = env("CONTROL").and_then(|p| p.parse().ok()) {
                 control(port);
@@ -932,6 +946,13 @@ pub fn run() {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .initialization_script(include_str!("native.js"))
                 .use_https_scheme(true)
+                .on_page_load(|_, load| {
+                    let event = match load.event() {
+                        tauri::webview::PageLoadEvent::Started => "started",
+                        tauri::webview::PageLoadEvent::Finished => "finished",
+                    };
+                    one::logs::record(&format!("page {event} loading {}", load.url()));
+                })
                 // Anything that would take the page away goes to the browser.
                 .on_navigation(|u| {
                     let own = matches!(u.scheme(), "tauri") || u.host_str() == Some("tauri.localhost");
