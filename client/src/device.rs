@@ -482,6 +482,13 @@ impl Device {
         }
     }
 
+    /// Renews its person's app schedules of `app` as they use it (`Keyring::renew_app_schedules`).
+    pub async fn renew_app_schedules(&self, app: &str) {
+        if let Some(client) = self.client().await {
+            self.keyring.renew_app_schedules(&client, self, app).await;
+        }
+    }
+
     /// What `app`'s `tool` answered last for `input` (JSON), if it only reads: its answer's JSON, and when (ms). For a
     /// screen to show at once while it asks again (bridge.js's `kept`).
     pub async fn kept(&self, app: &str, tool: &str, input: &[u8]) -> Option<(Vec<u8>, u64)> {

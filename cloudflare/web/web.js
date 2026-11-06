@@ -408,7 +408,7 @@ const h = OneUI.react.createElement;
     const asked = api("/v1/call", { method: "POST", body: { app, tool, input, client: about?.client || "web" } }).then((r) => r.ok);
     if (same) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
     const out = await asked;
-    if (device) net.renew(app).catch((err) => console.warn(`renewing ${app}'s schedules:`, err));
+    if (native || device) (native || net).renew(app).catch((err) => console.warn(`renewing ${app}'s schedules:`, err));
     return out;
   }
   const reading = new Map();

@@ -450,6 +450,14 @@ async fn kept(app: String, tool: String, input: Value) -> Option<Value> {
     Some(json!({ "answer": serde_json::from_slice::<Value>(&answer).ok()?, "at": at }))
 }
 
+/// Renews its person's app schedules of `app`, which they just used (`Device::renew_app_schedules`).
+#[tauri::command]
+async fn renew(app: String) {
+    if let Ok(device) = self::app().device() {
+        device.renew_app_schedules(&app).await;
+    }
+}
+
 /// Whether this device was taken out of its person's devices, as the relay says.
 #[tauri::command]
 async fn removed() -> bool {
