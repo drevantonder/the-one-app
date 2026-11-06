@@ -65,12 +65,6 @@ const CALL_LIMIT: Duration = Duration::from_secs(30);
 /// A device whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
 const FAR: Duration = Duration::from_millis(250);
 
-/// Whether a device has no room for more: its memory, or its CPU of late, over 90% used.
-fn full(load: &crate::load::Load) -> bool {
-    let busy = load.cpu.iter().rev().take(3).map(|c| *c as u32).sum::<u32>() / 3;
-    load.memory.is_some_and(|m| m.total > 0 && m.used * 10 > m.total * 9) || busy > 90
-}
-
 const TICK: Duration = Duration::from_secs(10);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
@@ -172,50 +166,8 @@ pub enum Event {
     Network,
 }
 
-#[derive(Serialize, Deserialize)]
-struct Pairing {
-    user: String,
-    /// The client that asked for it, if one did.
-    #[serde(default)]
-    by: Option<String>,
-    /// The user the machine joins as, when it isn't the asker's: an admin's code for someone else's machine.
-    #[serde(default)]
-    admits: Option<String>,
-    /// Milliseconds since 1970 after which it no longer works.
-    until: u64,
-    /// The machine whose join with it didn't finish (hex), which alone may use it again.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    tried: Option<String>,
-}
-
 /// What a machine's node is: the device its person's CLI, MCP and Mac app sign with, and compute.
 pub const MACHINE: &[scopes::Kind] = &[scopes::Kind::Client, scopes::Kind::Compute];
-
-
-#[derive(Serialize, Deserialize)]
-struct PairingCode {
-    /// The network's address, whose relay reaches the device that made it.
-    address: String,
-    from: Key,
-    secret: [u8; 16],
-}
-
-#[derive(Serialize, Deserialize)]
-struct JoinRequest {
-    secret: [u8; 16],
-    name: String,
-    #[serde(rename = "as")]
-    as_: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct JoinReply {
-    root: String,
-    user: String,
-    /// For a device: the network's bucket, as a place's fields.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    bucket: Option<BTreeMap<String, String>>,
-}
 
 /// Who asked for something: this device or another, or a client, as one user.
 #[derive(Clone, Debug)]
@@ -416,7 +368,7 @@ pub struct Inner {
     apps: Apps,
     pub services: crate::services::Services,
     network: Exclusive<Option<Network>>,
-    pairings: Mutex<HashMap<[u8; 16], Pairing>>,
+    pairings: Mutex<HashMap<[u8; 16], pairing::Pairing>>,
     events: broadcast::Sender<Event>,
     /// Held while writing or replaying, so views replay in order.
     writes: tokio::sync::Mutex<()>,
@@ -541,7 +493,7 @@ impl Node {
             apps,
             services: Default::default(),
             network: Exclusive::new(None),
-            pairings: Mutex::new(load_pairings(dir)),
+            pairings: Mutex::new(pairing::load(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),
@@ -1257,13 +1209,6 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
-}
-
-fn load_pairings(dir: &Path) -> HashMap<[u8; 16], Pairing> {
-    let list: Vec<(String, Pairing)> = std::fs::read(dir.join("pairings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    list.into_iter()
-        .filter_map(|(k, v)| Some((data_encoding::HEXLOWER.decode(k.as_bytes()).ok()?.try_into().ok()?, v)))
-        .collect()
 }
 
 /// The key of the device whose home is `dir`, for what this machine signs as itself without its node (`cloudflare invite`).

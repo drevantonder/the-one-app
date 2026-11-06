@@ -5,6 +5,54 @@ use super::*;
 
 const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
+#[derive(Serialize, Deserialize)]
+pub(super) struct Pairing {
+    pub(super) user: String,
+    /// The client that asked for it, if one did.
+    #[serde(default)]
+    pub(super) by: Option<String>,
+    /// The user the machine joins as, when it isn't the asker's: an admin's code for someone else's machine.
+    #[serde(default)]
+    pub(super) admits: Option<String>,
+    /// Milliseconds since 1970 after which it no longer works.
+    pub(super) until: u64,
+    /// The machine whose join with it didn't finish (hex), which alone may use it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) tried: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PairingCode {
+    /// The network's address, whose relay reaches the device that made it.
+    address: String,
+    from: Key,
+    secret: [u8; 16],
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct JoinRequest {
+    secret: [u8; 16],
+    name: String,
+    #[serde(rename = "as")]
+    as_: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct JoinReply {
+    root: String,
+    user: String,
+    /// For a device: the network's bucket, as a place's fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bucket: Option<BTreeMap<String, String>>,
+}
+
+pub(super) fn load(dir: &Path) -> HashMap<[u8; 16], Pairing> {
+    let list: Vec<(String, Pairing)> = std::fs::read(dir.join("pairings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    list.into_iter()
+        .filter_map(|(k, v)| Some((data_encoding::HEXLOWER.decode(k.as_bytes()).ok()?.try_into().ok()?, v)))
+        .collect()
+}
+
 impl Node {
     /// Makes a one-time pairing code for another of the local user's machines, which joins as a device.
     pub fn pair(&self) -> Result<String> {

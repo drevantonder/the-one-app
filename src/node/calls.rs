@@ -14,6 +14,13 @@ use super::*;
 
 /// A service's call may take longer, as a browser or a desktop starts: as long as a service is waited for.
 const SERVICE_LIMIT: Duration = Duration::from_secs(600);
+
+/// Whether a device has no room for more: its memory, or its CPU of late, over 90% used.
+fn full(load: &crate::load::Load) -> bool {
+    let busy = load.cpu.iter().rev().take(3).map(|c| *c as u32).sum::<u32>() / 3;
+    load.memory.is_some_and(|m| m.total > 0 && m.used * 10 > m.total * 9) || busy > 90
+}
+
 /// How much longer a call may take for each MiB put for it (a git push's pack), which it reads and may keep in the bucket.
 const PER_MIB: Duration = Duration::from_secs(1);
 /// How long an app that looped stays stopped on a device, unless it's deployed again sooner.
