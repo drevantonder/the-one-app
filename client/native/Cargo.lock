@@ -4017,6 +4017,7 @@ dependencies = [
  "ureq",
  "url",
  "windows",
+ "windows-collections",
  "windows-registry",
 ]
 

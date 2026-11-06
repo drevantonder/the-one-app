@@ -1,12 +1,14 @@
 //! What's Windows' own, beside the window: the taskbar button's count, opening at login (the package's startup task,
-//! Package.appxmanifest's `login`), the machine's own id, and the package's helper
+//! Package.appxmanifest's `login`), the links to the network's address, the machine's own id, and the package's helper
 //! (`windows/`, the Windows App SDK's), which registers this device's push channel. All but the id need the package's
 //! identity, which the app has installed (windows/build.sh); run from a folder, they do nothing.
 
 use windows::ApplicationModel::{StartupTask, StartupTaskState};
 use windows::Data::Xml::Dom::XmlDocument;
+use windows::System::{AppUriHandlerHost, AppUriHandlerRegistrationManager};
 use windows::UI::Notifications::{BadgeNotification, BadgeUpdateManager};
 use windows::core::HSTRING;
+use windows_collections::IIterable;
 
 /// Windows' own id for this machine, which outlives reinstalling the app.
 pub fn machine_guid() -> Option<String> {
@@ -26,6 +28,21 @@ pub fn badge(count: u32) {
     };
     if let Err(e) = set() {
         eprintln!("badge: {e}");
+    }
+}
+
+/// Links to the network's address open this app, from other apps (Edge and Chrome keep their own): the package's
+/// `links` names the one host the build was made for, and this makes it the address signed in to, or none. Windows asks
+/// the address for its `/.well-known/windows-app-web-link`, which names this package (the gateway serves it).
+pub fn claim(address: Option<&str>) {
+    let set = || -> windows::core::Result<()> {
+        let Some(links) = AppUriHandlerRegistrationManager::GetDefault()?.TryGetRegistration(&HSTRING::from("links")).ok() else { return Ok(()) };
+        let host = address.and_then(|a| url::Url::parse(a).ok()).filter(|u| u.scheme() == "https").and_then(|u| u.host_str().map(str::to_string));
+        let hosts = host.map(|h| AppUriHandlerHost::CreateInstance(&HSTRING::from(h)).map(Some)).transpose()?;
+        links.SetAppAddedHostsAsync(&IIterable::<AppUriHandlerHost>::from(hosts.into_iter().collect::<Vec<_>>()))?.join()
+    };
+    if let Err(e) = set() {
+        eprintln!("links: {e}");
     }
 }
 

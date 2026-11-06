@@ -257,6 +257,15 @@ fn native() -> Value {
     })
 }
 
+/// Links to the network's address open this app (Windows' app links), as of the address it signs in to.
+fn claim() {
+    #[cfg(windows)]
+    {
+        let address = app().address();
+        std::thread::spawn(move || windows::claim(address.as_deref()));
+    }
+}
+
 /// Takes what the person typed: an address, or an invite link (`<address>/invite#…`), whose secret goes with this
 /// device's request to be let in.
 #[tauri::command]
@@ -275,6 +284,7 @@ fn address(typed: String) -> Result<String, String> {
     a.keep("address", Some(&origin));
     let invite = (url.path() == "/invite").then(|| url.fragment().unwrap_or_default().to_string()).filter(|s| !s.is_empty());
     a.keep("invite", invite.as_deref());
+    claim();
     Ok(origin)
 }
 
@@ -627,12 +637,15 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// A link the app was opened with (`<cli>://…`): to the page, which goes there, or kept for it until it asks.
+/// A link the app was opened with (`<cli>://…`, or one to the network's address, which Windows hands it): to the page,
+/// which goes there, or kept for it until it asks.
 fn opened(url: &str) {
-    if !url.starts_with(&format!("{}://", one::config::CLI)) {
+    let a = app();
+    let own = url.starts_with(&format!("{}://", one::config::CLI))
+        || a.address().is_some_and(|address| url::Url::parse(url).is_ok_and(|u| u.origin().ascii_serialization() == address));
+    if !own {
         return;
     }
-    let a = app();
     show();
     match a.handle.get_webview_window("main").filter(|_| a.page.load(Ordering::Relaxed)) {
         Some(w) => drop(w.eval(format!("window.__oneNative?.opened({})", json!(url)))),
@@ -795,6 +808,7 @@ pub fn run() {
                 page: Default::default(),
             });
             // What runs beside the window asks it, while it runs, rather than starting a client of its own.
+            claim();
             #[cfg(desktop)]
             headless::serve(|| APP.get().and_then(|a| a.device().ok()));
             #[cfg(target_os = "linux")]

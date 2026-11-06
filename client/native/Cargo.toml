@@ -56,9 +56,10 @@ tokio = { version = "1", features = ["sync", "time", "macros"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 # Windows' own, beside the window (src/windows.rs): the taskbar button's count (BadgeUpdateManager), opening at login
-# (StartupTask), and the machine's id in the registry. Both already built for Tauri and iroh.
+# (StartupTask), the links to the network's address (AppUriHandler), and the machine's id in the registry. Both already built for Tauri and iroh.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "ApplicationModel"] }
+windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "ApplicationModel", "System"] }
+windows-collections = "0.3"
 windows-registry = "0.6"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
