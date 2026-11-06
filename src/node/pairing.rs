@@ -1,9 +1,8 @@
 //! Pairing: a code that lets a new device join the network, and admitting it.
 
 use crate::config::YOURS;
+use crate::protocol::PAIRING_LIFE;
 use super::*;
-
-const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Pairing {

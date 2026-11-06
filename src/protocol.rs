@@ -14,6 +14,8 @@ pub use crate::push::DOMAIN as PUSH;
 pub const AUTH_DOMAIN: &str = "one/auth";
 /// How many days an invite link works.
 pub const INVITE_DAYS: u64 = 3;
+/// How long a pairing code works (ms): what a node tells the relay it lasts, which the relay holds it to.
+pub const PAIRING_LIFE: u64 = 7 * 86_400_000;
 /// What a session's endpoint signs to open its relay socket.
 pub const SOCKET: &str = "one/socket";
 /// How old a session's proof for its relay socket may be, either way: a socket is opened as soon as it's made.
@@ -150,6 +152,7 @@ pub fn javascript() -> String {
          export const SESSION = {session};\n\
          export const SOCKET_FRESH = {socket_fresh};\n\
          export const READS = {reads};\n\
+         export const PAIRING_LIFE = {pairing_life};\n\
          export const MOST_URLS = {most_urls};\n\
          export const MOST_NEEDED = {most_needed};\n\
          export const BEHIND = {behind};\n\
@@ -190,6 +193,7 @@ pub fn javascript() -> String {
         session = crate::keys::SESSION,
         socket_fresh = SOCKET_FRESH,
         reads = crate::database::READS,
+        pairing_life = PAIRING_LIFE,
         most_urls = MOST_URLS,
         most_needed = crate::keys::MOST_NEEDED,
         behind = json!(crate::keys::BEHIND),

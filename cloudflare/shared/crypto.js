@@ -17,8 +17,9 @@ const text = new TextEncoder();
 
 export const b64u = {
   encode(bytes) {
+    const all = new Uint8Array(bytes);
     let s = "";
-    for (const b of new Uint8Array(bytes)) s += String.fromCharCode(b);
+    for (let i = 0; i < all.length; i += 0x8000) s += String.fromCharCode(...all.subarray(i, i + 0x8000));
     return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
   },
   decode(s) {
@@ -121,6 +122,9 @@ const hex = {
   },
 };
 export { hex };
+
+/// A key as the network writes one: 64 hex characters.
+export const isKey = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
 
 /// JSON's bytes with every object's keys in order and no spaces, as serde_json writes a Value: what's signed.
 export function canonical(v) {
@@ -233,7 +237,7 @@ export async function checkCertificate(certificate, now = Date.now()) {
     throw new Error("a certificate is base64url JSON");
   }
   const { by, fields } = await checkSigned(ENDPOINT, request);
-  if (typeof fields.endpoint !== "string" || !/^[0-9a-f]{64}$/.test(fields.endpoint)) throw new Error("not a key: 64 hex characters");
+  if (!isKey(fields.endpoint)) throw new Error("not a key: 64 hex characters");
   if (!Number.isSafeInteger(fields.until)) throw new Error("a certificate says until when");
   if (fields.at > now + FRESH) throw new Error("it was signed in the future, or the clock that signed it is wrong");
   if (fields.until <= now) throw new Error("that session has ended");
@@ -285,7 +289,7 @@ export function waited(status, said) {
     // Where the approving device read who's who to (src/database/steps.rs `Welcome::parse`): `<freeze>.<at>.<hash>`.
     const w = typeof said.welcome === "string" && /^([1-9]\d{0,15})\.([1-9]\d{0,15})\.[0-9a-f]{64}$/.exec(said.welcome);
     const welcome = w && Number(w[2]) >= Number(w[1]) && Number(w[2]) <= NUMBER_MAX ? said.welcome : null;
-    return { approved: true, ...(typeof said.root === "string" && /^[0-9a-f]{64}$/.test(said.root) ? { root: said.root } : {}), ...(welcome ? { welcome } : {}) };
+    return { approved: true, ...(isKey(said.root) ? { root: said.root } : {}), ...(welcome ? { welcome } : {}) };
   }
   return {};
 }

@@ -4,6 +4,8 @@
 // remote MCP server, everything under `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything
 // else to the web client's files. Devices reach the network's nodes over iroh, never through here, and so does git: a
 // git request here is git on a computer without the CLI, told how to get it.
+import { hex, sha256 } from "../shared/crypto.js";
+import { refusal } from "../shared/http.js";
 import { IROH_PATHS } from "../shared/protocol.js";
 
 const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
@@ -24,17 +26,15 @@ function where(path) {
   return "web";
 }
 
-const refuse = (status, error) => Response.json({ error }, { status, headers: { "x-content-type-options": "nosniff" } });
-
-const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
-const sha256 = async (data) => hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? new TextEncoder().encode(data) : data));
+const NOSNIFF = { "x-content-type-options": "nosniff" };
+const digest = async (data) => hex.encode(await sha256(data));
 
 let icons = null;
 
 async function someIcons(env, url) {
   icons ||= env.ASSETS.fetch(new Request(new URL("/icons.json", url.origin))).then(async (r) => {
     const body = await r.arrayBuffer();
-    return { all: JSON.parse(new TextDecoder().decode(body)), v: await sha256(body) };
+    return { all: JSON.parse(new TextDecoder().decode(body)), v: await digest(body) };
   }).catch((err) => ((icons = null), Promise.reject(err)));
   const { all, v } = await icons;
   const names = (url.searchParams.get("names") || "").split(",").slice(0, 1000);
@@ -46,7 +46,7 @@ async function someIcons(env, url) {
 }
 
 async function toWeb(request, env, url) {
-  if (!["GET", "HEAD"].includes(request.method)) return refuse(405, "only GET and HEAD here");
+  if (!["GET", "HEAD"].includes(request.method)) return refusal(405, "only GET and HEAD here", NOSNIFF);
   if (url.pathname === "/icons") return someIcons(env, url);
   const ask = (path) => env.ASSETS.fetch(new Request(new URL(path, url.origin), { method: request.method }));
   let path = url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname;
@@ -77,7 +77,7 @@ async function toWeb(request, env, url) {
   const v = url.searchParams.get("v");
   if (v && resp.ok && request.method === "GET") {
     const body = await resp.arrayBuffer();
-    const named = (await sha256(body)).startsWith(v) && v.length >= 12;
+    const named = (await digest(body)).startsWith(v) && v.length >= 12;
     headers.set("cache-control", named ? "public, max-age=31536000, immutable" : "no-cache");
     return send(body);
   }
@@ -108,7 +108,7 @@ export default {
     if (url.pathname.startsWith("/push/")) return env.PUSH.fetch(request);
     if (GIT.test(url.pathname)) return gitWithoutCli(env, url);
     switch (where(url.pathname)) {
-      case "mcp": return env.MCP ? env.MCP.fetch(request) : refuse(503, "this network's MCP isn't set up yet");
+      case "mcp": return env.MCP ? env.MCP.fetch(request) : refusal(503, "this network's MCP isn't set up yet", NOSNIFF);
       case "auth": return env.AUTH.fetch(request);
       default: return toWeb(request, env, url);
     }

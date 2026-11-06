@@ -30,6 +30,7 @@ import { DurableObject } from "cloudflare:workers";
 import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { b64u, ed25519Public, hex, joinCode, random, signBytes, signedRequest, untilTaken } from "../shared/crypto.js";
+import { CORS, json, near, textOf } from "../shared/http.js";
 import { CODES, IROH_PATHS, READS, RELAY } from "../shared/protocol.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
@@ -50,10 +51,7 @@ const KEPT = "kept:";
 const JOIN_EARLY = 60_000;
 const JOIN_AGAIN = 30_000;
 
-const json = (v, status = 200, headers = {}) => Response.json(v, { status, headers });
-const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 const origin = (env) => new URL(env.ADDRESS).origin;
-const CORS = { "access-control-allow-origin": "*" };
 
 let issuer = null;
 const issuerOf = (env) => (issuer ||= new Issuer(`${origin(env)}/api/auth`, () => env.AUTH.fetch(`${origin(env)}/api/auth/jwks`)));
@@ -86,12 +84,6 @@ async function authorizationServer(env, which) {
   return json(meta, 200, CORS);
 }
 
-async function bodyOf(request) {
-  if (Number(request.headers.get("content-length") || 0) > BODY_MOST) return null;
-  const bytes = await request.arrayBuffer();
-  return bytes.byteLength > BODY_MOST ? null : new TextDecoder().decode(bytes);
-}
-
 function askedOf(request, body) {
   if (/json/i.test(request.headers.get("content-type") || "")) {
     let o = {};
@@ -104,7 +96,7 @@ function askedOf(request, body) {
 }
 
 async function token(request, env) {
-  const body = await bodyOf(request);
+  const body = await textOf(request, BODY_MOST);
   if (body === null) return json({ error: "invalid_request", error_description: "that request is too big" }, 413);
   const asked = askedOf(request, body);
   const headers = { "content-type": request.headers.get("content-type") || "application/x-www-form-urlencoded" };
@@ -140,7 +132,7 @@ async function mcp(request, env) {
   // An MCP client's sign-in is for this, `<address>/mcp`; the network's own apps' (`<address>`) open no device here.
   if (![claims.aud].flat().includes(`${origin(env)}/mcp`)) return signInFirst(env, `that sign-in isn't for ${origin(env)}/mcp`);
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
-  const body = await bodyOf(request);
+  const body = await textOf(request, BODY_MOST);
   if (body === null) return json({ error: "that request is too big" }, 413);
   const headers = {};
   for (const name of TO_NODE) if (request.headers.has(name)) headers[name] = request.headers.get(name);

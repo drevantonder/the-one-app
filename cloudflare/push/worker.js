@@ -28,7 +28,8 @@
 // each device's address, in its Durable Object.
 
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
-import { b64u, checkRequest, sealTo, hex, rolesOf } from "../shared/crypto.js";
+import { b64u, checkRequest, sealTo, hex, isKey, rolesOf } from "../shared/crypto.js";
+import { CORS, json, refusal, refuse } from "../shared/http.js";
 import { PUSH } from "../shared/protocol.js";
 import { apns, fcm, isWebPushEndpoint, isWnsChannel, vapidKey, webPush, wns } from "./senders.js";
 
@@ -41,30 +42,24 @@ const MOST = 64;
 const NOTE_BYTES = 2_600;
 const MINUTE = 60_000;
 
-const isKey = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
-const fail = (status, error) => {
-  throw Object.assign(new Error(error), { status });
-};
-const json = (v, status = 200) => Response.json(v, { status, headers: { "access-control-allow-origin": "*" } });
-
 const push = (env) => env.PUSH.get(env.PUSH.idFromName("push"));
 
 export default class extends WorkerEntrypoint {
   async fetch(request) {
     const url = new URL(request.url);
-    if (request.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "content-type" } });
+    if (request.method === "OPTIONS") return new Response(null, { headers: { ...CORS, "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "content-type" } });
     // What a browser subscribes with: the network's VAPID public key. And which services this network can push through.
     if (url.pathname === "/push/key" && request.method === "GET") {
       const vapid = this.env.VAPID_KEY ? b64u.encode((await vapidKey(this.env.VAPID_KEY)).public) : null;
-      return json({ vapid, via: senders(this.env) });
+      return json({ vapid, via: senders(this.env) }, 200, CORS);
     }
     const route = { "/push/register": "register", "/push/unregister": "unregister", "/push/send": "send", "/push/devices": "devices" }[url.pathname];
-    if (!route || request.method !== "POST") return json({ error: "not here" }, 404);
+    if (!route || request.method !== "POST") return refusal(404, "not here", CORS);
     const body = await request.json().catch(() => null);
-    if (!body) return json({ error: "the body isn't JSON" }, 400);
+    if (!body) return refusal(400, "the body isn't JSON", CORS);
     // Errors lose all but their message between objects, so it answers with its status.
     const { status, said } = await push(this.env).asked(route, `POST ${url.pathname}`, body);
-    return json(said, status);
+    return json(said, status, CORS);
   }
 }
 
@@ -102,14 +97,14 @@ export class Push extends DurableObject {
   }
 
   async answer(what, route, body) {
-    const { by, fields } = await checkRequest(PUSH, body).catch((err) => fail(403, `That request isn't signed as it should be: ${err.message}.`));
-    if (fields.route !== route) fail(403, `That request was signed for ${fields.route}, not ${route}.`);
+    const { by, fields } = await checkRequest(PUSH, body).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
+    if (fields.route !== route) refuse(403, `That request was signed for ${fields.route}, not ${route}.`);
     const sql = this.ctx.storage.sql;
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * MINUTE);
-    if (sql.exec("select 1 from signed where sig = ?", body.sig).toArray().length) fail(403, "That request was sent already.");
+    if (sql.exec("select 1 from signed where sig = ?", body.sig).toArray().length) refuse(403, "That request was sent already.");
     sql.exec("insert into signed (sig, at) values (?, ?)", body.sig, Date.now());
     const allowed = await this.env.RELAY.allowed(by);
-    if (!allowed) fail(403, "That device isn't one of the network's.");
+    if (!allowed) refuse(403, "That device isn't one of the network's.");
     const node = rolesOf(allowed.role).includes("compute");
     if (what === "register") return this.register(by, fields);
     if (what === "unregister") return this.unregister(by);
@@ -118,18 +113,18 @@ export class Push extends DurableObject {
   }
 
   register(by, { via, address, env = "", topic = "", keys, seal, user }) {
-    if (!VIAS.includes(via)) fail(400, `via is one of ${VIAS.join(", ")}`);
-    if (typeof address !== "string" || !address || address.length > 1024) fail(400, "say its address");
-    if (!isKey(seal)) fail(400, "seal is its seal key, hex");
-    if (user != null && !(typeof user === "string" && /^[\w-]{1,64}$/.test(user))) fail(400, "user is its person's id");
+    if (!VIAS.includes(via)) refuse(400, `via is one of ${VIAS.join(", ")}`);
+    if (typeof address !== "string" || !address || address.length > 1024) refuse(400, "say its address");
+    if (!isKey(seal)) refuse(400, "seal is its seal key, hex");
+    if (user != null && !(typeof user === "string" && /^[\w-]{1,64}$/.test(user))) refuse(400, "user is its person's id");
     if (via === "apns") {
-      if (!/^[0-9a-f]{16,200}$/.test(address)) fail(400, "an APNs token is hex");
-      if (!["sandbox", "production"].includes(env)) fail(400, "env is sandbox or production");
-      if (!JSON.parse(this.env.APNS_TOPICS || "[]").includes(topic)) fail(400, "topic is the app's bundle id");
+      if (!/^[0-9a-f]{16,200}$/.test(address)) refuse(400, "an APNs token is hex");
+      if (!["sandbox", "production"].includes(env)) refuse(400, "env is sandbox or production");
+      if (!JSON.parse(this.env.APNS_TOPICS || "[]").includes(topic)) refuse(400, "topic is the app's bundle id");
     }
-    if (via === "wns" && !isWnsChannel(address)) fail(400, "a WNS channel is at notify.windows.com");
+    if (via === "wns" && !isWnsChannel(address)) refuse(400, "a WNS channel is at notify.windows.com");
     if (via === "webpush") {
-      if (!isWebPushEndpoint(address)) fail(400, "that endpoint isn't a browser's push service");
+      if (!isWebPushEndpoint(address)) refuse(400, "that endpoint isn't a browser's push service");
       const ok = (s, n) => {
         try {
           return b64u.decode(s).length === n;
@@ -137,7 +132,7 @@ export class Push extends DurableObject {
           return false;
         }
       };
-      if (!keys || !ok(keys.p256dh, 65) || !ok(keys.auth, 16)) fail(400, "keys are the subscription's p256dh and auth");
+      if (!keys || !ok(keys.p256dh, 65) || !ok(keys.auth, 16)) refuse(400, "keys are the subscription's p256dh and auth");
     }
     const sql = this.ctx.storage.sql;
     sql.exec(
@@ -157,7 +152,7 @@ export class Push extends DurableObject {
   }
 
   devices(node, { user, keys = [] }) {
-    if (!node) fail(403, "Only a node asks which devices registered.");
+    if (!node) refuse(403, "Only a node asks which devices registered.");
     const sql = this.ctx.storage.sql;
     const registered = keys.filter(isKey).flatMap((key) => sql.exec("select key, via, env, at from devices where key = ?", key).toArray());
     return { registered };
@@ -175,8 +170,8 @@ export class Push extends DurableObject {
   }
 
   async send(by, notes = []) {
-    if (!Array.isArray(notes) || notes.length > MOST) fail(400, `notes is a list of at most ${MOST}`);
-    if (!this.count(`sender:${by}`, SENDS)) fail(429, "That device sent too many pushes this minute. Try again in a minute.");
+    if (!Array.isArray(notes) || notes.length > MOST) refuse(400, `notes is a list of at most ${MOST}`);
+    if (!this.count(`sender:${by}`, SENDS)) refuse(429, "That device sent too many pushes this minute. Try again in a minute.");
     const out = {};
     const sql = this.ctx.storage.sql;
     await Promise.all(

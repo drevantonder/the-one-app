@@ -58,8 +58,9 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
-import { b64u, behind, checkCertificate, checkRequest, hex, rolesOf, sha256 } from "../shared/crypto.js";
-import { CODES, FRESH, IROH_PATHS, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
+import { b64u, behind, checkCertificate, checkRequest, hex, isKey, rolesOf, sha256 } from "../shared/crypto.js";
+import { CORS, near, refusal } from "../shared/http.js";
+import { CODES, FRESH, IROH_PATHS, PAIRING_LIFE, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
 
 initSync({ module: wasm });
 
@@ -70,7 +71,6 @@ const PROVE_WITHIN = 30_000;
 const UNPROVEN_PER_PLACE = 8;
 const UNPROVEN_PER_SITE = 32;
 const UNPROVEN = 256;
-const PAIRING_FOR = 7 * 86_400_000;
 const HOUR = 3_600_000;
 const PAIRINGS_PER_DEVICE = 8;
 const is = (it, role) => !!it && rolesOf(it.role).includes(role);
@@ -78,12 +78,7 @@ const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
 const FOR_NODE_MOST = 1024;
 
-const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (h) => parseInt(h, 16));
-const isKey = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
-/// A refusal is its text, or `{ error, code }` where the caller acts on what kind it is (`CODES`).
-const refuse = (status, why) => Response.json(typeof why === "string" ? { error: why } : why, { status });
 const replayed = (what) => ({ error: `that ${what} was taken already`, code: CODES.replayed });
-const CORS = { "Access-Control-Allow-Origin": "*" };
 
 /// iroh's relay auth token: `Authorization: Bearer <token>` from a native endpoint, `?token=` from a browser's.
 function token(request, url) {
@@ -113,7 +108,7 @@ export default class extends WorkerEntrypoint {
     if (url.pathname === IROH_PATHS.portal) {
       const headers = { ...CORS };
       const challenge = request.headers.get("x-iroh-challenge");
-      if (challenge && /^[A-Za-z0-9._-]{1,63}$/.test(challenge)) headers["X-Iroh-Response"] = `response ${challenge}`;
+      if (challenge && /^[A-Za-z0-9._-]{1,63}$/.test(challenge)) headers["x-iroh-response"] = `response ${challenge}`;
       return new Response(null, { status: 204, headers });
     }
     const relay = IROH_PATHS.relay;
@@ -122,7 +117,7 @@ export default class extends WorkerEntrypoint {
     if (url.pathname === `${relay}/seen`) return this.ask(request, "seen");
     if (url.pathname === relay) return this.relay().fetch(request);
     if (url.pathname === `${relay}/test` && this.env.TEST) return Response.json(await this.relay().testing(await request.json()));
-    return refuse(404, "not the relay's");
+    return refusal(404, "not the relay's");
   }
 
   async ask(request, what) {
@@ -140,14 +135,14 @@ export default class extends WorkerEntrypoint {
         asked.session = session.by;
       }
     } catch (e) {
-      return refuse(400, String(e.message || e));
+      return refusal(400, String(e.message || e));
     }
     const said = await this.relay()[what](asked.by, asked);
-    if (said?.update) return refuse(426, updateRefusal(this.env.YOURS));
+    if (said?.update) return refusal(426, updateRefusal(this.env.YOURS));
     if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
-    if (said?.code) return refuse(400, said);
+    if (said?.code) return refusal(400, said);
     if (said && typeof said === "object") return Response.json({ [what]: said });
-    return said === null ? refuse(403, `the relay takes only ${this.env.YOURS}'s devices`) : refuse(400, said);
+    return said === null ? refusal(403, `the relay takes only ${this.env.YOURS}'s devices`) : refusal(400, said);
   }
 
   async allowed(key) {
@@ -170,15 +165,13 @@ async function tell(env, request) {
     const signed = JSON.parse(new TextDecoder().decode(body));
     await checkRequest(RELAY, signed);
     const error = await relay(env).tell(signed);
-    return error ? refuse(403, error) : new Response(null, { status: 204 });
+    return error ? refusal(403, error) : new Response(null, { status: 204 });
   } catch (e) {
-    return refuse(403, String(e.message || e));
+    return refusal(403, String(e.message || e));
   }
 }
 
-/// The network's one relay, made near its people (`LOCATION`, a location hint) rather than wherever its first request
-/// came from.
-const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
+/// The network's one relay, made near its people.
 const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 
 /// What the remote MCP server asks the relay, by its binding: its devices' own bindings, and who's here; and what any
@@ -187,7 +180,7 @@ const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 /// no other endpoint.
 export class McpDevices extends WorkerEntrypoint {
   fetch(request) {
-    return new URL(request.url).pathname === `${IROH_PATHS.relay}/tell` ? tell(this.env, request) : refuse(404, "the remote MCP server's devices only tell the relay");
+    return new URL(request.url).pathname === `${IROH_PATHS.relay}/tell` ? tell(this.env, request) : refusal(404, "the remote MCP server's devices only tell the relay");
   }
 
   bind(request, name) {
@@ -348,15 +341,15 @@ export class Relay extends DurableObject {
 
   async fetch(request) {
     const url = new URL(request.url);
-    if (request.headers.get("upgrade") !== "websocket") return refuse(426, "the relay takes an endpoint's WebSocket");
+    if (request.headers.get("upgrade") !== "websocket") return refusal(426, "the relay takes an endpoint's WebSocket");
     const protocols = (request.headers.get("sec-websocket-protocol") || "").split(",").map((p) => p.trim());
-    if (!protocols.includes(PROTOCOL)) return refuse(400, `the relay speaks ${PROTOCOL}`);
+    if (!protocols.includes(PROTOCOL)) return refusal(400, `the relay speaks ${PROTOCOL}`);
     const now = Date.now();
     // A pairing code's ticket (64 hex), or a session's certificate, if it shows one: whether it lets this key in is
     // decided once the key is proved, here if the certificate comes with its endpoint's proof.
     const ticket = token(request, url);
     const joining = isKey(ticket) ? hex.encode(await sha256(ticket)) : null;
-    if (joining && !(this.pairing(joining)?.until > this.now())) return refuse(403, "that pairing code has expired");
+    if (joining && !(this.pairing(joining)?.until > this.now())) return refusal(403, "that pairing code has expired");
     let session = null;
     let proved = false;
     if (ticket && !joining) {
@@ -364,7 +357,7 @@ export class Relay extends DurableObject {
       try {
         session = await checkCertificate(certificate, now);
       } catch (e) {
-        return refuse(403, String(e.message || e));
+        return refusal(403, String(e.message || e));
       }
       proved = !!proof && (await this.proves(proof, session.endpoint, now));
     }
@@ -394,7 +387,7 @@ export class Relay extends DurableObject {
       if (said.from === from) here++;
       if (said.site === site) near++;
     }
-    if (here >= UNPROVEN_PER_PLACE || near >= UNPROVEN_PER_SITE || unproven >= UNPROVEN) return refuse(429, "too many sockets that haven't proved their key");
+    if (here >= UNPROVEN_PER_PLACE || near >= UNPROVEN_PER_SITE || unproven >= UNPROVEN) return refusal(429, "too many sockets that haven't proved their key");
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     const made = challenge();
@@ -416,7 +409,7 @@ export class Relay extends DurableObject {
     if (said.by && now > said.until) return this.end(said.id, "its session ended");
     let out;
     try {
-      out = from_client(unhex(said.id), bytes);
+      out = from_client(hex.decode(said.id), bytes);
     } catch (e) {
       return ws.close(1002, String(e.message || e).slice(0, 100));
     }
@@ -441,7 +434,7 @@ export class Relay extends DurableObject {
       if (this.told.size >= GONE_KEPT) this.told.clear();
     }
     this.told.set(pair, now);
-    ws.send(endpoint_gone(unhex(to)));
+    ws.send(endpoint_gone(hex.decode(to)));
   }
 
   toNode(src, frame) {
@@ -474,7 +467,7 @@ export class Relay extends DurableObject {
       if (!to) gone.add(dst);
       else
         try {
-          to.send(to_client(unhex(this.env.BOUND), seg, contents));
+          to.send(to_client(hex.decode(this.env.BOUND), seg, contents));
         } catch {} // closed since it was listed: this packet is lost
     }
     return [...gone];
@@ -553,7 +546,7 @@ export class Relay extends DurableObject {
       if (!to) gone.add(dst);
       else
         try {
-          to.send(to_client(unhex(key), seg, contents));
+          to.send(to_client(hex.decode(key), seg, contents));
         } catch {} // closed since it was listed: this packet is lost
     }
     return [...gone];
@@ -562,7 +555,7 @@ export class Relay extends DurableObject {
   async prove(ws, said, bytes) {
     let id;
     try {
-      id = hex.encode(verify(unhex(said.challenge), bytes));
+      id = hex.encode(verify(hex.decode(said.challenge), bytes));
     } catch {
       id = null;
     }
@@ -711,7 +704,7 @@ export class Relay extends DurableObject {
       this.sql.exec("DELETE FROM pairings WHERE until <= ?", now);
       if (this.sql.exec("SELECT count(*) AS n FROM pairings WHERE by = ?", told.by).one().n >= PAIRINGS_PER_DEVICE) return "that device has made too many pairing codes that still work";
       if (this.pairing(hash)) return "that pairing code is made already";
-      this.sql.exec("INSERT INTO pairings VALUES (?, ?, ?, NULL)", hash, Math.min(until, now + PAIRING_FOR), told.by);
+      this.sql.exec("INSERT INTO pairings VALUES (?, ?, ?, NULL)", hash, Math.min(until, now + PAIRING_LIFE), told.by);
       return null;
     }
     if (told.unpair !== undefined) {

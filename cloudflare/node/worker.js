@@ -33,23 +33,12 @@ import { DurableObject, RpcTarget } from "cloudflare:workers";
 import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
+import { b64u, hex, isKey } from "./crypto.js";
+import { Refused, json, near, refuse, textOf } from "./http.js";
 import { BLOBS, CODES, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT } from "./protocol.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
-
-class Refused extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-}
-
-const refuse = (status, message) => {
-  throw new Refused(status, message);
-};
-
-const json = (v, status = 200) => Response.json(v, { status });
 
 /// An answer named by its content, but for a page's nonce, as a node on a machine names it (src/screen.rs's `tag`): to
 /// a client that has it already, only that.
@@ -57,7 +46,7 @@ async function tagged(request, body, type) {
   const nonce = body.split("'nonce-")[1]?.slice(0, 32);
   const content = nonce ? body.replaceAll(nonce, "") : body;
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content)));
-  const tag = `"${[...digest.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("")}"`;
+  const tag = `"${hex.encode(digest.slice(0, 16))}"`;
   if (request.headers.get("if-none-match") === tag) return new Response(null, { status: 304, headers: { etag: tag } });
   return new Response(body, { headers: { "content-type": type, etag: tag } });
 }
@@ -82,25 +71,11 @@ const HANDED_FOR = 3_600_000;
 const personOf = (env, user) => env.NODE.get(env.NODE.idFromName(`user:${user}`), near(env));
 
 async function bodyOf(request) {
-  if (Number(request.headers.get("content-length") || 0) > BODY_MOST) refuse(413, "that's more than a request may carry");
+  const text = await textOf(request, BODY_MOST);
+  if (text === null) refuse(413, "that's more than a request may carry");
   if (!request.body) return {};
-  const reader = request.body.getReader();
-  const parts = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > BODY_MOST) {
-      reader.cancel().catch(() => {});
-      refuse(413, "that's more than a request may carry");
-    }
-    parts.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  parts.reduce((at, part) => (bytes.set(part, at), at + part.byteLength), 0);
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(text);
   } catch {
     refuse(400, "the body isn't JSON");
   }
@@ -421,7 +396,7 @@ class Person {
     }
     const me = JSON.parse(endpoint_of(this.env.NODE_KEY));
     const list = need.map((n) => `${n.scope}'s ${n.app}/${n.database} in epoch ${n.epoch}`).join(", ");
-    throw Object.assign(new Refused(428, `it needs keys it wasn't handed: ${list}`), { said: { need, to: me.key, seal: me.seal } });
+    throw new Refused(428, `it needs keys it wasn't handed: ${list}`, { need, to: me.key, seal: me.seal });
   }
 
   /// Runs `f` with a database's keys (JSON); one that stops at an epoch it wasn't handed says so with 428.
@@ -456,7 +431,7 @@ class Person {
       this.handed.delete(who.hash);
       if (removed) refuse(403, "You were removed: an admin adds you back.");
       // As a node on a machine says it, so a device let in a moment ago asks again once this node has read that.
-      throw Object.assign(new Refused(403, "this isn't one of your devices: approve it on one that is"), { said: { code: CODES.notLetIn } });
+      throw new Refused(403, "this isn't one of your devices: approve it on one that is", { code: CODES.notLetIn });
     }
     if (who.offered) this.take(who, who.offered);
     who.offered = null;
@@ -960,9 +935,6 @@ async function screenOf(request, person, who, view, app, name, params, scope) {
 const CONNECT = 2_000;
 const IDLE = 30_000;
 
-const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
-const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (h) => parseInt(h, 16));
-const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 
 async function route(p, request) {
   const url = new URL(request.url);
@@ -1033,22 +1005,16 @@ async function route(p, request) {
 async function sealedKeys(bucket, scope, to, app) {
   if (!to === !app) refuse(400, "give to (an endpoint's key, or recovery) or app");
   if (!/^(global|(user|group):[A-Za-z0-9_-]{1,64})$/.test(scope)) refuse(400, "that isn't a scope");
-  if (to ? !/^([0-9a-f]{64}|recovery)$/.test(to) : !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(app)) refuse(400, to ? "to is an endpoint's key, or recovery" : "that isn't an app's name");
+  if (to ? !(isKey(to) || to === "recovery") : !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(app)) refuse(400, to ? "to is an endpoint's key, or recovery" : "that isn't an app's name");
   let newest = 0;
   while (newest < 1024 && (await bucket.get(epoch_name(scope, newest + 1, "recovery")))) newest++;
   const sealed = {};
   await Promise.all(Array.from({ length: newest }, (_, i) => i + 1).map(async (n) => {
     const o = await bucket.get(to ? epoch_name(scope, n, to) : app_key_name(scope, app, n));
-    if (o) sealed[n] = b64u(o.bytes);
+    if (o) sealed[n] = b64u.encode(o.bytes);
   }));
   return to ? { epoch: newest, sealed } : { sealed };
 }
-
-const b64u = (bytes) => {
-  let s = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-};
 
 function failure(err) {
   if (err instanceof Refused) return json({ error: err.message, ...err.said }, err.status);
@@ -1118,7 +1084,7 @@ export class Node extends DurableObject {
     if (!this.started) {
       const began = Date.now();
       const send = (dst, seg, contents) => {
-        this.out.push([hex(dst), seg, contents]);
+        this.out.push([hex.encode(dst), seg, contents]);
         if (this.out.length > 1) return;
         queueMicrotask(() => {
           const items = this.out;
@@ -1128,7 +1094,7 @@ export class Node extends DurableObject {
         });
       };
       const closed = (this.closing || Promise.resolve()).catch(() => {});
-      this.started = closed.then(() => endpoint_start(unhex(this.env.NODE_KEY), send, (...asked) => this.asked(...asked))).then((key) => {
+      this.started = closed.then(() => endpoint_start(hex.decode(this.env.NODE_KEY), send, (...asked) => this.asked(...asked))).then((key) => {
         console.log(JSON.stringify({ woke: key.slice(0, 8), ms: Date.now() - began }));
         return key;
       });
@@ -1142,7 +1108,7 @@ export class Node extends DurableObject {
   /// Datagrams the relay was handed for it: `[src, segment size, contents]` each.
   async deliver(batch) {
     await this.start();
-    for (const [src, seg, contents] of batch) endpoint_deliver(unhex(src), seg, contents);
+    for (const [src, seg, contents] of batch) endpoint_deliver(hex.decode(src), seg, contents);
   }
 
   /// Asks the first of `to` (keys, in the order to try them) that's connected to the relay, and reached, `message`:

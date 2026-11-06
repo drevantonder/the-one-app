@@ -25,6 +25,7 @@
 // client alone. A machine that runs things still reads, so a node takes the release it updates to.
 
 import { b64u, behind, checkRequest, rolesOf } from "../shared/crypto.js";
+import { Refused, refusal, refuse } from "../shared/http.js";
 import { COPY, MOST_URLS, NEWEST, STEP_DIGITS, URLS, copyName, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { bucketUrls } from "../shared/s3.js";
 
@@ -33,30 +34,17 @@ const CONFIRM = 100;
 /// How long the relay's answer about a key is kept here: a removed endpoint is refused within this.
 const ALLOWED_FOR = 5_000;
 
-const refuse = (status, error) => Response.json({ error }, { status });
-
-class Refused extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-}
-
-const fail = (status, message) => {
-  throw new Refused(status, message);
-};
-
 const isName = (name) => typeof name === "string" && name.length <= 1024 && name.split("/").every((p) => p && p !== "." && p !== "..");
 
 // stepName is src/database/stored.rs's `step_name`.
 function names(item) {
-  if (typeof item === "string") return isName(item) ? [item] : fail(400, `${item} isn't a name in the bucket`);
+  if (typeof item === "string") return isName(item) ? [item] : refuse(400, `${item} isn't a name in the bucket`);
   const { steps, from, to } = item || {};
-  if (!isName(steps) || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 1 || to < from || to - from >= MOST_URLS) fail(400, `steps are { steps, from, to }, from 1, at most ${MOST_URLS}`);
+  if (!isName(steps) || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 1 || to < from || to - from >= MOST_URLS) refuse(400, `steps are { steps, from, to }, from 1, at most ${MOST_URLS}`);
   return Array.from({ length: to - from + 1 }, (_, i) => stepName(steps, from + i));
 }
 
-const list = (v) => (v === undefined ? [] : Array.isArray(v) ? v : fail(400, "each kind is a list"));
+const list = (v) => (v === undefined ? [] : Array.isArray(v) ? v : refuse(400, "each kind is a list"));
 
 const known = new Map();
 
@@ -139,17 +127,17 @@ async function got(env, bucket, names) {
 }
 
 async function urls(request, env) {
-  if (!env.BUCKET) fail(503, `${env.YOURS} has no bucket yet`);
-  const body = await request.json().catch(() => fail(400, "the body isn't JSON"));
+  if (!env.BUCKET) refuse(503, `${env.YOURS} has no bucket yet`);
+  const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
   let checked;
   try {
     checked = await checkRequest(URLS, body);
   } catch (err) {
-    fail(401, err.message);
+    refuse(401, err.message);
   }
   const { by, fields } = checked;
   const who = await allowed(env, by);
-  if (!who) fail(403, `only ${env.YOURS}'s devices reach its bucket`);
+  if (!who) refuse(403, `only ${env.YOURS}'s devices reach its bucket`);
   const read = list(fields.read).flatMap(names);
   const head = list(fields.head).flatMap(names);
   const create = list(fields.create).flatMap(names);
@@ -159,24 +147,24 @@ async function urls(request, env) {
   const confirms = list(fields.confirm);
   const hints = list(fields.newest);
   const gets = list(fields.get).flatMap(names);
-  if (gets.length > 32) fail(400, "at most 32 objects got at once");
-  if (read.length + head.length + create.length + replace.length + remove.length + pages.length > MOST_URLS) fail(400, `at most ${MOST_URLS} URLs at once`);
-  if (confirms.length + hints.length > CONFIRM) fail(400, `at most ${CONFIRM} objects confirmed or hints read at once`);
-  if (!hints.every(isName)) fail(400, "each newest is a database's prefix");
-  for (const r of [...replace, ...confirms]) if (!isName(r?.name) || typeof r.etag !== "string" || !r.etag) fail(400, "give each a name and its ETag");
-  if (!replace.every((r) => r.name.endsWith(`/${NEWEST}`))) fail(403, "only a database's newest is replaced");
-  for (const name of remove) if (!isName(name)) fail(400, `${name} isn't a name in the bucket`);
-  if (remove.length && !who.admin) fail(403, "only an admin's device removes from the bucket");
+  if (gets.length > 32) refuse(400, "at most 32 objects got at once");
+  if (read.length + head.length + create.length + replace.length + remove.length + pages.length > MOST_URLS) refuse(400, `at most ${MOST_URLS} URLs at once`);
+  if (confirms.length + hints.length > CONFIRM) refuse(400, `at most ${CONFIRM} objects confirmed or hints read at once`);
+  if (!hints.every(isName)) refuse(400, "each newest is a database's prefix");
+  for (const r of [...replace, ...confirms]) if (!isName(r?.name) || typeof r.etag !== "string" || !r.etag) refuse(400, "give each a name and its ETag");
+  if (!replace.every((r) => r.name.endsWith(`/${NEWEST}`))) refuse(403, "only a database's newest is replaced");
+  for (const name of remove) if (!isName(name)) refuse(400, `${name} isn't a name in the bucket`);
+  if (remove.length && !who.admin) refuse(403, "only an admin's device removes from the bucket");
   const client = rolesOf(who.role).every((r) => r === "client");
-  if ((client || create.length + replace.length + remove.length) && behind(fields.reads)) fail(426, updateRefusal(env.YOURS));
+  if ((client || create.length + replace.length + remove.length) && behind(fields.reads)) refuse(426, updateRefusal(env.YOURS));
   for (const p of pages) {
     const ok = p && (p.prefix === "" || (typeof p.prefix === "string" && p.prefix.endsWith("/") && isName(p.prefix.slice(0, -1))));
-    if (!ok || ![undefined, "/"].includes(p.delimiter) || ![undefined, null].includes(p.token) && typeof p.token !== "string") fail(400, "a list is { prefix, delimiter?, token? }, its prefix a folder's, ending in /");
+    if (!ok || ![undefined, "/"].includes(p.delimiter) || ![undefined, null].includes(p.token) && typeof p.token !== "string") refuse(400, "a list is { prefix, delimiter?, token? }, its prefix a folder's, ending in /");
   }
   const bucket = JSON.parse(env.BUCKET);
   const until = Date.now() + EXPIRES * 1000;
   const creates = await due(env, bucket, create);
-  if (create.length && !creates.length) fail(409, "a step is written only once the one before it is there");
+  if (create.length && !creates.length) refuse(409, "a step is written only once the one before it is there");
   const out = await bucketUrls(bucket, { read, head, create: creates, replace, remove, list: pages }, EXPIRES);
   return { ...out, confirm: confirms.length ? await confirm(env, bucket, confirms) : {}, newest: hints.length ? await newest(env, bucket, hints) : {}, get: gets.length ? await got(env, bucket, gets) : {}, until };
 }
@@ -184,13 +172,13 @@ async function urls(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname !== "/urls" || request.method !== "POST") return refuse(404, "the URL signer answers only POST /urls");
+    if (url.pathname !== "/urls" || request.method !== "POST") return refusal(404, "the URL signer answers only POST /urls");
     try {
       return Response.json(await urls(request, env));
     } catch (err) {
-      if (err instanceof Refused) return refuse(err.status, err.message);
+      if (err instanceof Refused) return refusal(err.status, err.message);
       console.error(err.stack || err);
-      return refuse(500, "the URL signer failed");
+      return refusal(500, "the URL signer failed");
     }
   },
 };

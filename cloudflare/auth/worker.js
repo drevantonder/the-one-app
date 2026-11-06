@@ -62,14 +62,14 @@ import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx }
 import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { b64u, behind, checkRequest, hex, joinChallenge, joinCode, joinNonce } from "../shared/crypto.js";
+import { b64u, behind, checkRequest, hex, isKey, joinChallenge, joinCode, joinNonce, random, sha256 } from "../shared/crypto.js";
+import { json } from "../shared/http.js";
 import { AUTH_DOMAIN, updateRefusal } from "../shared/protocol.js";
 import { bearer, verify } from "../shared/token.js";
 import { codePage, invitePage, passkeysPage, signInPage, throwawayPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
 
-const json = (v, status = 200) => Response.json(v, { status });
-const hex16 = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+const hex16 = () => hex.encode(random(8));
 /// Where a client's sign-in goes, in words: the site it goes back to, or an app on the person's device (one listening on
 /// it, or its own link scheme), or the device that showed them a code.
 function goesTo(uri, origin) {
@@ -110,7 +110,6 @@ const STARTED = 15 * 60_000;
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 /// Where Better Auth makes a session with a passkey: the only places an admin's is made.
 const BY_PASSKEY = ["/passkey/verify-authentication", "/passkey/verify-registration"];
-const KEY = /^[0-9a-f]{64}$/;
 const USER = /^[0-9a-f]{16}$/;
 /// A device a sign-in is for: its key and seal key, hex.
 const JOIN = /^[0-9a-f]{128}$/;
@@ -125,12 +124,12 @@ const endpointOf = (join) => [hex.decode(join.slice(0, 64)), hex.decode(join.sli
 
 /// The network's root (`ROOT`, hex, as the device deploying to Cloudflare holds it), which a sign-in for a device
 /// names beside it: without it, a sign-in names no device, and its device is approved by its code.
-const rootOf = (env) => (/^[0-9a-f]{64}$/.test(env.ROOT || "") ? hex.decode(env.ROOT) : null);
+const rootOf = (env) => (isKey(env.ROOT) ? hex.decode(env.ROOT) : null);
 
 const asB64u = (s) => String(s || "").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 
 async function hash(secret) {
-  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex.encode(await sha256(secret));
 }
 
 /// A passkey's name, for the person's list of them: its maker's, if it says, a security key's, or the device it was
@@ -424,7 +423,7 @@ export class Auth extends DurableObject {
     const signed = await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")));
     if (!signed?.admin) refuse(403, "Only an admin's device invites someone.");
     const { id, name, user, email, until } = signed.fields;
-    if (!KEY.test(id || "")) refuse(400, "an invite's id is the sha256 of its secret, in hex");
+    if (!isKey(id)) refuse(400, "an invite's id is the sha256 of its secret, in hex");
     if (typeof name !== "string" || !name.trim()) refuse(400, "give the person's name");
     if (!USER.test(user || "")) refuse(400, "a user id is 16 hex characters");
     if (!(Number.isSafeInteger(until) && until > Date.now() && until <= Date.now() + INVITE)) refuse(400, "an invite works for up to 30 days");
@@ -533,13 +532,13 @@ export class Auth extends DurableObject {
     const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
     const { user, here } = (await this.asker(request)) || refuse(401, "Sign in first.");
     const { key, seal, name, proof, device, reads } = body;
-    if (!KEY.test(key || "") || !KEY.test(seal || "")) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
+    if (!isKey(key) || !isKey(seal)) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
     // A device whose build reads less of who's who than this one (an older one says nothing) would be let in to what it
     // can't read: it's told to update first.
     if (behind(reads)) refuse(426, updateRefusal(this.env.YOURS));
     if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the device's name, up to 64 characters");
-    if (proof != null && !KEY.test(proof)) refuse(400, "a proof is 64 hex characters");
-    if (device != null && !KEY.test(device)) refuse(400, "a device is 64 hex characters");
+    if (proof != null && !isKey(proof)) refuse(400, "a proof is 64 hex characters");
+    if (device != null && !isKey(device)) refuse(400, "a device is 64 hex characters");
     this.expire();
     const sql = this.ctx.storage.sql;
     const [had] = sql.exec("select user, seal, approved, told from requests where key = ?", key).toArray();
@@ -649,7 +648,7 @@ export class Auth extends DurableObject {
     if (approved) {
       if (!row.approved) {
         const welcomed = /^\d{1,16}\.\d{1,16}\.[0-9a-f]{64}$/.test(welcome || "") ? welcome : null;
-        this.ctx.storage.sql.exec("update requests set approved = ?, root = ?, welcome = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(root || "") ? root : null, welcomed, key);
+        this.ctx.storage.sql.exec("update requests set approved = ?, root = ?, welcome = ? where key = ?", Date.now(), isKey(root) ? root : null, welcomed, key);
         await this.push(row, { title: `${row.name} joined${row.place ? ` · ${row.place}` : ""}` });
       }
       return {};
