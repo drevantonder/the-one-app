@@ -144,14 +144,23 @@ async function keep(ctx, g, repo, pack) {
     newest.unshift({ ...r, size: r.size });
     sum += r.size;
   }
-  const old = newest.slice(0, -1);
-  let out = newest[0];
+  let old = newest.slice(0, -1);
+  const pushed = newest.at(-1);
+  let out = pushed;
   if (old.length) {
     const parts = await Promise.all(old.map(async (r) => {
       const bytes = await ctx.blob.get(r.pack);
       return { bytes, entries: (await check(bytes)).entries };
     }));
-    out = await merge([...parts, { bytes: pack.bytes, entries: pack.entries }]);
+    // The packs merged are let go of, so the merge is read back whole first: unless it holds every object they do,
+    // they're kept as they are and the pushed pack beside them.
+    try {
+      out = await merge([...parts, pushed]);
+      const holds = new Set((await check(out.bytes)).entries.map((e) => e.sha));
+      if (![...parts, pushed].every((p) => p.entries.every((e) => holds.has(e.sha)))) throw new Error("a merge lost objects");
+    } catch {
+      [out, old] = [pushed, []];
+    }
   }
   const blob = await ctx.blob.put(out.bytes);
   const index = await ctx.blob.put(await idx(out.entries, out.name));

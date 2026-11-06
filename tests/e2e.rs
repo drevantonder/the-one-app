@@ -482,6 +482,65 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     a.call(repos("delete", json!({ "repo": "team/site" }))).await.unwrap();
 }
 
+/// In Repos, each push's pack is merged into the ones before it, which are then let go of from the bucket: after many
+/// pushes, each of whose packs holds deltas, the packs a repo keeps still hold every object of every head it had, as
+/// git itself reads them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repos_merged_packs_hold_every_object_pushed() {
+    let a = start("repos-merge").await;
+    a.create("Home", "Andre").await.unwrap();
+    let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
+    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
+
+    let dir = temp("repos-merge-git");
+    let git = |dir: &std::path::Path, args: &[&str], input: &[u8]| {
+        let mut child = std::process::Command::new("git").args(["-c", "user.name=Andre", "-c", "user.email=andre@example.com"]).args(args).current_dir(dir)
+            .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+        std::io::Write::write_all(&mut child.stdin.take().unwrap(), input).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        out.stdout
+    };
+    git(&dir, &["init", "-q"], b"");
+
+    let zero = "0".repeat(40);
+    let (mut old, mut heads) = (zero.clone(), Vec::new());
+    for push in 0..12 {
+        // Two commits a push, each growing the same file, so the pack holds deltas.
+        for n in 0..2 {
+            let text: String = (0..200 * (2 * push + n + 1)).map(|i| format!("line {i}\n")).collect();
+            std::fs::write(dir.join("notes"), text).unwrap();
+            git(&dir, &["add", "notes"], b"");
+            git(&dir, &["commit", "-qm", &format!("Push {push}, commit {n}")], b"");
+        }
+        let head = String::from_utf8(git(&dir, &["rev-parse", "HEAD"], b"")).unwrap().trim().to_string();
+        let revs = if old == zero { "HEAD\n".to_string() } else { format!("HEAD\n^{old}\n") };
+        let pack = git(&dir, &["pack-objects", "--stdout", "--revs"], revs.as_bytes());
+        let line = format!("{old} {head} refs/heads/main\0report-status\n");
+        let mut body = format!("{:04x}{line}0000", line.len() + 4).into_bytes();
+        body.extend(pack);
+        let body = a.put_blob(&body).unwrap();
+        let told = a.call(repos("_http", json!({ "method": "POST", "path": "andre/home.git/git-receive-pack", "query": "", "body": body }))).await.unwrap();
+        assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
+        heads.push(head.clone());
+        old = head;
+    }
+
+    // What the repo keeps, read by git from nothing else.
+    let packs = a.call(repos("get", json!({ "repo": "andre/home" }))).await.unwrap()["packs"].as_array().unwrap().clone();
+    assert!(packs.len() < heads.len(), "pushes' packs are merged: {} packs", packs.len());
+    let bare = temp("repos-merge-bare");
+    git(&bare, &["init", "-q", "--bare"], b"");
+    for (i, hash) in packs.iter().enumerate() {
+        let path = bare.join(format!("objects/pack/kept-{i}.pack"));
+        std::fs::write(&path, a.blob(hash.as_str().unwrap()).await.unwrap()).unwrap();
+        git(&bare, &["index-pack", path.to_str().unwrap()], b"");
+    }
+    for head in &heads {
+        git(&bare, &["rev-list", "--objects", "--missing=error", head], b"");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_github_sign_in_only_to_them() {
     use one::node::{Caller, DeviceRequest, Invited};
