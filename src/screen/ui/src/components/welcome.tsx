@@ -1,5 +1,7 @@
 import { Problem } from "@/components/problem"
+import * as React from "react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
@@ -10,22 +12,37 @@ function Centered({ className, children }: { className?: string; children: React
 }
 
 /// Its logo and name, and the one thing to do (Sign In; Open, back from another site), as a button that runs or a link;
-/// `problem`, why the last try didn't work.
-function Welcome({ logo, name, action, problem }: {
+/// `field`, what to type first (a native app's address), with a line under it, which the button runs with, named
+/// `invite` instead when what's typed is an invite link; `note`, a grey line under the button; `problem`, why the last
+/// try didn't work.
+function Welcome({ logo, name, action, field, note, problem }: {
   logo?: string
   name: string
-  action: { label: string; run?: () => unknown; href?: string }
+  action: { label: string; invite?: string; run?: (typed?: string) => unknown; href?: string }
+  field?: { label: string; placeholder?: string; note?: string }
+  note?: string
   problem?: string
 }) {
+  const [typed, setTyped] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const run = () => (setBusy(true), action.run?.(field ? typed : undefined))
   return (
     <Centered>
       {logo && <img src={logo} alt="" className="size-28" />}
       <h1 className="mt-2 mb-4 text-3xl font-semibold tracking-tight">{name}</h1>
+      {field && (
+        <form className="w-full max-w-xs" onSubmit={(e) => (e.preventDefault(), typed.trim() && !busy && run())}>
+          <Input aria-label={field.label} placeholder={field.placeholder} value={typed} onChange={(e) => setTyped(e.target.value)}
+            autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url" />
+          {field.note && <p className="mt-2 text-sm text-muted-foreground">{field.note}</p>}
+        </form>
+      )}
       {action.href ? (
         <Button size="lg" data-slot="welcome-action" asChild><a href={action.href}>{action.label}</a></Button>
       ) : (
-        <Button size="lg" data-slot="welcome-action" onClick={(e) => ((e.currentTarget.disabled = true), action.run?.())}>{action.label}</Button>
+        <Button size="lg" data-slot="welcome-action" disabled={busy || (!!field && !typed.trim())} onClick={run}>{action.invite && typed.includes("/invite#") ? action.invite : action.label}</Button>
       )}
+      {note && <p className="text-sm text-muted-foreground">{note}</p>}
       {problem && <Problem title={problem} className="mt-4 w-full max-w-md text-left" />}
     </Centered>
   )

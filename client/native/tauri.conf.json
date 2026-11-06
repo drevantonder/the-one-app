@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "named by build.rs",
+  "version": "0.1.0",
+  "identifier": "app.named.by-build",
+  "build": { "frontendDist": "gen/web" },
+  "app": {
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

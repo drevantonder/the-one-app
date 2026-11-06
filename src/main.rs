@@ -154,7 +154,7 @@ fn every_command() -> String {
   {CLI} throwaway [<command>]          a throwaway network for this checkout, on this machine beside yours, with only
                                        what every new one starts with: to look around and test in. {CLI} throwaway
                                        <command> runs a command in it ({CLI} throwaway mcp for an agent), {CLI} throwaway
-                                       client web, android or windows gives a client of this checkout's build signed in
+                                       client web, linux, android or windows gives a client of this checkout's build signed in
                                        to it, and {CLI} throwaway stop deletes it
   {CLI} update                         build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer

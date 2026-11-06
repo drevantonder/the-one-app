@@ -86,6 +86,7 @@ pub mod push;
 #[cfg(feature = "db")]
 pub mod log;
 pub mod screen;
+pub mod web;
 #[cfg(feature = "db")]
 pub mod state;
 #[cfg(feature = "db")]

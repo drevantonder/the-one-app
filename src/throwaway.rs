@@ -127,7 +127,7 @@ pub fn run(rest: &[String]) -> Result<()> {
         // As its person, with no passkey: the throwaway network's sign-in asks for none.
         let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
         let started = one::sign_in::start(&address, None)?;
-        one::sign_in::approve_on_throwaway(&address, &started.url)?;
+        one::sign_in::approve_on_throwaway(&address, &started.url, None)?;
         one::sign_in::finish(started)?;
         let me = get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
         println!("Signed in as {me}. {CLI} throwaway and {CLI} throwaway mcp act as them until {CLI} throwaway sign-out.");
@@ -222,7 +222,7 @@ fn usage() -> String {
   {CLI} throwaway cloudflare node deploy    run its Cloudflare node beside its Workers, as Cloudflare would
   {CLI} throwaway switch           switch who's who to the scope database: the ceremony {CLI} switch runs with the
                                    recovery key, with its own, though the switch is off in this build
-  {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, android or windows
+  {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, linux, android or windows
   {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
   {CLI} throwaway client cli <command>    a command from a computer that's only a device of its person's (no node), asking
                                    their nodes over iroh in run priority's order, as every client does: the Cloudflare
@@ -662,6 +662,12 @@ fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, res
             web(dir, settings, person.as_deref())?
         }
         Some("cli") => return cli(dir, settings, &rest[1..]),
+        Some("linux") => {
+            if let Some(name) = &person {
+                joined(dir, settings, name)?;
+            }
+            linux(dir, checkout, settings, person.as_deref())?
+        }
         Some(kind @ ("android" | "windows")) => {
             if let Some(name) = &person {
                 // They join where anyone does, in a browser: the throwaway network's own here.
@@ -669,7 +675,7 @@ fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, res
             }
             device_client(dir, checkout, settings, kind, person.as_deref())?
         }
-        _ => bail!("which client? {CLI} throwaway client web, android, windows or cli, with --as <name> for someone else"),
+        _ => bail!("which client? {CLI} throwaway client web, linux, android, windows or cli, with --as <name> for someone else"),
     }
     println!("Ready in {}s.", started.elapsed().as_secs());
     Ok(())
@@ -706,7 +712,7 @@ fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[String]) -> 
             let said = line.trim();
             eprintln!("{line}");
             if said.starts_with(&settings.address) && said.contains("/sign-in") {
-                one::sign_in::approve_on_throwaway(&settings.address, said)?;
+                one::sign_in::approve_on_throwaway(&settings.address, said, None)?;
             } else if is_code(said) {
                 approve_code(dir, said)?;
             }
@@ -959,6 +965,89 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settin
   See it: {CLI} computer screen --device {device} (computer_screen), or {CLI} computer view --device {device} for a link
   Use it: computer_use with device {device} (computer_tools lists what it takes); {CLI} throwaway stop gives it back",
         person.map(|name| format!(" as {name}")).unwrap_or_default()
+    );
+    Ok(())
+}
+
+/// The native app (client/native) as this checkout builds it, on this machine in a display of its own (Xvfb), signed in
+/// to the throwaway network as its first person or `person` as a person would: its Sign In pressed, the sign-in it would
+/// open in a browser approved as them, and the code it then shows approved by the throwaway network's machine. What it
+/// keeps (its folder, and its key in the Secret Service by the throwaway network's address) stays with the throwaway network, so a
+/// new build is still signed in; it's started again each time.
+fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
+    let address = settings.address.as_str();
+    let name = person.map(|p| format!("linux-{}", p.to_lowercase().replace(' ', "-"))).unwrap_or_else(|| "linux".into());
+    let home = dir.join(&name);
+    std::fs::create_dir_all(&home)?;
+    eprintln!("Building client/native (dev profile; the first time takes minutes)…");
+    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).arg("build").current_dir(checkout.join("client/native")))?;
+    // Its own display and control port, the same each time for this throwaway network and person.
+    let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(home.to_string_lossy().as_bytes()).into();
+    let display = format!(":{}", 200 + u16::from_le_bytes([hash[0], hash[1]]) % 600);
+    let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
+    // What ran before for it goes: the app, and its display.
+    for file in ["app.pid", "display.pid"] {
+        if let Some(pid) = std::fs::read_to_string(home.join(file)).ok().and_then(|p| p.trim().parse::<i32>().ok()) {
+            unsafe { libc::kill(-pid, libc::SIGTERM) };
+        }
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let xvfb = spawn(dir, std::process::Command::new("Xvfb").args([display.as_str(), "-screen", "0", "1280x800x24", "-nolisten", "tcp"]), &format!("{name}/display.log"), true)?;
+    std::fs::write(home.join("display.pid"), xvfb.to_string())?;
+    std::thread::sleep(Duration::from_secs(1));
+    let env = |key: &str| format!("{}_{key}", CLI.to_uppercase());
+    let log = format!("{name}/app.log");
+    let app = spawn(
+        dir,
+        // On a session bus of its own, with a Secret Service there (GNOME's keyring, unlocked with a password of no worth, in its
+        // folder), as a desktop has.
+        std::process::Command::new("dbus-run-session")
+            .args(["--", "sh", "-c", "printf throwaway | gnome-keyring-daemon --unlock --components=secrets >/dev/null && exec \"$0\""])
+            .arg(checkout.join("client/native/target/debug/one-native"))
+            .env("DISPLAY", &display)
+            .env_remove("WAYLAND_DISPLAY")
+            .env("XDG_DATA_HOME", home.join("data"))
+            .env("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+            .env(env("ADDRESS"), address)
+            .env(env("SIGN_IN_PRINT"), "1")
+            .env(env("CONTROL"), control.to_string()),
+        &log,
+        true,
+    )?;
+    std::fs::write(home.join("app.pid"), app.to_string())?;
+    let eval = |js: &str| agent().post(format!("http://127.0.0.1:{control}/eval")).send(js).map(drop);
+    let start = Instant::now();
+    let (mut signed, mut approved) = (false, false);
+    loop {
+        anyhow::ensure!(start.elapsed() < Duration::from_secs(180), "the Linux app didn't sign in: {} says why", dir.join(&log).display());
+        std::thread::sleep(Duration::from_secs(1));
+        let said = std::fs::read_to_string(dir.join(&log)).unwrap_or_default();
+        if said.lines().any(|l| l == "Let in.") {
+            break;
+        }
+        match said.lines().rev().find_map(|l| l.strip_prefix("Sign in: ")) {
+            Some(url) if !signed => {
+                one::sign_in::approve_on_throwaway(address, url, person)?;
+                signed = true;
+            }
+            Some(_) => {}
+            // Signed out: its Sign In, pressed for the person.
+            None => drop(eval("document.querySelector('[data-slot=welcome-action]')?.click()")),
+        }
+        if let Some(code) = said.lines().rev().find_map(|l| l.strip_prefix("Code: "))
+            && !approved
+        {
+            approve_code(dir, code)?;
+            approved = true;
+        }
+    }
+    println!(
+        "The Linux app of this build is signed in to the throwaway network{}, on this machine in the display {display}.
+  See it: DISPLAY={display} import -window root shot.png
+  Use it: DISPLAY={display} xdotool …, or run JavaScript in its page: curl -d '<js>' http://127.0.0.1:{control}/eval
+  What it said: {}; {CLI} throwaway stop stops it",
+        person.map(|name| format!(" as {name}")).unwrap_or_default(),
+        dir.join(&log).display()
     );
     Ok(())
 }

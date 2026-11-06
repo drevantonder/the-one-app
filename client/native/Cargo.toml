@@ -1,0 +1,65 @@
+# The native app, one for every platform (Linux, Windows, Mac, iPhone, Android): a window that is the web client's own
+# (cloudflare/web, through one::web), on the client itself (one-client, ../) with this device's key in the OS's secret
+# store. Its own workspace, so the repo's `cargo build` and `cargo test` never build Tauri.
+[package]
+name = "one-native"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+name = "one_native"
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+name = "one-native"
+path = "src/main.rs"
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+# The web client's files and the custom build's name, which the window shows from and the app is called by.
+one = { path = "../..", default-features = false, features = ["db"] }
+serde_json = "1"
+
+[dependencies]
+# The app: the system's web view (WebKitGTK, WKWebView, WebView2, Android's) in a window, the same on every platform,
+# with a tray or menu bar item on computers. Its plugins: notifications, and opening links and files outside.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+# Where a file a screen gives is saved; and what a screen copies, which a web view takes only with a tap.
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+# Links that open the app (`<cli>://open?…`), and on computers, one app at a time, a second start (with a link or none)
+# showing the first; the window as big and where it was left.
+tauri-plugin-deep-link = "2"
+one-client = { path = ".." }
+one = { path = "../..", default-features = false, features = ["db"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Sign-in's requests, as the client's own.
+ureq = { version = "3", features = ["json"] }
+sha2 = "0.10"
+data-encoding = "2"
+rand = "0.8"
+url = "2"
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+# The OS's secret store for the device key and the refresh token: the Secret Service, the Keychain, the Credential
+# Manager.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-window-state = "2"
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.release]
+strip = true

@@ -1,0 +1,4 @@
+target/
+gen/
+# Made by tauri-build from build.rs's list of commands.
+permissions/

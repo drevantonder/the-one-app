@@ -22,14 +22,15 @@ window.oneHost = (() => {
 
   /// `one.save` and `one.preview`: a download, or a tab showing it. Only what can't run script shows in a tab, as
   /// this page's: anything else is saved. `blob(id)` gives a file the node keeps (`{ blob }`), where the page can reach
-  /// it.
-  async function file(how, f, blob) {
+  /// it. `give(how, name, blob)`, where the page can't download (the native app), gives it instead.
+  async function file(how, f, blob, give) {
     let data;
     if (f.base64) data = new Blob([Uint8Array.from(atob(f.base64), (c) => c.charCodeAt(0))]);
     else if (f.blob || f.file) data = await blob(String(f.blob || f.file));
     else throw new Error("No file to show.");
     const type = String(f.type || "");
     const viewable = /^(image\/(png|jpeg|gif|webp|avif)|application\/pdf|text\/plain|audio\/|video\/)/.test(type);
+    if (give) return give(how === "preview" && viewable ? "preview" : "save", f.name || "file", new Blob([data], { type }));
     const url = URL.createObjectURL(new Blob([data], { type: viewable ? type : "application/octet-stream" }));
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
     if (how === "preview" && viewable) return void window.open(url, "_blank", "noopener");
@@ -79,7 +80,7 @@ window.oneHost = (() => {
   /// answers them, the web client's and a chat's alike → what it replies; what it throws, it refuses with. `h` is what
   /// each page does its own way: `frame`, the screen's; `call(tool, input)`, as its app; `open(m)`, `close(value)` and
   /// `title(text, m)`; `kept(tool, input)`, what that call last answered if this page keeps it (`{ answer, at }`, or null); `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the node
-  /// keeps; `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; `traces()`, in
+  /// keeps; `give` and `copy`, where the page does those its own way (the native app); `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; `traces()`, in
   /// developer mode, its latest requests' traces (else null); and `own`, what only the client's own screens may do, by
   /// message, on a page that has them.
   async function answer(m, h) {
@@ -93,10 +94,10 @@ window.oneHost = (() => {
       case "alert": return alert(m);
       case "save": case "preview":
         if (h.elsewhere) return h.elsewhere();
-        await file(m.type, m.file || {}, h.blob);
+        await file(m.type, m.file || {}, h.blob, h.give);
         return null;
       case "copy":
-        await navigator.clipboard.writeText(String(m.text ?? ""));
+        await (h.copy ? h.copy(String(m.text ?? "")) : navigator.clipboard.writeText(String(m.text ?? "")));
         return null;
       case "link": return h.link(String(m.url ?? ""));
       case "vault": return h.vault(String(m.need || ""));

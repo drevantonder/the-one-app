@@ -278,6 +278,8 @@ impl Parts {
                 Some("service") => parts.service = true,
                 // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
+                // The native app (client/native) is its own workspace, in neither the node nor today's Mac app.
+                Some("client") if file.starts_with("client/native/") => {}
                 // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
                 Some("client") => (parts.node, parts.mac) = (true, true),
                 Some("docs" | "tests" | "android" | "windows" | "cloudflare") => {}

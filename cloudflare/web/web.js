@@ -18,6 +18,11 @@ import { qrSvg } from "./qr.js";
 
 window.__one = {};
 const ui = OneUI["@one/ui"];
+/// In the native app, the app itself (client/native/src/native.js): this device's client, which reaches the nodes and
+/// holds its keys, and signs in through the system's browser. Everything else is this page's, as in a browser.
+const native = window.__oneNative;
+/// What the app says of itself and who's signed in there (`native.about`), once the page starts.
+let about = null;
 const h = OneUI.react.createElement;
 
 (() => {
@@ -160,6 +165,22 @@ const h = OneUI.react.createElement;
     },
   };
 
+  // The app signs in itself, keeping its tokens in the OS's secret store, never this page.
+  if (native) {
+    Object.assign(auth, {
+      kept: () => (about?.signedIn ? {} : null),
+      user: () => about?.user || null,
+      start: () => native.signIn().then(() => location.reload()),
+      async signOut(why) {
+        await native.signOut().catch(() => {});
+        await forgetScreens();
+        about = await native.about();
+        if (why) return showSignedOut(why);
+        location.replace("/");
+      },
+    });
+  }
+
   // MARK: The node
 
   class NodeError extends Error {}
@@ -201,10 +222,10 @@ const h = OneUI.react.createElement;
     const route = Device.route(url.pathname, body);
     const user = auth.user();
     const joining = performance.now();
-    if (!user || !(await net.start(user).catch(() => false))) throw Object.assign(new NodeError("This device hasn't been approved yet."), { status: 403 });
+    if (!user || !(native ? nativeIn : await net.start(user).catch(() => false))) throw Object.assign(new NodeError("This device hasn't been approved yet."), { status: 403 });
     // How long it waited to join the network, if it did, and what that took.
     if (trace && performance.now() - joining >= 1) trace.network = Math.round(performance.now() - joining);
-    if (trace && (trace.network || trace.first)) trace.joined = await net.took();
+    if (trace && !native && (trace.network || trace.first)) trace.joined = await net.took();
     for (let needed = 0, misses = 0, behind = 0; ; ) {
       const headers = { "x-one-user": user };
       if (trace) headers["x-one-trace"] = "1";
@@ -221,7 +242,7 @@ const h = OneUI.react.createElement;
       let r;
       const watch = watching();
       try {
-        r = await Promise.race([net.fetch(method, url.pathname + url.search, headers, sent, signal, keys), watch.out]);
+        r = await Promise.race([(native || net).fetch(method, url.pathname + url.search, headers, sent, signal, keys), watch.out]);
         trace?.fetches.push(developer.parse(r.trace));
       } catch (err) {
         trace?.fetches.push(developer.parse(err.trace));
@@ -331,6 +352,12 @@ const h = OneUI.react.createElement;
   /// wait on for a long time without an answer. It's signed out then, not an app's problem: the sign-in says why.
   async function takenOut() {
     if (removed) return true;
+    if (native) {
+      if (!(await native.removed().catch(() => false))) return false;
+      removed = true;
+      await auth.signOut(REMOVED);
+      return true;
+    }
     // Only the relay saying so: a client with no session yet (a tab that just took over the others') doesn't know.
     if ((await net.still().catch(() => null)) !== false) return false;
     removed = true;
@@ -352,6 +379,7 @@ const h = OneUI.react.createElement;
   /// key goes. One that can't get out in a few seconds (no node answering) goes anyway, and stays listed, last seen when
   /// it signed out, until it's removed in Settings › Devices.
   async function signOut() {
+    if (native) return auth.signOut();
     if (device) await Promise.race([device.leave(), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
     await navigator.serviceWorker?.getRegistration().then((r) => r?.pushManager.getSubscription()).then((s) => s?.unsubscribe()).catch(() => {});
     localStorage.removeItem(PUSHED);
@@ -395,7 +423,8 @@ const h = OneUI.react.createElement;
     const all = await icons;
     return Object.fromEntries(names.map((n) => [n, all[n]]));
   }
-  window.__one.host = async (m) => (m.type === "copy" ? navigator.clipboard.writeText(m.text) : m.type === "icons" ? iconPaths(m.names) : null);
+  const copy = (text) => (native ? native.copy(String(text)) : navigator.clipboard.writeText(text));
+  window.__one.host = async (m) => (m.type === "copy" ? copy(m.text) : m.type === "icons" ? iconPaths(m.names) : null);
 
   /// Names a call wherever it's sent, so sent again it runs once.
   const callId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -417,7 +446,7 @@ const h = OneUI.react.createElement;
     // waits for that one's answer rather than running again.
     const same = reads(app, op) ? JSON.stringify([app, op, input]) : null;
     if (same && reading.has(same)) return reading.get(same);
-    const asked = api("/v1/call", { method: "POST", body: { app, op, input, client: "web" } }).then((r) => r.ok);
+    const asked = api("/v1/call", { method: "POST", body: { app, op, input, client: about?.client || "web" } }).then((r) => r.ok);
     if (same) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
     const out = await asked;
     // Using an app keeps the devices keeping it running for this person doing so.
@@ -486,7 +515,7 @@ const h = OneUI.react.createElement;
     const ranks = Object.fromEntries((state.install?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
     if (last) ranks[last] = rank(state.install.serverless.priority ?? "last");
     nodes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
-    if (state.user && nodes.length) net.nodes(state.user.id, nodes, ranks, last);
+    if (!native && state.user && nodes.length) net.nodes(state.user.id, nodes, ranks, last);
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
     store.state = state;
     // While it's being let in, its apps wait: they need the keys it's about to get.
@@ -1064,18 +1093,19 @@ const h = OneUI.react.createElement;
           const url = new URL(to, location.href);
           const item = settingAt(url.href);
           if (item) go(own(item.name));
-          else if (["http:", "https:", "mailto:", "tel:"].includes(url.protocol)) window.open(url.href, "_blank", "noopener,noreferrer");
+          else if (["http:", "https:", "mailto:", "tel:"].includes(url.protocol)) outside(url.href);
           return null;
         },
         icons: iconPaths,
         blob: async (id) => (await api(`/v1/blobs/${encodeURIComponent(id)}`, { raw: true })).blob(),
+        ...(native ? { copy, give: (how, name, blob) => native.save(name, blob, how === "preview") } : {}),
         traces: () => (developer.on() ? developer.kept : null),
         own: mine && {
           developer: (m) => ("on" in m && developer.set(!!m.on), developer.on()),
           api: clientApi,
           signOut: () => (signOut(), null),
           appearance: (m) => (m.value != null && setAppearance(String(m.value)), appearance()),
-          device: () => ({ name: browserName(), signOut: true, keys: !!device, notify: notifyState(), ...(device ? { key: device.me.key } : {}) }),
+          device: () => (native ? { name: about.device, signOut: true, keys: true, notify: nativeNotify } : { name: browserName(), signOut: true, keys: !!device, notify: notifyState(), ...(device ? { key: device.me.key } : {}) }),
           notify: () => notifications(true),
           request: async (m) => (await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true,
           cache: (m) => {
@@ -1110,8 +1140,9 @@ const h = OneUI.react.createElement;
     if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn’t on your devices.");
     const method = String(m.method || "GET").toUpperCase();
     const body = method === "GET" ? undefined : m.body ?? {};
-    if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = "web";
-    const own = signs[`${method} ${url.pathname}`];
+    if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = about?.client || "web";
+    // The app's client signs these itself, as it asks.
+    const own = !native && signs[`${method} ${url.pathname}`];
     if (own) {
       if (!device) throw new Error("This device hasn't been approved yet.");
       const out = await own(body || {});
@@ -1239,7 +1270,8 @@ const h = OneUI.react.createElement;
 
   /// Asks sign-in which devices wait now, and tells the window and its screens if that changed. → them.
   async function waitingNow() {
-    const now = await bySignIn((await device.requests()).filter((r) => !notMine.has(r.key)));
+    // The app's client lets its person's devices in by their sign-in itself; what's left is asked of a node.
+    const now = native ? (await api("/v1/devices/requests")).map((r) => ({ ...r, key: r.code })) : await bySignIn((await device.requests()).filter((r) => !notMine.has(r.key)));
     const changed = now.map((r) => r.key).join() !== waiting.map((r) => r.key).join();
     waiting = now;
     if (changed) {
@@ -1293,12 +1325,30 @@ const h = OneUI.react.createElement;
 
   // MARK: Starting
 
-  function showSignedOut(error) {
+  function showSignedOut(error, note) {
     const name = config().name;
     document.title = name;
     windowShown = false;
+    // The app asks where first: an address, or an invite link to one.
+    if (native && !about.address) {
+      const take = async (typed) => {
+        try {
+          await native.address(typed);
+          about = await native.about();
+          // An invite opens in the browser, where its person makes their passkey; then they sign in with it here.
+          if (/\/invite#./.test(typed)) return (await native.open(new URL(typed.includes("://") ? typed : `https://${typed}`).href), showSignedOut(undefined, "Made your passkey? Sign in with it."));
+          await auth.start();
+        } catch (err) {
+          showSignedOut(err.message);
+        }
+      };
+      const whose = about.yours.charAt(0).toUpperCase() + about.yours.slice(1);
+      const field = { label: "Address", placeholder: "one.example.com", note: `${whose}’s address, or the invite link you were sent.` };
+      // An invite link opens in the browser, where its person makes their passkey, then signs in here with it.
+      return void show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name, field, action: { label: "Sign In", invite: "Open Invite", run: take }, problem: error }));
+    }
     const signIn = () => auth.start().catch((err) => showSignedOut(err.message));
-    show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name, action: { label: "Sign In", run: signIn }, problem: error }));
+    show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name, action: { label: "Sign In", run: signIn }, note, problem: error }));
   }
 
   /// Back from a sign-in at another site, in a browser that isn't signed in here: on to the app, which finishes it.
@@ -1375,7 +1425,7 @@ const h = OneUI.react.createElement;
   /// phone that scans it.
   async function showJoin(code, invited) {
     document.title = "Waiting for Approval";
-    const link = `${location.origin}/approve#${code.replace(" ", "")}`;
+    const link = `${native ? about.address : location.origin}/approve#${code.replace(" ", "")}`;
     windowShown = false;
     show(h(ui.Join, {
       code,
@@ -1386,8 +1436,46 @@ const h = OneUI.react.createElement;
     }));
   }
 
+  /// The app's device let in, as `join` does a browser's: one already, or asking and showing its code until it's
+  /// approved.
+  let nativeIn = false;
+  async function nativeJoin() {
+    const asked = await native.join();
+    if (!asked.in) {
+      await showJoin(asked.code, asked.invited);
+      await native.wait();
+      show(h(ui.Starting));
+    }
+    nativeIn = true;
+  }
+
+  /// A link the app was opened with, `<cli>://open?app=&screen=&params=&scope=` (as `showBack` sends one on): that
+  /// app's screen, once this device is in.
+  function opened(link) {
+    const q = new URL(link).searchParams;
+    const app = q.get("app");
+    if (app) joined.then(() => go({ kind: "screen", app, screen: q.get("screen") || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined }));
+  }
+
+  /// A link elsewhere, in a new tab, or in the app, the system's browser.
+  const outside = (href) => (native ? native.open(href).catch(() => {}) : window.open(href, "_blank", "noopener,noreferrer"));
+  // In the app, a link of this page's to another site (Settings' that are pages of the address) goes to the browser.
+  if (native) {
+    addEventListener("click", (e) => {
+      const a = e.target.closest?.("a[href]");
+      if (!a || new URL(a.href, location.href).origin === location.origin) return;
+      e.preventDefault();
+      outside(a.href);
+    });
+  }
+
   async function start() {
     schemed(document, appearance());
+    if (native) {
+      about = await native.about();
+      native.onOpen = opened;
+      if (about.opened) opened(about.opened);
+    }
     // A new device's QR: Approve, with its code.
     if (location.pathname === "/approve") history.replaceState(null, "", href(own("devices", { approve: location.hash.slice(1) })));
     // `/back?state=<app>/<screen>[/<the app's own>]&…`: where a sign-in at another site sends the person back (an app's
@@ -1410,7 +1498,7 @@ const h = OneUI.react.createElement;
       }
     }
     if (!auth.kept()) return showSignedOut();
-    navigator.serviceWorker?.register("/sw.js").catch(() => {});
+    if (!native) navigator.serviceWorker?.register("/sw.js").catch(() => {});
     // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.
     let request = null;
     if (location.pathname === "/vault") {
@@ -1427,8 +1515,11 @@ const h = OneUI.react.createElement;
     const user = auth.user();
     try {
       // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
-      device = new Device(await join(user), { user, state: () => store.state, api, bearer, replay: net.global });
-      await device.load();
+      if (native) await nativeJoin();
+      else {
+        device = new Device(await join(user), { user, state: () => store.state, api, bearer, replay: net.global });
+        await device.load();
+      }
     } catch (err) {
       if (err.signedOut) return err.removed ? undefined : showSignedOut();
       return void show(message("Can’t Let This Device In", err.message));
@@ -1447,7 +1538,7 @@ const h = OneUI.react.createElement;
       }
     }
     clearTimeout(away);
-    if (install() && me()) await settle();
+    if (!native && install() && me()) await settle();
     joining = false;
     joined.done();
     await refreshApps().catch(() => {});
@@ -1462,6 +1553,8 @@ const h = OneUI.react.createElement;
   /// What was last registered for pushes here: the subscription's endpoint, the device's key and the install's VAPID
   /// key, and when.
   const PUSHED = "one.pushed";
+  /// Whether the app may show notifications, as it last said.
+  let nativeNotify = null;
 
   /// Whether this browser can get notifications: "default" until the person says, "granted", "denied", or null where
   /// it can't.
@@ -1471,6 +1564,7 @@ const h = OneUI.react.createElement;
   /// subscription is registered with the push Worker as this device's, again whenever it changes and daily. → the
   /// permission, as `notifyState`.
   async function notifications(ask) {
+    if (native) return (nativeNotify = await native.notify(ask).catch(() => null));
     if (!notifyState()) return null;
     if (ask && Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission !== "granted") return notifyState();

@@ -1,0 +1,50 @@
+# The native app
+
+One app for every platform, Tauri 2 on the client itself (`one-client`, `../`): its window is the web client's own page
+(`cloudflare/web/web.js` and @one/ui, from `one::web`), the same sidebar, sheets, menus and alerts as in a browser, run
+on this device's client and key rather than a browser's. `src/native.js` is what the page finds of the app; everything
+else a screen asks is the page's, as in a browser. Only what a web view can't do is the app's (`src/lib.rs`): the key in
+the OS's secret store, signing in through the system's browser, files, the clipboard, links outside, notifications;
+and per platform, what's beside it (below).
+
+Its own workspace, so the repo's `cargo build` and `cargo test` never build Tauri. `one throwaway client linux` builds
+and runs it signed in to your throwaway network; `cargo build` here, then `ONE_ADDRESS=<address> target/debug/one-native`
+on a desktop.
+
+## Replacing the old apps
+
+Until each platform's old app (`apple/`, `windows/`, `android/`) is gone, this is the list of what it does that this
+must too, ticked as it does and checked in `one throwaway`. Then this section goes, down to what the code can't say.
+
+Shared, every platform:
+
+- [x] Window is the web client's: sidebar, pages, screens in sandboxed frames, sheets, menus, alerts (checked, Linux)
+- [x] Signs in through the system's browser (loopback redirect), names the device it's for; refresh token in the
+      secret store (checked, Linux)
+- [x] Let in by code (Waiting for Approval, QR to the address's /approve) (checked, Linux)
+- [x] Node events: the window and screens keep up (a CLI post shows at once) (checked, Linux)
+- [x] Screens reach none of the app's commands: no Tauri internals in frames, IPC fetch refused, a frame's message to
+      WebKit's ipc handler runs nothing (copy probe), parent page unreachable (checked, Linux)
+- [x] Address or invite link typed on the welcome, with the old apps' words; an invite opens in the browser (for the
+      passkey), then "Made your passkey? Sign in with it."; its secret goes with the request to be let in (checked,
+      Linux, but for the browser itself, which the headless test has none of)
+- [ ] Save, preview, copy, links outside from screens
+- [ ] Notifications permission (Settings › Devices), and notes shown
+- [ ] Taken out (removed) → signed out, says why
+- [x] `<cli>://open?app=&screen=&params=&scope=`; one instance, a second start (with a link) going to the first
+      (checked, Linux)
+- [ ] The old apps' other links: `<cli>://vault?id=&scope=`, `<cli>://page?scope=[&folder=accounts]`,
+      `<cli>://settings[/<item>]`
+- [x] Closing the window leaves it running in the tray (menu bar), with Open and Quit (built; no tray host to see it
+      under Xvfb)
+- [ ] Window size and place kept (tauri-plugin-window-state, built, unchecked); sidebar state (web's, kept)
+- [ ] Keyboard shortcuts of the old apps
+- [ ] Offline: last window shown at once, "Can't Reach Your Devices", trying again
+- [ ] Speed: usable within 1.5 s of a cold open (ARCHITECTURE.md), measured
+- [ ] Icons and names from config.toml (custom builds)
+
+Linux (new): app, `.desktop` entry, tray item, open at login; built and installed by `one update`, `one release`,
+install.sh.
+
+Mac (`apple/Mac`, `apple/Shared`), iPhone (`apple/Phone`, `Notifications`, `Widget`), Windows (`windows/`), Android
+(`android/`): each old app's full inventory lands here before that platform is written.
