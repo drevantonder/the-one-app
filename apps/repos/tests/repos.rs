@@ -21,7 +21,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let me = Caller::own(a.id(), a.user().unwrap());
     // Naming no scopes, as git's requests don't: Sam's own runs nowhere, as he picked nowhere, so his run without it.
     let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
-    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
+    eventually("Repos to run", &a, async || a.call(repos("list", json!({}))).await.is_ok()).await;
 
     // A real one-commit pack, as git sends it.
     let dir = temp("repos-owner-git");
@@ -165,7 +165,7 @@ async fn a_repos_merged_packs_hold_every_object_pushed() {
     let a = start("repos-merge").await;
     create(&a, "Home", "Andre").await;
     let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
-    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
+    eventually("Repos to run", &a, async || a.call(repos("list", json!({}))).await.is_ok()).await;
 
     let dir = temp("repos-merge-git");
     let git = |dir: &std::path::Path, args: &[&str], input: &[u8]| {
@@ -224,7 +224,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     create(&a, "Home", "Andre").await;
     let me = Caller::own(a.id(), a.user().unwrap());
     let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
-    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
+    eventually("Repos to run", &a, async || a.call(repos("list", json!({}))).await.is_ok()).await;
 
     // GitHub, as far as this needs: Andre's own repo for his token, an organization's for the App's installation,
     // which it gives a token for with a JWT. Each request's path and Authorization is kept.

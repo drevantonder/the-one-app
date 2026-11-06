@@ -1,6 +1,6 @@
 //! Real nodes on this machine, reaching each other through the relay at a real network's gateway.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use one::node::{CallRequest, Node};
 use serde_json::{Value, json};
@@ -27,16 +27,17 @@ async fn relay(a: &Node) -> crate::cloudflare::Workers {
     k
 }
 
-/// Waits for what's expected, as long as a busy machine may take: a limit only for what never happens.
-pub(crate) async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(180) {
-        if check().await {
-            return;
+/// Waits for what's expected of `node`, checking again at each event it announces: a limit only for what never happens.
+pub(crate) async fn eventually(what: &str, node: &Node, mut check: impl AsyncFnMut() -> bool) {
+    let mut events = node.subscribe();
+    let waiting = async {
+        while !check().await {
+            let _ = events.recv().await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    if tokio::time::timeout(Duration::from_secs(180), waiting).await.is_err() {
+        panic!("timed out waiting for {what}");
     }
-    panic!("timed out waiting for {what}");
 }
 
 /// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
@@ -70,7 +71,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
-    eventually("notes to run", async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     a.set_item(&me, &one::database::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
     let bad = a.add_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" })).await.unwrap();
@@ -80,12 +81,12 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let dir = temp("backup-disk").join("One Backups");
     let added = a.add_place(&me, &json!({ "path": dir, "title": "T7 Shield" })).await.unwrap();
     assert!(added["id"].is_string() && added["tried"].as_array().unwrap().iter().all(|s| s["error"].is_null()), "{added}");
-    eventually("the first backup", async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
+    eventually("the first backup", &a, async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
     let shown = a.backups().unwrap();
     assert_eq!(shown["places"][0]["title"], "T7 Shield");
     assert_eq!(shown["places"][0]["last"]["device"], "backup-a", "the folder's own device backs it up: {shown}");
     let first = shown["places"][0]["last"]["time"].clone();
-    eventually("b to see it", async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
+    eventually("b to see it", &b, async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
 
     // The folder's device restores it into a throwaway copy, against what it holds: who's who, databases and blobs.
     let report = a.check_backups().await.unwrap();
@@ -116,7 +117,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     a.back_up_now();
     // A run is done once it says when it last backed up, not once its copy of the bucket has the post: it copies the
     // bucket before writing the snapshot that names the copy, and backs up every scope.
-    eventually("the second backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
+    eventually("the second backup", &a, async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
     let again = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert!(again.snapshot.databases["notes/main"].0 > steps_then);
     assert_eq!(backed_up_posts(&dir, &network, &one::keys::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
@@ -135,7 +136,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     // Its failure shows once it's done: nothing writes to the disk until the next run.
     a.call(notes("post", json!({ "text": "broken" }))).await.unwrap();
     a.back_up_now();
-    eventually("a failed run", async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
+    eventually("a failed run", &a, async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
     let problem = a.state().unwrap()["backups"].clone();
     assert_eq!(problem["fix"], "Check the disk on backup-a is plugged in and has room.", "{problem}");
     assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield "), "{problem}");
@@ -143,7 +144,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     std::fs::rename(dir.join("bucket-aside"), &copy).unwrap();
     a.call(notes("post", json!({ "text": "fixed" }))).await.unwrap();
     a.back_up_now();
-    eventually("the badge to clear", async || a.state().unwrap()["backups"].is_null()).await;
+    eventually("the badge to clear", &a, async || a.state().unwrap()["backups"].is_null()).await;
 
     // A folder named only by a Vault item, which anyone may write, is never written to: a folder is its own device's
     // choice. Nor is an S3 place no admin's setting names.
@@ -155,7 +156,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     a.set_item(&me, &global, json!({ "title": "Unnamed bucket", "type": one::backups::KIND, "fields": s3, "hosts": ["127.0.0.1"], "apps": ["node"] })).await.unwrap();
     a.back_up_now();
     let place = |title: &str| a.backups().unwrap()["places"].as_array().unwrap().iter().find(|p| p["title"] == title).cloned();
-    eventually("the planted folder's run to fail", async || place("Planted").is_some_and(|p| !p["problem"].is_null())).await;
+    eventually("the planted folder's run to fail", &a, async || place("Planted").is_some_and(|p| !p["problem"].is_null())).await;
     assert!(!planted.exists(), "nothing was written there");
     assert!(place("Unnamed bucket").is_none(), "{}", a.backups().unwrap());
 
@@ -218,7 +219,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
-    eventually("notes to run", async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let global = one::database::scopes::Scope::Global;
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let asks = |key: &ed25519_dalek::SigningKey, user: &str, proof: Option<String>| {
@@ -292,7 +293,7 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
     let a = start("trace-a").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
-    eventually("notes to run", async || a.call(notes("post", json!({ "text": "a private thought" }))).await.is_ok()).await;
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "a private thought" }))).await.is_ok()).await;
     let t = trace::Trace::new();
     let read = trace::within(Some(t.clone()), a.call(notes("read", json!({ "format": "json" })))).await.unwrap();
     assert!(read.to_string().contains("a private thought"), "{read}");
@@ -409,7 +410,7 @@ async fn a_client_devices_mcp_runs_as_its_person() {
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
-    eventually("notes to run", async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let secret = "the-invites-secret";
     let sam = one::node::Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let device = ed25519_dalek::SigningKey::from_bytes(&rand::random());
