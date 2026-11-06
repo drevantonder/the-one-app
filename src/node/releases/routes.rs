@@ -12,7 +12,7 @@ use crate::node::Node;
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/node-release", Who::ThisMachine, post(release))
-        .route("/v1/service-release", Who::ThisMachine, post(service_release))
+        .route("/v1/service-release", Who::ThisMachine, post(release))
 }
 
 #[derive(Deserialize)]
@@ -28,15 +28,9 @@ struct ReleaseRequest {
     signature: String,
 }
 
+/// A build of the node, or with `service` of a service's program (at its own path, so a node too old to know them
+/// refuses it rather than taking it for its own), for `target` and signed: published as its newest release.
 async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
-    let r = node.publish(std::path::Path::new(&req.path), None, &req.commit, &req.target, req.committed, &req.signature).await?;
-    Ok(Json(json!(r)))
-}
-
-/// A service's program, built for `target` and signed, published as its newest release (its own path, so a node too
-/// old to know them refuses it, rather than taking it for its own).
-async fn service_release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
-    let service = req.service.as_deref().ok_or_else(|| anyhow::anyhow!("say which service"))?;
-    let r = node.publish(std::path::Path::new(&req.path), Some(service), &req.commit, &req.target, req.committed, &req.signature).await?;
+    let r = node.publish(std::path::Path::new(&req.path), req.service.as_deref(), &req.commit, &req.target, req.committed, &req.signature).await?;
     Ok(Json(json!(r)))
 }

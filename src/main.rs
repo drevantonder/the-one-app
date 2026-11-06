@@ -67,10 +67,6 @@ else. Data goes to stdout, messages to stderr.
     )
 }
 
-fn addr() -> String {
-    api::addr()
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // Run as oned: this device, always on; or one of its parts.
@@ -457,10 +453,10 @@ fn releases() -> Command {
                 }
                 ["file", "put", file] => {
                     let read = std::fs::File::open(file).with_context(|| format!("read {file}"))?;
-                    println!("{}", request(agent().post(format!("http://{}/v1/blobs", addr())).send(read))?["blob"].as_str().unwrap_or(""));
+                    println!("{}", request(agent().post(format!("http://{}/v1/blobs", api::addr())).send(read))?["blob"].as_str().unwrap_or(""));
                 }
                 ["file", "get", hash, file] => {
-                    let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().map_err(unreached)?;
+                    let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", api::addr())).call().map_err(unreached)?;
                     if !resp.status().is_success() {
                         bail!("{}", resp.body_mut().read_json::<Value>()?["error"].as_str().unwrap_or("failed"));
                     }
@@ -641,7 +637,7 @@ fn built_with_service(dir: &std::path::Path) -> Result<(String, String)> {
 
 /// Keeps `bytes` as a blob on this machine's node, giving its hash.
 fn put_blob(bytes: &[u8]) -> Result<String> {
-    Ok(request(agent().post(format!("http://{}/v1/blobs", addr())).send(bytes))?["blob"].as_str().unwrap_or("").to_string())
+    Ok(request(agent().post(format!("http://{}/v1/blobs", api::addr())).send(bytes))?["blob"].as_str().unwrap_or("").to_string())
 }
 
 /// The deploy tool's files built into a bundle on this machine, as a blob of its node's: for React screens and a
@@ -867,7 +863,7 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         // With no node here, it's the address it was signed in at before, or the one given.
         None if !client_device::node_here() => one::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
         None => {
-            let state = request(agent().get(format!("http://{}/v1/state", addr())).call())?;
+            let state = request(agent().get(format!("http://{}/v1/state", api::addr())).call())?;
             state["network"]["settings"]["address"].as_str().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
         }
     };
@@ -922,11 +918,11 @@ impl one::node::own::Ask for Local {
 }
 
 fn get(path: &str) -> Result<Value> {
-    request(to_node(agent().get(format!("http://{}{path}", addr()))).call())
+    request(to_node(agent().get(format!("http://{}{path}", api::addr()))).call())
 }
 
 fn post(path: &str, body: Value) -> Result<Value> {
-    request(to_node(agent().post(format!("http://{}{path}", addr()))).send_json(&body))
+    request(to_node(agent().post(format!("http://{}{path}", api::addr()))).send_json(&body))
 }
 
 /// A call, asking for its trace if `--trace` (or MCP's `trace`) did: what it did stays for `print_trace`.
@@ -934,7 +930,7 @@ fn post_call(body: Value) -> Result<Value> {
     let asked = TRACE_ASKED.with(|t| t.get());
     TRACED.with(|t| *t.borrow_mut() = None);
     drop(client_device::take_tries());
-    let request_ = to_node(agent().post(format!("http://{}/v1/call", addr())));
+    let request_ = to_node(agent().post(format!("http://{}/v1/call", api::addr())));
     let request_ = if asked { request_.header(one::node::trace::HEADER, "1") } else { request_ };
     request(request_.send_json(&body))
 }
@@ -990,7 +986,7 @@ fn print_trace() {
 /// For a node in no network yet, which no one is signed in to: a sign-in this CLI kept for its address was another
 /// node's there before, so it isn't sent, and once the node is in a network it's let go.
 fn unsigned_post(path: &str, body: Value) -> Result<Value> {
-    let r = request(agent().post(format!("http://{}{path}", addr())).send_json(&body))?;
+    let r = request(agent().post(format!("http://{}{path}", api::addr())).send_json(&body))?;
     let _ = one::sign_in::sign_out();
     Ok(r)
 }
@@ -1192,7 +1188,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         node.warm().await;
     }
     std::fs::write(dir.join("pid"), std::process::id().to_string())?;
-    tracing::info!("{NAME} node {} serving {} from {}", &one::keys::hex(&node.id())[..8], addr(), dir.display());
+    tracing::info!("{NAME} node {} serving {} from {}", &one::keys::hex(&node.id())[..8], api::addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     api::serve_mcp(axum::routing::post(mcp_http));
     let mut routes = api::guarded(api::routes(), node.clone());
@@ -1310,17 +1306,13 @@ fn stopped() -> Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 
 /// by an earlier build, or started by hand) is stopped first: the one starting is the one to keep, so its supervisor's
 /// node never waits on a stray, and an update's node replaces whatever ran before it.
 async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
-    let bind = || tokio::net::TcpListener::bind(addr());
+    let bind = || tokio::net::TcpListener::bind(api::addr());
     match bind().await {
         Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {}
-        bound => return bound.with_context(|| format!("listen on {}", addr())),
+        bound => return bound.with_context(|| format!("listen on {}", api::addr())),
     }
-    // Who listens there: the pid this home's node wrote, or, for one built before nodes wrote it, the port's listener.
-    let port = addr().rsplit(':').next().unwrap_or_default().to_string();
+    // Who listens there: the pid this home's node wrote.
     let mut pids: Vec<i32> = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse().ok()).into_iter().collect();
-    if let Ok(out) = std::process::Command::new("lsof").args(["-nP", "-t", &format!("-iTCP:{port}"), "-sTCP:LISTEN"]).output() {
-        pids.extend(String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse::<i32>().ok()));
-    }
     // Only a process of this program, never whatever else took the port.
     let me = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
     let ours = |pid: i32| {
@@ -1330,7 +1322,7 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
     pids.sort();
     pids.dedup();
     pids.retain(|&pid| pid as u32 != std::process::id() && ours(pid));
-    anyhow::ensure!(!pids.is_empty(), "{} is taken, and not by {NAME}'s node", addr());
+    anyhow::ensure!(!pids.is_empty(), "{} is taken, and not by {NAME}'s node", api::addr());
     for &pid in &pids {
         tracing::warn!("a node of this network was already running (pid {pid}): stopping it, to run this one");
         unsafe { libc::kill(pid, libc::SIGTERM) };
@@ -1346,7 +1338,7 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    bind().await.with_context(|| format!("listen on {}: the node there didn't stop", addr()))
+    bind().await.with_context(|| format!("listen on {}: the node there didn't stop", api::addr()))
 }
 
 /// The local MCP server, over stdio: every app tool is a tool, with `search` to find them; or in code mode (`--code`), `search` and

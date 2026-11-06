@@ -127,14 +127,6 @@ pub fn client_screen(name: &str) -> &'static str {
     CLIENT_SCREENS.iter().find(|(n, _)| *n == name).map_or("", |(_, html)| html)
 }
 
-/// A client's own screen as its page, as each client makes it from the screens built into it, never a node's: one a
-/// node served could act as the person. Native apps make it with this (client/ffi); the web client fills in its
-/// address's `screens/<name>.html` (`client_template`).
-pub fn client_page(name: &str, params: &serde_json::Value) -> String {
-    let nonce = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>());
-    page_with(&client_context(name, params), client_screen(name), Some(nonce), false)
-}
-
 /// What a client's own screen is told: its name, its params, and the product's.
 fn client_context(name: &str, params: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "screen": name, "params": params, "config": { "name": crate::config::NAME, "cli": crate::config::CLI, "made_here": crate::config::MADE_HERE } })
@@ -150,8 +142,7 @@ pub const TEMPLATE_NONCE: &str = "__nonce__";
 pub const TEMPLATE_PARAMS: &str = "\"__params__\"";
 
 /// A client's own screen's page for the web client, which its address serves as `screens/<name>.html` (src/cloudflare/
-/// services.rs): `client_page`, but for `TEMPLATE_NONCE` and `TEMPLATE_PARAMS`, which the web client fills in, and
-/// linking the bridge and `@one/ui`, which it writes in from its own (cloudflare/web/web.js).
+/// services.rs), with `TEMPLATE_NONCE` and `TEMPLATE_PARAMS` for the web client to fill in, and linking the bridge and `@one/ui`, which it writes in from its own (cloudflare/web/web.js).
 pub fn client_template(name: &str) -> String {
     page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), true)
 }

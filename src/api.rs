@@ -912,7 +912,6 @@ mod tests {
             ("/v1/blobs/{hash}", SignedIn),
             ("/v1/events", SignedIn),
             ("/v1/screens/{app}/{screen}", SignedIn),
-            ("/v1/client-screens/{name}", SignedIn),
             ("/hooks/prompt", ThisMachine),
             ("/v1/services/{app}", ThisMachine),
             ("/v1/services/{app}/calls", ThisMachine),

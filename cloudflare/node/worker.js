@@ -30,7 +30,7 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { CODES, MOST_URLS, READS, URLS } from "./protocol.js";
@@ -1026,19 +1026,12 @@ async function route(p, request) {
     p.forgetLost(who);
     return json(JSON.parse(await sealed_global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
   }
-  const own = request.method === "GET" && path.startsWith("/v1/client-screens/");
-  if (own || (request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path))) {
+  if ((request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path))) {
     const who = p.whom(request);
     const run = new Run(p, who, await p.networkFor(who));
     // Nothing here changes but what devices write, which they'll say once one is on: no events, so the client asks again
     // in a while, and this node sleeps meanwhile.
     if (path === "/v1/events") return new Response(null, { status: 204 });
-    if (own) {
-      const name = decodeURIComponent(path.slice("/v1/client-screens/".length));
-      const params = JSON.parse(url.searchParams.get("params") || "{}");
-      const context = { screen: name, params, me: run.view.me, config: { name: CONFIG.name, cli: CONFIG.cli, api: `http://localhost:${CONFIG.port}`, made_here: CONFIG.made_here } };
-      return screenPage(request, client_screen(JSON.stringify(context), name, url.searchParams.get("linked") === "true"));
-    }
     const scope = url.searchParams.get("scope");
     if (path === "/v1/state") return json(run.view.state);
     if (path === "/v1/apps") return tagged(request, JSON.stringify(await run.apps({ light: url.searchParams.get("light") === "true" })), "application/json");

@@ -187,7 +187,7 @@ pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
     match (address.filter(|a| !a.is_empty()), guide) {
         (Some(address), _) => format!("Read {}/llms.txt and connect yourself to {yours}.", address.trim_end_matches('/')),
         (None, Some(guide)) => format!("Read {guide} and connect yourself to {yours}."),
-        (None, None) => format!("Run \"{cli} guide\" in a terminal, read what it says, and connect yourself to {yours}."),
+        (None, None) => format!("Run \"{cli} help\" in a terminal, do what it says, and connect yourself to {yours}."),
     }
 }
 

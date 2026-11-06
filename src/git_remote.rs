@@ -102,7 +102,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
     let (head, answered) = tokio::sync::oneshot::channel::<(u16, String, Option<String>)>();
     let (giving, given) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(8);
     std::thread::spawn(move || {
-        let url = format!("http://{}{path}", crate::addr());
+        let url = format!("http://{}{path}", one::api::addr());
         let asked = if post {
             let mut r = crate::to_node(crate::agent().post(&url));
             for (n, v) in &headers {

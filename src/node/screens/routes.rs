@@ -19,7 +19,6 @@ pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/events", Who::SignedIn, get(events))
         .route("/v1/screens/{app}/{screen}", Who::SignedIn, get(screen))
-        .route("/v1/client-screens/{name}", Who::SignedIn, get(client_screen))
 }
 
 #[derive(Deserialize)]
@@ -41,13 +40,6 @@ async fn screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap
 fn page(headers: &axum::http::HeaderMap, html: String) -> Response {
     let tag = crate::screen::tag(&html);
     tagged(headers, tag, axum::response::Html(html))
-}
-
-/// A client's own screen as a page (see `Node::client_screen`), for clients built before they made them themselves
-/// (`screen::client_page`); none since asks.
-async fn client_screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
-    let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    Ok(page(&headers, node.client_screen(me.caller, &name, params, q.linked == Some(true))?))
 }
 
 async fn events(State(node): State<Node>, me: Me) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

@@ -310,7 +310,7 @@ fn start_new(dir: &Path) -> Result<String> {
     stop(dir, true)?;
     // Called what the person is called in their own network, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
-    let mine = quick.get(format!("http://{}/v1/state", crate::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
+    let mine = quick.get(format!("http://{}/v1/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
     let me = mine.and_then(|s| s["user"]["name"].as_str().or(s["me"]["name"].as_str()).map(String::from));
     let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
     std::fs::create_dir_all(dir)?;

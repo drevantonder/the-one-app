@@ -574,7 +574,7 @@ fn deploy_apps(src: &Path, changed: &[String]) -> Result<()> {
         let files = one::app::bundle::sources(&dir)?;
         let files: Vec<(&str, &[u8])> = files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect();
         let bundle = one::node::built_in_bundle(&files)?;
-        let blob = crate::request(crate::agent().post(format!("http://{}/v1/blobs", crate::addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
+        let blob = crate::request(crate::agent().post(format!("http://{}/v1/blobs", one::api::addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
         if app["bundle"].as_str() != Some(blob.as_str()) {
             post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
             println!("Deployed {name}'s new version ({})", &blob[..12]);
@@ -1360,6 +1360,6 @@ fn await_mac(mac: &Value) -> Result<(Vec<(String, String)>, Vec<String>)> {
 }
 
 fn blob(hash: &str) -> Result<Vec<u8>> {
-    let mut resp = crate::agent().get(format!("http://{}/v1/blobs/{hash}", crate::addr())).call()?;
+    let mut resp = crate::agent().get(format!("http://{}/v1/blobs/{hash}", one::api::addr())).call()?;
     Ok(resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)
 }

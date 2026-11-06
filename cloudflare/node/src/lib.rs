@@ -386,12 +386,6 @@ pub fn screen(context: &str, body: &str, linked: bool) -> Result<String, JsError
     Ok(one::screen::page(&serde_json::from_str(context)?, body, false, linked))
 }
 
-/// A client's own screen's page (`src/screen.rs`), from what the screen is told (JSON) and its name.
-#[wasm_bindgen]
-pub fn client_screen(context: &str, name: &str, linked: bool) -> Result<String, JsError> {
-    Ok(one::screen::page(&serde_json::from_str(context)?, one::screen::client_screen(name), true, linked))
-}
-
 /// The custom build this node is: `{ name, cli, port, made_here }`.
 #[wasm_bindgen]
 pub fn config() -> String {

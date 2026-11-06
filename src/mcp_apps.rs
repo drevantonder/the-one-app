@@ -6,7 +6,9 @@ use serde_json::{Value, json};
 
 use one::config::CLI;
 
-use crate::{agent, addr, get, to_node};
+use one::api::addr;
+
+use crate::{agent, get, to_node};
 
 const MIME: &str = "text/html;profile=mcp-app";
 

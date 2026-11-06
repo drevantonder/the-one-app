@@ -149,12 +149,6 @@ impl Node {
         self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, false, linked)
     }
 
-    /// A client's own screen (`crate::screen::client_screen`) as a whole page, like an app's but no app's: for clients
-    /// built before every client made them itself (`crate::screen::client_page`).
-    pub fn client_screen(&self, viewer: Caller, name: &str, params: Value, linked: bool) -> Result<String> {
-        self.page(&viewer, json!({ "screen": name, "params": params }), crate::screen::client_screen(name), true, linked)
-    }
-
     /// A screen's page: its body with the design kit, the bridge, and `window.__one`, which is `context` and who's
     /// looking.
     pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, own: bool, linked: bool) -> Result<String> {

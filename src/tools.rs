@@ -859,7 +859,7 @@ fn mcp_file(v: &Value) -> Result<Value> {
         ensure!(bytes.len() <= MCP_FILE_LIMIT, "a file given as base64 is at most 1 MiB; give a file id or URL for a bigger one");
         (bytes, v["type"].as_str().or(v["mimeType"].as_str()).map(str::to_string), name)
     } else if let Some(id) = v["file"].as_str().or(v["blob"].as_str()) {
-        let mut resp = crate::to_node(crate::agent().get(format!("http://{}/v1/blobs/{id}", crate::addr()))).call().map_err(crate::unreached)?;
+        let mut resp = crate::to_node(crate::agent().get(format!("http://{}/v1/blobs/{id}", one::api::addr()))).call().map_err(crate::unreached)?;
         ensure!(resp.status().is_success(), "no file {id} for you");
         (resp.body_mut().with_config().limit(FILE_LIMIT as u64).read_to_vec()?, v["type"].as_str().map(str::to_string), name)
     } else if let Some(url) = v["url"].as_str() {
@@ -1014,7 +1014,7 @@ fn no_pictures(v: &mut Value) {
 /// Replaces each file in `v` (to a few levels deep) with a reference to a blob that holds it.
 fn keep_files(v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
     if let Some((name, ty, bytes)) = as_file(v) {
-        let put = crate::request(crate::to_node(crate::agent().post(format!("http://{}/v1/blobs", crate::addr()))).send(&bytes[..]));
+        let put = crate::request(crate::to_node(crate::agent().post(format!("http://{}/v1/blobs", one::api::addr()))).send(&bytes[..]));
         if let Ok(r) = put {
             let id = r["blob"].as_str().unwrap_or("").to_string();
             if ty.starts_with("image/") && bytes.len() <= MCP_FILE_LIMIT {
