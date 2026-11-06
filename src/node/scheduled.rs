@@ -196,8 +196,7 @@ impl Node {
                         list.push(v);
                     }
                 }
-                for ((a, name), runs) in status.runs.iter().filter(|((a, _), _)| a == app) {
-                    let _ = a;
+                for ((_, name), runs) in status.runs.iter().filter(|((a, _), _)| a == app) {
                     for r in runs {
                         activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "device": m.machine_ever(&r.device).map(|s| s.name.clone()), "user": user_name(&r.user) }));
                     }

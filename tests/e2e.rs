@@ -13,6 +13,11 @@ async fn start(name: &str) -> Node {
     Node::start(&dir).await.unwrap()
 }
 
+/// A new network on `a`: its recovery key's secret.
+async fn create(a: &Node, name: &str, user_name: &str) -> String {
+    a.create_with(name, user_name, None, one::config::STARTERS).await.unwrap()
+}
+
 /// Workers whose relay the devices of `a`'s network reach each other through, taking only `a` and those it
 /// admits: `a` says it's the network's.
 async fn relay(a: &Node) -> crate::cloudflare::Workers {
@@ -60,7 +65,7 @@ async fn add_notes(a: &Node) {
 async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alone() {
     let a = start("backup-a").await;
     let b = start("backup-b").await;
-    let recovery = a.create("Home", "Andre").await.unwrap();
+    let recovery = create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();
@@ -211,7 +216,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     let dir = temp("approve");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     eventually("notes to run", async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
@@ -269,7 +274,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     let a = start("put-from").await;
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     let caller = |user: &str| one::node::Caller { key: a.id(), user: user.into(), agent: None, token: Some(format!("{user}'s")) };
     let (sam, andre) = (caller("sam"), caller(&a.user().unwrap()));
     let (hash, size) = a.put_blob_from(&sam, axum::body::Body::from("Sam's file")).await.unwrap();
@@ -291,7 +296,7 @@ async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
 async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_delete_it() {
     use one::node::{Caller, DeviceRequest, Invited};
     let a = start("repos-owner").await;
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     // Naming no scopes, as git's requests don't: Sam's own runs nowhere, as he picked nowhere, so his run without it.
     let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
@@ -449,7 +454,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
 #[tokio::test(flavor = "multi_thread")]
 async fn a_repos_merged_packs_hold_every_object_pushed() {
     let a = start("repos-merge").await;
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
     eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
 
@@ -507,7 +512,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     use one::node::{Caller, DeviceRequest, Invited};
     use std::sync::{Arc, Mutex};
     let a = start("repos-github").await;
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
     eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
@@ -600,7 +605,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
 async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
     use one::node::trace;
     let a = start("trace-a").await;
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     eventually("notes to run", async || a.call(notes("post", json!({ "text": "a private thought" }))).await.is_ok()).await;
     let t = trace::Trace::new();
@@ -619,7 +624,7 @@ async fn only_a_devices_person_or_an_admin_reads_its_logs() {
     let dir = temp("logs");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     let andre = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let now = one::node::now_ms();
     let log: String = (0..3000).map(|i| format!("{} line {i}\n", now - 1000 + i)).collect();
@@ -654,7 +659,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     let dir = temp("service-build");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let build = a.put_blob(b"a program").unwrap();
     let bundle = |services: Value| {
@@ -693,7 +698,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
 async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_does() {
     use one::database::scopes::Scope;
     let a = start("vault-fill").await;
-    a.create("Home", "Andre").await.unwrap();
+    create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let item = json!({ "title": "Work", "type": "Browser profile", "hosts": ["notes"], "apps": ["notes"], "fields": { "_key": { "value": "s3cret", "secret": true } } });

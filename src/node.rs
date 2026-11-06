@@ -69,7 +69,6 @@ const PER_MIB: Duration = Duration::from_secs(1);
 pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
 pub const RATE_LIMIT: u32 = 600;
-/// How long an app that looped stays stopped on a device, unless it's deployed again sooner.
 /// A device whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
 const FAR: Duration = Duration::from_millis(250);
 
@@ -79,6 +78,7 @@ fn full(load: &crate::load::Load) -> bool {
     load.memory.is_some_and(|m| m.total > 0 && m.used * 10 > m.total * 9) || busy > 90
 }
 
+/// How long an app that looped stays stopped on a device, unless it's deployed again sooner.
 const STOPPED_FOR: u64 = 15 * 60_000;
 /// How often a device reads what other devices wrote and said.
 const TICK: Duration = Duration::from_secs(10);
@@ -810,10 +810,6 @@ impl Node {
     fn open_network(&self) -> Result<()> {
         let dir = self.network_dir();
         let file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join(NETWORK_FILE))?)?;
-        // The frozen logs' entries a device kept before 2026-11-06, which nothing reads now: the bucket keeps the logs.
-        for old in ["entries.db", "entries.db-wal", "entries.db-shm"] {
-            let _ = std::fs::remove_file(dir.join(old));
-        }
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), Some(Hash::from_bytes(root)), now_ms());
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.network_place(&f)?, f))).transpose()?;
@@ -874,12 +870,6 @@ impl Node {
             *name = listed;
         }
         name.clone()
-    }
-
-    /// Creates this device's install, with its local user as the first admin, and installs the config's apps in
-    /// `global`. Returns the recovery key's secret, given only this once.
-    pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
-        self.create_with(name, user_name, None, crate::config::STARTERS).await
     }
 
     /// Creates the network, with every built-in app added (owned by admins), so anyone may add one to their own page,

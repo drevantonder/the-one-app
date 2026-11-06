@@ -549,8 +549,7 @@ impl Node {
                 .into_iter()
                 .map(|(time, devices, places, scopes)| {
                     let (devices, places): (Vec<String>, Vec<String>) = (devices.into_iter().collect(), places.into_iter().collect());
-                    // `device` and `place`, one each, for apps built before a snapshot was the network's.
-                    json!({ "time": time, "device": devices.join(", "), "place": places.join(", "), "devices": devices, "places": places, "scopes": scopes })
+                    json!({ "time": time, "devices": devices, "places": places, "scopes": scopes })
                 })
                 .collect();
             Ok(json!({ "places": out, "snapshots": snapshots, "here": self.device_name(), "disks": disks() }))
