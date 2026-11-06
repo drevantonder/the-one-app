@@ -235,18 +235,6 @@ fn not_let_in() -> String {
     }
 }
 
-/// Whether the node lets a client device ask `path`: what someone signed in elsewhere may (`api::SIGNED_IN`), apps'
-/// own requests among it, and MCP.
-fn for_clients(path: &str) -> bool {
-    let asked: Vec<&str> = path.split('/').collect();
-    path == "/mcp"
-        || one::api::app_route(path)
-        || one::api::SIGNED_IN.iter().filter(|r| **r != one::api::APP_ROUTE).any(|route| {
-            let route: Vec<&str> = route.split('/').collect();
-            route.len() == asked.len() && route.iter().zip(&asked).all(|(r, a)| r == a || (r.starts_with('{') && !a.is_empty()))
-        })
-}
-
 /// The nodes the last request that asked for a trace tried, as a client device sent it.
 static TRIES: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 
@@ -269,7 +257,7 @@ pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware:
     }
     let Some(device) = kept() else { return next.handle(req) };
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/".into());
-    if !for_clients(req.uri().path()) {
+    if !one::api::clients_may(req.uri().path()) {
         return answer(403, needs_node(req.uri().path()));
     }
     let (parts, body) = req.into_parts();

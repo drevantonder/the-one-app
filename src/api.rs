@@ -170,78 +170,118 @@ pub fn local_token(home: &std::path::Path) -> Option<String> {
     std::fs::read_to_string(home.join(LOCAL_TOKEN)).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
 }
 
-/// Every route of the local API, unguarded: `guarded` lets only this machine's programs and sign-ins in.
-pub fn routes() -> Router<Node> {
-    let routes = match MCP.get() {
-        Some(mcp) => Router::new().route("/mcp", mcp.clone()),
-        None => Router::new(),
-    };
-    routes
-        .route("/llms.txt", get(llms))
-        .route("/skills/{name}/{*path}", get(skill_file))
-        .route("/v1/state", get(state))
-        .route("/v1/endpoint", get(endpoint))
-        .route("/v1/keys", get(keys_get).post(keys_post))
-        .route("/v1/apps", get(apps))
-        .route("/v1/labs", get(labs))
-        .route("/v1/images/{name}", get(image))
-        .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
-        .route("/v1/widgets", get(widgets))
-        .route("/v1/badges", get(badges))
-        .route("/v1/create", post(create))
-        .route("/v1/pair", post(pair))
-        .route("/v1/join", post(join))
-        .route("/v1/name", post(name))
-        .route("/v1/remove", post(remove))
-        .route("/v1/erase", post(erase))
-        .route("/v1/role", post(role))
-        .route("/v1/settings", post(settings))
-        .route("/v1/steps", post(steps))
-        .route("/v1/steps/global", get(global_steps))
-        .route("/v1/runs", post(runs))
-        .route("/v1/group", post(group))
-        .route("/v1/invite", post(invite))
-        .route("/v1/invite-link", post(invite_link))
-        .route("/v1/devices/requests", get(device_requests))
-        .route("/v1/devices/approve", post(approve))
-        .route("/v1/devices/refuse", post(refuse_device))
-        .route("/v1/devices/forget-sign-in", post(forget_sign_in))
-        .route("/v1/app-schedules", post(app_schedules))
-        .route("/v1/accept", post(accept))
-        .route("/v1/handle", post(handle))
-        .route("/v1/member", post(member))
-        .route("/v1/app", post(app))
-        .route("/v1/deploy", post(deploy))
-        .route("/v1/install", post(install))
-        .route("/v1/schedule", post(schedule))
-        .route("/v1/arrange", post(arrange))
-        .route("/v1/retire", post(retire))
-        .route("/v1/service", post(service))
-        .route("/v1/fork", post(fork))
-        .route("/v1/source/{app}", get(source))
-        .route("/v1/storage", get(storage_get).post(storage_post))
-        .route("/v1/storage/{op}", post(storage_post))
-        .route("/v1/backups", get(backups_get))
-        .route("/v1/backups/{op}", post(backups_post))
-        .route("/v1/vault", get(vault_get).post(vault_post))
-        .route("/v1/vault/requests", get(vault_get))
-        .route("/v1/vault/request", post(vault_post))
-        .route("/v1/vault/answer", post(vault_post))
-        .route("/v1/vault/fetch", post(vault_post))
-        .route("/v1/vault/grant", post(vault_post))
-        .route("/v1/node-release", post(release))
-        .route("/v1/service-release", post(service_release))
-        .route("/v1/blobs", post(put_blob))
-        .route("/v1/blobs/{hash}", get(blob))
-        .route("/v1/events", get(events))
-        .route("/v1/screens/{app}/{screen}", get(screen))
-        .route("/v1/client-screens/{name}", get(client_screen))
-        .route("/hooks/prompt", post(prompt))
-        .route("/v1/services/{app}", post(register))
-        .route("/v1/services/{app}/calls", get(next_call))
-        .route("/v1/services/{app}/calls/{id}", post(reply))
-        .route("/v1/services/{app}/calls/{id}/vault", post(fill))
-        .route(APP_ROUTE, any(app_http))
+/// Who may ask a route. This machine's own programs may ask any; the rest only what its route says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Who {
+    /// Anyone who has its name: a picture named by its content.
+    Anyone,
+    /// Also someone signed in at the network's address, and the network's client devices over iroh, each as their
+    /// person, with what that person may do.
+    SignedIn,
+    /// Also the network's client devices over iroh, as their person, but no sign-in from elsewhere: MCP.
+    Clients,
+    /// Only this machine's own programs.
+    ThisMachine,
+}
+
+/// The local API's routes, each with who may ask it (`Who`): what `guarded` lets in.
+#[derive(Default)]
+pub struct Routes {
+    router: Router<Node>,
+    who: Vec<(&'static str, Who)>,
+}
+
+impl Routes {
+    pub fn route(mut self, path: &'static str, who: Who, handler: axum::routing::MethodRouter<Node>) -> Routes {
+        self.router = self.router.route(path, handler);
+        self.who.push((path, who));
+        self
+    }
+
+    pub fn merge(mut self, other: Routes) -> Routes {
+        self.router = self.router.merge(other.router);
+        self.who.extend(other.who);
+        self
+    }
+
+    /// Every route's path, with who may ask it.
+    pub fn who(&self) -> &[(&'static str, Who)] {
+        &self.who
+    }
+}
+
+/// Every route of the local API, unguarded: `guarded` lets in who each says.
+pub fn routes() -> Routes {
+    use Who::*;
+    let mcp = MCP.get().cloned().unwrap_or_else(|| any(|| async { StatusCode::NOT_FOUND }));
+    Routes::default()
+        .route("/mcp", Clients, mcp)
+        .route("/llms.txt", ThisMachine, get(llms))
+        .route("/skills/{name}/{*path}", ThisMachine, get(skill_file))
+        .route("/v1/state", SignedIn, get(state))
+        .route("/v1/endpoint", SignedIn, get(endpoint))
+        .route("/v1/keys", SignedIn, get(keys_get).post(keys_post))
+        .route("/v1/apps", SignedIn, get(apps))
+        .route("/v1/labs", SignedIn, get(labs))
+        .route("/v1/images/{name}", Anyone, get(image))
+        .route("/v1/call", SignedIn, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
+        .route("/v1/widgets", SignedIn, get(widgets))
+        .route("/v1/badges", SignedIn, get(badges))
+        .route("/v1/create", ThisMachine, post(create))
+        .route("/v1/pair", SignedIn, post(pair))
+        .route("/v1/join", ThisMachine, post(join))
+        .route("/v1/name", SignedIn, post(name))
+        .route("/v1/remove", SignedIn, post(remove))
+        .route("/v1/erase", SignedIn, post(erase))
+        .route("/v1/role", SignedIn, post(role))
+        .route("/v1/settings", SignedIn, post(settings))
+        .route("/v1/steps", SignedIn, post(steps))
+        .route("/v1/steps/global", SignedIn, get(global_steps))
+        .route("/v1/runs", SignedIn, post(runs))
+        .route("/v1/group", SignedIn, post(group))
+        .route("/v1/invite", SignedIn, post(invite))
+        .route("/v1/invite-link", SignedIn, post(invite_link))
+        .route("/v1/devices/requests", SignedIn, get(device_requests))
+        .route("/v1/devices/approve", SignedIn, post(approve))
+        .route("/v1/devices/refuse", SignedIn, post(refuse_device))
+        .route("/v1/devices/forget-sign-in", SignedIn, post(forget_sign_in))
+        .route("/v1/app-schedules", ThisMachine, post(app_schedules))
+        .route("/v1/accept", SignedIn, post(accept))
+        .route("/v1/handle", SignedIn, post(handle))
+        .route("/v1/member", SignedIn, post(member))
+        .route("/v1/app", ThisMachine, post(app))
+        .route("/v1/deploy", SignedIn, post(deploy))
+        .route("/v1/install", SignedIn, post(install))
+        .route("/v1/schedule", ThisMachine, post(schedule))
+        .route("/v1/arrange", SignedIn, post(arrange))
+        .route("/v1/retire", SignedIn, post(retire))
+        .route("/v1/service", SignedIn, post(service))
+        .route("/v1/fork", ThisMachine, post(fork))
+        .route("/v1/source/{app}", ThisMachine, get(source))
+        .route("/v1/storage", ThisMachine, get(storage_get).post(storage_post))
+        .route("/v1/storage/{op}", ThisMachine, post(storage_post))
+        .route("/v1/backups", SignedIn, get(backups_get))
+        .route("/v1/backups/{op}", SignedIn, post(backups_post))
+        .route("/v1/vault", SignedIn, get(vault_get).post(vault_post))
+        .route("/v1/vault/requests", SignedIn, get(vault_get))
+        .route("/v1/vault/request", SignedIn, post(vault_post))
+        .route("/v1/vault/answer", SignedIn, post(vault_post))
+        .route("/v1/vault/fetch", SignedIn, post(vault_post))
+        .route("/v1/vault/grant", ThisMachine, post(vault_post))
+        .route("/v1/node-release", ThisMachine, post(release))
+        .route("/v1/service-release", ThisMachine, post(service_release))
+        .route("/v1/blobs", SignedIn, post(put_blob))
+        .route("/v1/blobs/{hash}", SignedIn, get(blob))
+        .route("/v1/events", SignedIn, get(events))
+        .route("/v1/screens/{app}/{screen}", SignedIn, get(screen))
+        .route("/v1/client-screens/{name}", SignedIn, get(client_screen))
+        .route("/hooks/prompt", ThisMachine, post(prompt))
+        .route("/v1/services/{app}", ThisMachine, post(register))
+        .route("/v1/services/{app}/calls", ThisMachine, get(next_call))
+        .route("/v1/services/{app}/calls/{id}", ThisMachine, post(reply))
+        .route("/v1/services/{app}/calls/{id}/vault", ThisMachine, post(fill))
+        // An app's own requests, run as its tool `_http` for its person, whose checks are the app's: git's, to Repos.
+        .route(APP_ROUTE, SignedIn, any(app_http))
 }
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.
@@ -256,14 +296,25 @@ pub fn app_route(path: &str) -> bool {
 /// The most this machine's own programs put in one file.
 const LOCAL_PUT: u64 = 1 << 30;
 
-/// Routes as only this machine's own programs, and people signed in at the network's address for what `SIGNED_IN` lists, may
-/// use them.
-pub fn guarded(routes: Router<Node>, node: Node) -> Router {
+/// `routes` as `Who` says each may be asked, with this machine's own programs asking any.
+pub fn guarded(routes: Routes, node: Node) -> Router {
+    let who: std::sync::Arc<std::collections::HashMap<&'static str, Who>> = std::sync::Arc::new(routes.who.into_iter().collect());
     routes
-        .route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine))
+        .router
+        .route_layer(axum::middleware::from_fn_with_state((node.clone(), who), only_this_machine))
         .layer(axum::middleware::map_response(sandboxed))
         .layer(axum::middleware::from_fn_with_state(node.clone(), traced))
         .with_state(node)
+}
+
+/// Whether a client device may ask `path` (`Who::SignedIn` or `Who::Clients`), as the node's routes match it.
+pub fn clients_may(path: &str) -> bool {
+    let asked: Vec<&str> = path.split('/').collect();
+    app_route(path)
+        || routes().who().iter().filter(|(r, w)| *r != APP_ROUTE && matches!(w, Who::SignedIn | Who::Clients)).any(|(route, _)| {
+            let route: Vec<&str> = route.split('/').collect();
+            route.len() == asked.len() && route.iter().zip(&asked).all(|(r, a)| r == a || (r.starts_with('{') && !a.is_empty()))
+        })
 }
 
 /// A request that asks for a trace (`x-one-trace`, a client in developer mode) gets what it did here in the same
@@ -287,56 +338,6 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
 /// Headers that say a request was passed on from elsewhere, as proxies add them.
 pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
 
-/// What someone signed in at the network's address may ask; the rest is for this machine's own programs.
-pub const SIGNED_IN: &[&str] = &[
-    "/v1/state",
-    "/v1/endpoint",
-    "/v1/keys",
-    "/v1/apps",
-    "/v1/labs",
-    "/v1/call",
-    "/v1/widgets",
-    "/v1/badges",
-    "/v1/screens/{app}/{screen}",
-    "/v1/client-screens/{name}",
-    "/v1/blobs",
-    "/v1/blobs/{hash}",
-    // An app's own requests, run as its tool `_http` for its person, whose checks are the app's: git's, to Repos.
-    APP_ROUTE,
-    "/v1/events",
-    "/v1/arrange",
-    "/v1/install",
-    "/v1/deploy",
-    "/v1/retire",
-    "/v1/vault",
-    "/v1/vault/requests",
-    "/v1/vault/request",
-    "/v1/vault/answer",
-    "/v1/vault/fetch",
-    // What Settings' screens ask: each checked as its person.
-    "/v1/pair",
-    "/v1/remove",
-    "/v1/erase",
-    "/v1/role",
-    "/v1/settings",
-    "/v1/steps",
-    "/v1/steps/global",
-    "/v1/name",
-    "/v1/service",
-    "/v1/runs",
-    "/v1/group",
-    "/v1/invite",
-    "/v1/invite-link",
-    "/v1/devices/requests",
-    "/v1/devices/approve",
-    "/v1/devices/refuse",
-    "/v1/devices/forget-sign-in",
-    "/v1/accept",
-    "/v1/member",
-    "/v1/handle",
-    "/v1/backups",
-    "/v1/backups/{op}",
-];
 
 /// The skills for this machine's person (src/skills.rs).
 async fn skills(node: &Node) -> Vec<crate::skills::Skill> {
@@ -425,16 +426,16 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 }
 
 /// Only this machine's own programs (`from_this_machine`) drive its node: no web page, an app's screen this node served
-/// included, and no program in a VM or emulator here. A request with an access token from sign-in is someone's
-/// instead, for what `SIGNED_IN` lists.
-async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+/// included, and no program in a VM or emulator here. A request with an access token from sign-in, or from a client
+/// device, is someone's instead, for what its route's `Who` lets them ask.
+async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<std::collections::HashMap<&'static str, Who>>)>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
-    // A picture named by its content is anyone's who has its name.
-    if path == "/v1/images/{name}" {
+    let who = routes.get(path.as_str()).copied().unwrap_or(Who::ThisMachine);
+    if who == Who::Anyone {
         return next.run(req).await;
     }
     if let Some(FromClient(key, until)) = req.extensions().get::<FromClient>().copied() {
-        return from_client(&node, key, until, &path, req, next).await;
+        return from_client(&node, key, until, who, req, next).await;
     }
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
     // This machine's own MCP, answering a client device's request (`mcp_http`), asks as that device, by the ticket it
@@ -443,11 +444,11 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         if !from_this_machine(&node, &req) {
             return refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": "that isn't a sign-in" }))).into_response()).await;
         }
-        return from_client(&node, key, until, &path, req, next).await;
+        return from_client(&node, key, until, who, req, next).await;
     }
     if let Some(token) = token {
-        // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `SIGNED_IN`.
-        if !SIGNED_IN.contains(&path.as_str()) && !from_this_machine(&node, &req) {
+        // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `Who::SignedIn`.
+        if who != Who::SignedIn && !from_this_machine(&node, &req) {
             return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
         }
         return match signed_in(&node, token.clone()).await {
@@ -474,10 +475,11 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
     next.run(req).await
 }
 
-/// A client device's request over iroh is its person's, as a sign-in's is, for what `SIGNED_IN` lists and MCP: the
-/// device must still be one of the network's, and the keys it hands are for its key, kept no longer than `until`.
-async fn from_client(node: &Node, key: crate::keys::Key, until: u64, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
-    if !(SIGNED_IN.contains(&path) || path == "/mcp") {
+/// A client device's request over iroh is its person's, as a sign-in's is, for what `Who::SignedIn` and `Who::Clients`
+/// let in: the device must still be one of the network's, and the keys it hands are for its key, kept no longer than
+/// `until`.
+async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    if !matches!(who, Who::SignedIn | Who::Clients) {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
     let Some((user, name)) = node.client_now(&key).await else {
@@ -1236,4 +1238,87 @@ async fn events(State(node): State<Node>, me: Me) -> Sse<impl tokio_stream::Stre
     // Ended as the node hands over, so its client asks the new one.
     let stream = futures_util::StreamExt::take_until(stream, Box::pin(crate::handoff::stopping()));
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+#[cfg(test)]
+mod tests {
+    /// Who may ask each route, all of them: a route that lets in more than it should gives a sign-in, or a client
+    /// device, this machine's rights, so any change to this list is one to look at in review.
+    #[test]
+    fn who_may_ask_each_route() {
+        use super::Who::*;
+        let want = [
+            ("/mcp", Clients),
+            ("/llms.txt", ThisMachine),
+            ("/skills/{name}/{*path}", ThisMachine),
+            ("/v1/state", SignedIn),
+            ("/v1/endpoint", SignedIn),
+            ("/v1/keys", SignedIn),
+            ("/v1/apps", SignedIn),
+            ("/v1/labs", SignedIn),
+            ("/v1/images/{name}", Anyone),
+            ("/v1/call", SignedIn),
+            ("/v1/widgets", SignedIn),
+            ("/v1/badges", SignedIn),
+            ("/v1/create", ThisMachine),
+            ("/v1/pair", SignedIn),
+            ("/v1/join", ThisMachine),
+            ("/v1/name", SignedIn),
+            ("/v1/remove", SignedIn),
+            ("/v1/erase", SignedIn),
+            ("/v1/role", SignedIn),
+            ("/v1/settings", SignedIn),
+            ("/v1/steps", SignedIn),
+            ("/v1/steps/global", SignedIn),
+            ("/v1/runs", SignedIn),
+            ("/v1/group", SignedIn),
+            ("/v1/invite", SignedIn),
+            ("/v1/invite-link", SignedIn),
+            ("/v1/devices/requests", SignedIn),
+            ("/v1/devices/approve", SignedIn),
+            ("/v1/devices/refuse", SignedIn),
+            ("/v1/devices/forget-sign-in", SignedIn),
+            ("/v1/app-schedules", ThisMachine),
+            ("/v1/accept", SignedIn),
+            ("/v1/handle", SignedIn),
+            ("/v1/member", SignedIn),
+            ("/v1/app", ThisMachine),
+            ("/v1/deploy", SignedIn),
+            ("/v1/install", SignedIn),
+            ("/v1/schedule", ThisMachine),
+            ("/v1/arrange", SignedIn),
+            ("/v1/retire", SignedIn),
+            ("/v1/service", SignedIn),
+            ("/v1/fork", ThisMachine),
+            ("/v1/source/{app}", ThisMachine),
+            ("/v1/storage", ThisMachine),
+            ("/v1/storage/{op}", ThisMachine),
+            ("/v1/backups", SignedIn),
+            ("/v1/backups/{op}", SignedIn),
+            ("/v1/vault", SignedIn),
+            ("/v1/vault/requests", SignedIn),
+            ("/v1/vault/request", SignedIn),
+            ("/v1/vault/answer", SignedIn),
+            ("/v1/vault/fetch", SignedIn),
+            ("/v1/vault/grant", ThisMachine),
+            ("/v1/node-release", ThisMachine),
+            ("/v1/service-release", ThisMachine),
+            ("/v1/blobs", SignedIn),
+            ("/v1/blobs/{hash}", SignedIn),
+            ("/v1/events", SignedIn),
+            ("/v1/screens/{app}/{screen}", SignedIn),
+            ("/v1/client-screens/{name}", SignedIn),
+            ("/hooks/prompt", ThisMachine),
+            ("/v1/services/{app}", ThisMachine),
+            ("/v1/services/{app}/calls", ThisMachine),
+            ("/v1/services/{app}/calls/{id}", ThisMachine),
+            ("/v1/services/{app}/calls/{id}/vault", ThisMachine),
+            (super::APP_ROUTE, SignedIn),
+        ];
+        let mut got = super::routes().who().to_vec();
+        let mut want = want.to_vec();
+        got.sort_by_key(|(p, _)| *p);
+        want.sort_by_key(|(p, _)| *p);
+        assert_eq!(got, want);
+    }
 }
