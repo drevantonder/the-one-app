@@ -75,6 +75,8 @@ pub struct Services {
     /// which it offers while it runs).
     offered: Mutex<HashMap<String, Instant>>,
     next: std::sync::atomic::AtomicU64,
+    /// Woken when a service registers, for a call waiting for one that is starting.
+    registered: tokio::sync::Notify,
 }
 
 impl Services {
@@ -85,6 +87,7 @@ impl Services {
         let (calls, rx) = mpsc::unbounded_channel();
         let p = Registered { describe: describe.clone(), calls, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::new(HashMap::new()), seen: Mutex::new(Instant::now()) };
         let before = self.by_app.lock().unwrap().insert(app.to_string(), std::sync::Arc::new(p));
+        self.registered.notify_waiters();
         before.is_none_or(|p| p.describe != describe || p.seen.lock().unwrap().elapsed() >= GONE_AFTER)
     }
 
@@ -129,12 +132,18 @@ impl Services {
     /// caller's scope keeps, so the devices that hold the scope can fetch it.
     pub async fn call(&self, app: &str, function: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
         // A node that just started, an update's, waits a moment for its services to register again with it.
-        let mut p = self.get(app);
         let until = Instant::now() + Duration::from_secs(5);
-        while p.is_none() && crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(15)) && Instant::now() < until {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            p = self.get(app);
-        }
+        let p = loop {
+            let registered = self.registered.notified();
+            tokio::pin!(registered);
+            registered.as_mut().enable();
+            match self.get(app) {
+                None if crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(15)) && Instant::now() < until => {
+                    let _ = tokio::time::timeout(until.saturating_duration_since(Instant::now()), registered).await;
+                }
+                found => break found,
+            }
+        };
         let p = p.ok_or_else(|| crate::protocol::Coded::error(crate::protocol::code::RESTARTING, format!("{app} isn't running on this device")))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
