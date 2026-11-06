@@ -96,7 +96,9 @@ function pendingItem(kept, p) {
 /// A page's items: its widgets and apps in its person's order, then its Accounts folder.
 function pageView(p) {
   const arrange = home.canArrange(p.scope)
-  const empty = !home.appsOn(p).length && !home.widgetsOn(p).length && !home.waiting(p)
+  // Empty only with nothing on it at all: Accounts' folder, on the first page, is something (Andre).
+  const first = p.scope === home.pages()[0]?.scope
+  const empty = !first && !home.appsOn(p).length && !home.widgetsOn(p).length && !home.waiting(p)
   let list = home.items(p).map((item) => {
     if (item.pending) return pendingItem(item.kept, p)
     if (item.widget) return widgetItem(item.widget, item.kept, p)
@@ -109,7 +111,7 @@ function pageView(p) {
   const order = S.order[p.scope]
   if (order) list = order.map((slot) => list.find((i) => i.slot === slot)).filter(Boolean).concat(list.filter((i) => !order.includes(i.slot)))
   // Accounts once, on the first page: every page's, listed together, opened as a page.
-  if (p.scope === home.pages()[0]?.scope) {
+  if (first) {
     const apps = [...new Map(home.pages().flatMap(home.accountsOn).map((a) => [a.name, a])).values()]
     list.push({ slot: "accounts", kind: "accounts", name: "Accounts", apps, open: () => one.open("accounts"), menu: arrange ? (e) => home.menu([editHomePage], e) : undefined })
   }
@@ -481,12 +483,16 @@ function Tile({ name, icon, size, badge, onClick, children }) {
   )
 }
 
-/// A page's Accounts folder: the icons of its apps that keep accounts, nine at most, small.
+/// A folder, as iOS draws one: a frosted, see-through rounded square, apart from the page and from app icons, with its
+/// apps' icons small in a 3×3 grid from the top left (nine at most); its empty places are just empty.
 function Folder({ apps, size }) {
-  const mini = (size * 0.62) / 3
+  const mini = (size * 0.64) / 3
   return (
-    <span className="grid content-start bg-foreground/10" style={{ width: size, height: size, borderRadius: size * 0.225, gridTemplateColumns: `repeat(3, ${mini}px)`, gridAutoRows: `${mini}px`, gap: size * 0.06, padding: size * 0.13 }}>
-      {apps.length ? apps.slice(0, 9).map((a) => <AppIcon key={a.name} app={a} size={mini} />) : Array.from({ length: 9 }, (_, i) => <i key={i} className="bg-foreground/10" style={{ borderRadius: mini * 0.25 }} />)}
+    <span
+      className="grid content-start bg-linear-to-b from-zinc-400/15 to-zinc-500/30 shadow-[0_1px_2px_rgb(0_0_0/0.08),inset_0_0_0_0.5px_rgb(0_0_0/0.08),inset_0_1px_0_rgb(255_255_255/0.5)] backdrop-blur-xl backdrop-saturate-150 dark:from-zinc-300/20 dark:to-zinc-400/12 dark:shadow-[0_1px_2px_rgb(0_0_0/0.4),inset_0_0_0_0.5px_rgb(255_255_255/0.12),inset_0_1px_0_rgb(255_255_255/0.08)]"
+      style={{ width: size, height: size, borderRadius: size * 0.225, gridTemplateColumns: `repeat(3, ${mini}px)`, gridAutoRows: `${mini}px`, gap: size * 0.05, padding: size * 0.13 }}
+    >
+      {apps.slice(0, 9).map((a) => <AppIcon key={a.name} app={a} size={mini} />)}
     </span>
   )
 }
