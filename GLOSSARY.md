@@ -47,7 +47,9 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 
 - **App**: code deployed into a scope, run in the app runtime. It publishes any of four things: **screens** (pages
   people open), **widgets** (what it shows on a home page), **tools** (what agents use, through MCP and the CLI), and
-  **services**. An app with only tools is still an app (Gmail, Shell). Avoid: worker, connector, operation (for a tool).
+  **services**. An app with only tools is still an app (Gmail, Shell). The core's own features (the Vault, Backups,
+  Groups, Devices, Widgets, Push, logs) have tools too, named the same way (`vault_list`), but are not apps: no list of
+  apps has them. Avoid: worker, connector, operation (for a tool).
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
   as its own process, an endpoint of its own key. Adding WhatsApp asks which of your nodes runs its service. A service

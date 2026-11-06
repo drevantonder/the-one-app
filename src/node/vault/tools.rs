@@ -1,17 +1,17 @@
-//! The Vault as an app: its tools, and what they ask the node (`/v1/vault…`).
+//! The Vault's tools, and what they ask the node (`/v1/vault…`).
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::config::CLI;
 use crate::api::Client;
-use crate::node::own::{Asked, NodeApp, text};
+use crate::core_tools::{Asked, Feature, text};
 use crate::skills::{confirm_input, hints};
 
 const GUIDE: &str = "The Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask leaving out app, then call vault_fetch with {{<field>}} where it goes: a machine that opens the Vault fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.";
 
-pub fn app() -> NodeApp {
-    NodeApp { name: "vault", title: "Vault", description: "Keys, sign-ins and accounts, used without being seen".into(), guide: GUIDE.into(), tools: tools(), elsewhere: true, run }
+pub fn feature() -> Feature {
+    Feature { name: "vault", title: "Vault", description: "Keys, sign-ins and accounts, used without being seen".into(), guide: GUIDE.into(), tools: tools(), elsewhere: true, run }
 }
 
 /// The Vault is the node's, not an app's: agents list its items (never a secret field's value), set and remove

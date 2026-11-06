@@ -28,7 +28,7 @@ fn run(g: &Given) -> Result<bool> {
             g.takes_only(&["scope"])?;
             let scope = g.flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
             for it in g.node.get(&format!("/v1/vault{scope}"))?.as_array().into_iter().flatten() {
-                println!("{}", super::app::item_line(it));
+                println!("{}", super::tools::item_line(it));
             }
         }
         ["vault", "set", item, field] => {
@@ -48,12 +48,12 @@ fn run(g: &Given) -> Result<bool> {
             anyhow::ensure!(!value.is_empty(), "give the value on stdin");
             let scope = g.flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             let hosts = g.flags.get("hosts").and_then(Value::as_str).map(|h| h.split(',').map(|h| h.trim().to_string()).collect());
-            println!("{}", super::app::set(g.node, scope, item, field, &value, g.flags.get("secret").map(|_| true), hosts, g.flags.get("app").and_then(Value::as_str), g.agent)?);
+            println!("{}", super::tools::set(g.node, scope, item, field, &value, g.flags.get("secret").map(|_| true), hosts, g.flags.get("app").and_then(Value::as_str), g.agent)?);
         }
         ["vault", "use", item, app] => {
             g.takes_only(&["scope", "off"])?;
             let scope = g.flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            println!("{}", super::app::switch(g.node, scope, item, app, !g.has("off"), g.agent)?);
+            println!("{}", super::tools::switch(g.node, scope, item, app, !g.has("off"), g.agent)?);
         }
         ["vault", "grant", device] => {
             g.takes_only(&["scope", "off"])?;
@@ -76,7 +76,7 @@ fn run(g: &Given) -> Result<bool> {
             g.takes_only(&["scope", "confirm"])?;
             crate::cli::agreed(g.has("confirm"), &format!("{CLI} vault remove"))?;
             let scope = g.flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            println!("{}", super::app::remove(g.node, scope, item, g.words.get(3).map(String::as_str))?);
+            println!("{}", super::tools::remove(g.node, scope, item, g.words.get(3).map(String::as_str))?);
         }
         ["vault", "request", app @ ..] if app.len() < 2 => {
             g.takes_only(&["scope", "need", "title", "fields", "secret-fields", "hosts", "why"])?;
@@ -91,7 +91,7 @@ fn run(g: &Given) -> Result<bool> {
         }
         ["vault", "status", id] => {
             g.takes_only(&[])?;
-            let r = super::app::request(g.node, id)?;
+            let r = super::tools::request(g.node, id)?;
             println!("{} for {} in {}: {}", r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
         }
         ["vault", "requests"] => {
@@ -109,7 +109,7 @@ fn run(g: &Given) -> Result<bool> {
             } else if let Some(item) = g.flags.get("item").and_then(Value::as_str) {
                 body["item"] = json!(item);
             } else {
-                let r = super::app::request(g.node, id)?;
+                let r = super::tools::request(g.node, id)?;
                 let mut text = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
                 let text = text.trim_end_matches(['\n', '\r']);

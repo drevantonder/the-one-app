@@ -1,14 +1,14 @@
-//! Push as an app: notifications to the person's own devices, for agents (apps push with `ctx.notify`).
+//! Push's tools: notifications to the person's own devices, for agents (apps push with `ctx.notify`).
 
 use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::config::YOURS;
-use crate::node::own::{Asked, NodeApp};
+use crate::core_tools::{Asked, Feature};
 use crate::skills::hints;
 
-pub fn app() -> NodeApp {
-    NodeApp {
+pub fn feature() -> Feature {
+    Feature {
         name: "push",
         title: "Push",
         description: "Sends notifications to your devices".into(),

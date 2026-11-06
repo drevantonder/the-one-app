@@ -131,7 +131,7 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
 }
 
 /// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those added for the person having their
-/// tools): the areas of their own, the Vault's, then one for each app with a guide.
+/// tools): the areas of their own, then one for each of the core's features and each app with a guide.
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {
         false => format!("https://github.com/{REPO}"),
@@ -169,8 +169,9 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             .map(|(p, t)| (p.to_string(), t.to_string()))
             .collect();
     }
-    // Each app with a guide and tools, the node's own first, as the node lists them.
-    skills.extend(apps.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["tools"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
+    // Each set of tools with a guide: the core's, then the apps'.
+    let core: Vec<Value> = crate::core_tools::all().iter().map(crate::core_tools::Feature::listed).collect();
+    skills.extend(core.iter().chain(apps).filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["tools"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
 
@@ -298,8 +299,8 @@ pub enum Mode {
 }
 
 /// The MCP server's instructions: the rules first, then how to find things in this mode, then the guides of the apps
-/// every agent needs from the start (the config's `always_on`), then a line for each app, as many as fit under
-/// Claude Code's limit. Every other app's guide comes with search, or `<cli> <app>`.
+/// every agent needs from the start (the config's `always_on`), then a line for each of the core's features and each
+/// app, as many as fit under Claude Code's limit. Every other app's guide comes with search, or `<cli> <app>`.
 pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String {
     let finding = match mode {
         Mode::All => format!(
@@ -333,7 +334,7 @@ pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String 
         })
         .collect();
     if !lines.is_empty() {
-        text.push_str("\n\n## Apps\n\nTools start with their app's name.");
+        text.push_str("\n\n## Tools\n\nTools start with the name of what they're for: the core's own features first, then apps.");
         let more = "\n- and more: search finds them";
         for (i, line) in lines.iter().enumerate() {
             let last = i + 1 == lines.len();

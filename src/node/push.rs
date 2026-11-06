@@ -1,7 +1,7 @@
 //! Push (`crate::push`), which every node does itself for any caller, through the network's push Worker: never a
 //! service a device runs.
 
-pub(crate) mod app;
+pub(crate) mod tools;
 pub(crate) mod routes;
 
 use crate::config::YOURS;

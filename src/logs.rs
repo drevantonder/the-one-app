@@ -13,7 +13,10 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{Result, bail, ensure};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
+
+use crate::api::Client;
+use crate::config::CLI;
 
 pub const NODE: &str = "node";
 /// The most a log file holds before the next line starts a new one.
@@ -271,7 +274,71 @@ mod tests {
     }
 }
 
-/// `logs <device>` on the command line: what MCP's `logs` gives (`mcp::logs_read`), printed.
+
+/// Logs, as the core's tool `logs`: a device's log, or one of its services'.
+pub fn feature() -> crate::core_tools::Feature {
+    crate::core_tools::Feature {
+        name: "logs",
+        title: "Logs",
+        description: "A device's log, or one of its services', over the network".into(),
+        guide: String::new(),
+        tools: vec![tool()],
+        // A sign-in from elsewhere can't ask a device for its log.
+        elsewhere: false,
+        run: |_, input, asked| {
+            let device = input.get("device").and_then(Value::as_str).unwrap_or("");
+            let (lines, note) = said(&ask(asked.node, input, asked.agent, asked.client, false).ok?, device);
+            let text: Vec<&str> = lines.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            Ok(json!(format!("{}{}", text.join("\n"), note.map(|n| format!("\n{n}")).unwrap_or_default())))
+        },
+    }
+}
+
+fn tool() -> Value {
+    json!({
+        "name": "logs",
+        "description": "Read a device's node log, or one of its services', over the network, instead of ssh: the newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's person and the network's admins may.",
+        "inputSchema": { "type": "object", "required": ["device"], "properties": {
+            "device": { "type": "string", "description": "the device's name (devices_requests and groups_list name them; the status command lists them)" },
+            "service": { "type": "string", "description": "a service's name, like whatsapp; omit for the node's own log" },
+            "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d" },
+            "grep": { "type": "string", "description": "only lines with this text in them, whatever its case" },
+            "lines": { "type": "integer", "description": "how many of the newest to give" },
+        } },
+        "annotations": crate::skills::hints(true, false),
+    })
+}
+
+/// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
+/// node there says no unless the caller may remove that device (src/node/calls/running.rs).
+pub fn ask(node: &Client, input: &Map<String, Value>, agent: Option<&str>, client: &str, trace: bool) -> crate::api::client::Called {
+    let Some(device) = input.get("device").and_then(Value::as_str) else {
+        return crate::api::client::Called { ok: Err(anyhow::anyhow!("which device? {CLI} devices lists them")), trace: None };
+    };
+    let mut asked = input.clone();
+    asked.remove("device");
+    asked.remove("trace");
+    if let Err(e) = Ask::from_json(&Value::Object(asked.clone())) {
+        return crate::api::client::Called { ok: Err(crate::cli::Failed::Typed(format!("{e:#}")).into()), trace: None };
+    }
+    node.call(&json!({ "device": device, "app": crate::database::scopes::APP, "tool": "logs", "scopes": [], "input": asked, "agent": agent, "client": client }), trace)
+}
+
+/// What a log read gives, as its lines and, if there's something to say about them, a note.
+pub fn said(r: &Value, device: &str) -> (Value, Option<String>) {
+    let (shown, matched) = (r["shown"].as_u64().unwrap_or(0), r["matched"].as_u64().unwrap_or(0));
+    let note = if shown == 0 {
+        let from = r["oldest"].as_u64().map(|ms| format!("; its log goes back to {}", crate::core_tools::say_time(ms))).unwrap_or_default();
+        Some(format!("{device}'s {} log has no lines like that{from}.", r["log"].as_str().unwrap_or("node")))
+    } else if matched > shown {
+        Some(format!("{shown} of the {matched} lines that match, the newest: narrow it with --since or --grep."))
+    } else {
+        None
+    };
+    (r["lines"].clone(), note)
+}
+
+/// `logs <device>` on the command line: what the tool `logs` gives (`ask`), printed.
 pub fn commands() -> crate::cli::Command {
     crate::cli::Command {
         help: vec![("logs <device> [--service <name>] [--since <10m>] [--grep <text>] [--lines <n>]".into(), "a device's node log, or one of its services', read over the network, newest last, capped (the last 200 lines, at most 1000 or 48 KiB); only its person and the network's admins read them. --since takes s, m, h or d".into())],
@@ -281,12 +348,12 @@ pub fn commands() -> crate::cli::Command {
             g.takes_only(&["service", "since", "grep", "lines"])?;
             let mut input = g.flags.clone();
             input.insert("device".into(), json!(device));
-            let read = crate::mcp::logs_read(g.node, &input, g.agent, "cli", g.trace);
+            let read = ask(g.node, &input, g.agent, "cli", g.trace);
             if read.ok.is_err() {
                 crate::tools::print_trace(read.trace.as_deref());
             }
             let trace = read.trace;
-            let (lines, note) = crate::mcp::logs_said(&read.ok.map_err(|e| anyhow::anyhow!(crate::tools::in_cli_words(g.node, &format!("{e:#}"))))?, device);
+            let (lines, note) = said(&read.ok.map_err(|e| anyhow::anyhow!(crate::tools::in_cli_words(g.node, &format!("{e:#}"))))?, device);
             match g.json {
                 true => println!("{}", serde_json::to_string_pretty(&lines)?),
                 false => {

@@ -1,15 +1,15 @@
-//! Backups as an app: how they're going, backing up now, and the places they go.
+//! Backups' tools: how they're going, backing up now, and the places they go.
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
-use crate::node::own::{Asked, NodeApp, text};
+use crate::core_tools::{Asked, Feature, text};
 use crate::skills::{confirm_input, hints};
 
 const GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; Once a week each place's newest backup is restored into a throwaway copy and checked (who's who, databases, blobs); a failed check shows on Backups like a failed backup. backups_check runs that check now and says what came back.";
 
-pub fn app() -> NodeApp {
-    NodeApp {
+pub fn feature() -> Feature {
+    Feature {
         name: "backups",
         title: "Backups",
         description: "Encrypted copies of everything, to a disk or S3-compatible storage".into(),

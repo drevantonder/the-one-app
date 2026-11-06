@@ -19,9 +19,10 @@ pub const FILE_LIMIT: usize = 10 << 20;
 /// What MCP takes inline from an agent, which sends base64 in its own output.
 pub const MCP_FILE_LIMIT: usize = 1 << 20;
 
-/// A tool as `GET /v1/apps` describes it, with its app; None when no app or service here lists it.
+/// A tool as the command line reads it, with its set: the core's (`core_tools`), or an app's as `GET /v1/apps`
+/// describes it; None when nothing here lists it.
 pub fn find(node: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
-    let apps = node.apps().ok()?;
+    let apps = crate::core_tools::and_apps(node).ok()?;
     let a = apps.iter().find(|a| a["name"] == app)?.clone();
     let o = a["tools"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
     Some((a, o))
@@ -56,12 +57,13 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
     let asked = words.last().is_some_and(|w| w == "-") && words.pop().is_some();
     let spec = find(node, app, tool);
     let Some((a, o)) = &spec else { return Err(Failed::Typed(unknown(node, app, Some(tool), Some(g.commands))?).into()) };
+    let call = crate::core_tools::find(&named(app, tool, false)).is_none();
     if flags.contains_key("help") || flags.contains_key("h") {
-        print!("{}", help(a, o));
+        print!("{}", help(a, o, call));
         return Ok(());
     }
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
-    let device = if own_device(o) || on_the_node(a) { None } else { take("device") };
+    let device = if call && !own_device(o) { take("device") } else { None };
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some();
@@ -87,7 +89,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
     check(&o["input"], &Value::Object(input.clone())).map_err(typed)?;
     // At a terminal, the person is asked here; what they said is checked where every tool runs.
     let confirmed = confirmed || (o["confirm"] == true && asked_yes(&format!("{CLI} {app} {tool}"))?);
-    let ran = crate::mcp::run(node, app, tool, o, input, crate::mcp::Run { device, scopes, agent: g.agent, client: "cli", confirmed, trace: g.trace });
+    let ran = crate::mcp::run(node, &named(app, tool, false), o["confirm"] == true, input, crate::mcp::Run { device, scopes, agent: g.agent, client: "cli", confirmed, trace: g.trace });
     let mut ok = match ran.ok {
         Ok(ok) => ok,
         Err(e) => {
@@ -124,7 +126,7 @@ pub fn print_trace(lines: Option<&[String]>) {
 /// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
 /// (`one gmail sign_in`), as it was when the node can't list its apps: the error that came with it matters more.
 pub fn in_cli_words(node: &Client, text: &str) -> String {
-    let apps = node.apps().unwrap_or_default();
+    let apps = crate::core_tools::and_apps(node).unwrap_or_default();
     let command = |word: &str| -> Option<String> {
         word.match_indices('_').find_map(|(i, _)| {
             let (app, tool) = (&word[..i], &word[i + 1..]);
@@ -183,7 +185,7 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, cli: bool
 /// `commands` are the command line's own words, when it asks.
 pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[String]>) -> Result<String> {
     let cli = commands.is_some();
-    let apps = node.apps()?;
+    let apps = crate::core_tools::and_apps(node)?;
     let tools_of = |a: &Value| -> Vec<String> { a["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
     // One the person could add: the node lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["tools"].is_null() && a["deleted"].is_null();
@@ -565,7 +567,8 @@ fn kind(prop: &Value) -> String {
     }
 }
 
-pub fn help(app: &Value, tool: &Value) -> String {
+/// A tool's `--help`; `call`: an app's, run as a call on a device, which takes `--device`, where the core's don't.
+fn help(app: &Value, tool: &Value, call: bool) -> String {
     let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
     let schema = &tool["input"];
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
@@ -607,7 +610,7 @@ pub fn help(app: &Value, tool: &Value) -> String {
         }
         rows.push((flag, about.join("; ")));
     }
-    if !own_device(tool) && !on_the_node(app) {
+    if call && !own_device(tool) {
         rows.push(("--device <name>".into(), device_about(app).into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
@@ -675,11 +678,6 @@ fn runs_on_devices(app: &Value) -> bool {
     app["runs"] == "here" || app["uses"]["services"].as_array().is_some_and(|s| !s.is_empty())
 }
 
-/// Whether `app` is one of the node's own (`node::own`), whose tools the node asked runs, never another device.
-pub fn on_the_node(app: &Value) -> bool {
-    app["runs"] == "node"
-}
-
 /// What `device` says it does: which device runs the call, and which when none is given.
 fn device_about(app: &Value) -> &'static str {
     match (app["runs"] == "here", runs_on_devices(app)) {
@@ -709,10 +707,8 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
     if runs_on_devices(app) && !own_device(tool) {
         schema["properties"]["device"] = json!({ "type": "string", "description": device_about(app) });
     }
-    // Every app's call runs on a device, which can say what it did; the node's own apps' tools on the node asked.
-    if !on_the_node(app) {
-        schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
-    }
+    // Every app's call runs on a device, which can say what it did.
+    schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
     if tool["confirm"] == true {
         schema["properties"]["confirm"] = crate::skills::confirm_input();
     }
@@ -1001,7 +997,7 @@ pub fn commands() -> crate::cli::Command {
             let args = g.args;
             match g.words().as_slice() {
                 [app] if !app.starts_with('-') => {
-                    let apps = g.node.apps()?;
+                    let apps = crate::core_tools::and_apps(g.node)?;
                     let Some(found) = apps.iter().find(|a| a["name"] == *app) else { anyhow::bail!("{}", unknown(g.node, app, None, Some(g.commands))?) };
                     println!("{} ({app})", found["title"].as_str().unwrap_or(app));
                     if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {

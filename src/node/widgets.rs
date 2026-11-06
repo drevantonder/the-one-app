@@ -1,15 +1,15 @@
-//! Widgets as an app: the person's widgets as text, for an agent, or a chat that can't draw them (src/mcp_apps.rs
+//! Widgets' tool: the person's widgets as text, for an agent, or a chat that can't draw them (src/mcp_apps.rs
 //! draws them in one that can).
 
 use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::api::Client;
-use crate::node::own::{Asked, NodeApp};
+use crate::core_tools::{Asked, Feature};
 use crate::skills::hints;
 
-pub fn app() -> NodeApp {
-    NodeApp { name: "widgets", title: "Widgets", description: "Your widgets, as text".into(), guide: String::new(), tools: vec![show_tool()], elsewhere: true, run }
+pub fn feature() -> Feature {
+    Feature { name: "widgets", title: "Widgets", description: "Your widgets, as text".into(), guide: String::new(), tools: vec![show_tool()], elsewhere: true, run }
 }
 
 /// `widgets_show`, as MCP lists it.

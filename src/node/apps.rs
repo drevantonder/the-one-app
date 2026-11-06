@@ -39,11 +39,10 @@ impl Node {
         Ok(())
     }
 
-    /// Every app in the network: the node's own (`own`), then each app with what it does for `viewer` where it's
-    /// added for them; and the services that serve them.
+    /// Every app in the network, with what it does for `viewer` where it's added for them; and the services that
+    /// serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
-        let mut out: Vec<Value> = super::own::all().iter().map(super::own::NodeApp::listed).collect();
-        out.extend(self.catalog(viewer, false).await?);
+        let mut out = self.catalog(viewer, false).await?;
         let mut services = Vec::new();
         if viewer.user == self.user()? {
             services.extend(self.with(|i| self.services_here(i))?.into_iter().map(|d| d.2));

@@ -12,7 +12,7 @@ use super::*;
 
 const REQUEST_LIFE: u64 = 86_400_000;
 
-pub mod app;
+pub mod tools;
 pub mod cli;
 pub(crate) mod routes;
 

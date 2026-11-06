@@ -55,8 +55,8 @@ fn run(g: &Given) -> Result<bool> {
         ["backups", "place", "remove", place] => {
             g.takes_only(&["confirm"])?;
             crate::cli::agreed(g.has("confirm"), &format!("{CLI} backups place remove"))?;
-            let asked = crate::node::own::Asked { node: g.node, agent: None, client: "cli", confirmed: true };
-            println!("No longer backing up to {}. What's there stays.", super::app::remove_place(&asked, place)?);
+            let asked = crate::core_tools::Asked { node: g.node, agent: None, client: "cli", confirmed: true };
+            println!("No longer backing up to {}. What's there stays.", super::tools::remove_place(&asked, place)?);
         }
         ["backups", "check"] => {
             g.takes_only(&["folder"])?;
@@ -80,7 +80,7 @@ fn backups_said(r: &Value) -> String {
         return format!("Nothing is backed up yet: add a place with {CLI} backups place add.\n");
     }
     for p in &places {
-        let when = |t: &Value| t.as_u64().map(|t| crate::node::own::say_time(t)).unwrap_or_default();
+        let when = |t: &Value| t.as_u64().map(|t| crate::core_tools::say_time(t)).unwrap_or_default();
         let last = match &p["last"] {
             Value::Null => "not backed up yet".to_string(),
             l => format!("backed up {} by {}", when(&l["time"]), l["device"].as_str().unwrap_or("")),
@@ -120,7 +120,7 @@ fn checked_said(r: &Value) -> String {
             unchecked => format!("{place}: not checked here, without their keys: {unchecked}\n"),
         };
     }
-    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} databases, {} blobs, from {})", s["name"].as_str().or(s["scope"].as_str()).unwrap_or(""), s["databases"], s["blobs"], crate::node::own::say_time(s["time"].as_u64().unwrap_or(0)))).collect();
+    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} databases, {} blobs, from {})", s["name"].as_str().or(s["scope"].as_str()).unwrap_or(""), s["databases"], s["blobs"], crate::core_tools::say_time(s["time"].as_u64().unwrap_or(0)))).collect();
     let mut out = format!(
         "{}: {} came back, checked, from {:.1} MB there\n  ✓ who's who from its steps, every blob as its hash says: {}\n",
         place,

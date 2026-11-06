@@ -21,8 +21,8 @@ pub enum For {
     Mcp(Mode),
 }
 
-/// Every app added for this user that has tools, the node's own among them, as `GET /v1/apps` gives them, with
-/// each tool's input as MCP takes it (files explained, `device` and `confirm` where they apply).
+/// The core's tools, then every app added for this user that has tools, as `GET /v1/apps` gives them, with each
+/// tool's input as MCP takes it (files explained, `device` and `confirm` where they apply).
 pub fn catalog(node: &Client) -> Result<Vec<Value>> {
     Ok(catalogs(node)?.0)
 }
@@ -30,7 +30,7 @@ pub fn catalog(node: &Client) -> Result<Vec<Value>> {
 /// What a search looks through: `catalog`'s apps, then the apps the person could add, which have no tools for
 /// them yet: those not added where they are, nor deleted.
 pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
-    let (mut apps, mut addable) = (Vec::new(), Vec::new());
+    let (mut apps, mut addable) = (crate::core_tools::listed(node), Vec::new());
     for mut app in node.apps()? {
         let tools: Vec<Value> = app["tools"]
             .as_array()

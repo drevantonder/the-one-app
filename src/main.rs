@@ -195,7 +195,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     };
     let commands: Vec<&String> = words.iter().take_while(|w| !w.starts_with('-')).collect();
     let (said, out) = (1..=commands.len()).rev().map(|n| (n, lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")))).find(|(_, o)| !o.is_empty()).unwrap_or_default();
-    let app = node.apps().unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
+    let app = one::core_tools::and_apps(node).unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
     match (app, out.is_empty()) {
         (true, _) if words.len() > 1 && said < commands.len() => None,
         (true, true) => None,

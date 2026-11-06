@@ -1,16 +1,16 @@
-//! Groups as an app: who's in the network and in each group, and handles.
+//! Groups' tools: who's in the network and in each group, and handles.
 
 use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::cli::{Command, Given};
 use crate::config::{CLI, YOURS};
-use crate::node::own::{Asked, NodeApp, text};
+use crate::core_tools::{Asked, Feature, text};
 use crate::skills::hints;
 
-pub fn app() -> NodeApp {
+pub fn feature() -> Feature {
     let guide = format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined. Each person and group has a handle, like andre or family, unique among them, which apps call them by (Repos' addresses are <handle>/<repo>); groups_handle changes yours, or a group's you're an admin of.");
-    NodeApp { name: "groups", title: "Groups", description: format!("Who's in {YOURS}, and in each of its groups"), guide, tools: tools(), elsewhere: true, run }
+    Feature { name: "groups", title: "Groups", description: format!("Who's in {YOURS}, and in each of its groups"), guide, tools: tools(), elsewhere: true, run }
 }
 
 fn tools() -> Vec<Value> {

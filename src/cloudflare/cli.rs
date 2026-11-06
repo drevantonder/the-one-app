@@ -182,7 +182,7 @@ pub fn commands() -> Command {
                     let email = flags.get("email").and_then(Value::as_str);
                     // Someone new is invited by this machine's node, which keeps the secret for their first device's approval.
                     if user.is_none() && email.is_none() {
-                        println!("{}", crate::node::devices::app::invited_said(name, &node.post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
+                        println!("{}", crate::node::devices::tools::invited_said(name, &node.post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
                     } else {
                         let key = crate::node::device_key(&crate::home())?;
                         let invite = crate::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;

@@ -62,7 +62,6 @@ mod steps;
 pub mod storage;
 pub mod trace;
 pub mod vault;
-pub mod own;
 pub mod groups;
 pub mod widgets;
 mod caller;

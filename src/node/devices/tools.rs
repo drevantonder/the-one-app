@@ -1,14 +1,15 @@
-//! Devices as an app: letting a device in, taking one out, inviting someone, and where an app's schedules run.
+//! Devices' tools: letting a device in, taking one out, inviting someone, and where an app's schedules run.
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::config::YOURS;
-use crate::node::own::{Asked, NodeApp, text};
+use crate::core_tools::{Asked, Feature, text};
+use crate::skills::{confirm_input, hints};
 
-pub fn app() -> NodeApp {
+pub fn feature() -> Feature {
     let guide = format!("A new device signs in, then shows a code of 8 letters and digits. devices_approve with that code, run on one of the person's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, from any of the inviting admin's devices. devices_remove takes a device out, or a person with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in with devices_approve's recovery_key: a file holding {YOURS}'s recovery key, never the key in the chat. An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys alone, and devices_stop_schedules stops them.");
-    NodeApp {
+    Feature {
         name: "devices",
         title: "Devices",
         description: "Set up a new laptop, phone or computer and let it in, take one out, run an app's schedules on one, and invite someone".into(),
@@ -23,12 +24,12 @@ pub fn app() -> NodeApp {
 fn tools() -> Vec<Value> {
     let confirm = json!({ "type": "boolean", "description": "true once the person has said yes to this very device" });
     vec![
-        json!({ "name": "devices_requests", "description": "Devices waiting to join that you may approve: your own new devices, and the first device of each person you invited.", "inputSchema": { "type": "object", "properties": {} }, "annotations": { "readOnlyHint": true } }),
-        json!({ "name": "devices_approve", "description": "Approve the new device showing this code. Without confirm, says whose device it is; with confirm: true, lets it in. With recovery_key, lets back in someone who lost all their devices.", "inputSchema": { "type": "object", "properties": { "code": { "type": "string", "description": "the 8 letters and digits the new device shows" }, "confirm": confirm, "recovery_key": { "type": "string", "description": format!("the path of a file on this machine holding {YOURS}'s recovery key (- reads it from stdin on the command line); never the key itself") } }, "required": ["code"] } }),
-        json!({ "name": "devices_remove", "description": "Take a device out, by its name, or a person, with all their devices: they open nothing made after. Their own data stays.", "inputSchema": { "type": "object", "properties": { "device": { "type": "string", "description": "a device's name" }, "user": { "type": "string", "description": "a person's name, to remove them" } } }, "annotations": { "destructiveHint": true } }),
-        json!({ "name": "devices_run_schedules", "description": "Run an app's schedules on one of your devices: the device holds only that app's keys in that place, for 30 days and longer as you use the app. Settings › Devices lists them under App Schedules, with Stop.", "inputSchema": { "type": "object", "properties": { "app": { "type": "string", "description": "the app's name" }, "device": { "type": "string", "description": "the device that runs them, by name" }, "scope": { "type": "string", "description": "where: user (yours, the default), a group by its name, or global" }, "days": { "type": "integer", "description": "how long, at most 30" } }, "required": ["app", "device"] } }),
-        json!({ "name": "devices_stop_schedules", "description": "Stop an app's schedules on a device: they no longer run there, and it no longer opens that app's data.", "inputSchema": { "type": "object", "properties": { "app": { "type": "string" }, "device": { "type": "string" }, "scope": { "type": "string", "description": "user (the default), a group by its name, or global" } }, "required": ["app", "device"] } }),
-        json!({ "name": "devices_invite", "description": "A link for someone new to join, once, for a few days. Give it to them yourself; it sends nothing.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "their name" }, "admin": { "type": "boolean", "description": "make them an admin" } }, "required": ["name"] } }),
+        json!({ "name": "devices_requests", "description": "Devices waiting to join that you may approve: your own new devices, and the first device of each person you invited.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
+        json!({ "name": "devices_approve", "description": "Approve the new device showing this code. Without confirm, says whose device it is; with confirm: true, lets it in. With recovery_key, lets back in someone who lost all their devices.", "inputSchema": { "type": "object", "properties": { "code": { "type": "string", "description": "the 8 letters and digits the new device shows" }, "confirm": confirm, "recovery_key": { "type": "string", "description": format!("the path of a file on this machine holding {YOURS}'s recovery key (- reads it from stdin on the command line); never the key itself") } }, "required": ["code"] }, "annotations": hints(false, false) }),
+        json!({ "name": "devices_remove", "description": "Take a device out, by its name, or a person, with all their devices: they open nothing made after. Their own data stays.", "inputSchema": { "type": "object", "properties": { "device": { "type": "string", "description": "a device's name" }, "user": { "type": "string", "description": "a person's name, to remove them" }, "confirm": confirm_input() } }, "annotations": hints(false, true) }),
+        json!({ "name": "devices_run_schedules", "description": "Run an app's schedules on one of your devices: the device holds only that app's keys in that place, for 30 days and longer as you use the app. Settings › Devices lists them under App Schedules, with Stop.", "inputSchema": { "type": "object", "properties": { "app": { "type": "string", "description": "the app's name" }, "device": { "type": "string", "description": "the device that runs them, by name" }, "scope": { "type": "string", "description": "where: user (yours, the default), a group by its name, or global" }, "days": { "type": "integer", "description": "how long, at most 30" } }, "required": ["app", "device"] }, "annotations": hints(false, false) }),
+        json!({ "name": "devices_stop_schedules", "description": "Stop an app's schedules on a device: they no longer run there, and it no longer opens that app's data.", "inputSchema": { "type": "object", "properties": { "app": { "type": "string" }, "device": { "type": "string" }, "scope": { "type": "string", "description": "user (the default), a group by its name, or global" } }, "required": ["app", "device"] }, "annotations": hints(false, false) }),
+        json!({ "name": "devices_invite", "description": "A link for someone new to join, once, for a few days. Give it to them yourself; it sends nothing.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "their name" }, "admin": { "type": "boolean", "description": "make them an admin" } }, "required": ["name"] }, "annotations": hints(false, false) }),
     ]
 }
 

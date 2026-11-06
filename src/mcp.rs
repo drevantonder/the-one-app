@@ -161,7 +161,8 @@ fn tool_names(apps: &[Value]) -> Vec<String> {
 /// MCP's notification after the answer; over HTTP, which sends nothing unasked, the answer says which tools are new.
 fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bool) {
     let name = params["name"].as_str().unwrap_or("");
-    let apps = (session.mode == Mode::All && name != "search").then(|| node.apps().ok()).flatten();
+    // Search and the core's tools never change which tools there are.
+    let apps = (session.mode == Mode::All && name != "search" && crate::core_tools::find(name).is_none()).then(|| node.apps().ok()).flatten();
     let reads = |apps: &[Value]| match name.split_once('_') {
         Some((a, o)) => apps.iter().filter(|x| x["name"] == a).flat_map(|x| x["tools"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
         None => name == "search",
@@ -243,8 +244,7 @@ fn instructions(node: &Client, mode: Mode) -> String {
     // A harness starts its MCP server at login, before the node may be up: the instructions then say less, and a
     // tool call says why it can't.
     let state = node.get("/v1/state").unwrap_or_default();
-    let apps: Vec<Value> = node.apps().unwrap_or_default().into_iter().filter(|a| usable(node, a)).collect();
-    crate::skills::instructions(mode, &apps, state["user"]["name"].as_str())
+    crate::skills::instructions(mode, &crate::core_tools::and_apps(node).unwrap_or_default(), state["user"]["name"].as_str())
 }
 
 /// MCP's `deploy`, `{CLI} deploy` for an agent with no shell: the app's files as text, built where it's asked.
@@ -259,50 +259,6 @@ fn deploy_tool() -> Value {
         } },
         "annotations": crate::skills::hints(false, false),
     })
-}
-
-fn logs_tool() -> Value {
-    json!({
-        "name": "logs",
-        "description": "Read a device's node log, or one of its services', over the network, instead of ssh: the newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's person and the network's admins may.",
-        "inputSchema": { "type": "object", "required": ["device"], "properties": {
-            "device": { "type": "string", "description": "the device's name (devices_requests and groups_list name them; the status command lists them)" },
-            "service": { "type": "string", "description": "a service's name, like whatsapp; omit for the node's own log" },
-            "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d" },
-            "grep": { "type": "string", "description": "only lines with this text in them, whatever its case" },
-            "lines": { "type": "integer", "description": "how many of the newest to give" },
-        } },
-        "annotations": crate::skills::hints(true, false),
-    })
-}
-
-/// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
-/// node there says no unless the caller may remove that device (src/node/calls/running.rs).
-pub fn logs_read(node: &Client, input: &Map<String, Value>, agent: Option<&str>, client: &str, trace: bool) -> crate::api::client::Called {
-    let Some(device) = input.get("device").and_then(Value::as_str) else {
-        return crate::api::client::Called { ok: Err(anyhow::anyhow!("which device? {CLI} devices lists them")), trace: None };
-    };
-    let mut asked = input.clone();
-    asked.remove("device");
-    asked.remove("trace");
-    if let Err(e) = crate::logs::Ask::from_json(&Value::Object(asked.clone())) {
-        return crate::api::client::Called { ok: Err(crate::cli::Failed::Typed(format!("{e:#}")).into()), trace: None };
-    }
-    node.call(&json!({ "device": device, "app": crate::database::scopes::APP, "tool": "logs", "scopes": [], "input": asked, "agent": agent, "client": client }), trace)
-}
-
-/// What a log read gives, as its lines and, if there's something to say about them, a note.
-pub fn logs_said(r: &Value, device: &str) -> (Value, Option<String>) {
-    let (shown, matched) = (r["shown"].as_u64().unwrap_or(0), r["matched"].as_u64().unwrap_or(0));
-    let note = if shown == 0 {
-        let from = r["oldest"].as_u64().map(|ms| format!("; its log goes back to {}", crate::node::own::say_time(ms))).unwrap_or_default();
-        Some(format!("{device}'s {} log has no lines like that{from}.", r["log"].as_str().unwrap_or("node")))
-    } else if matched > shown {
-        Some(format!("{shown} of the {matched} lines that match, the newest: narrow it with --since or --grep."))
-    } else {
-        None
-    };
-    (r["lines"].clone(), note)
 }
 
 /// What `deploy` did, and what's next: its tools, putting it on a page, and undoing it.
@@ -328,30 +284,21 @@ fn deploy_said(app: &str, r: &Value, added: bool) -> String {
     out.join("\n")
 }
 
-/// The tools it lists: its own and every app's.
+/// The tools it lists: its own, the core's, and every app's.
 fn listed(node: &Client) -> Result<Vec<Value>, Value> {
     let apps = node.apps().map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-    let mut tools = vec![deploy_tool()];
-    // A sign-in from elsewhere can't ask a device for its log.
-    if !node.elsewhere() {
-        tools.push(logs_tool());
-    }
     // MCP Apps' own version of a tool wins.
     let drawn: Vec<Value> = apps::tools().iter().map(|t| t["name"].clone()).collect();
-    for app in apps.iter().filter(|a| usable(node, a)) {
+    let core = crate::core_tools::usable(node).into_iter().flat_map(|f| f.tools).filter(|t| !drawn.contains(&t["name"]));
+    let mut tools: Vec<Value> = std::iter::once(deploy_tool()).chain(core).collect();
+    for app in &apps {
         let name = app["name"].as_str().unwrap_or("");
-        // Tools starting with `_` are for the screens, and the node's own.
+        // Tools starting with `_` are for the screens.
         for tool in app["tools"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')).filter(|tool| !drawn.contains(&json!(format!("{name}_{}", tool["name"].as_str().unwrap_or(""))))) {
             tools.push(json!({ "name": format!("{name}_{}", tool["name"].as_str().unwrap_or("")), "description": tool["description"], "inputSchema": tools::mcp_schema(app, tool), "annotations": tools::mcp_annotations(tool) }));
         }
     }
     Ok(tools)
-}
-
-/// Whether whoever this asks for may use `app`: a node app that's this machine's own person's (`elsewhere: false`)
-/// isn't for someone signed in from elsewhere.
-fn usable(node: &Client, app: &Value) -> bool {
-    app["elsewhere"] != false || !node.elsewhere()
 }
 
 /// A tool's answer, within the budget an agent reads (tools::BUDGET).
@@ -375,7 +322,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
     let input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
     // This server's own tools, checked as apps' are, in dispatch.
-    let own = [code::search_tool(session.mode), code::execute_tool(), deploy_tool(), logs_tool()].into_iter().chain(apps::tools()).find(|t| t["name"] == name);
+    let own = [code::search_tool(session.mode), code::execute_tool(), deploy_tool()].into_iter().chain(apps::tools()).find(|t| t["name"] == name);
     if let Some(Err(e)) = own.map(|t| tools::check(&t["inputSchema"], &Value::Object(input.clone()))) {
         return failed(format!("{e:#}"));
     }
@@ -420,20 +367,6 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
                 Err(e) => failed(format!("{e:#}")),
             }
         }
-        "logs" => {
-            let read = logs_read(node, &input, agent, "mcp", input.get("trace") == Some(&json!(true)));
-            with_trace(
-                match read.ok {
-                    Ok(r) => {
-                        let (lines, note) = logs_said(&r, input.get("device").and_then(Value::as_str).unwrap_or(""));
-                        let text: Vec<&str> = lines.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-                        json!({ "content": [{ "type": "text", "text": format!("{}{}", text.join("\n"), note.map(|n| format!("\n{n}")).unwrap_or_default()) }] })
-                    }
-                    Err(e) => failed(format!("{e:#}")),
-                },
-                read.trace,
-            )
-        }
         "execute" => match code::execute(node, input.get("code").and_then(Value::as_str).unwrap_or(""), agent, "mcp") {
             Ok(result) => json!({ "isError": result["ok"] != true, "content": [{ "type": "text", "text": code::shown(&result) }] }),
             Err(e) => failed(format!("{e:#}")),
@@ -473,26 +406,28 @@ fn unknown_tool(node: &Client, name: &str) -> Result<String> {
     }
 }
 
-/// Runs one tool as MCP or a code mode script gives it, its inputs checked as MCP lists them: `spec` is the tool, when
-/// the caller has it already.
+/// Runs one tool as MCP or a code mode script gives it, its inputs checked as MCP lists them: the core's by its name,
+/// else an app's, where `spec` is the app's tool, when the caller has it already.
 pub fn dispatch(node: &Client, name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<(Value, Value)>) -> crate::api::client::Called {
     let checked = (|| {
+        if let Some((_, tool)) = crate::core_tools::find(name) {
+            tools::check(&tool["inputSchema"], &Value::Object(input.clone()))?;
+            let confirmed = input.remove("confirm") == Some(json!(true));
+            return Ok((tool["annotations"]["destructiveHint"] == true, Run { device: None, scopes: None, agent, client, confirmed, trace: false }));
+        }
         let Some((app, tool)) = name.split_once('_') else { bail!("{}", unknown_tool(node, name)?) };
         let Some((a, spec)) = spec.or_else(|| tools::find(node, app, tool)) else { bail!("{}", unknown_tool(node, name)?) };
-        if !usable(node, &a) {
-            bail!(crate::cli::Failed::Refused(format!("{} is this machine's own person's to use, not someone signed in from elsewhere", a["title"].as_str().unwrap_or(app))));
-        }
         // Checked as MCP lists it, before anything runs: a wrong input says what's wrong, never runs as something else.
         tools::check(&tools::mcp_schema(&a, &spec), &Value::Object(input.clone()))?;
-        let device = if tools::on_the_node(&a) || tools::own_device(&spec) { None } else { input.remove("device").and_then(|d| d.as_str().map(str::to_string)) };
+        let device = if tools::own_device(&spec) { None } else { input.remove("device").and_then(|d| d.as_str().map(str::to_string)) };
         let confirmed = input.remove("confirm") == Some(json!(true));
         // `trace: true` gives, beside the answer, what the call did and where (`one <app> <tool> --trace`).
         let trace = input.remove("trace") == Some(json!(true));
         tools::mcp_files(node, &spec, &mut input)?;
-        Ok((app.to_string(), tool.to_string(), spec, Run { device, scopes: None, agent, client, confirmed, trace }))
+        Ok((spec["confirm"] == true, Run { device, scopes: None, agent, client, confirmed, trace }))
     })();
     match checked {
-        Ok((app, tool, spec, how)) => run(node, &app, &tool, &spec, input, how),
+        Ok((confirm, how)) => run(node, name, confirm, input, how),
         Err(err) => crate::api::client::Called { ok: Err(err), trace: None },
     }
 }
@@ -511,17 +446,22 @@ pub struct Run<'a> {
     pub trace: bool,
 }
 
-/// Runs an app's tool, or a node app's (`node::own`), as the person: what sends or can't be undone only once they
-/// agreed.
-pub fn run(node: &Client, app: &str, tool: &str, spec: &Value, input: Map<String, Value>, how: Run) -> crate::api::client::Called {
-    let cli = how.client == "cli";
-    if spec["confirm"] == true && !how.confirmed {
-        let give = if cli { "--confirm" } else { "confirm: true" };
-        let refused = format!("{} sends or can't be undone, and the person hasn't agreed to it: ask them, and give {give} only if they say yes to this very action", tools::named(app, tool, cli));
-        return crate::api::client::Called { ok: Err(crate::cli::Failed::Refused(refused).into()), trace: None };
+/// Runs the tool `name` (as MCP names it) as the person: the core's (`core_tools`), else an app's, as a call. What
+/// sends or can't be undone (`confirm`) runs only once they agreed.
+pub fn run(node: &Client, name: &str, confirm: bool, input: Map<String, Value>, how: Run) -> crate::api::client::Called {
+    let refused = |why: String| crate::api::client::Called { ok: Err(crate::cli::Failed::Refused(why).into()), trace: None };
+    let (app, tool) = name.split_once('_').unwrap_or((name, ""));
+    let core = crate::core_tools::find(name).map(|(feature, _)| feature);
+    if let Some(feature) = core.as_ref().filter(|f| !f.elsewhere && node.elsewhere()) {
+        return refused(format!("{} is this machine's own person's to use, not someone signed in from elsewhere", feature.title));
     }
-    if let Some(own) = crate::node::own::find(app) {
-        let ok = (own.run)(tool, &input, &crate::node::own::Asked { node, agent: how.agent, client: how.client, confirmed: how.confirmed });
+    if confirm && !how.confirmed {
+        let cli = how.client == "cli";
+        let give = if cli { "--confirm" } else { "confirm: true" };
+        return refused(format!("{} sends or can't be undone, and the person hasn't agreed to it: ask them, and give {give} only if they say yes to this very action", tools::named(app, tool, cli)));
+    }
+    if let Some(feature) = core {
+        let ok = feature.run(name, &input, &crate::core_tools::Asked { node, agent: how.agent, client: how.client, confirmed: how.confirmed });
         return crate::api::client::Called { ok, trace: None };
     }
     node.call(&json!({ "device": how.device, "scopes": how.scopes, "app": app, "tool": tool, "input": input, "agent": how.agent, "client": how.client }), how.trace)
