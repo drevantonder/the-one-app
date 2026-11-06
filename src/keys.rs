@@ -475,7 +475,7 @@ pub fn app_of(route: &str) -> Option<&str> {
 pub fn may_hand(route: &str, need: &Need) -> bool {
     use crate::{bucket::BLOBS, database::steps::KEY_NAME as LOG, vault::DATABASE as VAULT};
     let node = |of: &[&str]| need.app == crate::database::scopes::APP && of.contains(&need.database.as_str());
-    let apps = need.app != crate::database::scopes::APP && need.database == "main";
+    let apps = need.app != crate::database::scopes::APP && need.database == crate::database::scopes::APP_DATABASE;
     let code = need.scope == "global" && node(&[BLOBS]);
     match (app_of(route), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,

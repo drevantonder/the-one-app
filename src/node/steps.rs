@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::database::steps;
+use crate::protocol::{Coded, code};
 
 impl Node {
     /// Whether this device has read who's who: `global`'s freeze, and the steps after it.
@@ -159,9 +160,13 @@ impl Node {
             let _write = self.0.writes.lock().await;
             self.read_steps_now().await?;
             let next = self.with(|i| Ok(i.r.at()))?.context("who's who here isn't written as steps yet: update this device")? + 1;
-            ensure!(u64::from(step.seq()) == next, "{} is taken: sign it again for {next}", step.seq());
+            if u64::from(step.seq()) != next {
+                return Err(Coded::error(code::TAKEN, format!("{} is taken: sign it again for {next}", step.seq())));
+            }
             self.with(|i| steps::apply(i.r.db(), None, &Scope::Global, &step).map(drop))?;
-            ensure!(self.put_step(&step).await?, "{} is taken: sign it again for {}", step.seq(), next + 1);
+            if !self.put_step(&step).await? {
+                return Err(Coded::error(code::TAKEN, format!("{} is taken: sign it again for {}", step.seq(), next + 1)));
+            }
         }
         Ok(())
     }

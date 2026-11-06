@@ -74,6 +74,8 @@ pub struct Error {
     pub sent: bool,
     /// The network doesn't list this device (yet, or any more): what an app shows is its own screen to approve it.
     pub not_let_in: bool,
+    /// What kind of refusal the node said it was (`one::protocol::code`), when it said.
+    pub code: Option<String>,
     message: String,
     pub trace: Option<serde_json::Value>,
 }
@@ -87,7 +89,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 fn unsent(message: impl std::fmt::Display) -> Error {
-    Error { sent: false, not_let_in: false, message: message.to_string(), trace: None }
+    Error { sent: false, not_let_in: false, code: None, message: message.to_string(), trace: None }
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -96,7 +98,7 @@ fn not_let_in(message: impl std::fmt::Display) -> Error {
 }
 
 fn sent(message: impl std::fmt::Display) -> Error {
-    Error { sent: true, not_let_in: false, message: message.to_string(), trace: None }
+    Error { sent: true, not_let_in: false, code: None, message: message.to_string(), trace: None }
 }
 
 /// A request to a node's local API: `path` with its query, from `/`.

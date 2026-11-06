@@ -33,7 +33,7 @@ import { DurableObject, RpcTarget } from "cloudflare:workers";
 import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, config, prefix, following as after, read_scope, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_root, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
-import { CODES, MOST_URLS, READS, URLS } from "./protocol.js";
+import { BLOBS, CODES, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT } from "./protocol.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -389,7 +389,7 @@ class Person {
   keysOf(who, scope, app, database) {
     const kept = this.handed.get(who.hash);
     const found = (kept && kept.until > Date.now() && kept.keys.get(`${scope}/${app}/${database}`)) || null;
-    const offered = scope === "global" && app === "node" && database === "log" ? (who.offered?.keys || []).filter((k) => k.scope === scope && k.app === app && k.database === database) : [];
+    const offered = scope === "global" && app === NODE_APP && database === LOG ? (who.offered?.keys || []).filter((k) => k.scope === scope && k.app === app && k.database === database) : [];
     if (!offered.length) return found;
     const keys = { ...found };
     for (const k of offered) keys[k.epoch] = k.key;
@@ -416,7 +416,7 @@ class Person {
   lacking(need, who) {
     for (const [id, byEpoch] of this.handed.get(who.hash)?.keys || []) {
       const [scope, app, database] = id.split("/");
-      if (app !== "node" || database !== "log") continue;
+      if (app !== NODE_APP || database !== LOG) continue;
       for (const epoch of Object.keys(byEpoch).map(Number)) if (!need.some((n) => n.scope === scope && n.app === app && n.database === database && n.epoch === epoch)) need.push({ scope, epoch, app, database });
     }
     const me = JSON.parse(endpoint_of(this.env.NODE_KEY));
@@ -440,7 +440,7 @@ class Person {
   /// Reads `scopes`' steps for a request, each with the keys its person handed: a scope whose they didn't hand is
   /// asked for with 428, so its steps are never shown to someone who can't open them.
   async readScopes(who, scopes) {
-    await Promise.all(scopes.map((scope) => this.withKeys(who, scope, "node", "log", async (keys) => {
+    await Promise.all(scopes.map((scope) => this.withKeys(who, scope, NODE_APP, LOG, async (keys) => {
       const last = this.scopesRead.get(scope);
       if (last?.keys === keys && Date.now() - last.at < 2000) return;
       await read_scope(this.owner, this.bucket, scope, keys);
@@ -475,7 +475,7 @@ class Person {
     // Their own log's keys are asked for only if they chose this node to run their own things; it and their groups'
     // are read whenever they're handed.
     const own = `user:${who.user}`;
-    if (runs.includes(own) && !this.keysOf(who, own, "node", "log")) await this.needs([{ scope: own, app: "node", database: "log", have: [] }], who);
+    if (runs.includes(own) && !this.keysOf(who, own, NODE_APP, LOG)) await this.needs([{ scope: own, app: NODE_APP, database: LOG, have: [] }], who);
     const handed = (s) => this.handed.get(who.hash)?.keys.has(`${s}/node/log`);
     const theirs = [own, ...JSON.parse(groups(this.owner, who.user))].filter(handed).map((s) => this.readScopes(who, [s]).then(() => s, () => null));
     const read = ["global", ...(await Promise.all(theirs)).filter(Boolean)];
@@ -487,7 +487,7 @@ class Person {
 
   moduleOf(who, hash) {
     if (!this.modules.has(hash)) {
-      const got = this.withKeys(who, "global", "node", "blobs", (keys) => bundle(this.bucket, keys, hash));
+      const got = this.withKeys(who, "global", NODE_APP, BLOBS, (keys) => bundle(this.bucket, keys, hash));
       this.modules.set(hash, got);
       got.catch(() => this.modules.delete(hash));
     }
@@ -644,10 +644,10 @@ class Call {
   vault() {
     const p = this.person;
     this.items ||= (async () => {
-      const lacks = this.scopes.filter((scope) => !p.keysOf(this.who, scope, "node", "vault"));
-      if (lacks.length) await p.needs(lacks.map((scope) => ({ scope, app: "node", database: "vault", have: [] })), this.who);
+      const lacks = this.scopes.filter((scope) => !p.keysOf(this.who, scope, NODE_APP, VAULT));
+      if (lacks.length) await p.needs(lacks.map((scope) => ({ scope, app: NODE_APP, database: VAULT, have: [] })), this.who);
       const current = (scope) => this.view.epochs[scope] ?? p.epochs([scope])[scope];
-      return Promise.all(this.scopes.map((scope) => p.withKeys(this.who, scope, "node", "vault", async (keys) => [scope, await open(p.owner, p.bucket, prefix(scope, "node", "vault"), keys, current(scope), vault_schema(), p.env.NODE_KEY)])));
+      return Promise.all(this.scopes.map((scope) => p.withKeys(this.who, scope, NODE_APP, VAULT, async (keys) => [scope, await open(p.owner, p.bucket, prefix(scope, NODE_APP, VAULT), keys, current(scope), vault_schema(), p.env.NODE_KEY)])));
     })();
     return this.items.then((opened) => JSON.stringify(opened));
   }

@@ -591,7 +591,7 @@ impl Node {
         }
         // A sign-in's call that lacks a key of a scope it names fails here, before it runs or writes anything: its
         // app's database's, and the Vault's there too if it says it uses items.
-        let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), DATABASE)).collect();
+        let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), scopes::APP_DATABASE)).collect();
         if self.0.apps.describe(&req.app).await?["vault"].is_object() {
             want.extend(scopes.iter().map(|s| (s.clone(), scopes::APP, crate::vault::DATABASE)));
         }
@@ -850,12 +850,12 @@ impl Node {
         let wrote = async {
             let wrote = !statements.is_empty();
             for (scope, list, kept) in statements {
-                let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;
+                let (db, bucket) = self.call_database(me, &scope, app, scopes::APP_DATABASE, None).await?;
                 let mut db = db.lock().await;
                 let at = db.at();
                 self.write_in(&scope, &mut db, &bucket, |c| crate::database::stored::statements(c, &list)).await?;
                 if db.at() > at {
-                    self.ping(&scope, Some((app, DATABASE, db.at())));
+                    self.ping(&scope, Some((app, scopes::APP_DATABASE, db.at())));
                 }
                 drop(db);
                 if !kept.is_empty() {
@@ -1074,11 +1074,11 @@ impl Node {
         let first = !grant.caught_up.contains(scope);
         let traced = grant.trace.clone().filter(|_| first);
         let (db, at) = trace::within(traced.clone(), async {
-            let (db, bucket) = self.call_database(&grant.caller, scope, &grant.app, DATABASE, None).await?;
+            let (db, bucket) = self.call_database(&grant.caller, scope, &grant.app, scopes::APP_DATABASE, None).await?;
             let mut db = db.lock_owned().await;
             let at = db.at();
             if first {
-                self.read_ready(&(scope.clone(), format!("{}/{DATABASE}", grant.app)), &mut db, &bucket).await?;
+                self.read_ready(&(scope.clone(), format!("{}/{}", grant.app, scopes::APP_DATABASE)), &mut db, &bucket).await?;
                 if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
                     g.caught_up.push(scope.clone());
                 }

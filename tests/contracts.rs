@@ -421,7 +421,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["prefixes"], json!(["user-abc/tally/main", "global/node/scope"]), "where an app's database of a scope is");
         assert_eq!(out["refusal"], json!(one::protocol::update_refusal("your One App network")), "what a device that reads less is told");
         use one::protocol::code;
-        assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED }), "the codes answers carry");
+        assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED, "taken": code::TAKEN }), "the codes answers carry");
     }
 
     let _ = child.kill();

@@ -94,8 +94,6 @@ const NETWORK_FILE: &str = "network.json";
 /// How often a device says hello to the others: which services serve there, and how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
-/// What an app's own database is called: SQLite's name for a connection's first.
-const DATABASE: &str = "main";
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64

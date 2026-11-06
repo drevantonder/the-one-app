@@ -42,7 +42,7 @@ pub(crate) async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool)
 /// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
 pub(crate) async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: one::database::content::Content) {
     let global = one::database::scopes::Scope::Global;
-    let next = a.global_steps(caller, 9007199254740991, None).await.unwrap();
+    let next = a.global_steps(caller, one::database::steps::NUMBER_MAX, None).await.unwrap();
     let (at, epoch) = (next["at"].as_u64().unwrap(), next["epoch"].as_u64().unwrap() as u32);
     let step = one::database::steps::sign(key, &global, at + 1, &caller.user, epoch, one::node::now_ms(), content).unwrap();
     a.put_signed_steps(caller, vec![step]).await.unwrap();

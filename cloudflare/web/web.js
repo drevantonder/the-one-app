@@ -282,7 +282,7 @@ const h = OneUI.react.createElement;
       }
       if (raw && r.ok) return r;
       const out = await r.json().catch(() => null);
-      if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again.")), { status: r.status });
+      if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again.")), { status: r.status, code: out?.code });
       return out;
     }
   }

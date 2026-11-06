@@ -614,7 +614,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
             (crate::database::scopes::APP, crate::database::steps::KEY_NAME) => "history".to_string(),
             (crate::database::scopes::APP, crate::database::steps::NAME) => "who's who".to_string(),
             (crate::database::scopes::APP, _) => "status".to_string(),
-            (app, "main") => app.to_string(),
+            (app, crate::database::scopes::APP_DATABASE) => app.to_string(),
             (app, db) => format!("{app} {db}"),
         };
         let mut keys = crate::database::stored::Keys::new();

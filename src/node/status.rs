@@ -4,7 +4,7 @@
 
 use super::*;
 
-const NODE_DATABASE: (&str, &str) = (scopes::APP, "main");
+const NODE_DATABASE: (&str, &str) = (scopes::APP, scopes::APP_DATABASE);
 
 /// Its schema, as its changes, oldest first.
 const SCHEMA: &[&str] = &["

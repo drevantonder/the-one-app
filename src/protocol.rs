@@ -60,6 +60,8 @@ pub mod code {
     pub const RESTARTING: &str = "restarting";
     /// An app that isn't installed, or isn't on the person's pages.
     pub const NOT_INSTALLED: &str = "not_installed";
+    /// A step signed for a position of who's who that another device's step has taken: sign it again for the next.
+    pub const TAKEN: &str = "taken";
 }
 
 /// An error that says what kind it is, as `{ error, code }` on the wire: the node's answers, and what a device passes
@@ -144,6 +146,12 @@ pub fn javascript() -> String {
          export const TIDIED = {tidied};\n\
          export const COPY = {copy};\n\
          export const STEP_DIGITS = {digits};\n\
+         export const NUMBER_MAX = {number_max};\n\
+         export const NODE_APP = {node_app};\n\
+         export const MAIN = {main};\n\
+         export const VAULT = {vault};\n\
+         export const LOG = {log};\n\
+         export const BLOBS = {blobs};\n\
          export const NOTE_FALLBACK = {fallback};\n\
          export const CODES = {codes};\n\
          \n\
@@ -175,8 +183,14 @@ pub fn javascript() -> String {
         tidied = json!(TIDIED),
         copy = json!(COPY),
         digits = STEP_DIGITS,
+        number_max = crate::database::steps::NUMBER_MAX,
+        node_app = json!(crate::database::scopes::APP),
+        main = json!(crate::database::scopes::APP_DATABASE),
+        vault = json!(crate::vault::DATABASE),
+        log = json!(crate::database::steps::KEY_NAME),
+        blobs = json!(crate::bucket::BLOBS),
         fallback = json!(NOTE_FALLBACK),
-        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED }),
+        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED, "taken": code::TAKEN }),
         update = json!(UPDATE_REFUSAL),
     )
 }

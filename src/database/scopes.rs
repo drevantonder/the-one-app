@@ -697,6 +697,8 @@ impl ScopeDb {
 
 /// The node's own steps and databases. Apps never see them.
 pub const APP: &str = "node";
+/// What an app's own database is called: SQLite's name for a connection's first.
+pub const APP_DATABASE: &str = "main";
 /// The setting that names the Cloudflare node's endpoint (its key, hex).
 pub const CLOUDFLARE_NODE: &str = "cloudflare_node";
 /// The kind of node entry that sets app schedules.

@@ -696,7 +696,8 @@ impl Device {
         let status = response.status;
         let out: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
         if status != 200 {
-            return Err(failed(error(&out).unwrap_or_else(|| format!("{path} answered {status}"))));
+            let said = error(&out).unwrap_or_else(|| format!("{path} answered {status}"));
+            return Err(Error { code: out["code"].as_str().map(str::to_string), ..failed(said) });
         }
         Ok(out)
     }
@@ -953,14 +954,15 @@ impl Device {
         if log != "global" {
             return Err(failed(format!("a device writes only Everyone's who's who, not {log}")));
         }
-        let next = || self.json("GET", "/v1/steps/global?from=9007199254740991", None);
+        let path = format!("/v1/steps/global?from={}", one::database::steps::NUMBER_MAX);
+        let next = || self.json("GET", &path, None);
         let mut steps = next().await?;
         for _ in 0..5 {
             let (at, epoch) = (steps["at"].as_u64().unwrap_or(0), steps["epoch"].as_u64().unwrap_or(0) as u32);
             let step = one::database::steps::sign(&self.key, &Scope::Global, at + 1, user, epoch, now(), content.clone()).map_err(failed)?;
             match self.json("POST", "/v1/steps", Some(json!([step.to_json()]))).await {
                 Ok(_) => return Ok(()),
-                Err(err) if err.to_string().contains("taken") => steps = next().await?,
+                Err(err) if err.code.as_deref() == Some(one::protocol::code::TAKEN) => steps = next().await?,
                 Err(err) => return Err(err),
             }
         }

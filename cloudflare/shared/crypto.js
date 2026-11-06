@@ -11,7 +11,7 @@
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
 // nonce ‖ AES-256-GCM(key, nonce, plain), with key and the copy's id both derived from the secret.
 
-import { ENDPOINT, FRESH, MOST_NEEDED, READS, SESSION, SOCKET, STEP } from "./protocol.js";
+import { BLOBS, ENDPOINT, FRESH, LOG, MAIN, MOST_NEEDED, NODE_APP, NUMBER_MAX, READS, SESSION, SOCKET, STEP, VAULT } from "./protocol.js";
 
 const text = new TextEncoder();
 
@@ -366,15 +366,15 @@ export function appOf(route) {
 /// (`route`), when the node asks (428): only what that kind of request can use. As src/keys.rs `may_hand`, which says
 /// why.
 export function mayHand(route, need) {
-  const node = (of) => need.app === "node" && of.includes(need.database);
+  const node = (of) => need.app === NODE_APP && of.includes(need.database);
   // Apps' deployed code, which everyone in the network may read.
-  const code = need.scope === "global" && node(["blobs"]);
+  const code = need.scope === "global" && node([BLOBS]);
   const app = appOf(route);
-  if (app) return need.app === app || node(["vault", "log"]) || code;
-  if (["/mcp", "/v1/widgets", "/v1/badges"].includes(route)) return (need.app !== "node" && need.database === "main") || node(["vault", "log"]) || code;
-  if (route === "/v1/apps") return node(["log"]) || code;
-  if (route === "/v1/vault" || route.startsWith("/v1/vault/")) return node(["vault", "log"]);
-  return node(["log"]);
+  if (app) return need.app === app || node([VAULT, LOG]) || code;
+  if (["/mcp", "/v1/widgets", "/v1/badges"].includes(route)) return (need.app !== NODE_APP && need.database === MAIN) || node([VAULT, LOG]) || code;
+  if (route === "/v1/apps") return node([LOG]) || code;
+  if (route === "/v1/vault" || route.startsWith("/v1/vault/")) return node([VAULT, LOG]);
+  return node([LOG]);
 }
 
 /// What a node's 428 (`answer`) asks a request of `route` to hand, from the node that answered (`node`, hex): its
@@ -395,7 +395,7 @@ export function waited(status, said) {
   if (status >= 200 && status < 300 && said?.approved === true) {
     // Where the approving device read who's who to (src/database/steps.rs `Welcome::parse`): `<freeze>.<at>.<hash>`.
     const w = typeof said.welcome === "string" && /^([1-9]\d{0,15})\.([1-9]\d{0,15})\.[0-9a-f]{64}$/.exec(said.welcome);
-    const welcome = w && Number(w[2]) >= Number(w[1]) && Number(w[2]) < 2 ** 53 ? said.welcome : null;
+    const welcome = w && Number(w[2]) >= Number(w[1]) && Number(w[2]) <= NUMBER_MAX ? said.welcome : null;
     return { approved: true, ...(typeof said.root === "string" && /^[0-9a-f]{64}$/.test(said.root) ? { root: said.root } : {}), ...(welcome ? { welcome } : {}) };
   }
   return {};
@@ -404,7 +404,7 @@ export function waited(status, said) {
 /// The oldest epoch of `database`'s key a reader needs, of a scope whose newest is `newest`, from its newest hint
 /// (`hint`, its text, or null if it has none). As src/keys.rs `oldest_needed`, which says why.
 export function oldestNeeded(database, hint, newest) {
-  if (database === "blobs" || database === "log") return 1;
+  if (database === BLOBS || database === LOG) return 1;
   newest = Math.max(1, newest || 0);
   if (hint == null) return newest;
   let v = {};

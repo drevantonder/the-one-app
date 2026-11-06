@@ -10,7 +10,7 @@
 // (client/src/members.rs, `Who`) and only looked up here, so a hacked node gets no keys.
 
 import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signStep, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
-import { PUSH, READS, RELAY, SIGN_IN_DOMAIN, URLS, databasePrefix } from "../shared/protocol.js";
+import { CODES, NUMBER_MAX, PUSH, READS, RELAY, SIGN_IN_DOMAIN, URLS, databasePrefix } from "../shared/protocol.js";
 import { del, get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -422,13 +422,13 @@ export class Device {
   /// (src/database/steps.rs), and again for the one after while another device's goes first.
   async step(content, as = this.me) {
     for (let tries = 0; ; tries++) {
-      const { at, epoch } = await this.api(`/v1/steps/global?from=${Number.MAX_SAFE_INTEGER}`);
+      const { at, epoch } = await this.api(`/v1/steps/global?from=${NUMBER_MAX}`);
       const fields = { log: "global", at: at + 1, time: Date.now(), user: this.user, epoch };
       const s = await signStep(as.sign, hex.decode(as.key), fields, JSON.stringify(content));
       try {
         return await this.api("/v1/steps", { method: "POST", body: [{ header: b64u.encode(s.header), signature: b64u.encode(s.signature), body: b64u.encode(s.body) }] });
       } catch (err) {
-        if (tries > 3 || !/taken/.test(err.message)) throw err;
+        if (tries > 3 || err.code !== CODES.taken) throw err;
       }
     }
   }

@@ -228,15 +228,22 @@ impl Node {
         Ok(credential)
     }
 
-    /// The keys a call of `app` was handed here, of `scopes` alone, for passing it on, until when they're kept: its
-    /// app's databases', and the scopes' log and Vault, never another app's.
+    /// The keys a call of `app` was handed here, of `scopes` alone, for passing it on, until when they're kept: what a
+    /// client would hand a node for that call (`keys::may_hand`), never another app's.
     pub(super) fn passing_on(&self, credential: &Credential, scopes: &[Scope], app: &str) -> (Vec<crate::keys::Handed>, u64) {
         let Some(held) = credential.held() else { return (Vec::new(), 0) };
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
-        let its = |a: &str, database: &str| a == app || (a == scopes::APP && (database == crate::database::steps::KEY_NAME || database == crate::vault::DATABASE));
+        let route = format!("call {app}");
         let kept = self.0.sessions.kept.lock().unwrap();
         let Some(session) = kept.get(&held).filter(|s| s.live(now_ms())) else { return (Vec::new(), 0) };
-        let keys = session.keys.iter().filter(|((scope, a, database), _)| named.contains(scope) && its(a, database)).flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| crate::keys::Handed { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone(), key: *key })).collect();
+        let keys = session
+            .keys
+            .iter()
+            .filter(|((scope, ..), _)| named.contains(scope))
+            .flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| (crate::keys::Need { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone() }, *key)))
+            .filter(|(need, _)| crate::keys::may_hand(&route, need))
+            .map(|(n, key)| crate::keys::Handed { scope: n.scope, epoch: n.epoch, app: n.app, database: n.database, key })
+            .collect();
         (keys, session.until)
     }
 
