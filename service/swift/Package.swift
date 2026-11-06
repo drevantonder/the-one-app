@@ -7,5 +7,5 @@ let package = Package(
     name: "Helper",
     platforms: [.macOS("26.0")],
     products: [.library(name: "Helper", targets: ["Helper"])],
-    targets: [.target(name: "Helper", path: ".", exclude: ["Package.swift"], sources: ["Helper.swift"])]
+    targets: [.target(name: "Helper", path: ".", exclude: ["Package.swift"], sources: ["Helper.swift", "Events.swift"])]
 )

@@ -1,4 +1,4 @@
-// Reminders: Reminders on the person's Mac. The reminders service lives in the Mac app, which macOS lets reach Reminders;
+// Reminders: Reminders on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Reminders;
 // this app is what people and agents use, wherever they are.
 
 /// Runs one of the reminders service's functions, wherever it runs for the caller. When none of their devices runs it,
@@ -29,6 +29,7 @@ export default {
   needs: "Needs a Mac",
   instructions: "Reminders are the person's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.",
   uses: { services: ["reminders"] },
+  service: { network: [], person: true, platforms: ["mac"] },
 
   tools: {
     devices: {

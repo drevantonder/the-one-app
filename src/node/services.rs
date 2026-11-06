@@ -150,8 +150,9 @@ impl Node {
         for (name, d) in self.0.services.offered() {
             out.insert(name.clone(), json!({ "name": name, "title": d["title"], "on": on(&name) }));
         }
-        // A process of oned's is on only by its entry: with none, it's off.
-        let switched = |name: &str| m.switch(&self.0.id, name).is_some_and(|s| s.on);
+        // A process of oned's is on only by its entry: with none, it's off; but a Mac helper the Mac app carries is on
+        // unless switched off, as oned runs it.
+        let switched = |name: &str| m.switch(&self.0.id, name).is_some_and(|s| s.on) || (crate::oned::helper(name).is_some() && on(name));
         let (processes, now) = crate::oned::parts();
         for name in &processes {
             out.insert(name.clone(), json!({ "name": name, "on": switched(&name) }));
