@@ -30,8 +30,9 @@ type ShellSection = { key: string; title: string; href: string; selected?: boole
 /// here as it is). Where its room is narrow, the sidebar is a sheet behind the bar's button. `onGo` is told of a plain
 /// click on a row or a page's name (a click with a modifier opens the link as the browser does); `back`, a Back button
 /// before the title; `end`, what the bar ends with. A `phone`'s has no sidebar: its home is the pages side by side
-/// (their own titles, no bar), and what's opened from them has a bar with Back, as the native phone apps had.
-function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, open, onOpenChange, screen, children, className, phone }: {
+/// (their own titles, no bar), and what's opened from them has a bar with Back, as the native phone apps had. `banner`,
+/// what's wrong with the whole window (being offline), once: across its top, or on a phone, at the top of what it shows.
+function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, open, onOpenChange, screen, children, className, phone, banner }: {
   sections: ShellSection[]
   title?: string
   back?: boolean
@@ -45,6 +46,7 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
   children?: React.ReactNode
   className?: string
   phone?: boolean
+  banner?: React.ReactNode
 }) {
   const body = (
     <div data-slot="shell-screen" className="relative flex min-h-0 flex-1 flex-col">
@@ -62,12 +64,13 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
             <h1 className="min-w-0 truncate text-[15px] font-semibold">{title}</h1>
           </header>
         )}
+        {banner}
         {body}
       </div>
     )
   }
-  return (
-    <SidebarProvider open={open} onOpenChange={onOpenChange} className={cn("h-full", className)}>
+  const window = (
+    <SidebarProvider open={open} onOpenChange={onOpenChange} className={cn(banner ? "min-h-0 flex-1" : "h-full", className)}>
       <Sidebar>
         <SidebarContent>
           {sections.map((s) => <ShellGroup key={s.key} section={s} onGo={onGo} />)}
@@ -93,6 +96,7 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
       </SidebarInset>
     </SidebarProvider>
   )
+  return banner ? <div className="flex h-full flex-col">{banner}{window}</div> : window
 }
 
 /// An element the client made and keeps, put here as it is: its frames go on running through every draw.

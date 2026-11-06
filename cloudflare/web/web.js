@@ -47,7 +47,7 @@ const h = OneUI.react.createElement;
   // What each kind of request needed (device.js), which another sign-in here needn't start from.
   const NEEDS = "one.needs";
   const forgetScreens = () => {
-    Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k === LAST || k === NEEDS).forEach((k) => localStorage.removeItem(k));
+    Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k.startsWith(LAST) || k === NEEDS).forEach((k) => localStorage.removeItem(k));
     window.caches?.delete(KEPT_SCREENS).catch(() => {});
     return answers.forget();
   };
@@ -504,6 +504,7 @@ const h = OneUI.react.createElement;
   const keepWindow = () => {
     try {
       localStorage.setItem(LAST, JSON.stringify(store));
+      localStorage.setItem(`${LAST}.at`, String(Date.now()));
     } catch {}
   };
 
@@ -740,7 +741,7 @@ const h = OneUI.react.createElement;
     windowShown = true;
     if (phone()) {
       const r = route();
-      return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: !(r.kind === "own" && r.name === "pages"), onBack: back, screen: detail }));
+      return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: !(r.kind === "own" && r.name === "pages"), onBack: back, screen: detail, banner: offline.banner() }));
     }
     show(h(ui.Shell, {
       sections: sections(),
@@ -753,6 +754,7 @@ const h = OneUI.react.createElement;
       open: localStorage.getItem(SIDEBAR) !== "closed",
       onOpenChange: (open) => (open ? localStorage.removeItem(SIDEBAR) : localStorage.setItem(SIDEBAR, "closed"), drawWindow()),
       screen: detail,
+      banner: offline.banner(),
     }));
   }
 
@@ -980,60 +982,68 @@ const h = OneUI.react.createElement;
       f.html = html;
       frame.src = asset("frame.html");
     };
-    // A kept page whose fresh one is slow to come (its devices gone quiet, not refusing) says so too.
+    // A kept page whose fresh one is slow to come (its devices gone quiet, not refusing) is the window's being offline too.
     let came = false;
-    setTimeout(() => came || tried.then(() => !came && f.page && offline(f, update)), 5000);
-    fresh.then((page) => ((came = true), f.offlineDone?.(), update(page)), async (err) => {
+    const away = async () => offline.add(f.key, async () => update(await screenPage(r)), await kept.when("page", f.key));
+    setTimeout(() => came || tried.then(() => !came && f.page && f.into.isConnected && away()), 5000);
+    fresh.then((page) => ((came = true), offline.done(f.key), update(page)), async (err) => {
       await tried;
-      if (f.page) return offline(f, update);
+      if (f.page) return away();
       f.loaded = true;
       failed(into, one.plain(err).title);
     });
     return f;
   }
 
-  /// A screen showing its kept page because its devices didn't answer, as the native apps showed it: a note at its top
-  /// after a moment, "Offline", or from when it was kept, with Try Now; asked again by itself until they answer, when
-  /// what they give replaces it (`update`).
-  async function offline(f, update) {
-    if (f.offline || f.route.kind === "own") return;
-    const at = await kept.when("page", f.key);
-    const note = Object.assign(document.createElement("div"), { className: "screen-offline" });
-    note.setAttribute("role", "status");
-    const text = document.createElement("span");
-    const button = Object.assign(document.createElement("button"), { type: "button", textContent: "Try Now" });
-    note.append(text, button);
-    f.offline = note;
-    const ago = (ms) => {
-      const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-      const mins = Math.round((Date.now() - ms) / 60_000);
-      return mins < 60 ? rtf.format(-mins, "minute") : mins < 2880 ? rtf.format(-Math.round(mins / 60), "hour") : rtf.format(-Math.round(mins / 1440), "day");
-    };
-    const say = () => (text.textContent = !at || Date.now() - at < 60_000 ? "Offline" : `Offline · from ${ago(at)}`);
-    say();
-    setTimeout(() => f.offline === note && f.into.isConnected && (f.into.append(note), f.into.classList.add("offline")), 1500);
-    const every = setInterval(say, 30_000);
-    let misses = 1, timer = null;
-    // Gone once its devices answer, by its own asking or the first.
-    f.offlineDone = () => (clearInterval(every), clearTimeout(timer), note.remove(), f.into.classList.remove("offline"), (f.offline = f.offlineDone = null));
-    const again = async () => {
-      clearTimeout(timer);
-      if (!f.into.isConnected) return f.offlineDone?.();
-      button.disabled = true;
-      text.textContent = "Trying again…";
-      try {
-        const page = await screenPage(f.route);
-        f.offlineDone?.();
-        await update(page);
-      } catch {
-        say();
-        button.disabled = false;
-        timer = setTimeout(again, Math.max(5000, retryWait(misses++)));
-      }
-    };
-    button.addEventListener("click", again);
-    timer = setTimeout(again, 5000);
-  }
+  /// While the person's devices don't answer, what the window shows from what it kept, as one banner across its top
+  /// (Andre): every screen showing its kept page, and the window's state, each with how it's asked again (`retry`) and
+  /// when what it shows was kept. Asked again by itself, and at Try Now; the banner goes once all have answered.
+  const offline = {
+    waiting: new Map(),
+    shown: false,
+    trying: false,
+    timer: null,
+    misses: 1,
+    add(key, retry, at) {
+      if (this.waiting.has(key)) return;
+      this.waiting.set(key, { retry, at: at || Date.now() });
+      // A moment's wait says nothing.
+      setTimeout(() => this.waiting.size && !this.shown && ((this.shown = true), redraw()), 1500);
+      if (!this.timer) this.later();
+    },
+    done(key) {
+      if (!this.waiting.delete(key) || this.waiting.size) return;
+      clearTimeout(this.timer);
+      Object.assign(this, { timer: null, misses: 1, shown: false, trying: false });
+      redraw();
+    },
+    later() {
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.now(), Math.max(5000, retryWait(this.misses++)));
+    },
+    async now() {
+      clearTimeout(this.timer);
+      this.trying = true;
+      redraw();
+      await Promise.all([...this.waiting].map(([key, w]) => w.retry().then(() => this.done(key), () => {})));
+      this.trying = false;
+      if (this.waiting.size) (this.later(), redraw());
+    },
+    /// The banner, once it's been a moment: one problem box, quiet, as it mends itself.
+    banner() {
+      if (!this.shown || !this.waiting.size) return null;
+      const at = new Date(Math.min(...[...this.waiting.values()].map((w) => w.at)));
+      const today = at.toDateString() === new Date().toDateString();
+      const when = new Intl.DateTimeFormat(undefined, today ? { timeStyle: "short" } : { dateStyle: "medium", timeStyle: "short" }).format(at);
+      return h(ui.Problem, {
+        quiet: true, title: "Offline", text: `Showing what this device kept from ${when}.`,
+        action: this.trying ? { label: "Trying…", run: () => {} } : { label: "Try Now", run: () => this.now() },
+        className: "max-w-none rounded-none border-0 border-b",
+      });
+    },
+  };
+  /// The window drawn again, as it is, for what's over it.
+  const redraw = () => windowShown && !panel && drawWindow();
 
   // MARK: Stills
 
@@ -1669,11 +1679,13 @@ const h = OneUI.react.createElement;
     for (let misses = 1; ; misses++) {
       try {
         await refreshState();
+        offline.done("state");
         break;
       } catch (err) {
         if (err.signedOut) return clearTimeout(away), err.removed ? undefined : showSignedOut();
-        // What it showed last stays, as a screen whose node is restarting does.
+        // What it showed last stays, as a screen whose node is restarting does, saying so.
         if (!windowShown) showUnreachable(err instanceof NodeError ? err.message : UNANSWERED);
+        else offline.add("state", () => refreshState(), Number(localStorage.getItem(`${LAST}.at`)) || null);
         await sleep(retryWait(misses));
       }
     }

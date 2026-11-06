@@ -44,9 +44,10 @@ Shared, every platform:
 - [ ] Per-widget menu bar items (Mac), "Let Agents Use This Mac" in the panel (Mac)
 - [ ] Window size and place kept (tauri-plugin-window-state, built, unchecked); sidebar state (web's, kept)
 - [ ] Keyboard shortcuts of the old apps
-- [x] Offline: last window shown at once, "Can't Reach Your Devices", trying again; a screen's kept page shown at once
-      with "Offline · from …" and Try Now when its devices don't answer, gone once they do (checked, Linux, the
-      throwaway's node stopped and started; the app's pages are now kept at all, which tauri:// had refused)
+- [x] Offline: last window shown at once, "Can't Reach Your Devices", trying again; while the person's devices don't
+      answer, one quiet banner for the whole window (Andre): "Offline", "Showing what this device kept from <time>.",
+      Try Now; across the top on a computer, the content's top on a phone; gone by itself once they answer (checked,
+      Linux, the throwaway's node stopped and started; the app's pages are now kept at all, which tauri:// had refused)
 - [ ] Speed: usable within 1.5 s of a cold open (ARCHITECTURE.md). Linux, a debug build under Xvfb (software
       rendering) with its keyring daemon starting first: window 1.0 s, the sidebar as it was 1.3 s, the home screen
       1.65 s. Still to measure: release builds, on each platform's real device
