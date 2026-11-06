@@ -317,10 +317,11 @@ impl Node {
     }
 
     /// Writes to a database as `Db::write` does, passing over a step it meets under an epoch no entry made, as a read
-    /// does (`judge_ahead`).
+    /// does (`judge_ahead`), and looking whether the log is frozen when a step says so (`ask_frozen`).
     pub(super) async fn write_in<R>(&self, scope: &Scope, db: &mut Db, bucket: &Copied, mut f: impl FnMut(&rusqlite::Connection) -> Result<R>) -> Result<R> {
         for _ in 0..TRIES {
             match db.write(bucket, &mut f).await {
+                Err(err) if err.is::<crate::db::MaybeFrozen>() => self.ask_frozen(db, bucket).await?,
                 Err(err) => match err.downcast_ref::<crate::db::Ahead>() {
                     Some(ahead) if !self.judge_ahead(scope, db.prefix(), ahead).await? => db.pass_over(ahead.at),
                     _ => return Err(err),
@@ -329,6 +330,25 @@ impl Node {
             }
         }
         bail!("{} has too much junk in it to write to", db.prefix())
+    }
+
+    /// Brings a database to `schema` as `Db::migrate` does, looking whether the log is frozen when a step says so.
+    async fn migrate_in(&self, db: &mut Db, bucket: &Copied, schema: &[String]) -> Result<()> {
+        for _ in 0..TRIES {
+            match db.migrate(bucket, schema).await {
+                Err(err) if err.is::<crate::db::MaybeFrozen>() => self.ask_frozen(db, bucket).await?,
+                done => return done,
+            }
+        }
+        bail!("{} kept saying the log is frozen", db.prefix())
+    }
+
+    /// Before writing to a database one of whose steps says a device that knows the log is frozen wrote it
+    /// (`db::MaybeFrozen`): `global`'s steps read, so this device knows if it is, and the database told (`Db::asked`).
+    /// Nothing is asked of the bucket until such a step is there.
+    async fn ask_frozen(&self, db: &mut Db, bucket: &Copied) -> Result<()> {
+        self.read_steps().await?;
+        db.asked(bucket, self.frozen()).await
     }
 
     /// A step a database's reader stopped at, under an epoch above all its keys: once `global` is read again, a new
@@ -435,7 +455,7 @@ impl Node {
                 if open.keys().last_key_value() == keys.last_key_value() {
                     // A deploy since it opened may have a schema change it hasn't had.
                     if open.version()? < schema.len() {
-                        open.migrate(&bucket, &schema).await?;
+                        self.migrate_in(&mut open, &bucket, &schema).await?;
                     }
                     drop(open);
                     return Ok(db);
@@ -468,7 +488,7 @@ impl Node {
             }
         };
         db.sign_as(self.signing_key());
-        db.migrate(&bucket, &schema).await?;
+        self.migrate_in(&mut db, &bucket, &schema).await?;
         trace::note(json!({ "step": "open", "app": app, "steps": db.at() }), opening.elapsed());
         let db = Arc::new(tokio::sync::Mutex::new(db));
         if !own {

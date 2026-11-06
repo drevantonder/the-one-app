@@ -28,7 +28,9 @@
 //! is: a release that turns the switch on only lets an admin freeze it. Then the first step a writer signs in it says
 //! its own position, and every
 //! step signed in it after says the same (`Sig::from`), so the database records where its steps are signed in them
-//! from, a copy's step saying it for those that start there; before, every reader ignores what any step says of it.
+//! from, a copy's step saying it for those that start there; before, every reader ignores what any step says of it,
+//! but a writer that reads a step saying it asks its device first whether the log is frozen (`MaybeFrozen`), so a
+//! device that hasn't read the freeze yet never writes a step every device that has refuses.
 //! Before that position a step and a copy count whatever their signatures say, as they do on older readers: older
 //! steps, and those whose signature beside them never landed, have none for good, and anyone with the key can write one
 //! beside an older writer's. From it, `refused` and `copy_holds` are the one check every device makes, readers, `tidy`,
@@ -165,6 +167,23 @@ impl std::fmt::Display for Ahead {
 
 impl std::error::Error for Ahead {}
 
+/// What a write or schema change stopped before, on a device that doesn't know the log is frozen: step `at` says where
+/// the database's steps are signed in them from (`Sig::from`), as only a device that knows writes one. Its device reads
+/// `global`'s steps, and answers whether it's frozen (`Db::asked`) before writing, so its step is never one that every
+/// device that knows refuses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaybeFrozen {
+    pub at: u64,
+}
+
+impl std::fmt::Display for MaybeFrozen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "step {} is signed as only a device that knows the log is frozen signs one: look whether it is before writing", self.at)
+    }
+}
+
+impl std::error::Error for MaybeFrozen {}
+
 /// The most epochs a scope looks for sealed to a device that knows none of its entries yet.
 pub const EPOCHS_MAX: u32 = 10_000;
 
@@ -288,6 +307,11 @@ pub struct Db {
     switched: bool,
     /// Where the database's steps are signed in them from, as what it read says (`Sig::from`).
     signed_from: Option<u64>,
+    /// While phase 2 isn't on for it, the newest step it read whose signature says where steps are signed in them from,
+    /// as only a device that knows the log is frozen writes one (`MaybeFrozen`); and the newest its device has said the
+    /// log isn't frozen since (`asked`).
+    says_frozen: u64,
+    asked: u64,
     /// Who may write each step from there, if the database checks it.
     signers: Option<std::sync::Arc<dyn Signers>>,
     /// What it found of the signatures beside the steps it applied.
@@ -351,6 +375,8 @@ impl Db {
             in_step: switched,
             switched,
             signed_from: None,
+            says_frozen: 0,
+            asked: 0,
             signers,
             checks: Checks::default(),
         };
@@ -398,6 +424,7 @@ impl Db {
     /// first step.
     fn start_from(&mut self, held: Held) -> Result<()> {
         let Held { at, epoch, bytes, signed, check } = held;
+        self.note_frozen(at, signed.as_ref());
         self.count(at, signed);
         if check.hash == Some(false) {
             self.wrong_hash(at);
@@ -482,6 +509,7 @@ impl Db {
     /// (`refused`, `Signers`, and, from where steps are signed in them, a state hash it signs that what it reads doesn't
     /// come to): whether it counts.
     fn take(&mut self, at: u64, step: &[u8], signed: Option<Result<Sig>>) -> Result<bool> {
+        self.note_frozen(at, signed.as_ref());
         // Before the switch nothing is refused: a step any key holder signs in it mustn't make this device refuse what
         // older devices write.
         let from = signed_from(self.signed_from, at, step, signed.as_ref()).filter(|_| self.switched);
@@ -522,6 +550,35 @@ impl Db {
         }
         self.signed_from = from;
         Ok(true)
+    }
+
+    /// Notes step `at` (or the copy there) if its signature, `signed`, says where steps are signed in them from while
+    /// phase 2 isn't on for it: a device that knows the log is frozen wrote it, or anyone with the key did.
+    fn note_frozen(&mut self, at: u64, signed: Option<&Result<Sig>>) {
+        if !self.switched && matches!(signed, Some(Ok(sig)) if sig.from.is_some()) {
+            self.says_frozen = self.says_frozen.max(at);
+        }
+    }
+
+    /// Before it writes: fails with `MaybeFrozen` if a step it read says a device that knows the log is frozen wrote
+    /// it, and its device hasn't said since whether it is.
+    fn ask_first(&self) -> Result<()> {
+        ensure!(self.switched || self.says_frozen <= self.asked, MaybeFrozen { at: self.says_frozen });
+        Ok(())
+    }
+
+    /// Its device's answer, once it has read `global`'s steps, to a write that stopped at `MaybeFrozen`: if the log is
+    /// `frozen`, it's read again with phase 2 on, as every device that knows reads it, so what it writes is signed in
+    /// it and counts on them all; if not, it writes as it did until a newer step says so again.
+    pub async fn asked(&mut self, bucket: &impl Bucket, frozen: bool) -> Result<()> {
+        if !frozen {
+            self.asked = self.says_frozen;
+            return Ok(());
+        }
+        let mut db = Db::open_as(bucket, &self.prefix, self.keys.clone(), self.junk.clone(), self.signers.clone(), true).await?;
+        db.signer = self.signer.clone();
+        *self = db;
+        Ok(())
     }
 
     /// Whether the signer of a step signed in it may make it (`Signers::may`), asked of the database as it is now.
@@ -628,6 +685,7 @@ impl Db {
     pub async fn migrate(&mut self, bucket: &impl Bucket, migrations: &[String]) -> Result<()> {
         for _ in 0..TRIES {
             self.catch_up(bucket).await?;
+            self.ask_first()?;
             let version = self.version()?;
             let Some(sql) = migrations.get(version) else { return Ok(()) };
             let step = [b"s".as_slice(), &serde_json::to_vec(&json!({ "version": version + 1, "sql": sql }))?].concat();
@@ -662,10 +720,11 @@ impl Db {
 
     /// Runs a write in one transaction, which is the step written after this device's newest, under the newest epoch
     /// it was given: when another device wrote that first, it catches up and runs `f` again, so `f` must do only
-    /// database work.
+    /// database work. Stops before writing at `MaybeFrozen`, as a schema change does.
     pub async fn write<R>(&mut self, bucket: &impl Bucket, mut f: impl FnMut(&Connection) -> Result<R>) -> Result<R> {
         for _ in 0..TRIES {
             self.catch_up(bucket).await?;
+            self.ask_first()?;
             let (epoch, key) = self.newest_key()?;
             let due = self.signer.is_some() && self.copy_due(self.at + 1);
             let from = self.signs_from(self.at + 1)?;
@@ -1996,8 +2055,14 @@ mod tests {
             let early = ed25519_dalek::SigningKey::from_bytes(&rand::random());
             let signed_in = Sig::wrap(&early, &step_name("p", at), &plain, None, Some(at));
             bucket.objects.lock().unwrap().insert(step_name("p", at), crate::keys::seal(1, &key[&1], &step_name("p", at), &signed_in));
+            // Each writer asks its device first whether the log is frozen, which says it isn't: it writes as before.
             let mut older = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let asks = older.write(&bucket, |c| execute(c, "insert into notes values ('x')", &[]).map(|_| ())).await;
+            assert_eq!(asks.unwrap_err().downcast_ref::<MaybeFrozen>(), Some(&MaybeFrozen { at }));
+            older.asked(&bucket, false).await.unwrap();
             note(&mut older, &bucket, "unsigned").await;
+            a.catch_up(&bucket).await.unwrap();
+            a.asked(&bucket, false).await.unwrap();
             note(&mut a, &bucket, "beside").await;
             assert!(bucket.objects.lock().unwrap().contains_key(&sig_name("p", a.at())), "it signs beside its step, as before");
             older.catch_up(&bucket).await.unwrap();
@@ -2007,6 +2072,34 @@ mod tests {
             for db in [&a, &older, &read] {
                 assert_eq!((db.checks().refused, db.signed_from()), (0, None));
             }
+        });
+    }
+
+    /// A device that hasn't read the freeze yet loses no write to those that have: the first step one that has signs in
+    /// it says so, so before writing after it, it asks its device (`MaybeFrozen`), which reads the freeze, and what it
+    /// writes then is signed in it as theirs are, and kept by every reader that knows.
+    #[test]
+    fn a_writer_that_hasnt_read_the_freeze_loses_no_write_to_those_that_have() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random())]);
+            let mut behind = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            behind.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            behind.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            note(&mut behind, &bucket, "before").await;
+            let mut knows = Db::open_switched(&bucket, "p", key.clone()).await.unwrap();
+            knows.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            note(&mut knows, &bucket, "after the freeze").await;
+            assert_eq!(knows.signed_from(), Some(3));
+            let asks = behind.write(&bucket, |c| execute(c, "insert into notes values ('x')", &[]).map(|_| ())).await;
+            assert_eq!(asks.unwrap_err().downcast_ref::<MaybeFrozen>(), Some(&MaybeFrozen { at: 3 }), "it writes nothing before asking");
+            behind.asked(&bucket, true).await.unwrap();
+            note(&mut behind, &bucket, "by the one behind").await;
+            note(&mut knows, &bucket, "and on").await;
+            let read = Db::open_switched(&bucket, "p", key).await.unwrap();
+            let all = ["before", "after the freeze", "by the one behind", "and on"].map(String::from).to_vec();
+            assert_eq!((notes(&read), notes(&knows), notes(&behind)), (all.clone(), all.clone(), all[..3].to_vec()));
+            assert_eq!((read.checks().refused, read.signed_from(), knows.checks().refused), (0, Some(3), 0));
         });
     }
 

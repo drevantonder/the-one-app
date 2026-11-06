@@ -359,7 +359,7 @@ impl Node {
         let scope = Scope::User(self.user()?);
         let db = self.database(&scope, members::APP, INVITES, Some(vec![INVITES_SCHEMA.into()]), None).await?;
         let mut db = db.lock().await;
-        db.write(&self.bucket()?, |c| {
+        self.write_in(&scope, &mut db, &self.bucket()?, |c| {
             match invite {
                 Some(i) => crate::db::execute(c, "insert or replace into invites values (?, ?, ?, ?, ?)", &[json!(i.user), json!(i.secret), json!(i.name), json!(i.role), json!(i.until)])?,
                 None => crate::db::execute(c, "delete from invites where user = ?", &[json!(user)])?,

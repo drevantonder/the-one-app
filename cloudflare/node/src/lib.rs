@@ -252,7 +252,7 @@ pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, 
     }
     .map_err(failed)?;
     db.sign_as(signing_key(&seed).map_err(failed)?);
-    db.migrate(&bucket, &migrations).await.map_err(failed)?;
+    migrate(&owner, &mut db, &bucket, &migrations).await.map_err(failed)?;
     let handle = OPEN.with(|o| {
         let mut o = o.borrow_mut();
         o.0 += 1;
@@ -281,7 +281,7 @@ pub async fn refresh(handle: u32, bucket: JsValue, migrations: String) -> Result
     touch(&owner);
     let done = async {
         db.catch_up(&bucket).await?;
-        db.migrate(&bucket, &migrations).await
+        migrate(&owner, &mut db, &bucket, &migrations).await
     }
     .await;
     put(handle, (owner, db));
@@ -319,12 +319,41 @@ pub fn may(owner: &str, handle: Option<u32>, user: &str, asks: &str, types: &str
 pub async fn write(handle: u32, bucket: JsValue, statements: String) -> Result<f64, JsError> {
     let list: Vec<(String, Vec<Value>, Option<String>)> = serde_json::from_str(&statements)?;
     let (owner, mut db) = take(handle).map_err(thrown)?;
-    let at = db.at();
-    let wrote = db.write(&Js(bucket), |c| one::db::statements(c, &list)).await;
+    let (at, bucket) = (db.at(), Js(bucket));
+    let wrote = async {
+        loop {
+            match db.write(&bucket, |c| one::db::statements(c, &list)).await {
+                Err(err) if err.is::<one::db::MaybeFrozen>() => ask_frozen(&owner, &mut db, &bucket).await?,
+                done => return done,
+            }
+        }
+    }
+    .await;
     let step = if db.at() > at { db.at() as f64 } else { 0.0 };
     put(handle, (owner, db));
     wrote.map_err(thrown)?;
     Ok(step)
+}
+
+/// Brings a database to `migrations` as `Db::migrate` does, looking whether the log is frozen when a step says so.
+async fn migrate(owner: &str, db: &mut Db, bucket: &Js, migrations: &[String]) -> Result<()> {
+    loop {
+        match db.migrate(bucket, migrations).await {
+            Err(err) if err.is::<one::db::MaybeFrozen>() => ask_frozen(owner, db, bucket).await?,
+            done => return done,
+        }
+    }
+}
+
+/// Before writing to `owner`'s database one of whose steps says a device that knows the log is frozen wrote it
+/// (`one::db::MaybeFrozen`): `global`'s log and steps read again with the keys it was last read with, so this isolate
+/// knows if it is, as a node on a machine does, and the database told (`Db::asked`). Nothing is asked of the bucket
+/// until such a step is there, so a call's subrequests are the same until then.
+async fn ask_frozen(owner: &str, db: &mut Db, bucket: &Js) -> Result<()> {
+    let id = (owner.to_string(), "global".to_string());
+    let keys = LOGS.with(|l| l.borrow().get(&id).map(|g| g.keys.clone())).context("this node hasn't read who's who yet, to say whether its log is frozen: try again")?;
+    read_log_with(id, bucket, keys).await?;
+    db.asked(bucket, frozen(owner)).await
 }
 
 #[wasm_bindgen]
@@ -533,19 +562,23 @@ fn reading() -> u64 {
 #[wasm_bindgen]
 pub async fn read_log(owner: String, bucket: JsValue, scope: String, keys: String) -> Result<(), JsValue> {
     touch(&owner);
-    let bucket = Js(bucket);
     let keys = keys_of(&keys).map_err(failed)?;
     Scope::parse(&scope).map_err(failed)?;
+    read_log_with((owner, scope), &Js(bucket), keys).await.map_err(failed)
+}
+
+/// `read_log`, of `id`'s scope for its owner, with its log's `keys`.
+async fn read_log_with(id: (String, String), bucket: &Js, keys: one::db::Keys) -> Result<()> {
+    let scope = id.1.clone();
     let prefix = one::log::prefix(&scope);
-    let id = (owner, scope.clone());
     let from = LOGS.with(|l| l.borrow().get(&id).filter(|l| l.keys == keys).map(|l| l.at));
     let Some(from) = from else {
-        let one::log::Read { at, entries, .. } = one::log::open(&bucket, &keys, &prefix, &scope).await.map_err(failed)?;
+        let one::log::Read { at, entries, .. } = one::log::open(bucket, &keys, &prefix, &scope).await?;
         let entries = if scope == "global" { causal(entries, &HashMap::new()) } else { entries };
         LOGS.with(|l| l.borrow_mut().insert(id.clone(), Log { keys, at, entries, read: reading(), steps: Vec::new(), anchor: None, frozen: None }));
-        return read_steps(&id, &bucket).await.map_err(failed);
+        return read_steps(&id, bucket).await;
     };
-    let one::log::Read { at, entries: new, .. } = one::log::read(&bucket, &keys, u32::MAX, &prefix, &scope, from, 0).await.map_err(failed)?;
+    let one::log::Read { at, entries: new, .. } = one::log::read(bucket, &keys, u32::MAX, &prefix, &scope, from, 0).await?;
     LOGS.with(|l| {
         if let Some(log) = l.borrow_mut().get_mut(&id).filter(|l| l.keys == keys) {
             // Each once, by hash: both sides of a fork are kept, as a node's store keeps them, so it's found.
@@ -560,7 +593,7 @@ pub async fn read_log(owner: String, bucket: JsValue, scope: String, keys: Strin
             log.at = log.at.max(at);
         }
     });
-    read_steps(&id, &bucket).await.map_err(failed)
+    read_steps(&id, bucket).await
 }
 
 /// A scope's database's steps after those read, with the log's keys: `global`'s always, since its freeze is one, and

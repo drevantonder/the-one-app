@@ -366,8 +366,8 @@ impl Node {
         let (db, bucket) = self.vault_db(me, scope).await?;
         let mut db = db.lock().await;
         let (at, now) = (db.at(), now_ms());
-        let id = db
-            .write(&bucket, |c| {
+        let id = self
+            .write_in(scope, &mut db, &bucket, |c| {
                 let mut items = crate::vault::load(c)?;
                 if let Some(keys) = sealing.keys {
                     crate::vault::open_all(&mut items, keys);
