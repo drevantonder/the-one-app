@@ -52,25 +52,20 @@ pub(super) fn says_wait(short: &str) {
     println!("The Macs build it in the background: {CLI} status --until {short} waits for them, and for every device's services.");
 }
 
-/// `status --until <commit> [--device <name>]… [--timeout <time>]`, with the words after `status`.
-pub fn wait(args: &[String]) -> Result<()> {
-    let (mut commit, mut names, mut limit) = (None, Vec::new(), Duration::from_secs(10 * 60));
-    let mut words = args.iter().skip_while(|a| *a != "status").skip(1);
-    while let Some(flag) = words.next() {
-        let typed = |m: String| anyhow::Error::from(one::cli::Failed::Typed(m));
-        let value = words.next().filter(|v| !v.starts_with("--")).ok_or_else(|| typed(format!("{flag} takes a value: see {CLI} status --help")))?;
-        match flag.as_str() {
-            "--until" => commit = Some(value.to_lowercase()),
-            "--device" => names.extend(value.split(',').map(str::to_string)),
-            "--timeout" => {
-                let (n, unit) = value.split_at(value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len()));
-                let n: u64 = n.parse().map_err(|_| typed("--timeout is like 90s, 10m or 1h".into()))?;
-                limit = Duration::from_secs(n * match unit { "" | "s" => 1, "m" => 60, "h" => 3600, _ => return Err(typed("--timeout is like 90s, 10m or 1h".into())) });
-            }
-            other => return Err(typed(format!("{other} isn't an input of status --until: see {CLI} status --help"))),
+/// `status --until <commit> [--device <name>]… [--timeout <time>]`.
+pub fn wait(g: &one::cli::Given) -> Result<()> {
+    g.takes_only(&["until", "device", "timeout"])?;
+    let typed = |m: &str| anyhow::Error::from(one::cli::Failed::Typed(m.into()));
+    let names: Vec<String> = g.values("device").iter().flat_map(|d| d.split(',')).map(str::to_string).collect();
+    let limit = match g.flag("timeout") {
+        None => Duration::from_secs(10 * 60),
+        Some(value) => {
+            let (n, unit) = value.split_at(value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len()));
+            let n: u64 = n.parse().map_err(|_| typed("--timeout is like 90s, 10m or 1h"))?;
+            Duration::from_secs(n * match unit { "" | "s" => 1, "m" => 60, "h" => 3600, _ => return Err(typed("--timeout is like 90s, 10m or 1h")) })
         }
-    }
-    let commit = commit.unwrap_or_default();
+    };
+    let commit = g.flag("until").unwrap_or_default().to_lowercase();
     ensure!(commit.len() >= 7 && commit.chars().all(|c| c.is_ascii_hexdigit()), "give the commit: {CLI} status --until $(git rev-parse HEAD)");
     wait_until(&commit, &names, limit)
 }

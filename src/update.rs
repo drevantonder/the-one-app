@@ -47,7 +47,7 @@ pub fn commands() -> one::cli::Command {
                         [path] => std::fs::canonicalize(path)?,
                         _ => std::env::current_exe()?,
                     };
-                    publish(g.node, &path, g.flags, &release_key()?)?;
+                    publish(g, &path, &release_key()?)?;
                 }
                 ["services", "try", dir] => try_service(Path::new(dir), g.flag("device"))?,
                 _ => return Ok(false),
@@ -423,16 +423,16 @@ fn blob(hash: &str) -> Result<Vec<u8>> {
 
 /// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform
 /// (--target <triple> --commit <hash> --committed <seconds>), or a service's program (--service <name>, with those).
-fn publish(node: &one::api::Client, path: &Path, flags: &serde_json::Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
+fn publish(g: &one::cli::Given, path: &Path, key: &ssh_key::PrivateKey) -> Result<()> {
     // The binary knows what it is; ask it, unless it's for another platform and can't run here, or a service's.
-    let service = flags.get("service").and_then(Value::as_str);
+    let service = g.flag("service");
     let version = if service.is_none() { Version::of(path) } else { None };
-    let flag = |name: &str| flags.get(name).and_then(Value::as_str).map(str::to_string);
+    let flag = |name: &str| g.flag(name).map(str::to_string);
     let version = Version {
-        committed: flags.get("committed").and_then(Value::as_u64).or(version.as_ref().map(|v| v.committed)).context("say when the commit was made with --committed (seconds since 1970)")?,
+        committed: g.flag("committed").and_then(|c| c.parse().ok()).or(version.as_ref().map(|v| v.committed)).context("say when the commit was made with --committed (seconds since 1970)")?,
         commit: flag("commit").or(version.as_ref().map(|v| v.commit.clone())).context("say which commit this is with --commit")?,
         target: flag("target").or(version.as_ref().map(|v| v.target.clone())).context("say which platform this is for with --target")?,
     };
-    println!("{}", build::published_said(&build::publish(node, path, key, &version, service)?, service));
+    println!("{}", build::published_said(&build::publish(g.node, path, key, &version, service)?, service));
     Ok(())
 }

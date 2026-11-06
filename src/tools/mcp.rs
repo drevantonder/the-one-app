@@ -43,16 +43,19 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
     if runs_on_devices(app) && !own_device(tool) {
         schema["properties"]["device"] = json!({ "type": "string", "description": device_about(app) });
     }
-    // Every app's call runs on a device, which can say what it did.
-    schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
+    // A call runs on a device, which can say what it did; the core's tools run here (`core_tools`).
+    if app["runs"] != "client" {
+        schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
+    }
     if tool["confirm"] == true {
         schema["properties"]["confirm"] = crate::skills::confirm_input();
     }
     schema
 }
 
-pub fn mcp_annotations(tool: &Value) -> Value {
-    crate::skills::hints(tool["reads"] == true, tool["confirm"] == true)
+/// A tool of `app` (as `GET /v1/apps` lists them) as MCP lists it, by `name`.
+pub fn mcp_tool(app: &Value, tool: &Value, name: String) -> Value {
+    json!({ "name": name, "description": tool["description"], "inputSchema": mcp_schema(app, tool), "annotations": crate::skills::hints(tool["reads"] == true, tool["confirm"] == true) })
 }
 
 /// Brings an agent's file inputs to what apps take, `{ name, type, size, base64 }`: from base64, a file id (a blob

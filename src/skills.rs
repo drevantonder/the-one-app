@@ -8,6 +8,7 @@
 use serde_json::{Value, json};
 
 use crate::config::{CLI, NAME, REPO, YOURS};
+use crate::tools::SENDS;
 
 /// Claude Code keeps only the first 4,096 characters (UTF-16 units) of an MCP server's instructions; stay under them.
 pub const INSTRUCTIONS_LIMIT: usize = 4000;
@@ -22,7 +23,7 @@ pub fn about() -> String {
 pub fn rules() -> String {
     [
         "Never send a message or an email unless the person asked you to send that one. Draft it instead, show them, and let them send it.".to_string(),
-        format!("Anything that sends or can't be undone takes `confirm: true` (`--confirm` in the terminal), given only once the person agreed to that action. Without it, it refuses: ask them rather than guess."),
+        format!("Anything that {SENDS} takes `confirm: true` (`--confirm` in the terminal), given only once the person agreed to that action. Without it, it refuses: ask them rather than guess."),
         "Never ask for a password, key or token in the chat, and never paste one. `vault_request` gives the person a link to a sheet on their own device, where they pick or type it; `vault_fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, keep it with `vault_set` and don't repeat it.".to_string(),
         "If something says you aren't allowed, stop and tell the person. Nothing widens access by itself.".to_string(),
     ]
@@ -212,7 +213,7 @@ pub fn app_skill(app: &Value) -> Skill {
         guide = out;
     }
     let mut body = format!(
-        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action.\n",
+        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What {SENDS} takes `confirm: true` (`--confirm`), given only once the person agreed to that very action.\n",
         guide,
     );
     for tool in tools {
@@ -221,30 +222,9 @@ pub fn app_skill(app: &Value) -> Skill {
             (_, true) => " Needs `confirm: true`.",
             _ => "",
         };
-        body.push_str(&format!("\n- `{}`: {}{mark}", command(name, tool), tool["description"].as_str().unwrap_or("").trim()));
+        body.push_str(&format!("\n- `{}`: {}{mark}", crate::tools::usage(name, tool), tool["description"].as_str().unwrap_or("").trim()));
     }
     Skill { name: skill_name(name), description, body, files: vec![] }
-}
-
-/// A tool as a command: `one <app> <tool> [<topic>] <text>`, its words as --help shows them, then its other
-/// required inputs as flags.
-fn command(app: &str, tool: &Value) -> String {
-    let required: Vec<&str> = tool["input"]["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-    let words: Vec<&str> = match tool["words"].as_array() {
-        Some(w) => w.iter().filter_map(Value::as_str).collect(),
-        None => required.clone(),
-    };
-    let mut line = format!("{CLI} {app} {}", tool["name"].as_str().unwrap_or(""));
-    for w in &words {
-        line.push_str(&match required.contains(w) {
-            true => format!(" <{}>", w.replace('_', "-")),
-            false => format!(" [<{}>]", w.replace('_', "-")),
-        });
-    }
-    for r in required.iter().filter(|r| !words.contains(r)) {
-        line.push_str(&format!(" --{} <{}>", r.replace('_', "-"), r.replace('_', "-")));
-    }
-    line
 }
 
 /// An MCP tool's hints, all three always, since a client takes one left out as the worst: whether it only reads (so it
@@ -255,7 +235,7 @@ pub fn hints(reads: bool, confirm: bool) -> Value {
 
 /// The input that says the person agreed, on what sends or can't be undone.
 pub fn confirm_input() -> Value {
-    json!({ "type": "boolean", "description": "true once the person agreed to this very action: it sends or can't be undone" })
+    json!({ "type": "boolean", "description": format!("true once the person agreed to this very action: it {SENDS}") })
 }
 
 /// A JSON Schema as a TypeScript type, as code mode's signatures show it.
@@ -296,6 +276,16 @@ pub fn path(app: &str, tool: &str) -> String {
 pub enum Mode {
     All,
     Code,
+}
+
+impl Mode {
+    /// Who reads a search's answer in this mode: an MCP client calling tools, or a script.
+    pub fn reader(self) -> crate::tools::Reader {
+        match self {
+            Mode::All => crate::tools::Reader::Mcp,
+            Mode::Code => crate::tools::Reader::Code,
+        }
+    }
 }
 
 /// The MCP server's instructions: the rules first, then how to find things in this mode, then the guides of the apps

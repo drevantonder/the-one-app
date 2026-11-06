@@ -6,12 +6,15 @@ mod files;
 mod help;
 mod input;
 mod mcp;
+mod run;
+mod words;
 
 pub use check::{check, nearest};
 pub use files::{FILE_LIMIT, as_file, mime, read_file};
-pub use help::list;
-pub use mcp::{BUDGET, MCP_FILE_LIMIT, mcp_annotations, mcp_content, mcp_files, mcp_schema, within_budget};
-pub use input::takes;
+pub use help::{forms, list, optional, usage};
+pub use mcp::{BUDGET, MCP_FILE_LIMIT, mcp_content, mcp_files, mcp_schema, mcp_tool, within_budget};
+pub use input::{Flags, input, split, takes};
+pub use run::{Reader, Run, SENDS, dispatch};
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -22,7 +25,7 @@ use crate::config::CLI;
 
 use files::show;
 use help::help;
-use input::{from_stdin, input, missing, places, split};
+use input::{from_stdin, missing, places};
 
 /// A tool as the command line reads it, with its set: the core's (`core_tools`), or an app's as `GET /v1/apps`
 /// describes it; None when nothing here lists it.
@@ -62,7 +65,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
     let asked = words.last().is_some_and(|w| w == "-") && words.pop().is_some();
     let spec = find(node, app, tool);
     let Some((a, o)) = &spec else { return Err(Failed::Typed(unknown(node, app, Some(tool), Some(g.commands))?).into()) };
-    let call = crate::core_tools::find(&named(app, tool, false)).is_none();
+    let call = a["runs"] != "client";
     if flags.contains_key("help") || flags.contains_key("h") {
         print!("{}", help(a, o, call));
         return Ok(());
@@ -93,8 +96,9 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
     }
     check(&o["input"], &Value::Object(input.clone())).map_err(typed)?;
     // At a terminal, the person is asked here; what they said is checked where every tool runs.
-    let confirmed = confirmed || (o["confirm"] == true && asked_yes(&format!("{CLI} {app} {tool}"))?);
-    let ran = crate::mcp::run(node, &named(app, tool, false), o["confirm"] == true, input, crate::mcp::Run { device, scopes, agent: g.agent, client: "cli", confirmed, trace: g.trace });
+    let confirmed = confirmed || (o["confirm"] == true && asked_yes(&Reader::Cli.named(app, tool))?);
+    let how = Run { reader: Reader::Cli, device, scopes, agent: g.agent, confirmed, trace: g.trace };
+    let ran = run::run(node, &Reader::Mcp.named(app, tool), o["confirm"] == true, input, how);
     let mut ok = match ran.ok {
         Ok(ok) => ok,
         Err(e) => {
@@ -108,7 +112,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
             });
         }
     };
-    if let Some(none) = none_said(node, a, o, &ok, true).filter(|_| !g.json) {
+    if let Some(none) = none_said(node, a, o, &ok, Reader::Cli).filter(|_| !g.json) {
         println!("{none}");
         print_trace(ran.trace.as_deref());
         return Ok(());
@@ -155,17 +159,9 @@ pub fn in_cli_words(node: &Client, text: &str) -> String {
     out
 }
 
-/// A tool as the caller names it: `one gmail sign_in` on the command line, `gmail_sign_in` to MCP.
-pub fn named(app: &str, tool: &str, cli: bool) -> String {
-    match cli {
-        true => format!("{CLI} {app} {tool}"),
-        false => format!("{app}_{tool}"),
-    }
-}
-
 /// An empty list of accounts, from a tool that says it lists them (`accounts: true`), in words, with what to do:
 /// screens want the list, a person or agent reading wants this.
-pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, cli: bool) -> Option<String> {
+pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, reader: Reader) -> Option<String> {
     if tool["accounts"] != true || ok.as_array().is_none_or(|a| !a.is_empty()) {
         return None;
     }
@@ -179,7 +175,7 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, cli: bool
     };
     Some(match (signs_in, app["needs"].as_str()) {
         (_, Some(needs)) if !parts.is_empty() && on_none() == Some(true) => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),
-        (true, _) => format!("No account is signed in to {title} yet: {} signs one in.", named(name, "sign_in", cli)),
+        (true, _) => format!("No account is signed in to {title} yet: {} signs one in.", reader.named(name, "sign_in")),
         (false, Some(needs)) => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),
         (false, None) => format!("No {title} accounts yet."),
     })
@@ -258,7 +254,7 @@ pub fn commands() -> crate::cli::Command {
     crate::cli::Command {
         help: vec![
             ("<app>".into(), "an app's tools".into()),
-            ("<app> <tool> [words] [--input value]".into(), format!("run a tool, e.g. {CLI} repos list; --help says what it takes. Words fill its main inputs in order (--help shows which), lists repeat a flag, required inputs not given are read as JSON from stdin (a last word - reads it anyway), --file <input>=<path> gives a file and --out <path> saves what it gives back. --device <name> runs it on that device; --trace prints, after its answer (or why it failed), what it did: the devices tried, the one that ran it, each wait in ms, where its data came from, and the total")),
+            ("<app> <tool> [words] [--input value]".into(), format!("run a tool, e.g. {CLI} repos list; --help says what it takes. Words fill its main inputs in order (--help shows which), lists repeat a flag, required inputs not given are asked for at a terminal, else read as JSON from stdin (a last word - reads it anyway), --file <input>=<path> gives a file and --out <path> saves what it gives back. --device <name> runs it on that device; --trace prints, after its answer (or why it failed), what it did: the devices tried, the one that ran it, each wait in ms, where its data came from, and the total")),
         ],
         run: |g| {
             let args = g.args;

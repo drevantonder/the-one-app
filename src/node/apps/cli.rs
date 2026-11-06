@@ -1,10 +1,10 @@
 //! Apps on the command line: listing, deploying, their code, adding, forking and retiring them, and their schedules.
 
 use anyhow::{Context, Result, bail};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::api::Client;
-use crate::cli::{Command, ago};
+use crate::cli::{Command, Given, ago};
 use crate::config::CLI;
 use crate::{build, tools};
 
@@ -24,7 +24,6 @@ pub fn commands() -> Command {
             ("schedule on|off <app> <name> [--scope user|global|<group>]".into(), "switch an app's schedule on (it then runs as you) or off".into()),
         ],
         run: |g| {
-            let flags = g.flags;
             match g.words().as_slice() {
                 ["apps"] => {
                     let groups = g.node.get("/v1/state")?["network"]["groups"].clone();
@@ -42,12 +41,12 @@ pub fn commands() -> Command {
                         tools::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
                     }
                 }
-                ["deploy", app] if flags.contains_key("version") => {
-                    let version = flags["version"].as_str().context("give --version <hash>")?;
+                ["deploy", app] if g.has("version") => {
+                    let version = g.flag("version").context("give --version <hash>")?;
                     let here = g.node.post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?["here"] == true;
                     println!("{}", deployed_said(g.node, &format!("Deployed {app} ({version}) again."), here));
                 }
-                ["deploy", dir] => deploy(g.node, std::path::Path::new(dir), flags)?,
+                ["deploy", dir] => deploy(g, std::path::Path::new(dir))?,
                 ["deploys", app] => {
                     let apps = g.node.apps()?;
                     let found = apps.iter().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}"))?;
@@ -58,7 +57,7 @@ pub fn commands() -> Command {
                 }
                 ["source", app, rest @ ..] => {
                     let mut q = Vec::new();
-                    if let Some(b) = flags.get("version").and_then(Value::as_str) {
+                    if let Some(b) = g.flag("version") {
                         q.push(format!("bundle={b}"));
                     }
                     if let [path] = rest {
@@ -72,16 +71,16 @@ pub fn commands() -> Command {
                     }
                 }
                 ["remove", app] => {
-                    let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+                    let scope = g.flag("scope").unwrap_or("user");
                     g.node.post("/v1/add", json!({ "app": app, "scope": scope, "added": false }))?;
                     println!("{app} is no longer added to {scope}.");
                 }
                 ["fork", app, name] => {
-                    g.node.post("/v1/fork", json!({ "app": app, "name": name, "owner": flags.get("owner") }))?;
+                    g.node.post("/v1/fork", json!({ "app": app, "name": name, "owner": g.flag("owner") }))?;
                     println!("Forked {app} as {name}; deploy your changes with {CLI} deploy <dir> --name {name}.");
                 }
                 ["add", app] => {
-                    let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+                    let scope = g.flag("scope").unwrap_or("user");
                     g.node.post("/v1/add", json!({ "app": app, "scope": scope, "added": true }))?;
                     println!("{app} is added to {scope}.");
                 }
@@ -109,7 +108,7 @@ pub fn commands() -> Command {
                     }
                 }
                 ["schedule", on @ ("on" | "off"), app, name] => {
-                    let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+                    let scope = g.flag("scope").unwrap_or("user");
                     g.node.post("/v1/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
                     println!("{app}'s schedule {name} is {on} in {scope}.");
                 }
@@ -122,14 +121,15 @@ pub fn commands() -> Command {
 
 /// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the network hasn't one by that
 /// name, and deploys it, saying whether this device runs it yet.
-fn deploy(node: &Client, dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
+fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
+    let node = g.node;
     anyhow::ensure!(dir.is_dir(), "no folder {} in {}: give the app's folder", dir.display(), std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default());
-    let name = match flags.get("name").and_then(Value::as_str) {
+    let name = match g.flag("name") {
         Some(name) => name.to_string(),
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
     let (blob, service) = build::built_with_service(node, dir)?;
-    let here = node.post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
+    let here = node.post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?["here"] == true;
     println!("{}", deployed_said(node, &format!("Deployed {name} ({}).{service}", &blob[..12]), here));
     Ok(())
 }

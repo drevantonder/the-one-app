@@ -1,10 +1,9 @@
 //! The command line's built-in commands, each defined by its feature (`Command`), and what they share: how one fails
-//! (`Failed`, its exit code), asking the person before what can't be undone, and the help made from them.
+//! (`Failed`, its exit code), asking the person before what sends or can't be undone, and the help made from them.
 
 use std::io::IsTerminal;
 
 use anyhow::Result;
-use serde_json::{Map, Value};
 
 use crate::config::CLI;
 use crate::api::Client;
@@ -29,7 +28,7 @@ impl std::error::Error for Failed {}
 /// What was typed, for a command to run: the words (its own first), the flags, and the node to ask.
 pub struct Given<'a> {
     pub words: &'a [String],
-    pub flags: &'a Map<String, Value>,
+    pub flags: &'a crate::tools::Flags,
     /// Everything typed, as typed.
     pub args: &'a [String],
     pub node: &'a Client,
@@ -49,7 +48,12 @@ impl Given<'_> {
     }
 
     pub fn flag(&self, name: &str) -> Option<&str> {
-        self.flags.get(name).and_then(Value::as_str)
+        self.flags.get(name)?.last()?.as_deref()
+    }
+
+    /// Each value of a flag given more than once (`--device a --device b`).
+    pub fn values(&self, name: &str) -> Vec<&str> {
+        self.flags.get(name).into_iter().flatten().filter_map(Option::as_deref).collect()
     }
 
     pub fn has(&self, name: &str) -> bool {
@@ -59,7 +63,7 @@ impl Given<'_> {
     /// Refuses a flag the command doesn't take, rather than running as if it weren't given.
     pub fn takes_only(&self, takes: &[&str]) -> Result<()> {
         match self.flags.keys().find(|k| !takes.contains(&k.as_str())) {
-            Some(other) => Err(Failed::Typed(format!("--{other} isn't an input of this: see --help")).into()),
+            Some(other) => Err(Failed::Typed(format!("--{other} isn't an input of this (see --help)")).into()),
             None => Ok(()),
         }
     }
@@ -78,9 +82,10 @@ const ABOUT_AT: usize = 39;
 /// How wide `help all` is.
 const WIDTH: usize = 118;
 
-pub fn help(commands: &[Command]) -> String {
+/// Commands' forms (`Command.help`) as `help all` lays them out.
+pub fn help<'a>(forms: impl IntoIterator<Item = &'a (String, String)>) -> String {
     let mut out = String::new();
-    for (usage, about) in commands.iter().flat_map(|c| &c.help) {
+    for (usage, about) in forms {
         let mut line = format!("  {CLI} {usage}");
         if line.chars().count() + 1 >= ABOUT_AT {
             out.push_str(&line);
@@ -115,22 +120,13 @@ pub fn help(commands: &[Command]) -> String {
     out
 }
 
-/// Goes ahead with `command`, which sends or can't be undone, given --confirm; else asks at a terminal, and elsewhere
-/// (an agent, or piped) refuses.
-pub fn agreed(confirmed: bool, command: &str) -> Result<()> {
-    if confirmed || asked_yes(command)? {
-        return Ok(());
-    }
-    Err(Failed::Refused(format!("{command} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action")).into())
-}
-
 /// Asks the person at a terminal whether to go ahead with `command`: false with no one there to ask, and refused if they
 /// say no.
 pub fn asked_yes(command: &str) -> Result<bool> {
     if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
         return Ok(false);
     }
-    eprint!("{command} sends or can't be undone. Go ahead? [y/N] ");
+    eprint!("{command} {}. Go ahead? [y/N] ", crate::tools::SENDS);
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
     if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes") {

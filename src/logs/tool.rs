@@ -57,7 +57,7 @@ pub fn feature() -> crate::core_tools::Feature {
         elsewhere: false,
         run: |_, input, asked| {
             let device = input.get("device").and_then(Value::as_str).unwrap_or("");
-            let (lines, note) = said(&ask(asked.node, input, asked.agent, asked.client, false).ok?, device);
+            let (lines, note) = said(&ask(asked.node, input, asked.agent, asked.reader, false).ok?, device);
             let text: Vec<&str> = lines.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             Ok(json!(format!("{}{}", text.join("\n"), note.map(|n| format!("\n{n}")).unwrap_or_default())))
         },
@@ -68,20 +68,20 @@ fn tool() -> Value {
     json!({
         "name": "logs",
         "description": "Read a device's log over the network, instead of ssh: its node's, or one of its services', or for a phone or computer app, what its app and page say went wrong (read while the app is open and connected). The newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's person and the network's admins may.",
-        "inputSchema": { "type": "object", "required": ["device"], "properties": {
+        "reads": true,
+        "input": { "type": "object", "required": ["device"], "properties": {
             "device": { "type": "string", "description": "the device's name (devices_requests and groups_list name them; the status command lists them)" },
             "service": { "type": "string", "description": "a service's name, like whatsapp; omit for the node's own log, and for an app's" },
             "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d" },
             "grep": { "type": "string", "description": "only lines with this text in them, whatever its case" },
             "lines": { "type": "integer", "description": "how many of the newest to give" },
         } },
-        "annotations": crate::skills::hints(true, false),
     })
 }
 
 /// A device's log, or one of its services', as `logs` asks for it (`device`, `service`, `since`, `grep`, `lines`): the
 /// node there says no unless the caller may remove that device (src/node/calls/running.rs).
-pub fn ask(node: &Client, input: &Map<String, Value>, agent: Option<&str>, client: &str, trace: bool) -> crate::api::client::Called {
+pub fn ask(node: &Client, input: &Map<String, Value>, agent: Option<&str>, reader: crate::tools::Reader, trace: bool) -> crate::api::client::Called {
     let Some(device) = input.get("device").and_then(Value::as_str) else {
         return crate::api::client::Called { ok: Err(anyhow::anyhow!("which device? {CLI} devices lists them")), trace: None };
     };
@@ -91,7 +91,7 @@ pub fn ask(node: &Client, input: &Map<String, Value>, agent: Option<&str>, clien
     if let Err(e) = Ask::from_json(&Value::Object(asked.clone())) {
         return crate::api::client::Called { ok: Err(crate::cli::Failed::Typed(format!("{e:#}")).into()), trace: None };
     }
-    node.call(&json!({ "device": device, "app": crate::database::scopes::APP, "tool": "logs", "scopes": [], "input": asked, "agent": agent, "client": client }), trace)
+    node.call(&json!({ "device": device, "app": crate::database::scopes::APP, "tool": "logs", "scopes": [], "input": asked, "agent": agent, "client": reader.client() }), trace)
 }
 
 /// What a log read gives, as its lines and, if there's something to say about them, a note.
@@ -116,9 +116,9 @@ pub fn commands() -> crate::cli::Command {
             let words = g.words();
             let ["logs", device] = words.as_slice() else { return Ok(false) };
             g.takes_only(&["service", "since", "grep", "lines"])?;
-            let mut input = g.flags.clone();
+            let mut input = crate::tools::input(&tool()["input"], &[], vec![], g.flags.clone(), &[]).map_err(|e| crate::cli::Failed::Typed(format!("{e:#}")))?;
             input.insert("device".into(), json!(device));
-            let read = ask(g.node, &input, g.agent, "cli", g.trace);
+            let read = ask(g.node, &input, g.agent, crate::tools::Reader::Cli, g.trace);
             if read.ok.is_err() {
                 crate::tools::print_trace(read.trace.as_deref());
             }

@@ -6,23 +6,21 @@ use serde_json::{Map, Value, json};
 
 use crate::api::Client;
 use crate::core_tools::{Asked, Feature};
-use crate::skills::hints;
 
 pub fn feature() -> Feature {
-    Feature { name: "widgets", title: "Widgets", description: "Your widgets, as text".into(), guide: String::new(), tools: vec![show_tool()], elsewhere: true, run }
+    Feature { name: "widgets", title: "Widgets", description: "Your widgets, as text".into(), guide: String::new(), tools: vec![tool()], elsewhere: true, run }
 }
 
-/// `widgets_show`, as MCP lists it.
-pub fn show_tool() -> Value {
+fn tool() -> Value {
     json!({
-        "name": "widgets_show",
+        "name": "show",
+        "reads": true,
         "description": "Show the person's widgets inline, drawn as their apps draw them (or as text where a chat can't draw them): all of them, one app's, or one. Use it when they ask how things stand at a glance.",
-        "inputSchema": { "type": "object", "properties": {
+        "input": { "type": "object", "properties": {
             "app": { "type": "string", "description": "only this app's widgets" },
             "widget": { "type": "string", "description": "only the widget of this name" },
             "scope": { "type": "string", "description": "whose page: user (theirs), group:<id> or global; every page by default" },
         } },
-        "annotations": hints(true, false),
     })
 }
 

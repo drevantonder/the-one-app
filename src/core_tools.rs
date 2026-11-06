@@ -10,8 +10,7 @@ use serde_json::{Map, Value, json};
 pub struct Asked<'a> {
     pub node: &'a crate::api::Client,
     pub agent: Option<&'a str>,
-    /// `cli` or `mcp`.
-    pub client: &'a str,
+    pub reader: crate::tools::Reader,
     /// The person agreed to what it sends or can't undo (`confirm: true`, `--confirm`).
     pub confirmed: bool,
 }
@@ -22,28 +21,36 @@ pub struct Feature {
     pub title: &'static str,
     pub description: String,
     pub guide: String,
-    /// Its tools as MCP lists them: `<name>_<tool>`, or the feature's name alone for its one tool (`logs`).
+    /// Its tools as an app lists them (`GET /v1/apps`): each named after `<name>_`, or as the feature, for its one tool
+    /// with a command of its own (`logs`).
     pub tools: Vec<Value>,
     /// Whether someone signed in from elsewhere may use it, or only this machine's own person.
     pub elsewhere: bool,
-    /// Runs one of its tools, by the name it has after `<name>_` (or its whole name).
+    /// Runs one of its tools, by its name in `tools`.
     pub run: fn(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value>,
 }
 
 impl Feature {
-    /// Its tools as the command line, search and skills read a set of tools, in the shape an app lists them with (`GET
-    /// /v1/apps`): each `<name>_<tool>` as `<tool>`. A tool named as the feature is its own command (`logs <device>`).
+    /// Its tools as the command line, MCP, search and skills read a set of tools, in the shape an app lists them with:
+    /// those named `<name>_<tool>`, since one named as the feature is its own command. They run here, on the client
+    /// (`runs`), never as a call on a device.
     pub fn listed(&self) -> Value {
-        let prefix = format!("{}_", self.name);
-        let tools: Vec<Value> = self
-            .tools
-            .iter()
-            .filter_map(|t| {
-                let short = t["name"].as_str()?.strip_prefix(&prefix)?;
-                Some(json!({ "name": short, "description": t["description"], "input": t["inputSchema"], "reads": t["annotations"]["readOnlyHint"] == true, "confirm": t["annotations"]["destructiveHint"] == true }))
-            })
-            .collect();
-        json!({ "name": self.name, "title": self.title, "description": self.description, "instructions": self.guide, "tools": tools })
+        let tools: Vec<&Value> = self.tools.iter().filter(|t| t["name"] != self.name).collect();
+        json!({ "name": self.name, "title": self.title, "description": self.description, "instructions": self.guide, "tools": tools, "runs": "client" })
+    }
+
+    /// A tool of its as MCP names it: `vault_list`, or `logs` for the one named as the feature.
+    pub fn mcp_name(&self, tool: &Value) -> String {
+        match tool["name"].as_str().unwrap_or("") {
+            t if t == self.name => t.to_string(),
+            t => format!("{}_{t}", self.name),
+        }
+    }
+
+    /// Its tools as MCP lists them.
+    pub fn mcp_tools(&self) -> Vec<Value> {
+        let set = self.listed();
+        self.tools.iter().map(|t| crate::tools::mcp_tool(&set, t, self.mcp_name(t))).collect()
     }
 
     /// Runs its tool `name` (as MCP names it).
@@ -67,7 +74,7 @@ pub fn usable(node: &crate::api::Client) -> Vec<Feature> {
 /// The feature with the tool `name` (as MCP names it), and the tool.
 pub fn find(name: &str) -> Option<(Feature, Value)> {
     all().into_iter().find_map(|f| {
-        let tool = f.tools.iter().find(|t| t["name"] == name)?.clone();
+        let tool = f.tools.iter().find(|t| f.mcp_name(t) == name)?.clone();
         Some((f, tool))
     })
 }

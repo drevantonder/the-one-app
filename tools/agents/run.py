@@ -206,8 +206,8 @@ class Network:
 def real_agents():
     """The real network's AGENTS.md and skills, as its Agents app syncs them: read only."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(f"{CLI.upper()}_")}
-    get = lambda *a: json.loads(subprocess.run([CLI, *a], env=env, capture_output=True, text=True, check=True).stdout or "null")
-    text = subprocess.run([CLI, "agents", "get"], env=env, capture_output=True, text=True, check=True).stdout
+    get = lambda *a: json.loads(subprocess.run([CLI, *a, "--json"], env=env, capture_output=True, text=True, check=True).stdout or "null")
+    text = subprocess.run([CLI, "agents", "get", "--json"], env=env, capture_output=True, text=True, check=True).stdout
     try:
         text = json.loads(text)
         text = text.get("text", text) if isinstance(text, dict) else text

@@ -1,6 +1,5 @@
 //! Files in a tool's inputs and results on the command line, and printing a result.
 
-use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
@@ -108,20 +107,19 @@ pub(super) fn show(app: &str, tool: &str, ok: &Value, out: Option<&str>, json: b
         }
         return Ok(());
     }
-    let text = match ok {
-        _ if json => serde_json::to_string(ok)?,
-        Value::String(s) => s.clone(),
-        Value::Null => return Ok(()),
-        // Laid out for a person at a terminal; compact for an agent's shell or a pipe.
-        other if std::io::stdout().is_terminal() => serde_json::to_string_pretty(other)?,
-        other => serde_json::to_string(other)?,
-    };
     match out {
+        // Kept as data: as it came.
         Some(path) => {
+            let text = match ok {
+                Value::String(s) => s.clone(),
+                other => serde_json::to_string_pretty(other)?,
+            };
             std::fs::write(&path, format!("{text}\n")).with_context(|| format!("write {}", path.display()))?;
             println!("{}", path.display());
         }
-        None => println!("{text}"),
+        None if json => println!("{}", serde_json::to_string(ok)?),
+        None if ok.is_null() => {}
+        None => println!("{}", super::words::said(ok)),
     }
     Ok(())
 }

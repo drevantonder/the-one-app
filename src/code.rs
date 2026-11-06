@@ -12,14 +12,7 @@ use crate::skills::{Mode, path, ts};
 use serde_json::{Value, json};
 
 use crate::api::Client;
-use crate::tools;
-
-/// Who a search answers: someone at the command line, or an MCP client in one of its modes.
-#[derive(Clone, Copy)]
-pub enum For {
-    Cli,
-    Mcp(Mode),
-}
+use crate::tools::{self, Reader};
 
 /// The core's tools, then every app added for this user that has tools, as `GET /v1/apps` gives them, with each
 /// tool's input as MCP takes it (files explained, `device` and `confirm` where they apply).
@@ -103,33 +96,17 @@ fn score_app(app: &Value, query: &[String]) -> (u32, usize) {
     (score, query.iter().filter(|w| has(&name, w) || has(&about, w)).count())
 }
 
-fn call(app: &Value, tool: &Value, how: For) -> String {
+fn call(app: &Value, tool: &Value, how: Reader) -> String {
     let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
     match how {
-        For::Mcp(Mode::Code) => format!("{}({})", path(a, o), ts(&tool["input"])),
-        For::Mcp(Mode::All) => format!("{a}_{o} {}", ts(&tool["input"])),
-        For::Cli => {
-            let schema = &tool["input"];
-            let required: Vec<&str> = schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-            // The inputs words fill, as --help shows them; the rest are flags.
-            let words: Vec<&str> = match tool["words"].as_array() {
-                Some(w) => w.iter().filter_map(Value::as_str).collect(),
-                None => required.clone(),
-            };
-            let mut line = format!("{CLI} {a} {o}");
-            for w in &words {
-                line.push_str(&match required.contains(w) {
-                    true => format!(" <{}>", w.replace('_', "-")),
-                    false => format!(" [<{}>]", w.replace('_', "-")),
-                });
-            }
-            for r in required.iter().filter(|r| !words.contains(r)) {
-                line.push_str(&format!(" --{} <{}>", r.replace('_', "-"), r.replace('_', "-")));
-            }
-            for (k, v) in schema["properties"].as_object().into_iter().flatten().filter(|(k, _)| !required.contains(&k.as_str()) && !words.contains(&k.as_str())) {
+        Reader::Code => format!("{}({})", path(a, o), ts(&tool["input"])),
+        Reader::Mcp => format!("{a}_{o} {}", ts(&tool["input"])),
+        Reader::Cli => {
+            let mut line = tools::usage(a, tool);
+            for (k, v) in tools::optional(tool) {
                 match v["type"] == "boolean" {
                     true => line.push_str(&format!(" [--{}]", k.replace('_', "-"))),
-                    false => line.push_str(&format!(" [--{} {}]", k.replace('_', "-"), ts(v))),
+                    false => line.push_str(&format!(" [--{} {}]", k.replace('_', "-"), ts(&v))),
                 }
             }
             line
@@ -161,7 +138,7 @@ fn fit(described: &[&str], room: usize) -> Vec<String> {
 /// The tools that best match `query`, best first, each with how to call it and what it does, then the guide of
 /// each app they're in; and the apps the person could add (`addable`) that match as well. A match is one whose name,
 /// app or description has most of the query's words, and as many as the best: fewer is a guess, not an answer.
-pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how: For) -> String {
+pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how: Reader) -> String {
     // What people call the devices their One App runs on, and keeping something.
     let query: Vec<String> = words(query)
         .into_iter()
@@ -201,9 +178,9 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
     let add = |app: &Value| {
         let name = app["name"].as_str().unwrap_or("");
         let how = match how {
-            For::Cli => format!("{CLI} apps add {name} user"),
-            For::Mcp(Mode::All) => format!("apps_add {{ app: \"{name}\", scope: \"user\" }}"),
-            For::Mcp(Mode::Code) => format!("tools.apps.add({{ app: \"{name}\", scope: \"user\" }})"),
+            Reader::Cli => format!("{CLI} apps add {name} user"),
+            Reader::Mcp => format!("apps_add {{ app: \"{name}\", scope: \"user\" }}"),
+            Reader::Code => format!("tools.apps.add({{ app: \"{name}\", scope: \"user\" }})"),
         };
         format!("- {} ({name}): {}. {how} adds it for the person.", app["title"].as_str().unwrap_or(name), app["description"].as_str().unwrap_or("").trim().trim_end_matches('.'))
     };
@@ -228,10 +205,7 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
     for (i, (_, _, _, app, tool)) in found.iter().enumerate() {
         let mark = match (tool["reads"] == true, tool["confirm"] == true) {
             (true, _) => " It only reads.",
-            (_, true) => match how {
-                For::Cli => " It can't be undone: give --confirm once the person agreed.",
-                For::Mcp(_) => " It can't be undone: give confirm: true once the person agreed.",
-            },
+            (_, true) => &format!(" {}", how.needs_confirm()),
             _ => "",
         };
         text.push_str(&format!("{}\n  {}{mark}\n\n", calls[i], about[i]));
@@ -286,7 +260,7 @@ const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
 pub fn execute_tool() -> Value {
     json!({
         "name": "execute",
-        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what sends or can't be undone needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
+        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what {} needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", tools::SENDS, LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
         "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
         "annotations": crate::skills::hints(false, false),
     })
@@ -333,16 +307,16 @@ fn runner() -> Result<(PathBuf, PathBuf)> {
 /// Runs a script: each call it makes is checked against its tool's inputs and run as the person, as an MCP call
 /// is, what sends or can't be undone only with confirm: true. Gives back code mode's result: `{ ok, value | error,
 /// logs, truncated, toolCalls }`.
-pub fn execute(node: &Client, script: &str, agent: Option<&str>, client: &str) -> Result<Value> {
+pub fn execute(node: &Client, script: &str, agent: Option<&str>) -> Result<Value> {
     anyhow::ensure!(!script.trim().is_empty(), "give the script as code");
-    let apps = catalog(node)?;
+    let (apps, sets) = (catalog(node)?, crate::core_tools::and_apps(node)?);
     let mut tools = Vec::new();
     let mut descriptions = serde_json::Map::new();
     for app in &apps {
         let name = app["name"].as_str().unwrap_or("");
         descriptions.insert(name.into(), app["description"].clone());
         for tool in app["tools"].as_array().into_iter().flatten() {
-            tools.push(json!({ "app": name, "tool": tool["name"], "description": tool["description"], "input": tool["input"], "confirm": tool["confirm"] == true }));
+            tools.push(json!({ "app": name, "tool": tool["name"], "description": tool["description"], "input": tool["input"] }));
         }
     }
     let (bun, dir) = runner()?;
@@ -366,12 +340,12 @@ pub fn execute(node: &Client, script: &str, agent: Option<&str>, client: &str) -
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
         if let Some(id) = msg.get("call") {
             let (app, tool) = (msg["app"].as_str().unwrap_or(""), msg["tool"].as_str().unwrap_or(""));
-            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["tools"].as_array()?.iter().find(|o| o["name"] == tool)?.clone())));
+            let spec = sets.iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["tools"].as_array()?.iter().find(|o| o["name"] == tool)?.clone())));
             let input = msg["input"].clone();
             let answer = (|| {
                 let spec = spec.with_context(|| format!("no tool {app}_{tool}"))?;
                 anyhow::ensure!(input.is_object() || input.is_null(), "a tool's input is an object, not {input}");
-                crate::mcp::dispatch(node, &format!("{app}_{tool}"), input.as_object().cloned().unwrap_or_default(), agent, client, Some(spec)).ok
+                tools::dispatch(node, &Reader::Mcp.named(app, tool), input.as_object().cloned().unwrap_or_default(), Reader::Code, agent, Some(spec)).ok
             })();
             let reply = match answer {
                 Ok(ok) => json!({ "reply": id, "ok": ok }),
@@ -429,7 +403,7 @@ pub fn commands() -> crate::cli::Command {
                         "-" => std::io::read_to_string(std::io::stdin())?,
                         file => std::fs::read_to_string(file).with_context(|| format!("read {file}"))?,
                     };
-                    let result = execute(g.node, &script, g.agent, "cli")?;
+                    let result = execute(g.node, &script, g.agent)?;
                     for line in result["logs"].as_array().into_iter().flatten() {
                         eprintln!("{}", line.as_str().map(String::from).unwrap_or_else(|| line.to_string()));
                     }
@@ -443,9 +417,9 @@ pub fn commands() -> crate::cli::Command {
                     }
                 }
                 ["search", words @ ..] if !words.is_empty() => {
-                    let limit = g.flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
+                    let limit = g.flag("limit").and_then(|l| l.parse().ok()).unwrap_or(8);
                     let (apps, addable) = catalogs(g.node)?;
-                    println!("{}", search(&apps, &addable, &words.join(" "), limit, For::Cli));
+                    println!("{}", search(&apps, &addable, &words.join(" "), limit, Reader::Cli));
                 }
                 _ => return Ok(false),
             }

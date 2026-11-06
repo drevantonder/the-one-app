@@ -13,7 +13,6 @@ pub fn commands() -> Command {
             ("services sandbox | sudo sh".into(), "let this machine run services in their sandbox, each as its own user (Linux; the installer does it)".into()),
         ],
         run: |g| {
-            let flags = g.flags;
             match g.words().as_slice() {
                 ["services"] => {
                     let state = g.node.get("/v1/state")?;
@@ -65,7 +64,7 @@ pub fn commands() -> Command {
                 // What lets this machine's person start services in their sandbox, for root to run once: `| sudo sh`.
                 ["services", "sandbox"] => print!("{}", crate::services::sandbox::setup_script()?),
                 ["services", how @ ("on" | "off"), name] => {
-                    let device = flags.get("device").and_then(Value::as_str);
+                    let device = g.flag("device");
                     g.node.post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
                     let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
                     match (*how, *name == crate::database::scopes::APPS_PART) {

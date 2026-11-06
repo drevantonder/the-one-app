@@ -4,7 +4,6 @@
 use super::*;
 
 pub mod tools;
-pub mod cli;
 pub(crate) mod routes;
 
 use super::status::{BackedUp, BackupRun, CheckRun, Said};

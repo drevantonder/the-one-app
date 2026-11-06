@@ -4,9 +4,9 @@
 
 use anyhow::{Context, Result, bail};
 use one::api::Client;
-use one::cli::{Command, ago};
+use one::cli::{Command, Given, ago};
 use one::config::{CLI, NAME, YOURS};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use one::api;
 
@@ -29,9 +29,18 @@ pub fn commands() -> Command {
             ("settings [<name> <value>|--default]".into(), "the network's settings (admins set them)".into()),
         ],
         run: |g| {
-            let (flags, args) = (g.flags, g.args);
+            let takes = match g.words().as_slice() {
+                ["sign-in"] => &["address", "invite"][..],
+                ["status"] => &["until", "device", "timeout"],
+                ["create", ..] => &["as", "user"],
+                ["pair"] => &["user"],
+                ["settings", _, ..] => &["default"],
+                ["sign-out" | "join" | "settings" | "role" | "rename", ..] => &[],
+                _ => return Ok(false),
+            };
+            g.takes_only(takes)?;
             match g.words().as_slice() {
-                ["sign-in"] => sign_in(g.node, &flags)?,
+                ["sign-in"] => sign_in(g)?,
                 ["sign-out"] => {
                     // A device takes itself out of its person's devices first, while its sign-in still says who it is; git
                     // here then no longer reaches its repos, which a node here still serves.
@@ -46,15 +55,15 @@ pub fn commands() -> Command {
                         false => println!("This machine isn't signed in."),
                     }
                 }
-                ["status"] if flags.contains_key("until") => update::wait(&args)?,
+                ["status"] if g.has("until") => update::wait(g)?,
                 ["status"] => status(g.node, &g.node.get("/v1/state")?),
                 ["create", name @ ..] if !name.is_empty() => {
-                    let user_name = flags.get("as").and_then(Value::as_str).context("say what to call you with --as <your name>")?;
-                    let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": flags.get("user") }))?;
+                    let user_name = g.flag("as").context("say what to call you with --as <your name>")?;
+                    let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": g.flag("user") }))?;
                     println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
                 }
                 ["pair"] => {
-                    let r = g.node.post("/v1/pair", json!({ "user": flags.get("user") }))?;
+                    let r = g.node.post("/v1/pair", json!({ "user": g.flag("user") }))?;
                     println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
                 }
                 ["join", code] => {
@@ -68,7 +77,7 @@ pub fn commands() -> Command {
                     }
                 }
                 ["settings", name, value @ ..] => {
-                    let value = if flags.contains_key("default") { Value::Null } else { json!(value.join(" ")) };
+                    let value = if g.has("default") { Value::Null } else { json!(value.join(" ")) };
                     g.node.post("/v1/settings", json!({ "name": name, "value": value }))?;
                     println!("Set {name}.");
                 }
@@ -88,16 +97,17 @@ pub fn commands() -> Command {
 }
 
 /// `sign-in`: this machine signs in at the network's address, as the person who approves its code with their passkey.
-fn sign_in(node: &Client, flags: &Map<String, Value>) -> Result<()> {
+fn sign_in(g: &Given) -> Result<()> {
+    let node = g.node;
     // Someone new's invite: its link (`<address>/invite#<secret>`), or its secret with --address.
-    let invite = flags.get("invite").and_then(Value::as_str).map(|i| match i.split_once("/invite#") {
+    let invite = g.flag("invite").map(|i| match i.split_once("/invite#") {
         Some((address, secret)) => (Some(address.to_string()), secret.to_string()),
         None => (None, i.trim_start_matches('#').to_string()),
     });
     if invite.is_some() && client_device::node_here() {
         bail!("{NAME} runs on this computer, so it joins as a device, not with an invite: {CLI} join <pairing code>, from {CLI} pair on a device in {YOURS}");
     }
-    let address = match flags.get("address").and_then(Value::as_str).map(str::to_string).or_else(|| invite.as_ref().and_then(|(a, _)| a.clone())) {
+    let address = match g.flag("address").map(str::to_string).or_else(|| invite.as_ref().and_then(|(a, _)| a.clone())) {
         Some(a) => a,
         // With no node here, it's the address it was signed in at before, or the one given.
         None if !client_device::node_here() => crate::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,

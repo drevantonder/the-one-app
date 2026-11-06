@@ -2,7 +2,7 @@
 // subset with no eval, network, files or timers, that reaches the world only through `tools`. Each tool call goes back
 // to the command that started this, which runs it as the person, as any MCP call; this side only asks.
 //
-// stdin: first { code, tools: [{ app, tool, description, input, confirm }], limits }, then { reply, ok | error } for
+// stdin: first { code, tools: [{ app, tool, description, input }], limits }, then { reply, ok | error } for
 // each call. stdout: { call, app, tool, input } for each call, then { done: result }.
 import { CodeMode, Namespace, Tool, toolError } from "@opencode/codemode"
 import { Effect } from "effect"
@@ -42,10 +42,8 @@ const call = (t, input) =>
     say({ call: id, app: t.app, tool: t.tool, input })
   })
 
-const byPath = new Map()
 const apps = {}
 for (const t of list) {
-  byPath.set(`${t.app}.${t.tool}`, t)
   ;(apps[t.app] ??= {})[t.tool] = Tool.make({
     description: t.description ?? "",
     input: t.input ?? { type: "object" },
@@ -55,19 +53,7 @@ for (const t of list) {
 }
 const tools = Object.fromEntries(Object.entries(apps).map(([app, tools]) => [app, Namespace.make({ description: descriptions?.[app] ?? "", tools })]))
 
-const runtime = CodeMode.make({
-  tools,
-  limits,
-  hooks: {
-    // What sends or can't be undone runs only with confirm: true, given once the person agreed, as everywhere else.
-    "tool.before": ({ name, input }) => {
-      const t = byPath.get(name)
-      if (t?.confirm && input?.confirm !== true)
-        return Effect.fail(toolError(`${t.app}_${t.tool} sends or can't be undone: ask the person first, then call it again with confirm: true`))
-      return Effect.void
-    },
-  },
-})
+const runtime = CodeMode.make({ tools, limits })
 
 say({ done: await Effect.runPromise(runtime.execute(code)) })
 process.exit(0)

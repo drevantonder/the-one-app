@@ -45,7 +45,7 @@ pub fn tools() -> Vec<Value> {
     let ui = json!({ "ui": { "resourceUri": view_uri() } });
     vec![
         {
-            let mut show = crate::node::widgets::show_tool();
+            let mut show = crate::node::widgets::feature().mcp_tools().remove(0);
             show["_meta"] = ui.clone();
             show
         },

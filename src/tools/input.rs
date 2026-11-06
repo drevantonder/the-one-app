@@ -10,9 +10,13 @@ use serde_json::{Map, Value, json};
 
 use super::files::read_file;
 
-/// Splits words from `--flag value`s. A flag given again adds to a list; a flag with no value is None.
-pub(super) fn split(args: &[String]) -> (Vec<String>, BTreeMap<String, Vec<Option<String>>>) {
-    let (mut words, mut flags) = (Vec::new(), BTreeMap::<String, Vec<Option<String>>>::new());
+/// Each flag given, with its values in order: None for one given with no value.
+pub type Flags = BTreeMap<String, Vec<Option<String>>>;
+
+/// Splits words from `--flag value`s (or `--flag=value`), as every command takes them. A flag given again adds to a
+/// list; `--` ends the flags.
+pub fn split(args: &[String]) -> (Vec<String>, Flags) {
+    let (mut words, mut flags) = (Vec::new(), Flags::new());
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
@@ -74,7 +78,7 @@ pub fn takes(schema: &Value, name: &str) -> bool {
 /// The tool's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
 /// optional places are skipped first: for a tool with a topic and a text, `"hi"` is text and `ideas "hi"` a topic and text.
 /// A word left over is an error, never folded into another input: it says to quote text, or which flag to give it as.
-pub(super) fn input(schema: &Value, places: &[String], words: Vec<String>, flags: BTreeMap<String, Vec<Option<String>>>, files: &[String]) -> Result<Map<String, Value>> {
+pub fn input(schema: &Value, places: &[String], words: Vec<String>, flags: Flags, files: &[String]) -> Result<Map<String, Value>> {
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
     let mut input = Map::new();
     for (flag, values) in flags {
@@ -168,13 +172,25 @@ fn value(flag: &str, values: &[Option<String>], prop: Option<&Value>) -> Result<
     }
 }
 
-/// Fills missing inputs from stdin, when something is piped: a JSON object of inputs, or the one missing input's text.
+/// Fills missing inputs from stdin: a person at a terminal types each, a line each; or what's piped, a JSON object of
+/// inputs, or the one missing input's text.
 pub(super) fn from_stdin(schema: &Value, missing: &[String], input: &mut Map<String, Value>) -> Result<()> {
+    let props = schema["properties"].as_object().cloned().unwrap_or_default();
     if std::io::stdin().is_terminal() {
+        if std::io::stderr().is_terminal() {
+            for name in missing {
+                eprint!("{}: ", kebab(name));
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)?;
+                let line = line.trim_end_matches(['\n', '\r']);
+                if !line.is_empty() {
+                    input.insert(name.clone(), value(name, &[Some(line.to_string())], props.get(name))?);
+                }
+            }
+        }
         return Ok(());
     }
     let Some(text) = piped() else { return Ok(()) };
-    let props = schema["properties"].as_object().cloned().unwrap_or_default();
     match serde_json::from_str::<Value>(text.trim()) {
         Ok(Value::Object(obj)) if missing.len() > 1 || obj.keys().any(|k| props.contains_key(k)) => {
             for (k, v) in obj {

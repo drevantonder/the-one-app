@@ -3,7 +3,7 @@ use anyhow::{Result, bail};
 use one::config::{CLI, NAME, YOURS};
 use one::cli::{Command, Given};
 use one::api;
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
 mod client_device;
 mod git_remote;
@@ -14,10 +14,11 @@ mod update;
 
 use one::api::Client;
 use one::{build, tools};
+use one::tools::SENDS;
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
 fn commands() -> Vec<Command> {
-    use one::node::{apps, backups, blobs, groups, services, storage, vault};
+    use one::node::{apps, blobs, groups, services, storage, vault};
     vec![
         network::commands(),
         groups::commands(),
@@ -25,7 +26,6 @@ fn commands() -> Vec<Command> {
         vault::cli::commands(),
         one::cloudflare::cli::commands(),
         storage::cli::commands(),
-        backups::cli::commands(),
         services::cli::commands(),
         one::logs::commands(),
         update::commands(),
@@ -39,9 +39,14 @@ fn commands() -> Vec<Command> {
     ]
 }
 
-/// Every built-in command, with what it takes: `help all` prints it, and `<command> --help` its lines.
-fn every_command() -> String {
-    format!("Usage:\n{}\n{NAME} holds one network. For another context, run that context's own app.", one::cli::help(&commands()))
+/// Every built-in command, with what it takes, then the core's tools as commands: `help all`.
+fn every_command(node: &Client) -> String {
+    let core = tools::forms(&one::core_tools::listed(node));
+    format!(
+        "Usage:\n{}\nThe core's own tools, each a command as an app's tools are (--help after one says what it takes):\n{}\n{NAME} holds one network. For another context, run that context's own app.",
+        one::cli::help(commands().iter().flat_map(|c| &c.help)),
+        one::cli::help(&core)
+    )
 }
 
 fn command_words() -> Vec<String> {
@@ -73,7 +78,7 @@ fn help(node: &Client) -> String {
 {yours}
 A tool's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
 from stdin. --file <input>=<path> gives a file, --out <path> saves what comes back, --device <name> runs it there,
-and --confirm goes ahead with what sends or can't be undone, once the person agreed. --json prints what comes back
+and --confirm goes ahead with what {SENDS}, once the person agreed. --json prints what comes back
 as JSON. --trace prints what the call did, and where, after its answer: use it, and {CLI} logs <device>, before ssh.
 
 Exit codes: 0 done, 2 what was typed is wrong, 3 refused (needs --confirm, not allowed, or not signed in), 1 anything
@@ -124,7 +129,7 @@ fn run(args: Vec<String>) -> Result<()> {
     // --trace too: a call prints what it did, and where, after its answer.
     let trace = args[..end].iter().any(|a| a == "--trace");
     let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || (*a != "--json" && *a != "--trace")).map(|(_, a)| a.clone()).collect();
-    let (positional, flags) = parse(&args);
+    let (positional, flags) = tools::split(&args);
     if positional.first().map(String::as_str) != Some("mcp") {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
         unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
@@ -132,7 +137,7 @@ fn run(args: Vec<String>) -> Result<()> {
     let (agent, node, words) = (one::mcp::agent_from_env(), node(), command_words());
     let given = Given { words: &positional, flags: &flags, args: &args, node: &node, agent: agent.as_deref(), json, trace, commands: &words };
     // --help shows help, whatever the command: never runs it. An app's tool's is the app's own.
-    if flags.contains_key("help") || positional.iter().any(|p| p == "-h") {
+    if flags.contains_key("help") || flags.contains_key("h") {
         match command_help(&node, &positional) {
             Some(text) => print!("{text}"),
             None => _ = (tools::commands().run)(&given)?,
@@ -157,7 +162,7 @@ fn own() -> Command {
                     println!("{}", help(g.node));
                     println!("\n{}", connection(g.node));
                 }
-                ["help", "all"] => println!("{}", every_command()),
+                ["help", "all"] => println!("{}", every_command(g.node)),
                 ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
                     None => bail!("{}", tools::unknown(g.node, rest[0], None, Some(g.commands))?),
@@ -171,62 +176,27 @@ fn own() -> Command {
     }
 }
 
-/// A built-in command's help, for --help after it: every_command()'s lines for it, or help() when none are. None for
-/// an app's tool, and for an app that isn't a built-in command too, whose help is their own.
+/// A built-in command's help, for --help after it: its forms, as `help all` has them, or help() when none are. None for
+/// a tool, and for an app that isn't a built-in command too, whose help is their own.
 fn command_help(node: &Client, words: &[String]) -> Option<String> {
     let first = words.first().filter(|w| *w != "-h")?;
-    let text = every_command();
-    // The lines for the most words given that have any: vault set's, else every vault line.
-    let lines = |prefix: &str| {
-        let mut out = String::new();
-        let mut taking = false;
-        for line in text.lines() {
-            if let Some(rest) = line.strip_prefix(&format!("  {CLI} {prefix}")) {
-                taking = rest.is_empty() || rest.starts_with(' ');
-            } else if !line.starts_with("        ") {
-                taking = false;
-            }
-            if taking {
-                out.push_str(line);
-                out.push('\n');
-            }
-        }
-        out
-    };
-    let commands: Vec<&String> = words.iter().take_while(|w| !w.starts_with('-')).collect();
-    let (said, out) = (1..=commands.len()).rev().map(|n| (n, lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")))).find(|(_, o)| !o.is_empty()).unwrap_or_default();
-    let app = one::core_tools::and_apps(node).unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
-    match (app, out.is_empty()) {
-        (true, _) if words.len() > 1 && said < commands.len() => None,
+    let typed: Vec<&str> = words.iter().take_while(|w| !w.starts_with('-')).map(String::as_str).collect();
+    if let [set, tool, ..] = typed[..]
+        && tools::find(node, set, tool).is_some()
+    {
+        return None;
+    }
+    let (commands, core) = (commands(), tools::forms(&one::core_tools::listed(node)));
+    let forms: Vec<&(String, String)> = commands.iter().flat_map(|c| &c.help).chain(&core).collect();
+    // The forms for the most words given that have any: vault answer's, else every vault form.
+    let starts = |n: usize| -> Vec<&(String, String)> { forms.iter().copied().filter(|(usage, _)| usage.split_whitespace().take(n).eq(typed[..n].iter().copied())).collect() };
+    let these = (1..=typed.len()).rev().map(starts).find(|f| !f.is_empty()).unwrap_or_default();
+    let set = one::core_tools::and_apps(node).unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
+    match (set, these.is_empty()) {
         (true, true) => None,
         (false, true) => Some(format!("{}\n", help(node))),
-        (_, false) => Some(format!("Usage:\n{out}")),
+        (_, false) => Some(format!("Usage:\n{}", one::cli::help(these))),
     }
-}
-
-/// Splits `--key value` flags from positional words. A flag with no value is true.
-fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
-    let (mut positional, mut flags) = (Vec::new(), Map::new());
-    let mut i = 0;
-    while i < args.len() {
-        if let Some(key) = args[i].strip_prefix("--") {
-            match args.get(i + 1).filter(|v| !v.starts_with("--")) {
-                Some(v) => {
-                    let value = serde_json::from_str(v).ok().filter(|v: &Value| !v.is_string()).unwrap_or_else(|| json!(v));
-                    flags.insert(key.to_string(), value);
-                    i += 2;
-                }
-                None => {
-                    flags.insert(key.to_string(), json!(true));
-                    i += 1;
-                }
-            }
-        } else {
-            positional.push(args[i].clone());
-            i += 1;
-        }
-    }
-    (positional, flags)
 }
 
 fn connection(node: &Client) -> String {

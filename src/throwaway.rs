@@ -194,7 +194,7 @@ fn usage() -> String {
         },
         None => mcp_anywhere(),
     };
-    format!("Usage:\n{}", one::cli::help(&[commands(&mcp)]))
+    format!("Usage:\n{}", one::cli::help(&commands(&mcp).help))
 }
 
 fn mcp_anywhere() -> String {

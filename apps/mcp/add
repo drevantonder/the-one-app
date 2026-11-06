@@ -5,7 +5,7 @@
 #   apps/mcp/add <name>        deploys the server's tools as they are now: after sign_in, or when they change
 #
 # A server that wants OAuth: `one <name> sign_in`, then run this again with just the name. A header's value may hold
-# a Vault field as {{key}}: `one vault request <name> --title <title> --fields key --secret-fields key --hosts <the
+# a Vault field as {{key}}: `one vault request <name> --title <title> --fields '{"key":{"secret":true}}' --hosts <the
 # server's host>` asks the person for it.
 # Apps can't deploy, so this runs where the CLI does: it builds the app from mcp.js beside it.
 set -eu
@@ -60,7 +60,7 @@ fi
 [ $new = no ] || $one add "$name" --scope "$scope"
 
 tries=0 # a deploy takes a moment to reach the devices, and restarts their runtimes
-until $one "$name" refresh_tools >"$dir/tools.next" 2>"$dir/error"; do
+until $one "$name" refresh_tools --json >"$dir/tools.next" 2>"$dir/error"; do
   tries=$((tries + 1))
   if [ $tries -ge 15 ] || ! grep -qE "latest deploy|disconnected|restart" "$dir/error"; then
     cat "$dir/error" >&2

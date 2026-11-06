@@ -1,11 +1,11 @@
 //! Where the network keeps its data: `storage`, and `storage move`.
 
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::cli::{Command, Given};
 use crate::config::CLI;
-use crate::node::backups::cli::tried_said;
+use crate::node::backups::tools::tried_said;
 
 pub fn commands() -> Command {
     Command {
@@ -28,7 +28,7 @@ fn run(g: &Given) -> Result<bool> {
             }
         }
         ["storage", "move"] => {
-            let get = |k: &str| g.flags.get(k).and_then(Value::as_str);
+            let get = |k: &str| g.flag(k);
             let endpoint = get("endpoint").context("give --endpoint, like https://<account>.r2.cloudflarestorage.com")?;
             let bucket = get("bucket").context("give --bucket, the bucket's name: its key is the Workers' (BUCKET, which only the URL signer holds)")?;
             let r = g.node.post("/v1/storage", json!({ "endpoint": endpoint, "bucket": bucket, "region": get("region") }))?;

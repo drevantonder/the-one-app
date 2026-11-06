@@ -1,9 +1,9 @@
 //! The network's Workers on Cloudflare, from this machine: `cloudflare`, and `cloudflare <what>`.
 
 use anyhow::{Context, Result, bail};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
-use crate::cli::{Command, Failed};
+use crate::cli::{Command, Failed, Given};
 use crate::config::{CLI, NAME, YOURS};
 use crate::api::Client;
 
@@ -41,11 +41,11 @@ fn at_home(settings: &mut crate::cloudflare::Settings) -> Result<()> {
 
 /// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, or else the Workers' own (their .env.local's), for the account
 /// `--account` names or the token's only one.
-fn cloudflare(flags: &Map<String, Value>, settings: Option<&crate::cloudflare::Settings>) -> Result<crate::cloudflare::Cloudflare> {
+fn cloudflare(g: &Given, settings: Option<&crate::cloudflare::Settings>) -> Result<crate::cloudflare::Cloudflare> {
     let token = std::env::var("CLOUDFLARE_API_TOKEN").ok().or_else(|| settings.and_then(|s| s.cloudflare_token.clone()));
     let token = token.context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN, or as the Workers' CLOUDFLARE_API_TOKEN in their .env.local")?;
     let api = "https://api.cloudflare.com/client/v4".to_string();
-    let account = match flags.get("account").and_then(Value::as_str) {
+    let account = match g.flag("account") {
         Some(account) => account.to_string(),
         None => crate::cloudflare::Cloudflare { api: api.clone(), token: token.clone(), account: String::new() }.accounts()?,
     };
@@ -81,7 +81,7 @@ pub fn commands() -> Command {
             ("cloudflare use <address>".into(), "point this network at its Workers: its nodes take sign-ins made at the address".into()),
         ],
         run: |g| {
-            let (flags, node) = (g.flags, g.node);
+            let node = g.node;
             match g.words().as_slice() {
                 ["cloudflare"] => print!("{}", cloudflare_said(&crate::cloudflare::Settings::load()?)),
                 ["cloudflare", "serve"] => {
@@ -89,7 +89,7 @@ pub fn commands() -> Command {
                         Ok(settings) => settings,
                         Err(err) => {
                             crate::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
-                            let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the network, with --address https://…")?;
+                            let url = g.flag("address").context("say where people will reach the network, with --address https://…")?;
                             let settings = crate::cloudflare::Settings::new(NAME, url);
                             settings.save()?;
                             settings
@@ -101,15 +101,15 @@ pub fn commands() -> Command {
                 }
                 ["cloudflare", "deploy"] => {
                     let loaded = crate::cloudflare::Settings::load();
-                    let cf = cloudflare(&flags, loaded.as_ref().ok())?;
+                    let cf = cloudflare(g, loaded.as_ref().ok())?;
                     let settings = match loaded {
                         Ok(settings) => settings,
                         Err(err) => {
                             crate::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
                             // Workers already in the account were made elsewhere: new settings here would replace their secrets.
                             let made = cf.scripts()?.contains_key(&crate::cloudflare::worker_name("auth"));
-                            anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has this network's Workers already, made on another machine: deploy them there, where their settings are, or bring them here ({} and .env.local). --new replaces them, and everything they hold can't be read again", crate::cloudflare::Settings::path().display());
-                            let domain = flags.get("domain").and_then(Value::as_str).map(|d| d.trim_matches('.').to_string());
+                            anyhow::ensure!(!made || g.has("new"), "the Cloudflare account has this network's Workers already, made on another machine: deploy them there, where their settings are, or bring them here ({} and .env.local). --new replaces them, and everything they hold can't be read again", crate::cloudflare::Settings::path().display());
+                            let domain = g.flag("domain").map(|d| d.trim_matches('.').to_string());
                             let (domain, address) = match domain {
                                 Some(domain) => (domain.clone(), format!("https://{CLI}.{domain}")),
                                 None => {
@@ -118,7 +118,7 @@ pub fn commands() -> Command {
                                 }
                             };
                             let at = |service: &str| format!("https://{}.{domain}", crate::cloudflare::worker_name(service));
-                            let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
+                            let address = g.flag("address").map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
                             let mut settings = crate::cloudflare::Settings::new(NAME, &address);
                             settings.auth_url = at("auth");
                             settings.save()?;
@@ -132,7 +132,7 @@ pub fn commands() -> Command {
                     };
                     let mut settings = settings;
                     at_home(&mut settings)?;
-                    let settings = devices_here(g.node, settings, !flags.contains_key("new"))?;
+                    let settings = devices_here(g.node, settings, !g.has("new"))?;
                     let mut web = settings.web();
                     web.extend(crate::cloudflare::precompressed(&web)?);
                     crate::cloudflare::deploy(&cf, &settings, &web)?;
@@ -156,7 +156,7 @@ pub fn commands() -> Command {
                     let mut settings = crate::cloudflare::Settings::load()?;
                     at_home(&mut settings)?;
                     let mut settings = devices_here(g.node, settings, true)?;
-                    let cf = cloudflare(&flags, Some(&settings))?;
+                    let cf = cloudflare(g, Some(&settings))?;
                     if settings.cloudflare_node_endpoint().is_none() {
                         settings.cloudflare_node_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
                         settings.set_secret("CLOUDFLARE_NODE_KEY", &settings.cloudflare_node_key)?;
@@ -175,14 +175,14 @@ pub fn commands() -> Command {
                 ["cloudflare", "invite", name] => {
                     let settings = crate::cloudflare::Settings::load()?;
                     // This machine's person, inviting themselves to their own network, is who they are in it.
-                    let user = match flags.get("user").and_then(Value::as_str) {
+                    let user = match g.flag("user") {
                         Some(user) => Some(user.to_string()),
                         None => node.get("/v1/state").ok().filter(|s| s["user"]["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
                     };
-                    let email = flags.get("email").and_then(Value::as_str);
+                    let email = g.flag("email");
                     // Someone new is invited by this machine's node, which keeps the secret for their first device's approval.
                     if user.is_none() && email.is_none() {
-                        println!("{}", crate::node::devices::tools::invited_said(name, &node.post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
+                        println!("{}", crate::node::devices::tools::invited_said(name, &node.post("/v1/invite-link", json!({ "name": name, "admin": g.has("admin") }))?));
                     } else {
                         let key = crate::node::device_key(&crate::home())?;
                         let invite = crate::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;

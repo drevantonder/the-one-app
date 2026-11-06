@@ -34,7 +34,7 @@ A removed device's later steps fail rule 3, because they come after its removal 
 ## Designed, not built
 
 - One key per scope at a time, changed only when a person or a lost device is removed, every database copied under the new key and the old one dropped. Today a scope has numbered epochs, and a new one is made when someone loses the right to open it.
-- Backups' recovery from nothing: `one backups check --folder` opens a backup with the recovery key alone, but a device restoring with no one left to pair with doesn't yet admit itself. The rules already let the recovery key sign a device's step (`database::rules`); nothing does it yet.
+- Backups' recovery from nothing: `one backups check --folder <path> --recovery-key <file>` opens a backup with the recovery key alone, but a device restoring with no one left to pair with doesn't yet admit itself. The rules already let the recovery key sign a device's step (`database::rules`); nothing does it yet.
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
 - The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in.
 - What's left of the storage move: `docs/plan-storage-and-permissions.md`.
