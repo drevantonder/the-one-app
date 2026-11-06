@@ -479,6 +479,9 @@ pub struct Inner {
     unshared: Mutex<Vec<(Scope, String)>>,
     /// `<scope> <hash>` of blobs a call put in the bucket before writing the steps that keep them, which don't again.
     put_first: Mutex<std::collections::HashSet<String>>,
+    /// The newest hint each database's last write wants moved on to, by its prefix, while one is waiting its turn
+    /// (`hint_after`): (last step, newest copy, its epoch).
+    hints: Mutex<HashMap<String, (u64, u64, u32)>>,
     /// Requests to join, by their device's key, that their person said weren't theirs, not shown again while it runs.
     refused: Mutex<std::collections::HashSet<String>>,
     /// Held while `network/forgotten` changes.
@@ -618,6 +621,7 @@ impl Node {
             shared: Mutex::new(Default::default()),
             unshared: Mutex::new(Vec::new()),
             put_first: Mutex::new(Default::default()),
+            hints: Mutex::new(HashMap::new()),
             refused: Mutex::default(),
             forgotten: Mutex::new(()),
             sessions: Default::default(),

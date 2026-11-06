@@ -311,17 +311,59 @@ impl Node {
 
     /// Writes to a database as `Db::write` does, passing over a step it meets under an epoch no entry made, as a read
     /// does (`judge_ahead`).
+    ///
+    /// The newest hint (`hint`), which only saves readers work, is moved on after the write returns (`hint_after`), not
+    /// before.
     pub(super) async fn write_in<R>(&self, scope: &Scope, db: &mut Db, bucket: &Copied, mut f: impl FnMut(&rusqlite::Connection) -> Result<R>) -> Result<R> {
+        db.leave_hint(true);
+        let mut out = None;
         for _ in 0..TRIES {
             match db.write(bucket, &mut f).await {
                 Err(err) => match err.downcast_ref::<crate::database::stored::Ahead>() {
                     Some(ahead) if !self.judge_ahead(scope, db.prefix(), ahead).await? => db.pass_over(ahead.at),
-                    _ => return Err(err),
+                    _ => {
+                        out = Some(Err(err));
+                        break;
+                    }
                 },
-                ok => return ok,
+                ok => {
+                    out = Some(ok);
+                    break;
+                }
             }
         }
-        bail!("{} has too much junk in it to write to", db.prefix())
+        db.leave_hint(false);
+        if let Some(hint) = db.take_hint() {
+            self.hint_after(bucket.clone(), hint);
+        }
+        out.unwrap_or_else(|| Err(anyhow!("{} has too much junk in it to write to", db.prefix())))
+    }
+
+    /// Moves a database's newest hint on to `hint` (its prefix, last step, newest copy and that copy's epoch) in the
+    /// background: one already waiting for its turn for the same database is only raised, so a burst of writes asks the
+    /// bucket about it once or twice. A hint that fails is the next write's to make.
+    fn hint_after(&self, bucket: Copied, (prefix, at, copy, epoch): (String, u64, u64, u32)) {
+        let waiting = {
+            let mut hints = self.0.hints.lock().unwrap();
+            hints.insert(prefix.clone(), (at, copy, epoch)).is_some()
+        };
+        if waiting {
+            return;
+        }
+        let node = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let Some((at, copy, epoch)) = node.0.hints.lock().unwrap().get(&prefix).copied() else { return };
+                if let Err(err) = crate::database::stored::hint(&bucket, &prefix, at, copy, epoch).await {
+                    tracing::debug!("{prefix}'s hint: {err:#}");
+                }
+                let mut hints = node.0.hints.lock().unwrap();
+                if hints.get(&prefix) == Some(&(at, copy, epoch)) {
+                    hints.remove(&prefix);
+                    return;
+                }
+            }
+        });
     }
 
     /// Brings a database to `schema` as `Db::migrate` does.

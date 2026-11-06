@@ -290,7 +290,21 @@ pub struct Db {
     signers: Option<std::sync::Arc<dyn Signers>>,
     /// What it found of the signatures beside the steps it applied.
     checks: Checks,
+    /// When (`Bucket::now`) the bucket last had no step after `at`, as far as this database knows: it read to its end,
+    /// or wrote it. 0 if never, or on a runtime with no clock.
+    current: u64,
+    /// Whether a write leaves moving the newest hint on to its caller (`take_hint`), who may do it after going on.
+    hint_later: bool,
+    /// The newest hint a write left for its caller: (last step, newest copy, its epoch).
+    hint_due: Option<(u64, u64, u32)>,
 }
+
+/// How long after the bucket had no step after a database's last one it can't have deleted the next: steps are deleted
+/// only once they've been there `KEEP_STEPS_FOR`, so a step missing now that wasn't a moment ago was never written.
+const CURRENT_FOR: u64 = DAY;
+/// How long after a database was read to the bucket's end a write needn't look for newer steps again first: one it
+/// missed is found when the write that was to follow it finds its position taken, and runs again.
+const WRITES_TRUST_FOR: u64 = 5_000;
 
 /// A copy a reader may start from (`copy_holds`): its position and epoch, its bytes, and what its step's signature says.
 struct Held {
@@ -338,6 +352,9 @@ impl Db {
             signed_from: None,
             signers,
             checks: Checks::default(),
+            current: 0,
+            hint_later: false,
+            hint_due: None,
         };
         // From the hint's copy, if it holds; or, once steps may be deleted and it names one, the newest copy that does;
         // or from the first step, where `gap` finds any deleted.
@@ -444,6 +461,7 @@ impl Db {
                 if self.gap(bucket).await? {
                     continue;
                 }
+                self.current = bucket.now();
                 break;
             };
             if self.junk.contains(&at) {
@@ -533,6 +551,10 @@ impl Db {
     /// which only reads) has only the newest hint's.
     async fn gap(&mut self, bucket: &impl Bucket) -> Result<bool> {
         let next = self.at + 1;
+        // Read to the end of what the bucket had a moment ago: a step that's missing now was never there to be deleted.
+        if self.current > 0 && bucket.now().saturating_sub(self.current) < CURRENT_FOR {
+            return Ok(false);
+        }
         if bucket.get(&tidied_name(&self.prefix)).await?.is_none() {
             return Ok(false);
         }
@@ -647,8 +669,13 @@ impl Db {
     /// it was given: when another device wrote that first, it catches up and runs `f` again, so `f` must do only
     /// database work.
     pub async fn write<R>(&mut self, bucket: &impl Bucket, mut f: impl FnMut(&Connection) -> Result<R>) -> Result<R> {
-        for _ in 0..TRIES {
-            self.catch_up(bucket).await?;
+        for tries in 0..TRIES {
+            // Not asking the bucket first, when what it was asked a moment ago is all there was: a step written since
+            // takes this one's position, which it finds out below, and then reads on.
+            let looked = self.current > 0 && bucket.now().saturating_sub(self.current) < WRITES_TRUST_FOR;
+            if tries > 0 || !looked {
+                self.catch_up(bucket).await?;
+            }
             let (epoch, key) = self.newest_key()?;
             let due = self.signer.is_some() && self.copy_due(self.at + 1);
             let from = self.signs_from(self.at + 1)?;
@@ -677,6 +704,7 @@ impl Db {
                 open.execute_batch("commit")?;
                 drop(open);
                 self.wrote(epoch, from);
+                self.current = bucket.now();
                 self.sign(bucket, &name, epoch, &key, &sealed, hash.as_deref(), from.is_none()).await;
                 self.written(bucket, &step).await;
                 return Ok(result);
@@ -794,7 +822,23 @@ impl Db {
                 }
             }
         }
+        if self.hint_later {
+            self.hint_due = Some((self.at, self.copy, self.copy_epoch));
+            return Ok(());
+        }
         hint(bucket, &self.prefix, self.at, self.copy, self.copy_epoch).await
+    }
+
+    /// Whether the writes that follow leave moving the newest hint on to their caller (`take_hint`), rather than do it
+    /// before they return.
+    pub fn leave_hint(&mut self, later: bool) {
+        self.hint_later = later;
+    }
+
+    /// The newest hint the writes since the last call left: its database's prefix, last step, newest copy and that
+    /// copy's epoch, for `hint`.
+    pub fn take_hint(&mut self) -> Option<(String, u64, u64, u32)> {
+        self.hint_due.take().map(|(at, copy, epoch)| (self.prefix.clone(), at, copy, epoch))
     }
 
     /// Applies a step: a changeset, or a schema change this database is due.
@@ -1788,6 +1832,31 @@ mod tests {
             bucket.objects.lock().unwrap().insert(copy_name("p", copy), held);
             bucket.objects.lock().unwrap().insert(newest_name("p"), serde_json::to_vec(&json!({ "at": 0, "copy": 0, "epoch": 0 })).unwrap());
             assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all);
+        });
+    }
+
+    /// A device that read a database to its end a moment ago writes without reading again first, and one that wrote
+    /// meanwhile loses nothing for it: its write finds its position taken, reads on and goes after.
+    #[test]
+    fn a_write_that_skips_looking_loses_no_one_else_s_write() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            bucket.clock.store(1_000, std::sync::atomic::Ordering::Relaxed);
+            let key = keys(&[(1, rand::random())]);
+            let mut a = switched(&bucket, &key).await.unwrap();
+            a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            let mut b = switched(&bucket, &key).await.unwrap();
+            b.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            note(&mut b, &bucket, "from b").await;
+            note(&mut a, &bucket, "from a").await;
+            note(&mut b, &bucket, "again from b").await;
+            for db in [&mut a, &mut b] {
+                db.catch_up(&bucket).await.unwrap();
+            }
+            let all = vec!["from b".to_string(), "from a".into(), "again from b".into()];
+            assert_eq!((notes(&a), notes(&b)), (all.clone(), all));
+            assert_eq!(a.at(), b.at());
         });
     }
 

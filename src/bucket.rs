@@ -22,6 +22,11 @@ pub trait Bucket {
     fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> impl Future<Output = Result<bool>>;
     /// Waits before asking again, on the clock of the runtime it's reached from.
     fn wait(&self, ms: u64) -> impl Future<Output = ()>;
+    /// Now, in ms since 1970, on the clock of the runtime it's reached from; 0 where it has none, and what a reader
+    /// stamped with it then never counts as recent.
+    fn now(&self) -> u64 {
+        0
+    }
     /// The objects directly in a folder, each its name in it and when the bucket wrote it (ms): for tidying, where a
     /// place can be listed.
     fn objects(&self, folder: &str) -> impl Future<Output = Result<Vec<(String, u64)>>> {
@@ -132,6 +137,8 @@ pub struct Memory {
     pub objects: std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
     /// Names another device takes just before this one writes them.
     pub taken: std::sync::Mutex<Vec<(String, Vec<u8>)>>,
+    /// What `now` says, in ms: 0, no clock, unless a test sets it.
+    pub clock: std::sync::atomic::AtomicU64,
 }
 
 #[cfg(test)]
@@ -153,6 +160,9 @@ impl Bucket for Memory {
         Ok(true)
     }
     async fn wait(&self, _: u64) {}
+    fn now(&self) -> u64 {
+        self.clock.load(std::sync::atomic::Ordering::Relaxed)
+    }
     /// Every object was written long ago.
     async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
         let within = format!("{folder}/");

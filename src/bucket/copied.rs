@@ -181,6 +181,10 @@ impl<B: Bucket> Bucket for Copied<B> {
         self.place.wait(ms).await
     }
 
+    fn now(&self) -> u64 {
+        self.place.now()
+    }
+
     async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
         let moved = self.moved.read().await;
         Bucket::objects(moved.as_ref().unwrap_or(&self.place), folder).await
