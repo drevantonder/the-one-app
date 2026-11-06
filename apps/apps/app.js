@@ -135,6 +135,22 @@ async function nodeFor(ctx, a, node) {
   return w.nodes[0];
 }
 
+/// The apps `a` uses, and those they use, that have a service.
+async function usedWithService(ctx, a) {
+  const out = [];
+  const seen = new Set([a.name]);
+  const next = [...(a.uses?.apps || [])];
+  while (next.length) {
+    const name = next.shift();
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const used = await withService(ctx, await find(ctx, name).catch(() => null) || { name });
+    next.push(...(used.uses?.apps || []));
+    if (hasService(used)) out.push(used);
+  }
+  return out;
+}
+
 async function find(ctx, name) {
   const all = await ctx.catalog();
   const app = all.find((a) => a.name === name);
@@ -220,7 +236,16 @@ export default {
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput, node: NODE } },
       async run(ctx, { app, scope, node }) {
         const a = await withService(ctx, await find(ctx, app));
-        ctx.install(app, placeOf(ctx, scope), true, await nodeFor(ctx, a, node));
+        const place = placeOf(ctx, scope);
+        // Each app it uses whose service runs nowhere for this place yet runs it on node too if it can, or on the one
+        // node it can; with a choice, its page asks where.
+        for (const used of await usedWithService(ctx, a)) {
+          const w = await where(ctx, used);
+          if (used.runs_on?.some((r) => r.scope === (place === "user" ? `user:${ctx.me.user}` : place))) continue;
+          const on = w.nodes.find((n) => node && n.toLowerCase() === String(node).toLowerCase()) || (w.nodes.length === 1 ? w.nodes[0] : undefined);
+          if (on) ctx.install(used.name, place, true, on);
+        }
+        ctx.install(app, place, true, await nodeFor(ctx, a, node));
         return `Added ${a.title || app}.`;
       },
     },

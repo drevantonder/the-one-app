@@ -64,15 +64,19 @@ impl Node {
     }
 
     /// Each service switched on here before a service named the scope of the app it runs for, switched on again naming
-    /// it, once: so removing the app, or moving its service, reaches it. It goes on running throughout.
-    pub async fn name_services_scopes(&self) {
+    /// it, once: so removing the app, or moving its service, reaches it. So is each this device carries (`carried`, a
+    /// Mac's helpers) with no record here yet, once its app is added: the app's added where this node runs it. Each
+    /// goes on running throughout.
+    pub async fn name_services_scopes(&self, carried: &[String]) {
         let Ok(caller) = self.own_caller() else { return };
         let named = self.with(|i| {
             let m = i.r.db();
-            Ok(m.switches()
-                .into_iter()
-                .filter(|((k, name), s)| *k == self.0.id && s.on && s.scope.is_none() && name != members::APPS_PART)
-                .filter_map(|((_, name), _)| added_scope(i, &caller.user, &name).map(|scope| (name, scope)))
+            let switches = m.switches();
+            let unnamed = switches.iter().filter(|((k, name), s)| *k == self.0.id && s.on && s.scope.is_none() && name != members::APPS_PART).map(|((_, name), _)| name.clone());
+            let unrecorded = carried.iter().filter(|name| !switches.contains_key(&(self.0.id, name.to_string()))).cloned();
+            Ok(unnamed
+                .chain(unrecorded)
+                .filter_map(|name| added_scope(i, &caller.user, &name).map(|scope| (name, scope)))
                 .filter_map(|(name, scope)| service_entry(m, &caller.user, &hex(&self.0.id), &name, true, Some(&scope)).ok())
                 .collect::<Vec<_>>())
         });

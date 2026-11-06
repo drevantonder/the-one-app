@@ -485,15 +485,17 @@ impl Node {
         if !self.runs_apps() {
             return Ok(Reply::Elsewhere(format!("{} doesn't run apps: its person switched that off", self.device_name())));
         }
+        // Before it's read every scope it holds (just taken over from an update's node, say), what's added where reads as
+        // nothing: another device runs it.
+        if !self.ready() {
+            return Ok(Reply::Elsewhere("it isn't ready yet".into()));
+        }
         let title = self.title(&req.app).await;
         let prepared = self.with(|i| prepare(self, i, req, me, &title));
         let (ctx, scopes) = match prepared? {
             Ok(p) => p,
             Err(why) => return Ok(Reply::Elsewhere(why)),
         };
-        if !self.ready() {
-            return Ok(Reply::Elsewhere("it isn't ready yet".into()));
-        }
         let deployed_here = self.0.bundles.lock().unwrap().get(&req.app).cloned();
         let latest = self.with(|i| Ok(i.r.db().app(&req.app).and_then(|a| a.bundle.clone())))?;
         if deployed_here.is_none() || deployed_here != latest {

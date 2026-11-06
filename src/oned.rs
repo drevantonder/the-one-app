@@ -291,7 +291,8 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
             keep_runtime(&node, &runtime, &mut apps, &mut apps_stops);
             if looked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 released = runtime.block_on(node.service_builds());
-                runtime.block_on(node.name_services_scopes());
+                let carried: Vec<String> = helpers().iter().filter_map(|p| p.file_name()?.to_string_lossy().strip_prefix(&format!("{CLI}-")).map(str::to_string)).collect();
+                runtime.block_on(node.name_services_scopes(&carried));
                 declared.clear();
                 looked = Some(Instant::now());
             }

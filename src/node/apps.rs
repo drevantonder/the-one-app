@@ -335,9 +335,10 @@ impl Node {
     }
 
     /// The entries that install (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing
-    /// also installs each app it uses, and each they use, that isn't installed there yet, and runs their services for
-    /// it on `node` (a device's name, or `cloudflare`), one node each: added again with another node, a service moves
-    /// there. Uninstalling stops its services there.
+    /// also installs each app it uses, and each they use, that isn't installed there yet, and runs its own services
+    /// for it on `node` (a device's name, or `cloudflare`), one node each: added again with another node, they move
+    /// there. The services of the apps it uses are theirs to place, each added with its own node (the App Store's
+    /// add does). Uninstalling stops its services there.
     pub(super) async fn install_entries(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool, node: Option<&str>) -> Result<Vec<(Scope, Content)>> {
         let mut wanted = vec![app.to_string()];
         let mut i = 0;
@@ -350,10 +351,7 @@ impl Node {
             }
             i += 1;
         }
-        let mut services = Vec::new();
-        for name in &wanted {
-            services.extend(self.uses(name).await.1);
-        }
+        let services = self.uses(app).await.1;
         self.with(|i| {
             let m = i.r.db();
             let named = scope_name(i, &scope.to_string());
