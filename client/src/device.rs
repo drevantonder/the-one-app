@@ -389,7 +389,7 @@ impl Device {
 
     /// Registers where a push service reaches it (`one::push::Address`) with the network's push Worker
     /// (`<address>/push/register`), signed with its key and naming its seal key, which each note pushed to it is sealed
-    /// to, and its person as its entries list it, so sign-in pushes it when another device of theirs asks to join. Once
+    /// to, and its person as who's who lists it, so sign-in pushes it when another device of theirs asks to join. Once
     /// it's out of the network, the Worker forgets it.
     pub async fn register_push(&self, address: &one::push::Address) -> Result<(), Error> {
         let user = self.keyring.user();
