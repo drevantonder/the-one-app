@@ -89,11 +89,11 @@ function SidebarProvider({
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen, setOpenMobile])
 
-  // Adds a keyboard shortcut to toggle the sidebar.
+  // Adds a keyboard shortcut to toggle the sidebar: shadcn's ⌘B, and ⌘\ as the Mac app's was.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
-        event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
+        (event.key === SIDEBAR_KEYBOARD_SHORTCUT || event.key === "\\") &&
         (event.metaKey || event.ctrlKey)
       ) {
         event.preventDefault()
