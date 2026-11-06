@@ -27,7 +27,14 @@ def pct(xs, p):
 
 
 def one(*args):
-    return subprocess.run(["one", *args], capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout
+    """A one command's output. A node just starting can't answer yet, so it's asked again for a few minutes;
+    then the report fails rather than counting nothing as zero."""
+    for wait in (0, 30, 60, 120):
+        time.sleep(wait)
+        r = subprocess.run(["one", *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if r.returncode == 0:
+            return r.stdout
+    sys.exit(f"one {' '.join(args)} failed: {r.stderr.strip()[:300]}")
 
 
 # What a tool call was for, as time is split.
