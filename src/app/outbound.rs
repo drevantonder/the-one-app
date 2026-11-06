@@ -50,12 +50,8 @@ async fn out(node: Node, req: Request) -> Result<Response> {
         return node.internal(&header("x-one-call").unwrap_or_default(), parts.method.as_str(), parts.uri.path(), body.to_vec()).await;
     }
     let scheme = header("x-forwarded-proto").filter(|p| p == "https").unwrap_or_else(|| "http".into());
-    let port = authority.rsplit_once(':').and_then(|(_, p)| p.parse().ok()).unwrap_or(if scheme == "https" { 443 } else { 80 });
     if node.names_app(&host) {
         return Ok((StatusCode::FORBIDDEN, format!("{host} is an app's name, not a site's: an app reaches its own service with ctx.services, and other apps with ctx.apps")).into_response());
-    }
-    if own_port(&node, &host, port) {
-        return Ok((StatusCode::FORBIDDEN, "apps can't reach the node's own ports").into_response());
     }
     let url = format!("{scheme}://{authority}{}", parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
     let body = axum::body::to_bytes(body, LIMIT).await?.to_vec();
@@ -91,7 +87,8 @@ async fn out(node: Node, req: Request) -> Result<Response> {
         Err(e) => e.into_bytes(),
     };
     let method = parts.method.as_str().to_string();
-    let (status, headers, bytes) = tokio::task::spawn_blocking(move || send(&method, &url, headers, body)).await??;
+    let ports = node.own_ports();
+    let (status, headers, bytes) = tokio::task::spawn_blocking(move || send(&method, &url, headers, body, ports)).await??;
     let mut out = Response::builder().status(status);
     for (name, value) in headers {
         out = out.header(name, value);
@@ -99,17 +96,12 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     Ok(out.body(Body::from(bytes))?)
 }
 
-/// Whether `host:port` is one of the node's own ports on this machine, which would let a request act as someone else
-/// (the local API, workerd) or loop back here.
-pub fn own_port(node: &Node, host: &str, port: u16) -> bool {
-    let loopback = host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified());
-    loopback && node.own_ports().contains(&port)
-}
-
-/// Makes a request, filled in already: → its status, headers and body.
-pub fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>) -> Result<(u16, Vec<(String, Vec<u8>)>, Vec<u8>)> {
+/// Makes a request, filled in already, to anywhere but this machine's `ports` (the node's own, `Node::own_ports`): →
+/// its status, headers and body.
+pub fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>, ports: Vec<u16>) -> Result<(u16, Vec<(String, Vec<u8>)>, Vec<u8>)> {
     // Redirects go back to the app, whose next request comes here again: a secret never follows one to another host.
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
+    let config = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30)));
+    let agent = crate::reach::agent(config, crate::reach::not_ports(ports));
     let mut builder = ureq::http::Request::builder().method(method).uri(url);
     for (name, value) in headers {
         builder = builder.header(name, value);

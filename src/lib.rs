@@ -70,6 +70,8 @@ pub mod logs;
 #[cfg(feature = "node")]
 pub mod logos;
 #[cfg(feature = "node")]
+pub mod reach;
+#[cfg(feature = "node")]
 pub mod node;
 #[cfg(feature = "node")]
 pub mod release;

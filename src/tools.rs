@@ -872,44 +872,11 @@ fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
 /// machine's addresses (its local API, which takes this device for its own programs), its network's and its tailnet's
 /// are its person's, not theirs.
 fn fetch_file(node: &Client, url: &str) -> Result<ureq::http::Response<ureq::Body>> {
-    if !node.elsewhere() {
-        return crate::api::agent().get(url).call().with_context(|| format!("couldn't get {url}"));
-    }
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).build().into();
-    let mut at = url.to_string();
-    for _ in 0..10 {
-        let uri: ureq::http::Uri = at.parse().with_context(|| format!("{at} isn't a URL"))?;
-        let host = uri.host().with_context(|| format!("{at} has no host"))?.trim_matches(['[', ']']);
-        let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
-        let addrs: Vec<_> = std::net::ToSocketAddrs::to_socket_addrs(&(host, port)).with_context(|| format!("couldn't find {host}"))?.collect();
-        ensure!(!addrs.is_empty() && addrs.iter().all(|a| on_the_internet(a.ip())), "{at} isn't on the internet: a file's url is public");
-        let resp = agent.get(&at).call().with_context(|| format!("couldn't get {at}"))?;
-        if !resp.status().is_redirection() {
-            return Ok(resp);
-        }
-        let to = resp.headers().get("location").and_then(|l| l.to_str().ok()).with_context(|| format!("{at} redirects nowhere"))?;
-        at = match to.starts_with('/') {
-            true => format!("{}://{}{to}", uri.scheme_str().unwrap_or("http"), uri.authority().map(|a| a.as_str()).unwrap_or(host)),
-            false => to.to_string(),
-        };
-        ensure!(at.starts_with("https://") || at.starts_with("http://"), "{url} redirects to {at}, which isn't http or https");
-    }
-    bail!("{url} redirects too many times")
-}
-
-/// Whether an address is on the internet: not this machine's, a private network's, a tailnet's (100.64.0.0/10,
-/// fd7a:115c:a1e0::/48) or a link's.
-fn on_the_internet(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
-            !(v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast() || v4.is_multicast() || a == 0 || (a == 100 && (64..128).contains(&b)))
-        }
-        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-            Some(v4) => on_the_internet(v4.into()),
-            None => !(v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() || v6.is_unique_local() || v6.is_unicast_link_local()),
-        },
-    }
+    let agent = match node.elsewhere() {
+        true => crate::reach::agent(ureq::Agent::config_builder().http_status_as_error(false), crate::reach::public),
+        false => crate::api::agent(),
+    };
+    agent.get(url).call().with_context(|| format!("couldn't get {url}"))
 }
 
 /// What an MCP result gives an agent to read, at most: about 10,000 tokens, below where harnesses warn.
