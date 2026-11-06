@@ -572,20 +572,17 @@ pub struct Applied {
     pub db: Connection,
 }
 
-/// The kinds of step applied by their rules as rows (`rules`): the rest are still by `members`' rules, until each moves.
-const BY_RULES: &[&str] = &["install", "uninstall", "schedule", "keep", "forget", "vault-request", "arrange", DEFAULTS, "device", "refuse", "forget-sign-in", "remove", "recovery", "runs", "service", "role", "group", "invite", "accept", "member", "rename", "setting"];
-
 /// Applies `step` to `db`, `scope`'s database as the steps before it left it, with `global`'s as it is now (for a
 /// scope other than `global`, whose permissions are `global`'s): → the database it leaves, or why it doesn't count.
 pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
-    let by_rules = step.content.app != members::APP || BY_RULES.contains(&step.content.kind.as_str());
-    let applied = if by_rules { apply_rules(db, global, scope, step) } else { apply_members(db, global, scope, step) };
+    let applied = apply_rules(db, global, scope, step);
     #[cfg(test)]
     oracle::same_as_members(db, global, scope, step);
     applied
 }
 
-/// As `apply`, by `members`' rules, for the kinds not yet applied by their rules as rows (`BY_RULES`).
+/// As `apply`, by `members`' rules, which the rules as rows are held to.
+#[cfg(test)]
 fn apply_members(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
     ensure!(step.scope() == *scope, "a step of another scope");
     let who = global.unwrap_or(db);
@@ -756,6 +753,7 @@ fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<
 
 /// What only steps say, which building from replay's members leaves out, copied from the database before: what they
 /// named, and the release's types, roles and rules the steps said (`DEFAULTS`), not this reader's own release's.
+#[cfg(test)]
 fn carry(from: &Connection, to: &Connection) -> Result<()> {
     to.pragma_update(None, "user_version", version(from)?)?;
     to.execute_batch(&format!("DELETE FROM types; DELETE FROM roles WHERE builtin = 1; DELETE FROM relations WHERE {RULE};"))?;
@@ -803,6 +801,7 @@ fn named(db: &Connection, step: &Entry) -> Result<()> {
 }
 
 /// A scope's own state after `step`, a node entry of its own: replay's rules for it, and what it does.
+#[cfg(test)]
 fn apply_own(m: &Members, mut state: ScopeState, step: &Entry) -> Result<ScopeState> {
     members::apply_in_scope(m, &mut state, step)?;
     Ok(state)
