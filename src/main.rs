@@ -1,10 +1,9 @@
-use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use one::config::{CLI, NAME, YOURS};
 use one::cli::{Command, Given};
 use one::skills::Mode;
-use one::{api, node::Node};
+use one::api;
 use serde_json::{Map, Value, json};
 
 mod client_device;
@@ -70,14 +69,14 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // Run as oned: this device, always on; or one of its parts.
     if one::oned::invoked() {
-        if let Err(err) = oned(&args) {
+        if let Err(err) = one::oned::run(&args) {
             eprintln!("{}: {err:#}", one::oned::name());
             std::process::exit(1);
         }
         return;
     }
     // Run by git, for a repo's address.
-    if std::env::args_os().next().is_some_and(|me| std::path::Path::new(&me).file_name().is_some_and(|n| *n == *git_remote::helper())) {
+    if std::env::args_os().next().is_some_and(|me| std::path::Path::new(&me).file_name().is_some_and(|n| *n == *one::git_wire::helper())) {
         let ran = git_remote::run(&args);
         client_device::end();
         match ran {
@@ -157,7 +156,7 @@ fn network() -> Command {
                     let address = one::sign_in::kept().map(|k| k.address).filter(|_| !client_device::node_here());
                     let device = client_device::sign_out();
                     if let Some(address) = address {
-                        git_remote::unwire(&address);
+                        one::git_wire::unwire(&address);
                     }
                     match one::sign_in::sign_out()? || device {
                         true if device => println!("Signed out: this computer is no longer one of your devices, and {CLI} here no longer acts as you."),
@@ -808,7 +807,7 @@ fn sign_in(node: &Client, flags: &Map<String, Value>) -> Result<()> {
         println!("It's open in your browser here.");
     }
     one::sign_in::finish(started)?;
-    if let Err(err) = git_remote::wire(&address) {
+    if let Err(err) = one::git_wire::wire(&address) {
         eprintln!("{err:#}");
     }
     if client_device::node_here() {
@@ -935,220 +934,4 @@ fn ago(ms: u64) -> String {
         3600..86400 => format!("{}h ago", s / 3600),
         _ => format!("{}d ago", s / 86400),
     }
-}
-
-/// Puts the usual tool folders on PATH: launchd starts the Mac's node with almost none, and the shell, agents and
-/// services it starts need Homebrew's and the user's own tools.
-fn usual_path() {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let mut path: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    let usual = [
-        home.join(".local/bin"),
-        home.join(".cargo/bin"),
-        home.join(".bun/bin"),
-        "/opt/homebrew/bin".into(),
-        "/opt/homebrew/sbin".into(),
-        "/usr/local/bin".into(),
-        "/usr/local/sbin".into(),
-        "/usr/bin".into(),
-        "/bin".into(),
-        "/usr/sbin".into(),
-        "/sbin".into(),
-    ];
-    // Before what it has, as a login shell puts them (Homebrew's git before the system's).
-    let missing: Vec<PathBuf> = usual.into_iter().filter(|d| d.is_dir() && !path.contains(d)).collect();
-    path.splice(0..0, missing);
-    if let Ok(joined) = std::env::join_paths(path) {
-        // Before the runtime starts any thread.
-        unsafe { std::env::set_var("PATH", joined) };
-    }
-}
-
-/// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`).
-fn oned(args: &[String]) -> Result<()> {
-    let named: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    match named.as_slice() {
-        #[cfg(target_os = "linux")]
-        [] if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--sandboxed=")) => one::services::sandbox::launch(std::path::Path::new(dir)),
-        [] => {
-            usual_path();
-            serve(args)
-        }
-        [name] if *name == one::database::scopes::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::app::runtime::run(std::path::Path::new(dir)),
-        [name] => one::services::endpoint::run(name),
-        _ => bail!("{} runs this device, or with a service's name, that service, as its oned starts it", one::oned::name()),
-    }
-}
-
-#[tokio::main]
-async fn serve(args: &[String]) -> Result<()> {
-    // What it says is kept too, for `one logs`.
-    one::logs::keep(one::logs::NODE);
-    tracing_subscriber::fmt()
-        .with_writer(one::logs::Tee)
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
-        .init();
-    // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
-    // ends, which a stuck request would hold up.
-    let stop = stopped()?;
-    tokio::spawn(async move {
-        stop.await;
-        one::app::runtime::stop_all();
-        std::process::exit(0)
-    });
-    let dir = one::home();
-    // A new network's first start makes its home.
-    std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
-    // Taking over from the node before, an update's, with its socket: it answers until this one is warm.
-    let handed = one::handoff::handed(args)?;
-    let listener = match &handed {
-        Some(h) => tokio::net::TcpListener::from_std(h.listener.try_clone()?)?,
-        None => listen(&dir).await?,
-    };
-    // Its app runtime is a program of its own, which oned starts as its parts.
-    one::app::runtime::APART.store(true, std::sync::atomic::Ordering::SeqCst);
-    let node = Node::start(&dir).await?;
-    // Its parts that run as processes of their own, as its entries switch them.
-    one::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
-    // Git here reaches the network's repos at their address, as on every computer of its person's.
-    let mode = one::mode::here();
-    if matches!(mode, one::mode::Mode::Own) && let Ok(address) = node.address() {
-        std::thread::spawn(move || {
-            if let Err(err) = git_remote::wire(&address) {
-                tracing::warn!("{err:#}");
-            }
-        });
-    }
-    if handed.is_some() {
-        node.warm().await;
-    }
-    std::fs::write(dir.join("pid"), std::process::id().to_string())?;
-    tracing::info!("{NAME} node {} serving {} from {}", &one::keys::hex(&node.id())[..8], api::addr(), dir.display());
-    tokio::spawn(api::serve_guide(node.clone()));
-    let mut routes = api::guarded(api::routes(), node.clone());
-    if let one::mode::Mode::Throwaway(network) = mode {
-        routes = network.serve_beside(routes);
-    }
-    // Asked to restart (an update, or SIGHUP): the program now at this one's path takes over, and this one stops
-    // taking connections, finishes what it's answering, and exits.
-    let fd = raw_fd(&listener);
-    let (drained, drain) = tokio::sync::oneshot::channel::<()>();
-    let restarting = {
-        let (node, args) = (node.clone(), args.to_vec());
-        async move {
-            loop {
-                one::handoff::wanted().await;
-                tracing::info!("handing over to {}", std::env::current_exe().map(|e| e.display().to_string().trim_end_matches(" (deleted)").to_string()).unwrap_or_default());
-                node.handing_over(true).await;
-                match one::handoff::hand_over(fd, &args).await {
-                    Ok(()) => return node.handed_over(),
-                    Err(err) if one::handoff::supervised() => {
-                        // Its supervisor starts the new build, as before nodes handed over.
-                        tracing::warn!("couldn't hand over ({err:#}): exiting, to be started again");
-                        std::process::exit(0);
-                    }
-                    Err(err) => {
-                        tracing::warn!("couldn't hand over, so this build keeps running: {err:#}");
-                        node.handing_over(false).await;
-                    }
-                }
-            }
-        }
-    };
-    #[cfg(unix)]
-    tokio::spawn(async {
-        let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else { return };
-        while hup.recv().await.is_some() {
-            let _ = one::handoff::restart();
-        }
-    });
-    tokio::spawn(async move {
-        restarting.await;
-        let _ = drained.send(());
-    });
-    let http = api::serve_until(listener, routes, async {
-        let _ = drain.await;
-    });
-    one::handoff::able();
-    match handed {
-        Some(h) => h.ready(),
-        None => one::handoff::notify("READY=1"),
-    }
-    tracing::info!("{NAME} node {} answering", &one::keys::hex(&node.id())[..8]);
-    one::handoff::watch();
-    let served = http.await;
-    one::app::runtime::stop_all();
-    if one::handoff::stopped() {
-        std::process::exit(0);
-    }
-    Ok(served?)
-}
-
-#[cfg(unix)]
-fn raw_fd(listener: &tokio::net::TcpListener) -> i32 {
-    std::os::fd::AsRawFd::as_raw_fd(listener)
-}
-
-#[cfg(not(unix))]
-fn raw_fd(_listener: &tokio::net::TcpListener) -> i32 {
-    -1
-}
-
-/// When the node is asked to stop: Ctrl-C, or SIGTERM from its supervisor, an update or a node replacing it, each
-/// listened for from when it's called.
-fn stopped() -> Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        let (mut term, mut interrupt) = (signal(SignalKind::terminate())?, signal(SignalKind::interrupt())?);
-        Ok(Box::pin(async move {
-            tokio::select! {
-                _ = term.recv() => {}
-                _ = interrupt.recv() => {}
-            }
-        }))
-    }
-    #[cfg(not(unix))]
-    Ok(Box::pin(async {
-        let _ = tokio::signal::ctrl_c().await;
-    }))
-}
-
-/// The node's address, listened on. A node of this network already there (one left running outside launchd or systemd
-/// by an earlier build, or started by hand) is stopped first: the one starting is the one to keep, so its supervisor's
-/// node never waits on a stray, and an update's node replaces whatever ran before it.
-async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
-    let bind = || tokio::net::TcpListener::bind(api::addr());
-    match bind().await {
-        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {}
-        bound => return bound.with_context(|| format!("listen on {}", api::addr())),
-    }
-    // Who listens there: the pid this home's node wrote.
-    let mut pids: Vec<i32> = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse().ok()).into_iter().collect();
-    // Only a process of this program, never whatever else took the port.
-    let me = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
-    let ours = |pid: i32| {
-        let out = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output().ok();
-        out.is_some_and(|o| std::path::Path::new(String::from_utf8_lossy(&o.stdout).trim()).file_name().is_some_and(|n| n.to_string_lossy() == me))
-    };
-    pids.sort();
-    pids.dedup();
-    pids.retain(|&pid| pid as u32 != std::process::id() && ours(pid));
-    anyhow::ensure!(!pids.is_empty(), "{} is taken, and not by {NAME}'s node", api::addr());
-    for &pid in &pids {
-        tracing::warn!("a node of this network was already running (pid {pid}): stopping it, to run this one");
-        unsafe { libc::kill(pid, libc::SIGTERM) };
-    }
-    for tries in 0..100 {
-        if let Ok(listener) = bind().await {
-            return Ok(listener);
-        }
-        if tries == 50 {
-            for &pid in &pids {
-                unsafe { libc::kill(pid, libc::SIGKILL) };
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    bind().await.with_context(|| format!("listen on {}: the node there didn't stop", api::addr()))
 }

@@ -149,17 +149,16 @@ fn git(dir: &Path, args: &[String]) -> Result<()> {
     let address = crate::node().get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
-    let link = bin.join(crate::git_remote::helper());
-    let _ = std::fs::remove_file(&link);
-    std::os::unix::fs::symlink(std::env::current_exe()?.canonicalize()?, &link)?;
+    one::git_wire::link_in(&bin)?;
     let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())))?;
     let config: usize = std::env::var("GIT_CONFIG_COUNT").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
+    let (key, value) = one::git_wire::instead_of(&address);
     let status = std::process::Command::new("git")
         .args(args)
         .env("PATH", path)
         .env("GIT_CONFIG_COUNT", (config + 1).to_string())
-        .env(format!("GIT_CONFIG_KEY_{config}"), format!("url.{CLI}::{address}/repos/.insteadOf"))
-        .env(format!("GIT_CONFIG_VALUE_{config}"), format!("{address}/repos/"))
+        .env(format!("GIT_CONFIG_KEY_{config}"), key)
+        .env(format!("GIT_CONFIG_VALUE_{config}"), value)
         .status()
         .context("couldn't run git")?;
     if !status.success() {

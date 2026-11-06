@@ -60,6 +60,8 @@ pub mod mcp;
 pub mod tools;
 pub mod app;
 #[cfg(feature = "node")]
+pub mod git_wire;
+#[cfg(feature = "node")]
 pub mod handoff;
 #[cfg(feature = "node")]
 pub mod load;

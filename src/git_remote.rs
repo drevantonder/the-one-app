@@ -13,11 +13,7 @@ use axum::body::{Body, Bytes};
 use axum::http::{Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use one::config::{CLI, NAME, YOURS};
-
-/// The name git runs this program by for `<CLI>::` addresses.
-pub fn helper() -> String {
-    format!("git-remote-{CLI}")
-}
+use one::git_wire::helper;
 
 /// Run as git's remote helper, `git-remote-<CLI> <remote> <url>`: → the exit code of git's HTTP transport.
 pub fn run(args: &[String]) -> Result<i32> {
@@ -177,46 +173,4 @@ impl Read for Fed {
         buf[..n].copy_from_slice(&self.part.split_to(n));
         Ok(n)
     }
-}
-
-/// Tells git on this machine to reach `address`'s repos through this program, and makes sure git finds it as
-/// `git-remote-<CLI>`, linked beside it.
-pub fn wire(address: &str) -> Result<()> {
-    let address = address.trim_end_matches('/');
-    // A Mac's git, before its developer tools are installed, only offers to install them.
-    let tools = !cfg!(target_os = "macos") || std::process::Command::new("xcode-select").arg("-p").output().is_ok_and(|o| o.status.success());
-    if !tools || !git(&["--version"]) {
-        return Ok(());
-    }
-    if !on_path(&helper()) {
-        let me = std::env::current_exe()?.canonicalize()?;
-        // Beside the `<CLI>` people run (a link to it, on a Mac), else beside this program.
-        let dir = std::env::var_os("PATH")
-            .map(|p| std::env::split_paths(&p).find(|d| d.join(CLI).is_file()).unwrap_or_default())
-            .filter(|d| !d.as_os_str().is_empty())
-            .or_else(|| me.parent().map(|p| p.to_path_buf()))
-            .context("this program is in no folder")?;
-        let link = dir.join(helper());
-        let _ = std::fs::remove_file(&link);
-        std::os::unix::fs::symlink(&me, &link).with_context(|| format!("git reaches your repos through {}, which couldn't be made: ln -s {} {}", link.display(), me.display(), link.display()))?;
-    }
-    let base = format!("url.{CLI}::{address}/repos/.insteadOf");
-    if !git(&["config", "--global", "--replace-all", &base, &format!("{address}/repos/")]) {
-        bail!("git couldn't be told where your repos are: git config --global {base} {address}/repos/");
-    }
-    Ok(())
-}
-
-/// Git on this machine no longer reaches `address`'s repos through this program.
-pub fn unwire(address: &str) {
-    let address = address.trim_end_matches('/');
-    git(&["config", "--global", "--unset-all", &format!("url.{CLI}::{address}/repos/.insteadOf")]);
-}
-
-fn git(args: &[&str]) -> bool {
-    std::process::Command::new("git").args(args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
-}
-
-fn on_path(name: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
 }
