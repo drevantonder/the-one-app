@@ -591,6 +591,15 @@ impl Node {
         Ok(conn)
     }
 
+    /// How long a message takes there and back on the connection open to `to`, as iroh measures it on the path it sends
+    /// on. None if there's no connection open.
+    pub(super) fn round_trip(&self, to: &Key) -> Option<Duration> {
+        let slot = self.0.net.conns.lock().unwrap().get(to)?.clone();
+        let held = slot.try_lock().ok()?;
+        let conn = held.as_ref().filter(|c| c.close_reason().is_none())?;
+        conn.paths().iter().find(|p| p.is_selected()).map(|p| p.rtt())
+    }
+
     /// Forgets the connection to `to`, so the next message opens a new one.
     fn drop_conn(&self, to: &Key) {
         self.0.net.conns.lock().unwrap().remove(to);

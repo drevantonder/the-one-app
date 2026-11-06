@@ -295,8 +295,8 @@ impl Node {
         }
     }
 
-    /// Says hello to every other device: as now and then, and when this device's services change. How long each takes
-    /// to answer is how far it is.
+    /// Says hello to every other device: as now and then, and when this device's services change. How far each is, is
+    /// the round trip iroh measures to it.
     pub(super) fn say_hello(&self) {
         let Ok((devices, me, services, parts)) = self.with(|i| {
             let devices: Vec<Key> = i.r.db().computes().into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect();
@@ -309,9 +309,10 @@ impl Node {
         for device in devices {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());
             tokio::spawn(async move {
-                let asked = Instant::now();
-                if node.ask_device(device, &req, &me).await.is_ok() {
-                    let _ = node.with(|i| Ok(i.far.insert(device, asked.elapsed())));
+                if node.ask_device(device, &req, &me).await.is_ok()
+                    && let Some(far) = node.round_trip(&device)
+                {
+                    let _ = node.with(|i| Ok(i.far.insert(device, far)));
                 }
             });
         }
@@ -337,7 +338,6 @@ impl Node {
     pub(super) async fn hello_service_now(&self, key: &Key) -> bool {
         let key = *key;
         let Some(name) = self.with(|i| Ok(i.r.db().machine_ever(&key).and_then(|m| m.service.clone()))).ok().flatten() else { return false };
-        let asked = Instant::now();
         let offers = match self.hello_service(key).await {
             Ok(Some(offers)) => offers,
             Ok(None) => {
@@ -354,8 +354,11 @@ impl Node {
         let users: Vec<String> = self.with(|i| { let m = i.r.db(); Ok(m.users().into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&key))).collect()) }).unwrap_or_default();
         describe["name"] = json!(name);
         let services: Vec<Service> = vec![(name.clone(), users, describe)];
+        let far = self.round_trip(&key);
         let changed = self.with(|i| {
-            i.far.insert(key, asked.elapsed());
+            if let Some(far) = far {
+                i.far.insert(key, far);
+            }
             let before = i.peers.insert(key, Peer { services: services.clone(), load: None, parts: None, seen: Instant::now() });
             Ok(before.is_none_or(|p| p.services != services || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
         });
