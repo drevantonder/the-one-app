@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use crate::config::{CLI, TARGET};
 use crate::release::Version;
 use serde_json::{Value, json};
@@ -310,4 +310,60 @@ pub fn built_here(node: &crate::api::Client, files: &serde_json::Map<String, Val
     })();
     let _ = std::fs::remove_dir_all(&dir);
     built
+}
+
+/// The Bun every deploy builds with, and each platform's npm package of it with its sha512.
+pub(crate) const BUN: &str = "1.4.4";
+const PACKAGES: &[(&str, &str, &str)] = &[
+    ("x86_64-unknown-linux-gnu", "linux-x64", "CHbbkmHVM28T1GFq+6GL4Ao4ujwwYwj1CxFFwEFzLanPfNsId9AhbIP0Q4reWuWBkGimUkoQygrK7Rgjtj3vog=="),
+    ("aarch64-unknown-linux-gnu", "linux-aarch64", "ZTVtpf9zmHSBVPX1sBwe5agGb/rN34yPGg/Hby8e2Ax2uCUA2URZKlZH7qLntK7qaFJCMXh9v0GWNYN2zINz1w=="),
+    ("aarch64-apple-darwin", "darwin-aarch64", "zW/hxwc8sJAILGwB5eTC4i48ouGXf0V4lrxmEOk3JIE6JkYVW1TZh1E2pIempqsezgW1sckTIIDudFON8bJ2Mw=="),
+    ("x86_64-apple-darwin", "darwin-x64", "oKGcxLsvh4oHjAo28nPm8c/xN0o/OmGyj1IHYc94vprkWsW2hNg2keEZt5f40cI5Hvu4jDlSRTR0UNpv1UIAxw=="),
+];
+
+/// The pinned Bun, downloaded and checked the first time.
+pub fn bun() -> Result<PathBuf> {
+    let (_, package, integrity) =
+        PACKAGES.iter().find(|(target, _, _)| *target == crate::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", crate::config::TARGET))?;
+    let url = format!("https://registry.npmjs.org/@oven/bun-{package}/-/bun-{package}-{BUN}.tgz");
+    crate::app::runtime::pinned(&format!("bun-{BUN}"), "bun", &url, integrity)
+}
+
+/// A browser with no window on this machine, for drawing screens (one throwaway's web client, the tests), started as lean as
+/// it still works: CHROME's, Playwright's headless shell (a third of Chrome's memory), the usual Chromes, or
+/// Playwright's Chromium. Each app's frame keeps a process of its own, as in people's browsers, which the headless shell
+/// doesn't do by itself and one throwaway's script needs to reach the frames.
+pub fn chrome() -> Option<std::process::Command> {
+    let playwright = |prefix: &str, names: &[&str]| -> Option<PathBuf> {
+        let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/ms-playwright");
+        let mut found: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(prefix))).collect();
+        found.sort();
+        found.into_iter().rev().flat_map(|p| names.iter().map(move |n| p.join(n))).find(|p| p.is_file())
+    };
+    let named = || {
+        ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]
+            .iter()
+            .find_map(|name| std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file()))
+    };
+    let mac = PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+    let path = std::env::var_os("CHROME")
+        .map(PathBuf::from)
+        .or_else(|| playwright("chromium_headless_shell-", &["chrome-headless-shell-linux64/chrome-headless-shell", "chrome-linux/headless_shell"]))
+        .or_else(named)
+        .or_else(|| mac.is_file().then_some(mac))
+        .or_else(|| playwright("chromium-", &["chrome-linux64/chrome", "chrome-linux/chrome"]))?;
+    let mut command = std::process::Command::new(path);
+    command.args([
+        "--headless=new",
+        "--site-per-process",
+        "--disable-gpu",
+        "--disable-features=SpareRendererForSitePerProcess,BackForwardCache",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-breakpad",
+        "--mute-audio",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]);
+    Some(command)
 }

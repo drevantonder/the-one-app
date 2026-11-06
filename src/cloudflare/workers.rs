@@ -763,7 +763,7 @@ pub fn precompressed(web: &[(String, Vec<u8>)]) -> Result<Vec<(String, Vec<u8>)>
                 std::fs::write(dir.join("in").join(i.to_string()), &wanted[i].1)?;
             }
             std::fs::write(dir.join("brotli.mjs"), BROTLI)?;
-            let out = std::process::Command::new(crate::app::deploy::bun()?).args(["brotli.mjs"]).current_dir(&dir).env("DO_NOT_TRACK", "1").output()?;
+            let out = std::process::Command::new(crate::build::bun()?).args(["brotli.mjs"]).current_dir(&dir).env("DO_NOT_TRACK", "1").output()?;
             ensure!(out.status.success(), "couldn't compress the files the address serves:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
             for &i in &missing {
                 let part = names[i].with_extension(format!("{}.part", rand::random::<u64>()));
@@ -811,7 +811,7 @@ pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
             std::fs::create_dir_all(file.parent().unwrap())?;
             std::fs::write(file, text)?;
         }
-        let out = std::process::Command::new(crate::app::deploy::bun()?)
+        let out = std::process::Command::new(crate::build::bun()?)
             .args(["build", "--no-bundle", "--outdir=out"])
             .args(scripts.iter().map(|(path, _)| path))
             .current_dir(&dir)
@@ -868,7 +868,7 @@ pub fn module_from(mut files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec
 
 /// Builds `entry` in the Workers' folder `dir` into one ES module.
 pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
-    let bun = crate::app::deploy::bun()?;
+    let bun = crate::build::bun()?;
     let cache = bun.parent().unwrap().join("cache");
     let run = |args: &[&str]| -> Result<()> {
         let out = std::process::Command::new(&bun).args(args).current_dir(dir).env("BUN_INSTALL_CACHE_DIR", &cache).env("DO_NOT_TRACK", "1").output()?;

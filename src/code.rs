@@ -299,7 +299,7 @@ const RUNNER: &[(&str, &str)] = &[("package.json", include_str!("codemode/packag
 /// The folder the runner runs in, its packages installed (once per version of its files) with the pinned Bun.
 fn runner() -> Result<(PathBuf, PathBuf)> {
     use sha2::Digest;
-    let bun = crate::app::deploy::bun()?;
+    let bun = crate::build::bun()?;
     let mut hash = sha2::Sha256::new();
     for (path, text) in RUNNER {
         hash.update(format!("{path}\0{}\0{text}", text.len()));
