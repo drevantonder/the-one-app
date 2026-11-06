@@ -78,7 +78,6 @@ impl Schedule {
         v
     }
 
-    /// The next slot after `now`.
     pub fn next(&self, now: u64) -> Option<u64> {
         match &self.when {
             When::Every(ms) => Some((now / ms + 1) * ms),
@@ -86,7 +85,6 @@ impl Schedule {
         }
     }
 
-    /// The time of day's next occurrence after `now`.
     fn next_at(&self, now: u64) -> Option<u64> {
         let When::At { hour, minute, tz, days } = &self.when else { return None };
         let tz = jiff::tz::TimeZone::get(tz).ok()?;
@@ -109,7 +107,6 @@ impl Schedule {
     }
 }
 
-/// When a schedule's definition (`spec`) runs, for people.
 pub fn say(spec: &Value) -> String {
     if let Some(every) = spec["every"].as_str() {
         let ms = duration(every).unwrap_or(0);

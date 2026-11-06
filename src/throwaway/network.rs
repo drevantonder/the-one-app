@@ -81,7 +81,6 @@ pub(crate) fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
     sin.sin_addr = libc::in_addr { s_addr: u32::from_ne_bytes(addr.ip().octets()) };
     let bound = unsafe { libc::bind(fd, (&sin as *const libc::sockaddr_in).cast(), std::mem::size_of::<libc::sockaddr_in>() as _) };
     anyhow::ensure!(bound == 0, "{addr} is taken: {}", std::io::Error::last_os_error());
-    // With port 0 the system picked one: which.
     let mut got: libc::sockaddr_in = unsafe { std::mem::zeroed() };
     let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
     let named = unsafe { libc::getsockname(fd, (&mut got as *mut libc::sockaddr_in).cast(), &mut len) };
@@ -89,7 +88,6 @@ pub(crate) fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
     Ok((held, format!("{}:{}", addr.ip(), u16::from_be(got.sin_port))))
 }
 
-/// A new throwaway network, and its Workers.
 pub(crate) fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new throwaway network for this checkout…");
     stop(dir, true)?;

@@ -41,7 +41,6 @@ pub fn exit_code(err: &anyhow::Error) -> i32 {
     }
 }
 
-/// `err`, as what was typed being wrong.
 fn typed(err: anyhow::Error) -> anyhow::Error {
     match err.downcast::<Failed>() {
         Ok(f) => f.into(),
@@ -287,9 +286,6 @@ fn places(tool: &Value) -> Vec<String> {
     }
 }
 
-/// The tool's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
-/// optional places are skipped first: for a tool with a topic and a text, `"hi"` is text and `ideas "hi"` a topic and text.
-/// A word left over is an error, never folded into another input: it says to quote text, or which flag to give it as.
 /// Whether a tool takes a `device` of its own (an agent device's name, say): then that's what `device` is, and
 /// it says itself where it runs, so the CLI's and MCP's `device` (which of your devices runs it) isn't offered.
 pub fn own_device(tool: &Value) -> bool {
@@ -302,6 +298,9 @@ pub fn takes(schema: &Value, name: &str) -> bool {
     schema["properties"].get(name).is_some() || schema["additionalProperties"] == true || !schema["properties"].is_object()
 }
 
+/// The tool's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
+/// optional places are skipped first: for a tool with a topic and a text, `"hi"` is text and `ideas "hi"` a topic and text.
+/// A word left over is an error, never folded into another input: it says to quote text, or which flag to give it as.
 fn input(schema: &Value, places: &[String], words: Vec<String>, flags: BTreeMap<String, Vec<Option<String>>>, files: &[String]) -> Result<Map<String, Value>> {
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
     let mut input = Map::new();
@@ -449,7 +448,6 @@ pub fn read_file(path: &Path) -> Result<Value> {
     Ok(json!({ "name": name, "type": mime(&name), "size": bytes.len(), "base64": data_encoding::BASE64.encode(&bytes) }))
 }
 
-/// A file's type from its name.
 pub fn mime(name: &str) -> &'static str {
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_lowercase()).unwrap_or_default();
     match ext.as_str() {
@@ -559,7 +557,6 @@ fn show(app: &str, tool: &str, ok: &Value, out: Option<&str>, json: bool) -> Res
     Ok(())
 }
 
-/// One input's type as help shows it.
 fn kind(prop: &Value) -> String {
     if let Some(choices) = prop["enum"].as_array() {
         return choices.iter().map(|c| c.as_str().map(String::from).unwrap_or_else(|| c.to_string())).collect::<Vec<_>>().join("|");
@@ -575,7 +572,6 @@ fn kind(prop: &Value) -> String {
     }
 }
 
-/// A tool's help, from its description and input schema.
 pub fn help(app: &Value, tool: &Value) -> String {
     let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
     let schema = &tool["input"];
@@ -645,7 +641,6 @@ pub fn help(app: &Value, tool: &Value) -> String {
     text
 }
 
-/// A description's first sentence, for a list.
 fn first_sentence(text: &str) -> &str {
     let line = text.lines().next().unwrap_or("");
     match line.find(". ") {
@@ -679,7 +674,6 @@ fn takes_file(prop: &Value) -> Option<bool> {
     }
 }
 
-/// How MCP describes a file input to agents.
 pub const MCP_FILE: &str = "a file: { base64, name, type } (up to 1 MiB), { file } (a file id another tool gave back) or { url } (public)";
 
 /// Whether an app's calls run on a device of the person's choosing: it runs on every device, or uses a service (Shell
@@ -704,7 +698,7 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
         schema = json!({ "type": "object", "properties": {} });
     }
     if !schema["properties"].is_object() {
-        // One that lists no inputs takes any, as it did before it was listed with device or confirm.
+        // One that lists no inputs takes any.
         schema["properties"] = json!({});
         schema["additionalProperties"] = json!(true);
     }
@@ -824,7 +818,6 @@ fn distance(a: &[char], b: &[char]) -> usize {
     d[a.len()][b.len()]
 }
 
-/// A tool's MCP hints, from what it says: `reads`, and `confirm`.
 pub fn mcp_annotations(tool: &Value) -> Value {
     crate::skills::hints(tool["reads"] == true, tool["confirm"] == true)
 }

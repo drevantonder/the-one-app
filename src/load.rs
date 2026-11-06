@@ -171,13 +171,11 @@ fn in_container() -> bool {
     cfg!(target_os = "linux") && ["/run/systemd/container", "/run/.containerenv", "/.dockerenv"].iter().any(|p| std::path::Path::new(p).exists())
 }
 
-/// A program's output, if it ran and succeeded.
 fn run(program: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(program).args(args).stderr(std::process::Stdio::null()).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// The first of `paths` that exists.
 #[cfg(target_os = "linux")]
 fn find(paths: &[&'static str]) -> Option<&'static str> {
     paths.iter().copied().find(|p| std::path::Path::new(p).exists())

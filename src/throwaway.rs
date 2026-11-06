@@ -125,7 +125,6 @@ fn sign_in() -> Result<()> {
     Ok(())
 }
 
-/// What the bare `throwaway` says: that it runs, and where.
 fn say_where(dir: &Path, addr: &str) -> Result<()> {
     let state = crate::request(throwaway_agent(dir).get(format!("http://{addr}/v1/state")).call())?;
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
@@ -185,7 +184,6 @@ fn cloudflare_node(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// What `throwaway` takes.
 fn usage() -> String {
     // The MCP command as one that finds this throwaway network from any folder: this build, if it's a checkout's own.
     let mcp = match folder() {

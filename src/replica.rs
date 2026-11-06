@@ -10,7 +10,6 @@ use crate::database::scopes::{Scope, ScopeDb};
 use crate::database::steps::{self, Freeze, Given, Reader, Sealed, Step, Truth};
 use crate::keys::{Hash, Key};
 
-/// What one device holds and knows.
 pub struct Replica {
     pub key: SigningKey,
     pub id: Key,
@@ -44,7 +43,6 @@ impl Replica {
         self.reader.root()
     }
 
-    /// The freeze, once this device has read it.
     pub fn freeze(&self) -> Option<&Freeze> {
         self.reader.truth().map(|t| &t.freeze)
     }

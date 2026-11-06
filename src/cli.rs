@@ -44,7 +44,6 @@ pub struct Given<'a> {
 }
 
 impl Given<'_> {
-    /// The words, to match on.
     pub fn words(&self) -> Vec<&str> {
         self.words.iter().map(String::as_str).collect()
     }
@@ -79,7 +78,6 @@ const ABOUT_AT: usize = 39;
 /// How wide `help all` is.
 const WIDTH: usize = 118;
 
-/// The commands' help, every form of each as `help all` lists them.
 pub fn help(commands: &[Command]) -> String {
     let mut out = String::new();
     for (usage, about) in commands.iter().flat_map(|c| &c.help) {

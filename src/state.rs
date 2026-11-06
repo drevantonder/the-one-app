@@ -22,7 +22,6 @@ pub struct Here<'a> {
     pub device: Value,
     /// Whether that node is one of the network's devices.
     pub member: bool,
-    /// How many entries it holds.
     pub entries: u64,
     /// Requests for an item waiting for this person to answer.
     pub waiting: usize,
@@ -145,7 +144,6 @@ fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "runs": m.runs(me).map(|on| on.iter().map(hex).collect::<Vec<_>>()),
         // When the network's recovery key last let a device in, and whose.
         "recovery_used": m.recovery_used().map(|(time, user)| json!({ "time": time, "user": user })),
-        // When the network's recovery key was set.
         "recovery_set": m.recovery_set(),
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at(), "clients": clients,

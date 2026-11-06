@@ -8,8 +8,6 @@ use anyhow::Result;
 use one::config::NAME;
 use serde_json::{Value, json};
 
-// Clients.
-
 /// The devices borrowed for the throwaway network, by kind: `{ "android": "<name>" }`.
 pub(crate) fn devices(dir: &Path) -> serde_json::Map<String, Value> {
     std::fs::read(dir.join("devices.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
@@ -35,7 +33,6 @@ pub(crate) fn again(ask: impl Fn() -> Result<Value>) -> Result<Value> {
     }
 }
 
-/// A command run on a device, and what it said.
 pub(crate) fn on_device(device: &str, command: &str) -> Result<String> {
     let out = agent_devices("run", json!({ "device": device, "command": command }))?;
     Ok(out.as_str().map(str::to_string).unwrap_or_else(|| out.to_string()))

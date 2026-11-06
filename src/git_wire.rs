@@ -16,7 +16,6 @@ pub fn instead_of(address: &str) -> (String, String) {
     (format!("url.{CLI}::{address}/repos/.insteadOf"), format!("{address}/repos/"))
 }
 
-/// Links this program as git's helper in `dir`.
 pub fn link_in(dir: &std::path::Path) -> Result<()> {
     let me = std::env::current_exe()?.canonicalize()?;
     let link = dir.join(helper());
@@ -49,7 +48,6 @@ pub fn wire(address: &str) -> Result<()> {
     Ok(())
 }
 
-/// Git on this machine no longer reaches `address`'s repos through this program.
 pub fn unwire(address: &str) {
     git(&["config", "--global", "--unset-all", &instead_of(address).0]);
 }

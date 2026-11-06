@@ -10,8 +10,8 @@
 //! - a passkey's assertion: of this network's address, the person present, naming this device in this network just now,
 //!   and signed by the passkey's public key.
 //!
-//! Both name the network by its root (`Network::root`), so a sign-in made for another network, or by
-//! an older release that names none, lets no device in by itself: it's approved by its code.
+//! Both name the network by its root (`Network::root`), so a sign-in made for another network lets no device in by itself:
+//! it's approved by its code.
 //!
 //! Only a device that signed in itself is let in by its sign-in. One whose sign-in was finished from a link opened
 //! elsewhere (the CLI's sign-in link, or any link sent to the person) could be anyone's who sent it, so sign-in passes its
@@ -70,14 +70,12 @@ pub const CLIENTS: &str = "sign_in_clients";
 pub struct Network {
     /// Its address, whose host is its passkeys' relying party.
     pub address: String,
-    /// Its root.
     pub root: [u8; 32],
     /// The OIDC clients its people sign in with, `(issuer, client id)`, from its `CLIENTS` setting.
     pub clients: Vec<(String, String)>,
 }
 
 impl Network {
-    /// The network at `address` whose root is `root`, with its `CLIENTS` setting, `setting`.
     pub fn new(address: &str, root: [u8; 32], setting: Option<&str>) -> Network {
         let clients = setting.unwrap_or("").lines().filter_map(|l| l.trim().split_once(char::is_whitespace)).map(|(i, a)| (i.trim().to_string(), a.trim().to_string())).collect();
         Network { address: address.trim_end_matches('/').to_string(), root, clients }
@@ -115,13 +113,12 @@ impl Account {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Proof {
-    /// The provider's ID token, as it gave it.
     IdToken(String),
     /// A passkey's assertion, each part base64url as WebAuthn's JSON has it, and the public key sign-in holds for it,
     /// which counts only when a person approves the device by its code.
     Passkey { credential: String, authenticator_data: String, client_data: String, signature: String, public_key: String },
     /// A sign-in finished from a link opened on another device, not on the device asking: what it shows counts only for
-    /// a device approved by a tap. A release before it reads it as nothing, and so lets that device in only by its code.
+    /// a device approved by a tap.
     ByLink(Box<Proof>),
 }
 

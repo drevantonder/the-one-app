@@ -34,7 +34,6 @@ pub struct Handed {
     ready: std::fs::File,
 }
 
-/// What this node was handed, if it was started to take over (`serve`'s `args`).
 pub fn handed(args: &[String]) -> Result<Option<Handed>> {
     STARTED.get_or_init(std::time::Instant::now);
     let Some(arg) = args.iter().find_map(|a| a.strip_prefix(ARG)) else {
@@ -175,7 +174,6 @@ pub async fn stopping() {
     let _ = rx.wait_for(|s| *s).await;
 }
 
-/// Whether this node stopped for one taking over.
 pub fn stopped() -> bool {
     *STOPPING.borrow()
 }
@@ -257,7 +255,6 @@ async fn main_moved() -> Result<()> {
     bail!("systemd didn't take the new build as {unit}'s main process: its unit needs NotifyAccess=all")
 }
 
-/// How long the node handing over waits for what it's answering.
 pub fn drain_within() -> Duration {
     DRAIN_WITHIN
 }

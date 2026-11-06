@@ -29,17 +29,14 @@ use crate::config::{CLI, NAME};
 use crate::node::{Build, Node};
 use crate::api;
 
-/// What oned is called: its CLI's name and d.
 pub fn name() -> String {
     format!("{CLI}d")
 }
 
-/// Whether this process was started as oned.
 pub fn invoked() -> bool {
     std::env::args_os().next().and_then(|a| PathBuf::from(a).file_name().map(|n| n.to_string_lossy() == name())).unwrap_or(false)
 }
 
-/// This program, run as oned with `args`.
 pub fn command(args: &[&str]) -> std::io::Result<std::process::Command> {
     use std::os::unix::process::CommandExt;
     // The path, not the program this process runs: an update may have replaced it.
@@ -94,7 +91,6 @@ pub fn placed(carried: &std::path::Path) -> anyhow::Result<PathBuf> {
     Ok(program)
 }
 
-/// Every helper app's program the Mac app carries.
 fn helpers() -> Vec<PathBuf> {
     let Some(dir) = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("Helpers"))) else { return Vec::new() };
     let apps = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path().join("Contents/MacOS"));
@@ -108,7 +104,6 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     let mut names = BTreeSet::new();
     let dirs = [fetched("x"), std::env::current_exe().unwrap_or_default()].map(|p| p.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     let prefix = format!("{CLI}-");
-    // A helper runs unless switched off, as the Mac app's own services did.
     for program in helpers() {
         names.extend(program.file_name().and_then(|f| f.to_string_lossy().strip_prefix(&prefix).map(str::to_string)));
     }
@@ -142,7 +137,6 @@ pub struct Held {
     pub person: bool,
 }
 
-/// How each part running runs.
 static HELD: std::sync::Mutex<BTreeMap<String, Held>> = std::sync::Mutex::new(BTreeMap::new());
 
 /// How each part running runs, as its hello says.
@@ -165,7 +159,6 @@ fn hold(node: &Node, runtime: &tokio::runtime::Handle, name: &str, held: Option<
     }
 }
 
-/// Each part's `Now`, and the services oned could run as its processes.
 static NOW: std::sync::Mutex<(BTreeMap<String, Now>, BTreeSet<String>)> = std::sync::Mutex::new((BTreeMap::new(), BTreeSet::new()));
 
 /// The services this device could run as processes of oned's, and what each is doing now, as its hello says.
@@ -238,7 +231,6 @@ pub fn erase(dir: &std::path::Path) {
 /// good, so what it starts is its child for as long as oned runs.
 pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
     std::thread::spawn(move || {
-        // Each part running, and when it started.
         let mut running: BTreeMap<String, (std::process::Child, Instant)> = BTreeMap::new();
         // What each part last asked, and when it was listed for it: asked again later, it's listed again.
         let mut listed: BTreeMap<String, (String, Instant)> = BTreeMap::new();
@@ -256,7 +248,6 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
         let mut declared: BTreeMap<String, Option<crate::services::sandbox::Declared>> = BTreeMap::new();
         let mut started_with: BTreeMap<String, Option<crate::services::sandbox::Declared>> = BTreeMap::new();
         let device = node.device_name();
-        // The app runtime, while it runs, and when it stopped by itself lately.
         let mut apps: Option<std::process::Child> = None;
         let mut apps_stops: Vec<Instant> = Vec::new();
         loop {
@@ -293,8 +284,8 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                     let names = offered(&released.iter().filter(|(_, b)| **b != Build::None).map(|(n, _)| n.clone()).collect(), &on);
                     NOW.lock().unwrap().1 = names.clone();
                     for name in &names {
-                        // A Mac service's helper the Mac app carries runs unless its person switched it off there, as
-                        // the Mac app's own services did; any other, only where it's switched on.
+                        // A Mac service's helper the Mac app carries runs unless its person switched it off there; any other,
+                        // only where it's switched on.
                         let wanted = on.contains_key(name) || (helper(name).is_some() && node.removed_here(name).is_none());
                         // Switched on again while it runs fine (its record naming its scope), it goes on running.
                         let troubled = !running.contains_key(name) || NOW.lock().unwrap().0.get(name).is_some_and(|n| n.problem.is_some());
@@ -643,7 +634,7 @@ async fn serve(args: &[String]) -> Result<()> {
                 match crate::handoff::hand_over(fd, &args).await {
                     Ok(()) => return node.handed_over(),
                     Err(err) if crate::handoff::supervised() => {
-                        // Its supervisor starts the new build, as before nodes handed over.
+                        // Its supervisor starts the new build.
                         tracing::warn!("couldn't hand over ({err:#}): exiting, to be started again");
                         std::process::exit(0);
                     }

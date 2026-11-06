@@ -54,13 +54,11 @@ pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
     Ok((apps, addable))
 }
 
-/// Words a search ignores.
 const FILLER: &[&str] = &[
     "a", "an", "the", "my", "me", "i", "to", "for", "of", "in", "on", "at", "and", "or", "with", "from", "it", "is", "are", "all", "some", "how", "do", "can", "what", "this", "that",
     "please", "using", "use", "here", "there", "else", "which", "any", "your", "you", "be", "was", "has", "have", "just", "also",
 ];
 
-/// A word as a search compares it: lower case, without a plural's or a verb's ending.
 fn stem(word: &str) -> String {
     let w = word.to_lowercase();
     for end in ["ing", "es", "s", "ed"] {
@@ -106,7 +104,6 @@ fn score_app(app: &Value, query: &[String]) -> (u32, usize) {
     (score, query.iter().filter(|w| has(&name, w) || has(&about, w)).count())
 }
 
-/// The exact way to call a tool, for whoever asked.
 fn call(app: &Value, tool: &Value, how: For) -> String {
     let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
     match how {
@@ -254,7 +251,6 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
     text.trim_end().to_string()
 }
 
-/// MCP's `search` tool.
 pub fn search_tool(mode: Mode) -> Value {
     let calls = match mode {
         Mode::Code => "the exact call for a script (tools.<app>.<tool>({ ... }))",
@@ -284,7 +280,6 @@ pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
 /// A script's limits: ten minutes, a hundred calls and 60 KB back.
 const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
 
-/// MCP's `execute` tool.
 pub fn execute_tool() -> Value {
     json!({
         "name": "execute",

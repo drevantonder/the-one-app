@@ -76,7 +76,6 @@ pub(crate) fn approve(dir: &Path, settings: &one::cloudflare::Settings, port: u1
     Ok(())
 }
 
-/// Runs web.js with Bun: → what it printed.
 pub(crate) fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
     let script = dir.join("web.js");
     std::fs::write(&script, include_str!("web.js"))?;

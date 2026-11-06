@@ -56,7 +56,6 @@ fn kept() -> Option<Arc<Device>> {
     kept.clone()
 }
 
-/// Forgets this computer's device, and its key.
 fn forget() {
     let _ = std::fs::remove_dir_all(dir());
     *KEPT.lock().unwrap() = None;
@@ -72,7 +71,6 @@ pub fn me() -> Option<(String, String)> {
     active().then(|| (one::sign_in::hostname(), kept().map(|d| d.key()).unwrap_or_default()))
 }
 
-/// What a command says when there's no node here to ask, nor a device to ask as.
 pub fn not_here() -> String {
     format!("{NAME} isn't running on this computer, and it isn't one of your devices yet: {CLI} sign-in --address <{YOURS}'s address> makes it one, or installing it runs {CLI}d, this device, here")
 }
@@ -238,7 +236,6 @@ fn not_let_in() -> String {
 /// The nodes the last request that asked for a trace tried, as a client device sent it.
 static TRIES: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 
-/// What `TRIES` holds, once.
 pub fn take_tries() -> Option<serde_json::Value> {
     TRIES.lock().unwrap().take()
 }
@@ -345,7 +342,6 @@ impl Drop for Spooled {
     }
 }
 
-/// A node's answer's body, read as it comes.
 struct Streamed {
     body: Mutex<Option<one_client::Body>>,
     part: Vec<u8>,

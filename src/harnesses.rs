@@ -18,7 +18,6 @@ fn marker() -> String {
     format!(".synced-{}", crate::config::CLI)
 }
 
-/// Whether a skill's name is one of the built-in skills'.
 fn built_in(name: &str) -> bool {
     let server = crate::skills::server_name();
     name == server || name.starts_with(&format!("{server}-"))
@@ -62,7 +61,6 @@ fn turn() -> std::sync::MutexGuard<'static, ()> {
     ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Each harness's skills folder whose harness is installed here, made if it isn't there yet.
 fn skill_roots(home: &Path) -> Vec<PathBuf> {
     let roots = [home.join(".claude/skills"), home.join(".agents/skills")];
     roots.into_iter().filter(|r| r.parent().is_some_and(Path::is_dir) && std::fs::create_dir_all(r).is_ok()).collect()
@@ -213,7 +211,6 @@ fn git(addr: &str) {
     }
 }
 
-/// `<name>.jsonc` if the harness has one, else `<name>.json`.
 fn json_or_jsonc(dir: &Path, name: &str) -> PathBuf {
     let jsonc = dir.join(format!("{name}.jsonc"));
     if jsonc.is_file() { jsonc } else { dir.join(format!("{name}.json")) }

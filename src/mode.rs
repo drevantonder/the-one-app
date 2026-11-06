@@ -31,7 +31,6 @@ fn var() -> String {
     format!("{}_THROWAWAY", CLI.to_uppercase())
 }
 
-/// This process's mode, as its parent told it.
 pub fn here() -> &'static Mode {
     static HERE: OnceLock<Mode> = OnceLock::new();
     HERE.get_or_init(|| match std::env::var_os(var()) {
@@ -224,7 +223,6 @@ fn list(dir: &Path, prefix: &str, delimit: bool) -> Result<String> {
     Ok(xml + "</ListBucketResult>")
 }
 
-/// A URL's path, percent-decoded.
 fn decode(path: &str) -> String {
     let bytes = path.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());

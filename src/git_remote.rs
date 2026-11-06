@@ -155,7 +155,6 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
     (status, [(header::CONTENT_TYPE, kind)], body).into_response()
 }
 
-/// A request's body, read as git sends it.
 struct Fed {
     sent: tokio::sync::mpsc::Receiver<Bytes>,
     part: Bytes,

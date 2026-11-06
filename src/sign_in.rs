@@ -68,7 +68,6 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into()
 }
 
-/// Sign-in's endpoints, as it says them.
 fn meta(address: &str) -> Result<Value> {
     let mut resp = agent().get(format!("{address}/.well-known/oauth-authorization-server")).call().with_context(|| format!("the sign-in service at {address} isn't answering"))?;
     if resp.status() != 200 {
@@ -86,7 +85,6 @@ fn back(address: &str) -> String {
     format!("{address}/sign-in/code/done")
 }
 
-/// This machine, as a client of sign-in: registered the first time it signs in there.
 fn client(address: &str, meta: &Value) -> Result<String> {
     if let Some(kept) = kept().filter(|k| k.address == address && !k.client.is_empty()) {
         return Ok(kept.client);
@@ -194,7 +192,6 @@ pub fn approved_on_throwaway(address: &str, url: &str, person: Option<&str>) -> 
     Ok(to(done.to_string()))
 }
 
-/// Waits for the person to approve the code, then keeps the tokens it gives.
 pub fn finish(started: Started) -> Result<()> {
     let code = loop {
         let mut resp = agent().post(format!("{}/sign-in/code/take", started.address)).send_json(serde_json::json!({ "state": started.state }))?;
@@ -297,7 +294,6 @@ fn encode(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
-/// This computer's name, as its system says it.
 pub fn hostname() -> String {
     std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "this machine".into())
 }
@@ -310,7 +306,6 @@ pub fn has_screen() -> bool {
     cfg!(target_os = "macos") || std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
-/// Opens a link in this machine's browser.
 pub fn open(url: &str) -> bool {
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     std::process::Command::new(opener).arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())

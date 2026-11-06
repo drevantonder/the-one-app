@@ -15,7 +15,6 @@ use std::time::Duration;
 use anyhow::{Result, bail, ensure};
 use serde_json::{Value, json};
 
-/// What the node's own log is called.
 pub const NODE: &str = "node";
 /// The most a log file holds before the next line starts a new one.
 const KEPT: u64 = 4 << 20;
@@ -122,7 +121,7 @@ fn strip(text: &str) -> String {
     out
 }
 
-/// What `tracing` writes to: stderr as before, and the log.
+/// What `tracing` writes to: stderr, and the log.
 #[derive(Clone, Copy)]
 pub struct Tee;
 

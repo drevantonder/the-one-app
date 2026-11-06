@@ -12,7 +12,6 @@ use crate::config::{CLI, NAME, REPO, YOURS};
 /// Claude Code keeps only the first 4,096 characters (UTF-16 units) of an MCP server's instructions; stay under them.
 pub const INSTRUCTIONS_LIMIT: usize = 4000;
 
-/// What it is, in two plain lines.
 pub fn about() -> String {
     format!(
         "{NAME} is a person's devices, and their team's, as one place for apps and agents: their email, messages, calendar, files, notes and more, each an app.\nAgents use those apps as that person, through MCP or the `{CLI}` command, on any device in {YOURS}."
@@ -33,7 +32,6 @@ pub fn rules() -> String {
     .join("\n")
 }
 
-/// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
         "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the tools for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's tools and its guide; `{CLI} <app> <tool> --help` says what one takes.\n- Every MCP tool is also a command: `repos_list` is `{CLI} repos list`.\n- `{CLI} run <file>` runs a short script that calls several tools and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}. You act for the person it marks (you): write their name, never this computer's login.\n- When a call fails or is slow, `{CLI} <app> <tool> --trace` (`trace: true` in MCP) says which device ran it and where it waited, and `{CLI} logs <device>` (the `logs` tool) reads that device's log, or one of its services' with `--service`: the person's own, or an admin's.\n- Before saying you can't, search: an app the person hasn't added yet may do it, and search offers it.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
@@ -47,7 +45,6 @@ pub fn server_name() -> String {
     name.split('-').filter(|w| !w.is_empty()).collect::<Vec<_>>().join("-")
 }
 
-/// Which MCP entry to add.
 pub fn mcp_entries() -> String {
     let server = server_name();
     format!(
@@ -56,7 +53,6 @@ pub fn mcp_entries() -> String {
     )
 }
 
-/// How to get the command onto a device, for this custom build.
 fn install() -> String {
     match crate::state::install_line() {
         Some(line) => format!("install it with `{line}`"),
@@ -106,13 +102,11 @@ pub struct Skill {
 }
 
 impl Skill {
-    /// Its SKILL.md: the frontmatter, then the body.
     pub fn skill_md(&self) -> String {
         // JSON strings are YAML's double-quoted ones.
         format!("---\nname: {}\ndescription: {}\n---\n\n{}\n", self.name, json!(self.description), self.body.trim_end())
     }
 
-    /// Every file, SKILL.md first, by its path in the skill.
     pub fn all_files(&self) -> Vec<(String, String)> {
         [vec![("SKILL.md".to_string(), self.skill_md())], self.files.clone()].concat()
     }
@@ -180,7 +174,6 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     skills
 }
 
-/// The root and every skill under it, the root's list naming each by its name.
 pub fn all(apps: &[Value]) -> Vec<Skill> {
     let deeper = deeper(apps);
     [vec![root(&deeper, |s| format!("`{}`", s.name))], deeper].concat()
@@ -358,7 +351,6 @@ fn len(s: &str) -> usize {
     s.encode_utf16().count()
 }
 
-/// Where this device serves the guide to the other devices on its tailnet, once it does.
 static ADDRESS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, if this device serves it there.

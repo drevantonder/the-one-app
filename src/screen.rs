@@ -11,7 +11,6 @@
 /// web client's, at the address, and a chat's view, by `screens_icons`.
 pub const ICONS: &[u8] = include_bytes!("../vendor/phosphor/icons.json");
 
-/// The bridge, `one` (its path under `src/screen/` and its text).
 const BRIDGE: (&str, &str) = ("bridge.js", include_str!("screen/bridge.js"));
 
 /// What a screen's HTML has in it to use `@one/ui` (`src/screen/ui/`: React, and shadcn's components): its page then
@@ -127,12 +126,10 @@ pub fn client_screen(name: &str) -> &'static str {
     CLIENT_SCREENS.iter().find(|(n, _)| *n == name).map_or("", |(_, html)| html)
 }
 
-/// What a client's own screen is told: its name, its params, and the product's.
 fn client_context(name: &str, params: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "screen": name, "params": params, "config": { "name": crate::config::NAME, "cli": crate::config::CLI, "made_here": crate::config::MADE_HERE } })
 }
 
-/// Each client's own screen's name, and `missing`, what a name that's none of them shows.
 pub fn client_screens() -> impl Iterator<Item = &'static str> {
     CLIENT_SCREENS.iter().map(|(name, _)| *name).chain(["missing"])
 }

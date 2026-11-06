@@ -25,7 +25,6 @@ fn every_command() -> String {
     format!("Usage:\n{}\n{NAME} holds one network. For another context, run that context's own app.", one::cli::help(&commands()))
 }
 
-/// The built-in commands, by their first word, as the full list says them.
 fn command_words() -> Vec<String> {
     let mut out: Vec<String> = commands().iter().flat_map(|c| &c.help).filter_map(|(usage, _)| usage.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase() || c == '-')).map(String::from).collect();
     out.dedup();
@@ -67,7 +66,6 @@ else. Data goes to stdout, messages to stderr.
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // Run as oned: this device, always on; or one of its parts.
     if one::oned::invoked() {
         if let Err(err) = one::oned::run(&args) {
             eprintln!("{}: {err:#}", one::oned::name());
@@ -315,7 +313,6 @@ fn running() -> Command {
                     for s in &all {
                         let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
                         let off = s["off_services"].as_array().cloned().unwrap_or_default();
-                        // What a device that says it can run, each on or off, and what it's doing or what went wrong.
                         if let Some(parts) = s["parts"].as_array() {
                             println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
                             for p in parts {
@@ -554,7 +551,6 @@ fn generic() -> Command {
                     println!("\n{CLI} {app} <tool> --help says what a tool takes.");
                 }
                 [app, tool, ..] => {
-                    // The words and flags after `<app> <tool>`, as written.
                     let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
                     tools::run(g, app, tool, &args[at(tool, at(app, 0))..])?
                 }
@@ -672,7 +668,6 @@ fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
     (positional, flags)
 }
 
-/// Whether a device runs here, and which install it's in, for the bare command.
 fn connection(node: &Client) -> String {
     let state = match node.get("/v1/state") {
         Ok(state) => state,
@@ -719,7 +714,6 @@ impl one::api::client::Via for Http {
     }
 }
 
-/// This machine's node, as the CLI asks it.
 fn node() -> Client {
     Client::new(Http { signed_in: true }, false)
 }
@@ -737,7 +731,6 @@ fn token() -> Option<String> {
     })
 }
 
-/// A request to this machine's node, as whom this machine is signed in as (`token`).
 fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
     match token() {
         Some(token) => r.header("authorization", format!("Bearer {token}")),
@@ -751,7 +744,6 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).middleware(client_device::instead).middleware(api::as_this_machine).build().into()
 }
 
-/// What a node answered over HTTP, as `api::client::answered` says it.
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
     // Not even reached: the nodes tried are all there is to say.
     let mut resp = resp.map_err(unreached)?;
@@ -759,7 +751,6 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
     one::api::client::answered(status, resp.body_mut().read_json()?)
 }
 
-/// Why a request to this machine's node, or to its person's as their device, got no answer, saying what to do.
 fn unreached(err: ureq::Error) -> anyhow::Error {
     match client_device::active() {
         true => anyhow::anyhow!("{err}"),
@@ -860,7 +851,6 @@ fn status(node: &Client, state: &Value) {
     }
     let apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
     let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
-    // Each with a line of the services it runs, and the ones switched off there.
     let all = i["devices"].as_array().cloned().unwrap_or_default();
     println!("\nDevices");
     for s in &all {
@@ -925,7 +915,6 @@ fn is_phone(name: &str) -> bool {
     ["phone", "ipad", "tablet", "android", "pixel", "galaxy"].iter().any(|w| name.contains(w))
 }
 
-/// How long ago `ms` (milliseconds since 1970) was, roughly.
 fn ago(ms: u64) -> String {
     let s = one::node::now_ms().saturating_sub(ms) / 1000;
     match s {

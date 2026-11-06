@@ -9,13 +9,11 @@ use one::config::{CLI, NAME};
 use super::super::devices::{approve_code, didnt_sign_in, shell_quote};
 use super::super::network::spawn;
 
-/// The Mac app (client/native) as this checkout builds it, on the Mac `MAC` names to ssh (`mac` if none), beside the
+/// The Mac app (client/native), or with `iphone` the iPhone app on a simulator, as this checkout builds it, on the Mac `MAC` names to ssh (`mac` if none), beside the
 /// person's own app there: a throwaway's build (its own id, folder and Keychain items), in the Mac's logged-in session,
 /// reaching the throwaway network at its address through ports ssh forwards there. Signed in as the throwaway network's
 /// first person as linux() is: its Sign In pressed, the sign-in approved as them and opened there, its code approved.
 /// What it keeps stays on the Mac, so a new build is still signed in; it's started again each time.
-/// The Mac app, or with `iphone` the iPhone app on a simulator, of this checkout's build, built on the Mac `MAC` names
-/// (ssh's `mac` by default), signed in to the throwaway network as its first person.
 pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool) -> Result<()> {
     let address = settings.address.as_str();
     let host = std::env::var("MAC").unwrap_or_else(|_| "mac".into());

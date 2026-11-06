@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 /// Whether `name` may be one of the network's settings: lowercase words joined by _, or a lab's, whose parts are an
-/// app's or service's name and a lab's. An older device ignores a lab's setting, so to it the lab is off.
+/// app's or service's name and a lab's.
 pub fn valid_setting(name: &str) -> bool {
     let word = |w: &str| !w.is_empty() && w.len() <= 40 && w.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
     match name.strip_prefix("lab.") {
@@ -23,12 +23,10 @@ pub fn valid_setting(name: &str) -> bool {
     }
 }
 
-/// The setting that switches an app's lab on.
 pub fn app_key(app: &str, lab: &str) -> String {
     format!("lab.app.{app}.{lab}")
 }
 
-/// Whether the lab whose setting is `key` is on, by the network's `settings`.
 pub fn on(settings: &BTreeMap<String, String>, key: &str) -> bool {
     settings.get(key).is_some_and(|v| v == "on")
 }

@@ -28,7 +28,6 @@ pub enum Append {
     Vault { id: String, scope: Option<String>, data: Value, same: Option<String>, release: bool },
 }
 
-/// A call's appends, as the shim gives them.
 pub fn appends(list: &Value) -> Result<Vec<Append>> {
     let mut appends = Vec::new();
     for a in list.as_array().into_iter().flatten() {
