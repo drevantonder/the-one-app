@@ -342,6 +342,13 @@ impl Settings {
     pub fn load_in(home: &Path) -> Result<Settings> {
         let path = Settings::path_in(home);
         let text = std::fs::read_to_string(&path).with_context(|| format!("this machine has no Cloudflare settings yet: {} cloudflare serve --address <url> runs the Workers here, and their settings are on the machine that deployed them", crate::config::CLI))?;
+        let text = if text.contains("\"sign_in_url\"") {
+            let migrated = text.replace("\"sign_in_url\"", "\"auth_url\"");
+            std::fs::write(&path, &migrated)?;
+            migrated
+        } else {
+            text
+        };
         let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't the Workers' settings", path.display()))?;
         settings.dir = home.to_path_buf();
         let dir = path.parent().unwrap();
