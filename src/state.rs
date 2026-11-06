@@ -149,9 +149,10 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "recovery_set": m.recovery_set(),
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at(), "clients": clients,
-        // Standing work in the scopes this person may grant it in: which endpoint keeps which app running in which
-        // scope, until when, and who granted it. One whose endpoint is gone, or whose granter may grant no more, is over.
-        "grants": m.keeps().iter().filter(|((k, s, _), g)| m.may(me, "keep", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "keep", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
+        // App schedules in the scopes this person may set them in: which endpoint runs which app's schedules in which
+        // scope, until when, and who set them. Ones whose endpoint is gone, or whose setter may set them no more, are
+        // over. Named `grants` still, as older clients read it.
+        "grants": m.app_schedules().iter().filter(|((k, s, _), g)| m.may(me, "keep", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "keep", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets `serverless`, which clients read here by that name).
         // Its parts, as a device's oned lists its own: it always runs apps, and an admin switches on each service built

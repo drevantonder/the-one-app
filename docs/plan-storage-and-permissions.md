@@ -51,7 +51,7 @@ Who holds what:
 - **The last admin can't be removed**, and the recovery key sits above everything.
 - **Where it's checked:** steps to the scope database are checked by every reader, because they decide who gets keys. Rights inside an app are checked by the node running the call.
 - **Rights and keys stay tied:** a relation that lets you read a scope means your devices are sealed its keys, and losing it means a new epoch is owed.
-- **Grants become "keep"**, a device keeping an app running for a principal. Keep is a property of the device, not a permission.
+- **Grants become app schedules**, a device running an app's schedules for a principal. They're a property of the device, not a permission.
 
 **The protocol left in code is three rules:**
 1. the install's first step and its recovery key;
@@ -132,7 +132,7 @@ This phase has one owner. It starts only once **every device listed in the insta
 
 These are separate pieces of work, in parallel:
 - delete the log's code and its JavaScript copies, and trim `tests/contracts.rs`;
-- rename grants to keep everywhere: code, CLI, MCP, screens and data, in one change, as AGENTS.md requires;
+- rename grants to app schedules everywhere: code, CLI, MCP, screens and data, in one change, as AGENTS.md requires (done but for what older devices read: the `grant` entry, the `keep` verb, the `keeps` tables, `_grants` in the bucket);
 - move to those folders one at a time, each move a quick commit announced on the board;
 - generate the file map, and finish ARCHITECTURE.md;
 

@@ -16,7 +16,7 @@
 //! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`cloudflare::seal_to`)
 //! <folder>/_epochs/<n>/recovery             and to the install's recovery key
 //! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`cloudflare::seal_app_key`)
-//! <folder>/<app>/_grants/<endpoint>/<n>      and sealed to an endpoint a `grant` keeps it running on (`cloudflare::seal_to`)
+//! <folder>/<app>/_grants/<endpoint>/<n>      and sealed to an endpoint that runs its app schedules (`cloudflare::seal_to`)
 //! <folder>/_vault/<n>/<endpoint key hex>     the scope's Vault secret key n, sealed to a machine its `vault` entry grants
 //! <folder>/_vault/<n>/recovery               and to the install's recovery key
 //! ```
@@ -195,7 +195,7 @@ pub fn epoch_name(scope: &str, n: u32, to: &str) -> String {
 }
 
 /// What an `epoch` entry says of its key, so a device takes a key from the bucket as epoch n only if it's the one the
-/// signed entry made, and a `grant` of each app key it seals: HKDF-SHA256(key, "one/epoch-hash"), hex.
+/// signed entry made, and app schedules of each app key they seal: HKDF-SHA256(key, "one/epoch-hash"), hex.
 pub fn epoch_hash(key: &[u8; 32]) -> String {
     HEXLOWER.encode(&hkdf(key, b"one/epoch-hash"))
 }
@@ -205,9 +205,9 @@ pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
     format!("{}/{app}/_key/{n}", crate::bucket::folder(scope))
 }
 
-/// Where an app's key in epoch `n` of a scope is kept sealed to an endpoint that keeps the app running there (a
-/// `grant`, for standing work): its key in hex.
-pub fn grant_name(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
+/// Where an app's key in epoch `n` of a scope is kept sealed to an endpoint that runs the app's schedules there: its
+/// key in hex. `_grants` is the folder older devices read them from.
+pub fn app_schedules_key_name(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
     format!("{}/{app}/_grants/{endpoint}/{n}", crate::bucket::folder(scope))
 }
 

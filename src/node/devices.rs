@@ -115,8 +115,8 @@ impl Node {
     /// as someone's who may use the scope (or the recovery key, or a new epoch, only by one who may start it), only if
     /// it isn't there (→ `{}`); an app's key in epoch `n`, if it isn't there (→ `{ sealed }`, whichever is there
     /// now, which every device then uses); or with both, an app's key in epoch `n` sealed to `to`, an endpoint of the
-    /// install that will keep the app running there (`keys::grant_name`), by one who may grant that (→ `{}`, there
-    /// already or not: its `grant` entry names the hash of the one it means).
+    /// install that will run the app's schedules there (`keys::app_schedules_key_name`), by one who may set them (→ `{}`,
+    /// there already or not: the app schedules name the hash of the one they mean).
     pub async fn seal_key(&self, caller: &Caller, scope: &Scope, n: u32, to: Option<&str>, app: Option<&str>, sealed: &str) -> Result<Value> {
         let sealed = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("sealed is base64url"))?;
         ensure!(!sealed.is_empty() && sealed.len() <= SEALED_MAX, "a sealed key is at most {SEALED_MAX} bytes");
@@ -163,12 +163,12 @@ impl Node {
                 let key = crate::keys::unhex(to)?;
                 self.with(|i| {
                     let db = i.r.db();
-                    ensure!(db.may(&caller.user, "keep", &scopes::object(scope)), "only {scope}'s person, or its group's admins, keep its apps running");
+                    ensure!(db.may(&caller.user, "keep", &scopes::object(scope)), "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
                     ensure!(db.machine(&key).is_some(), "that endpoint isn't one of the install's");
                     Ok(())
                 })?;
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
-                crate::db::created(&bucket, &crate::keys::grant_name(&name, app, to, n), &sealed).await?;
+                crate::db::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, to, n), &sealed).await?;
                 Ok(json!({}))
             }
             _ => bail!("give to (an endpoint's key, or recovery), app, or both"),
@@ -917,7 +917,7 @@ impl Node {
     }
 
     /// Makes, in the background, each scope's keys that are owed, of what this device's person makes them of: a new
-    /// epoch a removal or a stopped grant asked for (`Members::owed`) that the device writing it didn't make (it failed,
+    /// epoch a removal or stopped app schedules asked for (`Members::owed`) that the device writing it didn't make (it failed,
     /// or went off first); or a new epoch or Vault key pair where the newest's entry lists this device but it was never
     /// sealed to it, as when the device making it stopped between its entry and its seals, so nobody holds it. Only
     /// once one has been owed at two looks in a row, so a removal's own new epoch, and every seal, goes first.

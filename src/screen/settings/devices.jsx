@@ -1,8 +1,8 @@
 // This person's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add a Device, their
 // browsers), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
 // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping;
-// under Devices, where this device holds its own keys (`device.keys`, the web client), what their devices keep
-// running for them, and a passkey to get back in with.
+// under Devices, where this device holds its own keys (`device.keys`, the web client), which of their devices run
+// which apps' schedules, and a passkey to get back in with.
 //
 // A Settings screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into dist/devices.html,
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
@@ -204,16 +204,16 @@ function model(x, again) {
     return (state.install?.clients || []).filter((c) => c.user === me && !c.passkey && !c.me && (c.since || 0) > since && ![device.key, state.me?.key].includes(c.key)).sort((a, b) => b.since - a.since)
   }
 
-  // Standing work: "linux keeps WhatsApp running for you", until when, with Stop. It lasts 30 days, and longer as
+  // App schedules: "linux runs WhatsApp's schedules for you", until when, with Stop. They last 30 days, and longer as
   // they use the app.
   const deviceName = (s) => (s.service ? `${appTitle(s.service)} on ${shown(s.name)}` : shown(s.name))
   const forWhom = (scope) => (scope === `user:${me}` ? "you" : scope === "global" ? "everyone" : state.install?.groups.find((g) => `group:${g.id}` === scope)?.name || "a group")
   // The apps that run on their own, every so often, in a scope (their own, unless it's said).
   const scheduled = (scope = `user:${me}`) => apps.filter((a) => (a.schedules || []).some((s) => s.scope === scope && !s.removed))
-  // The devices that may keep an app running in a scope: those that hold it.
-  const keepers = (scope) => (state.install?.devices || []).filter((d) => (d.runs_for || []).includes(scope))
+  // The devices that may run an app's schedules in a scope: those that hold it.
+  const runners = (scope) => (state.install?.devices || []).filter((d) => (d.runs_for || []).includes(scope))
 
-  return { me, admin, appOf, appTitle, userName, drawn, partsOf, partTitle, problemOf, problemsOf, board, gridColumns, justJoined, deviceName, forWhom, scheduled, keepers }
+  return { me, admin, appOf, appTitle, userName, drawn, partsOf, partTitle, problemOf, problemsOf, board, gridColumns, justJoined, deviceName, forWhom, scheduled, runners }
 }
 
 // ---- The screen ----
@@ -272,16 +272,16 @@ function Devices() {
     await load()
   }
 
-  // The same screen first loaded gets the one asked about from its QR and the app that sent them to keep something.
+  // The same screen first loaded gets the one asked about from its QR and the app that sent them to choose where its schedules run.
   useEffect(() => {
     one.largeTitle("Devices")
-    const keepAsked = one.params?.keep ? { app: String(one.params.keep), scope: one.params.scope && String(one.params.scope) } : null
+    const schedulesAsked = one.params?.schedules ? { app: String(one.params.schedules), scope: one.params.scope && String(one.params.scope) } : null
     load().then((first) => {
       if (!first) return
       // One it already asks about at the top is answered there.
       const typed = String(one.params?.approve || "").toUpperCase().replace(/[^A-Z2-7]/g, "")
       if (typed && !first.waiting.some((r) => r.code.replace(" ", "") === typed)) approveScanned(typed)
-      if (keepAsked && first.device.keys) show({ keep: keepAsked })
+      if (schedulesAsked && first.device.keys) show({ schedules: schedulesAsked })
     })
     one.on("changed", () => load())
   }, [])
@@ -473,7 +473,7 @@ function Devices() {
             removeOld={removeOld}
             signOut={signOut}
             add={() => show({ add: true })}
-            keep={() => show({ keep: {} })}
+            schedule={() => show({ schedules: {} })}
             act={act}
           />
         )}
@@ -490,7 +490,7 @@ function Devices() {
       {data && dialog.for?.remove && <RemoveDevice key={dialog.n} {...dialog.for.remove} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.signIns && <SignIns key={dialog.n} clients={dialog.for.signIns} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.add && <AddDevice key={dialog.n} data={data} open={dialog.open} setOpen={setDialogOpen} />}
-      {data && dialog.for?.keep && <Keep key={dialog.n} m={m} keepAsked={dialog.for.keep} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
+      {data && dialog.for?.schedules && <AppSchedules key={dialog.n} m={m} asked={dialog.for.schedules} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
     </div>
   )
 }
@@ -620,21 +620,21 @@ function Scanned({ scan, done, cancel }) {
 
 // ---- Devices ----
 
-function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, keep, act }) {
+function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, schedule, act }) {
   const { device, state, passkey } = data
   const { cards, browsers, stale } = m.drawn
   const mine = cards.filter((c) => c.user === m.me)
-  // Standing work, only for someone with something kept running, or an app that runs on its own: an app's screen asks
-  // for the rest.
-  const grants = device.keys ? (state.install?.grants || []).filter((g) => g.until > Date.now()) : []
-  const keeping = !!device.keys && (grants.length > 0 || m.scheduled().length > 0)
+  // App schedules, only for someone with some running, or an app that runs on its own: an app's screen asks for the
+  // rest. A node names them `grants`, as older clients read them.
+  const appSchedules = device.keys ? (state.install?.grants || []).filter((g) => g.until > Date.now()) : []
+  const scheduling = !!device.keys && (appSchedules.length > 0 || m.scheduled().length > 0)
   const recovery = []
   if (m.admin && state.install?.recovery_set) recovery.push(`Recovery key set ${day(state.install.recovery_set)}.`)
   if (state.install?.recovery_used && (m.admin || state.install.recovery_used.user === m.me)) {
     const r = state.install.recovery_used
     recovery.push(`The recovery key last let in a device of ${r.user === m.me ? "yours" : `${m.userName(r.user)}’s`}, ${day(r.time)}.`)
   }
-  const side = keeping || (!!device.keys && passkey) || recovery.length > 0
+  const side = scheduling || (!!device.keys && passkey) || recovery.length > 0
   return (
     <div className={cn("grid max-w-5xl items-start gap-x-8 gap-y-8", side && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]")}>
       <div className="flex min-w-0 flex-col gap-4">
@@ -701,25 +701,25 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, keep
       </div>
       {!!side && (
         <div className="flex min-w-0 flex-col gap-8">
-          {keeping && (
-            <Section title="Kept Running">
+          {scheduling && (
+            <Section title="App Schedules">
               <List>
-                {grants.map((g) => {
+                {appSchedules.map((g) => {
                   const on = (state.install?.devices || []).find((d) => d.key === g.endpoint)
                   const until = new Date(g.until).toLocaleDateString(undefined, { day: "numeric", month: "long" })
                   return (
                     <div key={`${g.endpoint} ${g.app} ${g.scope}`} className="flex items-center gap-3 px-3 py-2.5 text-sm">
                       <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{(on && m.deviceName(on)) || "A device"} keeps {m.appTitle(g.app)} running for {m.forWhom(g.scope)}</span>
+                        <span className="block font-medium">{(on && m.deviceName(on)) || "A device"} runs {m.appTitle(g.app)}’s schedules for {m.forWhom(g.scope)}</span>
                         <span className="block text-muted-foreground">Until {until}, and longer as {g.scope === `user:${m.me}` ? "you use it" : "it’s used"}</span>
                       </span>
-                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => act(() => api("POST", "/v1/grant", { device: g.endpoint, app: g.app, scope: g.scope, days: 0 }))}>Stop</Button>
+                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => act(() => api("POST", "/v1/app-schedules", { device: g.endpoint, app: g.app, scope: g.scope, days: 0 }))}>Stop</Button>
                     </div>
                   )
                 })}
-                <ActionRow icon="arrows-clockwise" onClick={keep}>Keep an App Running…</ActionRow>
+                <ActionRow icon="arrows-clockwise" onClick={schedule}>Run an App’s Schedules…</ActionRow>
               </List>
-              {!!grants.length && <Note>When one stops or runs out, that device can’t open the app’s things any more.</Note>}
+              {!!appSchedules.length && <Note>When one stops or runs out, that device can’t open the app’s things any more.</Note>}
             </Section>
           )}
           {device.keys && passkey && (
@@ -1120,10 +1120,10 @@ function AddDevice({ data, open, setOpen }) {
   )
 }
 
-/// Keeps which app (unless it's given) running on which device, asked, then granted.
-function Keep({ m, keepAsked, open, setOpen, done }) {
-  const scope = keepAsked.scope || `user:${m.me}`
-  const [app, setApp] = useState(keepAsked.app || null)
+/// Runs which app's (unless it's given) schedules on which device, asked, then set.
+function AppSchedules({ m, asked, open, setOpen, done }) {
+  const scope = asked.scope || `user:${m.me}`
+  const [app, setApp] = useState(asked.app || null)
   const [error, setError] = useState("")
   const rows = (items, footer) => (
     <div className="flex flex-col gap-4 overflow-y-auto p-4">
@@ -1135,16 +1135,16 @@ function Keep({ m, keepAsked, open, setOpen, done }) {
   async function choose(d) {
     setError("")
     try {
-      await api("POST", "/v1/grant", { device: d.key, app, scope })
+      await api("POST", "/v1/app-schedules", { device: d.key, app, scope })
       done()
     } catch (err) {
       setError(said(err))
     }
   }
   return (
-    <ResponsiveDialog open={open} onOpenChange={setOpen} title={app ? `Keep ${m.appTitle(app)} Running` : "Keep an App Running"} action={<Cancel setOpen={setOpen} />}>
+    <ResponsiveDialog open={open} onOpenChange={setOpen} title={app ? `Run ${m.appTitle(app)}’s Schedules On…` : "Run an App’s Schedules"} action={<Cancel setOpen={setOpen} />}>
       {app
-        ? rows(m.keepers(scope).map((d) => <ListRow key={d.key} title={m.deviceName(d)} onClick={() => choose(d)} />), "It runs on the device you choose, while that device is on.")
+        ? rows(m.runners(scope).map((d) => <ListRow key={d.key} title={m.deviceName(d)} onClick={() => choose(d)} />), "They run on the device you choose, while that device is on.")
         : rows(m.scheduled(scope).map((a) => <ListRow key={a.name} title={a.title || a.name} onClick={() => setApp(a.name)} />), "Apps that run on their own, every so often.")}
     </ResponsiveDialog>
   )

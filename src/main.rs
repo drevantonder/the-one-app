@@ -138,9 +138,9 @@ fn every_command() -> String {
                                        put your checkout's build of an app's service on a device of yours (here by
                                        default, else over ssh by its name) and switch it on, until a newer one is
                                        published
-  {CLI} devices keep|stop <app> on <device> [--scope user|global|<group>] [--days <n>]
-                                       keep an app running on one of your devices (its schedules run there, with that
-                                       app's keys alone, for 30 days and longer as you use it), or stop it
+  {CLI} devices run_schedules|stop_schedules <app> on <device> [--scope user|global|<group>] [--days <n>]
+                                       run an app's schedules on one of your devices (with that app's keys alone, for
+                                       30 days and longer as you use it), or stop them
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's tools
@@ -907,7 +907,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
-        ["devices", tool @ ("keep" | "stop"), app, "on", device] => {
+        ["devices", tool @ ("run_schedules" | "stop_schedules"), app, "on", device] => {
             takes_only(&flags, &["scope", "days"])?;
             let mut input = flags.clone();
             input.insert("app".into(), json!(app));
@@ -2291,10 +2291,10 @@ fn devices_tool(tool: &str, input: &Map<String, Value>, client: &str) -> Result<
             anyhow::ensure!(input.get("confirm") == Some(&json!(true)), "devices_remove can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very device or person");
             post("/v1/remove", what).map(|r| json!(removed_said(&r)))
         }
-        "keep" | "stop" => {
+        "run_schedules" | "stop_schedules" => {
             let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
-            let days = if tool == "stop" { json!(0) } else { input.get("days").cloned().unwrap_or(Value::Null) };
-            post("/v1/grant", json!({ "app": text("app")?, "device": text("device")?, "scope": scope, "days": days })).map(|r| r["said"].clone())
+            let days = if tool == "stop_schedules" { json!(0) } else { input.get("days").cloned().unwrap_or(Value::Null) };
+            post("/v1/app-schedules", json!({ "app": text("app")?, "device": text("device")?, "scope": scope, "days": days })).map(|r| r["said"].clone())
         }
         "invite" => post("/v1/invite-link", json!({ "name": text("name")?, "admin": input.get("admin") == Some(&json!(true)) })).map(|r| json!(invited_said(text("name").unwrap_or(""), &r))),
         other => anyhow::bail!("no tool devices_{other}"),

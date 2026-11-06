@@ -283,10 +283,10 @@ impl Node {
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<(Reply, Option<Value>)> {
         // A sign-in's token goes along, with the keys it was handed: to a service only if it serves everyone, which
         // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below), and
-        // standing work, kept by its grant here, passes on none.
+        // app schedules' calls, kept by their token here, pass on none.
         let service = self.is_service(&device);
         let shared = self.with(|i| Ok(i.r.db().service(&device).is_some_and(|s| s.shared)))?;
-        let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && !t.starts_with(standing::GRANT) && (!service || (shared && sessions::is_sign_in(t))));
+        let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && !t.starts_with(app_schedules::TOKEN) && (!service || (shared && sessions::is_sign_in(t))));
         // A node listed as the caller's own client asks services as itself, for a direct client's call only — never
         // one another node passed on: forwarding another client's key, or app database keys, would make the
         // receiving device refuse its own person's call.
@@ -497,9 +497,9 @@ impl Node {
             }
         };
         self.record(&req.app, req, me, None);
-        // Its person using it keeps the grants that keep it running for them.
-        if !me.token.as_deref().is_some_and(|t| t.starts_with(standing::GRANT)) {
-            self.renew_grants(me, &req.app);
+        // Its person using it renews the app schedules that run it for them.
+        if !me.token.as_deref().is_some_and(|t| t.starts_with(app_schedules::TOKEN)) {
+            self.renew_app_schedules(me, &req.app);
         }
         if outcome.later {
             self.keep_for_later(granted);

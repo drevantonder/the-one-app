@@ -1,5 +1,5 @@
 //! Members: users, groups, the endpoints of each (devices people use, compute that runs calls, services), epochs,
-//! grants, apps and deploys, made by replaying `global`'s node entries in causal order; and which entries count: a
+//! app schedules, apps and deploys, made by replaying `global`'s node entries in causal order; and which entries count: a
 //! member entry only when one of its user's own devices signed it, a scope's other entries also when a compute
 //! endpoint that runs that scope's calls did. Pure: entries in, members out.
 //!
@@ -178,9 +178,9 @@ pub struct Members {
     /// Each epoch's hash (`keys::epoch_hash`), by scope and number, as its `epoch` entry (or the genesis, for
     /// `global`'s first) named it: a device takes a key from the bucket as epoch n only if it has this hash.
     pub epoch_hashes: BTreeMap<(Scope, u32), String>,
-    /// Standing work: until when (milliseconds) each endpoint may hold an app's keys in a scope, by (endpoint, scope,
+    /// App schedules: until when (milliseconds) each endpoint may hold an app's keys in a scope, by (endpoint, scope,
     /// app), as the latest `grant` of each said; one with `until: 0` is gone.
-    pub grants: BTreeMap<(Key, Scope, String), Grant>,
+    pub app_schedules: BTreeMap<(Key, Scope, String), AppSchedules>,
     /// Each scope's Vault key, by its newest `vault` entry that counts: items' secrets are sealed to its public half,
     /// which only the machines it lists open.
     pub vaults: BTreeMap<Scope, VaultKey>,
@@ -188,8 +188,8 @@ pub struct Members {
     /// if it's this one's.
     pub vault_publics: BTreeMap<(Scope, u32), [u8; 32]>,
     /// Scopes that owe a new epoch: since their newest, someone who held their key lost the right to (a client device
-    /// removed by another, a person removed, a member taken out of a group, a grant stopped, or a granted machine
-    /// removed). Any of the scope's admins' devices starts it (`Node::start_owed_keys`), so a removal whose own new
+    /// removed by another, a person removed, a member taken out of a group, app schedules stopped, or a machine
+    /// running them removed). Any of the scope's admins' devices starts it (`Node::start_owed_keys`), so a removal whose own new
     /// epoch failed, or whose device went off first, still gets one. A device signing itself out owes none.
     pub owed: BTreeSet<Scope>,
     /// Where each person's own things run besides their own machines, as their latest `runs` said from one of their
@@ -244,10 +244,10 @@ fn first_not(seq: &Value) -> Result<u32> {
     })
 }
 
-/// A grant of standing work: who gave it, until when, and the hash (`keys::epoch_hash`) of the app's key in each epoch
-/// it sealed to the endpoint (`keys::grant_name`), so the endpoint takes from the bucket only those.
+/// App schedules: who set them, until when, and the hash (`keys::epoch_hash`) of the app's key in each epoch
+/// it sealed to the endpoint (`keys::app_schedules_key_name`), so the endpoint takes from the bucket only those.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Grant {
+pub struct AppSchedules {
     pub by: String,
     pub until: u64,
     pub hashes: BTreeMap<u32, String>,
@@ -395,11 +395,11 @@ impl Members {
     }
 
     /// The scopes whose keys `keys` held, which their removal makes owe a new epoch: each a client of them opens, but
-    /// `except` (a person's own, which removing them keeps as it is), and each a grant to one of them is in.
+    /// `except` (a person's own, which removing them keeps as it is), and each one of them runs app schedules in.
     fn held_by(&self, keys: &[Key], except: Option<&Scope>) -> Vec<Scope> {
         let opens = |s: &Scope| keys.iter().filter_map(|k| self.machine(k)).any(|d| d.is(Kind::Client) && self.may_use(&d.user, s));
-        let granted = self.grants.keys().filter(|(k, _, _)| keys.contains(k)).map(|(_, s, _)| s.clone());
-        self.scopes().into_iter().filter(opens).chain(granted).filter(|s| Some(s) != except).collect()
+        let scheduled = self.app_schedules.keys().filter(|(k, _, _)| keys.contains(k)).map(|(_, s, _)| s.clone());
+        self.scopes().into_iter().filter(opens).chain(scheduled).filter(|s| Some(s) != except).collect()
     }
 
     /// The key things are sealed to for an endpoint of the install, as it's listed.
@@ -407,10 +407,10 @@ impl Members {
         self.machine(key).map(|m| m.seal)
     }
 
-    /// The grants of standing work in force at `now`, each by (endpoint, scope, app): not expired, to an endpoint still
-    /// listed, by someone who may still grant there.
-    pub fn grants_at(&self, now: u64) -> impl Iterator<Item = (&(Key, Scope, String), &Grant)> {
-        self.grants.iter().filter(move |((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.grants_in(&g.by, s))
+    /// The app schedules in force at `now`, each by (endpoint, scope, app): not expired, on an endpoint still listed,
+    /// set by someone who may still set them there.
+    pub fn app_schedules_at(&self, now: u64) -> impl Iterator<Item = (&(Key, Scope, String), &AppSchedules)> {
+        self.app_schedules.iter().filter(move |((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.is_scope_admin(&g.by, s))
     }
 
     /// Whether `endpoint` is granted `scope`'s Vault now: its newest `vault` entry lists it, and it's still listed.
@@ -418,9 +418,9 @@ impl Members {
         self.vaults.get(scope).is_some_and(|v| v.to.contains(endpoint)) && self.machine(endpoint).is_some()
     }
 
-    /// Whether `user` may grant standing work in a scope: their own, a group's they're an admin of, or `global` as an
+    /// Whether `user` is a scope's admin, who sets its app schedules and Vault: their own, a group's they're an admin of, or `global` as an
     /// admin of the install.
-    pub fn grants_in(&self, user: &str, scope: &Scope) -> bool {
+    pub fn is_scope_admin(&self, user: &str, scope: &Scope) -> bool {
         match scope {
             Scope::User(u) => u == user && self.user(user).is_some(),
             Scope::Group(g) => self.group_role(user, g) == Some(Role::Admin),
@@ -806,32 +806,33 @@ impl Members {
                 ensure!(on.iter().all(|k| self.compute(k).is_some() || self.cloudflare_node() == Some(*k)), "only the install's machines that run things, and its Cloudflare node, run someone's own");
                 self.runs.insert(w, on);
             }
+            // App schedules, by the name older devices replay.
             "grant" => {
                 let endpoint = key_of("endpoint")?;
                 let scope = Scope::parse(&text("scope")?)?;
                 let app = text("app")?;
-                // The node's own databases of a scope (its log, its Vault) are never an app's to keep running.
-                ensure!(valid_app_name(&app), "standing work is an app's");
+                // The node's own databases of a scope (its log, its Vault) are never an app's to schedule.
+                ensure!(valid_app_name(&app), "app schedules are an app's");
                 let until = data["until"].as_u64().context("no until")?;
                 let mut hashes = BTreeMap::new();
                 for (n, h) in data["keys"].as_object().into_iter().flatten() {
                     hashes.insert(n.parse::<u32>().context("an epoch is a number")?, epoch_hash_of(h)?);
                 }
-                ensure!(self.grants_in(&w, &scope), "only the scope's person, or its group's admins, grant standing work in it");
+                ensure!(self.is_scope_admin(&w, &scope), "only the scope's person, or its group's admins, set app schedules in it");
                 ensure!(until == 0 || self.machine(&endpoint).is_some(), "no such endpoint");
                 match until {
                     0 => {
-                        if self.grants.remove(&(endpoint, scope.clone(), app)).is_some() {
+                        if self.app_schedules.remove(&(endpoint, scope.clone(), app)).is_some() {
                             self.owe(scope);
                         }
                     }
-                    until => drop(self.grants.insert((endpoint, scope, app), Grant { by: w, until, hashes })),
+                    until => drop(self.app_schedules.insert((endpoint, scope, app), AppSchedules { by: w, until, hashes })),
                 }
             }
             "vault" => {
                 // Who opens a scope's Vault is its admins' to say, never a member's who can only add to it.
                 let scope = Scope::parse(&text("scope")?)?;
-                ensure!(self.grants_in(&w, &scope), "only the scope's person, or its admins, say which machines open its Vault");
+                ensure!(self.is_scope_admin(&w, &scope), "only the scope's person, or its admins, say which machines open its Vault");
                 let n = data["n"].as_u64().context("no n")?;
                 ensure!(n == self.vaults.get(&scope).map_or(0, |v| v.n) as u64 + 1, "a Vault key follows the one before it");
                 let public = key_of("public")?;
@@ -1415,8 +1416,9 @@ pub fn runs(on: &[Key]) -> Content {
     node("runs", json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
 }
 
-/// Standing work: `endpoint` keeps `app` running in `scope` until `until`, or no longer with 0.
-pub fn grant(endpoint: &Key, scope: &Scope, app: &str, until: u64, keys: &BTreeMap<u32, String>) -> Content {
+/// App schedules: `endpoint` runs `app`'s schedules in `scope` until `until`, or no longer with 0. The entry is
+/// `grant`, as older devices replay it.
+pub fn app_schedules(endpoint: &Key, scope: &Scope, app: &str, until: u64, keys: &BTreeMap<u32, String>) -> Content {
     let keys: serde_json::Map<String, Value> = keys.iter().map(|(n, h)| (n.to_string(), json!(h))).collect();
     node("grant", json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until, "keys": keys }))
 }
@@ -1858,14 +1860,14 @@ mod tests {
         add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 3, &[mac_id, bob_id], &H.repeat(64)));
         add(&mut entries, &mut mac, ANDRE, epoch(&work, 3, &[mac_id, bob_id], &H.repeat(64)));
         assert!(owed(&entries).is_empty());
-        // A grant stopped, and a machine with one taken out.
-        add(&mut entries, &mut bobs, BOB, grant(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
-        add(&mut entries, &mut bobs, BOB, grant(&linux_id, &bob, "notes", 0, &BTreeMap::new()));
+        // App schedules stopped, and a machine running them taken out.
+        add(&mut entries, &mut bobs, BOB, app_schedules(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
+        add(&mut entries, &mut bobs, BOB, app_schedules(&linux_id, &bob, "notes", 0, &BTreeMap::new()));
         assert_eq!(owed(&entries), vec![bob.clone()]);
         add(&mut entries, &mut bobs, BOB, epoch(&bob, 4, &[bob_id], &H.repeat(64)));
-        add(&mut entries, &mut bobs, BOB, grant(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
+        add(&mut entries, &mut bobs, BOB, app_schedules(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
         add(&mut entries, &mut mac, ANDRE, remove_device(&linux_id, None));
-        assert_eq!(owed(&entries), vec![bob.clone()], "a machine holds no epoch, only the keys of what it was granted");
+        assert_eq!(owed(&entries), vec![bob.clone()], "a machine holds no epoch, only the keys of the app schedules it runs");
         add(&mut entries, &mut bobs, BOB, epoch(&bob, 5, &[bob_id], &H.repeat(64)));
         // Taken out of a group, then out of the install: their own scope is kept as it is.
         add(&mut entries, &mut mac, ANDRE, member("c000000000000003", BOB, None));

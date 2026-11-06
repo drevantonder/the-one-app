@@ -210,7 +210,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/devices/approve", post(approve))
         .route("/v1/devices/refuse", post(refuse_device))
         .route("/v1/devices/forget-sign-in", post(forget_sign_in))
-        .route("/v1/grant", post(grant))
+        .route("/v1/app-schedules", post(app_schedules))
         .route("/v1/accept", post(accept))
         .route("/v1/handle", post(handle))
         .route("/v1/member", post(member))
@@ -767,14 +767,14 @@ async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
     done()
 }
 
-/// `{ device, app, scope?, days? }`: keeps an app running in a scope (`user` by default) on a device of the install, for
-/// `days` (30 by default; 0 stops it), as this machine's person (`Node::keep_running`).
-async fn grant(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+/// `{ device, app, scope?, days? }`: runs an app's schedules in a scope (`user` by default) on a device of the install,
+/// for `days` (30 by default; 0 stops them), as this machine's person (`Node::set_app_schedules`).
+async fn app_schedules(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     only(&body, &["device", "app", "scope", "days"])?;
     let me = local(&node)?;
     let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
-    let days = body["days"].as_u64().unwrap_or(crate::node::GRANT_DAYS);
-    Ok(Json(node.keep_running(&me, text(&body, "device")?, text(&body, "app")?, &scope, days).await?))
+    let days = body["days"].as_u64().unwrap_or(crate::node::APP_SCHEDULES_DAYS);
+    Ok(Json(node.set_app_schedules(&me, text(&body, "device")?, text(&body, "app")?, &scope, days).await?))
 }
 
 async fn schedule(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {

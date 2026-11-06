@@ -449,8 +449,8 @@ const h = OneUI.react.createElement;
     const asked = api("/v1/call", { method: "POST", body: { app, op, input, client: about?.client || "web" } }).then((r) => r.ok);
     if (same) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
     const out = await asked;
-    // Using an app keeps the devices keeping it running for this person doing so.
-    device?.renewGrants(app);
+    // Using an app renews the app schedules that run it for this person.
+    device?.renewAppSchedules(app);
     return out;
   }
   const reading = new Map();
@@ -1053,9 +1053,9 @@ const h = OneUI.react.createElement;
         },
         open: (m) => {
           const params = JSON.stringify(m.params || {});
-          // Any screen may send its person to choose the device that keeps its app running, in Settings › Devices.
-          // An app's says only which app to keep running, and where: no code to approve.
-          const to = m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params: mine ? params : JSON.stringify({ keep: m.params?.keep, scope: m.params?.scope }) }
+          // Any screen may send its person to choose the device that runs its app's schedules, in Settings › Devices.
+          // An app's says only which app's schedules, and where: no code to approve.
+          const to = m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params: mine ? params : JSON.stringify({ schedules: m.params?.schedules, scope: m.params?.scope }) }
             : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
             : mine ? { kind: "own", name: String(m.screen || ""), params }
             : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
@@ -1185,7 +1185,7 @@ const h = OneUI.react.createElement;
     "POST /v1/install": (b) => (b.scope === "global" ? write(members.install({ app: b.app, installed: b.installed !== false })) : api("/v1/install", { method: "POST", body: b })),
     "POST /v1/invite-link": (b) => device.invite(String(b.name || "")),
     // As a machine's node answers it: `device` by its key; `scope` user (theirs), global or group:<id>; `days`, 0 to stop.
-    "POST /v1/grant": (b) => device.grant({ endpoint: String(b.device || ""), app: String(b.app || ""), scope: !b.scope || b.scope === "user" ? `user:${me().id}` : String(b.scope), days: b.days ?? undefined }),
+    "POST /v1/app-schedules": (b) => device.setAppSchedules({ endpoint: String(b.device || ""), app: String(b.app || ""), scope: !b.scope || b.scope === "user" ? `user:${me().id}` : String(b.scope), days: b.days ?? undefined }),
     "GET /v1/devices/passkey": async () => ({ passkey: !!passkeyToList() }),
     // `{ key: ms }`: when each device was last let onto the install's network.
     "GET /v1/devices/seen": () => device.seen(),

@@ -288,7 +288,7 @@ impl Node {
         loop {
             if self.has_install() {
                 self.say_hello();
-                self.end_expired_grants();
+                self.end_expired_app_schedules();
                 self.start_owed_keys();
             }
             tokio::time::sleep(PRESENCE_EVERY).await;

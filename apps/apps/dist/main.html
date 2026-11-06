@@ -136,7 +136,7 @@ function oe(t) {
 	}, a[32] = A.title, a[33] = l, a[34] = g, a[35] = W, a[36] = ve) : ve = a[36];
 	let J = ve, ye;
 	a[37] === l ? ye = a[38] : (ye = (e) => one.open("devices", {
-		keep: l,
+		schedules: l,
 		scope: e
 	}, "settings"), a[37] = l, a[38] = ye);
 	let be = ye, xe;
@@ -149,7 +149,7 @@ function oe(t) {
 	let Ce = Se, we;
 	a[45] === N.data?.schedules ? we = a[46] : (we = N.data?.schedules || [], a[45] = N.data?.schedules, a[46] = we);
 	let Te, X, Ee, De, Z, Q, $, Oe;
-	if (a[47] !== A || a[48] !== he || a[49] !== I || a[50] !== F || a[51] !== pe || a[52] !== N.data || a[53] !== be || a[54] !== l || a[55] !== oe || a[56] !== J || a[57] !== W || a[58] !== we || a[59] !== Ce || a[60] !== P.data) {
+	if (a[47] !== A || a[48] !== he || a[49] !== I || a[50] !== be || a[51] !== F || a[52] !== pe || a[53] !== N.data || a[54] !== l || a[55] !== oe || a[56] !== J || a[57] !== W || a[58] !== we || a[59] !== Ce || a[60] !== P.data) {
 		let e = we.filter(le), t = e.find(E), n = new Set(e.map(ce)).size > 1, r;
 		a[69] === n ? r = a[70] : (r = (e) => e.invalid ? /* @__PURE__ */ b("span", {
 			className: "text-destructive",
@@ -266,7 +266,7 @@ function oe(t) {
 			className: "flex flex-col gap-4",
 			children: [t && /* @__PURE__ */ b(m, {
 				warn: !0,
-				title: `${A.title || l} needs a device to keep it running`,
+				title: `${A.title || l} needs a device to run its schedules`,
 				text: "Its schedules run on a device you choose, while it’s on.",
 				action: {
 					label: "Choose a Device",
@@ -288,7 +288,7 @@ function oe(t) {
 					}, t);
 				}) })
 			})]
-		}), a[47] = A, a[48] = he, a[49] = I, a[50] = F, a[51] = pe, a[52] = N.data, a[53] = be, a[54] = l, a[55] = oe, a[56] = J, a[57] = W, a[58] = we, a[59] = Ce, a[60] = P.data, a[61] = Te, a[62] = X, a[63] = Ee, a[64] = De, a[65] = Z, a[66] = Q, a[67] = $, a[68] = Oe;
+		}), a[47] = A, a[48] = he, a[49] = I, a[50] = be, a[51] = F, a[52] = pe, a[53] = N.data, a[54] = l, a[55] = oe, a[56] = J, a[57] = W, a[58] = we, a[59] = Ce, a[60] = P.data, a[61] = Te, a[62] = X, a[63] = Ee, a[64] = De, a[65] = Z, a[66] = Q, a[67] = $, a[68] = Oe;
 	} else Te = a[61], X = a[62], Ee = a[63], De = a[64], Z = a[65], Q = a[66], $ = a[67], Oe = a[68];
 	let ke;
 	a[112] !== A.uses.apps || a[113] !== Y || a[114] !== p ? (ke = A.uses.apps.length > 0 && /* @__PURE__ */ b(te, {

@@ -42,6 +42,8 @@ use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 
 /// The tables, as every database that holds permissions makes them: run it on a new one.
+/// `keep` is the permission to choose which devices run a scope's app schedules: named so still, as older devices
+/// read it in these rows and check it on steps.
 pub const SCHEMA: &str = "
 create table if not exists types (
     name text primary key,

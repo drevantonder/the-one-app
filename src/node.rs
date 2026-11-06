@@ -47,8 +47,8 @@ pub use calls::Elsewhere;
 pub use releases::Build;
 pub use sessions::{Needs, client_token, passed_token};
 mod services;
-mod standing;
-pub use standing::GRANT_DAYS;
+mod app_schedules;
+pub use app_schedules::APP_SCHEDULES_DAYS;
 mod state;
 mod status;
 mod steps;
@@ -472,8 +472,8 @@ pub struct Inner {
     sessions: sessions::Sessions,
     /// Apps whose deploy doesn't start here, by the bundle that didn't: left out until they're deployed again.
     broken: Mutex<BTreeMap<String, String>>,
-    /// The keys of the apps this device keeps running for their people.
-    standing: standing::Standing,
+    /// The keys of the apps whose schedules this device runs for their people.
+    app_schedules: app_schedules::State,
     /// What `Node::start_owed_keys` knows between its looks.
     owed: Mutex<devices::Owed>,
     /// What `Node::sign_in_loop` knows between its looks.
@@ -610,7 +610,7 @@ impl Node {
             forgotten: Mutex::new(()),
             sessions: Default::default(),
             broken: Default::default(),
-            standing: Default::default(),
+            app_schedules: Default::default(),
             owed: Default::default(),
             sign_ins: Default::default(),
             net: Default::default(),

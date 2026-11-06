@@ -31,8 +31,8 @@ pub(super) struct Sessions {
     pub kept: Mutex<HashMap<[u8; 32], Session>>,
     /// Sign-in at the install's address, whose keys check the tokens calls come with.
     issuer: Mutex<Option<Arc<crate::cloudflare::Issuer>>>,
-    /// The databases opened with keys a caller handed (or standing work's grant), each kept open for calls handed
-    /// exactly those keys, and forgotten with them: once their last session or grant ends, or no live session holds
+    /// The databases opened with keys a caller handed (or app schedules'), each kept open for calls handed
+    /// exactly those keys, and forgotten with them: once their last session or app schedules end, or no live session holds
     /// them.
     pub opened: Mutex<HashMap<(Scope, String), Vec<Opened>>>,
     /// The log keys handed here that opened what the bucket holds of their scope at their epoch, each by a hash of
@@ -43,10 +43,10 @@ pub(super) struct Sessions {
 /// A database opened with keys a caller handed: shared only with calls handed exactly them.
 pub(super) struct Opened {
     pub keys: Keys,
-    /// Until when its keys may be used: the latest of the sessions (or grant) that handed them.
+    /// Until when its keys may be used: the latest of the sessions (or app schedules) that handed them.
     pub until: u64,
-    /// Opened for standing work, whose grant's keys no session holds: forgotten with the grant, or at `until`.
-    pub standing: bool,
+    /// Opened for app schedules, whose keys no session holds: forgotten with them, or at `until`.
+    pub app_schedules: bool,
     pub db: Arc<tokio::sync::Mutex<Db>>,
 }
 
@@ -280,11 +280,11 @@ impl Node {
         (until > 0).then(|| crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: crate::keys::token_id(token), until, keys }).ok()).flatten()
     }
 
-    /// The keys a token caller was handed for a database, by epoch: for standing work, its grant's.
+    /// The keys a token caller was handed for a database, by epoch: for app schedules, theirs.
     fn handed(&self, me: &Caller, scope: &Scope, app: &str, database: &str) -> Keys {
         let Some(token) = &me.token else { return Keys::new() };
-        if token.starts_with(standing::GRANT) {
-            return self.standing_handed(token, scope, app, database);
+        if token.starts_with(app_schedules::TOKEN) {
+            return self.app_schedules_handed(token, scope, app, database);
         }
         let kept = self.0.sessions.kept.lock().unwrap();
         kept.get(&hash(token)).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
@@ -379,7 +379,7 @@ impl Node {
     /// or a group its person isn't in), with the keys of its log the caller hands, which it's asked for (428) if it
     /// didn't: what their calls are checked by (which apps are there, who may do what), and written after.
     pub(super) async fn read_callers_logs(&self, me: &Caller) -> Result<()> {
-        if me.token.as_deref().is_none_or(|t| t.starts_with(standing::GRANT)) {
+        if me.token.as_deref().is_none_or(|t| t.starts_with(app_schedules::TOKEN)) {
             return Ok(());
         }
         let want: Vec<(Scope, &str, &str)> = self.with(|i| {
@@ -449,8 +449,8 @@ impl Node {
         Needs { need, to: hex(&me.key), seal: hex(&me.seal) }
     }
 
-    /// A call's database: for a token caller, opened with the keys it was handed (standing work: its grant's), and
-    /// kept open here no longer than its token (or grant) lasts; else with this device's own, for its own person alone.
+    /// A call's database: for a token caller, opened with the keys it was handed (app schedules: theirs), and
+    /// kept open here no longer than its token (or app schedules) lasts; else with this device's own, for its own person alone.
     pub(super) async fn call_database(&self, me: &Caller, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
         let bucket = self.bucket()?;
         let Some(token) = &me.token else {
@@ -459,11 +459,11 @@ impl Node {
         };
         self.needs(me, &[(scope.clone(), app, database)]).await?;
         let keys = self.handed(me, scope, app, database);
-        let (standing, until) = match token.starts_with(standing::GRANT) {
-            true => (true, self.standing_until(token)),
+        let (app_schedules, until) = match token.starts_with(app_schedules::TOKEN) {
+            true => (true, self.app_schedules_until(token)),
             false => (false, self.0.sessions.kept.lock().unwrap().get(&hash(token)).map(|s| s.until).unwrap_or(0)),
         };
-        let db = match self.database(scope, app, database, schema, Some(super::databases::Given { keys, bucket: &bucket, until, standing })).await {
+        let db = match self.database(scope, app, database, schema, Some(super::databases::Given { keys, bucket: &bucket, until, app_schedules })).await {
             Err(err) => {
                 let epoch = err.downcast_ref::<crate::db::Missing>().map(|m| m.epoch).or(err.downcast_ref::<crate::db::Ahead>().map(|a| a.epoch));
                 return match epoch {
@@ -485,11 +485,11 @@ impl Node {
     }
 
     /// Keeps a database opened with handed keys open for the calls handed exactly them, until `until`.
-    pub(super) fn keep_opened(&self, id: (Scope, String), keys: Keys, until: u64, standing: bool, db: Arc<tokio::sync::Mutex<Db>>) {
+    pub(super) fn keep_opened(&self, id: (Scope, String), keys: Keys, until: u64, app_schedules: bool, db: Arc<tokio::sync::Mutex<Db>>) {
         let mut opened = self.0.sessions.opened.lock().unwrap();
         let all = opened.entry(id).or_default();
         all.retain(|o| o.keys != keys);
-        all.push(Opened { keys, until, standing, db });
+        all.push(Opened { keys, until, app_schedules, db });
     }
 
     /// Forgets the databases opened with handed keys that have run out, or that no live session holds any more (one
@@ -510,7 +510,7 @@ impl Node {
             let (app, database) = name.split_once('/').unwrap_or((name, ""));
             let id = (scope.to_string(), app.to_string(), database.to_string());
             let holds = |keys: &Keys| held.get(&id).is_some_and(|by| by.iter().any(|h| keys.iter().all(|(n, k)| h.get(n) == Some(k))));
-            all.retain(|o| o.until > now && (o.standing || holds(&o.keys)));
+            all.retain(|o| o.until > now && (o.app_schedules || holds(&o.keys)));
         }
         opened.retain(|_, all| !all.is_empty());
     }

@@ -79,15 +79,16 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
     await run(op, () => one.call(op, { app: name, confirm: true }))
     if (erase) onGone()
   }
-  const keepIt = (scope) => one.open("devices", { keep: name, scope }, "settings")
+  const chooseDevice = (scope) => one.open("devices", { schedules: name, scope }, "settings")
 
   const link = (n) => apps.find((x) => x.name === n) || { name: n, title: n }
   const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : [a.tagline, !a.screens && "Tools\u00a0only"].filter(Boolean).join(" · ")
 
-  // Schedules run only on a device chosen to keep the app running: one that's on with none says so, with the fix.
+  // Schedules run only on a device chosen for the app's schedules: one that's on with none says so, with the fix.
+  // `kept_by` and `may_keep` are what nodes, older ones too, name them.
   // One a deploy removed no longer runs: it isn't the app's any more.
   const schedules = (health.data?.schedules || []).filter((s) => !s.removed)
-  const unkept = schedules.find((s) => !s.invalid && s.on && s.runs_as && !(s.kept_by || []).length && s.may_keep)
+  const unrun = schedules.find((s) => !s.invalid && s.on && s.runs_as && !(s.kept_by || []).length && s.may_keep)
   const manyPlaces = new Set(schedules.map((s) => s.scope)).size > 1
   const line = (s) => {
     if (s.invalid) return <span className="text-destructive">{s.invalid}</span>
@@ -158,12 +159,12 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
 
       {schedules.length > 0 && (
         <div className="flex flex-col gap-4">
-          {unkept && (
+          {unrun && (
             <Problem
               warn
-              title={`${a.title || name} needs a device to keep it running`}
+              title={`${a.title || name} needs a device to run its schedules`}
               text="Its schedules run on a device you choose, while it’s on."
-              action={{ label: "Choose a Device", run: () => keepIt(unkept.scope) }}
+              action={{ label: "Choose a Device", run: () => chooseDevice(unrun.scope) }}
             />
           )}
           <Section title="Schedules">

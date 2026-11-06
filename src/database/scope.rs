@@ -1,11 +1,11 @@
-//! The scope database: who and what a scope has (people, groups, devices, who holds which role, epochs, keeps, apps,
+//! The scope database: who and what a scope has (people, groups, devices, who holds which role, epochs, app schedules, apps,
 //! deploys, installs, services, settings, the Vault's bookkeeping, recovery) as SQLite rows. Until the log is frozen
 //! it's built, never written: `build` makes it from what replay made (`Members`, and the scope's `ScopeState`), so
 //! replay stays the truth and this is its projection, the same on every reader. It's small, so it's built again as
 //! entries arrive.
 //!
 //! Every scope's database has the same tables, `permissions`' among them with its defaults. What `global`'s entries
-//! say of the whole install (people, groups, invites, devices, relations, epochs and keeps of every scope, apps,
+//! say of the whole install (people, groups, invites, devices, relations, epochs and app schedules of every scope, apps,
 //! services, settings, Vault keys, recovery) is filled in only in `global`'s, which everyone in the install reads; a
 //! person's or group's has only its own state (installs, schedules, Vault requests, pages, forgotten blobs), which
 //! only those who use it may read.
@@ -29,7 +29,8 @@ use crate::members::{Kind, Members, Principal, Role, ScopeState};
 use crate::permissions;
 
 /// The tables, the same in every scope's database, besides the permissions' (`permissions::SCHEMA`). STRICT, so a
-/// value is stored as the type it was given, and every table has a primary key, which changesets need.
+/// value is stored as the type it was given, and every table has a primary key, which changesets need. App schedules
+/// are `keeps` and `keep_keys`, the names older devices read.
 pub const SCHEMA: &str = "
 CREATE TABLE install (
   id INTEGER PRIMARY KEY CHECK (id = 0),
@@ -338,7 +339,7 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
     for scope in &m.owed {
         db.execute("INSERT INTO owed VALUES (?)", params![scope.to_string()])?;
     }
-    for ((key, scope, app), g) in &m.grants {
+    for ((key, scope, app), g) in &m.app_schedules {
         db.execute("INSERT INTO keeps VALUES (?, ?, ?, ?, ?)", params![hex(key), scope.to_string(), app, person(&g.by), int(g.until)])?;
         for (n, hash) in &g.hashes {
             db.execute("INSERT INTO keep_keys VALUES (?, ?, ?, ?, ?)", params![hex(key), scope.to_string(), app, n, hash])?;
@@ -476,7 +477,7 @@ pub(crate) mod tests {
             for s in &scopes {
                 let o = object(s);
                 assert_eq!(may(&p, "use", &o), m.may_use(u, s), "{u} uses {s}");
-                assert_eq!(may(&p, "keep", &o), m.grants_in(u, s), "{u} keeps apps running in {s}");
+                assert_eq!(may(&p, "keep", &o), m.is_scope_admin(u, s), "{u} sets app schedules in {s}");
                 assert_eq!(may(&p, "add-apps", &o), manages_scope(m, u, s), "{u} adds apps to {s}");
             }
             for g in m.groups.keys() {

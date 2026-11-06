@@ -136,7 +136,7 @@ function y(t) {
 	}, s[32] = E.title, s[33] = u, s[34] = v, s[35] = P, s[36] = je) : je = s[36];
 	let F = je, Me;
 	s[37] === u ? Me = s[38] : (Me = (e) => one.open("devices", {
-		keep: u,
+		schedules: u,
 		scope: e
 	}, "settings"), s[37] = u, s[38] = Me);
 	let Ne = Me, Pe;
@@ -149,7 +149,7 @@ function y(t) {
 	let L = Fe, R;
 	s[45] === k.data?.schedules ? R = s[46] : (R = k.data?.schedules || [], s[45] = k.data?.schedules, s[46] = R);
 	let z, B, V, H, U, W, G, K;
-	if (s[47] !== E || s[48] !== Oe || s[49] !== M || s[50] !== j || s[51] !== ye || s[52] !== k.data || s[53] !== Ne || s[54] !== u || s[55] !== pe || s[56] !== F || s[57] !== P || s[58] !== R || s[59] !== L || s[60] !== A.data) {
+	if (s[47] !== E || s[48] !== Oe || s[49] !== M || s[50] !== Ne || s[51] !== j || s[52] !== ye || s[53] !== k.data || s[54] !== u || s[55] !== pe || s[56] !== F || s[57] !== P || s[58] !== R || s[59] !== L || s[60] !== A.data) {
 		let e = R.filter(fe), t = e.find(de), i = new Set(e.map(ue)).size > 1, d;
 		s[69] === i ? d = s[70] : (d = (e) => e.invalid ? /* @__PURE__ */ p("span", {
 			className: "text-destructive",
@@ -266,7 +266,7 @@ function y(t) {
 			className: "flex flex-col gap-4",
 			children: [t && /* @__PURE__ */ p(c, {
 				warn: !0,
-				title: `${E.title || u} needs a device to keep it running`,
+				title: `${E.title || u} needs a device to run its schedules`,
 				text: "Its schedules run on a device you choose, while it’s on.",
 				action: {
 					label: "Choose a Device",
@@ -288,7 +288,7 @@ function y(t) {
 					}, t);
 				}) })
 			})]
-		}), s[47] = E, s[48] = Oe, s[49] = M, s[50] = j, s[51] = ye, s[52] = k.data, s[53] = Ne, s[54] = u, s[55] = pe, s[56] = F, s[57] = P, s[58] = R, s[59] = L, s[60] = A.data, s[61] = z, s[62] = B, s[63] = V, s[64] = H, s[65] = U, s[66] = W, s[67] = G, s[68] = K;
+		}), s[47] = E, s[48] = Oe, s[49] = M, s[50] = Ne, s[51] = j, s[52] = ye, s[53] = k.data, s[54] = u, s[55] = pe, s[56] = F, s[57] = P, s[58] = R, s[59] = L, s[60] = A.data, s[61] = z, s[62] = B, s[63] = V, s[64] = H, s[65] = U, s[66] = W, s[67] = G, s[68] = K;
 	} else z = s[61], B = s[62], V = s[63], H = s[64], U = s[65], W = s[66], G = s[67], K = s[68];
 	let q;
 	s[112] !== E.uses.apps || s[113] !== I || s[114] !== _ ? (q = E.uses.apps.length > 0 && /* @__PURE__ */ p(ie, {

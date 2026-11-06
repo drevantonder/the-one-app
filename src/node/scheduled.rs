@@ -1,5 +1,5 @@
-//! Schedules: an app's schedules run on the machine its person chose to keep the app running (a grant, src/node/
-//! standing.rs), from its node, with the grant's keys alone: each slot once, whichever such machine takes it first,
+//! Schedules: an app's schedules run on the machine its person chose for them (its app schedules, src/node/
+//! app_schedules.rs), from its node, with their keys alone: each slot once, whichever such machine takes it first,
 //! and none while every one is off.
 
 use std::collections::BTreeSet;
@@ -10,20 +10,20 @@ use super::*;
 const TICK: Duration = Duration::from_secs(10);
 
 impl Node {
-    /// Runs the schedules due of each app this device keeps running, every `TICK`, for as long as the node runs.
+    /// Runs the schedules due of each app whose schedules this device runs, every `TICK`, for as long as the node runs.
     pub(super) async fn schedule_loop(self) {
         // Each schedule's next slot, by (scope, app, schedule), with what it was worked out from.
         let mut next: HashMap<(Scope, String, String), (Value, u64)> = HashMap::new();
         loop {
             tokio::time::sleep(TICK).await;
-            self.forget_standing();
+            self.forget_app_schedules();
             if let Err(err) = self.run_due(&mut next).await {
                 tracing::debug!("schedules: {err:#}");
             }
         }
     }
 
-    /// Starts each schedule whose slot came, of the apps this device keeps running: one first seen waits for its next
+    /// Starts each schedule whose slot came, of the apps whose schedules this device runs: one first seen waits for its next
     /// slot, so nothing missed while it was off runs late.
     async fn run_due(&self, next: &mut HashMap<(Scope, String, String), (Value, u64)>) -> Result<()> {
         let now = now_ms();
@@ -32,7 +32,7 @@ impl Node {
             let m = i.r.db();
             let mut due = Vec::new();
             let mut seen = BTreeSet::new();
-            for ((_, scope, app), _) in m.keeps_at(now).into_iter().filter(|((k, ..), _)| *k == self.0.id) {
+            for ((_, scope, app), _) in m.app_schedules_at(now).into_iter().filter(|((k, ..), _)| *k == self.0.id) {
                 let Some((_, state)) = i.views.get(&scope.to_string()).filter(|(_, s)| s.installed.contains(&app)) else { continue };
                 let Some((_, list)) = declared.iter().find(|(a, _)| *a == app) else { continue };
                 for s in list.iter().filter_map(|s| s.as_ref().ok()) {
@@ -64,10 +64,10 @@ impl Node {
         Ok(())
     }
 
-    /// Runs one slot of a schedule here, as whom it runs as, with the grant's keys: once, whichever device takes its
+    /// Runs one slot of a schedule here, as whom it runs as, with its app schedules' keys: once, whichever device takes its
     /// slot first. How it went is written as every run's is, where this device opens the scope's own rows.
     async fn run_schedule(&self, scope: &Scope, app: &str, schedule: &Schedule, user: &str, slot: u64) -> Result<()> {
-        self.standing_keys(scope, app).await?;
+        self.app_schedules_keys(scope, app).await?;
         let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::bucket::folder(&scope.to_string()), members::APP, schedule.name);
         if !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
             return Ok(());
@@ -75,11 +75,11 @@ impl Node {
         let started = Instant::now();
         let ran = match self.count(app, "schedule").await {
             Err(err) => Err(err),
-            Ok(()) => self.standing_call(scope, app, user, &schedule.tool, schedule.input.clone(), "schedule").await,
+            Ok(()) => self.app_schedules_call(scope, app, user, &schedule.tool, schedule.input.clone(), "schedule").await,
         };
         let error = ran.as_ref().err().map(|e| format!("{e:#}").chars().take(500).collect::<String>());
         let said = status::Run { slot, time: now_ms(), device: self.0.id, user: user.to_string(), ok: error.is_none(), error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
-        // The scope's own rows open only with its epochs, which a machine that only keeps the app running hasn't.
+        // The scope's own rows open only with its epochs, which a machine that only runs the app's schedules hasn't.
         if let Err(err) = self.say(scope, status::Said::Ran { app: app.to_string(), schedule: schedule.name.clone(), run: said }).await {
             tracing::debug!("{app}'s run of {} in {scope} isn't written: {err:#}", schedule.name);
         }
@@ -150,8 +150,9 @@ impl Node {
                 }
                 let status = i.status.get(&scope.to_string()).cloned().unwrap_or_default();
                 let scope_name = handles(m, std::slice::from_ref(&scope), &viewer.user).remove(0).name;
-                // The devices that keep it running there: none, and its schedules don't run.
-                let kept_by: Vec<String> = m.keeps_at(now).into_iter().filter(|((_, s, a), _)| *s == scope && a == app).filter_map(|((k, ..), _)| m.machine(&k).map(|d| d.name)).collect();
+                // The devices that run its schedules there: none, and they don't run. `may_keep` and `kept_by` keep their names
+                // for older App Store screens, which read them.
+                let kept_by: Vec<String> = m.app_schedules_at(now).into_iter().filter(|((_, s, a), _)| *s == scope && a == app).filter_map(|((k, ..), _)| m.machine(&k).map(|d| d.name)).collect();
                 let base = |name: &str| {
                     let key = (app.to_string(), name.to_string());
                     let runs = status.runs.get(&key);

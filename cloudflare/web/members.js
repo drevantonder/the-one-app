@@ -23,8 +23,9 @@ export const members = {
   rename: ({ what, id, name }) => node("rename", { [what]: id, name }),
   handle: ({ what, id, handle }) => node("rename", { [what]: id, handle }),
   epoch: ({ scope, n, to, hash }) => node("epoch", { scope, n, to, hash }),
-  /// `keys`: the hash of the app's key in each epoch sealed to the endpoint, by epoch (`epochHash`).
-  grant: ({ endpoint, scope, app, until, keys = {} }) => node("grant", { endpoint, scope, app, until, keys }),
+  /// App schedules, in the `grant` entry older devices replay. `keys`: the hash of the app's key in each epoch sealed
+  /// to the endpoint, by epoch (`epochHash`).
+  appSchedules: ({ endpoint, scope, app, until, keys = {} }) => node("grant", { endpoint, scope, app, until, keys }),
   runs: ({ on }) => node("runs", { on }),
   /// A part of a device's oned (a service, or `apps`, the app service) switched on or off there.
   service: ({ device, name, on = false }) => node("service", { device, name, on: !!on }),

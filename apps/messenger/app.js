@@ -646,7 +646,7 @@ export default {
   schema: { user: SCHEMA },
 
   // A device borrowed for a read goes back after 5 idle minutes; Agent Devices takes one back after 15 without a call. Runs on
-  // the device that keeps Messenger running (one devices keep messenger <it>).
+  // the device that runs Messenger's schedules (one devices run_schedules messenger on <it>).
   schedules: { idle: { op: "_idle", every: "2m", description: "Gives back the devices Messenger borrowed and isn't using" } },
 
   tools: {

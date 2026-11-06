@@ -232,7 +232,7 @@ function W(e, t) {
 		deviceName: (e) => e.service ? `${u(e.service)} on ${k(e.name)}` : k(e.name),
 		forWhom: (e) => e === `user:${s}` ? "you" : e === "global" ? "everyone" : n.install?.groups.find((t) => `group:${t.id}` === e)?.name || "a group",
 		scheduled: (e = `user:${s}`) => i.filter((t) => (t.schedules || []).some((t) => t.scope === e && !t.removed)),
-		keepers: (e) => (n.install?.devices || []).filter((t) => (t.runs_for || []).includes(e))
+		runners: (e) => (n.install?.devices || []).filter((t) => (t.runs_for || []).includes(e))
 	};
 }
 function ee() {
@@ -271,14 +271,14 @@ function ee() {
 	}
 	t(() => {
 		one.largeTitle("Devices");
-		let e = one.params?.keep ? {
-			app: String(one.params.keep),
+		let e = one.params?.schedules ? {
+			app: String(one.params.schedules),
 			scope: one.params.scope && String(one.params.scope)
 		} : null;
 		R().then((t) => {
 			if (!t) return;
 			let n = String(one.params?.approve || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
-			n && !t.waiting.some((e) => e.code.replace(" ", "") === n) && B(n), e && t.device.keys && A({ keep: e });
+			n && !t.waiting.some((e) => e.code.replace(" ", "") === n) && B(n), e && t.device.keys && A({ schedules: e });
 		}), one.on("changed", () => R());
 	}, []);
 	async function B(e) {
@@ -510,7 +510,7 @@ function ee() {
 				removeOld: oe,
 				signOut: se,
 				add: () => A({ add: !0 }),
-				keep: () => A({ keep: {} }),
+				schedule: () => A({ schedules: {} }),
 				act: z
 			}),
 			s && /* @__PURE__ */ w(m, { title: s })
@@ -547,9 +547,9 @@ function ee() {
 				open: k.open,
 				setOpen: M
 			}, k.n),
-			e && k.for?.keep && /* @__PURE__ */ w(De, {
+			e && k.for?.schedules && /* @__PURE__ */ w(De, {
 				m: K,
-				keepAsked: k.for.keep,
+				asked: k.for.schedules,
 				open: k.open,
 				setOpen: M,
 				done: () => (M(!1), R())
@@ -837,8 +837,8 @@ function ie(t) {
 	}), n[24] = M, n[25] = v, n[26] = S, n[27] = C, n[28] = N) : N = n[28], N;
 }
 function ae(t) {
-	let n = e(56), { m: r, data: i, opened: a, flag: s, menu: l, removeOld: u, signOut: f, add: p, keep: m, act: h } = t, { device: g, state: _, passkey: v } = i, { cards: y, browsers: b, stale: S } = r.drawn, C;
-	if (n[0] !== h || n[1] !== p || n[2] !== b || n[3] !== y || n[4] !== i.seen || n[5] !== g || n[6] !== s || n[7] !== m || n[8] !== r || n[9] !== l || n[10] !== a || n[11] !== v || n[12] !== u || n[13] !== f || n[14] !== S || n[15] !== _.install) {
+	let n = e(56), { m: r, data: i, opened: a, flag: s, menu: l, removeOld: u, signOut: f, add: p, schedule: m, act: h } = t, { device: g, state: _, passkey: v } = i, { cards: y, browsers: b, stale: S } = r.drawn, C;
+	if (n[0] !== h || n[1] !== p || n[2] !== b || n[3] !== y || n[4] !== i.seen || n[5] !== g || n[6] !== s || n[7] !== r || n[8] !== l || n[9] !== a || n[10] !== v || n[11] !== u || n[12] !== m || n[13] !== f || n[14] !== S || n[15] !== _.install) {
 		let e;
 		n[17] === r.me ? e = n[18] : (e = (e) => e.user === r.me, n[17] = r.me, n[18] = e);
 		let t = y.filter(e), D = g.keys ? (_.install?.grants || []).filter(le) : [], O = !!g.keys && (D.length > 0 || r.scheduled().length > 0), k;
@@ -960,7 +960,7 @@ function ae(t) {
 				className: "flex min-w-0 flex-col gap-8",
 				children: [
 					O && /* @__PURE__ */ T(te, {
-						title: "Kept Running",
+						title: "App Schedules",
 						children: [/* @__PURE__ */ T(d, { children: [D.map((e) => {
 							let t = (_.install?.devices || []).find((t) => t.key === e.endpoint), n = new Date(e.until).toLocaleDateString(void 0, {
 								day: "numeric",
@@ -974,9 +974,9 @@ function ae(t) {
 										className: "block font-medium",
 										children: [
 											t && r.deviceName(t) || "A device",
-											" keeps ",
+											" runs ",
 											r.appTitle(e.app),
-											" running for ",
+											"’s schedules for ",
 											r.forWhom(e.scope)
 										]
 									}), /* @__PURE__ */ T("span", {
@@ -992,7 +992,7 @@ function ae(t) {
 									variant: "ghost",
 									size: "sm",
 									className: "text-destructive",
-									onClick: () => h(() => E("POST", "/v1/grant", {
+									onClick: () => h(() => E("POST", "/v1/app-schedules", {
 										device: e.endpoint,
 										app: e.app,
 										scope: e.scope,
@@ -1004,7 +1004,7 @@ function ae(t) {
 						}), /* @__PURE__ */ w(q, {
 							icon: "arrows-clockwise",
 							onClick: m,
-							children: "Keep an App Running…"
+							children: "Run an App’s Schedules…"
 						})] }), !!D.length && /* @__PURE__ */ w(K, { children: "When one stops or runs out, that device can’t open the app’s things any more." })]
 					}),
 					g.keys && v && /* @__PURE__ */ w(d, { children: /* @__PURE__ */ w(q, {
@@ -1018,7 +1018,7 @@ function ae(t) {
 					})
 				]
 			})]
-		}), n[0] = h, n[1] = p, n[2] = b, n[3] = y, n[4] = i.seen, n[5] = g, n[6] = s, n[7] = m, n[8] = r, n[9] = l, n[10] = a, n[11] = v, n[12] = u, n[13] = f, n[14] = S, n[15] = _.install, n[16] = C;
+		}), n[0] = h, n[1] = p, n[2] = b, n[3] = y, n[4] = i.seen, n[5] = g, n[6] = s, n[7] = r, n[8] = l, n[9] = a, n[10] = v, n[11] = u, n[12] = m, n[13] = f, n[14] = S, n[15] = _.install, n[16] = C;
 	} else C = n[16];
 	return C;
 }
@@ -1607,7 +1607,7 @@ function Ee(e, t, n, r) {
 	}, t);
 }
 function De(t) {
-	let n = e(23), { m: i, keepAsked: a, open: o, setOpen: c, done: l } = t, u = a.scope || `user:${i.me}`, [p, g] = r(a.app || null), [_, v] = r(""), y;
+	let n = e(23), { m: i, asked: a, open: o, setOpen: c, done: l } = t, u = a.scope || `user:${i.me}`, [p, g] = r(a.app || null), [_, v] = r(""), y;
 	n[0] === _ ? y = n[1] : (y = (e, t) => /* @__PURE__ */ T("div", {
 		className: "flex flex-col gap-4 overflow-y-auto p-4",
 		children: [
@@ -1623,7 +1623,7 @@ function De(t) {
 	n[2] !== p || n[3] !== l || n[4] !== u ? (x = async function(e) {
 		v("");
 		try {
-			await E("POST", "/v1/grant", {
+			await E("POST", "/v1/app-schedules", {
 				device: e.key,
 				app: p,
 				scope: u
@@ -1633,14 +1633,14 @@ function De(t) {
 		}
 	}, n[2] = p, n[3] = l, n[4] = u, n[5] = x) : x = n[5];
 	let S = x, C;
-	n[6] !== p || n[7] !== i ? (C = p ? `Keep ${i.appTitle(p)} Running` : "Keep an App Running", n[6] = p, n[7] = i, n[8] = C) : C = n[8];
+	n[6] !== p || n[7] !== i ? (C = p ? `Run ${i.appTitle(p)}’s Schedules On…` : "Run an App’s Schedules", n[6] = p, n[7] = i, n[8] = C) : C = n[8];
 	let O;
 	n[9] === c ? O = n[10] : (O = /* @__PURE__ */ w(ve, { setOpen: c }), n[9] = c, n[10] = O);
 	let k;
-	n[11] !== p || n[12] !== S || n[13] !== i || n[14] !== b || n[15] !== u ? (k = p ? b(i.keepers(u).map((e) => /* @__PURE__ */ w(f, {
+	n[11] !== p || n[12] !== S || n[13] !== i || n[14] !== b || n[15] !== u ? (k = p ? b(i.runners(u).map((e) => /* @__PURE__ */ w(f, {
 		title: i.deviceName(e),
 		onClick: () => S(e)
-	}, e.key)), "It runs on the device you choose, while that device is on.") : b(i.scheduled(u).map((e) => /* @__PURE__ */ w(f, {
+	}, e.key)), "They run on the device you choose, while that device is on.") : b(i.scheduled(u).map((e) => /* @__PURE__ */ w(f, {
 		title: e.title || e.name,
 		onClick: () => g(e.name)
 	}, e.name)), "Apps that run on their own, every so often."), n[11] = p, n[12] = S, n[13] = i, n[14] = b, n[15] = u, n[16] = k) : k = n[16];

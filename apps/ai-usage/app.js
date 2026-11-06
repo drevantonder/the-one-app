@@ -302,7 +302,7 @@ export default {
   uses: { services: ["ai-usage"] },
   service: { network: ["api.anthropic.com", "api.openai.com", "chatgpt.com", "opencode.ai"], person: true, platforms: ["linux", "mac"] },
 
-  // Fresh readings for agents' prompts, from the device that keeps AI Usage running (one devices keep ai-usage on <it>).
+  // Fresh readings for agents' prompts, from the device that runs AI Usage's schedules (one devices run_schedules ai-usage on <it>).
   schedules: { refresh: { op: "status", every: "5m", description: "Reads every plan, so agents' prompts get fresh numbers" } },
 
   schema: Object.fromEntries(["user", "group", "global"].map((kind) => [kind, [`

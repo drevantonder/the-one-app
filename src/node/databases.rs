@@ -23,12 +23,12 @@ impl std::fmt::Display for NotGiven {
 impl std::error::Error for NotGiven {}
 
 /// The keys a call was handed for a database, with the bucket as that call reaches it, and until when they're kept (and
-/// whether standing work's grant handed them).
+/// whether app schedules handed them).
 pub(super) struct Given<'a> {
     pub keys: crate::db::Keys,
     pub bucket: &'a Copied,
     pub until: u64,
-    pub standing: bool,
+    pub app_schedules: bool,
 }
 
 impl Node {
@@ -206,7 +206,7 @@ impl Node {
         if self.with(|i| Ok(i.r.db().epoch(scope)))? > 0 {
             return Box::pin(self.epoch_keys(scope, false)).await;
         }
-        // A scope's first keys are its admins' to make, as they keep its apps running.
+        // A scope's first keys are its admins' to make, as they choose where its apps' schedules run.
         let (may, recovery) = self.with(|i| Ok((i.r.db().may(&i.user, "keep", &scopes::object(scope)), i.r.db().recovery())))?;
         ensure!(may, NotGiven(scope.clone(), self.device_name()));
         let recovery = recovery.context("the install has no recovery key to seal its keys to")?;
@@ -425,8 +425,8 @@ impl Node {
     /// handed keys is kept open only for calls handed exactly those keys, until they run out.
     pub(super) async fn database(&self, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>, given: Option<Given<'_>>) -> Result<Arc<tokio::sync::Mutex<Db>>> {
         let own = given.is_none();
-        let (keys, bucket, until, standing) = match given {
-            Some(g) => (g.keys, g.bucket.clone(), g.until, g.standing),
+        let (keys, bucket, until, app_schedules) = match given {
+            Some(g) => (g.keys, g.bucket.clone(), g.until, g.app_schedules),
             None => (self.database_keys(scope, app, database, true).await?, self.bucket()?, 0, false),
         };
         let schema = match schema {
@@ -492,7 +492,7 @@ impl Node {
         trace::note(json!({ "step": "open", "app": app, "steps": db.at() }), opening.elapsed());
         let db = Arc::new(tokio::sync::Mutex::new(db));
         if !own {
-            self.keep_opened(id, keys, until, standing, db.clone());
+            self.keep_opened(id, keys, until, app_schedules, db.clone());
             return Ok(db);
         }
         let mut dbs = self.0.dbs.lock().unwrap();

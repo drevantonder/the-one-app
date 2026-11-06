@@ -16,8 +16,8 @@ import { members } from "./members.js";
 
 const text = new TextEncoder();
 
-/// How long standing work lasts (src/node/standing.rs), unless its person renews it as they use the app.
-const GRANT_DAYS = 30, DAY = 86_400_000, HOUR = 3_600_000;
+/// How long app schedules last (src/node/app_schedules.rs), unless their person renews them as they use the app.
+const APP_SCHEDULES_DAYS = 30, DAY = 86_400_000, HOUR = 3_600_000;
 
 // MARK: Kept in this browser
 
@@ -99,9 +99,9 @@ export class Device {
     this.dbKeys = new Map();
     /// What each kind of request needed the last time (`one.needs`, which names no key).
     this.needs = JSON.parse(localStorage.getItem("one.needs") || "{}");
-    /// The grants this browser is renewing now.
+    /// The app schedules this browser is renewing now.
     this.renewing = new Set();
-    /// When `renewGrants` last checked the entries again.
+    /// When `renewAppSchedules` last checked the entries again.
     this.renewChecked = 0;
     /// What's being fetched now, by what it is, for everything that wants it at once to wait on the one fetch.
     this.fetching = new Map();
@@ -254,8 +254,8 @@ export class Device {
     return key;
   }
 
-  /// An app's key in epoch `n` of a scope as its bytes, opened now (for sealing it to a device that keeps the app
-  /// running): the one sealed under the epoch, or a new one if it has none yet. Its epochs' are asked for once, however
+  /// An app's key in epoch `n` of a scope as its bytes, opened now (for sealing it to a device that runs the app's
+  /// schedules): the one sealed under the epoch, or a new one if it has none yet. Its epochs' are asked for once, however
   /// many ask at once.
   async appKeyBytes(scope, app, n, note = noting) {
     const [epoch, all] = await Promise.all([
@@ -271,16 +271,17 @@ export class Device {
     return openAppKey(epoch, app, b64u.decode(sealed));
   }
 
-  // Standing work.
+  // App schedules.
 
-  /// Keeps `app` running in `scope` on one of the install's devices (`endpoint`) for `days`, 30 at most (0 stops it):
-  /// the app's key in each epoch of the scope, sealed to it first, then the `grant` naming each one's hash. Stopping
-  /// it starts a new epoch of the scope, which the device isn't sealed, so the keys it held open nothing written after.
-  async grant({ endpoint, app, scope, days = GRANT_DAYS }) {
+  /// Runs `app`'s schedules in `scope` on one of the install's devices (`endpoint`) for `days`, 30 at most (0 stops
+  /// them): the app's key in each epoch of the scope, sealed to it first, then the app schedules naming each one's
+  /// hash. Stopping them starts a new epoch of the scope, which the device isn't sealed, so the keys it held open
+  /// nothing written after.
+  async setAppSchedules({ endpoint, app, scope, days = APP_SCHEDULES_DAYS }) {
     const k = await this.checked();
     const e = k.devices.find((d) => d.key === endpoint && d.user);
     if (!e) throw new Error("That device isn’t one of yours.");
-    const until = days === 0 ? 0 : Date.now() + Math.min(days, GRANT_DAYS) * DAY;
+    const until = days === 0 ? 0 : Date.now() + Math.min(days, APP_SCHEDULES_DAYS) * DAY;
     const keys = {};
     if (until) {
       const made = Object.keys(k.epochs[scope]?.hashes || {}).map(Number);
@@ -291,17 +292,17 @@ export class Device {
         key.fill(0);
       }
     }
-    await this.write("global", members.grant({ endpoint, scope, app, until, keys }));
+    await this.write("global", members.appSchedules({ endpoint, scope, app, until, keys }));
     // Checked again, so what it renews next goes by this.
     await this.checked(true);
     if (!until) await this.renew([scope], []);
   }
 
-  /// Renews, in the background, this person's grants of `app` as they use it: once a day at most, and at once when
-  /// the scope has an epoch a grant's keys don't reach. One of theirs that ran out is stopped, as Stop does. Only those
-  /// the install's entries hold, as checked here (`keeps`), never those a node lists: a hacked one could list itself.
-  async renewGrants(app) {
-    // Checked again first, at most once an hour, so it renews what its person's other devices granted too.
+  /// Renews, in the background, this person's app schedules of `app` as they use it: once a day at most, and at once
+  /// when the scope has an epoch their keys don't reach. One of theirs that ran out is stopped, as Stop does. Only those
+  /// the install's entries hold, as checked here (`keeps`, their name for older clients), never those a node lists: a hacked one could list itself.
+  async renewAppSchedules(app) {
+    // Checked again first, at most once an hour, so it renews what its person's other devices set too.
     if (!(this.renewChecked > Date.now() - HOUR)) {
       this.renewChecked = Date.now();
       await this.checked(true).catch(() => {});
@@ -312,16 +313,16 @@ export class Device {
         const id = `${g.endpoint} ${g.scope} ${g.app}`;
         if (this.renewing.has(id)) continue;
         this.renewing.add(id);
-        this.grant({ endpoint: g.endpoint, app: g.app, scope: g.scope, days: 0 }).catch(() => {}).finally(() => this.renewing.delete(id));
+        this.setAppSchedules({ endpoint: g.endpoint, app: g.app, scope: g.scope, days: 0 }).catch(() => {}).finally(() => this.renewing.delete(id));
         continue;
       }
       const newest = this.known?.epochs[g.scope]?.n || 0;
       const reaches = Math.max(0, ...Object.keys(g.keys || {}).map(Number));
-      if (g.app !== app || g.until <= now || (g.until > now + (GRANT_DAYS - 1) * DAY && reaches >= newest)) continue;
+      if (g.app !== app || g.until <= now || (g.until > now + (APP_SCHEDULES_DAYS - 1) * DAY && reaches >= newest)) continue;
       const id = `${g.endpoint} ${g.scope} ${g.app}`;
       if (this.renewing.has(id)) continue;
       this.renewing.add(id);
-      this.grant({ endpoint: g.endpoint, app: g.app, scope: g.scope }).catch(() => {}).finally(() => this.renewing.delete(id));
+      this.setAppSchedules({ endpoint: g.endpoint, app: g.app, scope: g.scope }).catch(() => {}).finally(() => this.renewing.delete(id));
     }
   }
 

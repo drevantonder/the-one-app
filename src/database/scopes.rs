@@ -14,7 +14,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
 use crate::entry::{Hash, Key, Scope, hex, unhex};
-use crate::members::{App, Grant, Group, Kind, Machine, Members, Principal, Role, ScopeState, Switch, User, VaultKey};
+use crate::members::{App, AppSchedules, Group, Kind, Machine, Members, Principal, Role, ScopeState, Switch, User, VaultKey};
 use crate::permissions;
 
 pub use super::scope::{app, device, group, object, person, service};
@@ -23,7 +23,7 @@ pub use super::scope::{app, device, group, object, person, service};
 pub const INSTALL: &str = permissions::INSTALL;
 
 /// One scope database, and the time it was built at, which `may` asks as of. Nothing in it lasts until a time yet but
-/// keeps, which are asked with the time they're asked at (`keeps_at`).
+/// app schedules, which are asked with the time they're asked at (`app_schedules_at`).
 pub struct ScopeDb {
     db: Connection,
     now: u64,
@@ -581,8 +581,8 @@ impl ScopeDb {
         self.rows("SELECT scope FROM owed", [], |r| r.get::<_, String>(0)).iter().filter_map(|s| Scope::parse(s).ok()).collect()
     }
 
-    /// Every keep there is, by (device, scope, app), as its latest `grant` said: whether it's in force is `keeps_at`'s.
-    pub fn keeps(&self) -> BTreeMap<(Key, Scope, String), Grant> {
+    /// All app schedules, by (device, scope, app), as their latest `grant` said: whether in force is `app_schedules_at`'s.
+    pub fn app_schedules(&self) -> BTreeMap<(Key, Scope, String), AppSchedules> {
         let rows = self.rows("SELECT device, scope, app, principal, until FROM keeps", [], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, id(&r.get::<_, String>(3)?), r.get::<_, i64>(4)? as u64))
         });
@@ -593,14 +593,14 @@ impl ScopeDb {
                     .rows("SELECT epoch, key_hash FROM keep_keys WHERE device = ?1 AND scope = ?2 AND app = ?3", params![k, s, a], |r| Ok((r.get(0)?, r.get(1)?)))
                     .into_iter()
                     .collect();
-                Some(((key(&k), scope, a), Grant { by, until, hashes }))
+                Some(((key(&k), scope, a), AppSchedules { by, until, hashes }))
             })
             .collect()
     }
 
-    /// The keeps in force at `now`: not over, on a device still listed, by someone who may still keep apps running there.
-    pub fn keeps_at(&self, now: u64) -> Vec<((Key, Scope, String), Grant)> {
-        self.keeps().into_iter().filter(|((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.may(&g.by, "keep", &object(s))).collect()
+    /// The app schedules in force at `now`: not over, on a device still listed, by someone who may still set them there.
+    pub fn app_schedules_at(&self, now: u64) -> Vec<((Key, Scope, String), AppSchedules)> {
+        self.app_schedules().into_iter().filter(|((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.may(&g.by, "keep", &object(s))).collect()
     }
 
     /// A scope's current Vault key, if it has one.
@@ -718,7 +718,7 @@ impl ScopeDb {
             m.epochs.insert(scope, crate::members::Epoch { n, to, hash });
         }
         m.owed = self.owed().into_iter().collect();
-        m.grants = self.keeps();
+        m.app_schedules = self.app_schedules();
         for (scope, v) in self.vaults() {
             for (n, public) in self.vault_publics(&scope) {
                 m.vault_publics.insert((scope.clone(), n), public);
@@ -864,9 +864,9 @@ pub(crate) mod tests {
             assert_eq!(db.epoch_hashes(s), m.epoch_hashes.range((s.clone(), 0)..=(s.clone(), u32::MAX)).map(|((_, n), h)| (*n, h.clone())).collect());
         }
         assert_eq!(db.owed(), m.owed.iter().cloned().collect::<Vec<_>>());
-        assert_eq!(db.keeps(), m.grants);
+        assert_eq!(db.app_schedules(), m.app_schedules);
         for now in [0, 1_000, u64::MAX / 2] {
-            assert_eq!(db.keeps_at(now), m.grants_at(now).map(|(k, g)| (k.clone(), g.clone())).collect::<Vec<_>>());
+            assert_eq!(db.app_schedules_at(now), m.app_schedules_at(now).map(|(k, g)| (k.clone(), g.clone())).collect::<Vec<_>>());
         }
         let sorted = |v: &VaultKey| {
             let mut v = v.clone();
