@@ -1,17 +1,20 @@
 //! The app with no window, for what the platform runs beside it when nothing's open (a Windows Widgets board provider,
-//! a push woken in the background): the same program, signed in as the window is, answering one thing as JSON on
-//! stdout and ending.
+//! a push woken in the background, a home-screen widget's button): the same program, signed in as the window is,
+//! answering one `kind` of thing, given as JSON, with JSON. Windows' helper starts it as `--headless <kind> <json>`
+//! (an answer on stdout); Swift and Kotlin call `run_here` across FFI or JNI. Whatever a platform would otherwise work
+//! out itself (a note's link, a widget's id or headline) is worked out here, so they only show it.
 //!
-//! - `--call <app> <tool> <input JSON>`: runs a tool as the person → `{ "ok": … }` or `{ "error": "…" }`
-//! - `--widgets`: the pages' widgets kept again where the platform's own read them (`widgets`) → `{ "dir": "…" }`
-//! - `--open-note <pushed>`: a pushed note (its `n`), opened with this device's key → the note, or `{ "error" }`
-//! - `--answer-join <code> approve|refuse`: a device asking to join, let in or turned down → `{ "ok": null }`
-//! - `--register-push <via> <address>`: this device's push address (a WNS channel, from Windows' helper) registered
-//!   with the push Worker, which carries its notes → `{ "ok": null }`
+//! - `call` `{ app, tool, input }`: runs a tool as the person, then keeps the widgets again → `{ "ok": … }`
+//! - `widgets` `{}`: the pages' widgets kept again where the platform's own read them (`crate::widgets_dir`) → `{ "dir" }`
+//! - `open-note` `{ n }`: a pushed note opened with this device's key → `{ id, title, body, app, badge, link, join }`,
+//!   `link` what a tap opens and `join` the code of a device asking to join, if it does
+//! - `join` `{ code, approve }`: a device asking to join, let in or turned down → `{ "ok": null }`
+//! - `register-push` `{ via, address }`: this device's push address registered with the push Worker → `{ "ok": null }`
+//! - `open` `{ link }`: a link of the app's, opened in its window (a tapped notification's)
 //!
-//! While the app runs (in the tray), it answers these itself with its own client, already connected (`serve`): the
-//! command asks it over a loopback port its folder names, with a token only this user can read there, and starts the
-//! client itself only when no app answers.
+//! Each fails as `{ "error": "…" }`. While the app runs (in the tray), it answers these itself with its own client,
+//! already connected (`serve`): the command asks it over a loopback port its folder names, with a token only this user
+//! can read there, and starts the client itself only when no app answers.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -44,24 +47,30 @@ fn dirs_local() -> Option<PathBuf> {
     return std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
 }
 
-/// Answers `args` if they ask for one of these → whether they did.
+/// Answers `args` if they ask for one of these (`--headless <kind> <json>`) → whether they did.
 pub fn answer(args: &[String]) -> bool {
-    let Some(what) = args.get(1).filter(|a| a.starts_with("--") && ["--call", "--widgets", "--open-note", "--answer-join", "--register-push"].contains(&a.as_str())) else {
+    if args.get(1).map(String::as_str) != Some("--headless") {
         return false;
-    };
-    let out = running(&args[1..]).unwrap_or_else(|| tauri::async_runtime::block_on(run(what, &args[2..], None)).unwrap_or_else(|e| json!({ "error": e })));
+    }
+    let kind = args.get(2).cloned().unwrap_or_default();
+    let input: Value = args.get(3).and_then(|j| serde_json::from_str(j).ok()).unwrap_or_else(|| json!({}));
+    let out = running(&kind, &input).unwrap_or_else(|| answered(tauri::async_runtime::block_on(run(&kind, &input, None))));
     println!("{out}");
     true
 }
 
-/// The running app's answer to `args`, if one runs here and answers.
-fn running(args: &[String]) -> Option<Value> {
+fn answered(out: Result<Value, String>) -> Value {
+    out.unwrap_or_else(|e| json!({ "error": e }))
+}
+
+/// The running app's answer, if one runs here and answers.
+fn running(kind: &str, input: &Value) -> Option<Value> {
     let said = std::fs::read_to_string(data().join("headless")).ok()?;
     let (port, token) = said.trim().split_once(' ')?;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port.parse().ok()?));
     let mut stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(120))).ok()?;
-    writeln!(stream, "{}", json!({ "token": token, "args": args })).ok()?;
+    writeln!(stream, "{}", json!({ "token": token, "kind": kind, "input": input })).ok()?;
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).ok()?;
     serde_json::from_str(&line).ok()
@@ -70,7 +79,7 @@ fn running(args: &[String]) -> Option<Value> {
 /// The running app answering these for what runs beside it (`running`): a loopback port, and a token, in `headless` in
 /// its folder, which only this user reads.
 #[cfg(desktop)]
-pub fn serve(device: impl Fn() -> Option<Arc<one_client::Device>> + Send + Sync + 'static) {
+pub fn serve() {
     let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) else { return };
     let Ok(port) = listener.local_addr().map(|a| a.port()) else { return };
     let token = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>());
@@ -82,21 +91,19 @@ pub fn serve(device: impl Fn() -> Option<Arc<one_client::Device>> + Send + Sync 
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
     }
-    let device = Arc::new(device);
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            let (token, device) = (token.clone(), device.clone());
+            let token = token.clone();
             tauri::async_runtime::spawn(async move {
                 let mut line = String::new();
-                let mut reader = BufReader::new(&stream);
-                if reader.read_line(&mut line).is_err() {
+                if BufReader::new(&stream).read_line(&mut line).is_err() {
                     return;
                 }
                 let asked: Value = serde_json::from_str(&line).unwrap_or_default();
-                let args: Vec<String> = asked["args"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_string)).collect();
-                let out = match (asked["token"].as_str() == Some(token.as_str()), args.split_first()) {
-                    (true, Some((what, rest))) => run(what, rest, device()).await.unwrap_or_else(|e| json!({ "error": e })),
-                    _ => json!({ "error": "Not this app's." }),
+                let out = if asked["token"].as_str() == Some(token.as_str()) {
+                    run_here(asked["kind"].as_str().unwrap_or_default(), &asked["input"]).await
+                } else {
+                    json!({ "error": "Not this app's." })
                 };
                 let _ = writeln!(&stream, "{out}");
             });
@@ -104,90 +111,81 @@ pub fn serve(device: impl Fn() -> Option<Arc<one_client::Device>> + Send + Sync 
     });
 }
 
-/// The person signed in here, and this device's key for them.
+/// The person signed in here, and this device's key for them: `(address, "<address> <user>", key)`.
 fn signed_in(data: &std::path::Path) -> Result<(String, String, [u8; 32]), String> {
-    let read = |name: &str| std::fs::read_to_string(data.join(name)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let address = crate::env("ADDRESS").or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| read("address")).ok_or("Sign in first.")?;
-    let user = read("user").ok_or("Sign in first.")?;
+    let address = crate::address_in(data).ok_or("Sign in first.")?;
+    let user = crate::kept_in(data, "user").ok_or("Sign in first.")?;
     let id = format!("{address} {user}");
     let key = crate::secrets::device(&id).ok_or("Sign in first.")?;
     Ok((address, id, key))
 }
 
-async fn device(data: &std::path::Path) -> Result<one_client::Device, String> {
-    let (address, id, key) = signed_in(data)?;
-    let device = one_client::Device::new(key, &address, &data.join("client").join(crate::secrets::folder(&id)).to_string_lossy()).keeping();
+/// The running app's device if it's been let in, else one started from what it keeps.
+async fn device(mine: Option<Arc<one_client::Device>>) -> Result<Arc<one_client::Device>, String> {
+    if let Some(d) = mine {
+        return Ok(d);
+    }
+    let data = data();
+    let (address, id, key) = signed_in(&data)?;
+    let device = crate::client(&data, &address, &id, key);
     match device.connect().await {
-        Ok(true) => Ok(device),
+        Ok(true) => Ok(Arc::new(device)),
         Ok(false) => Err("This device hasn't been approved yet.".into()),
         Err(e) => Err(e.to_string()),
     }
 }
 
-async fn post(device: &one_client::Device, path: &str, body: Value) -> Result<Value, String> {
-    let r = device.fetch("POST", path, vec![("content-type".into(), "application/json".into())], serde_json::to_vec(&body).unwrap()).await.map_err(|e| e.to_string())?;
-    let status = r.status;
-    let out: Value = serde_json::from_slice(&r.body.bytes().await.map_err(|e| e.to_string())?).unwrap_or_default();
-    match out["error"].as_str() {
-        Some(e) => Err(e.to_string()),
-        None if !(200..300).contains(&status) => Err("That didn’t work. Try again.".into()),
-        None => Ok(out),
-    }
-}
-
-/// One of them, in the running app, with its device if it's been let in yet, or else one started from what it keeps (an
-/// iPhone's widget's button, which may start it in the background).
-#[cfg_attr(not(any(target_os = "ios", target_os = "android")), allow(dead_code))]
-pub async fn run_here(what: &str, rest: &[String]) -> Result<Value, String> {
-    run(what, rest, crate::APP.get().and_then(|a| a.device().ok())).await
+/// One of them, in this process: in the running app with its device if it's been let in yet, or else one started
+/// from what it keeps (an iPhone's widget's button, which may start it in the background).
+pub async fn run_here(kind: &str, input: &Value) -> Value {
+    answered(run(kind, input, crate::APP.get().and_then(|a| a.device().ok())).await)
 }
 
 /// One of them, with `mine`, the running app's device, or else one started here.
-async fn run(what: &str, rest: &[String], mine: Option<Arc<one_client::Device>>) -> Result<Value, String> {
-    let data = data();
-    let device = |data: &std::path::Path| {
-        let (mine, data) = (mine.clone(), data.to_path_buf());
-        async move {
-            match mine {
-                Some(d) => Ok(d),
-                None => device(&data).await.map(Arc::new),
-            }
-        }
-    };
-    let arg = |i: usize| rest.get(i).cloned().ok_or_else(|| format!("{what} wants more: see client/native/src/headless.rs"));
-    match what {
-        "--call" => {
-            let input: Value = serde_json::from_str(&rest.get(2).cloned().unwrap_or_else(|| "{}".into())).map_err(|e| e.to_string())?;
+async fn run(kind: &str, input: &Value, mine: Option<Arc<one_client::Device>>) -> Result<Value, String> {
+    let text = |key: &str| input[key].as_str().map(str::to_string).ok_or_else(|| format!("{kind} wants {key}: see client/native/src/headless.rs"));
+    match kind {
+        "call" => {
+            let device = device(mine).await?;
             let id = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 8]>());
-            let out = post(&*device(&data).await?, "/v1/call", json!({ "id": id, "app": arg(0)?, "tool": arg(1)?, "input": input, "client": crate::client_name() })).await?;
+            let asked = json!({ "id": id, "app": text("app")?, "tool": text("tool")?, "input": input["input"], "client": crate::client_name() });
+            let out = crate::node(&device, "POST", "/v1/call", Some(asked)).await?;
+            // What a tool did shows on the widgets.
+            crate::widgets_changed(&device).await;
             Ok(json!({ "ok": out["ok"] }))
         }
-        "--widgets" => {
-            let dir = data.join("widgets");
-            crate::widgets::refresh(&*device(&data).await?, &dir).await?;
+        "widgets" => {
+            let dir = crate::widgets_dir();
+            crate::widgets::refresh(&*device(mine).await?, &dir).await?;
             Ok(json!({ "dir": dir }))
         }
-        "--open-note" => {
-            let (_, _, key) = signed_in(&data)?;
-            let (note, by) = one_client::open_note(key, &arg(0)?).map_err(|e| e.to_string())?;
-            let mut out = serde_json::to_value(note).unwrap();
-            out["by"] = json!(by);
+        "open-note" => {
+            let (_, _, key) = signed_in(&data())?;
+            let (note, _) = one_client::open_note(key, &text("n")?).map_err(|e| e.to_string())?;
+            let mut out = json!({ "id": note.id, "title": note.title, "body": note.body, "app": note.app, "badge": note.badge, "link": note.link(), "join": note.join() });
+            // Absent, not null: Kotlin's optString reads a null as "null".
+            out.as_object_mut().unwrap().retain(|_, v| !v.is_null());
             Ok(out)
         }
-        "--answer-join" => {
-            let code: String = arg(0)?.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-            let device = device(&data).await?;
-            match arg(1)?.as_str() {
-                "approve" => post(&device, "/v1/devices/approve", json!({ "code": code, "confirm": true })).await?,
-                _ => post(&device, "/v1/devices/refuse", json!({ "code": code })).await?,
+        "join" => {
+            let code = crate::device_code(&text("code")?);
+            let device = device(mine).await?;
+            match input["approve"] == true {
+                true => crate::node(&device, "POST", "/v1/devices/approve", Some(json!({ "code": code, "confirm": true }))).await?,
+                false => crate::node(&device, "POST", "/v1/devices/refuse", Some(json!({ "code": code }))).await?,
             };
             Ok(json!({ "ok": null }))
         }
-        "--register-push" => {
-            let address = one::push::Address { via: arg(0)?, address: arg(1)?, ..Default::default() };
-            device(&data).await?.register_push(&address).await.map_err(|e| e.to_string())?;
+        "register-push" => {
+            let address = one::push::Address { via: text("via")?, address: text("address")?, ..Default::default() };
+            device(mine).await?.register_push(&address).await.map_err(|e| e.to_string())?;
             Ok(json!({ "ok": null }))
         }
-        _ => Err("Unknown".into()),
+        "open" => {
+            crate::APP.get().ok_or("The app hasn't started.")?;
+            crate::opened(&text("link")?);
+            Ok(json!({ "ok": null }))
+        }
+        _ => Err(format!("{kind} isn't something this answers: see client/native/src/headless.rs")),
     }
 }

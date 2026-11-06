@@ -47,11 +47,11 @@ public static class App
     /// Where the app keeps what it keeps (Tauri's app local data folder: the package's own, as both are in it).
     public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), $"app.{CustomBuild.Cli}.windows");
 
-    /// One thing asked of the app with no window → what it answered, or `Refused` with why not.
-    public static async Task<JsonNode?> Ask(params string[] args)
+    /// One thing asked of the app with no window (`--headless <kind> <input>`) → what it answered, or `Refused` with
+    /// why not.
+    public static async Task<JsonNode?> Ask(string kind, JsonObject input)
     {
-        var start = new ProcessStartInfo(Exe) { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true };
-        foreach (var a in args) start.ArgumentList.Add(a);
+        var start = new ProcessStartInfo(Exe) { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true, ArgumentList = { "--headless", kind, input.ToJsonString() } };
         using var p = Process.Start(start) ?? throw new Refused($"{CustomBuild.Name} didn’t start.");
         // One that can't reach the person's devices gives up, as a page's request would.
         using var limit = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(90));

@@ -31,6 +31,11 @@ pub fn cache() -> PathBuf {
     }
 }
 
+/// `s` as a part of a URL: its unreserved characters as they are, every other byte percent-encoded.
+pub fn url_encode(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
 pub(crate) fn user_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into())
 }

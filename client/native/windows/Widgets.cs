@@ -3,8 +3,8 @@
 // Card (WidgetCard.cs), its buttons and toggles running the widget's tools. Windows starts this helper as the
 // package's COM server for the board (Helper.cs). It draws from what the app keeps of every page's widgets for the
 // platform's own (client/native/src/widgets.rs), which the app writes whenever it sees them change, and asks the app,
-// with no window, to read them again (--widgets) when the board shows them and every few minutes while it does, and to
-// run a widget's tool (--call). What each pinned widget shows is kept with it, as its custom state.
+// with no window, to read them again (widgets) when the board shows them and every few minutes while it does, and to
+// run a widget's tool (call). What each pinned widget shows is kept with it, as its custom state.
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -20,14 +20,12 @@ using Microsoft.Windows.Widgets.Providers;
 
 namespace One;
 
-/// Every page's widgets, as the app last read them: its `widgets.json`, in the iPhone widget's format.
+/// Every page's widgets, as the app last read them: its `widgets.json` (client/native/src/widgets.rs).
 public static class WidgetCache
 {
-    public sealed record Item(string App, string Widget, string Scope, string Page, string Title, string? Error, JsonElement Root, Dictionary<string, JsonElement>? Sizes)
+    /// `Id`: what a pinned widget's choice is found again by.
+    public sealed record Item(string Id, string App, string Widget, string Scope, string Page, string Title, string? Error, JsonElement Root, Dictionary<string, JsonElement>? Sizes)
     {
-        /// `<scope>/<app>.<widget>`, as the iPhone's: what a pinned widget's choice is found again by.
-        public string Id => $"{Scope}/{App}.{Widget}";
-
         public JsonElement Tree(string size) => Sizes?.TryGetValue(size, out var t) == true ? t : Root;
     }
 
@@ -37,9 +35,6 @@ public static class WidgetCache
     static string Dir => Path.Combine(App.Folder, "widgets");
     public static string File => Path.Combine(Dir, "widgets.json");
 
-    /// Seconds from 1970 to 2001, where the iPhone's `fetched` counts from.
-    const double Swift = 978_307_200;
-
     public static Kept? Last()
     {
         try
@@ -47,14 +42,14 @@ public static class WidgetCache
             using var doc = JsonDocument.Parse(System.IO.File.ReadAllBytes(File));
             var root = doc.RootElement;
             if (root.TryGetProperty("signedOut", out var o) && o.ValueKind == JsonValueKind.True) return new Kept(null, default);
-            var at = root.TryGetProperty("fetched", out var f) && f.ValueKind == JsonValueKind.Number ? DateTime.UnixEpoch.AddSeconds(f.GetDouble() + Swift) : default;
+            var at = root.TryGetProperty("fetched", out var f) && f.ValueKind == JsonValueKind.Number ? DateTime.UnixEpoch.AddSeconds(f.GetDouble()) : default;
             var items = new List<Item>();
             foreach (var w in root.GetProperty("widgets").EnumerateArray())
             {
                 string S(string key) => w.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
                 var error = w.TryGetProperty("error", out var e) && e.ValueKind != JsonValueKind.Null ? e.ValueKind == JsonValueKind.String ? e.GetString() : e.GetRawText() : null;
                 var sizes = w.TryGetProperty("sizes", out var s) && s.ValueKind == JsonValueKind.Object ? s.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone()) : null;
-                items.Add(new Item(S("app"), S("widget"), S("scope"), S("page"), S("title"), error, w.TryGetProperty("root", out var r) ? r.Clone() : default, sizes));
+                items.Add(new Item(S("id"), S("app"), S("widget"), S("scope"), S("page"), S("title"), error, w.TryGetProperty("root", out var r) ? r.Clone() : default, sizes));
             }
             // The icons they draw, kept beside them.
             try { WidgetArt.Icons = JsonSerializer.Deserialize<Dictionary<string, string>>(System.IO.File.ReadAllText(Path.Combine(Dir, "icons.json"))) ?? []; }
@@ -250,7 +245,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
                 {
                     try
                     {
-                        await App.Ask("--call", app, tool, input?.ToJsonString() ?? "{}");
+                        await App.Ask("call", new JsonObject { ["app"] = app, ["tool"] = tool, ["input"] = input?.DeepClone() ?? new JsonObject() });
                         p.Problem = null;
                     }
                     catch (Exception e)
@@ -336,7 +331,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         try
         {
             if (items != null && away == null && DateTime.UtcNow - readAt < fresh) return;
-            await App.Ask("--widgets");
+            await App.Ask("widgets", new JsonObject());
             Load();
         }
         catch (Refused e) when (e.Message.StartsWith("Sign in"))

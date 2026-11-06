@@ -165,9 +165,29 @@ fn app() -> &'static App {
     APP.get().expect("the app")
 }
 
+/// What the app keeps in `data` as `name`, if anything.
+fn kept_in(data: &std::path::Path, name: &str) -> Option<String> {
+    std::fs::read_to_string(data.join(name)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// The network's address: `ADDRESS` for a test, the custom build's if it has one, else as the person gave it.
+fn address_in(data: &std::path::Path) -> Option<String> {
+    env("ADDRESS").or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| kept_in(data, "address")).map(|a| a.trim_end_matches('/').to_string())
+}
+
+/// This device's client for `id` (`<address> <user>`), its folder in `data` named by it.
+fn client(data: &std::path::Path, address: &str, id: &str, secret: [u8; 32]) -> one_client::Device {
+    one_client::Device::new(secret, address, &data.join("client").join(secrets::folder(id)).to_string_lossy()).keeping()
+}
+
+/// A device's code, as typed or pushed: its letters and digits.
+fn device_code(typed: &str) -> String {
+    typed.chars().filter(|c| c.is_ascii_alphanumeric()).collect()
+}
+
 impl App {
     fn kept(&self, name: &str) -> Option<String> {
-        std::fs::read_to_string(self.data.join(name)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        kept_in(&self.data, name)
     }
 
     fn keep(&self, name: &str, value: Option<&str>) {
@@ -181,9 +201,8 @@ impl App {
         }
     }
 
-    /// The network's address: `ADDRESS` for a test, the custom build's if it has one, else as the person gave it.
     fn address(&self) -> Option<String> {
-        env("ADDRESS").or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| self.kept("address")).map(|a| a.trim_end_matches('/').to_string())
+        address_in(&self.data)
     }
 
     fn auth(&self) -> Result<Arc<signin::Auth>, String> {
@@ -202,16 +221,21 @@ impl App {
     }
 }
 
-/// What a node answers at `path`, as JSON.
-async fn node_json(device: &one_client::Device, path: &str) -> Result<Value, String> {
-    let r = device.fetch("GET", path, Vec::new(), Vec::new()).await.map_err(|e| e.to_string())?;
+/// What a node answers `method` at `path` (with `body`, as JSON), as JSON: its `error`, or a status that isn't a success,
+/// an Err.
+async fn node(device: &one_client::Device, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+    let (headers, body) = match body {
+        Some(b) => (vec![("content-type".into(), "application/json".into())], serde_json::to_vec(&b).map_err(|e| e.to_string())?),
+        None => (Vec::new(), Vec::new()),
+    };
+    let r = device.fetch(method, path, headers, body).await.map_err(|e| e.to_string())?;
     let status = r.status;
-    let body = r.body.bytes().await.map_err(|e| e.to_string())?;
-    let out: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-    if !(200..300).contains(&status) {
-        return Err(out["error"].as_str().unwrap_or("That didn’t work.").to_string());
+    let out: Value = serde_json::from_slice(&r.body.bytes().await.map_err(|e| e.to_string())?).unwrap_or_default();
+    match out["error"].as_str() {
+        Some(e) => Err(e.to_string()),
+        None if !(200..300).contains(&status) => Err("That didn’t work. Try again.".into()),
+        None => Ok(out),
     }
-    Ok(out)
 }
 
 /// Where the platform's own widgets read the pages' widgets (`widgets`): on an iPhone, the App Group they share.
@@ -220,7 +244,17 @@ fn widgets_dir() -> PathBuf {
     if let Some(group) = iphone::group() {
         return group;
     }
-    app().data.join("widgets")
+    headless::data().join("widgets")
+}
+
+/// The widgets kept for the platform's own again, and drawn again where the app runs.
+async fn widgets_changed(device: &one_client::Device) {
+    if let Err(e) = widgets::refresh(device, &widgets_dir()).await {
+        eprintln!("widgets: {e}");
+    }
+    if APP.get().is_some() {
+        redraw_widgets();
+    }
 }
 
 /// The widgets kept for the platform's own, again now, and every five minutes while the app runs (once it's let in).
@@ -267,12 +301,7 @@ fn redraw_panel() {
 #[tauri::command]
 fn changed() {
     let Ok(device) = app().device() else { return };
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = widgets::refresh(&device, &widgets_dir()).await {
-            eprintln!("widgets: {e}");
-        }
-        redraw_widgets();
-    });
+    tauri::async_runtime::spawn(async move { widgets_changed(&device).await });
 }
 
 /// The platform's own widgets drawn again from what's kept for them: a Mac's menu bar items, an iPhone's or Android
@@ -465,8 +494,7 @@ async fn join() -> Result<Value, String> {
         match d.as_ref() {
             Some(d) => d.clone(),
             None => {
-                let dir = a.data.join("client").join(secrets::folder(&id));
-                let new = Arc::new(one_client::Device::new(secret, &address, &dir.to_string_lossy()).keeping());
+                let new = Arc::new(client(&a.data, &address, &id, secret));
                 if let Some(on) = this_device() {
                     new.on(&on);
                 }
@@ -855,7 +883,7 @@ fn approve_here(code: String) {
     if !cfg!(target_os = "macos") {
         return;
     }
-    let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    let code = device_code(&code);
     std::thread::spawn(move || local("/v1/devices/approve", Some(json!({ "code": code, "confirm": true })), 30));
 }
 
@@ -1363,7 +1391,7 @@ pub fn run() {
             // What runs beside the window asks it, while it runs, rather than starting a client of its own.
             claim();
             #[cfg(desktop)]
-            headless::serve(|| APP.get().and_then(|a| a.device().ok()));
+            headless::serve();
             #[cfg(target_os = "linux")]
             if let Err(e) = launcher(app) {
                 eprintln!("the launcher's entry: {e}");

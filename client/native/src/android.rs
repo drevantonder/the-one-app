@@ -152,37 +152,14 @@ pub fn push(device: std::sync::Arc<one_client::Device>) {
     });
 }
 
-/// What Kotlin tells Rust (`kind`, with `json`): "join", a notification's Approve or Not Me (`{ code, approve }`); "call", a
-/// widget's button or toggle (`{ app, tool, input }`), after which the widgets are kept again; "widgets", the refresh
-/// WorkManager makes; "open-note", a push (`{ n }`) opened with this device's key; "register-push", a new FCM token
-/// (`{ token }`). → `{ ok }` or `{ error }`. It waits: never call it on the main thread.
-fn answer(kind: &str, asked: &Value) -> Value {
-    let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
-    let (what, args): (&str, Vec<String>) = match kind {
-        "join" => ("--answer-join", vec![text(&asked["code"]), if asked["approve"] == true { "approve" } else { "refuse" }.into()]),
-        "call" => ("--call", vec![text(&asked["app"]), text(&asked["tool"]), asked["input"].to_string()]),
-        "widgets" => ("--widgets", vec![]),
-        "open-note" => ("--open-note", vec![text(&asked["n"])]),
-        "register-push" => ("--register-push", vec!["fcm".into(), text(&asked["token"])]),
-        _ => return json!({ "error": "Unknown" }),
-    };
-    let out = tauri::async_runtime::block_on(async {
-        let out = crate::headless::run_here(what, &args).await.unwrap_or_else(|e| json!({ "error": e }));
-        // What a tool did shows on the widgets: kept again, which Kotlin then draws.
-        if kind == "call" {
-            let _ = crate::headless::run_here("--widgets", &[]).await;
-        }
-        out
-    });
-    out
-}
-
 /// # Safety
 /// Called by the JVM, with its own environment and strings.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_client_Native_call<'a>(mut env: JNIEnv<'a>, _: JClass<'a>, kind: JString<'a>, json: JString<'a>) -> jstring {
     let read = |env: &mut JNIEnv, s: &JString| -> String { env.get_string(s).map(Into::into).unwrap_or_default() };
     let (kind, json) = (read(&mut env, &kind), read(&mut env, &json));
-    let out = answer(&kind, &serde_json::from_str(&json).unwrap_or_default());
+    // One of the things the app answers with no window (`headless`): a widget's button (`call`), WorkManager's refresh
+    // (`widgets`), a push (`open-note`), its Approve or Not Me (`join`), a new FCM token (`register-push`).
+    let out = tauri::async_runtime::block_on(crate::headless::run_here(&kind, &serde_json::from_str(&json).unwrap_or_default()));
     env.new_string(out.to_string()).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }

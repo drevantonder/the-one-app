@@ -42,10 +42,8 @@ object Push {
         if (!note.has("error")) show(context, note)
     }
 
-    /** The code of the device a note's action asks to let in (`{ "join": "<code>" }`), if it does. */
-    private fun join(note: JSONObject): String? = note.optJSONObject("action")?.optString("join")?.ifEmpty { null }
-
-    private fun enc(text: String) = Uri.encode(text)
+    /** The code of the device a note asks to let in, if it does. */
+    private fun join(note: JSONObject): String? = note.optString("join").ifEmpty { null }
 
     fun show(context: Context, note: JSONObject, problem: String? = null) {
         val join = join(note)
@@ -55,16 +53,7 @@ object Push {
             manager.createNotificationChannel(NotificationChannel(CHANNEL, "Notifications", NotificationManager.IMPORTANCE_HIGH))
         }
         val (id, title, body) = Triple(note.optString("id"), note.optString("title"), note.optString("body"))
-        val (app, screen) = note.optString("app") to note.optString("screen")
-        val params = note.optJSONObject("params")
-        // A join's taps open Settings › Devices, where it waits too; anything else the app screen it names, or the app.
-        val link = when {
-            join != null -> "${BuildConfig.CLI}://settings/devices"
-            // Settings' own screens (Settings › Devices, where a device that joined is) are this app's, not an app's.
-            app == "settings" -> "${BuildConfig.CLI}://settings/${enc(screen)}"
-            app.isNotEmpty() -> "${BuildConfig.CLI}://open?app=${enc(app)}&screen=${enc(screen.ifEmpty { "main" })}" + (params?.let { "&params=${enc(it.toString())}" } ?: "")
-            else -> null
-        }
+        val link = note.optString("link").ifEmpty { null }
         val open = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             link?.let { data = Uri.parse(it) }
@@ -95,7 +84,7 @@ class PushService : FirebaseMessagingService() {
     }
 
     override fun onNewToken(token: String) {
-        Native.call("register-push", JSONObject().put("token", token).toString())
+        Native.call("register-push", JSONObject().put("via", "fcm").put("address", token).toString())
     }
 }
 
@@ -106,7 +95,7 @@ class PushActions : BroadcastReceiver() {
         val code = intent.getStringExtra("code") ?: return
         val approve = intent.action == APPROVE
         val note = JSONObject().put("id", intent.getStringExtra("id") ?: "").put("title", intent.getStringExtra("title") ?: "")
-            .put("body", intent.getStringExtra("body") ?: "").put("action", JSONObject().put("join", code))
+            .put("body", intent.getStringExtra("body") ?: "").put("join", code)
         val done = goAsync()
         Push.dismiss(context, note.getString("id"))
         Thread {

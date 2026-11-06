@@ -21,13 +21,9 @@ enum Notes {
         content.body = note.body
         if let badge = note.badge { content.badge = NSNumber(value: badge) }
         var info: [String: Any] = [:]
-        if !note.app.isEmpty {
-            let params = (try? JSONSerialization.jsonObject(with: Data(note.params.utf8))) ?? [String: Any]()
-            info["link"] = ["app": note.app, "screen": note.screen.isEmpty ? "main" : note.screen, "params": params]
-            content.threadIdentifier = note.app
-        }
-        let action = note.action.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
-        if let code = action?["join"] as? String, !code.isEmpty {
+        if let link = note.link { info["link"] = link }
+        if !note.app.isEmpty { content.threadIdentifier = note.app }
+        if let code = note.join {
             info["join"] = code
             content.categoryIdentifier = join
         }

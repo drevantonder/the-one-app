@@ -171,21 +171,6 @@ struct WidgetNode: Codable, Sendable, Equatable {
         init(from decoder: Decoder) throws { node = try? WidgetNode(from: decoder) }
     }
 
-    /// Its most prominent text (the biggest, then the first that isn't muted): what a one-line place shows.
-    var headline: String? {
-        func texts(_ n: WidgetNode) -> [(String, Int, Bool)] {
-            switch n.t {
-            case "text": [(n.text ?? "", ["sm": 0, "md": 1, "lg": 2, "xl": 3][n.size ?? "md"] ?? 1, n.tone == "muted")]
-            case "stat": [([n.value?.text ?? "", n.unit ?? ""].filter { !$0.isEmpty }.joined(separator: " ") + (n.label.map { " \($0)" } ?? ""), 4, false)]
-            case "item": [(n.title ?? "", 1, false)]
-            default: (n.c ?? []).flatMap(texts)
-            }
-        }
-        return texts(self).filter { !$0.0.isEmpty }.enumerated().max { a, b in
-            (a.element.1, a.element.2 ? 0 : 1, -a.offset) < (b.element.1, b.element.2 ? 0 : 1, -b.offset)
-        }?.element.0
-    }
-
     /// Every image the tree shows: a home-screen widget can only draw ones the app saved for it.
     var imageURLs: [URL] {
         (t == "image" ? [url.flatMap(URL.init(string:))].compactMap { $0 } : []) + (c ?? []).flatMap(\.imageURLs)

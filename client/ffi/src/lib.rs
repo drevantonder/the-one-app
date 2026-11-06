@@ -28,20 +28,17 @@ fn failed(message: &str) -> OneError {
     OneError::Failed { reason: message.into() }
 }
 
-/// A note pushed to this device, opened: what to show, what a tap opens (`app`, `screen`, its `params` as JSON), the
-/// number for the app's icon, and an `action` (JSON) its device checks itself, like a device asking to join; `by` is
-/// the key (hex) of the network's device that sent it, none for the network's Workers.
+/// A note pushed to this device, opened: what to show, its app (the notifications it's grouped with), the number for
+/// the app's icon, what a tap opens (`link`, as every platform's), and the code of a device asking to join, which its
+/// notification answers with Approve and Not Me.
 #[derive(uniffi::Record)]
 pub struct Note {
-    pub id: String,
     pub title: String,
     pub body: String,
     pub app: String,
-    pub screen: String,
-    pub params: String,
     pub badge: Option<i64>,
-    pub action: Option<String>,
-    pub by: Option<String>,
+    pub link: Option<String>,
+    pub join: Option<String>,
 }
 
 /// Opens a note pushed to the device whose key is `secret` (`n` in the push, base64url). It only opens: nothing
@@ -49,17 +46,7 @@ pub struct Note {
 #[uniffi::export]
 pub fn open_note(secret: Vec<u8>, pushed: String) -> Result<Note, OneError> {
     let secret: [u8; 32] = secret.try_into().map_err(|_| failed("a device's key is 32 bytes"))?;
-    let (n, by) = one_client::open_note(secret, &pushed)?;
-    let json = |v: &serde_json::Value| v.to_string();
-    Ok(Note {
-        id: n.id,
-        title: n.title,
-        body: n.body,
-        app: n.app,
-        screen: n.screen,
-        params: n.params.map_or_else(|| "{}".into(), |p| json(&serde_json::Value::Object(p))),
-        badge: n.badge,
-        action: n.action.as_ref().map(json),
-        by,
-    })
+    let (n, _) = one_client::open_note(secret, &pushed)?;
+    let (link, join) = (n.link(), n.join().map(str::to_string));
+    Ok(Note { title: n.title, body: n.body, app: n.app, badge: n.badge, link, join })
 }

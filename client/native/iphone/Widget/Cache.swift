@@ -5,8 +5,8 @@ import SwiftUI
 /// Every page's widgets, as the app last saw them, which it leaves in its app group for the home-screen widgets.
 struct WidgetCache: Codable {
     struct Item: Codable, Identifiable {
-        /// `<scope>/<app>.<widget>`: what a home-screen widget's choice is found again by.
-        var id: String { "\(scope ?? "")/\(app ?? "").\(widget ?? "")" }
+        /// What a home-screen widget's choice is found again by.
+        var id: String
         var app: String?
         var widget: String?
         /// The page it's on, and that page's name.
@@ -18,6 +18,8 @@ struct WidgetCache: Codable {
         var image: String?
         var imageKind: String?
         var error: String?
+        /// Its most prominent text, for a one-line place.
+        var headline: String?
         var root: WidgetNode
         /// Its tree at each size it draws.
         var sizes: [String: WidgetNode]?
@@ -39,11 +41,15 @@ struct WidgetCache: Codable {
     private static var file: URL? { group?.appending(path: "widgets.json") }
 
     static func load() -> WidgetCache? {
-        file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode(WidgetCache.self, from: $0) }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? decoder.decode(WidgetCache.self, from: $0) }
     }
 
     func save() {
-        guard let file = Self.file, let data = try? JSONEncoder().encode(self) else { return }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        guard let file = Self.file, let data = try? encoder.encode(self) else { return }
         try? data.write(to: file, options: .atomic)
     }
 

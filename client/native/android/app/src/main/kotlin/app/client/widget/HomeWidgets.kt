@@ -46,18 +46,20 @@ import java.util.concurrent.TimeUnit
 @Serializable
 data class Kept(
     val widgets: List<KeptWidget> = emptyList(),
-    /** When they were all fetched, in seconds from 2001 (as the iPhone's widget reads it). */
+    /** When they were all fetched, in seconds since 1970. */
     val fetched: Double? = null,
     /** Set once the person signs out: nothing of theirs is left. */
     val signedOut: Boolean = false,
 ) {
     /** When they were fetched, in ms. */
-    val at get() = ((fetched ?: 0.0) + 978_307_200.0).times(1000).toLong().takeIf { fetched != null } ?: 0L
+    val at get() = fetched?.times(1000)?.toLong() ?: 0L
 }
 
 /** A widget on one of the pages, its tree at each size as `GET /v1/widgets` gave it. */
 @Serializable
 data class KeptWidget(
+    /** What a home-screen widget's choice is found again by. */
+    val id: String,
     val scope: String,
     /** Its page's name. */
     val page: String,
@@ -74,8 +76,6 @@ data class KeptWidget(
     val sizes: Map<String, WidgetNode>? = null,
     val root: WidgetNode? = null,
 ) {
-    /** `<scope>/<app>.<widget>`: what a home-screen widget's choice is found again by. */
-    val id get() = "$scope/$app.$widget"
     fun decoded(): WidgetInfo? = root?.let { WidgetInfo(app, widget, title, sizes, error, it) }
 }
 

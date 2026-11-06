@@ -178,7 +178,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
       try? await center.add(UNNotificationRequest(identifier: "join \(code)", content: content, trigger: nil))
       return
     }
-    guard let link = Notes.link(info) else { return }
+    guard let link = info["link"] as? String else { return }
     _ = await Rust.tell("open", ["link": link])
   }
 
@@ -291,7 +291,7 @@ enum Tokens {
 }
 
 /// What the notification extension leaves on each notification (its `Notes`): a device asking to join shows Approve and
-/// Not Me; a tap opens `link`'s screen.
+/// Not Me; a tap opens `link`, which the app's Rust made.
 enum Notes {
   static let join = "join"
   static let approve = "approve"
@@ -303,23 +303,6 @@ enum Notes {
       UNNotificationAction(identifier: notMe, title: "Not Me", options: [.authenticationRequired, .destructive]),
     ]
     return [UNNotificationCategory(identifier: join, actions: actions, intentIdentifiers: [])]
-  }
-
-  /// A tapped notification's screen, as the app's link: `<cli>://open?app=&screen=&params=`, or Settings' own.
-  static func link(_ info: [AnyHashable: Any]) -> String? {
-    guard let link = info["link"] as? [String: Any], let app = link["app"] as? String,
-          let cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String else { return nil }
-    var url = URLComponents()
-    url.scheme = cli
-    if app == "settings" {
-      url.host = "settings"
-      url.path = "/\(link["screen"] as? String ?? "")"
-      return url.url?.absoluteString
-    }
-    let params = (link["params"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-    url.host = "open"
-    url.queryItems = [.init(name: "app", value: app), .init(name: "screen", value: link["screen"] as? String ?? "main"), .init(name: "params", value: params)]
-    return url.url?.absoluteString
   }
 }
 

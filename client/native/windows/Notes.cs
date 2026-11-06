@@ -1,9 +1,9 @@
 // Notifications. The network's push Worker (cloudflare/push/) carries each note, sealed to this computer's device,
 // through WNS as a raw notification, its body the sealed bytes, which starts this helper (the Windows App SDK's
 // PushNotificationManager, by the custom build's Microsoft Entra app: CustomBuild.WnsApp and WnsObject, empty for none,
-// and then nothing registers). The app opens the note with the device's key (--open-note), asking nothing of the
+// and then nothing registers). The app opens the note with the device's key (open-note), asking nothing of the
 // network, and this shows it as a toast; clicking one opens the app screen it names. A device asking its person to
-// join shows Approve and Not Me, answered by the app (--answer-join) as Settings › Devices answers them, with no window.
+// join shows Approve and Not Me, answered by the app (join) as Settings › Devices answers them, with no window.
 using System;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
@@ -60,7 +60,7 @@ public static class Notes
         {
             var made = await PushNotificationManager.Default.CreateChannelAsync(Guid.Parse(CustomBuild.WnsObject));
             if (made.Status != PushNotificationChannelStatus.CompletedSuccess) throw made.ExtendedError ?? new Exception($"WNS gave no channel: {made.Status}");
-            await App.Ask("--register-push", "wns", made.Channel.Uri.ToString());
+            await App.Ask("register-push", new JsonObject { ["via"] = "wns", ["address"] = made.Channel.Uri.ToString() });
         }
         catch (Exception e)
         {
@@ -75,7 +75,7 @@ public static class Notes
         // As every push service but WNS carries it: base64url.
         var pushed = Convert.ToBase64String(payload).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         JsonNode? note;
-        try { note = await App.Ask("--open-note", pushed); }
+        try { note = await App.Ask("open-note", new JsonObject { ["n"] = pushed }); }
         catch (Exception e)
         {
             App.Problem(e);
@@ -87,21 +87,11 @@ public static class Notes
 
     static string Str(JsonNode note, string key) => note[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : "";
 
-    /// The code of the device a note's action asks to let in (`{ "join": "<code>" }`), if it does.
-    static string? Join(JsonNode note) => note["action"]?["join"] is JsonValue v && v.TryGetValue<string>(out var code) && code.Length > 0 ? code : null;
+    /// The code of the device a note asks to let in, if it does.
+    static string? Join(JsonNode note) => Str(note, "join") is { Length: > 0 } code ? code : null;
 
-    /// Where clicking a note goes: a join, to Settings › Devices, where it waits too; anything else, the app screen it
-    /// names, or the app.
-    static string Opens(JsonNode note)
-    {
-        if (Join(note) != null) return $"{CustomBuild.Cli}://settings/devices";
-        var (app, screen) = (Str(note, "app"), Str(note, "screen"));
-        // Settings' own screens (Settings › Devices, where a device that joined is) are the app's, not an app's.
-        if (app == "settings") return $"{CustomBuild.Cli}://settings/{Uri.EscapeDataString(screen)}";
-        if (app.Length == 0) return $"{CustomBuild.Cli}://open";
-        var link = $"{CustomBuild.Cli}://open?app={Uri.EscapeDataString(app)}&screen={Uri.EscapeDataString(screen.Length > 0 ? screen : "main")}";
-        return note["params"] is JsonObject p && p.Count > 0 ? $"{link}&params={Uri.EscapeDataString(p.ToJsonString())}" : link;
-    }
+    /// Where clicking a note goes, as the app worked it out; with none, the app.
+    static string Opens(JsonNode note) => Str(note, "link") is { Length: > 0 } link ? link : $"{CustomBuild.Cli}://open";
 
     static void Show(string id, string title, string body, string open, string? join, string? problem = null)
     {
@@ -134,7 +124,7 @@ public static class Notes
         try
         {
             if (id.Length > 0) await AppNotificationManager.Default.RemoveByTagAsync(id);
-            await App.Ask("--answer-join", code, approve ? "approve" : "refuse");
+            await App.Ask("join", new JsonObject { ["code"] = code, ["approve"] = approve });
         }
         catch (Exception ex)
         {

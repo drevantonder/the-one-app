@@ -1,15 +1,13 @@
 //! Every page's widgets, as the app last had them from the person's devices, kept where the platform's own widgets
 //! read them (the iPhone's home screen, the Windows Widgets board, Android's home screen, the Mac's menu bar), since
-//! those can't ask a node themselves: `widgets.json` in the iPhone widget's format (iphone/Widget/Cache.swift's
-//! `WidgetCache`), `icons.json` with the Phosphor icons they draw, and `images/<first 12 bytes of the URL's SHA-256,
+//! those can't ask a node themselves: `widgets.json`, with what each would otherwise work out itself (its `id`, `kind`,
+//! `headline`; `fetched` in seconds since 1970), which they only draw; `icons.json` with the Phosphor icons they draw, and `images/<first 12 bytes of the URL's SHA-256,
 //! hex>` for the pictures they show, which they can't download.
 
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
-/// Seconds from 1970 to 2001, where a Swift `Date` counts from (JSONEncoder's default).
-const SWIFT_EPOCH: f64 = 978_307_200.0;
 /// The most a widget's picture may be.
 const IMAGE_MOST: usize = 2 << 20;
 
@@ -21,11 +19,9 @@ const IMAGE_MOST: usize = 2 << 20;
 pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), String> {
     static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _one = ONE.lock().await;
-    let state = crate::node_json(device, "/v1/state").await?;
-    let apps = crate::node_json(device, "/v1/apps").await?;
+    let state = crate::node(device, "GET", "/v1/state", None).await?;
+    let apps = crate::node(device, "GET", "/v1/apps", None).await?;
     let apps: Vec<Value> = apps.as_array().cloned().unwrap_or_default();
-    #[cfg(target_os = "macos")]
-    crate::menubar::named(&apps);
     let Some(me) = state["user"]["id"].as_str() else { return Ok(()) };
     let mut pages = vec![("user".to_string(), "You".to_string())];
     let mut groups: Vec<(String, String)> = state["network"]["groups"]
@@ -45,7 +41,7 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     for (scope, title) in &pages {
         // An app's widgets show on a page it's installed on.
         let here: Vec<&Value> = apps.iter().filter(|a| a["installed"].as_array().is_some_and(|s| s.iter().any(|s| in_scope(s.as_str().unwrap_or(""), scope)))).collect();
-        let widgets = match crate::node_json(device, &format!("/v1/widgets?scope={}", url::form_urlencoded::byte_serialize(scope.as_bytes()).collect::<String>())).await {
+        let widgets = match crate::node(device, "GET", &format!("/v1/widgets?scope={}", url::form_urlencoded::byte_serialize(scope.as_bytes()).collect::<String>()), None).await {
             Ok(Value::Array(w)) => w,
             _ => {
                 answered = false;
@@ -58,10 +54,17 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
             let name = w["app"].as_str().unwrap_or_default();
             let Some(app) = here.iter().find(|a| a["name"] == name) else { continue };
             let named = w["title"].as_str().or(app["title"].as_str()).or(w["widget"].as_str()).unwrap_or_default();
+            let widget = w["widget"].as_str().unwrap_or_default();
+            let kind = format!("{name}.{widget}");
             let mut item = json!({
-                "app": name, "widget": w["widget"], "scope": scope, "page": title,
+                // What a home-screen widget's choice is found again by, and a menu bar item's kind.
+                "id": format!("{scope}/{kind}"), "kind": kind,
+                "app": name, "widget": widget, "scope": scope, "page": title, "appTitle": app["title"],
                 "title": named, "icon": app["icon"].as_str().unwrap_or_default(), "root": w["root"],
             });
+            if w["error"].is_null() {
+                item["headline"] = json!(headline(&w["root"]));
+            }
             for (from, to) in [("image", "image"), ("image_kind", "imageKind"), ("color", "color")] {
                 if let Some(v) = app[from].as_str() {
                     item[to] = json!(v);
@@ -78,7 +81,7 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
         }
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or_default();
-    let fetched = if answered { json!(now - SWIFT_EPOCH) } else { kept["fetched"].clone() };
+    let fetched = if answered { json!(now) } else { kept["fetched"].clone() };
     let mut cache = json!({ "network": state["network"]["name"], "widgets": items, "fetched": fetched });
     if cache["fetched"].is_null() {
         cache.as_object_mut().unwrap().remove("fetched");
@@ -95,6 +98,44 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
 pub fn forget(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir.join("images"));
     let _ = write(&dir.join("widgets.json"), br#"{"widgets":[],"signedOut":true}"#);
+}
+
+/// A tree's most prominent text (the biggest, then the first that isn't muted): what a one-line place shows (an iPhone's
+/// Lock Screen widget, a Mac's menu bar item).
+fn headline(tree: &Value) -> Option<String> {
+    fn texts(n: &Value, out: &mut Vec<(String, i32, bool)>) {
+        match n["t"].as_str() {
+            Some("text") => {
+                let size = match n["size"].as_str() {
+                    Some("sm") => 0,
+                    Some("lg") => 2,
+                    Some("xl") => 3,
+                    _ => 1,
+                };
+                out.push((n["text"].as_str().unwrap_or_default().to_string(), size, n["tone"] == "muted"));
+            }
+            Some("stat") => {
+                let value = match &n["value"] {
+                    Value::String(s) => s.clone(),
+                    Value::Number(v) => v.as_f64().map(|f| if f.fract() == 0.0 { format!("{f:.0}") } else { format!("{}", (f * 100.0).round() / 100.0) }).unwrap_or_default(),
+                    _ => String::new(),
+                };
+                let mut text = [value, n["unit"].as_str().unwrap_or_default().to_string()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
+                if let Some(label) = n["label"].as_str() {
+                    text = format!("{text} {label}");
+                }
+                out.push((text, 4, false));
+            }
+            Some("item") => out.push((n["title"].as_str().unwrap_or_default().to_string(), 1, false)),
+            _ => n["c"].as_array().into_iter().flatten().for_each(|c| texts(c, out)),
+        }
+    }
+    let mut all = Vec::new();
+    texts(tree, &mut all);
+    let all: Vec<_> = all.into_iter().filter(|t| !t.0.is_empty()).collect();
+    // The biggest; of those, one that isn't muted; of those, the first.
+    let best = all.iter().enumerate().max_by_key(|(i, t)| (t.1, !t.2, -(*i as i64)))?;
+    Some(best.1.0.clone())
 }
 
 /// Whether an app installed at `installed` (`user:<id>`, `group:<id>`, `global`) is on the page `scope`.

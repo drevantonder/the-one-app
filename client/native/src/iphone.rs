@@ -122,10 +122,9 @@ fn started() -> Option<&'static crate::App> {
     None
 }
 
-/// What the Swift side tells Rust (`kind`, with `json`): "open", a link a tapped notification opens (`{ link }`);
-/// "join", its Approve or Not Me (`{ code, approve }`); "call", a widget's button or toggle (`{ app, tool, input }`), after
-/// which the widgets are drawn again. → `{ ok }` or `{ error }`, freed with `one_ios_free`. It waits: never call it on
-/// the main thread.
+/// What the Swift side tells Rust: one of the things the app answers with no window (`headless`, `kind` with `json`):
+/// a tapped notification's link (`open`), its Approve or Not Me (`join`), a widget's button or toggle (`call`). → its
+/// answer, freed with `one_ios_free`. It waits: never call it on the main thread.
 ///
 /// # Safety
 /// Both are C strings.
@@ -133,24 +132,9 @@ fn started() -> Option<&'static crate::App> {
 pub unsafe extern "C" fn one_ios(kind: *const c_char, json: *const c_char) -> *mut c_char {
     let kind = unsafe { CStr::from_ptr(kind) }.to_string_lossy().into_owned();
     let asked: Value = serde_json::from_str(&unsafe { CStr::from_ptr(json) }.to_string_lossy()).unwrap_or_default();
-    let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
-    let out = match (kind.as_str(), started()) {
-        (_, None) => json!({ "error": "The app hasn't started." }),
-        ("open", Some(_)) => {
-            crate::opened(&text(&asked["link"]));
-            json!({ "ok": null })
-        }
-        ("join", Some(_)) => {
-            let how = if asked["approve"] == true { "approve" } else { "refuse" };
-            tauri::async_runtime::block_on(crate::headless::run_here("--answer-join", &[text(&asked["code"]), how.into()])).unwrap_or_else(|e| json!({ "error": e }))
-        }
-        ("call", Some(_)) => {
-            let args = [text(&asked["app"]), text(&asked["tool"]), asked["input"].to_string()];
-            let out = tauri::async_runtime::block_on(crate::headless::run_here("--call", &args)).unwrap_or_else(|e| json!({ "error": e }));
-            crate::changed();
-            out
-        }
-        _ => json!({ "error": "Unknown" }),
+    let out = match started() {
+        None => json!({ "error": "The app hasn't started." }),
+        Some(_) => tauri::async_runtime::block_on(crate::headless::run_here(&kind, &asked)),
     };
     CString::new(out.to_string()).unwrap_or_default().into_raw()
 }

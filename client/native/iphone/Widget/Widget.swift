@@ -129,7 +129,7 @@ struct EntryView: View {
             let host = WidgetHost(app: widget.app ?? "", scope: widget.scope)
             Group {
                 if family == .accessoryInline {
-                    Label { Text(widget.root.headline ?? widget.title) } icon: { Glyph(name: widget.icon) }
+                    Label { Text(widget.headline ?? widget.title) } icon: { Glyph(name: widget.icon) }
                 } else if widget.error != nil {
                     Broken(title: widget.title, text: "This widget stopped working. Open \(appName) to see why.")
                 } else {

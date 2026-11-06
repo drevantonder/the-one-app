@@ -77,7 +77,7 @@ fn helper() -> Option<std::path::PathBuf> {
     helper.exists().then_some(helper)
 }
 
-/// This device's WNS channel, registered with the push Worker by the helper (`--register-push wns <channel>` back to
+/// This device's WNS channel, registered with the push Worker by the helper (`register-push` back to
 /// this program, src/headless.rs); a custom build with no Microsoft Entra app for WNS has none, and the helper ends.
 pub fn register_push() {
     let Some(helper) = helper() else { return };

@@ -287,11 +287,7 @@ impl Drop for Lock {
 }
 
 fn form(fields: &[(&str, &str)]) -> String {
-    fields.iter().map(|(k, v)| format!("{}={}", encode(k), encode(v))).collect::<Vec<_>>().join("&")
-}
-
-fn encode(s: &str) -> String {
-    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+    fields.iter().map(|(k, v)| format!("{}={}", crate::url_encode(k), crate::url_encode(v))).collect::<Vec<_>>().join("&")
 }
 
 pub fn hostname() -> String {

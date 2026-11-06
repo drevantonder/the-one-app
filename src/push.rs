@@ -48,6 +48,33 @@ pub struct Note {
     pub action: Option<Value>,
 }
 
+impl Note {
+    /// The code of the device its action asks to let in (`{ "join": "<code>" }`), if it does.
+    pub fn join(&self) -> Option<&str> {
+        self.action.as_ref()?["join"].as_str().filter(|c| !c.is_empty())
+    }
+
+    /// What tapping it opens in the app, the same on every platform: a join, Settings › Devices, where it waits too;
+    /// Settings' own screens (`app` "settings"), the client's, not an app's; else the app screen it names, `main` if
+    /// none. None opens only the app.
+    pub fn link(&self) -> Option<String> {
+        let cli = crate::config::CLI;
+        let enc = crate::url_encode;
+        if self.join().is_some() {
+            return Some(format!("{cli}://settings/devices"));
+        }
+        if self.app.is_empty() {
+            return None;
+        }
+        if self.app == "settings" {
+            return Some(format!("{cli}://settings/{}", enc(&self.screen)));
+        }
+        let screen = if self.screen.is_empty() { "main" } else { &self.screen };
+        let params = self.params.as_ref().filter(|p| !p.is_empty()).map(|p| format!("&params={}", enc(&Value::Object(p.clone()).to_string()))).unwrap_or_default();
+        Some(format!("{cli}://open?app={}&screen={}{params}", enc(&self.app), enc(screen)))
+    }
+}
+
 /// A note, signed by `by` at `at` (ms), sealed to a device's seal key `to`: the bytes a push carries. A body too long to
 /// fit is cut short.
 pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result<Vec<u8>> {
@@ -167,5 +194,16 @@ mod tests {
         assert!(sealed.len() <= NOTE_BYTES);
         let (opened, _) = open_note(&secret, &sealed).unwrap();
         assert!(opened.body.ends_with('…') && opened.body.len() < long.body.len());
+    }
+
+    #[test]
+    fn a_tapped_note_opens_the_same_link_on_every_platform() {
+        let cli = crate::config::CLI;
+        let note = |app: &str, screen: &str, params: Option<Value>, action: Option<Value>| Note { app: app.into(), screen: screen.into(), params: params.and_then(|p| p.as_object().cloned()), action, ..Default::default() };
+        assert_eq!(note("tally", "", None, None).link(), Some(format!("{cli}://open?app=tally&screen=main")));
+        assert_eq!(note("tally", "day", Some(json!({ "d": "a b" })), None).link(), Some(format!("{cli}://open?app=tally&screen=day&params=%7B%22d%22%3A%22a%20b%22%7D")));
+        assert_eq!(note("settings", "devices", None, None).link(), Some(format!("{cli}://settings/devices")));
+        assert_eq!(note("", "", None, Some(json!({ "join": "AB12" }))).link(), Some(format!("{cli}://settings/devices")));
+        assert_eq!(note("", "", None, None).link(), None);
     }
 }
