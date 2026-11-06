@@ -115,12 +115,7 @@ impl Node {
             device_now: &device_now,
             client_now: &client_now,
         };
-        let mut state = crate::state::state(network.as_ref().map(|i| i.r.db()), me, here);
-        // Whether who's who is the scope database's steps now (`database::switch`), which a client reads them from.
-        if let Some(i) = network.as_ref().filter(|_| state["install"].is_object()) {
-            state["install"]["frozen"] = json!(i.r.frozen.is_some());
-        }
-        state
+        crate::state::state(network.as_ref().map(|i| i.r.db()), me, here)
     }
 
     /// Writes one of `global`'s node entries as the local user, after checking it would count.

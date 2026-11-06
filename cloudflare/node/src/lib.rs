@@ -175,14 +175,6 @@ thread_local! {
     static OPEN: RefCell<(u32, HashMap<u32, (String, Db)>)> = RefCell::new((0, HashMap::new()));
     /// When each person's object last used what this isolate keeps for it, to forget the least lately used.
     static OWNERS: RefCell<(u64, HashMap<String, u64>)> = RefCell::new((0, HashMap::new()));
-    /// The people's objects whose network's log this isolate found frozen, as it read `global`'s steps: phase 2 is on
-    /// for the databases each opens (`one::db::Db::switched`).
-    static FROZEN: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
-}
-
-/// Whether `owner`'s network's log is frozen, as this isolate last read `global`'s steps for it.
-fn frozen(owner: &str) -> bool {
-    FROZEN.with(|f| f.borrow().contains(owner))
 }
 
 /// Notes that `owner`'s object is using what this isolate keeps for it, forgetting the least lately used owner's
@@ -204,7 +196,6 @@ fn touch(owner: &str) {
         OPEN.with(|o| o.borrow_mut().1.retain(|_, (by, _)| *by != gone));
         LOGS.with(|l| l.borrow_mut().retain(|(by, _), _| *by != gone));
         REPLAYED.with(|r| r.borrow_mut().retain(|(by, _), _| *by != gone));
-        FROZEN.with(|f| f.borrow_mut().remove(&gone));
     }
 }
 
@@ -246,13 +237,9 @@ pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, 
     let bucket = Js(bucket);
     let keys = usable(&keys, current)?;
     let migrations: Vec<String> = serde_json::from_str(&migrations).map_err(|e| failed(e.into()))?;
-    let mut db = match frozen(&owner) {
-        true => Db::open_switched(&bucket, &prefix, keys).await,
-        false => Db::open(&bucket, &prefix, keys).await,
-    }
-    .map_err(failed)?;
+    let mut db = Db::open(&bucket, &prefix, keys).await.map_err(failed)?;
     db.sign_as(signing_key(&seed).map_err(failed)?);
-    migrate(&owner, &mut db, &bucket, &migrations).await.map_err(failed)?;
+    db.migrate(&bucket, &migrations).await.map_err(failed)?;
     let handle = OPEN.with(|o| {
         let mut o = o.borrow_mut();
         o.0 += 1;
@@ -269,7 +256,7 @@ pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, 
 #[wasm_bindgen]
 pub fn opens(handle: u32, keys: &str, current: u32) -> bool {
     let Ok(keys) = usable(keys, current) else { return false };
-    OPEN.with(|o| o.borrow().1.get(&handle).is_some_and(|(owner, db)| *db.keys() == keys && db.switched() == frozen(owner)))
+    OPEN.with(|o| o.borrow().1.get(&handle).is_some_and(|(_, db)| *db.keys() == keys))
 }
 
 /// Brings an open database up to what the bucket has, and to `migrations`, with the keys it was opened with.
@@ -281,7 +268,7 @@ pub async fn refresh(handle: u32, bucket: JsValue, migrations: String) -> Result
     touch(&owner);
     let done = async {
         db.catch_up(&bucket).await?;
-        migrate(&owner, &mut db, &bucket, &migrations).await
+        db.migrate(&bucket, &migrations).await
     }
     .await;
     put(handle, (owner, db));
@@ -320,40 +307,11 @@ pub async fn write(handle: u32, bucket: JsValue, statements: String) -> Result<f
     let list: Vec<(String, Vec<Value>, Option<String>)> = serde_json::from_str(&statements)?;
     let (owner, mut db) = take(handle).map_err(thrown)?;
     let (at, bucket) = (db.at(), Js(bucket));
-    let wrote = async {
-        loop {
-            match db.write(&bucket, |c| one::db::statements(c, &list)).await {
-                Err(err) if err.is::<one::db::MaybeFrozen>() => ask_frozen(&owner, &mut db, &bucket).await?,
-                done => return done,
-            }
-        }
-    }
-    .await;
+    let wrote = db.write(&bucket, |c| one::db::statements(c, &list)).await;
     let step = if db.at() > at { db.at() as f64 } else { 0.0 };
     put(handle, (owner, db));
     wrote.map_err(thrown)?;
     Ok(step)
-}
-
-/// Brings a database to `migrations` as `Db::migrate` does, looking whether the log is frozen when a step says so.
-async fn migrate(owner: &str, db: &mut Db, bucket: &Js, migrations: &[String]) -> Result<()> {
-    loop {
-        match db.migrate(bucket, migrations).await {
-            Err(err) if err.is::<one::db::MaybeFrozen>() => ask_frozen(owner, db, bucket).await?,
-            done => return done,
-        }
-    }
-}
-
-/// Before writing to `owner`'s database one of whose steps says a device that knows the log is frozen wrote it
-/// (`one::db::MaybeFrozen`): `global`'s log and steps read again with the keys it was last read with, so this isolate
-/// knows if it is, as a node on a machine does, and the database told (`Db::asked`). Nothing is asked of the bucket
-/// until such a step is there, so a call's subrequests are the same until then.
-async fn ask_frozen(owner: &str, db: &mut Db, bucket: &Js) -> Result<()> {
-    let id = (owner.to_string(), "global".to_string());
-    let keys = LOGS.with(|l| l.borrow().get(&id).map(|g| g.keys.clone())).context("this node hasn't read who's who yet, to say whether its log is frozen: try again")?;
-    read_log_with(id, bucket, keys).await?;
-    db.asked(bucket, frozen(owner)).await
 }
 
 #[wasm_bindgen]
@@ -634,10 +592,6 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
                         g.read = reading();
                     }
                 });
-            }
-            // A freeze that counts, once, which no later step undoes: phase 2 is on for its databases from now on.
-            if !frozen(&id.0) && LOGS.with(|l| l.borrow().get(id).is_some_and(|g| matches!(g.truth(), Ok(Some(_))))) {
-                FROZEN.with(|f| f.borrow_mut().insert(id.0.clone()));
             }
         }
         // One under an epoch made whose key it wasn't handed: asked for (428), as the log's are. One under an epoch

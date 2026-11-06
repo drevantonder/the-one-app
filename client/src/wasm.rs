@@ -198,10 +198,7 @@ impl Global {
             let apps = steps["apps"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, data_encoding::BASE64URL_NOPAD.decode(k.as_str()?.as_bytes()).ok()?))).collect();
             wants_log = g.add_sealed(&steps["given"], &epochs, &apps).map_err(js)?.unwrap_or(0);
         }
-        let mut view = crate::members::view_of(&g.who().map_err(js)?).map_err(js)?;
-        // Whether it has read who's who (`cloudflare/web/device.js`).
-        view["frozen"] = serde_json::json!(g.frozen());
-        let members = view.to_string();
+        let members = crate::members::view_of(&g.who().map_err(js)?).map_err(js)?.to_string();
         Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members, wants_log })
     }
 

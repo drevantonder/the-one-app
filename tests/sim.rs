@@ -19,10 +19,9 @@
 //! nothing the others wrote is lost.
 //!
 //! Throughout, a device without the key forges the newest hint (past every step, at nothing, at junk, at a copy that's
-//! gone) and leaves junk where copies go, while a tidier deletes the copies no reader needs. In seeds whose second bit
-//! is set, phase 2 is switched on (`Db::open_switched`, as a device that knows the log is frozen): every step is signed in it and the tidier
-//! deletes the steps a copy covers too (`db::DELETE_COVERED_STEPS`), counting a step as kept long enough once it's been there a few
-//! minutes, and at the end everything a copy covers, before a device that's been away since the start reads on.
+//! gone) and leaves junk where copies go, while a tidier deletes the copies no reader needs. Every step is signed in
+//! it, as `Db::open` writes them; in seeds whose second bit is set, the tidier deletes the steps a copy covers too
+//! (`db::DELETE_COVERED_STEPS`), counting a step as kept long enough once it's been there a few minutes, and at the end everything a copy covers, before a device that's been away since the start reads on.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -251,17 +250,14 @@ const PREFIX: &str = "global/sim/main";
 /// when any write that read the step before it could still land.
 const KEPT_FOR_MS: u64 = 300_000;
 
-/// Whether a seed switches phase 2 on: steps signed in them, and the steps a copy covers deleted.
+/// Whether a seed deletes the steps a copy covers (`db::DELETE_COVERED_STEPS`).
 fn phase_two(seed: u64) -> bool {
     seed & 2 != 0
 }
 
-/// Opens the database as a device does, with phase 2's switch on for it in a seed that switches it.
-async fn opened(bucket: &impl Bucket, keys: &Keys, phase2: bool) -> Result<Db> {
-    match phase2 {
-        true => Db::open_switched(bucket, PREFIX, keys.clone()).await,
-        false => Db::open(bucket, PREFIX, keys.clone()).await,
-    }
+/// Opens the database as a device does.
+async fn opened(bucket: &impl Bucket, keys: &Keys, _deletes: bool) -> Result<Db> {
+    Db::open(bucket, PREFIX, keys.clone()).await
 }
 
 /// A device without the key, now and then until `done`: replacing the newest hint with one that says a step past every
@@ -336,10 +332,7 @@ fn signed(link: &Link, db: &Db, seed: u64) {
     let checks = db.checks();
     assert_eq!((checks.wrong, checks.refused), (0, 0), "seed {seed}: a signature didn't hold: {checks:?}");
     let beside = link.objects.lock().unwrap().keys().any(|n| n.ends_with(".sig"));
-    match phase_two(seed) {
-        true => assert!(!beside && checks.signed > 0 && db.signed_from() == Some(1), "seed {seed}: every step is signed in it: {checks:?}"),
-        false => assert!(beside, "seed {seed}: no step was signed"),
-    }
+    assert!(!beside && checks.signed > 0 && db.signed_from() == Some(1), "seed {seed}: every step is signed in it: {checks:?}");
 }
 
 fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
