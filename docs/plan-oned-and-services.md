@@ -11,8 +11,8 @@ Today oned and the node are one program, and services are four different things:
 - **this program run again** as `oned <name>`: AI Usage and, since #1376, Agent Devices (`services::hosted`);
 - **a program in another language**, published with the release key: WhatsApp (`services/whatsapp`, Go,
   `service-release` entries, fetched by `oned::keep_parts`);
-- **Swift in the Mac app's process**: iMessage, Calendar, Contacts, Reminders, Computer (`apple/Mac/Services`), because
-  macOS grants its privacy permissions to the Mac app.
+- **Swift in the Mac app's process**: iMessage, Calendar, Contacts, Reminders, Computer (`apple/Mac/Services`, gone in
+  phase 3), because macOS grants its privacy permissions to the Mac app.
 
 That costs us:
 - the core names apps (`built_in`, `hosted`), against "the core never names an app";
@@ -177,6 +177,14 @@ records in the app's own database, which each person's node copied once from the
 
 Check: on the Mac, `apple/build.sh`, then from another device: `imessage_read`, `contacts_search`, `calendar_events`,
 `reminders_list`, `computer_screen`. Each permission asked once, under the helper's name.
+
+Done (2026-11-06). Unlike the above: macOS records the permissions of code inside an app as that app's, even when it's
+its own responsible process, so the helpers ship in `Contents/Helpers` (built by `service/mac-helpers.sh` into
+`target/mac-helpers`, which the Tauri Mac app copies in too) but oned runs a copy of each in its home's `helpers/`
+(`oned::placed`), spawned disclaimed (`service.rs`), not as a launch agent. A helper registers only once it has its
+permission, saying what it needs on its service meanwhile; until then the Mac app's own copy answered, and the node
+refused that copy once the helper served (`Node::stand_down`, gone with the Swift Mac app). A carried helper runs unless
+switched off, as the Mac app's services did. Shared Swift is `service/swift` (`Helper`).
 
 ### Phase 4: the wrapper
 

@@ -13,7 +13,6 @@ struct MacApp: App {
         // The window shows at once; the rest waits for an older copy to quit.
         SingleCopy.claim {
             Mac.shared.run()
-            Services.start()
             WidgetItems.shared.start(Mac.shared.store)
         }
         if !UserDefaults.standard.bool(forKey: "loginItemSet") {

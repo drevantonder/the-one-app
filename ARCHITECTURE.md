@@ -32,7 +32,6 @@ Your devices, and your team's, as one place for apps and agents. A network is on
 - One key per scope at a time, changed only when a person or a lost device is removed, every database copied under the new key and the old one dropped. Today a scope has numbered epochs, and a new one is made when someone loses the right to open it.
 - Backups' recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
-- Each app one folder in `apps/`, its service's source beside its `app.js`, and each service its own program: none built into the Mac app (iMessage, Calendar, Contacts and Reminders, whose macOS permissions belong to the Mac app, so they may ship as helpers inside it).
 - The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.
 
