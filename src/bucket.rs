@@ -28,12 +28,10 @@ pub trait Bucket {
     }
     /// The objects directly in a folder, each its name in it and when the bucket wrote it (ms): for tidying, where a
     /// place can be listed.
-    fn objects(&self, folder: &str) -> impl Future<Output = Result<Vec<(String, u64)>>> {
-        let _ = folder;
+    fn objects(&self, _folder: &str) -> impl Future<Output = Result<Vec<(String, u64)>>> {
         async { anyhow::bail!("this bucket isn't listed from here") }
     }
-    fn delete(&self, name: &str) -> impl Future<Output = Result<()>> {
-        let _ = name;
+    fn delete(&self, _name: &str) -> impl Future<Output = Result<()>> {
         async { anyhow::bail!("nothing is deleted from this bucket from here") }
     }
     /// Which of `objects` the bucket holds exactly as given, each a name and its bytes: read and compared, unless the

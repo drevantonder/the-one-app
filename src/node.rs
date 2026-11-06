@@ -1218,11 +1218,10 @@ fn added_scope(i: &Network, user: &str, name: &str) -> Result<Option<Scope>> {
 
 fn scope_name(i: &Network, scope: &str) -> Result<String> {
     let db = i.r.db();
-    Ok(match Scope::parse(scope) {
-        Ok(Scope::Global) => "Everyone".to_string(),
-        Ok(Scope::User(u)) => db.user(&u)?.map(|u| u.name).unwrap_or(u),
-        Ok(Scope::Group(g)) => db.group(&g)?.map(|g| g.name).unwrap_or(g),
-        Err(_) => scope.to_string(),
+    Ok(match Scope::parse(scope)? {
+        Scope::Global => "Everyone".to_string(),
+        Scope::User(u) => db.user(&u)?.map(|u| u.name).unwrap_or(u),
+        Scope::Group(g) => db.group(&g)?.map(|g| g.name).unwrap_or(g),
     })
 }
 

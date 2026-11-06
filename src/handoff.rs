@@ -76,7 +76,7 @@ impl Handed {
 }
 
 /// Tells systemd `state`, when it runs this node as a service that listens.
-pub fn notify(state: &str) {
+pub fn notify(#[cfg_attr(not(target_os = "linux"), allow(unused_variables))] state: &str) {
     #[cfg(target_os = "linux")]
     if let Some(at) = std::env::var_os("NOTIFY_SOCKET") {
         use std::os::linux::net::SocketAddrExt;
@@ -90,7 +90,6 @@ pub fn notify(state: &str) {
             tracing::warn!("couldn't tell systemd {state:?}: {err}");
         }
     }
-    let _ = state;
 }
 
 /// Whether this node can hand over to a new build rather than exit for its supervisor to start it: on Linux, either
