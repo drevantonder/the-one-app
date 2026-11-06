@@ -18,6 +18,7 @@ use iroh::endpoint::{Connection, RecvStream, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
 use n0_future::time::{Duration, Instant, timeout};
 
+pub mod keyring;
 pub mod members;
 #[cfg(feature = "relayed")]
 pub mod relayed;
@@ -92,7 +93,6 @@ fn unsent(message: impl std::fmt::Display) -> Error {
     Error { sent: false, not_let_in: false, code: None, message: message.to_string(), trace: None }
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn not_let_in(message: impl std::fmt::Display) -> Error {
     Error { not_let_in: true, ..unsent(message) }
 }

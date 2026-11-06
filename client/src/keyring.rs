@@ -1,0 +1,594 @@
+//! What a client device knows of its network, the keys it opened, and how it asks a node with them, the same on every
+//! client that runs this crate: the CLI and native apps (`device.rs`), and the remote MCP server's devices
+//! (cloudflare/node/src/clients.rs). cloudflare/web/device.js is the same in a browser.
+//!
+//! It trusts no node, nor the relay, for who's who: it reads `global`'s scope database's steps from the bucket itself,
+//! opens them with the epochs sealed to it, and applies them by the node's own rules (`steps::Reader`). It asks only
+//! endpoints those list as nodes that run its person's things, takes a 428 only from the node that answered, and only
+//! for scopes they say it runs, databases that kind of request uses (`keys::asked_for`) and epochs from each one's
+//! newest copy (`keys::oldest_needed`); and hands what it named to the one node each request is sent to, of the scopes
+//! they say that node runs, sealed to the seal key they list for it. An epoch it's given opens only if its hash is the
+//! one who's who names, whoever passed it on.
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
+
+use data_encoding::BASE64URL_NOPAD as B64U;
+use n0_future::time::{Duration, Instant};
+use one::config::YOURS;
+use one::database::scopes::{Scope, ScopeDb};
+use one::database::steps::{Reader, Welcome};
+use one::keys::{self, Handed, Handoff, Hash, Need, hex};
+use serde_json::{Value, json};
+
+use crate::{Body, Client, Error, Request, Response, TRACE_HEADER, not_let_in, unsent};
+
+const REREAD: u64 = 30_000;
+/// The most kinds of request whose needs are kept: the remote MCP server keeps one for each tool an MCP client calls.
+const KINDS_KEPT: usize = 128;
+const ROOT: &str = "root";
+const WELCOME: &str = "welcome";
+const NEEDS: &str = "needs.json";
+
+/// Where a device keeps what outlives one run of it, by name: the network's root, pinned the first time it reads it
+/// (`root`); where the device that let it in had read to (`welcome`), until it's read from there; and what each kind
+/// of request needed (`needs.json`).
+pub trait Keep {
+    fn get(&self, name: &str) -> impl Future<Output = Option<Vec<u8>>>;
+    fn put(&self, name: &str, bytes: &[u8]) -> impl Future<Output = anyhow::Result<()>>;
+    fn delete(&self, name: &str) -> impl Future<Output = ()>;
+}
+
+/// What a device reaches at its network's address: the bucket, through the URL signer, and the relay, which alone says
+/// whether it's still let in.
+pub trait Address {
+    type Bucket: one::bucket::Bucket;
+    fn bucket(&self) -> &Self::Bucket;
+    /// False only if the relay says it no longer lets this device in.
+    fn let_in(&self) -> impl Future<Output = bool>;
+}
+
+pub fn now() -> u64 {
+    n0_future::time::SystemTime::now().duration_since(n0_future::time::SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+fn failed(message: impl std::fmt::Display) -> Error {
+    unsent(message)
+}
+
+pub fn refused() -> Error {
+    not_let_in("This device hasn't been let in yet.")
+}
+
+/// Who's who as this device read and checked it itself.
+struct Known {
+    reader: Reader,
+    /// The keys `global`'s steps are sealed under, by epoch.
+    steps: one::database::stored::Keys,
+    user: String,
+    /// The nodes it may ask, by key: their seal keys; and the Cloudflare node, if the network has one.
+    nodes: HashMap<[u8; 32], [u8; 32]>,
+    cloudflare_node: Option<[u8; 32]>,
+    /// Each node's run priority, as the network's admins set it (src/rank.rs): the Cloudflare node's too.
+    ranks: HashMap<[u8; 32], u32>,
+    at: u64,
+}
+
+impl Known {
+    fn who(&self) -> &ScopeDb {
+        &self.reader.truth().expect("known once who's who is read").db
+    }
+}
+
+pub struct Keyring {
+    key: [u8; 32],
+    /// Its seal key's secret, which opens what's sealed to it.
+    opens: [u8; 32],
+    known: Mutex<Option<Known>>,
+    /// Held while it reads who's who, so it reads once at a time.
+    reading: tokio::sync::Mutex<()>,
+    epochs: Mutex<HashMap<(String, u32), [u8; 32]>>,
+    app_keys: Mutex<HashMap<(String, String, u32), [u8; 32]>>,
+    /// What each kind of request needed (`Kind::name`): the last 428's, and the node that sent it (hex); none until
+    /// read from where it's kept.
+    needs: Mutex<Option<BTreeMap<String, (String, Vec<Need>)>>>,
+    /// Held while a kind of request learns from a 428: another of its kind waits for it, and goes with what it learned.
+    learning: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+impl Keyring {
+    /// The keyring of the device whose key is `key`, opening what's sealed to it with `opens`.
+    pub fn new(key: [u8; 32], opens: [u8; 32]) -> Keyring {
+        Keyring {
+            key,
+            opens,
+            known: Mutex::default(),
+            reading: tokio::sync::Mutex::default(),
+            epochs: Mutex::default(),
+            app_keys: Mutex::default(),
+            needs: Mutex::default(),
+            learning: Mutex::default(),
+        }
+    }
+
+    /// Reads who's who from the bucket: the first time from the network's first freeze, or where the device that let it
+    /// in had read to, after that what's new. The network's root is kept the first time, and must be the same after.
+    /// Fails `not_let_in` until it lists this device as a client of its person's, with its keys sealed to it.
+    pub async fn read(&self, on: &(impl Address + Keep)) -> Result<(), Error> {
+        let _reading = self.reading.lock().await;
+        let (bucket, now, me) = (on.bucket(), now(), hex(&self.key));
+        let pinned = on.get(ROOT).await.and_then(|r| Hash::from_hex(String::from_utf8_lossy(&r).trim()).ok());
+        let mut reader = Reader::new(pinned);
+        // From a copy of what it knows, which is asked meanwhile.
+        let had = self.known.lock().unwrap().as_mut().and_then(|k| Some((k.reader.kept().ok()?, k.steps.clone())));
+        let (epochs, steps) = match had {
+            Some((kept, steps)) if reader.restart(&kept, now).is_ok() => {
+                reader.read(bucket, &steps, now).await.map_err(failed)?;
+                let newest = reader.truth().map_or(0, |t| t.db.epoch(&Scope::Global));
+                match steps.keys().next_back().is_some_and(|n| *n >= newest) {
+                    true => (BTreeMap::new(), steps),
+                    false => one::database::steps::read_sealed_to(bucket, &mut reader, &me, &self.opens, &mut None, now).await.map_err(failed)?,
+                }
+            }
+            _ => {
+                let mut welcome = on.get(WELCOME).await.and_then(|w| Welcome::parse(String::from_utf8_lossy(&w).trim()));
+                let had_welcome = welcome.is_some();
+                let read = one::database::steps::read_sealed_to(bucket, &mut reader, &me, &self.opens, &mut welcome, now).await.map_err(failed)?;
+                if had_welcome && welcome.is_none() {
+                    on.delete(WELCOME).await;
+                }
+                if read.0.is_empty() {
+                    return Err(not_let_in(format!("This device hasn't been given {YOURS}'s keys yet.")));
+                }
+                read
+            }
+        };
+        if pinned.is_none()
+            && let Some(root) = reader.root()
+        {
+            on.put(ROOT, root.to_hex().as_bytes()).await.map_err(failed)?;
+        }
+        let who = &reader.truth().ok_or_else(|| not_let_in("This device isn't listed yet."))?.db;
+        let user = who.client(&self.key).map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
+        // The nodes that run something of its person's, and the Cloudflare node, which runs anyone's calls.
+        let cloudflare_node = who.cloudflare_node();
+        let nodes: HashMap<[u8; 32], [u8; 32]> = who.nodes().into_iter().filter(|(key, _)| Some(*key) == cloudflare_node || who.serves(key, &user)).collect();
+        let set = one::rank::set(&who.settings());
+        let ranks = nodes
+            .keys()
+            .map(|k| {
+                let id = if Some(*k) == cloudflare_node { one::rank::CLOUDFLARE.to_string() } else { hex(k) };
+                (*k, match one::rank::priority(&set, &id) { one::rank::Priority::Number(n) => n, one::rank::Priority::Last => u32::MAX })
+            })
+            .collect();
+        self.epochs.lock().unwrap().extend(epochs.into_iter().map(|(n, key)| (("global".to_string(), n), key)));
+        *self.known.lock().unwrap() = Some(Known { reader, steps, user, nodes, cloudflare_node, ranks, at: now });
+        Ok(())
+    }
+
+    /// Reads who's who again if it's been a while and it doesn't know one of `nodes` (as a node said they are).
+    pub async fn reread_for(&self, on: &(impl Address + Keep), nodes: &[[u8; 32]]) {
+        let stale = self.known.lock().unwrap().as_ref().is_some_and(|k| nodes.iter().any(|n| !k.nodes.contains_key(n)) && now() > k.at + REREAD);
+        if stale {
+            let _ = self.read(on).await;
+        }
+    }
+
+    /// Who's who, as it last read it, for `f`: none before it has.
+    pub fn who<R>(&self, f: impl FnOnce(&ScopeDb) -> R) -> Option<R> {
+        self.known.lock().unwrap().as_ref().map(|k| f(k.who()))
+    }
+
+    /// Its person, as who's who lists this device.
+    pub fn user(&self) -> Option<String> {
+        self.known.lock().unwrap().as_ref().map(|k| k.user.clone())
+    }
+
+    /// The nodes it may ask, by key, with their seal keys.
+    pub fn nodes(&self) -> HashMap<[u8; 32], [u8; 32]> {
+        self.known.lock().unwrap().as_ref().map(|k| k.nodes.clone()).unwrap_or_default()
+    }
+
+    pub fn cloudflare_node(&self) -> Option<[u8; 32]> {
+        self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node)
+    }
+
+    pub fn ranks(&self) -> Vec<([u8; 32], u32)> {
+        self.known.lock().unwrap().as_ref().map(|k| k.ranks.iter().map(|(k, r)| (*k, *r)).collect()).unwrap_or_default()
+    }
+
+    /// An epoch this device just made, whose hash who's who names.
+    pub fn made_epoch(&self, scope: &Scope, n: u32, key: [u8; 32]) {
+        self.epochs.lock().unwrap().insert((scope.to_string(), n), key);
+    }
+
+    /// Forgets all it knew and kept but the network's root, as a device that's out does: the next approval names the
+    /// network again.
+    pub async fn forget(&self, on: &impl Keep) {
+        *self.known.lock().unwrap() = None;
+        *self.needs.lock().unwrap() = Some(BTreeMap::new());
+        self.epochs.lock().unwrap().clear();
+        self.app_keys.lock().unwrap().clear();
+        for kept in [NEEDS, ROOT, WELCOME] {
+            on.delete(kept).await;
+        }
+    }
+
+    /// A request to its network's nodes as its person, with the keys its kind needed last time, sealed to the node it's
+    /// sent to until `until` (ms). One a node needs others for (428) is sent again with them, a few times, as a node may
+    /// find what it needs as it goes (the Cloudflare node, its logs' keys first, then a call's); one a node refuses as
+    /// it doesn't list this device yet, again in a moment while the relay lets it in. `fetches` gets each try's trace.
+    pub async fn request(&self, client: &Client, on: &(impl Address + Keep), mut request: Request, until: u64, mut fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
+        let kind = Kind::of(&request.path, request.body.bytes());
+        if fetches.is_some() && !request.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(TRACE_HEADER)) {
+            request.headers.push((TRACE_HEADER.into(), "1".into()));
+        }
+        if self.needs.lock().unwrap().is_none() {
+            let kept = on.get(NEEDS).await.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+            self.needs.lock().unwrap().get_or_insert(kept);
+        }
+        let (mut needed, mut behind) = (0, 0);
+        loop {
+            let learning = self.learning.lock().unwrap().get(&kind.name).cloned();
+            if let Some(learning) = learning {
+                drop(learning.lock().await);
+            }
+            let sent_with = self.needs_of(&kind.name);
+            let opening = fetches.is_some().then(Notes::new);
+            let handed = self.handed(client, on, sent_with.as_ref(), opening.as_ref()).await;
+            let again = Request { method: request.method.clone(), path: request.path.clone(), headers: request.headers.clone(), body: request.body.clone() };
+            let sent = self.send(client, again, &handed, until).await;
+            if let Some(fetches) = fetches.as_deref_mut() {
+                let mut fetched = match &sent {
+                    Ok(response) => response.trace.clone().unwrap_or_default(),
+                    Err(err) => err.trace.clone().unwrap_or_default(),
+                };
+                if let Some(opened) = opening.and_then(Notes::opened) {
+                    fetched["handed"] = opened;
+                }
+                fetches.push(fetched);
+            }
+            let response = sent?;
+            if response.status == 428 && needed < 3 {
+                needed += 1;
+                let node = response.node;
+                let answer: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
+                let notes = fetches.is_some().then(Notes::new);
+                let learned = self.learn(client, on, &kind, &node, &answer, sent_with, notes.as_ref()).await;
+                if let (Some(notes), Some(last)) = (notes, fetches.as_deref_mut().and_then(|f| f.last_mut())) {
+                    last["client"] = notes.done();
+                }
+                learned?;
+                continue;
+            }
+            if response.status == 403 {
+                let bytes = response.body.bytes().await?;
+                // A node that doesn't list this device may not have read its approval yet: the relay says if it's out,
+                // else it's asked again in a moment, once it has.
+                if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == one::protocol::code::NOT_LET_IN) {
+                    if !on.let_in().await {
+                        return Err(refused());
+                    }
+                    if behind < keys::BEHIND.len() {
+                        n0_future::time::sleep(Duration::from_millis(keys::BEHIND[behind])).await;
+                        behind += 1;
+                        continue;
+                    }
+                    return Err(failed("Your devices haven't caught up with this one yet. Try again in a moment."));
+                }
+                return Ok(Response { body: Body::whole(bytes), ..response });
+            }
+            return Ok(response);
+        }
+    }
+
+    fn needs_of(&self, kind: &str) -> Option<(String, Vec<Need>)> {
+        self.needs.lock().unwrap().as_ref().and_then(|n| n.get(kind).cloned())
+    }
+
+    /// A request saying whose it is (`x-one-user`), which a node checks against this device's key, with the keys
+    /// `handed` of the scopes who's who says run on the node the client sends it to, for that node alone, sealed to the
+    /// seal key it lists for it: never to a node it only raced a connection to, nor one it doesn't list.
+    async fn send(&self, client: &Client, mut request: Request, handed: &[Handed], until: u64) -> Result<Response, Error> {
+        let user = self.user().ok_or_else(refused)?;
+        request.headers.push(("x-one-user".into(), user));
+        client.fetch_with(request, |node| std::future::ready(self.sealed_for(node, handed, until))).await
+    }
+
+    /// `handed`, of the scopes who's who says `node` runs, sealed to it (`x-one-keys`): none if it has none of them, or
+    /// isn't listed.
+    fn sealed_for(&self, node: &[u8; 32], handed: &[Handed], until: u64) -> Vec<(String, String)> {
+        let known = self.known.lock().unwrap();
+        let Some((k, seal)) = known.as_ref().and_then(|k| Some((k, k.nodes.get(node)?))) else { return Vec::new() };
+        let keys: Vec<Handed> = handed.iter().filter(|h| Scope::parse(&h.scope).is_ok_and(|s| k.who().runs_for(node, &s))).cloned().collect();
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        let handoff = Handoff { for_: hex(&self.key), until, keys };
+        keys::seal_handoff(seal, &handoff).map(|k| vec![("x-one-keys".to_string(), k)]).unwrap_or_default()
+    }
+
+    /// A request's JSON, handing no keys: what this device asks to open them, and to write.
+    pub async fn json(&self, client: &Client, method: &str, path: &str, body: Option<Value>) -> Result<Value, Error> {
+        let mut headers = Vec::new();
+        if body.is_some() {
+            headers.push(("content-type".into(), "application/json".into()));
+        }
+        let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
+        let response = self.send(client, Request { method: method.into(), path: path.into(), headers, body: body.into() }, &[], 0).await?;
+        let status = response.status;
+        let out: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
+        if status != 200 {
+            let said = error(&out).unwrap_or_else(|| format!("{path} answered {status}"));
+            return Err(Error { code: out["code"].as_str().map(str::to_string), ..failed(said) });
+        }
+        Ok(out)
+    }
+
+    /// The keys a kind of request needed last time (`needs`), opened: none it can't open. Each node it's sent to is
+    /// handed only those of the scopes it runs (`sealed_for`).
+    async fn handed(&self, client: &Client, on: &(impl Address + Keep), needs: Option<&(String, Vec<Need>)>, notes: Option<&Notes>) -> Vec<Handed> {
+        let Some((_, needs)) = needs else { return Vec::new() };
+        self.fetch_keys(client, needs, notes).await;
+        let mut handed = Vec::new();
+        for n in needs {
+            if let Ok(key) = self.database_key(client, on, n).await {
+                handed.push(Handed { key, scope: n.scope.clone(), epoch: n.epoch, app: n.app.clone(), database: n.database.clone() });
+            }
+        }
+        handed
+    }
+
+    /// A node's 428, taken only from the node that answered (`node`), naming itself, asking only keys of scopes who's
+    /// who says it runs, and of databases that kind of request uses (`keys::asked_for`): what the request needed,
+    /// remembered for that kind of request and that node, in place of what it needed before. Fails, remembering
+    /// nothing, if it asks for more, or this device can't open them. One of a kind of request that another learned for
+    /// since it was sent (`sent_with`, what it went with) learns nothing more.
+    #[allow(clippy::too_many_arguments)]
+    async fn learn(&self, client: &Client, on: &(impl Address + Keep), kind: &Kind, node: &[u8; 32], answer: &Value, sent_with: Option<(String, Vec<Need>)>, notes: Option<&Notes>) -> Result<(), Error> {
+        let lock = self.learning.lock().unwrap().entry(kind.name.clone()).or_default().clone();
+        let _learning = lock.lock().await;
+        if self.needs_of(&kind.name) != sent_with {
+            return Ok(());
+        }
+        let mut need = keys::asked_for(&kind.route, &hex(node), answer).ok_or_else(|| failed("A device asked for keys that request doesn't use. Nothing was handed."))?;
+        if !self.nodes().contains_key(node) {
+            return Err(failed("A device that isn't one of yours asked for keys. Nothing was handed."));
+        }
+        let scopes: Vec<Scope> = need.iter().map(|n| Scope::parse(&n.scope)).collect::<Result<_, _>>().map_err(|_| failed("A device asked for keys of something that isn't. Nothing was handed."))?;
+        let runs = || self.who(|who| scopes.iter().all(|s| who.runs_for(node, s))).unwrap_or(false);
+        // What it runs may be newer than this device read: read again, now and then, before refusing.
+        if !runs() && self.known.lock().unwrap().as_ref().is_some_and(|k| now() > k.at + REREAD) {
+            noted(notes, json!({ "step": "members" }), self.read(on)).await?;
+        }
+        if !runs() {
+            return Err(failed("A device that doesn't run that asked for its keys. Nothing was handed."));
+        }
+        // Of each database, only epochs from the one its newest copy is under (`keys::oldest_needed`): older ones open
+        // only its history.
+        let bucket = on.bucket();
+        let prefix = |n: &Need| one::bucket::database_prefix(&n.scope, &n.app, &n.database);
+        let mut each: BTreeMap<String, &Scope> = BTreeMap::new();
+        for (n, scope) in need.iter().zip(&scopes) {
+            each.entry(prefix(n)).or_insert(scope);
+        }
+        let asked = n0_future::join_all(each.keys().map(|p| {
+            let name = one::database::stored::newest_name(p);
+            async move { one::bucket::Bucket::get(bucket, &name).await }
+        }));
+        // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
+        let (hints, ()) = n0_future::future::zip(noted(notes, json!({ "step": "newest", "databases": each.len() }), asked), self.fetch_keys(client, &need, notes)).await;
+        let mut oldest: BTreeMap<String, u32> = BTreeMap::new();
+        for ((p, scope), hint) in each.iter().zip(hints) {
+            let hint = hint.map_err(failed)?;
+            let newest = self.who(|who| who.epoch(scope)).unwrap_or(0);
+            let database = p.rsplit('/').next().unwrap_or_default();
+            oldest.insert(p.clone(), keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest));
+        }
+        need.retain(|n| n.epoch >= oldest[&prefix(n)]);
+        if need.is_empty() {
+            return Err(failed("A device asked for older keys than it needs. Nothing was handed."));
+        }
+        for n in &need {
+            self.database_key(client, on, n).await?;
+        }
+        let kept = {
+            let mut needs = self.needs.lock().unwrap();
+            let needs = needs.get_or_insert_default();
+            needs.insert(kind.name.clone(), (hex(node), need));
+            if needs.len() > KINDS_KEPT
+                && let Some(other) = needs.keys().find(|k| **k != kind.name).cloned()
+            {
+                needs.remove(&other);
+            }
+            serde_json::to_vec(&*needs).unwrap_or_default()
+        };
+        // Kept only to save the next run of this device a 428.
+        let _ = on.put(NEEDS, &kept).await;
+        Ok(())
+    }
+
+    /// What `need`'s keys are opened from that this device hasn't opened yet, asked for all at once: each scope's epochs
+    /// sealed to it, and each app's keys in them, one request each. What doesn't open here is left for `database_key`,
+    /// which asks again, one at a time.
+    async fn fetch_keys(&self, client: &Client, need: &[Need], notes: Option<&Notes>) {
+        let scopes: BTreeSet<&str> = need.iter().filter(|n| !self.epochs.lock().unwrap().contains_key(&(n.scope.clone(), n.epoch))).map(|n| n.scope.as_str()).collect();
+        let apps: BTreeSet<(&str, &str)> = need.iter().filter(|n| !self.app_keys.lock().unwrap().contains_key(&(n.scope.clone(), n.app.clone(), n.epoch))).map(|n| (n.scope.as_str(), n.app.as_str())).collect();
+        let me = hex(&self.key);
+        let asked = |path: String, step: Value| async move { noted(notes, step, self.json(client, "GET", &path, None)).await };
+        let epochs = n0_future::join_all(scopes.iter().map(|scope| asked(format!("/v1/keys?scope={}&to={me}", query(scope)), json!({ "step": "keys", "of": "epochs", "scope": kind(scope) }))));
+        let sealed = n0_future::join_all(apps.iter().map(|(scope, app)| asked(format!("/v1/keys?scope={}&app={}", query(scope), query(app)), json!({ "step": "keys", "of": app, "scope": kind(scope) }))));
+        let (epochs, sealed) = n0_future::future::zip(epochs, sealed).await;
+        for (scope, kept) in scopes.iter().zip(epochs) {
+            if let Ok(kept) = kept {
+                self.open_epochs(scope, &kept);
+            }
+        }
+        for ((scope, app), kept) in apps.iter().zip(sealed) {
+            for (m, sealed) in kept.iter().flat_map(|k| k["sealed"].as_object()).flatten() {
+                let Ok(m) = m.parse::<u32>() else { continue };
+                let Some(epoch) = self.epochs.lock().unwrap().get(&(scope.to_string(), m)).copied() else { continue };
+                let opened = B64U.decode(sealed.as_str().unwrap_or("").trim().as_bytes()).ok().and_then(|b| keys::open_app_key(&epoch, app, &b).ok());
+                if let Some(key) = opened {
+                    self.app_keys.lock().unwrap().insert((scope.to_string(), app.to_string(), m), key);
+                }
+            }
+        }
+    }
+
+    /// Opens each of a scope's epochs in `kept` (what `/v1/keys` gave, sealed to this device) whose hash is the one
+    /// who's who names.
+    fn open_epochs(&self, scope: &str, kept: &Value) {
+        let Ok(parsed) = Scope::parse(scope) else { return };
+        let opened: Vec<(u32, [u8; 32])> = kept["sealed"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(m, sealed)| {
+                let m = m.parse::<u32>().ok()?;
+                let key = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| keys::open_sealed(&self.opens, &s).ok())?;
+                Some((m, <[u8; 32]>::try_from(key).ok()?))
+            })
+            .collect();
+        for (m, key) in opened {
+            if self.who(|who| who.epoch_hash(&parsed, m)).flatten() == Some(keys::epoch_hash(&key)) {
+                self.epochs.lock().unwrap().insert((scope.to_string(), m), key);
+            }
+        }
+    }
+
+    /// A database's key in an epoch.
+    async fn database_key(&self, client: &Client, on: &(impl Address + Keep), n: &Need) -> Result<[u8; 32], Error> {
+        Ok(keys::database_key(&self.app_key(client, on, &n.scope, &n.app, n.epoch).await?, &n.app, &n.database))
+    }
+
+    /// An app's key in epoch `n` of a scope: the one sealed under the epoch, or one made now if it has none yet.
+    async fn app_key(&self, client: &Client, on: &(impl Address + Keep), scope: &str, app: &str, n: u32) -> Result<[u8; 32], Error> {
+        let id = (scope.to_string(), app.to_string(), n);
+        if let Some(key) = self.app_keys.lock().unwrap().get(&id) {
+            return Ok(*key);
+        }
+        let epoch = self.epoch(client, on, scope, n).await?;
+        let kept = self.json(client, "GET", &format!("/v1/keys?scope={}&app={}", query(scope), query(app)), None).await?;
+        let sealed = match kept["sealed"][n.to_string()].as_str() {
+            Some(s) => s.to_string(),
+            None => {
+                let made: [u8; 32] = rand::random();
+                let sealed = B64U.encode(&keys::seal_app_key(&epoch, app, &made));
+                let out = self.json(client, "POST", "/v1/keys", Some(json!({ "scope": scope, "n": n, "app": app, "sealed": sealed }))).await?;
+                out["sealed"].as_str().unwrap_or_default().to_string()
+            }
+        };
+        let bytes = B64U.decode(sealed.trim().as_bytes()).ok().ok_or_else(|| failed(format!("{app}'s key isn't one")))?;
+        let key = keys::open_app_key(&epoch, app, &bytes).map_err(|_| failed(format!("{app}'s key didn't open")))?;
+        self.app_keys.lock().unwrap().insert(id, key);
+        Ok(key)
+    }
+
+    /// Epoch `n` of a scope: opened from what's sealed to this device, if its hash is the one who's who names, read
+    /// again once if it isn't yet.
+    async fn epoch(&self, client: &Client, on: &(impl Address + Keep), scope: &str, n: u32) -> Result<[u8; 32], Error> {
+        if let Some(key) = self.epochs.lock().unwrap().get(&(scope.to_string(), n)) {
+            return Ok(*key);
+        }
+        Scope::parse(scope).map_err(failed)?;
+        let kept = self.json(client, "GET", &format!("/v1/keys?scope={}&to={}", query(scope), hex(&self.key)), None).await?;
+        for fresh in [false, true] {
+            if fresh {
+                self.read(on).await?;
+            }
+            self.open_epochs(scope, &kept);
+            if let Some(key) = self.epochs.lock().unwrap().get(&(scope.to_string(), n)) {
+                return Ok(*key);
+            }
+        }
+        Err(failed("This device can't open that yet."))
+    }
+}
+
+/// What a request is, to remember what it needed: its route, as `keys::may_hand` reads it, and the name it's
+/// remembered by.
+struct Kind {
+    route: String,
+    name: String,
+}
+
+impl Kind {
+    /// An app's call by its app, as is an app's own request (`/<app>/…`, its `_http` call), a screen by its app, an MCP
+    /// request by its method and tool (a batch by none), anything else by its path.
+    fn of(path: &str, body: &[u8]) -> Kind {
+        let at = path.split('?').next().unwrap_or(path);
+        let route = match at.strip_prefix('/').and_then(|p| p.split_once('/')) {
+            Some((app, rest)) if !app.is_empty() && !rest.is_empty() && !matches!(app, "v1" | "mcp" | "hooks" | "skills") => format!("call {app}"),
+            _ if at == "/v1/call" => format!("call {}", serde_json::from_slice::<Value>(body).ok().and_then(|b| b["app"].as_str().map(str::to_string)).unwrap_or_default()),
+            _ => match at.strip_prefix("/v1/screens/").and_then(|s| s.split('/').next()) {
+                Some(app) => format!("/v1/screens/{app}"),
+                None => at.to_string(),
+            },
+        };
+        let name = match route.as_str() {
+            "/mcp" => match serde_json::from_slice::<Value>(body).ok().filter(|m| m["method"].is_string()) {
+                Some(m) => {
+                    let tool = m["params"]["name"].as_str().filter(|_| m["method"] == "tools/call").map(|t| format!(" {t}")).unwrap_or_default();
+                    format!("/mcp {}{tool}", m["method"].as_str().unwrap_or_default()).chars().take(160).collect()
+                }
+                None => route.clone(),
+            },
+            _ => route.clone(),
+        };
+        Kind { route, name }
+    }
+}
+
+/// What a request did between a node's 428 and sending it again, each thing it asked for timed (developer mode's
+/// traces): `{ ms, steps }`, as a browser's says it (cloudflare/web/web.js).
+struct Notes {
+    started: Instant,
+    steps: Mutex<Vec<Value>>,
+}
+
+impl Notes {
+    fn new() -> Notes {
+        Notes { started: Instant::now(), steps: Mutex::default() }
+    }
+
+    fn done(self) -> Value {
+        json!({ "ms": self.started.elapsed().as_millis() as u64, "steps": self.steps.into_inner().unwrap() })
+    }
+
+    /// As keys opened before a request was sent: until the last thing asked for was answered, if anything was.
+    fn opened(self) -> Option<Value> {
+        let steps = self.steps.into_inner().unwrap();
+        let ms = steps.iter().map(|s| s["at"].as_u64().unwrap_or(0) + s["ms"].as_u64().unwrap_or(0)).max()?;
+        Some(json!({ "ms": ms, "steps": steps }))
+    }
+}
+
+/// `asked`, timed as `step` in `notes`, if there are any.
+async fn noted<T>(notes: Option<&Notes>, mut step: Value, asked: impl Future<Output = T>) -> T {
+    let at = Instant::now();
+    let out = asked.await;
+    if let Some(notes) = notes {
+        step["at"] = json!(at.duration_since(notes.started).as_millis() as u64);
+        step["ms"] = json!(at.elapsed().as_millis() as u64);
+        notes.steps.lock().unwrap().push(step);
+    }
+    out
+}
+
+/// A scope as a trace names it: its kind alone, never whose.
+fn kind(scope: &str) -> &'static str {
+    match scope {
+        "global" => "everyone",
+        s if s.starts_with("group:") => "group",
+        _ => "user",
+    }
+}
+
+pub fn query(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+pub fn error(out: &Value) -> Option<String> {
+    out["error"].as_str().or(out["message"].as_str()).map(str::to_string)
+}
