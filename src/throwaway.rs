@@ -184,38 +184,42 @@ fn cloudflare_node(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `throwaway`'s own help, with the MCP command as one that finds this throwaway network from any folder: this build,
+/// if it's a checkout's own.
 fn usage() -> String {
-    // The MCP command as one that finds this throwaway network from any folder: this build, if it's a checkout's own.
     let mcp = match folder() {
         Some((_, checkout)) => match std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).filter(|e| e.starts_with(&checkout)) {
             Some(exe) => format!("{} throwaway mcp", exe.display()),
             None => format!("sh -c 'cd {} && exec {CLI} throwaway mcp'", checkout.display()),
         },
-        None => format!("sh -c 'cd <checkout> && exec {CLI} throwaway mcp'"),
+        None => mcp_anywhere(),
     };
-    format!(
-        "Usage:
-  {CLI} throwaway                  start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is
-  {CLI} throwaway <command>        any command, in it: {CLI} throwaway status, {CLI} throwaway apps, {CLI} throwaway repos list
-  {CLI} throwaway mcp              its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}
-  {CLI} throwaway sign-in          sign its CLI in as its person, with no browser
-  {CLI} throwaway git <args>       git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone
-  {CLI} throwaway cloudflare node deploy    run its Cloudflare node beside its Workers, as Cloudflare would
-  {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows
-  {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
-  {CLI} throwaway client cli <command>    a command from a computer that's only a device of its person's (no node), asking
-                                   their nodes over iroh in run priority's order, as every client does: the Cloudflare
-                                   node, once deployed, with {CLI} throwaway settings priority '{{\"cloudflare\":1}}';
-                                   --build <program> first runs another build of {CLI} (an older release's) as that device
-  {CLI} throwaway stop             stop and delete it, and give back its devices; {CLI} throwaway then starts a new one"
-    )
+    format!("Usage:\n{}", one::cli::help(&[commands(&mcp)]))
 }
 
-/// `throwaway`'s help: it runs before the words after it are read, as their own command (`run`).
+fn mcp_anywhere() -> String {
+    format!("sh -c 'cd <checkout> && exec {CLI} throwaway mcp'")
+}
+
+/// `throwaway`'s help, in `help all`: it runs before the words after it are read, as their own command (`run`).
 pub fn command() -> one::cli::Command {
+    commands(&mcp_anywhere())
+}
+
+fn commands(mcp: &str) -> one::cli::Command {
+    let form = |usage: &str, about: String| (usage.to_string(), about);
     one::cli::Command {
         help: vec![
-            ("throwaway [<command>]".into(), format!("a throwaway network for this checkout, on this machine beside yours, with only what every new one starts with: to look around and test in. {CLI} throwaway <command> runs a command in it ({CLI} throwaway mcp for an agent), {CLI} throwaway client web, linux, mac, iphone, android or windows gives a client of this checkout's build signed in to it, and {CLI} throwaway stop deletes it")),
+            form("throwaway", "start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is: on this machine beside yours, with only what every new one starts with, to look around and test in".into()),
+            form("throwaway <command>", format!("any command, in it: {CLI} throwaway status, {CLI} throwaway apps, {CLI} throwaway repos list")),
+            form("throwaway mcp", format!("its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}")),
+            form("throwaway sign-in", "sign its CLI in as its person, with no browser".into()),
+            form("throwaway git <args>", format!("git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone")),
+            form("throwaway cloudflare node deploy", "run its Cloudflare node beside its Workers, as Cloudflare would".into()),
+            form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows".into()),
+            form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
+            form("throwaway client cli <command>", format!("a command from a computer that's only a device of its person's (no node), asking their nodes over iroh in run priority's order, as every client does: the Cloudflare node, once deployed, with {CLI} throwaway settings priority '{{\"cloudflare\":1}}'; --build <program> first runs another build of {CLI} (an older release's) as that device")),
+            form("throwaway stop", format!("stop and delete it, and give back its devices; {CLI} throwaway then starts a new one")),
         ],
         run: |_| Ok(false),
     }
