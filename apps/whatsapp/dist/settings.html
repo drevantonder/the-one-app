@@ -19,6 +19,10 @@ function w(n) {
 			for (let t = 0; t < 90 && !e; t++) {
 				let t = await one.call("_pairing", s ? { device: s } : {}).catch(D);
 				if (e) return;
+				if (t.error) {
+					g(t.error), m({}), setTimeout(d, 3e3);
+					return;
+				}
 				if (!t.qr) {
 					if ((await one.call("accounts").catch(E)).length > u) return d();
 					g("The codes ran out before the phone linked."), m({}), setTimeout(d, 3e3);
@@ -74,8 +78,8 @@ function T(e) {
 function E() {
 	return [];
 }
-function D() {
-	return {};
+function D(e) {
+	return { error: e.message };
 }
 function O() {
 	let { accounts: e, problem: i, retry: l, failed: C, signOut: T, reload: E } = b(), [D, O] = r(null), [k, A] = r(""), [j, M] = r(""), [N, P] = r(null), [F, I] = r(!1), L = n(null);

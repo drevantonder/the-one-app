@@ -12,8 +12,13 @@ function Pairing({ phone, device, had, done }) {
     let over = false
     ;(async () => {
       for (let i = 0; i < 90 && !over; i++) {
-        const p = await one.call("_pairing", device ? { device } : {}).catch(() => ({}))
+        const p = await one.call("_pairing", device ? { device } : {}).catch((err) => ({ error: err.message }))
         if (over) return
+        if (p.error) {
+          setNote(p.error)
+          setCodes({})
+          return void setTimeout(done, 3000)
+        }
         if (!p.qr) {
           const now = await one.call("accounts").catch(() => [])
           if (now.length > had) return done()
