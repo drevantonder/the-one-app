@@ -440,7 +440,7 @@ impl Service {
         let input = if call["input"].is_null() { json!({}) } else { call["input"].clone() };
         let from = call["from"].as_str().map(str::to_string);
         match self.0.services.call(&self.0.name, call["op"].as_str().unwrap_or(""), input, caller, from).await {
-            Ok(answer) => json!({ "ok": answer.ok }),
+            Ok(answer) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
             Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
             Err(err) => json!({ "error": format!("{err:#}") }),
         }
@@ -505,6 +505,8 @@ impl Service {
             .route("/v1/services/{app}/calls/{id}/vault", post(fill))
             .route("/v1/state", get(state))
             .route("/v1/call", post(call))
+            .route("/v1/blobs", post(put_blob))
+            .route("/v1/blobs/{hash}", get(get_blob))
             // Its program's way out, from its sandbox: `CONNECT host:port`, to a host its app declares.
             .fallback(proxy)
             .with_state(self.clone())
@@ -656,6 +658,42 @@ async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Val
     match s.ask_node(body).await {
         Ok(answer) if answer.get("error").is_some() => refused(StatusCode::BAD_REQUEST, answer["error"].as_str().unwrap_or("failed")),
         Ok(answer) => Json(json!({ "ok": answer["ok"] })).into_response(),
+        Err(err) => refused(StatusCode::BAD_GATEWAY, format!("{err:#}")),
+    }
+}
+
+/// A blob its program keeps (`POST /v1/blobs`) or reads (`GET /v1/blobs/<hash>`), through its own device's oned, as
+/// a service in oned's own process does: one it keeps is named in its call's answer, which the call's node keeps.
+async fn put_blob(State(s): State<Service>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    blobs(&s, &headers, "POST", "/v1/blobs", Some(body.to_vec())).await
+}
+
+async fn get_blob(State(s): State<Service>, headers: HeaderMap, UrlPath(hash): UrlPath<String>) -> Response {
+    blobs(&s, &headers, "GET", &format!("/v1/blobs/{hash}"), None).await
+}
+
+async fn blobs(s: &Service, headers: &HeaderMap, method: &'static str, path: &str, body: Option<Vec<u8>>) -> Response {
+    if let Err(r) = ours(s, headers) {
+        return r;
+    }
+    let url = format!("http://{}{path}", crate::api::addr());
+    let asked = tokio::task::spawn_blocking(move || -> Result<(u16, Vec<u8>)> {
+        let token = std::fs::read_to_string(crate::home().join(crate::api::LOCAL_TOKEN)).context("its device's oned has no local token")?;
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let resp = match body {
+            Some(body) => agent.post(&url).header(crate::api::LOCAL_TOKEN_HEADER, token.trim()).header("content-type", "application/octet-stream").send(&body[..])?,
+            None => agent.get(&url).header(crate::api::LOCAL_TOKEN_HEADER, token.trim()).call()?,
+        };
+        let status = resp.status().as_u16();
+        Ok((status, resp.into_body().with_config().limit(u64::MAX).read_to_vec()?))
+    })
+    .await;
+    match asked {
+        Ok(Ok((status, bytes))) => {
+            let kind = if method == "GET" && status == 200 { "application/octet-stream" } else { "application/json" };
+            (StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY), [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response()
+        }
+        Ok(Err(err)) => refused(StatusCode::BAD_GATEWAY, format!("its device's oned: {err:#}")),
         Err(err) => refused(StatusCode::BAD_GATEWAY, format!("{err:#}")),
     }
 }

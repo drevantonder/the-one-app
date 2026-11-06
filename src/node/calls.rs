@@ -391,6 +391,16 @@ impl Node {
         if let Some(ok) = reply.get_mut("ok") {
             crate::vault::blot(ok, &used);
         }
+        // What a service endpoint kept for the call (on its device's oned), its caller's own scope keeps, as for one
+        // run here.
+        let kept: Vec<String> = match service {
+            true => reply.get_mut("blobs").map(Value::take).and_then(|b| serde_json::from_value(b).ok()).unwrap_or_default(),
+            false => Vec::new(),
+        };
+        if !kept.is_empty() && reply.get("ok").is_some() {
+            let user = me.user.clone();
+            self.append_as(&Scope::User(user.clone()), &user, Content { blobs: kept, ..content::node("keep", json!({})) }).await?;
+        }
         let theirs = reply.get_mut("trace").map(Value::take).filter(Value::is_object);
         Ok((Reply::from_json(reply), theirs))
     }
