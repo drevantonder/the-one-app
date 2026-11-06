@@ -188,7 +188,7 @@ impl Node {
         // Waited for: until the relay lets it in, the machine that joined reaches nothing.
         if self.address().is_ok() {
             let admin = self.with(|i| Ok(i.r.db().may(&user, "invite", scopes::NETWORK)))?;
-            self.tell_relay_now(json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.with_context(|| format!("{YOURS}'s network didn't take this machine: try again with the same code"))?;
+            crate::settings::tell(self, self, json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.with_context(|| format!("{YOURS}'s network didn't take this machine: try again with the same code"))?;
         }
         Ok(JoinReply { root, user, bucket })
     }

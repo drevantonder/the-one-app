@@ -1,15 +1,10 @@
 //! App schedules (GLOSSARY.md): an app's schedules run in a scope on a machine its person chose, with that app's keys
-//! there sealed to the machine (`keys::app_schedules_key_name`) while the log says so. This device's person sets them
-//! here, and renews them as they use the app, so app schedules nobody uses, or whose machine is off, end by themselves;
-//! a machine that holds them opens that app's databases there with their keys alone, as a call opens what it was
-//! handed, and never its other apps'. They're an `app-schedules` step.
+//! there sealed to the machine (`keys::app_schedules_key_name`) while the log says so. Their person's devices set them
+//! (`settings`), and renew them as they use the app, so app schedules nobody uses, or whose machine is off, end by
+//! themselves; a machine that holds them opens that app's databases there with their keys alone, as a call opens what
+//! it was handed, and never its other apps'. They're an `app-schedules` step.
 
-use crate::config::YOURS;
 use super::*;
-
-/// How long app schedules last, unless its person's device renews it as they use the app.
-pub const APP_SCHEDULES_DAYS: u64 = 30;
-const DAY: u64 = 86_400_000;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -17,138 +12,24 @@ pub(super) struct State {
     keys: Mutex<HashMap<(Scope, String), crate::database::stored::Keys>>,
     /// The Vault secret keys sealed to this machine, by scope and number, each the one its `vault` entry names.
     pub(super) vault: Mutex<HashMap<(Scope, u32), [u8; 32]>>,
-    /// The app schedules this device is renewing now.
-    renewing: Mutex<std::collections::HashSet<(Key, Scope, String)>>,
+    /// Held while this machine renews its person's app schedules.
+    renewing: tokio::sync::Mutex<()>,
 }
 
 impl Node {
-    /// Runs `app`'s schedules in `scope` on `device` for `days` (0 stops them): as this device's person, who must be the
-    /// scope's or, for a group, its admin. Seals the app's key in each epoch this device opens to that device, then
-    /// writes the app schedules naming each one's hash. → what it did, in words.
-    pub async fn set_app_schedules(&self, me: &Caller, device: &str, app: &str, scope: &Scope, days: u64) -> Result<Value> {
-        ensure!(me.user == self.user()?, "{} sets app schedules only for its own person", self.device_name());
-        let endpoint = self.find_device(device)?;
-        let (title, name) = (self.title_of(app).await, self.name_of(&endpoint));
-        ensure!(self.with(|i| Ok(i.r.db().app(app)?.is_some()))?, "no app called {app}");
-        let until = match days {
-            0 => 0,
-            days => now_ms() + days.min(APP_SCHEDULES_DAYS) * DAY,
-        };
-        self.write_app_schedules(endpoint, app, scope, until).await?;
-        if until == 0 {
-            self.end_app_schedules(me, scope).await?;
+    /// Renews, in the background, each of this machine's person's app schedules of `app` that's due, and stops each of
+    /// theirs that ran out (`settings::renew_app_schedules`): as they use it here, and now and then. One renewal at a
+    /// time; one asked meanwhile is passed over.
+    pub(super) fn renew_app_schedules(&self, app: &str) {
+        let mine = self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == i.user)));
+        if !mine.unwrap_or(false) {
+            return;
         }
-        Ok(match until {
-            0 => json!({ "said": format!("{name} no longer runs {title}'s schedules, and what's written from now on is under new keys it doesn't have.") }),
-            until => json!({ "said": format!("{name} runs {title}'s schedules for you, for {} days, and longer as you use it.", days.min(APP_SCHEDULES_DAYS)), "until": until }),
-        })
-    }
-
-    /// Writes app schedules of `app` in `scope` on `endpoint` until `until` (0: no longer), with its keys sealed first.
-    async fn write_app_schedules(&self, endpoint: Key, app: &str, scope: &Scope, until: u64) -> Result<()> {
-        let (seal, mine, may) = self.with(|i| {
-            let m = i.r.db();
-            Ok((m.seal_key(&endpoint)?, m.client(&self.0.id)?.is_some(), m.may(&i.user, "choose-devices", &scopes::object(&scope))))
-        })?;
-        ensure!(mine, "{} isn't one of its person's own devices, which are what set app schedules", self.device_name());
-        ensure!(may, "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
-        let seal = seal.with_context(|| format!("that device isn't one of {YOURS}'s"))?;
-        let mut hashes = BTreeMap::new();
-        if until > 0 {
-            let epochs = self.epoch_keys(scope, true).await?;
-            let newest = epochs.keys().next_back().copied().unwrap_or(0);
-            let (bucket, name, to) = (self.bucket()?, scope.to_string(), hex(&endpoint));
-            for (n, epoch) in &epochs {
-                let Some(key) = crate::keys::app_key(&bucket, epoch, &name, app, *n, *n == newest).await? else { continue };
-                // One there already is the same key, or junk the hash written beside it passes over.
-                crate::database::stored::created(&bucket, &crate::keys::app_schedules_key_name(&name, app, &to, *n), &crate::keys::seal_to(&seal, &key)?).await?;
-                hashes.insert(*n, crate::keys::epoch_hash(&key));
-            }
-        }
-        self.append(&Scope::Global, content::app_schedules(&endpoint, scope, app, until, &hashes)).await?;
-        Ok(())
-    }
-
-    /// App schedules stopped or run out: a new epoch of its scope, sealed as removing a device's is, so the keys the device
-    /// held open nothing written after.
-    async fn end_app_schedules(&self, me: &Caller, scope: &Scope) -> Result<()> {
-        self.new_epoch(me, scope).await.with_context(|| format!("starting {scope}'s new keys"))?;
-        Ok(())
-    }
-
-    /// Stops, in the background, each app schedules this device's person set that ran out, as Stop does: saying so
-    /// and a new epoch of its scope. Now and then, from any of their devices with a node.
-    pub(super) fn end_expired_app_schedules(&self) {
-        let now = now_ms();
-        let Ok(me) = self.user() else { return };
-        let ended: Vec<(Key, Scope, String)> = self
-            .with(|i| {
-                let m = i.r.db();
-                if m.client(&self.0.id)?.is_none_or(|c| c.user != me) {
-                    return Ok(Vec::new());
-                }
-                let mut ended = Vec::new();
-                for (id, g) in m.app_schedules()? {
-                    if g.by == me && g.until != 0 && g.until <= now && m.machine(&id.0)?.is_some() && m.may(&me, "choose-devices", &scopes::object(&id.1)) {
-                        ended.push(id);
-                    }
-                }
-                Ok(ended)
-            })
-            .inspect_err(|err| tracing::warn!("looking for app schedules that ran out: {err:#}"))
-            .unwrap_or_default();
-        for id in ended {
-            if !self.0.app_schedules.renewing.lock().unwrap().insert(id.clone()) {
-                continue;
-            }
-            let (node, me) = (self.clone(), Caller::own(self.0.id, me.clone()));
-            tokio::spawn(async move {
-                let (endpoint, scope, app) = id.clone();
-                let ended = async {
-                    node.write_app_schedules(endpoint, &app, &scope, 0).await?;
-                    node.end_app_schedules(&me, &scope).await
-                };
-                if let Err(err) = ended.await {
-                    tracing::warn!("ending {}'s app schedules of {app} in {scope}, which ran out: {err:#}", node.name_of(&endpoint));
-                }
-                node.0.app_schedules.renewing.lock().unwrap().remove(&id);
-            });
-        }
-    }
-
-    /// Renews, in the background, each app schedules this device's person set of `app` that's due: as they use it,
-    /// once a day at most, or at once when the scope has an epoch their keys don't reach.
-    pub(super) fn renew_app_schedules(&self, me: &Caller, app: &str) {
-        let now = now_ms();
-        let due: Vec<(Key, Scope)> = self
-            .with(|i| {
-                let m = i.r.db();
-                if me.user != i.user || m.client(&self.0.id)?.is_none() {
-                    return Ok(Vec::new());
-                }
-                let mut due = Vec::new();
-                for ((k, s, a), g) in m.app_schedules_at(now)? {
-                    if a == app && g.by == i.user && (g.until < now + (APP_SCHEDULES_DAYS - 1) * DAY || g.hashes.keys().next_back().copied().unwrap_or(0) < m.epoch(&s)?) {
-                        due.push((k, s));
-                    }
-                }
-                Ok(due)
-            })
-            .inspect_err(|err| tracing::warn!("looking for app schedules to renew: {err:#}"))
-            .unwrap_or_default();
-        for (endpoint, scope) in due {
-            let id = (endpoint, scope.clone(), app.to_string());
-            if !self.0.app_schedules.renewing.lock().unwrap().insert(id.clone()) {
-                continue;
-            }
-            let (node, app) = (self.clone(), app.to_string());
-            tokio::spawn(async move {
-                if let Err(err) = node.write_app_schedules(endpoint, &app, &scope, now_ms() + APP_SCHEDULES_DAYS * DAY).await {
-                    tracing::warn!("renewing {}'s app schedules of {app} in {scope}: {err:#}", node.name_of(&endpoint));
-                }
-                node.0.app_schedules.renewing.lock().unwrap().remove(&id);
-            });
-        }
+        let (node, app) = (self.clone(), app.to_string());
+        tokio::spawn(async move {
+            let Ok(_renewing) = node.0.app_schedules.renewing.try_lock() else { return };
+            crate::settings::renew_app_schedules(&node, &app).await;
+        });
     }
 
     /// The app schedules in force for this device to run `app`'s schedules in `scope`, with their keys loaded from the
@@ -232,9 +113,5 @@ impl Node {
             tracing::info!("{} no longer runs {app}'s schedules in {scope}: its keys are forgotten", self.device_name());
             self.close_dbs(|s, db| *s == scope && db.split('/').next() == Some(app.as_str()));
         }
-    }
-
-    pub(super) async fn title_of(&self, app: &str) -> String {
-        self.0.apps.describe(app).await.ok().and_then(|d| d["title"].as_str().map(str::to_string)).unwrap_or_else(|| app.to_string())
     }
 }

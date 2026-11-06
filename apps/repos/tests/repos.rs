@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use crate::e2e::{create, eventually, signed_by, start};
+use crate::e2e::{create, eventually, let_sam_in, signed_by, start};
 use crate::temp;
 use one::node::CallRequest;
 
@@ -15,7 +15,7 @@ use one::node::CallRequest;
 /// owners delete one.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_delete_it() {
-    use one::node::{Caller, DeviceRequest, Invited};
+    use one::node::Caller;
     let a = start("repos-owner").await;
     create(&a, "Home", "Andre").await;
     let me = Caller::own(a.id(), a.user().unwrap());
@@ -62,13 +62,9 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
     assert_eq!(branches("andre/home").await, [("main".to_string(), head.clone())]);
 
-    let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = one::keys::Endpoint::of(&sams);
-    let proof = one::keys::invite_proof(secret.as_bytes(), &e);
-    let asks = DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
-    a.approve_request(&asks, Some(&sam)).await.unwrap();
+    let sam_id = let_sam_in(&a, &sams).await;
 
     // Repos' keys in global, as Sam's device opens them and hands them to the node with his calls.
     let global = one::database::scopes::Scope::Global;
@@ -84,8 +80,8 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
         }
     }
 
-    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
-    let signed_in = Caller { key: a.id(), user: sam.user.clone(), agent: None, credential: one::node::Credential::SignIn("Sam's sign-in".into()) };
+    let client = Caller { key: e.key, user: sam_id.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
+    let signed_in = Caller { key: a.id(), user: sam_id.clone(), agent: None, credential: one::node::Credential::SignIn("Sam's sign-in".into()) };
     let mut both = Vec::new();
     for (sam, handed_for) in [(client, one::keys::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
         let handoff = one::keys::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
@@ -144,10 +140,10 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     a.call(repos("remove_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.unwrap();
     assert!(!sams_push(&client, "andre/home", "sams", false).await);
 
-    let group = a.make_group(&me, "Team").await.unwrap();
+    let group = one::settings::answer(&a, "POST", "/v1/group", br#"{ "name": "Team" }"#).await.unwrap().unwrap()["group"].as_str().unwrap().to_string();
     a.call(repos("create", json!({ "name": "site", "owner": "team" }))).await.unwrap();
     assert!(!sams_push(&client, "team/site", "sams", false).await);
-    a.member_content(&me, one::database::content::invite(&group, &sam.user, one::database::scopes::Role::Member)).await.unwrap();
+    a.member_content(&me, one::database::content::invite(&group, &sam_id, one::database::scopes::Role::Member)).await.unwrap();
     signed_by(&a, &client, &sams, one::database::content::accept(&group)).await;
     assert!(sams_push(&client, "team/site", "sams", false).await, "a member of the group pushes to its repo");
     let refused = call(CallRequest { scopes: Some(vec!["global".into()]), ..repos("delete", json!({ "repo": "team/site" })) }, &client).await.unwrap_err();
@@ -218,7 +214,7 @@ async fn a_repos_merged_packs_hold_every_object_pushed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_github_sign_in_only_to_them() {
-    use one::node::{Caller, DeviceRequest, Invited};
+    use one::node::Caller;
     use std::sync::{Arc, Mutex};
     let a = start("repos-github").await;
     create(&a, "Home", "Andre").await;
@@ -259,19 +255,15 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     a.set_item(&me, &one::database::scopes::Scope::User(me.user.clone()), json!({ "title": "GitHub andre-gh", "type": "GitHub account", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
         "login": { "value": "andre-gh" }, "access_token": { "value": "andre-token", "secret": true }, "expires": { "value": "0" } } })).await.unwrap();
 
-    let group = a.make_group(&me, "Team").await.unwrap();
+    let group = one::settings::answer(&a, "POST", "/v1/group", br#"{ "name": "Team" }"#).await.unwrap().unwrap()["group"].as_str().unwrap().to_string();
     a.call(repos("connect_org", json!({ "group": "team" }))).await.unwrap();
     a.call(repos("finish_connect_org", json!({ "back": "http://x/back?installation_id=7&setup_action=install" }))).await.unwrap();
     let names = |list: Value| list.as_array().unwrap().iter().map(|r| r["repo"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     assert_eq!(names(a.call(repos("list", json!({ "source": "github" }))).await.unwrap()), ["github.com/andre-gh/mine", "github.com/org/site"]);
 
-    let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = one::keys::Endpoint::of(&sams);
-    let proof = one::keys::invite_proof(secret.as_bytes(), &e);
-    let asks = DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None, sign_in: None };
-    a.approve_request(&asks, Some(&sam)).await.unwrap();
+    let sam_id = let_sam_in(&a, &sams).await;
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
     let epochs = a.sealed_keys(&me, &global, Some(&one::keys::hex(&e.key)), None).await.unwrap();
     let mut keys = Vec::new();
@@ -283,9 +275,9 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
             keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key });
         }
     }
-    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
+    let client = Caller { key: e.key, user: sam_id.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
     let handoff = one::keys::Handoff { for_: one::keys::hex(&e.key), until: u64::MAX, keys };
-    a.hand(&client.credential, &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
+    a.hand(&client.credential, &sam_id, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
     let sams_list = async || {
         let req = CallRequest { scopes: Some(vec!["global".into()]), ..repos("list", json!({ "source": "github" })) };
         let before = seen.lock().unwrap().len();
@@ -297,7 +289,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let refused = a.call_as(CallRequest { scopes: Some(vec!["global".into()]), ..repos("tree", json!({ "repo": "github.com/andre-gh/mine" })) }, client.clone()).await.unwrap_err();
     assert!(format!("{refused:#}").contains("Sign in to GitHub first"), "{refused:#}");
 
-    a.member_content(&me, one::database::content::invite(&group, &sam.user, one::database::scopes::Role::Member)).await.unwrap();
+    a.member_content(&me, one::database::content::invite(&group, &sam_id, one::database::scopes::Role::Member)).await.unwrap();
     signed_by(&a, &client, &sams, one::database::content::accept(&group)).await;
     let (list, sent) = sams_list().await;
     assert_eq!(list, ["github.com/org/site"]);

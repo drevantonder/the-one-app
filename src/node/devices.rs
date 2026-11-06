@@ -1,6 +1,6 @@
-//! Devices joining and leaving: the keys sealed to each (`GET`/`POST /v1/keys`, which any of the network's devices may
-//! read, sealed as they are), approving a device's request to join (its own person's, or a newcomer's by invite), invites,
-//! and removing a device.
+//! Devices' keys and parts: the keys sealed to each (`GET`/`POST /v1/keys`, which any of the network's devices may read,
+//! sealed as they are), new keys a scope is owed, a device's services listed as its parts, and erasing what a device
+//! keeps. Letting devices in and taking them out is what this machine signs as its own device (`settings.rs`).
 
 use crate::config::YOURS;
 use super::*;
@@ -47,31 +47,6 @@ pub(super) struct Owed {
 pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[scopes::Kind]) -> Result<bool> {
     let theirs = kinds.iter().any(|k| matches!(k, scopes::Kind::Client | scopes::Kind::Service));
     Ok(db.user(user)?.is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::person(user)))
-}
-
-/// How often a client of its person's looks for their new devices whose sign-in lets them in.
-const SIGN_INS_EVERY: Duration = Duration::from_secs(4);
-
-/// How long an issuer's keys are kept before they're fetched again: a key it no longer signs with goes within the hour.
-const ISSUER_KEYS_FOR: Duration = Duration::from_secs(3600);
-
-/// What `Node::sign_in_loop` knows between its looks.
-#[derive(Default)]
-pub(super) struct SignIns {
-    /// Each issuer's keys, by where they're published, and when they were fetched.
-    keys: HashMap<String, (Value, Instant)>,
-    /// Requests whose sign-in was checked and didn't let them in, by key and the accounts they were checked against:
-    /// left for the person, by code, unless their accounts change.
-    refused: std::collections::HashSet<String>,
-}
-
-/// Whether `user` may start a scope's new epoch: they may `remove` from it, and it's a group that's there.
-fn starts_epochs(db: &ScopeDb, user: &str, scope: &Scope) -> Result<bool> {
-    let gone = match scope {
-        Scope::Group(g) => db.group(g)?.is_none(),
-        _ => false,
-    };
-    Ok(!gone && db.may(user, "remove", &scopes::object(scope)))
 }
 
 impl Node {
@@ -137,9 +112,9 @@ impl Node {
                     let db = i.r.db();
                     ensure!(db.may(&caller.user, "use", &scopes::object(scope)), "you don't use {scope}");
                     ensure!(n >= 1 && n <= newest + 1, "{scope} has no epoch {n}: its newest is {newest}");
-                    ensure!(n <= newest || starts_epochs(db, &caller.user, scope)?, "only {scope}'s admins start its new epoch");
+                    ensure!(n <= newest || db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins start its new epoch");
                     match to {
-                        "recovery" => ensure!(starts_epochs(db, &caller.user, scope)?, "only {scope}'s admins seal its keys to the recovery key"),
+                        "recovery" => ensure!(db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins seal its keys to the recovery key"),
                         to => {
                             let key = crate::keys::unhex(to)?;
                             // A scope's epochs are its people's client devices' alone: a node is handed a call's keys,
@@ -185,115 +160,10 @@ impl Node {
     }
 }
 
-/// A device's request to join, as auth keeps it (`/api/auth/devices/requests`): its endpoint's keys and name, its
-/// person, and for a newcomer's first device, the proof that their invite's secret was theirs.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DeviceRequest {
-    pub key: String,
-    pub seal: String,
-    pub name: String,
-    pub user: String,
-    /// Their person's name, as auth knows it.
-    #[serde(default)]
-    pub person: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proof: Option<String>,
-    /// For a native app, the device it's on (hex): its oned's key, or an id of the device's own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device: Option<String>,
-    /// When it asked (ms).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub made: Option<u64>,
-    /// The city it asked from, as Cloudflare placed it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub place: Option<String>,
-    /// What its sign-in showed (`sign_in_proof::Proof`), as auth passed it on: unchecked, and read only as a proof.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sign_in: Option<Value>,
-}
-
-impl DeviceRequest {
-    /// What its sign-in showed, if it's a proof this release reads.
-    pub fn proof(&self) -> Option<crate::sign_in_proof::Proof> {
-        serde_json::from_value(self.sign_in.clone()?).ok()
-    }
-
-    /// The device that asks: its key and seal key, which its join code and proof cover both of.
-    pub fn endpoint(&self) -> Result<crate::keys::Endpoint> {
-        Ok(crate::keys::Endpoint { key: crate::keys::unhex(&self.key)?, seal: crate::keys::unhex(&self.seal)? })
-    }
-}
-
-/// An invite this device's person made, kept in their own scope so any of their devices approves its newcomer.
-#[derive(Clone, Debug)]
-pub struct Invited {
-    /// The link's secret, as its text.
-    pub secret: String,
-    pub name: String,
-    pub user: String,
-    pub role: Role,
-    pub until: u64,
-}
-
-/// Where a person's invites are kept: a database of the node's own, in their scope.
-const INVITES: &str = "invites";
-const INVITES_SCHEMA: &str = "create table invites (user text primary key, secret text not null, name text not null, role text not null, until integer not null)";
-
-#[cfg(test)]
-mod waiting_tests {
-
-}
-
-/// The one device waiting with join `code`: none if two are, as a device made to show another's code would be.
-fn waiting(asked: Vec<DeviceRequest>, code: &str) -> Result<DeviceRequest> {
-    let mut found = asked.into_iter().filter(|r| r.endpoint().is_ok_and(|d| crate::keys::join_code(&d) == code));
-    let r = found.next().context("no device is waiting with that code: it waits 15 minutes after it asks")?;
-    ensure!(found.next().is_none(), "two devices are waiting with that code, so neither was let in: start again on yours, for a new code");
-    Ok(r)
-}
-
-/// Whether `user` may answer request `r`: `Some(None)` for one of their own devices, `Some(invite)` for the first
-/// device of someone they invited, whose proof is that invite's.
-fn mine_or_invited<'a>(r: &DeviceRequest, user: &str, invites: &'a BTreeMap<String, Invited>, device: &crate::keys::Endpoint) -> Option<Option<&'a Invited>> {
-    match (&r.proof, invites.get(&r.user)) {
-        (None, _) if r.user == user => Some(None),
-        (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), device) => Some(Some(i)),
-        _ => None,
-    }
-}
-
-fn code_of(typed: &str) -> String {
-    typed.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_ascii_uppercase()
-}
-
 impl Node {
     /// The network's address, where people sign in.
     pub fn address(&self) -> Result<String> {
         self.with(|i| super::calls::address(i.r.db()))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
-    }
-
-    /// Asks the network's auth something as this device, signed with its key (`one/auth`): a POST's body is
-    /// the signed request, a GET's or DELETE's is in `x-one-request`; it's signed for `path` without its query. → its
-    /// answer.
-    async fn ask_sign_in(&self, method: &'static str, path: &str, fields: Value) -> Result<Value> {
-        let (address, key, path) = (self.address()?, self.signing_key(), path.to_string());
-        tokio::task::spawn_blocking(move || {
-            let mut fields = fields;
-            fields["route"] = json!(format!("{method} {}", path.split('?').next().unwrap_or_default()));
-            let signed = crate::keys::signed_request(&key, crate::protocol::AUTH_DOMAIN, fields, now_ms());
-            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-            let url = format!("{address}{path}");
-            let header = B64U.encode(&serde_json::to_vec(&signed)?);
-            let mut resp = match method {
-                "POST" => agent.post(&url).send_json(&signed)?,
-                "DELETE" => agent.delete(&url).header(crate::protocol::header::REQUEST, &header).call()?,
-                _ => agent.get(&url).header(crate::protocol::header::REQUEST, &header).call()?,
-            };
-            let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-            ensure!(resp.status().is_success(), "{}", out["error"].as_str().unwrap_or("auth didn't answer"));
-            Ok(out)
-        })
-        .await?
     }
 
     /// Once the network's recovery key changed, an admin's device tells the relay to let the old one in no more and the
@@ -315,442 +185,6 @@ impl Node {
         }
     }
 
-    /// Tells the relay something now, signed by this device (`one/relay`), as `tell_relay` does in the background.
-    pub(super) async fn tell_relay_now(&self, fields: Value) -> Result<()> {
-        self.tell_relay_as(self.signing_key(), fields).await
-    }
-
-    /// Tells the relay something now, signed by `key`: this device's, or the network's recovery key.
-    async fn tell_relay_as(&self, key: ed25519_dalek::SigningKey, fields: Value) -> Result<()> {
-        let address = self.address()?;
-        tokio::task::spawn_blocking(move || {
-            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(15))).build().into();
-            // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
-            let mut again = true;
-            loop {
-                let at = crate::keys::next_at(now_ms());
-                let body = crate::keys::signed_request(&key, crate::protocol::RELAY, fields.clone(), at);
-                let mut resp = agent.post(format!("{address}/relay/tell")).send_json(&body)?;
-                let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-                let said = out["error"].as_str().unwrap_or("no");
-                if !resp.status().is_success() && again && out["code"] == crate::protocol::code::REPLAYED {
-                    again = false;
-                    std::thread::sleep(crate::keys::again_in(at));
-                    continue;
-                }
-                ensure!(resp.status().is_success(), "the relay said: {said}");
-                return Ok(());
-            }
-        })
-        .await?
-    }
-
-    /// The invites this device's person made that still work, by who they're for.
-    async fn invites(&self) -> Result<BTreeMap<String, Invited>> {
-        let scope = Scope::User(self.user()?);
-        let db = self.database(&scope, scopes::APP, INVITES, Some(vec![INVITES_SCHEMA.into()]), None).await?;
-        let mut db = db.lock().await;
-        db.catch_up(&self.bucket()?).await?;
-        let rows = db.query("select * from invites where until > ?", &[json!(now_ms())])?;
-        let text = |r: &serde_json::Map<String, Value>, k: &str| r[k].as_str().unwrap_or("").to_string();
-        Ok(rows
-            .iter()
-            .filter_map(|r| {
-                let role = serde_json::from_value(json!(text(r, "role"))).ok()?;
-                Some((text(r, "user"), Invited { secret: text(r, "secret"), name: text(r, "name"), user: text(r, "user"), role, until: r["until"].as_u64().unwrap_or(0) }))
-            })
-            .collect())
-    }
-
-    async fn keep_invite(&self, user: &str, invite: Option<&Invited>) -> Result<()> {
-        let scope = Scope::User(self.user()?);
-        let db = self.database(&scope, scopes::APP, INVITES, Some(vec![INVITES_SCHEMA.into()]), None).await?;
-        let mut db = db.lock().await;
-        self.write_in(&scope, &mut db, &self.bucket()?, |c| {
-            match invite {
-                Some(i) => crate::database::stored::execute(c, "insert or replace into invites values (?, ?, ?, ?, ?)", &[json!(i.user), json!(i.secret), json!(i.name), json!(i.role), json!(i.until)])?,
-                None => crate::database::stored::execute(c, "delete from invites where user = ?", &[json!(user)])?,
-            };
-            Ok(())
-        })
-        .await
-    }
-
-    /// Invites someone new to join, called `name`, as `role`, for this device's person, an admin: its secret is made
-    /// here, auth is told only its hash (signed by this device), and it's kept in their own scope, for any of their
-    /// devices to approve the newcomer's first device. → (the link, until when).
-    pub async fn invite_someone(&self, name: &str, role: Role) -> Result<(String, u64)> {
-        let me = self.user()?;
-        ensure!(self.with(|i| Ok(i.r.db().may(&me, "invite", scopes::NETWORK)))?, "only admins invite someone");
-        let (address, key, name_) = (self.address()?, self.signing_key(), name.to_string());
-        let user = new_id();
-        let made = {
-            let user = user.clone();
-            tokio::task::spawn_blocking(move || crate::cloudflare::invite(&address, &key, &name_, Some(&user), None)).await??
-        };
-        let secret = made.link.rsplit_once('#').map(|(_, s)| s.to_string()).context("an invite link carries its secret")?;
-        self.keep_invite(&user, Some(&Invited { secret, name: name.trim().to_string(), user: user.clone(), role, until: made.until })).await?;
-        Ok((made.link, made.until))
-    }
-
-    /// The requests to join that this device's person may approve, as auth lists them to it: their own devices', and
-    /// those of the people they invited whose proof is right, but those they said weren't theirs. Each with its code,
-    /// which the device asking shows too, to compare, and when and where it asked from.
-    pub async fn device_requests(&self) -> Result<Vec<Value>> {
-        let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let (me, invites) = (self.user()?, self.invites().await?);
-        let refused = self.0.refused.lock().unwrap().clone();
-        let mut out = Vec::new();
-        for r in asked {
-            let Ok(device) = r.endpoint() else { continue };
-            if refused.contains(&r.key) || self.taken_out(&device.key)? {
-                continue;
-            }
-            let mut shown = match mine_or_invited(&r, &me, &invites, &device) {
-                Some(None) => json!({ "device": r.name, "person": r.person, "yours": true }),
-                Some(Some(i)) => json!({ "device": r.name, "person": i.name, "role": i.role, "new": true }),
-                None => continue,
-            };
-            // As the device asking shows it: "ABCD EFGH".
-            let code = crate::keys::join_code(&device);
-            shown["code"] = json!(format!("{} {}", &code[..4], &code[4..]));
-            if let Some(made) = r.made {
-                shown["made"] = json!(made);
-            }
-            if let Some(place) = &r.place {
-                shown["place"] = json!(place);
-            }
-            // What approving it records as what they sign in with, for the card to say.
-            if let Some(account) = self.signed_in_with(&r, None).await {
-                shown["sign_in"] = json!(account);
-            }
-            out.push(shown);
-        }
-        Ok(out)
-    }
-
-    /// Turns down the device whose join code is `code`, one this device's person may approve: its request (and what its sign-in
-    /// showed) is forgotten at auth, and it isn't shown here again when it asks again. One of their own ("Not Me") is
-    /// turned down by an entry (`content::refuse`), so no device of theirs lets it in after. → which it was.
-    pub async fn refuse_device(&self, code: &str) -> Result<Value> {
-        let code = code_of(code);
-        ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
-        let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let r = waiting(asked, &code)?;
-        let invites = self.invites().await?;
-        let mine = mine_or_invited(&r, &self.user()?, &invites, &r.endpoint()?).context("that device isn't yours, or someone's you invited, to turn down")?;
-        if mine.is_none() && !self.taken_out(&r.endpoint()?.key)? {
-            self.member_content(&Caller::local(self)?, content::refuse(&r.endpoint()?, &r.name)).await?;
-        }
-        {
-            let mut refused = self.0.refused.lock().unwrap();
-            if refused.len() >= 50 {
-                refused.clear();
-            }
-            refused.insert(r.key.clone());
-        }
-        self.ask_sign_in("DELETE", &format!("/api/auth/devices/requests/{}", r.key), json!({})).await?;
-        Ok(json!({ "device": r.name }))
-    }
-
-    /// Lets back in someone who lost every device, with the network's recovery key, on this machine (never one asked
-    /// over the network): the device whose join code is `code`, theirs, is listed by an entry the recovery key signs
-    /// (which counts as an admin's approval, and is listed as its use), sealed each epoch of each scope they may open
-    /// (opened through the recovery key's copy), and let onto the network by the recovery key. Without `confirm`, says
-    /// whose it is. → what it is, or what was done.
-    pub async fn approve_with_recovery(&self, code: &str, recovery: &ed25519_dalek::SigningKey, confirm: bool) -> Result<Value> {
-        let at = recovery.verifying_key().to_bytes();
-        ensure!(self.with(|i| Ok(i.r.db().recovery()? == Some(at)))?, "that isn't {YOURS}'s recovery key");
-        let code = code_of(code);
-        ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
-        let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let r = waiting(asked, &code)?;
-        ensure!(r.proof.is_none(), "the recovery key lets in a device of someone already in {YOURS}");
-        let person = self.with(|i| Ok(i.r.db().user(&r.user)?.map(|u| u.name)))?.with_context(|| format!("the recovery key lets in a device of someone already in {YOURS}"))?;
-        if !confirm {
-            return Ok(json!({ "device": r.name, "person": person, "recovery": true }));
-        }
-        let endpoint = r.endpoint()?;
-        self.read_scope_now(&Scope::Global).await?;
-        // Listed already by an approval that didn't finish: the rest is done again, each step once.
-        if !self.with(|i| Ok(i.r.db().client(&endpoint.key)?.is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))? {
-            self.write_step_as(recovery, &r.user, content::device(&endpoint, &r.user, &r.name, &[scopes::Kind::Client], None)).await?;
-        }
-        let relay = self.tell_relay_as(recovery.clone(), json!({ "add": r.key, "role": "client" })).await.err().map(|err| format!("{err:#}"));
-        let scopes: Vec<Scope> = self.with(|i| Ok(i.r.db().may_scopes(&r.user, "use")?))?;
-        let (mut sealed, mut not) = (Vec::new(), Vec::new());
-        for scope in scopes {
-            match self.seal_from_recovery(&scope, recovery, &endpoint).await {
-                Ok(0) => {}
-                Ok(_) => sealed.push(scope.to_string()),
-                Err(err) => not.push(json!({ "scope": scope.to_string(), "why": format!("{err:#}") })),
-            }
-        }
-        // Marked approved, for the device waiting on it to see, with the network it's in.
-        if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
-            tracing::warn!("marking a request approved at auth: {err:#}");
-        }
-        Ok(json!({ "device": r.name, "person": person, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
-    }
-
-    /// Where a device's request is marked approved at auth, saying the network it was let into (its root),
-    /// the only one that device then takes, and once `global`'s log is frozen, where this device read its scope database
-    /// to, which that device starts from (`steps::Welcome`).
-    fn approved_path(&self, key: &str) -> Result<String> {
-        let (root, welcome) = self.with(|i| Ok((i.r.root().map(|r| r.to_hex()), i.r.welcome()?)))?;
-        let root = root.with_context(|| format!("this device isn't in {YOURS} yet"))?;
-        let welcome = welcome.map(|w| format!("&welcome={w}")).unwrap_or_default();
-        Ok(format!("/api/auth/devices/requests/{key}?approved&root={root}{welcome}"))
-    }
-
-    /// Seals each epoch of `scope` its entries made, opened through the recovery key's copy, to `to` where it isn't yet.
-    /// → how many it opened.
-    async fn seal_from_recovery(&self, scope: &Scope, recovery: &ed25519_dalek::SigningKey, to: &crate::keys::Endpoint) -> Result<usize> {
-        let (bucket, name) = (self.bucket()?, scope.to_string());
-        let hashes: BTreeMap<u32, String> = self.with(|i| Ok(i.r.db().epoch_hashes(scope)?))?;
-        let secret = crate::keys::seal_secret(recovery);
-        let mut opened = 0;
-        for (n, hash) in hashes {
-            let Some(o) = Bucket::get(&bucket, &crate::keys::epoch_name(&name, n, "recovery")).await? else {
-                tracing::warn!("{scope}'s epoch {n} isn't sealed to the recovery key");
-                continue;
-            };
-            let key = crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == hash);
-            let Some(key) = key else {
-                tracing::warn!("{scope}'s epoch {n} sealed to the recovery key isn't the key its entry made: passed over");
-                continue;
-            };
-            let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
-            if Bucket::get(&bucket, &at).await?.is_none() {
-                crate::database::stored::created(&bucket, &at, &crate::keys::seal_to(&to.seal, &key)?).await?;
-            }
-            opened += 1;
-        }
-        Ok(opened)
-    }
-
-    /// Approves the device whose join code is `code`, for this device's person: with `confirm`, lets it in
-    /// (`approve_request`) and forgets its request; without, says what it is. → what it is, or what was done.
-    pub async fn approve(&self, code: &str, confirm: bool) -> Result<Value> {
-        let me = self.user()?;
-        let code = code_of(code);
-        ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
-        let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let r = waiting(asked, &code)?;
-        let invite = match &r.proof {
-            Some(_) => self.invites().await?.remove(&r.user),
-            _ => None,
-        };
-        let who = invite.as_ref().map(|i| i.name.clone()).unwrap_or(r.person.clone());
-        if !confirm {
-            ensure!(r.user == me || invite.is_some(), "that device is {who}'s: one of their own devices approves it");
-            return Ok(json!({ "device": r.name, "person": who, "new": invite.is_some() }));
-        }
-        let approved = self.approve_request(&r, invite.as_ref()).await?;
-        // Marked approved, for the device waiting on it to see, with the network it's in.
-        if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
-            tracing::warn!("marking a request approved at auth: {err:#}");
-        }
-        if invite.is_some() {
-            self.keep_invite(&r.user, None).await?;
-        }
-        Ok(approved)
-    }
-
-    /// Lets a device in: lists it (`device`, a client of its person; for a newcomer, writing them in too, as an admin's
-    /// device may), seals it every epoch this device holds of each scope its person uses (a newcomer's own scope is
-    /// theirs: their device makes its first epoch), and tells the relay to let it in. A newcomer's request counts only with
-    /// the proof their invite's secret makes with its key. → what it was sealed, and what it wasn't.
-    pub async fn approve_request(&self, r: &DeviceRequest, invite: Option<&Invited>) -> Result<Value> {
-        let caller = &Caller::local(self)?;
-        let endpoint = r.endpoint()?;
-        ensure!(!self.taken_out(&endpoint.key)?, "{} was turned down or taken out, so it isn't let in again: start again on it, for a new code", r.name);
-        let on = r.device.as_deref().map(crate::keys::unhex).transpose().context("the device it's on is 64 hex characters")?;
-        let mut listed = match invite {
-            Some(i) => {
-                let proof = r.proof.as_deref().context("a newcomer's device brings their invite's proof")?;
-                ensure!(proof == crate::keys::invite_proof(i.secret.as_bytes(), &endpoint), "that device's proof isn't from {}'s invite", i.name);
-                ensure!(r.user == i.user, "that device isn't {}'s", i.name);
-                content::device(&endpoint, &r.user, &r.name, &[scopes::Kind::Client], Some((&i.name, i.role)))
-            }
-            None => {
-                ensure!(r.user == caller.user, "that device is {}'s: one of their own devices approves it", if r.person.is_empty() { &r.user } else { &r.person });
-                content::device(&endpoint, &r.user, &r.name, &[scopes::Kind::Client], None)
-            }
-        };
-        if let Some(on) = &on {
-            listed.data["device"] = json!(hex(on));
-        }
-        // What it signed in with, checked here, recorded with it: their next device's sign-in is checked against it.
-        if let Some(account) = self.signed_in_with(r, None).await {
-            listed.data["sign_in"] = json!(account);
-        }
-        if let Some(place) = &r.place {
-            listed.data["place"] = json!(place);
-        }
-        // Approved before, but its request wasn't marked so (the device still waits on it): what's left is done again.
-        let already = self.with(|i| Ok(i.r.db().client(&endpoint.key)?.is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))?;
-        if !already {
-            self.member_content(caller, listed).await?;
-        }
-        // Signed in again on the same device: its sign-in before goes, as signing out would have taken it, so its scopes
-        // keep their keys.
-        if let Some(on) = on {
-            let before: Vec<Key> = self.with(|i| {
-                Ok(i.r.db().clients()?.into_iter().filter(|c| c.user == r.user && c.device == Some(on) && c.key != endpoint.key && c.passkey.is_none()).map(|c| c.key).collect())
-            })?;
-            for old in before {
-                if let Err(err) = self.tell_relay_now(json!({ "remove": hex(&old) })).await {
-                    tracing::warn!("taking {}'s sign-in before off the network: {err:#}", r.name);
-                }
-                self.member_content(caller, content::remove_device(&old)).await?;
-            }
-        }
-        let admin = self.with(|i| Ok(i.r.db().may(&r.user, "invite", scopes::NETWORK)))?;
-        if invite.is_some_and(|i| i.role == Role::Admin)
-            && let Err(err) = self.ask_sign_in("POST", "/api/auth/people/admin", json!({ "user": r.user, "admin": true })).await
-        {
-            tracing::warn!("telling auth {} is an admin: {err:#}", r.user);
-        }
-        let scopes: Vec<Scope> = self.with(|i| {
-            let db = i.r.db();
-            Ok(db.may_scopes(&r.user, "use")?.into_iter().filter(|s| invite.is_none() || *s != Scope::User(r.user.clone())).collect())
-        })?;
-        let (mut sealed, mut not) = (Vec::new(), Vec::new());
-        for scope in scopes {
-            match self.seal_held(&scope, &endpoint).await {
-                Ok(()) => sealed.push(scope.to_string()),
-                Err(err) => not.push(json!({ "scope": scope.to_string(), "why": format!("{err:#}") })),
-            }
-        }
-        // Last, and waited for where there's a relay (at the network's address): until it lets the device in, the device
-        // reaches nothing and keeps waiting. Approving it again finishes this, as it's listed already.
-        if self.address().is_ok() {
-            let told = self.tell_relay_now(json!({ "add": r.key, "admin": admin, "role": "client" })).await;
-            told.with_context(|| format!("{} is let in, but {YOURS}'s network didn't take it yet: approve it again", r.name))?;
-        }
-        Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
-    }
-
-    /// What `r`'s sign-in shows it signed in with, checked here: against `accounts` (the person's, as their devices
-    /// record them) for one let in by it, else for one approved by its code. None if it shows nothing that checks out.
-    async fn signed_in_with(&self, r: &DeviceRequest, accounts: Option<&[crate::sign_in_proof::Account]>) -> Option<crate::sign_in_proof::Account> {
-        let proof = r.proof()?;
-        let (endpoint, network) = (r.endpoint().ok()?, self.sign_in_network().ok()?);
-        let jwks = match proof.issuer().and_then(|i| crate::sign_in_proof::keys_at(&i, &network.address)) {
-            Some(at) => match self.issuer_keys(&at).await {
-                Ok(keys) => Some(keys),
-                Err(err) => {
-                    tracing::warn!("fetching {at}, to check {}'s sign-in: {err:#}", r.name);
-                    return None;
-                }
-            },
-            None => None,
-        };
-        let checked = match accounts {
-            Some(theirs) => crate::sign_in_proof::vouches(&proof, &endpoint, &network, jwks.as_ref(), theirs, now_ms()),
-            None => crate::sign_in_proof::check(&proof, &endpoint, &network, jwks.as_ref(), now_ms()),
-        };
-        checked.map_err(|err| tracing::info!("{}'s sign-in doesn't let it in by itself: {err:#}", r.name)).ok()
-    }
-
-    /// The network a new device's sign-in must be for, as this device's signed entries say.
-    fn sign_in_network(&self) -> Result<crate::sign_in_proof::Network> {
-        let address = self.address()?;
-        self.with(|i| {
-            let root = i.r.root().with_context(|| format!("this device isn't in {YOURS} yet"))?;
-            Ok(crate::sign_in_proof::Network::new(&address, *root.as_bytes(), i.r.db().setting(crate::sign_in_proof::CLIENTS)?.as_deref()))
-        })
-    }
-
-    /// Whether `key` was listed and taken out, or turned down before it was: never let in again.
-    fn taken_out(&self, key: &Key) -> Result<bool> {
-        self.with(|i| Ok(i.r.db().machine_ever(key)?.is_some_and(|m| m.removed)))
-    }
-
-    /// Forgets what one of this device's person's devices (`key`, hex) signed in with: a new device's sign-in is no
-    /// longer checked against it.
-    pub async fn forget_sign_in(&self, key: &str) -> Result<()> {
-        let caller = &Caller::local(self)?;
-        let key = crate::keys::unhex(key).context("a device's key is 64 hex characters")?;
-        let theirs = self.with(|i| Ok(i.r.db().machine(&key)?.is_some_and(|m| m.user == caller.user && m.sign_in.is_some())))?;
-        ensure!(theirs, "that isn't one of your devices with a sign-in to forget");
-        self.member_content(caller, content::forget_sign_in(&key)).await
-    }
-
-    async fn issuer_keys(&self, at: &str) -> Result<Value> {
-        if let Some((keys, when)) = self.0.sign_ins.lock().unwrap().keys.get(at)
-            && when.elapsed() < ISSUER_KEYS_FOR
-        {
-            return Ok(keys.clone());
-        }
-        let url = at.to_string();
-        let keys: Value = tokio::task::spawn_blocking(move || -> Result<Value> {
-            let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().into();
-            Ok(agent.get(&url).call()?.body_mut().read_json()?)
-        })
-        .await??;
-        self.0.sign_ins.lock().unwrap().keys.insert(at.to_string(), (keys.clone(), Instant::now()));
-        Ok(keys)
-    }
-
-    /// Every few seconds, on a client of its person's, lets in each of their new devices whose sign-in shows it's
-    /// theirs (`sign_in_proof::vouches`), as their approving it would, with no one tapping; any other waits for them to
-    /// approve it by its code. Nodes that only run calls let in no one.
-    pub(super) async fn sign_in_loop(self) {
-        loop {
-            tokio::time::sleep(SIGN_INS_EVERY).await;
-            if let Err(err) = self.approve_by_sign_in().await {
-                tracing::debug!("looking for devices let in by their sign-in: {err:#}");
-            }
-        }
-    }
-
-    async fn approve_by_sign_in(&self) -> Result<()> {
-        let me = self.with(|i| Ok(i.r.db().client(&self.0.id)?.map(|c| c.user)))?;
-        let Some(user) = me else { return Ok(()) };
-        if self.address().is_err() {
-            return Ok(());
-        }
-        let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
-        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let theirs = asked.into_iter().filter(|r| r.user == user && r.proof.is_none() && r.sign_in.is_some());
-        for r in theirs {
-            let accounts = self.with(|i| Ok(i.r.db().sign_ins(&user)?))?;
-            // Checked once against the accounts they have now, and again if those change.
-            let tried = format!("{} {}", r.key, json!(accounts));
-            let done = self.0.refused.lock().unwrap().contains(&r.key) || self.0.sign_ins.lock().unwrap().refused.contains(&tried) || r.endpoint().ok().is_none_or(|d| self.taken_out(&d.key).unwrap_or(true));
-            if done || accounts.is_empty() {
-                continue;
-            }
-            if self.signed_in_with(&r, Some(&accounts)).await.is_none() {
-                let mut kept = self.0.sign_ins.lock().unwrap();
-                if kept.refused.len() >= 100 {
-                    kept.refused.clear();
-                }
-                kept.refused.insert(tried);
-                continue;
-            }
-            // Another device of theirs may have just let it in.
-            self.read_scope_now(&Scope::Global).await?;
-            let approved = self.approve_request(&r, None).await;
-            match approved {
-                Ok(_) => {
-                    tracing::info!("let {} in by its sign-in", r.name);
-                    if let Err(err) = self.ask_sign_in("DELETE", &self.approved_path(&r.key)?, json!({})).await {
-                        tracing::warn!("marking a request approved at auth: {err:#}");
-                    }
-                }
-                Err(err) => tracing::warn!("letting {} in by its sign-in: {err:#}", r.name),
-            }
-        }
-        Ok(())
-    }
-
     /// Lists one of this device's parts, the service `service`, as its person's, a part of this device (oned turned it
     /// on, and it asked with its endpoint and whether it serves everyone), and tells the relay to let it in. It holds no
     /// keys: the nodes that call it bring it the network's entries, which say who may. A part listed before it named its
@@ -765,8 +199,8 @@ impl Node {
         })?;
         if listed.is_none() {
             // Told first: a service the relay won't let in is never reached.
-            if let Err(err) = self.tell_relay_now(json!({ "add": hex(&endpoint.key), "admin": false, "role": "service" })).await {
-                ensure!(format!("{err:#}").contains("in already"), "{YOURS}'s relay won't let {service} in: {err:#}");
+            if let Err(err) = crate::settings::tell(self, self, json!({ "add": hex(&endpoint.key), "admin": false, "role": "service" })).await {
+                ensure!(crate::protocol::Coded::of(&err).as_deref() == Some(crate::protocol::code::ALREADY), "{YOURS}'s relay won't let {service} in: {err:#}");
             }
         }
         if listed != Some(true) {
@@ -784,18 +218,6 @@ impl Node {
             }
             tracing::warn!("service {} was listed but this device hasn't reached it", crate::keys::short(&key));
         });
-        Ok(())
-    }
-
-    /// Seals each epoch of `scope` this device holds to `to`, where it isn't yet.
-    async fn seal_held(&self, scope: &Scope, to: &crate::keys::Endpoint) -> Result<()> {
-        let (bucket, name) = (self.bucket()?, scope.to_string());
-        for (n, key) in self.epoch_keys(scope, false).await? {
-            let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
-            if Bucket::get(&bucket, &at).await?.is_none() {
-                crate::database::stored::created(&bucket, &at, &crate::keys::seal_to(&to.seal, &key)?).await?;
-            }
-        }
         Ok(())
     }
 
@@ -820,88 +242,6 @@ impl Node {
         Ok(json!({ "erasing": name }))
     }
 
-    /// Removes a device (by name or key), and what's part of it (its services, and its apps' sign-ins), for its person or
-    /// an admin: the relay told to let each in no more first, so it reaches the bucket no more, then their `remove`
-    /// entries, and a new epoch of each scope it could open (as a client:
-    /// compute holds no epochs) that this device's person starts epochs of, sealed to every client left that opens it and
-    /// the recovery key; databases move to it at their next routine copy. A scope they can't start a new epoch of is
-    /// said: one of its own admins' devices does. Off the relay first, then unlisted. A device removing itself (as it
-    /// signs out) does it itself, never through a node. → what was done.
-    pub async fn remove_device(&self, device: &str) -> Result<Value> {
-        let caller = &Caller::local(self)?;
-        let key = self.find_machine(device)?;
-        let (gone, keys, scopes) = self.with(|i| {
-            let db = i.r.db();
-            let d = db.machine(&key)?.context("no such device")?;
-            ensure!(db.may(&caller.user, "remove", &scopes::device(&key)), "only its person or an admin removes a device");
-            let keys: Vec<Key> = std::iter::once(key).chain(db.machines()?.into_iter().filter(|e| e.device == Some(key) && e.key != key && !e.removed).map(|e| e.key)).collect();
-            let mut listed = Vec::new();
-            for k in &keys {
-                listed.extend(db.machine(k)?);
-            }
-            let opens = |s: &Scope| listed.iter().any(|d| d.is(scopes::Kind::Client) && db.may(&d.user, "use", &scopes::object(s)));
-            Ok((d.name, keys.clone(), db.scopes()?.into_iter().filter(opens).collect::<Vec<_>>()))
-        })?;
-        ensure!(!keys.contains(&self.0.id), "{gone} is this device: remove it from another of your devices");
-        let mut relay = Vec::new();
-        for k in &keys {
-            if let Err(err) = self.tell_relay_now(json!({ "remove": hex(k) })).await {
-                relay.push(format!("{err:#}"));
-            }
-        }
-        let relay = (!relay.is_empty()).then(|| relay.join("; "));
-        for k in &keys {
-            self.member_content(caller, content::remove_device(k)).await?;
-        }
-        let (renewed, left) = self.renew(caller, scopes).await;
-        Ok(json!({ "removed": gone, "new_epochs": renewed, "not_renewed": left, "relay": relay }))
-    }
-
-    /// Removes a person, for an admin: the relay told to let each of their devices in no more first, then their removal,
-    /// and a new epoch of each scope they could open but their own (`global`, and each group they were in),
-    /// sealed to every client left that opens it and the recovery key. Their own scope is kept as it is: removing deletes
-    /// nothing. → what was done.
-    pub async fn remove_person(&self, user: &str) -> Result<Value> {
-        let caller = &Caller::local(self)?;
-        let user = self.find_user(user)?;
-        let (name, keys, scopes) = self.with(|i| {
-            let db = i.r.db();
-            ensure!(db.may(&caller.user, "remove", scopes::NETWORK), "only admins remove someone");
-            ensure!(user != caller.user, "you can't remove yourself: another admin can");
-            let name = db.user(&user)?.context("no such person")?.name;
-            let keys: Vec<Key> = db.machines()?.into_iter().filter(|d| d.user == user && !d.removed).map(|d| d.key).collect();
-            let mut scopes = vec![Scope::Global];
-            scopes.extend(db.groups_of(&user)?.into_keys().map(Scope::Group));
-            Ok((name, keys, scopes))
-        })?;
-        ensure!(!keys.contains(&self.0.id), "this device is {name}'s: remove them from another");
-        let mut relay = Vec::new();
-        for key in &keys {
-            if let Err(err) = self.tell_relay_now(json!({ "remove": hex(key) })).await {
-                relay.push(format!("{err:#}"));
-            }
-        }
-        self.member_content(caller, content::remove_user(&user)).await?;
-        let (renewed, left) = self.renew(caller, scopes).await;
-        Ok(json!({ "removed": name, "new_epochs": renewed, "not_renewed": left, "relay": (!relay.is_empty()).then(|| relay.join("; ")) }))
-    }
-
-    /// A new epoch of each scope, where `caller` may start one: → those made, and those left to one of their admins.
-    async fn renew(&self, caller: &Caller, scopes: Vec<Scope>) -> (Vec<Value>, Vec<String>) {
-        let (mut renewed, mut left) = (Vec::new(), Vec::new());
-        for scope in scopes {
-            if !self.with_or(false, |i| starts_epochs(i.r.db(), &caller.user, &scope)) {
-                left.push(self.whose(&scope));
-                continue;
-            }
-            match self.new_epoch(caller, &scope).await {
-                Ok(n) => renewed.push(json!({ "scope": scope.to_string(), "epoch": n })),
-                Err(err) => left.push(format!("{} ({err:#})", self.whose(&scope))),
-            }
-        }
-        (renewed, left)
-    }
-
     /// Makes, in the background, each scope's keys that are owed, of what this device's person makes them of: a new
     /// epoch a removal or stopped app schedules asked for (`ScopeDb::owed`) that the device writing it didn't make (it failed,
     /// or went off first); or a new epoch or Vault key pair where the newest's entry lists this device but it was never
@@ -917,13 +257,13 @@ impl Node {
                 }
                 let mut owed = BTreeSet::new();
                 for s in db.owed()? {
-                    if starts_epochs(db, &me, &s)? {
+                    if db.starts_epochs(&me, &s)? {
                         owed.insert(Owing::Epoch(s));
                     }
                 }
                 let mut epochs = Vec::new();
                 for (s, n) in db.epochs()? {
-                    if db.sealed_to(&s)?.contains(&self.0.id) && starts_epochs(db, &me, &s)? {
+                    if db.sealed_to(&s)?.contains(&self.0.id) && db.starts_epochs(&me, &s)? {
                         epochs.push((Owing::Epoch(s), n));
                     }
                 }
@@ -968,10 +308,13 @@ impl Node {
             });
         }
         for owing in due {
-            let (node, me, (vaults, recovery)) = (self.clone(), Caller::own(self.0.id, me.clone()), vaults.clone());
+            let (node, (vaults, recovery)) = (self.clone(), vaults.clone());
             tokio::spawn(async move {
                 let made = match &owing {
-                    Owing::Epoch(scope) => node.new_epoch(&me, scope).await.map(|_| ()),
+                    Owing::Epoch(scope) => match node.newest_epoch(scope).await {
+                        Ok(newest) => crate::settings::new_epoch(&node, scope, newest + 1, &[]).await,
+                        Err(err) => Err(err),
+                    },
                     Owing::Vault(scope) => match (vaults.get(scope), recovery) {
                         (Some((n, to)), Some(recovery)) => node.new_vault_key(scope, n + 1, to, &recovery).await,
                         _ => Ok(()),
@@ -984,70 +327,5 @@ impl Node {
                 node.0.owed.lock().unwrap().starting.remove(&owing);
             });
         }
-    }
-
-    /// What a person's first device does once it's in, here for a machine (one-client's `settle_own` for a client): where
-    /// their own things run besides their own machines, if their devices never said (the network's machines that run
-    /// everyone's, chosen without asking), and their own scope's first epoch, if it isn't made.
-    pub(super) fn settle_own(&self) {
-        let node = self.clone();
-        tokio::spawn(async move {
-            let todo = node.with(|i| {
-                let db = i.r.db();
-                let me = i.user.clone();
-                if db.client(&node.0.id)?.is_none_or(|c| c.user != me) || db.epoch(&Scope::User(me.clone()))? > 0 {
-                    return Ok(None);
-                }
-                Ok(Some((me.clone(), db.runs_until_chosen(&me)?)))
-            });
-            let Ok(Some((me, on))) = todo else { return };
-            if !on.is_empty()
-                && let Err(err) = node.member_content(&Caller::own(node.0.id, me.clone()), content::runs(&on)).await
-            {
-                tracing::warn!("saying where {me}'s things run: {err:#}");
-            }
-            if let Err(err) = node.epoch_keys(&Scope::User(me.clone()), true).await {
-                tracing::warn!("making {me}'s own keys: {err:#}");
-            }
-        });
-    }
-
-    /// A scope as a person reads it: "Sam's own", "Work's", or "everyone's".
-    fn whose(&self, scope: &Scope) -> String {
-        self.with(|i| {
-            Ok(match scope {
-                Scope::Global => "everyone's".to_string(),
-                Scope::User(u) => format!("{}'s own", Some(crate::state::whose(i.r.db(), scope)?).filter(|n| !n.is_empty()).unwrap_or(u.clone())),
-                Scope::Group(g) => format!("{}'s", Some(crate::state::whose(i.r.db(), scope)?).filter(|n| !n.is_empty()).unwrap_or(g.clone())),
-            })
-        })
-        .unwrap_or_default()
-    }
-
-    /// A scope's next epoch: its `epoch` entry first, naming its key's hash (which, first in causal order, makes it),
-    /// then the key sealed to the recovery key, if there is one, and to every client device of someone who uses the scope, before
-    /// anything uses it. → its number.
-    pub(super) async fn new_epoch(&self, caller: &Caller, scope: &Scope) -> Result<u32> {
-        let newest = self.newest_epoch(scope).await?;
-        ensure!(newest >= 1, "{scope} has no keys yet");
-        let n = newest + 1;
-        let (recovery, to) = self.with(|i| Ok((i.r.db().recovery()?, i.r.db().openers(scope)?)))?;
-        let (bucket, name) = (self.bucket()?, scope.to_string());
-        let key: [u8; 32] = rand::random();
-        let hash = crate::keys::epoch_hash(&key);
-        self.member_content(caller, content::epoch(scope, n, &to.iter().map(|c| c.key).collect::<Vec<_>>(), &hash)).await?;
-        ensure!(self.with(|i| Ok(i.r.db().epoch_hash(scope, n)?.as_deref() == Some(hash.as_str())))?, "another device started {scope}'s epoch {n} just now");
-        // Not while there's none (the one there was forked `global`), until an admin names the next: a removal still
-        // takes keys away from whoever it removes.
-        if let Some(recovery) = recovery
-            && !crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::keys::seal_to(&crate::keys::twin_public(&recovery)?, &key)?).await?
-        {
-            tracing::warn!("{scope}'s epoch {n} was sealed to the recovery key already, not with its key: the recovery key won't open it");
-        }
-        for c in &to {
-            crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&c.key)), &crate::keys::seal_to(&c.seal, &key)?).await?;
-        }
-        self.forget_epochs(scope);
-        Ok(n)
     }
 }

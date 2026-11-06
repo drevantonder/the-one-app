@@ -107,5 +107,7 @@ pub mod push;
 pub mod screen;
 pub mod web;
 pub mod state;
+#[cfg(feature = "sign-in-proof")]
+pub mod settings;
 pub mod settings_tools;
 pub mod vault;

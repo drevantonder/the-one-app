@@ -23,7 +23,7 @@ use crate::keys::{Hash, Key, hex, short, unhex};
 use crate::database::scopes::{Scope, new_id};
 use crate::database::scopes::{self, ScopeDb};
 use crate::database::content;
-use crate::database::scopes::{Principal, Role, ScopeState};
+use crate::database::scopes::{Principal, ScopeState};
 use crate::rank;
 use crate::release::{self, Release};
 use crate::schedules::{self, Schedule};
@@ -44,7 +44,6 @@ mod scheduled;
 pub(crate) mod screens;
 mod sessions;
 pub use databases::NotGiven;
-pub use devices::{DeviceRequest, Invited};
 pub use net::{alpn, relay, service_alpn};
 pub use calls::{CallRequest, Elsewhere, Grant};
 use calls::{Granted, Reply};
@@ -56,7 +55,8 @@ pub use releases::Build;
 pub use sessions::Needs;
 pub mod services;
 mod app_schedules;
-pub use app_schedules::APP_SCHEDULES_DAYS;
+mod settings;
+pub(crate) use settings::routes as settings_routes;
 mod state;
 mod status;
 mod steps;
@@ -200,8 +200,6 @@ pub struct Inner {
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
     /// Held while this device makes a scope's first epoch.
     making_keys: tokio::sync::Mutex<()>,
-    /// Requests to join, by their device's key, that their person said weren't theirs, not shown again while it runs.
-    refused: Mutex<std::collections::HashSet<String>>,
     /// What the vault gave this device for the sign-ins its calls came with.
     sessions: sessions::Sessions,
     /// Apps whose deploy doesn't start here, by the bundle that didn't: left out until they're deployed again.
@@ -209,7 +207,7 @@ pub struct Inner {
     /// The keys of the apps whose schedules this device runs for their people.
     app_schedules: app_schedules::State,
     owed: Mutex<devices::Owed>,
-    sign_ins: Mutex<devices::SignIns>,
+    issuer_keys: Mutex<settings::IssuerKeys>,
     net: net::Net,
     /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
     settled: tokio::sync::watch::Sender<u64>,
@@ -282,12 +280,11 @@ impl Node {
             caught_up: tokio::sync::Mutex::new(None),
             moved: Arc::default(),
             making_keys: tokio::sync::Mutex::new(()),
-            refused: Mutex::default(),
             sessions: Default::default(),
             broken: Default::default(),
             app_schedules: Default::default(),
             owed: Default::default(),
-            sign_ins: Default::default(),
+            issuer_keys: Default::default(),
             net: Default::default(),
             settled: tokio::sync::watch::channel(0).0,
             settling: tokio::sync::Mutex::new(()),

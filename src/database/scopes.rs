@@ -563,6 +563,16 @@ impl ScopeDb {
         Ok(self.row("SELECT max(epoch) FROM epochs WHERE scope = ?1", [scope.to_string()], |r| r.get::<_, Option<u32>>(0))?.flatten().unwrap_or(0))
     }
 
+    /// Whether `user` may start a scope's new epoch, as its `epoch` step's rule says: they may `remove` from it, and it's
+    /// a group that's there.
+    pub fn starts_epochs(&self, user: &str, scope: &Scope) -> Result<bool> {
+        let gone = match scope {
+            Scope::Group(g) => self.group(g)?.is_none(),
+            _ => false,
+        };
+        Ok(!gone && self.may(user, "remove", &object(scope)))
+    }
+
     pub fn epoch_hashes(&self, scope: &Scope) -> Result<BTreeMap<u32, String>> {
         Ok(self.rows("SELECT epoch, key_hash FROM epochs WHERE scope = ?1", [scope.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))?.into_iter().collect())
     }

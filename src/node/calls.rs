@@ -801,9 +801,9 @@ impl Node {
             }
         };
         self.record(&req.app, req, me, None);
-        // Its person using it renews the app schedules that run it for them.
-        if !matches!(me.credential, Credential::AppSchedules { .. }) {
-            self.renew_app_schedules(me, &req.app);
+        // Its person using it here renews the app schedules that run it for them, as their other devices do themselves.
+        if self.this_machine(me) {
+            self.renew_app_schedules(&req.app);
         }
         if outcome.later {
             self.keep_for_later(granted);

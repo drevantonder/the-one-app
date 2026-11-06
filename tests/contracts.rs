@@ -770,7 +770,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
 }
 
 /// Every path of the node's API that the Workers, the screens, the web client and the native apps ask is one of its routes
-/// (`api::routes`) or one a device answers itself (`one_client::settings::answered`): a path misspelled or dropped from one
+/// (`api::routes`) or one a device answers itself (`one::settings::answered`): a path misspelled or dropped from one
 /// fails as a 404, which no one sees until it's used.
 #[test]
 fn every_path_asked_of_a_node_is_one_it_serves() {
@@ -819,7 +819,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
                 let literal = &line[at..end];
                 let asked: Vec<&str> = literal.trim_start_matches('/').split('/').collect();
                 // A start of a path, which more is added to.
-                if !literal.ends_with('/') && !matches(&asked) && !one_client::settings::answered(literal) {
+                if !literal.ends_with('/') && !matches(&asked) && !one::settings::answered(literal) {
                     unserved.push(format!("{}:{}: {}", path.strip_prefix(root).unwrap().display(), n + 1, &line[at..end]));
                 }
             }

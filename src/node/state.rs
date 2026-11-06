@@ -127,15 +127,6 @@ impl Node {
         Ok(())
     }
 
-    /// Makes a group called `name`, with `caller` its first admin: → its id. Its first epoch is made by the first of
-    /// its admin's devices to need it.
-    pub async fn make_group(&self, caller: &Caller, name: &str) -> Result<String> {
-        ensure!(!name.trim().is_empty(), "give the group a name");
-        let group = new_id();
-        self.member_content(caller, content::group(&group, name)).await?;
-        Ok(group)
-    }
-
     pub async fn rename_device(&self, name: &str) -> Result<()> {
         ensure!(!name.trim().is_empty(), "give a name");
         *self.0.name.lock().unwrap() = name.to_string();

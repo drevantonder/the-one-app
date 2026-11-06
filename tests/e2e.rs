@@ -49,6 +49,25 @@ pub(crate) async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed2551
     a.put_signed_steps(caller, vec![step]).await.unwrap();
 }
 
+/// A request to join from the device of `key`, as auth lists it, for `user`, with the proof `secret`'s invite makes.
+fn asks(key: &ed25519_dalek::SigningKey, user: &str, secret: Option<&[u8]>) -> one::settings::Asked {
+    let e = one::keys::Endpoint::of(key);
+    let proof = secret.map(|s| one::keys::invite_proof(s, &e));
+    one::settings::Asked::of(&json!({ "key": one::keys::hex(&e.key), "seal": one::keys::hex(&e.seal), "name": "Sam's laptop", "user": user, "proof": proof })).unwrap()
+}
+
+/// An invite for Sam, as a member, whose secret is `secret`.
+fn invited(secret: &str) -> one::settings::Invited {
+    one::settings::Invited::of(&json!({ "secret": secret, "name": "Sam", "role": "member", "until": u64::MAX })).unwrap()
+}
+
+/// Sam, invited by `a`'s person as a member, let in with his first device, `key`, as `a` approves it: → his id.
+pub(crate) async fn let_sam_in(a: &Node, key: &ed25519_dalek::SigningKey) -> String {
+    let sam = one::database::scopes::new_id();
+    one::settings::approve(a, &asks(key, &sam, Some(b"the-invites-secret")), Some(&invited("the-invites-secret"))).await.unwrap();
+    sam
+}
+
 fn notes(tool: &str, input: Value) -> CallRequest {
     CallRequest { app: "notes".into(), tool: tool.into(), input, ..Default::default() }
 }
@@ -212,7 +231,6 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// with; a device removed opens no epoch made after.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
-    use one::node::{DeviceRequest, Invited};
     let dir = temp("approve");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir, false).await.unwrap();
@@ -222,10 +240,6 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let global = one::database::scopes::Scope::Global;
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let asks = |key: &ed25519_dalek::SigningKey, user: &str, proof: Option<String>| {
-        let e = one::keys::Endpoint::of(key);
-        DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Chrome".into(), user: user.into(), person: String::new(), proof, device: None, made: None, place: None, sign_in: None }
-    };
     let opens = async |key: &ed25519_dalek::SigningKey, scope: &one::database::scopes::Scope| -> Vec<u32> {
         let got = a.sealed_keys(&me, scope, Some(&one::keys::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
         let sealed = got["sealed"].as_object().unwrap();
@@ -234,28 +248,26 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
 
     // Andre's new laptop, approved from his machine, opens global.
     let laptop = new_key();
-    a.approve_request(&asks(&laptop, &me.user, None), None).await.unwrap();
+    one::settings::approve(&a, &asks(&laptop, &me.user, None), None).await.unwrap();
     assert_eq!(opens(&laptop, &global).await, vec![1]);
 
     // Sam is let in only with the proof of the secret Andre's invite made.
-    let secret = "the-invites-secret";
-    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
-    let sams = new_key();
-    let wrong = one::keys::invite_proof(b"another-secret", &one::keys::Endpoint::of(&sams));
-    assert!(a.approve_request(&asks(&sams, &sam.user, Some(wrong)), Some(&sam)).await.is_err());
-    assert!(!a.is_user(&sam.user), "a request whose proof doesn't match lets no one in");
-    let right = one::keys::invite_proof(secret.as_bytes(), &one::keys::Endpoint::of(&sams));
-    a.approve_request(&asks(&sams, &sam.user, Some(right)), Some(&sam)).await.unwrap();
-    assert!(a.is_user(&sam.user));
+    let (sam, sams) = (one::database::scopes::new_id(), new_key());
+    let invite = invited("the-invites-secret");
+    assert!(one::settings::approve(&a, &asks(&sams, &sam, Some(b"another-secret")), Some(&invite)).await.is_err());
+    assert!(!a.is_user(&sam), "a request whose proof doesn't match lets no one in");
+    one::settings::approve(&a, &asks(&sams, &sam, Some(b"the-invites-secret")), Some(&invite)).await.unwrap();
+    assert!(a.is_user(&sam));
     assert_eq!(opens(&sams, &global).await, vec![1]);
 
     // Sam's next device is his to approve, not Andre's.
-    let refused = a.approve_request(&asks(&new_key(), &sam.user, None), None).await.unwrap_err();
-    assert!(format!("{refused:#}").contains("one of their own devices"), "{refused:#}");
+    let refused = one::settings::approve(&a, &asks(&new_key(), &sam, None), None).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("only their own devices"), "{refused:#}");
 
     // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the notes go on.
-    let removed = a.remove_device(&one::keys::hex(&laptop.verifying_key().to_bytes())).await.unwrap();
-    assert!(removed["new_epochs"].as_array().unwrap().iter().any(|e| e["scope"] == "global" && e["epoch"] == 2), "{removed}");
+    let laptop_key = json!({ "key": one::keys::hex(&laptop.verifying_key().to_bytes()) });
+    let removed = one::settings::answer(&a, "POST", "/v1/remove", laptop_key.to_string().as_bytes()).await.unwrap().unwrap();
+    assert_eq!(removed["not_renewed"], json!([]), "{removed}");
     assert_eq!(opens(&laptop, &global).await, vec![1]);
     for f in walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_epochs/2/")) {
         assert!(one::keys::open_sealed(&one::keys::seal_secret(&laptop), &std::fs::read(&f).unwrap()).is_err(), "{} opens for the removed laptop", f.display());
@@ -302,7 +314,6 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
 /// by another member, and what's returned is capped.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_devices_person_or_an_admin_reads_its_logs() {
-    use one::node::Invited;
     let dir = temp("logs");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir, false).await.unwrap();
@@ -320,17 +331,13 @@ async fn only_a_devices_person_or_an_admin_reads_its_logs() {
     assert!(all["shown"].as_u64().unwrap() <= one::logs::MOST_LINES as u64, "a read is capped");
 
     // Sam, invited as a member, may not; once an admin, may.
-    let sam = Invited { secret: "s".into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
-    let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let e = one::keys::Endpoint::of(&key);
-    let request = one::node::DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's".into(), user: sam.user.clone(), person: String::new(), proof: Some(one::keys::invite_proof(b"s", &e)), device: None, made: None, place: None, sign_in: None };
-    a.approve_request(&request, Some(&sam)).await.unwrap();
-    let from_sam = one::node::Caller::own(a.id(), sam.user.clone());
+    let sam = let_sam_in(&a, &ed25519_dalek::SigningKey::from_bytes(&rand::random())).await;
+    let from_sam = one::node::Caller::own(a.id(), sam.clone());
     let refused = a.call_as(logs(json!({})), from_sam.clone()).await.unwrap_err();
     assert!(format!("{refused:#}").contains("reads its logs"), "{refused:#}");
-    assert!(!a.may_read_logs(&sam.user).unwrap() && a.may_read_logs(&andre.user).unwrap());
-    a.member_content(&andre, one::database::content::role(&sam.user, one::database::scopes::Role::Admin)).await.unwrap();
-    assert!(a.may_read_logs(&sam.user).unwrap(), "an admin of the network reads any device's logs");
+    assert!(!a.may_read_logs(&sam).unwrap() && a.may_read_logs(&andre.user).unwrap());
+    a.member_content(&andre, one::database::content::role(&sam, one::database::scopes::Role::Admin)).await.unwrap();
+    assert!(a.may_read_logs(&sam).unwrap(), "an admin of the network reads any device's logs");
 }
 
 /// A node runs a build of an app's service only if its app's latest deploy names it: one whose bytes aren't that hash's
@@ -406,12 +413,8 @@ async fn a_client_devices_mcp_runs_as_its_person() {
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
-    let secret = "the-invites-secret";
-    let sam = one::node::Invited { secret: secret.into(), name: "Sam".into(), user: one::database::scopes::new_id(), role: one::database::scopes::Role::Member, until: u64::MAX };
     let device = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let e = one::keys::Endpoint::of(&device);
-    let asks = one::node::DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Chrome".into(), user: sam.user.clone(), person: String::new(), proof: Some(one::keys::invite_proof(secret.as_bytes(), &e)), device: None, made: None, place: None, sign_in: None };
-    a.approve_request(&asks, Some(&sam)).await.unwrap();
+    let_sam_in(&a, &device).await;
     // Asked as the node asks its routes for a request over iroh: as the device its connection proved.
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(one::protocol::header::READS, one::database::READS.into());

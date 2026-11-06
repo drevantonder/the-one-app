@@ -1,13 +1,11 @@
-//! The routes of the network itself: its state, its keys, creating or joining it, roles and settings, and signed steps.
+//! The routes of the network itself: its state, its keys, creating or joining it, and signed steps.
 
 use axum::Json;
 use axum::routing::{get, post};
 use axum::extract::{Query, State};
 use serde_json::json;
 
-use crate::database::content;
 
-use crate::database::scopes::Role;
 use crate::node::Node;
 
 use super::guard::Me;
@@ -21,8 +19,6 @@ pub(super) fn routes() -> Routes {
         .route("/v1/keys", SignedIn, get(keys_get).post(keys_post))
         .route("/v1/create", ThisMachine, post(create))
         .route("/v1/join", ThisMachine, post(join))
-        .route("/v1/role", ThisMachine, post(role))
-        .route("/v1/settings", ThisMachine, post(settings))
         .route("/v1/steps", SignedIn, post(steps))
         .route("/v1/steps/global", SignedIn, get(global_steps))
 }
@@ -79,32 +75,6 @@ struct Join {
 
 async fn join(State(node): State<Node>, Body(body): Body<Join>) -> Reply {
     node.join(given(&body.code, "code")?).await?;
-    done()
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SetRole {
-    user: String,
-    role: Role,
-}
-
-async fn role(State(node): State<Node>, me: Me, Body(body): Body<SetRole>) -> Reply {
-    node.member_content(&me.caller, content::role(&node.find_user(given(&body.user, "user")?)?, body.role)).await?;
-    done()
-}
-
-/// One of the network's settings, for admins; `value: null` puts back the custom build's default.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Setting {
-    name: String,
-    #[serde(default)]
-    value: Option<String>,
-}
-
-async fn settings(State(node): State<Node>, me: Me, Body(body): Body<Setting>) -> Reply {
-    node.member_content(&me.caller, content::setting(given(&body.name, "name")?, body.value.as_deref())).await?;
     done()
 }
 

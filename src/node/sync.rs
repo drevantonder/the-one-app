@@ -196,7 +196,7 @@ impl Node {
             if self.has_network() {
                 self.say_hello();
                 self.check_relay();
-                self.end_expired_app_schedules();
+                self.renew_app_schedules("");
                 self.start_owed_keys();
             }
             tokio::time::sleep(PRESENCE_EVERY).await;

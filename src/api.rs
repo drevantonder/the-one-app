@@ -96,7 +96,7 @@ pub fn routes() -> Routes {
         .merge(crate::node::backups::routes::routes())
         .merge(crate::node::storage::routes::routes())
         .merge(crate::node::devices::routes::routes())
-        .merge(crate::node::groups::routes::routes())
+        .merge(crate::node::settings_routes())
         .merge(crate::node::widgets::routes::routes())
         .merge(crate::node::push::routes::routes())
         .merge(crate::node::apps::routes::routes())

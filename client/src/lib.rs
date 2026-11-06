@@ -20,8 +20,8 @@ use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, 
 use n0_future::time::{Duration, Instant, timeout};
 
 pub mod keyring;
-pub mod settings;
-pub use settings::answered;
+mod settings;
+pub use one::settings::answered;
 #[cfg(feature = "relayed")]
 pub mod relayed;
 #[cfg(target_family = "wasm")]

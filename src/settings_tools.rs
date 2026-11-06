@@ -1,6 +1,6 @@
 //! The core's tools that change who can do what and that someone's device elsewhere may use: a device answers their
-//! requests itself, signing what they change as its person's (client/src/settings.rs), as a node signs that only for its
-//! own machine's programs. Each is the request it makes and what it says once that's answered: the command line asks
+//! requests itself, signing what they change as its person's (src/settings.rs), as a machine with a node does for its
+//! own programs. Each is the request it makes and what it says once that's answered: the command line asks
 //! it through its device (core_tools), and the remote MCP server's devices answer an MCP client's call of one with no
 //! node (cloudflare/node/src/clients.rs).
 
