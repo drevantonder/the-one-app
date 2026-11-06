@@ -180,13 +180,14 @@ impl Node {
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let sealed = crate::keys::seal_to(&crate::keys::twin_public(&recovery)?, &key)?;
         if !crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, 1, "recovery"), &sealed).await? {
-            // Another device is making it: its entry says so soon. If none does, what's there is junk, and this one's made.
-            for _ in 0..50 {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                self.read_scope(&Scope::Global).await?;
-                if self.with(|i| Ok(i.r.db().epoch(scope)?))? > 0 {
-                    return self.settled_first_epoch(scope).await;
-                }
+            // Another device is making it: its entry says so soon, read here as who's who changes, or from the bucket
+            // after a while if no device said it changed. If none does, what's there is junk, and this one's made.
+            let mut changes = self.0.events.subscribe();
+            let until = tokio::time::Instant::now() + Duration::from_secs(5);
+            while self.with(|i| Ok(i.r.db().epoch(scope)?))? == 0 && tokio::time::timeout_at(until, changes.recv()).await.is_ok() {}
+            self.read_scope(&Scope::Global).await?;
+            if self.with(|i| Ok(i.r.db().epoch(scope)?))? > 0 {
+                return self.settled_first_epoch(scope).await;
             }
             tracing::warn!("{scope}'s first epoch was begun but no entry made it: making it here");
         }
@@ -208,6 +209,7 @@ impl Node {
 
     /// A first epoch another device made: its copy for this one, which it seals right after its entry.
     async fn settled_first_epoch(&self, scope: &Scope) -> Result<crate::database::stored::Keys> {
+        // The bucket tells no one when an object lands, so it looks again.
         for _ in 0..50 {
             match Box::pin(self.epoch_keys(scope, false)).await {
                 Err(err) if err.is::<NotGiven>() => tokio::time::sleep(Duration::from_millis(100)).await,

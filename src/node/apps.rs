@@ -226,7 +226,7 @@ impl Node {
                 let described = Value::Object(d.clone());
                 info["offers"] = json!({
                     "screens": d["screens"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == "main")) || d["widgets"].as_array().is_some_and(|w| !w.is_empty()),
-                    "accounts": d["ops"].as_array().is_some_and(|o| o.iter().any(|o| o["name"] == "accounts")),
+                    "accounts": d["ops"].as_array().is_some_and(|o| o.iter().any(|o| o["accounts"] == true)),
                 });
                 if let Some(nodes) = self.nodes_for(viewer, &described) {
                     info["nodes"] = json!(nodes);
@@ -357,17 +357,12 @@ impl Node {
     }
 
     async fn runs_latest(&self, app: &str, within: Duration) -> bool {
-        let started = Instant::now();
-        loop {
+        let runs = || {
             let latest = self.with_or(None, |i| Ok(i.r.db().app(app)?.and_then(|a| a.bundle.clone())));
-            if latest.is_none() || self.0.bundles.lock().unwrap().get(app) == latest.as_ref() {
-                return true;
-            }
-            if started.elapsed() >= within {
-                return false;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+            latest.is_none() || self.0.bundles.lock().unwrap().get(app) == latest.as_ref()
+        };
+        let mut settled = self.0.settled.subscribe();
+        tokio::time::timeout(within, settled.wait_for(|_| runs())).await.is_ok()
     }
 
     pub(super) async fn uses_here(&self, app: &str) -> (Vec<String>, Vec<String>) {

@@ -27,10 +27,11 @@ impl Node {
                 read.push(scope);
             }
         }
-        self.with(|i| {
-            i.read = true;
-            Ok(())
-        })
+        // Having read them all can make it ready (`ready`): its settling says so to whoever waits (`warm`).
+        if !self.with(|i| Ok(std::mem::replace(&mut i.read, true)))? {
+            self.0.changed.notify_one();
+        }
+        Ok(())
     }
 
     pub(super) async fn read_scope(&self, scope: &Scope) -> Result<()> {
