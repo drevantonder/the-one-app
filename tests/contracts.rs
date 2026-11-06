@@ -607,3 +607,37 @@ mod service_protocol {
         }
     }
 }
+
+/// What a widget's tree can hold, which an app makes and every client draws by itself: the iPhone's, Android's and
+/// Windows' widgets and the screens' own. A type or a coloured tone one names and another doesn't shows as nothing, or plain
+/// text, on some devices only.
+#[test]
+fn every_renderer_of_a_widgets_tree_draws_the_same_types_and_tones() {
+    const TYPES: &[&str] = &["col", "row", "text", "time", "stat", "gauge", "progress", "spark", "chart", "list", "item", "image", "icon", "dot", "link", "divider", "button", "toggle"];
+    const TONES: &[&str] = &["muted", "warn", "bad"];
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let read = |p: &str| std::fs::read_to_string(root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let all = |dir: &str, ext: &str| {
+        let mut text = String::new();
+        for f in std::fs::read_dir(root.join(dir)).unwrap().flatten().filter(|f| f.path().extension().is_some_and(|e| e == ext)) {
+            text += &std::fs::read_to_string(f.path()).unwrap();
+        }
+        text
+    };
+    let renderers = [
+        ("the iPhone's", read("client/native/iphone/Widget/WidgetTree.swift")),
+        ("Android's", all("client/native/android/app/src/main/kotlin/app/client/widget", "kt")),
+        ("Windows'", read("client/native/windows/WidgetCard.cs")),
+        ("the screens'", read("src/screen/ui/src/components/widget.tsx")),
+    ];
+    let mut missing = Vec::new();
+    for (who, source) in &renderers {
+        for name in TYPES.iter().chain(TONES) {
+            // Quoted, as each draws a type or a tone by its name.
+            if !source.contains(&format!("\"{name}\"")) && !source.contains(&format!("{name}:")) {
+                missing.push(format!("{who} widgets don't name `{name}`"));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "{}", missing.join("\n"));
+}
