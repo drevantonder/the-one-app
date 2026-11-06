@@ -1685,7 +1685,7 @@ const h = OneUI.react.createElement;
       }
     }
     if (!auth.kept()) return showSignedOut();
-    if (!native) navigator.serviceWorker?.register("/sw.js").catch(() => {});
+    if (!native) navigator.serviceWorker?.register("/sw.js", { type: "module" }).catch(() => {});
     // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.
     let request = null;
     if (location.pathname === "/vault") {

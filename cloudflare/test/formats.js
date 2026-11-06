@@ -1,5 +1,5 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { appOf, askedFor, b64u, canonical, certify, checkCertificate, epochHash, checkRequest, databaseKey, ed25519Public, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, mayHand, oldestNeeded, open, openAppKey, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signStep, signedRequest, twinPublic, waited, x25519Public } from "../shared/crypto.js";
+import { appOf, askedFor, b64u, canonical, certify, checkCertificate, epochHash, checkRequest, databaseKey, ed25519Public, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, mayHand, oldestNeeded, open, openAppKey, openNote, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signStep, signedRequest, twinPublic, waited, x25519Public } from "../shared/crypto.js";
 import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { members } from "../web/members.js";
 import { AGENTS } from "../screen/agents.js";
@@ -23,6 +23,10 @@ const ops = {
   },
   async openSealed({ secret, public: pub, sealed }) {
     return { plain: b64u.encode(await openSealed({ secret: b64u.decode(secret), public: b64u.decode(pub) }, b64u.decode(sealed))) };
+  },
+  /// A note, opened as the service worker does: the note, or why not.
+  async openNote({ secret, public: pub, sealed }) {
+    return { note: await openNote({ secret: b64u.decode(secret), public: b64u.decode(pub) }, b64u.decode(sealed)).catch((err) => ({ error: String(err.message || err) })) };
   },
   async sealUnder({ secret, plain }) {
     return { sealed: b64u.encode(await sealUnder(secret, b64u.decode(plain))), id: await idOf(secret) };

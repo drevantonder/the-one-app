@@ -6,12 +6,14 @@
 // And its notifications: a push (cloudflare/push/) carries a note sealed to one of this browser's devices (one per person
 // signed in here), which it opens with that device's seal key, kept in IndexedDB where it can't be read out
 // (device.js), and shows; tapping it opens the screen it names. A note it can't open still shows that one came, as
-// browsers require of every push.
+// browsers require of every push, and so does one whose signature is wrong.
+import { b64u, hex, openNote } from "/shared/crypto.js";
+import { NOTE_FALLBACK } from "/shared/protocol.js";
+
 const KEPT = "one.page";
 const PLACES = /^\/($|page\/|accounts\/|app\/|settings($|\/)|vault$)/;
 /// The custom build's name, which the Workers' build writes in (Settings::web).
 const NAME = "";
-const FALLBACK = "";
 
 addEventListener("install", (e) => e.waitUntil(caches.open(KEPT).then((c) => c.add("/index.html")).catch(() => {}).then(() => skipWaiting())));
 addEventListener("activate", (e) => e.waitUntil(clients.claim()));
@@ -28,11 +30,11 @@ addEventListener("fetch", (e) => {
 });
 
 // A note comes as base64url text (cloudflare/push/senders.js).
-addEventListener("push", (e) => e.waitUntil(show(e.data ? unb64u(e.data.text()) : null)));
+addEventListener("push", (e) => e.waitUntil(show(e.data ? e.data.text() : null)));
 
-async function show(sealed) {
-  const note = sealed && (await opened(sealed).catch(() => null));
-  if (!note?.title) return registration.showNotification(NAME, { body: FALLBACK, icon: "/icon.png" });
+async function show(pushed) {
+  const note = pushed && (await opened(pushed).catch(() => null));
+  if (!note?.title) return registration.showNotification(NAME, { body: NOTE_FALLBACK, icon: "/icon.png" });
   const link = note.app ? { app: note.app, screen: note.screen || "main", params: note.params || {} } : null;
   return registration.showNotification(note.title, { body: note.body || "", tag: note.id || undefined, icon: "/icon.png", data: { link } });
 }
@@ -55,12 +57,13 @@ addEventListener("notificationclick", (e) => {
   );
 });
 
-/// The note sealed to one of this browser's devices, which are kept as `device:<user>` in IndexedDB's `one` (kept.js).
-async function opened(sealed) {
+/// The note sealed to one of this browser's devices, which are kept as `device:<user>` in IndexedDB's `one` (kept.js):
+/// null if it's none's or its signature is wrong.
+async function opened(pushed) {
+  const sealed = b64u.decode(pushed);
   for (const d of await devices()) {
-    try {
-      return JSON.parse(new TextDecoder().decode(await openSealed(d.seal, unhex(d.sealKey), sealed)));
-    } catch {}
+    const note = await openNote({ secret: d.seal, public: hex.decode(d.sealKey) }, sealed).catch(() => null);
+    if (note) return note;
   }
   return null;
 }
@@ -84,29 +87,4 @@ function devices() {
       tx.onerror = () => (open.result.close(), reject(tx.error));
     };
   });
-}
-
-const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (b) => parseInt(b, 16));
-const unb64u = (s) => {
-  try {
-    return Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
-  } catch {
-    return null;
-  }
-};
-
-/// Opens what was sealed to an X25519 key pair (`secret`, a CryptoKey that can't be read out, and `public`): as
-/// shared/crypto.js's `openSealed`, which a service worker, not a module, can't import. share ‖ AES-256-GCM(HKDF-SHA256
-/// of the shared secret, salted with share ‖ public, "one/sealed-to"; zero nonce).
-async function openSealed(secret, public_, sealed) {
-  if (sealed.length < 48) throw new Error("not sealed");
-  const share = sealed.slice(0, 32);
-  const them = await crypto.subtle.importKey("raw", share, { name: "X25519" }, false, []);
-  const shared = await crypto.subtle.deriveBits({ name: "X25519", public: them }, secret, 256);
-  const salt = new Uint8Array(64);
-  salt.set(share), salt.set(public_, 32);
-  const ikm = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info: new TextEncoder().encode("one/sealed-to") }, ikm, 256);
-  const key = await crypto.subtle.importKey("raw", bits, "AES-GCM", false, ["decrypt"]);
-  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(12) }, key, sealed.slice(32)));
 }

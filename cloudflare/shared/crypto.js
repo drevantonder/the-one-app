@@ -11,7 +11,7 @@
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
 // nonce ‖ AES-256-GCM(key, nonce, plain), with key and the copy's id both derived from the secret.
 
-import { BLOBS, CODES, ENDPOINT, FRESH, LOG, MAIN, MOST_NEEDED, NODE_APP, NUMBER_MAX, READS, SESSION, SOCKET, STEP, VAULT } from "./protocol.js";
+import { BLOBS, CODES, ENDPOINT, FRESH, LOG, MAIN, MOST_NEEDED, NODE_APP, NUMBER_MAX, READS, SESSION, SIGNED_NOTE, SOCKET, STEP, VAULT } from "./protocol.js";
 
 const text = new TextEncoder();
 
@@ -102,6 +102,14 @@ export async function openSealed(pair, sealed) {
   const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: them }, me, 256));
   const key = await hkdf(shared, "one/sealed-to", concat(share, bytes(pair.public)));
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: ZERO }, await aes(key, "decrypt"), sealed.slice(32)));
+}
+
+/// Opens a note sealed to the key pair `pair` (`open_note` in src/push.rs): → the note, signed by a device of the network
+/// (`by`, hex), or unsigned from the network's own Workers. One whose signature is wrong is refused.
+export async function openNote(pair, sealed) {
+  const { sig, ...note } = JSON.parse(new TextDecoder().decode(await openSealed(pair, sealed)));
+  if (sig !== undefined && !(await verify(hex.decode(String(note.by)), SIGNED_NOTE, note, b64u.decode(sig)))) throw new Error("its signature is wrong");
+  return note;
 }
 
 /// The id a copy sealed under `secret` is kept by: it names the copy without opening it.

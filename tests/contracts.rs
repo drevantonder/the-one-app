@@ -542,6 +542,44 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     assert_eq!(post("/push/send", one::keys::signed_request(&node, push::DOMAIN, fields, now())).1["to"][&to], json!({ "none": true }));
 }
 
+/// The browser's service worker opens a note as `push::open_note` does (`openNote` in `cloudflare/shared/crypto.js`): one a
+/// device signed shows with who signed it, one the network's own Workers send is unsigned, and one whose signature is
+/// wrong, or isn't signed by who it says, is refused.
+#[test]
+fn the_service_worker_opens_notes_as_rust_does() {
+    use data_encoding::HEXLOWER;
+    use ed25519_dalek::SigningKey;
+    use one::push::{self, Note};
+
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    let formats = Formats::start();
+    let open = |secret: &[u8; 32], public: &[u8; 32], plain: &[u8]| {
+        let sealed = keys::seal_to(public, plain).unwrap();
+        formats.js(json!({ "op": "openNote", "secret": B64U.encode(secret), "public": B64U.encode(public), "sealed": B64U.encode(&sealed) }))["note"].clone()
+    };
+    let (secret, public) = keys::twin(&rand::random());
+    let node = SigningKey::from_bytes(&rand::random());
+    let by = HEXLOWER.encode(node.verifying_key().as_bytes());
+    let note = Note { id: "0123456789abcdef".into(), title: "Café \"Ü\"".into(), body: "é…".into(), app: "tally".into(), screen: "main".into(), params: Some(serde_json::from_value(json!({ "b": 1, "a": ["x"] })).unwrap()), ..Default::default() };
+
+    let sealed = push::seal_note(&node, &public, &note, now()).unwrap();
+    let got = formats.js(json!({ "op": "openNote", "secret": B64U.encode(&secret), "public": B64U.encode(&public), "sealed": B64U.encode(&sealed) }))["note"].clone();
+    let (opened, from) = push::open_note(&secret, &sealed).unwrap();
+    assert_eq!((got["title"].as_str(), got["by"].as_str()), (Some(opened.title.as_str()), from.as_deref()), "a note a device signed: {got}");
+    assert_eq!(got["by"], json!(by));
+
+    let signed = keys::signed_request(&node, push::SIGNED_NOTE, serde_json::to_value(&note).unwrap(), now());
+    let unsigned = open(&secret, &public, &serde_json::to_vec(&note).unwrap());
+    assert_eq!(unsigned["title"], json!(note.title), "a note from the network's Workers is unsigned: {unsigned}");
+    let mut forged = signed.clone();
+    forged["title"] = json!("Your device needs approving");
+    assert!(open(&secret, &public, &serde_json::to_vec(&forged).unwrap())["error"].is_string(), "a note changed after it was signed");
+    let mut other = signed;
+    other["by"] = json!(HEXLOWER.encode(SigningKey::from_bytes(&rand::random()).verifying_key().as_bytes()));
+    assert!(open(&secret, &public, &serde_json::to_vec(&other).unwrap())["error"].is_string(), "a note signed by another than it says");
+    assert!(push::open_note(&secret, &keys::seal_to(&public, &serde_json::to_vec(&forged).unwrap()).unwrap()).is_err(), "Rust refuses the same");
+}
+
 /// A service answers its node in the words of `service/wire.json`, in whatever language it's written: registering what's
 /// about its machine, taking calls and answering with `ok`, `error` or `elsewhere`, registering again when its node
 /// forgets it, always with the token in its home. The node here is the real registry (`one::services`) behind its routes.

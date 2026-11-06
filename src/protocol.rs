@@ -140,6 +140,7 @@ pub fn javascript() -> String {
          export const URLS = {urls};\n\
          export const RELAY = {relay};\n\
          export const PUSH = {push};\n\
+         export const SIGNED_NOTE = {signed_note};\n\
          export const SIGN_IN_DOMAIN = {sign_in};\n\
          export const ENDPOINT = {endpoint};\n\
          export const SOCKET = {socket};\n\
@@ -180,6 +181,7 @@ pub fn javascript() -> String {
         urls = json!(URLS),
         relay = json!(RELAY),
         push = json!(PUSH),
+        signed_note = json!(crate::push::SIGNED_NOTE),
         sign_in = json!(SIGN_IN_DOMAIN),
         endpoint = json!(crate::keys::ENDPOINT),
         socket = json!(SOCKET),
