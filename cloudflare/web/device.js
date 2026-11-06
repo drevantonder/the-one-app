@@ -413,8 +413,11 @@ export class Device {
   async leave() {
     const k = await this.checked(true);
     if (!k.devices.some((d) => d.key === this.me.key)) return;
-    await this.write("global", members.removeDevice({ key: this.me.key }));
-    await this.tell({ remove: this.me.key });
+    // A node closes a removed device's connection as it applies its removal, so the answer may never come: off the
+    // network all the same.
+    const wrote = await this.write("global", members.removeDevice({ key: this.me.key })).then(() => null, (err) => err);
+    await this.takeOut(this.me.key, this.me);
+    if (wrote) throw wrote;
   }
 
   /// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they
