@@ -2,6 +2,7 @@ package app.client
 
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
@@ -75,6 +76,8 @@ class MainActivity : TauriActivity() {
         }
         // The page's text is sized by the page (Settings' text size reaches it as a zoom, `scale`).
         webView.settings.textZoom = 100
+        // Its colour until the page draws, as the window's, so a start in dark has no white frame.
+        webView.setBackgroundColor(colour())
     }
 
     /** Light, dark or automatic ("automatic", "light", "dark"), as the person chose. */
@@ -87,10 +90,22 @@ class MainActivity : TauriActivity() {
         if (recreate) bars()
     }
 
+    /** Whether the page draws dark: as the person chose, or the phone's own for automatic. Read from what's kept, not this
+     *  activity's configuration, which isn't dark yet as a start in dark begins. */
+    private fun dark(): Boolean = when (getSharedPreferences("app", Context.MODE_PRIVATE).getString("appearance", "automatic")) {
+        "dark" -> true
+        "light" -> false
+        else -> (applicationContext.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    }
+
+    /** The page's colour (@one/ui's --background), for what's drawn before it is. */
+    private fun colour(): Int = if (dark()) 0xFF0A0A0A.toInt() else 0xFFFFFFFF.toInt()
+
     /** The system bars' icons dark on light and light on dark, over the window's colour, which is the page's. */
     private fun bars() {
-        val dark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        window.setBackgroundDrawableResource(R.color.page)
+        val dark = dark()
+        window.setBackgroundDrawable(ColorDrawable(colour()))
+        page?.setBackgroundColor(colour())
         WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
