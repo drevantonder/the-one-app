@@ -3,13 +3,12 @@
 @layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-font-weight:initial}}}@layer theme,base,components;@layer utilities{.mx-auto{margin-inline:auto}.contents{display:contents}.flex{display:flex}.inline-flex{display:inline-flex}.table{display:table}.h-14{height:calc(var(--spacing,.25rem) * 14)}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-md{max-width:var(--container-md,28rem)}.flex-col{flex-direction:column}.items-center{align-items:center}.gap-1{gap:var(--spacing,.25rem)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.self-start{align-self:flex-start}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.text-destructive{color:var(--destructive)}.text-muted-foreground{color:var(--muted-foreground)}.text-warning{color:var(--warning)}}@property --tw-font-weight{syntax:"*";inherits:false}
 /*$vite$:1*/</style>
 <div id="root"></div>
-<script type="module">import { useEffect as e, useRef as t, useState as n } from "react";
-import { createRoot as r } from "react-dom/client";
+<script type="module">import { createRoot as e } from "react-dom/client";
+import { useEffect as t, useRef as n, useState as r } from "react";
 import { AccountList as i, Empty as a, Hint as o, List as s, ListRow as c, ListSkeleton as l, LoadFailure as u, Loading as d, LoadingButton as f, Problem as p, failureSentence as m, useAccounts as h } from "@one/ui";
 import { jsx as g, jsxs as _ } from "react/jsx-runtime";
-var v = "Google Drive", y = "Sign in, and your apps can save copies to your Drive.";
-function b() {
-	let { accounts: r, problem: b, retry: x, failed: S, signOut: C, reload: w } = h(), [T, E] = n(null), [D, O] = n(!1), [k, A] = n(null), j = () => (O(!1), E(null));
+function v({ title: e, blurb: v }) {
+	let { accounts: y, problem: b, retry: x, failed: S, signOut: C, reload: w } = h(), [T, E] = r(null), [D, O] = r(!1), [k, A] = r(null), j = () => (O(!1), E(null));
 	async function M(e) {
 		let t;
 		try {
@@ -44,18 +43,18 @@ function b() {
 		}
 		j(), w();
 	}
-	e(() => {
+	t(() => {
 		one.params.back ? N(one.params.back) : one.params.add && M();
 	}, []);
-	let P = t(null), F = r && JSON.stringify(r);
-	if (e(() => {
+	let P = n(null), F = y && JSON.stringify(y);
+	if (t(() => {
 		P.current !== null && F !== P.current && T?.link && j(), F !== null && (P.current = F);
-	}, [F]), b && !r) return /* @__PURE__ */ g(u, {
+	}, [F]), b && !y) return /* @__PURE__ */ g(u, {
 		problem: b,
 		retry: x
 	});
-	if (!r) return /* @__PURE__ */ g(l, {});
-	let I = k ? [] : r.filter((e) => !e.ok);
+	if (!y) return /* @__PURE__ */ g(l, {});
+	let I = k ? [] : y.filter((e) => !e.ok);
 	return /* @__PURE__ */ _("div", {
 		className: "flex flex-col gap-6",
 		children: [
@@ -64,26 +63,26 @@ function b() {
 				title: k.title,
 				text: k.text
 			}),
-			!r.length && !k && !D && /* @__PURE__ */ g(a, {
+			!y.length && !k && !D && /* @__PURE__ */ g(a, {
 				className: "mx-auto max-w-md",
 				action: {
 					label: "Sign In to Google",
 					run: () => M()
 				},
-				children: y
+				children: v
 			}),
-			I.map((e) => /* @__PURE__ */ g(p, {
+			I.map((t) => /* @__PURE__ */ g(p, {
 				warn: !0,
-				title: e.account + " needs signing in",
-				text: one.plain(e.why || "Needs signing in again").title.replace(/^Needs signing in again\.$/, `Sign in to Google again to let ${v} in.`),
+				title: t.account + " needs signing in",
+				text: one.plain(t.why || "Needs signing in again").title.replace(/^Needs signing in again\.$/, `Sign in to Google again to let ${e} in.`),
 				action: {
 					label: "Sign In",
-					run: () => M(e.account)
+					run: () => M(t.account)
 				}
-			}, e.account)),
-			r.length > 0 && /* @__PURE__ */ g(i, {
+			}, t.account)),
+			y.length > 0 && /* @__PURE__ */ g(i, {
 				title: "Accounts",
-				accounts: r,
+				accounts: y,
 				failed: S,
 				signOut: C,
 				line: (e, t) => e.ok ? t ? null : { text: "Used first" } : {
@@ -106,7 +105,7 @@ function b() {
 					}),
 					/* @__PURE__ */ g(s, { children: /* @__PURE__ */ g(c, {
 						title: "Sign in to Google",
-						sub: `and allow ${v}`,
+						sub: `and allow ${e}`,
 						onClick: () => one.link(T.link)
 					}) }),
 					/* @__PURE__ */ g(o, { children: "Google brings you back here when you're done." })
@@ -123,5 +122,8 @@ function b() {
 		]
 	});
 }
-r(document.getElementById("root")).render(/* @__PURE__ */ g(b, {}));
+e(document.getElementById("root")).render(/* @__PURE__ */ g(v, {
+	title: "Google Drive",
+	blurb: "Sign in, and your apps can save copies to your Drive."
+}));
 </script>
