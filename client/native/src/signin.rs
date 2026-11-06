@@ -18,6 +18,8 @@ use crate::secrets;
 pub struct Auth {
     pub address: String,
     pub name: String,
+    /// Where it keeps its registration with sign-in (not a secret): `sign-in`, its address and its id there.
+    data: std::path::PathBuf,
     access: Mutex<Option<(String, Instant)>>,
     meta: Mutex<Option<Value>>,
 }
@@ -33,12 +35,15 @@ fn agent() -> ureq::Agent {
 }
 
 impl Auth {
-    pub fn new(address: &str, name: &str) -> Auth {
-        Auth { address: address.trim_end_matches('/').into(), name: name.into(), access: Mutex::default(), meta: Mutex::default() }
+    pub fn new(address: &str, name: &str, data: std::path::PathBuf) -> Auth {
+        Auth { address: address.trim_end_matches('/').into(), name: name.into(), data, access: Mutex::default(), meta: Mutex::default() }
     }
 
-    fn key(&self, k: &str) -> String {
-        format!("{} {k}", self.address)
+    /// This app's id as a client of sign-in at this address, if it registered there.
+    fn client_id(&self) -> Option<String> {
+        let kept = std::fs::read_to_string(self.data.join("sign-in")).ok()?;
+        let (address, id) = kept.trim().split_once('\n')?;
+        (address == self.address).then(|| id.to_string())
     }
 
     fn meta(&self) -> Result<Value, String> {
@@ -55,12 +60,12 @@ impl Auth {
     }
 
     pub fn signed_in(&self) -> bool {
-        secrets::get(&self.key("refresh")).is_some()
+        secrets::refresh().is_some()
     }
 
     fn client(&self, m: &Value) -> Result<String, String> {
-        if let Some(id) = secrets::get(&self.key("client")) {
-            return Ok(String::from_utf8_lossy(&id).into());
+        if let Some(id) = self.client_id() {
+            return Ok(id);
         }
         let body = json!({
             "client_name": self.name, "redirect_uris": ["http://127.0.0.1/callback"], "token_endpoint_auth_method": "none",
@@ -71,7 +76,8 @@ impl Auth {
         let id = out["client_id"].as_str().filter(|_| r.status().as_u16() < 300).ok_or_else(|| {
             out["error_description"].as_str().unwrap_or("This device couldn’t sign up to sign in.").to_string()
         })?;
-        secrets::set(&self.key("client"), id.as_bytes())?;
+        let _ = std::fs::create_dir_all(&self.data);
+        std::fs::write(self.data.join("sign-in"), format!("{}\n{id}", self.address)).map_err(|e| e.to_string())?;
         Ok(id.into())
     }
 
@@ -136,7 +142,7 @@ impl Auth {
         *self.access.lock().unwrap() = Some((access.into(), Instant::now() + Duration::from_secs_f64(expires)));
         // Each refresh token works once: the new one is kept before anything else can ask.
         if let Some(refresh) = out["refresh_token"].as_str() {
-            secrets::set(&self.key("refresh"), refresh.as_bytes())?;
+            secrets::set_refresh(refresh)?;
         }
         Ok(())
     }
@@ -148,13 +154,12 @@ impl Auth {
         {
             return Ok(t);
         }
-        let refresh = secrets::get(&self.key("refresh")).ok_or("Sign in again.")?;
-        let refresh = String::from_utf8_lossy(&refresh).to_string();
-        let id = secrets::get(&self.key("client")).map(|b| String::from_utf8_lossy(&b).to_string()).unwrap_or_default();
+        let refresh = secrets::refresh().ok_or("Sign in again.")?;
+        let id = self.client_id().unwrap_or_default();
         let m = self.meta()?;
         if let Err(e) = self.grant(&m, &[("grant_type", "refresh_token"), ("refresh_token", &refresh), ("client_id", &id)]) {
             if e.starts_with("Sign in again") {
-                secrets::delete(&self.key("refresh"));
+                secrets::forget_refresh();
             }
             return Err(e);
         }
@@ -170,14 +175,13 @@ impl Auth {
 
     /// Revokes the refresh token, so it opens nothing again, and forgets it here.
     pub fn sign_out(&self) {
-        let refresh = secrets::get(&self.key("refresh"));
-        secrets::delete(&self.key("refresh"));
+        let refresh = secrets::refresh();
+        secrets::forget_refresh();
         *self.access.lock().unwrap() = None;
         if let (Ok(m), Some(refresh)) = (self.meta(), refresh)
             && let Some(at) = m["revocation_endpoint"].as_str()
         {
-            let id = secrets::get(&self.key("client")).map(|b| String::from_utf8_lossy(&b).to_string()).unwrap_or_default();
-            let refresh = String::from_utf8_lossy(&refresh).to_string();
+            let id = self.client_id().unwrap_or_default();
             let _ = agent().post(at).send_form([("token", refresh.as_str()), ("token_type_hint", "refresh_token"), ("client_id", id.as_str())]);
         }
     }

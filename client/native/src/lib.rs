@@ -50,8 +50,21 @@ fn env(name: &str) -> Option<String> {
     std::env::var(format!("{}_{name}", one::config::CLI.to_uppercase())).ok().filter(|v| !v.is_empty())
 }
 
-fn hex(b: &[u8]) -> String {
-    data_encoding::HEXLOWER.encode(b)
+/// The device this app is on, which signing in again replaces its sign-in under: the computer's own node's key, where
+/// one runs here (as the Mac app's was); else, on Linux, the machine's id, hashed.
+fn this_device() -> Option<String> {
+    let token = std::fs::read_to_string(one::home().join("local-token")).ok();
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(2))).build().into();
+    let node = token.and_then(|t| {
+        let mut r = agent.get(format!("http://127.0.0.1:{}/v1/state", one::config::PORT)).header("x-one-local-token", t.trim()).call().ok()?;
+        let state: Value = r.body_mut().read_json().ok()?;
+        state["device"]["key"].as_str().map(str::to_string)
+    });
+    node.or_else(|| {
+        use sha2::{Digest, Sha256};
+        let id = ["/etc/machine-id", "/var/lib/dbus/machine-id"].iter().find_map(|p| std::fs::read_to_string(p).ok())?;
+        Some(data_encoding::HEXLOWER.encode(&Sha256::digest(format!("this device {}", id.trim()).as_bytes())))
+    })
 }
 
 /// A response's body the page reads, and what stops a read waiting on it once the page cancels.
@@ -107,7 +120,7 @@ impl App {
         if let Some(a) = auth.as_ref().filter(|a| a.address == address) {
             return Ok(a.clone());
         }
-        let a = Arc::new(signin::Auth::new(&address, &format!("{} on {}", one::config::NAME, device_name())));
+        let a = Arc::new(signin::Auth::new(&address, &format!("{} on {}", one::config::NAME, device_name()), self.data.clone()));
         *auth = Some(a.clone());
         Ok(a)
     }
@@ -123,16 +136,6 @@ async fn token() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || auth.token()).await.map_err(|e| e.to_string())?
 }
 
-/// This device's key at this address, kept in the secret store, made the first time.
-fn device_secret(address: &str) -> Result<[u8; 32], String> {
-    let key = format!("device {address}");
-    if let Some(s) = secrets::get(&key).and_then(|b| <[u8; 32]>::try_from(b).ok()) {
-        return Ok(s);
-    }
-    let s = one_client::new_secret();
-    secrets::set(&key, &s)?;
-    Ok(s)
-}
 
 // MARK: What the page asks
 
@@ -179,7 +182,8 @@ fn address(typed: String) -> Result<String, String> {
 async fn sign_in() -> Result<(), String> {
     let a = app();
     let address = a.address().ok_or("Enter your address first.")?;
-    let join = one_client::join_of(device_secret(&address)?);
+    let _ = &address;
+    let join = one_client::join_of(secrets::signing_in()?);
     let auth = a.auth()?;
     let handle = a.handle.clone();
     let auth2 = auth.clone();
@@ -214,16 +218,19 @@ async fn join() -> Result<Value, String> {
     let token = token().await?;
     let user = signin::Auth::subject(&token);
     a.keep("user", Some(&user));
-    let secret = device_secret(&address)?;
+    // One key for each person at each address, as the Mac and iPhone apps keep them, its folder named by it too.
+    let id = format!("{address} {user}");
+    let secret = secrets::device_made(&id)?;
     let device = {
         let mut d = a.device.lock().unwrap();
         match d.as_ref() {
             Some(d) => d.clone(),
             None => {
-                use sha2::{Digest, Sha256};
-                let sum = Sha256::digest(format!("{address} {user}").as_bytes());
-                let dir = a.data.join("client").join(hex(&sum[..8]));
+                let dir = a.data.join("client").join(secrets::folder(&id));
                 let made = Arc::new(one_client::Device::new(secret, &address, &dir.to_string_lossy()).keeping());
+                if let Some(on) = this_device() {
+                    made.on(&on);
+                }
                 *d = Some(made.clone());
                 made
             }
@@ -315,8 +322,8 @@ async fn sign_out() -> Result<(), String> {
     if let Ok(auth) = a.auth() {
         let _ = tauri::async_runtime::spawn_blocking(move || auth.sign_out()).await;
     }
-    if let Some(address) = a.address() {
-        secrets::delete(&format!("device {address}"));
+    if let (Some(address), Some(user)) = (a.address(), a.kept("user")) {
+        secrets::forget_device(&format!("{address} {user}"));
     }
     a.keep("user", None);
     Ok(())
