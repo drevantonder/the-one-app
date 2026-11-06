@@ -1,7 +1,7 @@
-// A page's Accounts: the accounts its apps sign in to, a section per app that keeps accounts, its accounts (one that
-// needs signing in again says so), then Add Account; then Add Account for Another App, which opens the App Store's apps
-// that sign in to one. It shows as soon as the apps are known, each app's accounts filling in its own section as they
-// come.
+// Accounts: the accounts your apps sign in to, on every page of yours, listed together (GLOSSARY.md): a section per app
+// that keeps accounts, its accounts (one that needs signing in again says so), then Add Account; then Add Account for
+// Another App, which opens the App Store's apps that sign in to one. A page in the window, as an app's screen is. It
+// shows as soon as the apps are known, each app's accounts filling in its own section as they come.
 //
 // A client's own screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into
 // dist/accounts.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
@@ -10,22 +10,24 @@ import { createRoot } from "react-dom/client"
 import { AppIcon, Button, Empty, Icon, List, ListRow, Problem, Skeleton } from "@one/ui"
 import { home } from "./lib/model.js"
 
-const scope = one.params?.scope || "user"
-
 /// Only what this screen shows: the person's pages and the apps on them, not the widgets Home draws.
 async function load() {
   ;[home.data.state, home.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")])
 }
 
-/// What the screen draws from, as the apps are now: the page's apps that keep accounts, and where each signs in.
+/// What the screen draws from, as the apps are now: every page's apps that keep accounts, each once (on the first
+/// page that has it, in the pages' order), and where each signs in.
 function build() {
-  const p = home.page(scope)
-  if (!p) return { missing: true }
-  return {
-    p,
-    may: home.canArrange(p.scope) && !!home.addAccountApp(),
-    withAccounts: home.accountsOn(p).map((a) => ({ a, signIn: home.settings(a, p, true), store: home.inStore(a) })),
+  const pages = home.pages(), seen = new Set(), withAccounts = []
+  for (const p of pages) {
+    for (const a of home.accountsOn(p)) {
+      if (seen.has(a.name)) continue
+      seen.add(a.name)
+      withAccounts.push({ a, p, signIn: home.settings(a, p, true), store: home.inStore(a) })
+    }
   }
+  withAccounts.sort((x, y) => home.label(x.a).localeCompare(home.label(y.a)))
+  return { may: pages.some((p) => home.canArrange(p.scope)) && !!home.addAccountApp(), withAccounts }
 }
 
 /// Add Account: the person's accounts in the Vault this app wants and doesn't use yet, to switch it on for one; with
@@ -137,13 +139,12 @@ function Accounts() {
       </div>
     ) : null
   }
-  if (view.missing) return <Empty>This device can't open this page. Sign out and in again to choose it.</Empty>
-  const { p, withAccounts, may } = view
+  const { withAccounts, may } = view
   return (
     <div className="flex flex-col gap-8">
       <h1 className="large-title text-3xl font-bold tracking-tight">Accounts</h1>
       {withAccounts.map((item) => {
-        const { a, signIn } = item
+        const { a, p, signIn } = item
         return (
           <section key={a.name} className="flex max-w-2xl flex-col gap-3">
             <div className="flex items-center gap-3">

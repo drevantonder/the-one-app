@@ -387,14 +387,18 @@ function ie(e) {
 			], e)
 		});
 	}), i = V.order[e.scope];
-	return i && (r = i.map((e) => r.find((t) => t.slot === e)).filter(Boolean).concat(r.filter((e) => !i.includes(e.slot)))), r.push({
-		slot: "accounts",
-		kind: "accounts",
-		name: "Accounts",
-		apps: j.accountsOn(e),
-		open: () => one.open("accounts", { scope: e.scope }, void 0, { sheet: !0 }),
-		menu: t ? (e) => j.menu([B], e) : void 0
-	}), {
+	if (i && (r = i.map((e) => r.find((t) => t.slot === e)).filter(Boolean).concat(r.filter((e) => !i.includes(e.slot)))), e.scope === j.pages()[0]?.scope) {
+		let e = [...new Map(j.pages().flatMap(j.accountsOn).map((e) => [e.name, e])).values()];
+		r.push({
+			slot: "accounts",
+			kind: "accounts",
+			name: "Accounts",
+			apps: e,
+			open: () => one.open("accounts"),
+			menu: t ? (e) => j.menu([B], e) : void 0
+		});
+	}
+	return {
 		scope: e.scope,
 		p: e,
 		title: e.title,

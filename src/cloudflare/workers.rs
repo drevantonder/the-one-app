@@ -656,7 +656,7 @@ pub fn windows_package() -> String {
 /// from another app, as the web client has them (cloudflare/web/web.js): You, a page, its Accounts, an app's screen,
 /// Settings, a Vault request and an invite.
 fn windows_links() -> Vec<u8> {
-    let paths = ["/", "/page/*", "/accounts/*", "/app/*", "/settings", "/settings/*", "/vault", "/invite"];
+    let paths = ["/", "/page/*", "/accounts", "/accounts/*", "/app/*", "/settings", "/settings/*", "/vault", "/invite"];
     json!([{ "packageFamilyName": windows_package(), "paths": paths }]).to_string().into_bytes()
 }
 

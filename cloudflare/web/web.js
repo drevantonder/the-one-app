@@ -601,7 +601,7 @@ const h = OneUI.react.createElement;
 
   // MARK: Where the window is
 
-  /// The URL is the place: `/` (You), `/page/<scope>`, `/accounts/<scope>`, `/settings`, `/settings/<screen>?params=`
+  /// The URL is the place: `/` (You), `/page/<scope>`, `/accounts` (every page's), `/settings`, `/settings/<screen>?params=`
   /// (a Settings screen), `/app/<app>/<screen>?params=&scope=`; and `/vault?id=&scope=`, a request for an item, as a sheet
   /// over You. Each is a screen: the client's own (`own`, by name), or an app's.
   function route(at = location) {
@@ -614,7 +614,7 @@ const h = OneUI.react.createElement;
     const path = at.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     const q = new URLSearchParams(at.search);
     if (path[0] === "page" && path[1]) return own("pages", { scope: path[1] });
-    if (path[0] === "accounts" && path[1]) return own("accounts", { scope: path[1] });
+    if (path[0] === "accounts") return own("accounts");
     if (path[0] === "app" && path[1]) return { kind: "screen", app: path[1], screen: path[2] || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined };
     if (path[0] === "settings") return path[1] ? { kind: "own", name: path[1], params: q.get("params") || "{}" } : own("pages", { scope: "settings" });
     return own("pages", { scope: "user" });
@@ -626,7 +626,7 @@ const h = OneUI.react.createElement;
     if (r.kind === "own") {
       const params = JSON.parse(r.params || "{}");
       if (r.name === "pages") return params.scope === "settings" ? "/settings" : !params.scope || params.scope === "user" ? "/" : `/page/${encodeURIComponent(params.scope)}`;
-      if (r.name === "accounts") return `/accounts/${encodeURIComponent(params.scope || "user")}`;
+      if (r.name === "accounts") return "/accounts";
       if (r.params && r.params !== "{}") q.set("params", r.params);
       return `/settings/${encodeURIComponent(r.name)}${q.size ? `?${q}` : ""}`;
     }
@@ -639,7 +639,7 @@ const h = OneUI.react.createElement;
   /// that page, Settings' screens and apps under Settings.
   function under(r) {
     const params = JSON.parse(r.params || "{}");
-    if (r.kind === "own") return own("pages", { scope: r.name === "accounts" ? params.scope || "user" : r.name === "request" ? "user" : "settings" });
+    if (r.kind === "own") return own("pages", { scope: ["accounts", "request"].includes(r.name) ? "user" : "settings" });
     return own("pages", { scope: r.scope || (settingsItems().some((i) => i.app === r.app) ? "settings" : "user") });
   }
 
@@ -727,6 +727,7 @@ const h = OneUI.react.createElement;
     }
     const params = JSON.parse(r.params || "{}");
     if (r.name === "pages") return params.scope === "settings" ? `${about.cli}://settings` : `${about.cli}://open?scope=${encodeURIComponent(params.scope || "user")}`;
+    if (r.name === "accounts") return `${about.cli}://page?folder=accounts`;
     return `${about.cli}://settings/${encodeURIComponent(r.name)}`;
   }
 
@@ -764,9 +765,11 @@ const h = OneUI.react.createElement;
     const item = (to, key, title, more) => ({ key, title, href: link(to), selected: href(to) === at, ...more });
     const section = (to, key, title, items) => ({ key, title, href: link(to), selected: href(to) === at, items });
     const listed = (a) => settingsItems().some((i) => i.app === a.name);
-    const out = pages().map((p) => section(own("pages", { scope: p.scope }), p.scope, p.title, [
+    // Accounts once, under You: every page's, listed together.
+    const accounts = [...new Map(pages().flatMap(accountsOn).map((a) => [a.name, a])).values()];
+    const out = pages().map((p, i) => section(own("pages", { scope: p.scope }), p.scope, p.title, [
       ...appsOn(p).filter((a) => !listed(a)).map((a) => item({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, a.name, label(a), { app: a, badge: appBadge(a.name, p) })),
-      item(own("accounts", { scope: p.scope }), "accounts", "Accounts", { folder: accountsOn(p) }),
+      ...(i === 0 ? [item(own("accounts"), "accounts", "Accounts", { folder: accounts })] : []),
     ]));
     // One with another site's url opens it in a new tab; one here (Passkeys) shows beside the sidebar.
     const items = settingsItems().map((i) => {
@@ -1584,7 +1587,7 @@ const h = OneUI.react.createElement;
     let to = null;
     if (url.protocol === `${about.cli}:`) {
       if (url.host === "open") to = q.get("app") ? { kind: "screen", app: q.get("app"), screen: q.get("screen") || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined } : own("pages", { scope: q.get("scope") || "user" });
-      else if (url.host === "page") to = own(q.get("folder") === "accounts" ? "accounts" : "pages", { scope: q.get("scope") || "user" });
+      else if (url.host === "page") to = q.get("folder") === "accounts" ? own("accounts") : own("pages", { scope: q.get("scope") || "user" });
       else if (url.host === "settings") to = part ? { kind: "own", name: part, params: "{}" } : own("pages", { scope: "settings" });
       else if (url.host === "vault") return void sheet(q.get("scope"), q.get("id"));
     } else if (about.address && url.origin === new URL(about.address).origin) {

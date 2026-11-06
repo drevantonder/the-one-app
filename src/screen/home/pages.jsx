@@ -108,7 +108,11 @@ function pageView(p) {
   })
   const order = S.order[p.scope]
   if (order) list = order.map((slot) => list.find((i) => i.slot === slot)).filter(Boolean).concat(list.filter((i) => !order.includes(i.slot)))
-  list.push({ slot: "accounts", kind: "accounts", name: "Accounts", apps: home.accountsOn(p), open: () => one.open("accounts", { scope: p.scope }, undefined, { sheet: true }), menu: arrange ? (e) => home.menu([editHomePage], e) : undefined })
+  // Accounts once, on the first page: every page's, listed together, opened as a page.
+  if (p.scope === home.pages()[0]?.scope) {
+    const apps = [...new Map(home.pages().flatMap(home.accountsOn).map((a) => [a.name, a])).values()]
+    list.push({ slot: "accounts", kind: "accounts", name: "Accounts", apps, open: () => one.open("accounts"), menu: arrange ? (e) => home.menu([editHomePage], e) : undefined })
+  }
   return {
     scope: p.scope, p, title: p.title, subtitle: p.subtitle, arrange, empty, store: !!home.store(), list,
     said: empty ? (arrange ? (p.scope === "user" ? "No apps yet." : `No apps on ${p.title} yet.`) : `When its admins add apps to ${p.title}, they show up here.`) : "",
