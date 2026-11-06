@@ -59,7 +59,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
 import { b64u, behind, checkCertificate, checkRequest, hex, rolesOf, sha256 } from "../shared/crypto.js";
-import { FRESH, IROH_PATHS, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
+import { CODES, FRESH, IROH_PATHS, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
 
 initSync({ module: wasm });
 
@@ -80,7 +80,9 @@ const FOR_NODE_MOST = 1024;
 
 const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (h) => parseInt(h, 16));
 const isKey = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
-const refuse = (status, error) => Response.json({ error }, { status });
+/// A refusal is its text, or `{ error, code }` where the caller acts on what kind it is (`CODES`).
+const refuse = (status, why) => Response.json(typeof why === "string" ? { error: why } : why, { status });
+const replayed = (what) => ({ error: `that ${what} was taken already`, code: CODES.replayed });
 const CORS = { "Access-Control-Allow-Origin": "*" };
 
 /// iroh's relay auth token: `Authorization: Bearer <token>` from a native endpoint, `?token=` from a browser's.
@@ -160,6 +162,7 @@ export default class extends WorkerEntrypoint {
     const said = await this.relay()[what](asked.by, asked);
     if (said?.update) return refuse(426, updateRefusal(this.env.YOURS));
     if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
+    if (said?.code) return refuse(400, said);
     if (said && typeof said === "object") return Response.json({ [what]: said });
     return said === null ? refuse(403, `the relay takes only ${this.env.YOURS}'s devices`) : refuse(400, said);
   }
@@ -309,7 +312,7 @@ export class Relay extends DurableObject {
   asks(by, { at, session } = {}) {
     // Who's asking first, as `tell` does, so a stranger's requests are never kept.
     if (session !== undefined ? !is(this.key(session), "client") : !this.key(by)) return null;
-    if (at !== undefined && !this.take(by, at)) return "that request was taken already";
+    if (at !== undefined && !this.take(by, at)) return replayed("request");
     return true;
   }
 
@@ -490,7 +493,7 @@ export class Relay extends DurableObject {
     let fields;
     try {
       ({ fields } = await checkRequest(RELAY, request));
-      if (!this.take(fields.by, fields.at)) throw new Error("that binding was taken already");
+      if (!this.take(fields.by, fields.at)) return replayed("binding");
     } catch (e) {
       return { error: String(e.message || e) };
     }
@@ -654,7 +657,7 @@ export class Relay extends DurableObject {
     }
     const by = this.key(told.by);
     if (!by) return `only ${this.env.YOURS}'s devices tell the relay`;
-    if (!this.take(told.by, told.at)) return "that tell was taken already";
+    if (!this.take(told.by, told.at)) return replayed("tell");
     const admin = by.admin === 1;
     if (told.add !== undefined) {
       if (!isKey(told.add)) return "add is a key, in hex";
@@ -666,7 +669,7 @@ export class Relay extends DurableObject {
       // nothing and is done.
       const same = it && it.by === told.by && it.role === told.role && it.admin === (wants ? 1 : 0);
       if (it && !same) {
-        if (!admin) return "that key is in already: only an admin's device changes it";
+        if (!admin) return { error: "that key is in already: only an admin's device changes it", code: CODES.already };
         if (it.admin === 1 && !wants && this.admins() === 1) return "that's the last admin's key";
         this.sql.exec("UPDATE keys SET admin = ?, role = ? WHERE key = ?", wants ? 1 : 0, told.role, told.add);
         if (told.role !== "client") this.endSessionsOf(told.add);
@@ -685,7 +688,7 @@ export class Relay extends DurableObject {
       const it = this.key(told.remove);
       if (!it) {
         const pairing = this.sql.exec("SELECT hash, by FROM pairings WHERE key = ?", told.remove).toArray()[0];
-        if (!pairing) return "that key isn't on the list";
+        if (!pairing) return { error: "that key isn't on the list", code: CODES.notListed };
         if (!admin && pairing.by !== told.by) return "only an admin's device or the one that made its pairing code takes it out";
         this.sql.exec("DELETE FROM pairings WHERE hash = ?", pairing.hash);
         this.end(told.remove, "taken out");

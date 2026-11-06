@@ -252,13 +252,7 @@ pub fn next_at(now: u64) -> u64 {
     LAST.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
 }
 
-/// Whether the relay refused a request because another with the same `at` from the same key came first, which signing
-/// it again a moment later cures: two processes of one device signing in one millisecond.
-pub fn taken_already(said: &str) -> bool {
-    said.contains("taken already")
-}
-
-/// How long to wait before signing again a request (signed `at`) that was taken already: a few milliseconds that
+/// How long to wait before signing again a request (signed `at`) the relay refused as `replayed`: a few milliseconds that
 /// differ between processes, so the two don't land on the same one again.
 pub fn again_in(at: u64) -> std::time::Duration {
     std::time::Duration::from_millis(2 + (at ^ u64::from(std::process::id())) % 23)

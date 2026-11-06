@@ -10,7 +10,7 @@
 // (`steps::Reader`, `view_of` in client/src/members.rs) and only looked up here, so a hacked node gets no keys.
 
 import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signStep, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
-import { CODES, NUMBER_MAX, PUSH, READS, RELAY, SIGN_IN_DOMAIN, URLS, databasePrefix } from "../shared/protocol.js";
+import { CODES, NUMBER_MAX, PUSH, READS, RELAY, SIGN_IN_DOMAIN, URLS, Yours, databasePrefix } from "../shared/protocol.js";
 import { del, get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -126,7 +126,7 @@ export class Device {
       const k = !steps && kept?.steps?.truth && kept?.members?.people?.[this.user]?.app_schedules ? kept.members : await this.replay(this.user, steps);
       // One that didn't check out is read from the freeze on, the next time.
       if (welcome && !(await get(`global:${this.user}`))?.steps?.truth) await del(`welcome:${this.user}`).catch(() => {});
-      if (!k.people[this.user]) throw new Error("Your One App network doesn't list you yet, so this device didn't use it.");
+      if (!k.people[this.user]) throw new Error(`${Yours} doesn't list you yet, so this device didn't use it.`);
       this.known = k;
     }
     return this.known;
@@ -390,7 +390,7 @@ export class Device {
     for (let at = from + 1; ; at += 32) {
       const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed(URLS, { get: [{ steps: prefix, from: at, to: at + 31 }], reads: READS })) });
       const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || "Your One App network's storage didn't answer. Try again.");
+      if (!r.ok) throw new Error(body.error || `${Yours}'s storage didn't answer. Try again.`);
       const sealed = Object.keys(body.get).sort().map((name) => body.get[name]);
       const end = sealed.indexOf(null);
       out.push(...sealed.slice(0, end >= 0 ? end : sealed.length).map((b, i) => ({ at: at + i, sealed: b })));
@@ -408,7 +408,7 @@ export class Device {
     const newest = [...new Set(needs.map(prefixOf))];
     const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed(URLS, { newest, reads: READS })) });
     const out = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(out.error || "Your One App network's storage didn't answer. Try again.");
+    if (!r.ok) throw new Error(out.error || `${Yours}'s storage didn't answer. Try again.`);
     return out.newest || {};
   }
 
@@ -443,16 +443,23 @@ export class Device {
   async registerPush({ endpoint, keys }) {
     const body = await this.signed(PUSH, { route: "POST /push/register", via: "webpush", address: endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, seal: this.me.seal, user: this.user });
     const r = await fetch("/push/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Your One App network's push service didn't take this browser.");
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `${Yours}'s push service didn't take this browser.`);
   }
 
   /// Tells the relay to let a key in (`{ add, admin? }`) or take one out (`{ remove }`), signed by `as`.
   async tell(fields, as = this.me) {
     const said = await untilTaken(async (at) => {
       const r = await fetch("/relay/tell", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await signedRequest(as.sign, hex.decode(as.key), RELAY, fields, at)) });
-      return r.ok ? "" : (await r.json().catch(() => null))?.error || "Your One App network didn't take that.";
+      return r.ok ? null : (await r.json().catch(() => null)) || {};
     });
-    if (said) throw new Error(said);
+    if (said) throw Object.assign(new Error(said.error || `${Yours} didn't take that.`), { code: said.code });
+  }
+
+  /// Takes a key off the relay's list, as `as`; one it doesn't list is out already.
+  async takeOut(key, as) {
+    await this.tell({ remove: key }, as).catch((err) => {
+      if (err.code !== CODES.notListed) throw err;
+    });
   }
 
   /// When each of the network's devices was last let onto its network, as the relay says: `{ key: ms }`, or none from a
@@ -519,12 +526,18 @@ export class Device {
     if (!listed) await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser, device: r.device, signIn, place: r.place }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
     await this.tell({ add: r.key, role: "client", ...(!newUser && may.invites ? { admin: true } : {}) }, as).catch((err) => {
-      if (!(listed && /in already/.test(err.message))) throw err;
+      if (!(listed && err.code === CODES.already)) throw err;
     });
     // Signed in again on the same device: its sign-in before goes, as signing out would have taken it, so its scopes
-    // keep their keys.
+    // keep their keys. One the relay wouldn't take out stays listed, with the next sign-in here to try it again; this
+    // one is let in all the same.
     for (const old of r.device ? k.devices.filter((d) => d.user === r.user && d.device === r.device && d.key !== r.key && !d.passkey && (d.roles || []).includes("client")) : []) {
-      await this.tell({ remove: old.key }, as).catch(() => {});
+      try {
+        await this.takeOut(old.key, as);
+      } catch (err) {
+        console.warn(`${r.name}'s earlier sign-in is still let in: ${err.message}`);
+        continue;
+      }
       await this.write("global", members.removeDevice({ key: old.key }), as);
     }
     // Marked approved, for the device waiting on it to see, with the network it's in: the only one it then takes; and
@@ -543,7 +556,7 @@ export class Device {
       const { keys } = await this.epochBytes(scope, as);
       for (const [n, key] of keys) {
         await this.api("/v1/keys", { method: "POST", body: { scope, n, to: device.key, sealed: b64u.encode(await sealTo(hex.decode(device.seal), key)) } }).catch((err) => {
-          if (!/already/.test(err.message)) throw err;
+          if (err.code !== CODES.already) throw err;
         });
         key.fill(0);
       }
@@ -562,9 +575,7 @@ export class Device {
     // It, and what's part of it: its services with endpoints of their own.
     const keys = [key, ...k.devices.filter((d) => d.device === key && d.key !== key).map((d) => d.key)];
     for (const one of keys) {
-      await this.tell({ remove: one }, as).catch((err) => {
-        if (!/isn.t|not/.test(err.message)) throw err;
-      });
+      await this.takeOut(one, as);
       await this.write("global", members.removeDevice({ key: one }), as);
     }
     await this.renew(scopesOf(k, it.user), keys);
@@ -590,9 +601,7 @@ export class Device {
     if (!k.people[this.user].removes_people) throw new Error("Only an admin takes someone out.");
     const theirs = k.devices.filter((e) => e.user === user).map((e) => e.key);
     for (const key of theirs) {
-      await this.tell({ remove: key }).catch((err) => {
-        if (!/isn.t|not/.test(err.message)) throw err;
-      });
+      await this.takeOut(key, this.me);
     }
     await this.write("global", members.removeUser({ user }));
     await this.renew(scopesOf(k, user).filter((s) => s !== `user:${user}`), theirs);

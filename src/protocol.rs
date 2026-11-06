@@ -66,6 +66,12 @@ pub mod code {
     pub const NOT_INSTALLED: &str = "not_installed";
     /// A step signed for a position of who's who that another device's step has taken: sign it again for the next.
     pub const TAKEN: &str = "taken";
+    /// A signed request the relay already took once (it takes each `(by, at)` once): sign it again with a new `at`.
+    pub const REPLAYED: &str = "replayed";
+    /// What was asked is there already: a key the relay lists, a key sealed to a device.
+    pub const ALREADY: &str = "already";
+    /// A device or key to take out that the network doesn't list.
+    pub const NOT_LISTED: &str = "not_listed";
 }
 
 /// An error that says what kind it is, as `{ error, code }` on the wire: the node's answers, and what a device passes
@@ -159,6 +165,8 @@ pub fn javascript() -> String {
          export const BLOBS = {blobs};\n\
          export const NOTE_FALLBACK = {fallback};\n\
          export const CODES = {codes};\n\
+         export const YOURS = {yours};\n\
+         export const Yours = YOURS[0].toUpperCase() + YOURS.slice(1);\n\
          \n\
          export const folder = (scope) => scope.replace(\":\", \"-\");\n\
          export const databasePrefix = (scope, app, database) => `${{folder(scope)}}/${{app}}/${{database}}`;\n\
@@ -196,7 +204,8 @@ pub fn javascript() -> String {
         log = json!(crate::database::steps::KEY_NAME),
         blobs = json!(crate::bucket::BLOBS),
         fallback = json!(NOTE_FALLBACK),
-        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED, "taken": code::TAKEN }),
+        yours = json!(crate::config::YOURS),
+        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED }),
         update = json!(UPDATE_REFUSAL),
     )
 }

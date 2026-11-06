@@ -29,7 +29,7 @@ import { DurableObject } from "cloudflare:workers";
 import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, following } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { b64u, ed25519Public, hex, joinCode, random, signedRequest, untilTaken } from "../shared/crypto.js";
-import { READS, RELAY, URLS } from "../shared/protocol.js";
+import { CODES, READS, RELAY, URLS } from "../shared/protocol.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
 
@@ -59,6 +59,12 @@ const issuerOf = (env) => (issuer ||= new Issuer(`${origin(env)}/api/auth`, () =
 
 /// A token's claims, unchecked: only for one sign-in just gave us by its binding.
 const claimsOf = (token) => JSON.parse(new TextDecoder().decode(b64u.decode(token.split(".")[1])));
+/// The `code` a node's refusal carries, if the body is one: a node's own body is JSON, but a proxy's isn't.
+const codeOf = (body) => {
+  try {
+    return JSON.parse(new TextDecoder().decode(body))?.code;
+  } catch {}
+};
 
 const deviceOf = (env, client, user) => env.CLIENT.get(env.CLIENT.idFromName(`${client}\n${user}`), near(env));
 
@@ -383,7 +389,7 @@ export class Client extends DurableObject {
     let bound;
     await untilTaken(async (at) => {
       bound = await this.relay().bind(await signedRequest(me.seed, hex.decode(me.key), RELAY, { bind: true }, at), name);
-      return bound?.error;
+      return bound?.error ? bound : null;
     });
     if (!bound?.ticket) throw new Error(`the relay didn't take its key: ${bound?.error}`);
     run.ticket = bound.ticket;
@@ -479,17 +485,18 @@ export class Client extends DurableObject {
     if (this.removedFor === me.key) return;
     this.removedFor = me.key;
     const replaced = (await this.ctx.storage.get("replaces")) || [];
-    if (!replaced.length) return;
-    try {
-      const left = [];
-      for (const key of replaced) {
-        const r = await device_fetch(me.key, "POST", "/v1/remove", ["content-type", "application/json"], new TextEncoder().encode(JSON.stringify({ key })), me.until, this.on(me)).catch(() => null);
-        const why = r ? new TextDecoder().decode(r.body) : "";
-        if (!r || (r.status !== 200 && !/no such/.test(why))) left.push(key);
-        console.log(JSON.stringify({ removed: key.slice(0, 8), status: r?.status, why: r?.status === 200 ? undefined : why.slice(0, 200) }));
+    const left = [];
+    for (const key of replaced) {
+      try {
+        const r = await device_fetch(me.key, "POST", "/v1/remove", ["content-type", "application/json"], new TextEncoder().encode(JSON.stringify({ key })), me.until, this.on(me));
+        if (r.status !== 200 && codeOf(r.body) !== CODES.notListed) throw new Error(`the node said ${r.status}: ${new TextDecoder().decode(r.body).slice(0, 200)}`);
+      } catch (err) {
+        console.warn(`removing the device ${key.slice(0, 8)} this one replaced: ${err.message}`);
+        left.push(key);
       }
-      await this.ctx.storage.put("replaces", left);
-    } catch {}
+    }
+    if (replaced.length) await this.ctx.storage.put("replaces", left);
+    if (left.length) this.removedFor = null;
   }
 
   /// Datagrams the relay was handed for its key: `[src, segment size, contents]` each, dropped if its endpoint isn't

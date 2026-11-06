@@ -3,6 +3,8 @@
 // over a BroadcastChannel. index.html loads this first, so the client's WebAssembly is on its way while the page draws,
 // and a person already signed in starts their session at once.
 
+import { Yours } from "../shared/protocol.js";
+
 const started = self.oneNet || {};
 const url = started.url || "";
 
@@ -53,7 +55,7 @@ let send = () => {};
 function lost() {
   for (const [id, w] of waiting) {
     waiting.delete(id);
-    const err = new Error("Your One App network restarted. Try again.");
+    const err = new Error(`${Yours} restarted. Try again.`);
     if (w.body) w.body.error(err);
     else w.reject(err);
   }

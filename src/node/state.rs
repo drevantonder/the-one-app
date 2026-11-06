@@ -187,7 +187,7 @@ impl Node {
         let names = || self.with_or(Default::default(), |i| Ok(i.r.db().computes()?.into_iter().map(|m| m.name.clone()).collect::<Vec<_>>().join(", ")));
         match found.as_slice() {
             [one] => Ok(*one),
-            [] => bail!("no device called {name}: your devices are {}", names()),
+            [] => return Err(crate::protocol::Coded::error(crate::protocol::code::NOT_LISTED, format!("no device called {name}: your devices are {}", names()))),
             _ => bail!("several devices match {name}"),
         }
     }

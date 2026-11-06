@@ -853,13 +853,13 @@ impl Node {
                 let sent = tokio::task::spawn_blocking(move || {
                     let mut resp = agent.post(&url).send_json(&body)?;
                     let said: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-                    anyhow::Ok((resp.status().as_u16(), said["error"].as_str().unwrap_or("").to_string()))
+                    anyhow::Ok((resp.status().as_u16(), said["code"].as_str().unwrap_or("").to_string()))
                 })
                 .await;
                 match sent {
                     Ok(Ok((code, _))) if code < 300 => return,
                     // Another process of this device signed in the same millisecond: again at once, with a new `at`.
-                    Ok(Ok((_, said))) if crate::keys::taken_already(&said) => {
+                    Ok(Ok((_, said))) if said == crate::protocol::code::REPLAYED => {
                         tokio::time::sleep(crate::keys::again_in(at)).await;
                         continue;
                     }

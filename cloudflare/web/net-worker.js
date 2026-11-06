@@ -99,7 +99,7 @@ export function server(version) {
     const took = {};
     let mark = performance.now();
     const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
-    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION }, { getAll, put }] = await code;
+    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { getAll, put }] = await code;
     const [mine, nodes, members] = await getAll([`device:${user}`, `nodes:${user}`, `global:${user}`]);
     const device = as || mine;
     if (!device) return null;
@@ -113,14 +113,14 @@ export function server(version) {
     const socket = async (certificate) => early(`${certificate}.${await proveSocket(key, endpoint)}`);
     await socket(certificate);
     step("key");
-    // The relay takes each request once, so one refused as taken already (another process of this device signed in the
-    // same millisecond) is signed again.
+    // The relay takes each request once, so one refused as replayed (another process of this device signed in the same
+    // millisecond) is signed again.
     const ask = async (certificate) => {
       let answer;
       await untilTaken(async (at) => {
         const body = JSON.stringify(await signedRequest(key, endpoint, RELAY, { computes: true, certificate }, at));
         answer = await fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body });
-        return answer.status === 403 || answer.ok ? "" : (await answer.clone().json().catch(() => null))?.error;
+        return answer.status === 403 || answer.ok ? null : await answer.clone().json().catch(() => null);
       });
       return answer;
     };
@@ -130,7 +130,7 @@ export function server(version) {
     const computes = ask(certificate).then(async (asked) => {
       // Not let in: this browser isn't one of its person's devices (yet, or any more).
       if (asked.status === 403) return null;
-      if (!asked.ok) throw new Error("Your One App network isn't answering.");
+      if (!asked.ok) throw new Error(`${Yours} isn't answering.`);
       const said = await asked.json();
       return { all: await theirs(user, said.computes), online: said.online };
     });

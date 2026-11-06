@@ -11,7 +11,7 @@
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
 // nonce ‖ AES-256-GCM(key, nonce, plain), with key and the copy's id both derived from the secret.
 
-import { BLOBS, ENDPOINT, FRESH, LOG, MAIN, MOST_NEEDED, NODE_APP, NUMBER_MAX, READS, SESSION, SOCKET, STEP, VAULT } from "./protocol.js";
+import { BLOBS, CODES, ENDPOINT, FRESH, LOG, MAIN, MOST_NEEDED, NODE_APP, NUMBER_MAX, READS, SESSION, SOCKET, STEP, VAULT } from "./protocol.js";
 
 const text = new TextEncoder();
 
@@ -206,11 +206,11 @@ export function nextAt() {
   return lastAt;
 }
 
-/// Signs and sends again, once, a request that was taken already (another process of this device signed in the same
-/// millisecond): `send(at)` signs with `at` and → the problem it was refused with, or nothing.
+/// Signs and sends again, once, a request the relay refused as replayed (another process of this device signed in the
+/// same millisecond): `send(at)` signs with `at` and → the refusal, `{ error, code }`, or nothing.
 export async function untilTaken(send) {
   const said = await send(nextAt());
-  if (!/taken already/.test(said || "")) return said;
+  if (said?.code !== CODES.replayed) return said;
   await new Promise((done) => setTimeout(done, 2 + Math.floor(Math.random() * 23)));
   return send(nextAt());
 }

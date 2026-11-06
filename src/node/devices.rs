@@ -151,7 +151,9 @@ impl Node {
                     }
                     Ok(())
                 })?;
-                ensure!(crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, to), &sealed).await?, "{scope}'s epoch {n} is sealed to {to} already");
+                if !crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, to), &sealed).await? {
+                    return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY, format!("{scope}'s epoch {n} is sealed to {to} already")));
+                }
                 Ok(json!({}))
             }
             (None, Some(app)) => {
@@ -331,7 +333,7 @@ impl Node {
                 let mut resp = agent.post(format!("{address}/relay/tell")).send_json(&body)?;
                 let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
                 let said = out["error"].as_str().unwrap_or("no");
-                if !resp.status().is_success() && again && crate::keys::taken_already(said) {
+                if !resp.status().is_success() && again && out["code"] == crate::protocol::code::REPLAYED {
                     again = false;
                     std::thread::sleep(crate::keys::again_in(at));
                     continue;
