@@ -411,16 +411,15 @@ impl Node {
             Credential::SignIn(token) if !service || shared => Some(token),
             _ => None,
         };
-        // A node listed as the caller's own client asks services as itself, for a direct client's call only — never
-        // one another node passed on: forwarding another client's key, or app database keys, would make the
-        // receiving device refuse its own person's call.
-        let as_own_client = req.service.is_some()
-            && match &me.credential {
-                Credential::Own => true,
-                Credential::Client(key) => *key == me.key,
-                _ => false,
-            }
-            && self.with(|i| Ok(i.r.db().client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
+        // A node listed as the caller's own client asks as itself: always for a call it runs with its own keys (one
+        // another device of its person passed here as itself, whose key the receiving device would refuse from this
+        // connection), and a direct client's call only for a service — never one another node passed on: forwarding
+        // another client's key, or app database keys, would make the receiving device refuse its own person's call.
+        let as_own_client = match &me.credential {
+            Credential::Own => true,
+            Credential::Client(key) => req.service.is_some() && *key == me.key,
+            _ => false,
+        } && self.with(|i| Ok(i.r.db().client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
         let mut request = json!({ "app": req.app, "service": req.service, "op": req.tool, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
