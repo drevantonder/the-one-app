@@ -290,7 +290,7 @@ impl Reply {
             Reply::Error(e, None) => json!({ "error": e }),
             Reply::Error(e, Some(code)) => json!({ "error": e, "code": code }),
             Reply::Elsewhere(w) => json!({ "elsewhere": w }),
-            Reply::Needs(n) => json!({ "error": n.to_string(), "need": n.need, "to": n.to, "seal": n.seal }),
+            Reply::Needs(n) => n.json(),
         }
     }
 
@@ -298,11 +298,8 @@ impl Reply {
         if let Some(w) = v.get("elsewhere") {
             return Reply::Elsewhere(w.as_str().unwrap_or("").into());
         }
-        if let Ok(need) = serde_json::from_value::<Vec<crate::keys::Need>>(v["need"].clone())
-            && !need.is_empty()
-        {
-            let said = |k: &str| v[k].as_str().unwrap_or("").to_string();
-            return Reply::Needs(Needs { need, to: said("to"), seal: said("seal") });
+        if let Some(needs) = Needs::from_json(&v) {
+            return Reply::Needs(needs);
         }
         match v.get("error") {
             Some(e) => Reply::Error(e.as_str().unwrap_or("failed").into(), v["code"].as_str().map(str::to_string)),

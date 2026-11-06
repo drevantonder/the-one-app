@@ -480,7 +480,7 @@ impl IntoResponse for Error {
 /// and `{ need, to, seal }` for keys a call wasn't handed.
 fn failed(err: &anyhow::Error) -> Value {
     match err.downcast_ref::<crate::node::Needs>() {
-        Some(n) => json!({ "error": n.to_string(), "need": n.need, "to": n.to, "seal": n.seal }),
+        Some(n) => n.json(),
         None => match crate::protocol::Coded::of(err) {
             Some(code) => json!({ "error": format!("{err:#}"), "code": code }),
             None => json!({ "error": format!("{err:#}") }),

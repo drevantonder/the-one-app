@@ -62,6 +62,20 @@ impl std::fmt::Display for Needs {
 
 impl std::error::Error for Needs {}
 
+impl Needs {
+    /// As the API says it: `{ error, need, to, seal }`.
+    pub fn json(&self) -> Value {
+        json!({ "error": self.to_string(), "need": self.need, "to": self.to, "seal": self.seal })
+    }
+
+    /// What `json` says, if it says keys are needed.
+    pub fn from_json(v: &Value) -> Option<Needs> {
+        let need: Vec<Need> = serde_json::from_value(v["need"].clone()).ok().filter(|n: &Vec<Need>| !n.is_empty())?;
+        let said = |k: &str| v[k].as_str().unwrap_or("").to_string();
+        Some(Needs { need, to: said("to"), seal: said("seal") })
+    }
+}
+
 impl Session {
     fn live(&self, now: u64) -> bool {
         self.until > now
