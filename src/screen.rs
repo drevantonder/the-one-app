@@ -139,7 +139,7 @@ pub const TEMPLATE_NONCE: &str = "__nonce__";
 pub const TEMPLATE_PARAMS: &str = "\"__params__\"";
 
 /// A client's own screen's page for the web client, which its address serves as `screens/<name>.html` (src/cloudflare/
-/// services.rs), with `TEMPLATE_NONCE` and `TEMPLATE_PARAMS` for the web client to fill in, and linking the bridge and `@one/ui`, which it writes in from its own (cloudflare/web/web.js).
+/// services.rs), with `TEMPLATE_NONCE` and `TEMPLATE_PARAMS` for the web client to fill in, and linking the bridge and `@one/ui`, which it writes in from its own (cloudflare/web/screens.js).
 pub fn client_template(name: &str) -> String {
     page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), true)
 }

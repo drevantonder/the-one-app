@@ -719,8 +719,8 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
     let objects = [("user", names(user)), ("me", names(me)), ("device", names(device)), ("config", names(config)), ("client", names(client)), ("network", network.clone())];
 
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
-    let mut sources = vec![root.join("cloudflare/web/web.js"), root.join("cloudflare/node/worker.js"), root.join("cloudflare/mcp/worker.js")];
-    for dir in ["src/screen/home", "src/screen/settings"] {
+    let mut sources = vec![root.join("cloudflare/node/worker.js"), root.join("cloudflare/mcp/worker.js")];
+    for dir in ["cloudflare/web", "src/screen/home", "src/screen/settings"] {
         let mut stack = vec![root.join(dir)];
         while let Some(dir) = stack.pop() {
             for f in std::fs::read_dir(&dir).unwrap().flatten() {

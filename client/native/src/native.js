@@ -1,4 +1,4 @@
-// The app, as the web client's page (cloudflare/web/web.js) finds it: `window.__oneNative`, in the window's own page
+// The app, as the web client's page finds it (cloudflare/web/app.js): `window.__oneNative`, in the window's own page
 // alone. Screens' frames are sandboxed in it with no origin of their own: this doesn't run there, and the app's
 // commands don't answer them.
 (() => {

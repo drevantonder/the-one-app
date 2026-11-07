@@ -43,8 +43,8 @@ fn failed(message: impl std::fmt::Display) -> Error {
     unsent(message)
 }
 
-/// Where a device is with its network, from its sign-in to its sign-out, as a browser goes the same way (cloudflare/web/web.js:
-/// `join`, `start`, `takenOut` and `signOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
+/// Where a device is with its network, from its sign-in to its sign-out, as a browser goes the same way (cloudflare/web:
+/// browser.js `join` and `leave`, web.js `start`, request.js `takenOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
 /// outlives the program: `removed` asks it.
 enum Stage {
     /// Not reaching its nodes: not let in yet, having asked auth with `asked` if it has since it started (`ask`, then
@@ -333,7 +333,7 @@ impl Device {
     }
 
     /// Out: as the relay said, or signed out. Its connections close, and what it kept as this device goes with them,
-    /// as a browser's does (web.js `forgetDevice` and `signOut`): what each kind of request needed, its calls' answers
+    /// as a browser's does (browser.js `forgetDevice` and `leave`): what each kind of request needed, its calls' answers
     /// and the network it was let into, which the next approval names again. Whether this key was in stays, for
     /// `removed` to say.
     async fn out(&self) {

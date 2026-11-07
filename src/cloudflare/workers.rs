@@ -707,7 +707,7 @@ pub fn windows_package() -> String {
 }
 
 /// `/.well-known/windows-app-web-link`: the pages at the address the Windows app opens, when a link to one is opened
-/// from another app, as the web client has them (cloudflare/web/web.js): You, a page, its Accounts, an app's screen,
+/// from another app, as the web client has them (cloudflare/web/routes.js): You, a page, its Accounts, an app's screen,
 /// Settings, a Vault request and an invite.
 fn windows_links() -> Vec<u8> {
     let paths = ["/", "/page/*", "/accounts", "/accounts/*", "/app/*", "/settings", "/settings/*", "/vault", "/invite"];

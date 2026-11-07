@@ -629,7 +629,7 @@ impl Kind {
 }
 
 /// What a request did between a node's 428 and sending it again, each thing it asked for timed (developer mode's
-/// traces): `{ ms, steps }`, as a browser's says it (cloudflare/web/web.js).
+/// traces): `{ ms, steps }`, as a browser's says it (cloudflare/web/request.js).
 struct Notes {
     started: Instant,
     steps: Mutex<Vec<Value>>,
