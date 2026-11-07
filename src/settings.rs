@@ -90,6 +90,7 @@ enum Route {
     Refuse,
     Passkey,
     Seen,
+    VaultGrant,
 }
 
 /// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
@@ -117,6 +118,8 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/devices/refuse", Route::Refuse, true),
     ("POST", "/v1/devices/passkey", Route::Passkey, true),
     ("GET", "/v1/devices/seen", Route::Seen, true),
+    // A machine with a node that opens the Vault seals what's in it to the new key at once.
+    ("POST", "/v1/vault/grant", Route::VaultGrant, false),
 ];
 
 /// Whether a device answers the node's route of this path itself, whatever the method.
@@ -350,6 +353,21 @@ mod body {
         pub credential: String,
     }
 
+    /// `device` added to the machines that open `scope`'s Vault (user, the default; global; or a group by its name or
+    /// id), or with `on: false`, taken off them.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct VaultGrant {
+        pub scope: Option<String>,
+        pub device: String,
+        #[serde(default = "yes")]
+        pub on: bool,
+    }
+
+    fn yes() -> bool {
+        true
+    }
+
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     pub struct Nothing {}
@@ -462,7 +480,53 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             read::<body::Nothing>(path, raw)?;
             seen(m).await?
         }
+        Route::VaultGrant => vault_grant(m, read(path, raw)?).await?,
     })
+}
+
+/// Says which machines open a Vault: `device` added to them or taken off, by its person or its admins. Always a new
+/// key pair (`new_vault_key`); what's sealed to the old one is sealed to the new by a machine that opens both, at its
+/// next write there. → `{ said }`.
+async fn vault_grant(m: &impl Me, body: body::VaultGrant) -> Result<Value> {
+    let user = m.user()?;
+    let given = body.scope.as_deref().unwrap_or("user");
+    let (scope, endpoint, name, current) = m.who(|who| {
+        let scope = Scope::parse_for(given, &user).or_else(|_| who.find_group(given).map(Scope::Group))?;
+        ensure!(who.may(&user, "choose-devices", &scopes::object(&scope)), "Only this Vault's person, or its admins, say which machines open it.");
+        let endpoint = who.find_node(&body.device)?;
+        let current = who.vault(&scope)?.unwrap_or_default();
+        Ok((scope, endpoint, who.machine(&endpoint)?.map(|d| d.name).unwrap_or_default(), current))
+    })?;
+    let mut to: Vec<[u8; 32]> = current.to.into_iter().filter(|k| *k != endpoint).collect();
+    if body.on {
+        to.push(endpoint);
+    }
+    new_vault_key(m, &scope, current.n + 1, &to).await?;
+    Ok(json!({ "said": match body.on {
+        true => format!("{name} opens this Vault now, and fills its items into requests to their sites."),
+        false => format!("{name} no longer opens this Vault: what's set from now on is sealed to a key it doesn't have."),
+    } }))
+}
+
+/// Makes `scope`'s Vault key `n`, for the machines `to`: its `vault` step first, then its secret half sealed to each of
+/// them and to the recovery key.
+pub async fn new_vault_key(m: &impl Me, scope: &Scope, n: u32, to: &[[u8; 32]]) -> Result<()> {
+    let secret: [u8; 32] = rand::random();
+    let public = keys::public_of(&secret);
+    m.write(content::vault(scope, n, &public, to)).await?;
+    m.read().await?;
+    let (recovery, seals) = m.who(|who| {
+        ensure!(who.vault_publics(scope)?.get(&n) == Some(&public), "Another device made new keys for this Vault just now. Try again.");
+        let mut seals = Vec::new();
+        for k in to {
+            seals.extend(who.seal_key(k)?.map(|s| (hex(k), s)));
+        }
+        Ok((who.recovery()?.ok_or_else(|| anyhow!("{YOURS} has no recovery key to seal its Vault to."))?, seals))
+    })?;
+    for (at, seal) in std::iter::once(("recovery".to_string(), keys::twin_public(&recovery)?)).chain(seals) {
+        m.keep_key(json!({ "scope": scope.to_string(), "n": n, "to": at, "vault": true, "sealed": B64U.encode(&keys::seal_to(&seal, &secret)?) })).await?;
+    }
+    Ok(())
 }
 
 /// The step that deletes `app` (`deleted`), restores it (`restored`) or erases it for good (`erased`), as `user`, who

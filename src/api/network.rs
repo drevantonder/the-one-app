@@ -38,12 +38,15 @@ struct SealedKey {
     n: u32,
     to: Option<String>,
     app: Option<String>,
+    /// A Vault's key, sealed to a machine that opens it or to the recovery key.
+    #[serde(default)]
+    vault: bool,
     sealed: String,
 }
 
 async fn keys_post(State(node): State<Node>, me: Me, Body(body): Body<SealedKey>) -> Reply {
     let scope = crate::database::scopes::Scope::parse(given(&body.scope, "scope")?)?;
-    Ok(Json(node.seal_key(&me.caller, &scope, body.n, body.to.as_deref(), body.app.as_deref(), given(&body.sealed, "sealed")?).await?))
+    Ok(Json(node.seal_key(&me.caller, &scope, body.n, body.to.as_deref(), body.app.as_deref(), body.vault, given(&body.sealed, "sealed")?).await?))
 }
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Reply {

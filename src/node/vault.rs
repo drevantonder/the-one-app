@@ -82,57 +82,11 @@ impl Node {
         Ok(Some(out))
     }
 
-    /// Says which machines open `scope`'s Vault: `device` added to them (`on`) or taken off, as this device's person,
-    /// who must be the scope's admin. Always a new key pair, sealed to each machine and the network's recovery key,
-    /// its public half in a `vault` step; what's sealed to the old one is sealed to the new by a machine granted both,
-    /// at its next write there. → what it did, in words.
-    pub async fn vault_grant(&self, me: &Caller, scope: &Scope, device: &str, on: bool) -> Result<Value> {
-        ensure!(me.user == self.user()?, "{} grants only for its own person", self.device_name());
-        let endpoint = self.find_device(device)?;
-        let (mine, may, current, recovery) = self.with(|i| {
-            let m = i.r.db();
-            Ok((m.client(&self.0.id)?.is_some(), m.may(&i.user, "choose-devices", &scopes::object(&scope)), m.vault(scope)?.unwrap_or_default(), m.recovery()?))
-        })?;
-        ensure!(mine, "{} isn't one of its person's own devices, which are what grant", self.device_name());
-        ensure!(may, "only {scope}'s person, or its admins, say which machines open its Vault");
-        let mut to: Vec<Key> = current.to.iter().copied().filter(|k| *k != endpoint).collect();
-        if on {
-            to.push(endpoint);
-        }
-        self.new_vault_key(scope, current.n + 1, &to, &recovery.context("the network has no recovery key to seal its Vault to")?).await?;
-        // Sealed to the new key here, if this machine opens it: a write that changes nothing else.
-        if to.contains(&self.0.id) && self.vault_secrets(scope).await?.is_some_and(|k| k.len() > 1) {
-            if let Err(err) = self.write_item(me, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await {
-                tracing::debug!("sealing {scope}'s Vault to its new key: {err:#}");
-            }
-        }
-        let name = self.name_of(&endpoint);
-        Ok(json!({ "said": match on {
-            true => format!("{name} opens this Vault now, and fills its items into requests to their sites."),
-            false => format!("{name} no longer opens this Vault: what's set from now on is sealed to a key it doesn't have."),
-        } }))
-    }
-
-    /// Makes `scope`'s Vault key `n`, for the machines `to`: its `vault` step first (which, first in causal order,
-    /// makes it), then its secret half sealed to each of them and to the recovery key.
-    pub(super) async fn new_vault_key(&self, scope: &Scope, n: u32, to: &[Key], recovery: &Key) -> Result<()> {
-        let secret: [u8; 32] = rand::random();
-        let public = crate::keys::public_of(&secret);
-        self.append(&Scope::Global, content::vault(scope, n, &public, to)).await?;
-        ensure!(self.with(|i| Ok(i.r.db().vault_publics(scope)?.get(&n) == Some(&public)))?, "another device made {scope}'s Vault key {n} just now");
-        let (bucket, name) = (self.bucket()?, scope.to_string());
-        let seals: Vec<(String, [u8; 32])> = self.with(|i| {
-            let mut seals = Vec::new();
-            for k in to {
-                seals.extend(i.r.db().seal_key(k)?.map(|s| (hex(k), s)));
-            }
-            Ok(seals)
-        })?;
-        for (at, seal) in std::iter::once(("recovery".to_string(), crate::keys::twin_public(recovery)?)).chain(seals) {
-            crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::keys::seal_to(&seal, &secret)?).await?;
-        }
-        if to.contains(&self.0.id) {
-            self.0.app_schedules.vault.lock().unwrap().insert((scope.clone(), n), secret);
+    /// Seals what's in `scope`'s Vault to its newest key, if this machine opens it and another before it: a write that
+    /// changes nothing else, done at once after this machine's own person changed which machines open it.
+    pub(crate) async fn reseal_vault(&self, scope: &Scope) -> Result<()> {
+        if self.with(|i| i.r.db().opens_vault(&self.0.id, scope))? && self.vault_secrets(scope).await?.is_some_and(|k| k.len() > 1) {
+            self.write_item(&Caller::local(self)?, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await?;
         }
         Ok(())
     }

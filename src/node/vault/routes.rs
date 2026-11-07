@@ -19,7 +19,6 @@ pub fn routes() -> Routes {
         .route("/v1/vault/request", Who::SignedIn, post(request))
         .route("/v1/vault/answer", Who::SignedIn, post(answer))
         .route("/v1/vault/fetch", Who::SignedIn, post(fetch))
-        // Which machines open a Vault's secrets is for its admins' own devices to say.
         .route("/v1/vault/grant", Who::ThisMachine, post(grant))
 }
 
@@ -140,23 +139,14 @@ async fn fetch(State(node): State<Node>, me: Me, Body(body): Body<Fetch>) -> Rep
     Ok(Json(node.vault_fetch(&me, &serde_json::to_value(body)?).await?))
 }
 
-/// Lets a machine open a scope's Vault, or no longer (`on: false`).
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Grant {
-    scope: Option<String>,
-    agent: Option<String>,
-    device: String,
-    #[serde(default = "yes")]
-    on: bool,
-}
-
-fn yes() -> bool {
-    true
-}
-
-async fn grant(State(node): State<Node>, me: Me, Body(body): Body<Grant>) -> Reply {
-    let me = caller(me, body.agent.as_deref());
-    let scope = scope(&node, &me, body.scope.as_deref())?;
-    Ok(Json(node.vault_grant(&me, &scope, &body.device, body.on).await?))
+/// Which machines open a Vault, said by this machine as its own device (`settings`), which then seals what's in it to
+/// the new key if it opens it.
+async fn grant(State(node): State<Node>, body: axum::body::Bytes) -> Reply {
+    let said = node.answer_as_mine("POST", "/v1/vault/grant", &body).await?;
+    let given = serde_json::from_slice::<Value>(&body).ok().and_then(|b| b["scope"].as_str().map(str::to_string));
+    let scope = scope(&node, &Caller::local(&node)?, given.as_deref())?;
+    if let Err(err) = node.reseal_vault(&scope).await {
+        tracing::warn!("sealing {scope}'s Vault to its new key: {err:#}");
+    }
+    Ok(said)
 }

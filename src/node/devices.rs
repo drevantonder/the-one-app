@@ -98,11 +98,26 @@ impl Node {
     /// it isn't there (→ `{}`); an app's key in epoch `n`, if it isn't there (→ `{ sealed }`, whichever is there
     /// now, which every device then uses); or with both, an app's key in epoch `n` sealed to `to`, an endpoint of the
     /// network that will run the app's schedules there (`keys::app_schedules_key_name`), by one who may set them (→ `{}`,
-    /// there already or not: the app schedules name the hash of the one they mean).
-    pub async fn seal_key(&self, caller: &Caller, scope: &Scope, n: u32, to: Option<&str>, app: Option<&str>, sealed: &str) -> Result<Value> {
+    /// there already or not: the app schedules name the hash of the one they mean); or with `vault`, a Vault's newest key
+    /// sealed to a machine it opens on, or the recovery key, by one who may say which those are.
+    pub async fn seal_key(&self, caller: &Caller, scope: &Scope, n: u32, to: Option<&str>, app: Option<&str>, vault: bool, sealed: &str) -> Result<Value> {
         let sealed = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("sealed is base64url"))?;
         ensure!(!sealed.is_empty() && sealed.len() <= SEALED_MAX, "a sealed key is at most {SEALED_MAX} bytes");
         let bucket = self.bucket()?;
+        if vault {
+            let (Some(to), None) = (to, app) else { bail!("a Vault key is sealed to a machine, or recovery, and is no app's") };
+            self.with(|i| {
+                let db = i.r.db();
+                ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s person, or its admins, say which machines open its Vault");
+                let newest = db.vault(scope)?.filter(|v| v.n == n).with_context(|| format!("{scope}'s newest Vault key isn't {n}"))?;
+                ensure!(to == "recovery" || newest.to.contains(&crate::keys::unhex(to)?), "{scope}'s Vault key {n} doesn't open on that machine");
+                Ok(())
+            })?;
+            if !crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&scope.to_string(), n, to), &sealed).await? {
+                return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY, format!("{scope}'s Vault key {n} is sealed to {to} already")));
+            }
+            return Ok(json!({}));
+        }
         let newest = self.newest_epoch(scope).await?;
         let name = scope.to_string();
         match (to, app) {
@@ -269,7 +284,7 @@ impl Node {
                 }
                 let vaults: BTreeMap<Scope, (u32, Vec<Key>)> = db.vaults()?.into_iter().filter(|(s, v)| v.to.contains(&self.0.id) && db.may(&me, "choose-devices", &scopes::object(s))).map(|(s, v)| (s, (v.n, v.to))).collect();
                 let listed: Vec<(Owing, u32)> = epochs.into_iter().chain(vaults.iter().map(|(s, (n, _))| (Owing::Vault(s.clone()), *n))).collect();
-                Ok((owed, listed, (vaults, db.recovery()?)))
+                Ok((owed, listed, vaults))
             });
         // A failed look is tried again at the next, which comes on its own.
         let (mut owed, listed, vaults) = match owing {
@@ -308,16 +323,16 @@ impl Node {
             });
         }
         for owing in due {
-            let (node, (vaults, recovery)) = (self.clone(), vaults.clone());
+            let (node, vaults) = (self.clone(), vaults.clone());
             tokio::spawn(async move {
                 let made = match &owing {
                     Owing::Epoch(scope) => match node.newest_epoch(scope).await {
                         Ok(newest) => crate::settings::new_epoch(&node, scope, newest + 1, &[]).await,
                         Err(err) => Err(err),
                     },
-                    Owing::Vault(scope) => match (vaults.get(scope), recovery) {
-                        (Some((n, to)), Some(recovery)) => node.new_vault_key(scope, n + 1, to, &recovery).await,
-                        _ => Ok(()),
+                    Owing::Vault(scope) => match vaults.get(scope) {
+                        Some((n, to)) => crate::settings::new_vault_key(&node, scope, n + 1, to).await,
+                        None => Ok(()),
                     },
                 };
                 match made {

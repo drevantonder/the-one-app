@@ -59,7 +59,7 @@ impl Me for Node {
         let text = |k: &str| sealed[k].as_str();
         let scope = Scope::parse(text("scope").unwrap_or_default())?;
         let n = sealed["n"].as_u64().context("n is an epoch's number")? as u32;
-        self.seal_key(&Caller::local(self)?, &scope, n, text("to"), text("app"), text("sealed").unwrap_or_default()).await.map(|_| ())
+        self.seal_key(&Caller::local(self)?, &scope, n, text("to"), text("app"), sealed["vault"] == true, text("sealed").unwrap_or_default()).await.map(|_| ())
     }
 
     async fn app_key(&self, scope: &Scope, app: &str, n: u32) -> Result<[u8; 32]> {
