@@ -15,7 +15,7 @@ pub fn routes() -> Routes {
         .route("/v1/pair", Who::SignedIn, post(pair))
         .route("/v1/name", Who::ThisMachine, post(name))
         .route("/v1/erase", Who::SignedIn, post(erase))
-        .route("/v1/devices/approve", Who::ThisMachine, post(approve))
+        .route("/v1/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
 }
 
 #[derive(Deserialize)]
@@ -54,22 +54,19 @@ async fn erase(State(node): State<Node>, me: Me, Body(body): Body<Device>) -> Re
     Ok(Json(node.erase(&me.caller, given(&body.key, "key")?).await?))
 }
 
-/// Lets in the device showing `code`, as this machine's own device (`settings`), or with `recovery`, the network's
-/// recovery key (hex), read from a file here by the CLI and never kept.
+/// Lets in the device showing `code` with `recovery`, the network's recovery key (hex), read from a file here by the
+/// CLI and never kept.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Approve {
     code: String,
     #[serde(default)]
     confirm: bool,
-    recovery: Option<String>,
+    recovery: String,
 }
 
-async fn approve(State(node): State<Node>, Body(body): Body<Approve>) -> Reply {
-    let code = given(&body.code, "code")?;
-    let Some(recovery) = &body.recovery else {
-        return node.answer_as_mine("POST", "/v1/devices/approve", &serde_json::to_vec(&json!({ "code": code, "confirm": body.confirm }))?).await;
-    };
+async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<Approve>) -> Reply {
+    let (code, recovery) = (given(&body.code, "code")?, &body.recovery);
     let secret: [u8; 32] = crate::keys::unhex(recovery.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
     let key = ed25519_dalek::SigningKey::from_bytes(&secret);
     Ok(Json(node.approve_with_recovery(code, &key, body.confirm).await?))

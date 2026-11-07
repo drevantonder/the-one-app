@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow, bail, ensure};
 use data_encoding::BASE64URL_NOPAD as B64U;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::config::YOURS;
@@ -94,8 +95,8 @@ enum Route {
 
 /// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
 /// missing here or there), and `answered` tells a request that comes by of; and whether a machine with a node answers
-/// it with this alone (`on_a_node`), false where the node serves that path itself: its own name, the recovery key kept
-/// on it, and apps and services, which it serves for more than its own programs.
+/// it with this alone (`on_a_node`), false where the node serves that path itself: its own name, and apps added to a
+/// page and services, which it serves for more than its own programs.
 const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/role", Route::Role, true),
     ("POST", "/v1/remove", Route::Remove, true),
@@ -115,7 +116,7 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/invite-link", Route::InviteLink, true),
     ("POST", "/v1/app-schedules", Route::AppSchedules, true),
     ("GET", "/v1/devices/requests", Route::Requests, true),
-    ("POST", "/v1/devices/approve", Route::Approve, false),
+    ("POST", "/v1/devices/approve", Route::Approve, true),
     ("POST", "/v1/devices/refuse", Route::Refuse, true),
     ("POST", "/v1/devices/passkey", Route::Passkey, true),
     ("GET", "/v1/devices/seen", Route::Seen, true),
@@ -175,7 +176,7 @@ impl Asked {
 }
 
 /// An invite a device made: the newcomer's first device brings the proof its secret makes with its key.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Invited {
     secret: String,
     name: String,
@@ -183,123 +184,312 @@ pub struct Invited {
     until: u64,
 }
 
-impl Invited {
-    pub fn of(v: &Value) -> Option<Invited> {
-        Some(Invited { secret: v["secret"].as_str()?.into(), name: text(v, "name"), role: serde_json::from_value(v["role"].clone()).unwrap_or(Role::Member), until: v["until"].as_u64()? })
-    }
-
-    fn kept(&self) -> Value {
-        json!({ "secret": self.secret, "name": self.name, "role": self.role, "until": self.until })
-    }
-}
-
 /// The answer to a request a device answers itself, as a node's route of the same path would (`/v1/role`, `/v1/remove`,
-/// `/v1/devices/approve`, …): none for any other, which goes to a node.
+/// `/v1/devices/approve`, …): none for any other, which goes to a node. Its body is the route's own (`body`), every
+/// field known and of its kind, or it's refused.
 pub async fn answer(m: &impl Me, method: &str, path: &str, body: &[u8]) -> Option<Result<Value>> {
     let path = path.split('?').next().unwrap_or(path);
     let (_, _, route, _) = ROUTES.iter().find(|(m, p, _, _)| *m == method && *p == path)?;
-    let body: Value = if body.is_empty() { json!({}) } else { serde_json::from_slice(body).unwrap_or(Value::Null) };
-    // The network's recovery key is used only on the machine it's kept on, by its node.
-    if body.get("recovery").is_some() {
-        return None;
-    }
-    if matches!(route, Route::Add) && body["scope"] != "global" {
-        return None;
+    if let Route::Add = route {
+        match read::<body::Add>(path, body) {
+            Ok(add) if add.scope != "global" => return None,
+            Err(err) => return Some(Err(err)),
+            Ok(_) => {}
+        }
     }
     // What a request names (a group, a device) may be newer than this device last read: it reads what's new first.
     if let Err(err) = m.read().await {
         return Some(Err(err));
     }
-    Some(answered_by(m, *route, &body).await)
+    Some(answered_by(m, *route, path, body).await)
 }
 
-async fn answered_by(m: &impl Me, route: Route, body: &Value) -> Result<Value> {
+/// A route's body, as `T`: none is `{}`.
+fn read<T: serde::de::DeserializeOwned>(path: &str, body: &[u8]) -> Result<T> {
+    let body = if body.is_empty() { b"{}".as_slice() } else { body };
+    serde_json::from_slice(body).map_err(|err| {
+        let said = err.to_string();
+        anyhow!("{path} didn't take that: {}.", said.split(" at line ").next().unwrap_or(&said))
+    })
+}
+
+/// Each route's body, as its callers send it.
+mod body {
+    use serde::Deserialize;
+
+    use crate::database::scopes;
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Role {
+        pub user: String,
+        pub role: scopes::Role,
+    }
+
+    /// A device by its key or name, or a person by their id or name, with all their devices.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Remove {
+        pub key: Option<String>,
+        pub user: Option<String>,
+    }
+
+    /// `value` none sets it back to what it is by default.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Setting {
+        pub name: String,
+        pub value: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Named {
+        pub name: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Invite {
+        pub group: String,
+        pub user: String,
+        pub role: scopes::Role,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Group {
+        pub group: String,
+    }
+
+    /// `role` none takes them out of the group.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Member {
+        pub group: String,
+        pub user: String,
+        pub role: Option<scopes::Role>,
+    }
+
+    /// A group's handle, or with no `group`, this person's.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Handle {
+        pub handle: String,
+        pub group: Option<String>,
+    }
+
+    /// Another device's name, or with no `key`, this one's.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Name {
+        pub key: Option<String>,
+        pub name: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Runs {
+        pub on: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Service {
+        pub device: String,
+        pub name: String,
+        pub on: bool,
+    }
+
+    /// `how`: deleted, restored or erased.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Retire {
+        pub app: String,
+        pub how: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Add {
+        pub app: String,
+        pub scope: String,
+        #[serde(default = "yes")]
+        pub added: bool,
+    }
+
+    fn yes() -> bool {
+        true
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Key {
+        pub key: String,
+    }
+
+    /// `user` invites someone in the network already; `email` is the Google account a newcomer signs up with.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct InviteLink {
+        pub name: String,
+        #[serde(default)]
+        pub admin: bool,
+        pub user: Option<String>,
+        pub email: Option<String>,
+    }
+
+    /// `device` by its name or key; `scope` user (theirs, the default), global, or a group by its name or id; `days`,
+    /// 30 at most, 0 to stop.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct AppSchedules {
+        pub app: String,
+        pub device: String,
+        pub scope: Option<String>,
+        pub days: Option<u64>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Code {
+        pub code: String,
+    }
+
+    /// Without `confirm`, whose the device showing `code` is.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Approve {
+        pub code: String,
+        #[serde(default)]
+        pub confirm: bool,
+    }
+
+    /// The passkey's PRF output (base64url), which only the page it signed in on has, and its credential's id.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Passkey {
+        pub prf: Option<String>,
+        pub credential: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Nothing {}
+}
+
+async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Result<Value> {
     let done = json!({});
     Ok(match route {
         Route::Role => {
-            let role = serde_json::from_value::<Role>(body["role"].clone()).map_err(|_| anyhow!("A role is admin or member."))?;
-            m.write(content::role(&m.who(|db| db.find_user(&text(body, "user")))?, role)).await?;
+            let body: body::Role = read(path, raw)?;
+            m.write(content::role(&m.who(|db| db.find_user(&body.user))?, body.role)).await?;
             done
         }
-        Route::Remove if body["user"].is_string() => remove_person(m, &text(body, "user")).await?,
-        Route::Remove => remove(m, &text(body, "key")).await?,
+        Route::Remove => match read(path, raw)? {
+            body::Remove { key: Some(key), user: None } => remove(m, &key).await?,
+            body::Remove { key: None, user: Some(user) } => remove_person(m, &user).await?,
+            _ => bail!("Give a device's key or a person, not both."),
+        },
         Route::Settings => {
-            m.write(content::setting(&text(body, "name"), body["value"].as_str())).await?;
+            let body: body::Setting = read(path, raw)?;
+            m.write(content::setting(&body.name, body.value.as_deref())).await?;
             done
         }
-        Route::Group => group(m, &text(body, "name")).await?,
+        Route::Group => group(m, &read::<body::Named>(path, raw)?.name).await?,
         Route::Invite => {
-            let (group, user) = m.who(|db| Ok((db.find_group(&text(body, "group"))?, db.find_user(&text(body, "user"))?)))?;
-            m.write(content::invite(&group, &user, serde_json::from_value(body["role"].clone()).unwrap_or(Role::Member))).await?;
+            let body: body::Invite = read(path, raw)?;
+            let (group, user) = m.who(|db| Ok((db.find_group(&body.group)?, db.find_user(&body.user)?)))?;
+            m.write(content::invite(&group, &user, body.role)).await?;
             done
         }
         Route::Accept => {
-            m.write(content::accept(&m.who(|db| db.find_group(&text(body, "group")))?)).await?;
+            let body: body::Group = read(path, raw)?;
+            m.write(content::accept(&m.who(|db| db.find_group(&body.group))?)).await?;
             done
         }
         Route::Member => {
-            let (group, user) = m.who(|db| Ok((db.find_group(&text(body, "group"))?, db.find_user(&text(body, "user"))?)))?;
-            m.write(content::member(&group, &user, serde_json::from_value(body["role"].clone()).ok())).await?;
+            let body: body::Member = read(path, raw)?;
+            let (group, user) = m.who(|db| Ok((db.find_group(&body.group)?, db.find_user(&body.user)?)))?;
+            m.write(content::member(&group, &user, body.role)).await?;
             done
         }
         Route::Handle => {
-            let handle = text(body, "handle").trim().to_string();
-            let (what, id) = match body["group"].as_str() {
+            let body: body::Handle = read(path, raw)?;
+            let (what, id) = match &body.group {
                 Some(g) => ("group", m.who(|db| db.find_group(g))?),
                 None => ("user", m.user()?),
             };
-            m.write(content::handle(what, &id, &handle)).await?;
+            m.write(content::handle(what, &id, body.handle.trim())).await?;
             done
         }
         Route::Name => {
-            let key = match body["key"].as_str() {
+            let body: body::Name = read(path, raw)?;
+            let key = match &body.key {
                 Some(k) => m.who(|db| db.find_machine(k))?,
                 None => m.public(),
             };
-            m.write(content::rename("key", &hex(&key), text(body, "name").trim())).await?;
+            m.write(content::rename("key", &hex(&key), body.name.trim())).await?;
             done
         }
         Route::Runs => {
-            let machines = body["on"].as_array().into_iter().flatten().map(|d| m.who(|db| db.find_machine(d.as_str().unwrap_or("")))).collect::<Result<Vec<_>>>()?;
+            let body: body::Runs = read(path, raw)?;
+            let machines = body.on.iter().map(|d| m.who(|db| db.find_machine(d))).collect::<Result<Vec<_>>>()?;
             m.write(content::runs(&machines)).await?;
             done
         }
         Route::Service => {
-            let device = m.who(|db| db.find_machine(&text(body, "device")))?;
-            m.write(content::service(&device, &text(body, "name"), body["on"] == true, None)).await?;
+            let body: body::Service = read(path, raw)?;
+            let device = m.who(|db| db.find_machine(&body.device))?;
+            m.write(content::service(&device, &body.name, body.on, None)).await?;
             done
         }
         Route::Retire => {
-            let app = text(body, "app");
-            let owner = m.who(|db| db.app(&app)?.map(|a| a.owner.to_string()).ok_or_else(|| anyhow!("no app named {app}")))?;
-            m.write(content::retire(&app, &owner, &text(body, "how"))?).await?;
+            let body: body::Retire = read(path, raw)?;
+            let owner = m.who(|db| db.app(&body.app)?.map(|a| a.owner.to_string()).ok_or_else(|| anyhow!("no app named {}", body.app)))?;
+            m.write(content::retire(&body.app, &owner, &body.how)?).await?;
             done
         }
         Route::Add => {
-            m.write(content::added(&text(body, "app"), body["added"] != false)).await?;
+            let body: body::Add = read(path, raw)?;
+            m.write(content::added(&body.app, body.added)).await?;
             done
         }
         Route::ForgetSignIn => {
+            let body: body::Key = read(path, raw)?;
             let user = m.user()?;
             let key = m.who(|db| {
-                let key = db.find_machine(&text(body, "key"))?;
+                let key = db.find_machine(&body.key)?;
                 ensure!(db.machine(&key)?.is_some_and(|d| d.user == user && d.sign_in.is_some()), "That isn't one of your devices with a sign-in to forget.");
                 Ok(key)
             })?;
             m.write(content::forget_sign_in(&key)).await?;
             done
         }
-        Route::InviteLink => invite(m, &text(body, "name"), if body["admin"] == true { Role::Admin } else { Role::Member }, body["user"].as_str(), body["email"].as_str()).await?,
-        Route::AppSchedules => app_schedules_asked(m, body).await?,
-        Route::Requests => requests(m).await?,
-        Route::Approve => approve_code(m, &text(body, "code"), body["confirm"] == true).await?,
-        Route::Refuse => refuse(m, &text(body, "code")).await?,
+        Route::InviteLink => {
+            let body: body::InviteLink = read(path, raw)?;
+            invite(m, &body.name, if body.admin { Role::Admin } else { Role::Member }, body.user.as_deref(), body.email.as_deref()).await?
+        }
+        Route::AppSchedules => app_schedules_asked(m, read(path, raw)?).await?,
+        Route::Requests => {
+            read::<body::Nothing>(path, raw)?;
+            requests(m).await?
+        }
+        Route::Approve => {
+            let body: body::Approve = read(path, raw)?;
+            approve_code(m, &body.code, body.confirm).await?
+        }
+        Route::Refuse => refuse(m, &read::<body::Code>(path, raw)?.code).await?,
         Route::Passkey => {
-            let prf = B64U.decode(text(body, "prf").trim_end_matches('=').as_bytes()).map_err(|_| anyhow!("Sign in with your passkey first."))?;
-            list_passkey(m, &prf, &text(body, "credential")).await?;
+            let body: body::Passkey = read(path, raw)?;
+            let prf = body.prf.and_then(|p| B64U.decode(p.trim_end_matches('=').as_bytes()).ok()).filter(|p| !p.is_empty()).ok_or_else(|| anyhow!("Sign in with your passkey first."))?;
+            list_passkey(m, &prf, &body.credential).await?;
             done
         }
-        Route::Seen => seen(m).await?,
+        Route::Seen => {
+            read::<body::Nothing>(path, raw)?;
+            seen(m).await?
+        }
     })
 }
 
@@ -500,16 +690,17 @@ pub async fn ask_auth(m: &impl Me, method: &str, path: &str, fields: Value) -> R
     Ok(out)
 }
 
-/// The invites this device made that still work, by who they're for.
-async fn invites(m: &impl Me) -> BTreeMap<String, Invited> {
-    let kept: Value = m.kept(INVITES).await.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+/// The invites this device made that still work, by who they're for: an error if what it keeps of them can't be read,
+/// which the next invite would otherwise write over.
+async fn invites(m: &impl Me) -> Result<BTreeMap<String, Invited>> {
+    let Some(kept) = m.kept(INVITES).await else { return Ok(BTreeMap::new()) };
+    let kept: BTreeMap<String, Invited> = serde_json::from_slice(&kept).map_err(|err| anyhow!("The invites this device made can't be read ({INVITES}: {err}), so none was changed."))?;
     let now = m.now();
-    kept.as_object().into_iter().flatten().filter_map(|(user, v)| Some((user.clone(), Invited::of(v)?))).filter(|(_, i)| i.until > now).collect()
+    Ok(kept.into_iter().filter(|(_, i)| i.until > now).collect())
 }
 
 async fn keep_invites(m: &impl Me, invites: &BTreeMap<String, Invited>) -> Result<()> {
-    let kept: serde_json::Map<String, Value> = invites.iter().map(|(user, i)| (user.clone(), i.kept())).collect();
-    m.keep(INVITES, Value::Object(kept).to_string().as_bytes()).await
+    m.keep(INVITES, &serde_json::to_vec(invites)?).await
 }
 
 /// An invite link for someone called `name`, as `role`, made by this admin's device: its secret stays here, to check
@@ -528,9 +719,9 @@ async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: 
     if let Some(email) = email {
         fields["email"] = json!(email);
     }
+    let mut kept = invites(m).await?;
     ask_auth(m, "POST", "/api/auth/invites", fields).await?;
     if new {
-        let mut kept = invites(m).await;
         kept.insert(user, Invited { secret: secret.clone(), name: name.to_string(), role, until });
         keep_invites(m, &kept).await?;
     }
@@ -542,7 +733,7 @@ async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: 
 async fn waiting(m: &impl Me) -> Result<Vec<(Asked, Option<Invited>)>> {
     let user = m.user()?;
     let asked = asked(m).await?;
-    let invites = invites(m).await;
+    let invites = invites(m).await?;
     let mut out = Vec::new();
     for r in asked {
         let gone = m.who(|who| Ok(who.machine_ever(&r.endpoint.key)?.is_some_and(|d| d.removed)))?;
@@ -719,7 +910,7 @@ pub async fn approve(m: &impl Me, r: &Asked, invite: Option<&Invited>) -> Result
         mark_approved(m, &e.key).await?;
     }
     if invite.is_some() {
-        let mut kept = invites(m).await;
+        let mut kept = invites(m).await?;
         kept.remove(&r.user);
         keep_invites(m, &kept).await?;
     }
@@ -764,18 +955,17 @@ async fn list_passkey(m: &impl Me, prf: &[u8], credential: &str) -> Result<()> {
     tell(m, m, json!({ "add": hex(&pk.key), "role": "client", "admin": admin })).await
 }
 
-/// `/v1/app-schedules`, as a node's route reads it: `device` by its name or key; `scope` user (theirs, the
-/// default), global, or a group by its name or id; `days`, 30 at most, 0 to stop.
-async fn app_schedules_asked(m: &impl Me, body: &Value) -> Result<Value> {
+/// `/v1/app-schedules`.
+async fn app_schedules_asked(m: &impl Me, body: body::AppSchedules) -> Result<Value> {
     let user = m.user()?;
-    let (app, given) = (text(body, "app"), body["scope"].as_str().unwrap_or("user"));
+    let (app, given) = (body.app, body.scope.as_deref().unwrap_or("user"));
     let (endpoint, scope, name) = m.who(|who| {
-        let endpoint = who.find_node(&text(body, "device"))?;
+        let endpoint = who.find_node(&body.device)?;
         let scope = Scope::parse_for(given, &user).or_else(|_| who.find_group(given).map(Scope::Group))?;
         ensure!(who.app(&app)?.is_some(), "no app called {app}");
         Ok((endpoint, scope, who.machine(&endpoint)?.map(|d| d.name).unwrap_or_default()))
     })?;
-    let days = body["days"].as_u64().unwrap_or(APP_SCHEDULES_DAYS);
+    let days = body.days.unwrap_or(APP_SCHEDULES_DAYS);
     let until = set_app_schedules(m, &endpoint, &app, &scope, days).await?;
     Ok(match until {
         0 => json!({ "said": format!("{name} no longer runs {app}'s schedules, and what's written from now on is under new keys it doesn't have.") }),

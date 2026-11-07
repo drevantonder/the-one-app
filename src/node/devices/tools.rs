@@ -39,10 +39,14 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
         "requests" => node.get("/v1/devices/requests"),
         "approve" => {
             let mut body = json!({ "code": text("code")?, "confirm": asked.confirmed });
-            if let Some(at) = input.get("recovery_key").and_then(Value::as_str) {
-                body["recovery"] = json!(recovery_key_from(at, asked.reader)?);
-            }
-            node.post("/v1/devices/approve", body).map(|r| json!(approved_said(&r)))
+            let path = match input.get("recovery_key").and_then(Value::as_str) {
+                Some(at) => {
+                    body["recovery"] = json!(recovery_key_from(at, asked.reader)?);
+                    "/v1/devices/approve-with-recovery"
+                }
+                None => "/v1/devices/approve",
+            };
+            node.post(path, body).map(|r| json!(approved_said(&r)))
         }
         "remove" => {
             let what = match (input.get("device").and_then(Value::as_str), input.get("user").and_then(Value::as_str)) {

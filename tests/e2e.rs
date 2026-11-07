@@ -58,7 +58,7 @@ fn asks(key: &ed25519_dalek::SigningKey, user: &str, secret: Option<&[u8]>) -> o
 
 /// An invite for Sam, as a member, whose secret is `secret`.
 fn invited(secret: &str) -> one::settings::Invited {
-    one::settings::Invited::of(&json!({ "secret": secret, "name": "Sam", "role": "member", "until": u64::MAX })).unwrap()
+    serde_json::from_value(json!({ "secret": secret, "name": "Sam", "role": "member", "until": u64::MAX })).unwrap()
 }
 
 /// Sam, invited by `a`'s person as a member, let in with his first device, `key`, as `a` approves it: → his id.
@@ -279,6 +279,30 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
 /// A file put from elsewhere (a client device's, a sign-in's) is read back by whoever put it alone, or by someone who
 /// may use a scope that names it: knowing its hash isn't enough. A file put to answer one request (git's push, to
 /// Repos' `_http`) goes once it's answered, unless something keeps it.
+/// A Settings change whose body doesn't read as its route's is refused, never taken as another: a mistyped role
+/// doesn't take someone out of a group. Invites this device can't read are an error, never written over.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_settings_change_that_doesnt_read_is_refused() {
+    let dir = temp("bodies");
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
+    create(&a, "Home", "Andre").await;
+    let me = a.user().unwrap();
+    let ask = async |path: &str, body: Value| one::settings::answer(&a, "POST", path, body.to_string().as_bytes()).await.unwrap();
+    let group = ask("/v1/group", json!({ "name": "Team" })).await.unwrap()["group"].as_str().unwrap().to_string();
+    let refused = ask("/v1/member", json!({ "group": group, "user": me, "role": "admn" })).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("admn"), "{refused:#}");
+    assert!(ask("/v1/invite", json!({ "group": group, "user": me, "role": "owner" })).await.is_err());
+    assert!(ask("/v1/role", json!({ "user": me, "role": "admin", "extra": true })).await.is_err());
+    let role = one::settings::Me::who(&a, |db| db.role_in(&me, &one::database::scopes::Scope::Group(group.clone()))).unwrap();
+    assert_eq!(role, Some(one::database::scopes::Role::Admin), "still the group's admin");
+
+    std::fs::write(dir.join("invites.json"), b"{ not json").unwrap();
+    let refused = ask("/v1/invite-link", json!({ "name": "Sam" })).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("can't be read"), "{refused:#}");
+    assert_eq!(std::fs::read(dir.join("invites.json")).unwrap(), b"{ not json");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     let a = start("put-from").await;
