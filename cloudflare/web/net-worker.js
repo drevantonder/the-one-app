@@ -191,22 +191,8 @@ export function server(version) {
     const took = {};
     let mark = performance.now();
     const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
-    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { del, getAll, named, put }] = await code;
-    const [mine, nodes, global, root] = await getAll([`device:${user}`, `nodes:${user}`, `global:${user}`, `root:${user}`]);
-    // Who's who as this browser checked it before its keyring kept it.
-    if (global) {
-      if (global.steps) await put(`who.json:${user}`, new TextEncoder().encode(JSON.stringify(global.steps)));
-      if (global.root && !root) await put(`root:${user}`, global.root);
-      await del(`global:${user}`);
-    }
-    // The invites this browser made, as it kept them before its keyring did.
-    const invites = await named("invite:");
-    if (invites.length) {
-      const kept = JSON.parse(new TextDecoder().decode((await getAll([`invites.json:${user}`]))[0] || new Uint8Array()) || "{}");
-      for (const [id, i] of invites) if (i?.until > Date.now()) kept[i.user || id.slice(7)] = { secret: i.secret, name: i.name, role: "member", until: i.until };
-      await put(`invites.json:${user}`, new TextEncoder().encode(JSON.stringify(kept)));
-      for (const [id] of invites) await del(id);
-    }
+    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { getAll, put }] = await code;
+    const [mine, nodes] = await getAll([`device:${user}`, `nodes:${user}`]);
     const device = as || mine;
     if (!device) return null;
     // Its keyring, made while the session's key is: this browser's, or another device's of its person's asked as while
