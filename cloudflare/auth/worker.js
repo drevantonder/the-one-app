@@ -880,7 +880,7 @@ export class Auth extends DurableObject {
 }
 
 /// A throwaway network's sign-in, with no passkey: whoever is signed in here already (someone who joined in this browser),
-/// or `person` by name (someone who joined), or else its first person, made the first time; and joining with an
+/// or `person` by name (someone who joined; of two with a name, the one a device was let in for), or else its first person, made the first time; and joining with an
 /// invite link, which signs its person in here.
 function throwawayNetwork(auth, id, name) {
   const signIn = async (ctx, user) => {
@@ -909,7 +909,8 @@ function throwawayNetwork(auth, id, name) {
         const adapter = ctx.context.internalAdapter;
         const person = typeof ctx.body?.person === "string" ? ctx.body.person.trim().toLowerCase() : "";
         if (person) {
-          const [row] = auth.ctx.storage.sql.exec("select id from user where lower(name) = ?", person).toArray();
+          // Invited again, a name is two people here: the one with a device let in is who joined, else the latest to open a link.
+          const [row] = auth.ctx.storage.sql.exec("select id from user where lower(name) = ? order by exists (select 1 from requests where requests.user = user.id and approved is not null) desc, createdAt desc limit 1", person).toArray();
           if (!row && person !== name.toLowerCase()) refuse(404, `Nobody called ${ctx.body.person} has joined.`);
           return signIn(ctx, row ? await adapter.findUserById(row.id) : await first(adapter));
         }
