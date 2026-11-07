@@ -20,7 +20,6 @@ pub fn routes() -> Routes {
         .route("/v1/add", Who::SignedIn, post(add))
         .route("/v1/schedule", Who::ThisMachine, post(schedule))
         .route("/v1/arrange", Who::SignedIn, post(arrange))
-        .route("/v1/retire", Who::SignedIn, post(retire))
         .route("/v1/fork", Who::ThisMachine, post(fork))
         .route("/v1/source/{app}", Who::ThisMachine, get(source))
 }
@@ -149,19 +148,6 @@ struct Arrange {
 
 async fn arrange(State(node): State<Node>, me: Me, Body(body): Body<Arrange>) -> Reply {
     node.arrange(&me.caller, given(&body.page, "page")?, body.items, body.hidden, body.pages).await?;
-    done()
-}
-
-/// Deletes an app (`how: deleted`), restores it (`restored`) or erases it for good (`erased`).
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Retire {
-    app: String,
-    how: String,
-}
-
-async fn retire(State(node): State<Node>, me: Me, Body(body): Body<Retire>) -> Reply {
-    node.retire(&me.caller, given(&body.app, "app")?, given(&body.how, "how")?).await?;
     done()
 }
 

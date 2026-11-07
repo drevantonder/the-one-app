@@ -336,6 +336,7 @@ impl Node {
             self.seal_epochs();
             self.settle_own();
             self.follow_recovery();
+            self.follow_erased().await;
         }
         if handled.members {
             self.follow_storage();

@@ -153,13 +153,7 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
             ensure!(blob.len() == 64 && blob.bytes().all(|b| b.is_ascii_hexdigit()), "a blob is named by its hash");
             (scope, content::forget(&blob))
         }
-        Append::Retire { app: name, how } => {
-            let db = i.r.db();
-            let a = db.app(&name)?.with_context(|| format!("no app named {name}"))?;
-            ensure!(db.may(&me.user, "delete", &scopes::app(&name)), "Only {title}'s owners can delete, restore or erase it.");
-            ensure!(how != "erased" || a.deleted.is_some(), "Delete {title} before erasing it.");
-            (Scope::Global, content::retire(&name, &a.owner.to_string(), &how)?)
-        }
+        Append::Retire { app, how } => (Scope::Global, crate::settings::retire(i.r.db(), &me.user, &app, &how, title)?),
         Append::Source { app: name, link } => {
             let db = i.r.db();
             let a = db.app(&name)?.filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;

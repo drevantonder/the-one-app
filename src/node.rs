@@ -48,7 +48,6 @@ pub use net::{alpn, relay, service_alpn};
 pub use calls::{CallRequest, Elsewhere, Grant};
 use calls::{Granted, Reply};
 use apps::built_in_bundle;
-use calls::check_append;
 use scheduled::switch_entry;
 use services::{added_scope, service_entry};
 pub use releases::Build;
@@ -213,6 +212,8 @@ pub struct Inner {
     settled: tokio::sync::watch::Sender<u64>,
     /// Held while settling, so one that read the members before a change can't load its apps after one that read it.
     settling: tokio::sync::Mutex<()>,
+    /// The erased apps this node erased here since it started (`follow_erased`).
+    erased: Mutex<BTreeSet<String>>,
     /// Whether the last settling couldn't fetch an app's deploy, so it's tried again soon, not only at the next change.
     unfetched: std::sync::atomic::AtomicBool,
     /// Set once this node is handing over to the next: it opens nothing only one of them may hold.
@@ -289,6 +290,7 @@ impl Node {
             settled: tokio::sync::watch::channel(0).0,
             settling: tokio::sync::Mutex::new(()),
             unfetched: Default::default(),
+            erased: Default::default(),
             handing_over: Default::default(),
             guide: Default::default(),
             signed_ins: Default::default(),

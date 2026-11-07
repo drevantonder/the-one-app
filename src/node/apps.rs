@@ -27,16 +27,21 @@ impl Node {
         self.with_or(false, |i| Ok(i.r.db().app(app)?.is_some_and(|a| a.deleted.is_some() || a.erased)))
     }
 
-    /// Deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`), for someone acting for
-    /// its owner. A deleted app stops running and leaves every page, but keeps its data until it's erased.
-    pub async fn retire(&self, caller: &Caller, app: &str, how: &str) -> Result<()> {
-        let title = self.title(app).await;
-        let (_, content) = self.with(|i| check_append(i, Append::Retire { app: app.into(), how: how.into() }, &[], caller, &title))?;
-        self.member_content(caller, content).await?;
-        if how == "erased" {
-            self.destroy_keys(app).await?;
+    /// Erases each app who's who says is erased that this node hasn't since it started, whichever device wrote the
+    /// step (`settings::retire`): its databases closed and forgotten here, and its keys deleted from the bucket, before
+    /// the step's read is done. Each node that reads the step does it, as deleting what's gone does nothing; one that
+    /// fails (the bucket didn't answer) is tried again the next time who's who changes.
+    pub(super) async fn follow_erased(&self) {
+        let Ok(erased) = self.with(|i| Ok(i.r.db().apps()?.into_iter().filter(|a| a.erased).map(|a| a.name).collect::<Vec<_>>())) else { return };
+        for app in erased {
+            if !self.0.erased.lock().unwrap().insert(app.clone()) {
+                continue;
+            }
+            if let Err(err) = self.destroy_keys(&app).await {
+                tracing::warn!("erasing {app}'s keys: {err:#}");
+                self.0.erased.lock().unwrap().remove(&app);
+            }
         }
-        Ok(())
     }
 
     /// Every app in the network, with what it does for `viewer` where it's added for them; and the services that

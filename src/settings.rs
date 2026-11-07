@@ -109,7 +109,7 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/name", Route::Name, false),
     ("POST", "/v1/runs", Route::Runs, true),
     ("POST", "/v1/service", Route::Service, false),
-    ("POST", "/v1/retire", Route::Retire, false),
+    ("POST", "/v1/retire", Route::Retire, true),
     // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
     ("POST", "/v1/add", Route::Add, false),
     ("POST", "/v1/devices/forget-sign-in", Route::ForgetSignIn, true),
@@ -446,8 +446,8 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
         }
         Route::Retire => {
             let body: body::Retire = read(path, raw)?;
-            let owner = m.who(|db| db.app(&body.app)?.map(|a| a.owner.to_string()).ok_or_else(|| anyhow!("no app named {}", body.app)))?;
-            m.write(content::retire(&body.app, &owner, &body.how)?).await?;
+            let user = m.user()?;
+            m.write(m.who(|db| retire(db, &user, &body.app, &body.how, &body.app))?).await?;
             done
         }
         Route::Add => {
@@ -491,6 +491,17 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             seen(m).await?
         }
     })
+}
+
+/// The step that deletes `app` (`deleted`), restores it (`restored`) or erases it for good (`erased`), as `user`, who
+/// acts for its owner, says it: whoever writes it, from any device or an app's call. `title` is what people call it.
+/// A deleted app stops running and leaves every page, but keeps its data until it's erased, which deletes its keys in
+/// the bucket as each node reads the step (`Node::follow_erased`).
+pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> Result<Content> {
+    let a = who.app(app)?.ok_or_else(|| anyhow!("no app named {app}"))?;
+    ensure!(who.may(user, "delete", &scopes::app(app)), "Only {title}'s owners can delete, restore or erase it.");
+    ensure!(how != "erased" || a.deleted.is_some(), "Delete {title} before erasing it.");
+    content::retire(app, &a.owner.to_string(), how)
 }
 
 /// A group called `name`, with this person its first admin: → `{ group }`, its id.

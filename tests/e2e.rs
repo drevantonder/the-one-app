@@ -303,6 +303,23 @@ async fn a_settings_change_that_doesnt_read_is_refused() {
     assert_eq!(std::fs::read(dir.join("invites.json")).unwrap(), b"{ not json");
 }
 
+/// Erasing an app deletes its keys in the bucket whoever erases it: here Settings' own answer, as any client's.
+#[tokio::test(flavor = "multi_thread")]
+async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {
+    let dir = temp("erase");
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
+    create(&a, "Home", "Andre").await;
+    add_notes(&a).await;
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
+    let keys = || walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/notes/_key/")).count();
+    assert!(keys() > 0, "notes has keys");
+    for how in ["deleted", "erased"] {
+        one::settings::answer(&a, "POST", "/v1/retire", json!({ "app": "notes", "how": how }).to_string().as_bytes()).await.unwrap().unwrap();
+    }
+    assert_eq!(keys(), 0, "notes' keys are gone");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     let a = start("put-from").await;

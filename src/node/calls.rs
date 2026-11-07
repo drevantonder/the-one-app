@@ -155,7 +155,6 @@ mod record;
 mod running;
 mod writes;
 
-pub(super) use writes::check_append;
 
 use record::Guard;
 
