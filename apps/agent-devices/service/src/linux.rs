@@ -3,11 +3,9 @@
 //! labels on the container. The container runtime is Podman on Linux and Apple's container on a Mac.
 //!
 //! The runtime is the machine's, shared by every network on it (a `one throwaway` beside the real one), so each container
-//! carries its network's data folder as a label (`one.home`), and a network lists and touches only its own. Those made
-//! before the label are claimed once, by a network whose folder was already there when it first ran with it
-//! (`claimed.json`): the real one, never a new `one throwaway`.
+//! carries its network's data folder as a label (`one.home`), and a network lists and touches only its own.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
@@ -38,34 +36,16 @@ pub struct Device {
     pub image: String,
     pub port: u16,
     pub token: String,
-    /// The data folder of the network it's of, or "" if it was made before that was kept.
+    /// The data folder of the network it's of.
     pub home: String,
 }
 
-/// This network's data folder, and the containers made before `one.home` that it claimed.
-static OWNER: OnceLock<(String, BTreeSet<String>)> = OnceLock::new();
+/// This network's data folder.
+static OWNER: OnceLock<String> = OnceLock::new();
 
 /// Whether a container listed is this network's.
 fn ours(d: &Device) -> bool {
-    OWNER.get().is_some_and(|(home, claimed)| if d.home.is_empty() { claimed.contains(&d.name) } else { &d.home == home })
-}
-
-/// Learns which containers are this network's, claiming those without `one.home` the first time if `fresh` is false.
-fn own(rt: &dyn Containers, dir: &Path, fresh: bool) -> Result<()> {
-    let file = dir.join("claimed.json");
-    let claimed: BTreeSet<String> = match std::fs::read(&file) {
-        Ok(b) => serde_json::from_slice(&b)?,
-        Err(_) => {
-            let claimed = if fresh { BTreeSet::new() } else { rt.all()?.into_iter().filter(|d| d.home.is_empty()).map(|d| d.name).collect() };
-            std::fs::write(&file, serde_json::to_vec(&claimed)?)?;
-            if !claimed.is_empty() {
-                tracing::info!("claimed the devices made before networks were told apart: {claimed:?}");
-            }
-            claimed
-        }
-    };
-    let _ = OWNER.set((dir.to_string_lossy().to_string(), claimed));
-    Ok(())
+    OWNER.get().is_some_and(|home| &d.home == home)
 }
 
 impl Device {
@@ -75,7 +55,7 @@ impl Device {
 
     /// What its container carries.
     fn labels(&self) -> Vec<String> {
-        let home = OWNER.get().map(|(home, _)| home.as_str()).unwrap_or_default();
+        let home = OWNER.get().map(String::as_str).unwrap_or_default();
         let mut l = vec!["--label".into(), format!("one.port={}", self.port), "--label".into(), format!("one.token={}", self.token), "--label".into(), format!("one.home={home}")];
         if self.pool {
             l.extend(["--label".into(), "one.pool=1".into()]);
@@ -289,9 +269,8 @@ pub fn delete_all(dir: &Path) -> Result<()> {
 }
 
 pub fn runtime(dir: &Path) -> Result<Box<dyn Containers>> {
-    let fresh = std::fs::read_dir(dir).map_or(true, |mut d| d.next().is_none());
     let rt: Box<dyn Containers> = if cfg!(target_os = "macos") { Box::new(Apple::new(dir)?) } else { Box::new(Podman::new()?) };
-    own(rt.as_ref(), dir, fresh)?;
+    let _ = OWNER.set(dir.to_string_lossy().to_string());
     Ok(rt)
 }
 

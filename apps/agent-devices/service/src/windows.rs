@@ -620,7 +620,7 @@ pub fn monitor(v: &Vm, command: &str) -> Result<String> {
 
 impl Devices {
     /// Deletes each Windows device's bases that no copy is on and copies aren't made on now: one stopped since it was
-    /// taken, or one from before bases had folders (base.qcow2 and the rest beside its disk).
+    /// taken.
     pub(super) fn prune_bases(&self) {
         let _creating = self.creating.lock().unwrap(); // no copy is being made on one
         let all = self.vms();
@@ -632,12 +632,6 @@ impl Devices {
                 if d.path().is_dir() && d.file_name().to_string_lossy() != current.trim() && !on(&base.to_string_lossy()) {
                     tracing::info!("deleting a base of {} no copy is on", from.name);
                     let _ = std::fs::remove_dir_all(&base);
-                }
-            }
-            if from.file("base.qcow2").exists() && !on("") {
-                for f in ["base.qcow2", "base.qcow2.part", "base-vars.fd", "base-tpm", "base-state", "base-state.id"] {
-                    let p = from.file(f);
-                    let _ = if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) };
                 }
             }
         }
@@ -662,22 +656,18 @@ mod tests {
             std::fs::write(bases.join(generation).join("disk.qcow2"), b"").unwrap();
         }
         std::fs::write(bases.join("current"), "now").unwrap();
-        std::fs::write(lasting.file("base.qcow2"), b"").unwrap(); // from before bases had folders
         ds.save_vm(&lasting).unwrap();
         ds.save_vm(&Vm { name: "copy".into(), kind: "windows".into(), of: "win".into(), base: bases.join("used").to_string_lossy().into(), ..Default::default() }).unwrap();
-        ds.save_vm(&Vm { name: "old-copy".into(), kind: "windows".into(), of: "win".into(), ..Default::default() }).unwrap();
 
         ds.prune_bases();
         for (generation, kept) in [("used", true), ("now", true), ("stale", false)] {
             assert_eq!(bases.join(generation).exists(), kept, "base {generation}");
         }
-        assert!(lasting.file("base.qcow2").exists(), "the old base went while a copy is on it");
 
         ds.forget_vm("copy");
-        ds.forget_vm("old-copy");
         std::fs::remove_file(bases.join("current")).unwrap();
         ds.prune_bases();
-        for gone in [bases.join("used"), bases.join("now"), lasting.file("base.qcow2")] {
+        for gone in [bases.join("used"), bases.join("now")] {
             assert!(!gone.exists(), "{} stayed with no copy on it", gone.display());
         }
         let _ = std::fs::remove_dir_all(dir);
