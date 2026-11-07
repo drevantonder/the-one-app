@@ -24,8 +24,6 @@ pub struct Worker {
     pub entry: &'static str,
     /// Its Durable Object's class, if it keeps anything.
     pub class: Option<&'static str>,
-    /// A Durable Object class it had once, which its next upload deletes on Cloudflare.
-    pub deleted: &'static [&'static str],
     /// Where it's reached and the local port it listens on, if anywhere but by other Workers' bindings.
     place: Option<fn(&Settings) -> (&str, u16)>,
     /// Whether it runs the Cloudflare node's build, which carries its devices' endpoints.
@@ -42,17 +40,17 @@ pub struct Worker {
 /// Auth's Durable Object `Auth` holds every person's passkeys and accounts. The paths under `/api/auth` name the
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
-    Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), deleted: &[], place: Some(|s| (s.auth_url.as_str(), s.ports[0])), node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings },
-    Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings },
-    Worker { name: "signer", entry: "signer/worker.js", class: None, deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings },
-    Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), deleted: &[], place: None, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings },
-    Worker { name: "gateway", entry: "gateway/worker.js", class: None, deleted: &["Relay"], place: Some(|s| (s.address.as_str(), s.ports[1])), node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings },
-    Worker { name: "push", entry: "push/worker.js", class: Some("Push"), deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings },
+    Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), place: Some(|s| (s.auth_url.as_str(), s.ports[0])), node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings },
+    Worker { name: "relay", entry: "relay/worker.js", class: Some("Relay"), place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: relay_bindings },
+    Worker { name: "signer", entry: "signer/worker.js", class: None, place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: signer_bindings },
+    Worker { name: "mcp", entry: "mcp/worker.js", class: Some("Client"), place: None, node_build: true, serves_web: false, reads_bucket: true, bindings: mcp_bindings },
+    Worker { name: "gateway", entry: "gateway/worker.js", class: None, place: Some(|s| (s.address.as_str(), s.ports[1])), node_build: false, serves_web: true, reads_bucket: false, bindings: gateway_bindings },
+    Worker { name: "push", entry: "push/worker.js", class: Some("Push"), place: None, node_build: false, serves_web: false, reads_bucket: false, bindings: push_bindings },
 ];
 
 /// The Cloudflare node's Worker (`cloudflare/node/`), `<cli>-node`: no address, and an iroh endpoint of its own key, which
 /// the relay wakes. It's built with WebAssembly, so not one of `WORKERS`' (`node::modules`).
-pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
+pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
 
 impl Worker {
     pub fn named(name: &str) -> &'static Worker {
@@ -342,13 +340,6 @@ impl Settings {
     pub fn load_in(home: &Path) -> Result<Settings> {
         let path = Settings::path_in(home);
         let text = std::fs::read_to_string(&path).with_context(|| format!("this machine has no Cloudflare settings yet: {} cloudflare serve --address <url> runs the Workers here, and their settings are on the machine that deployed them", crate::config::CLI))?;
-        let text = if text.contains("\"sign_in_url\"") {
-            let migrated = text.replace("\"sign_in_url\"", "\"auth_url\"");
-            std::fs::write(&path, &migrated)?;
-            migrated
-        } else {
-            text
-        };
         let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't the Workers' settings", path.display()))?;
         settings.dir = home.to_path_buf();
         let dir = path.parent().unwrap();
@@ -368,12 +359,6 @@ impl Settings {
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
         settings.cloudflare_node_key = get("CLOUDFLARE_NODE_KEY").unwrap_or_default();
         settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
-        // Workers from before pushes had their own make their VAPID key now, kept as its other secrets are.
-        if !settings.push.contains_key("VAPID_KEY") {
-            let key = vapid_key();
-            settings.set_secret("VAPID_KEY", &key)?;
-            settings.push.insert("VAPID_KEY".into(), key);
-        }
         if settings.throwaway_person.is_none() && google() {
             settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
             ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
@@ -1153,8 +1138,7 @@ pub fn worker_name(name: &str) -> String {
 }
 
 /// What a Worker's upload says besides its module: its bindings (another service's by its Worker's name), its Durable
-/// Object class, and that class's migration the first time, or the migration that deletes a class it had (`migration`:
-/// the tag of the one the Worker has had).
+/// Object class, and that class's migration the first time (`migration`: the tag of the one the Worker has had).
 pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> (Value, bool) {
     let mut complete = true;
     let class = worker.class;
@@ -1190,11 +1174,6 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
     let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::app::runtime::COMPATIBILITY_DATE, "bindings": bindings });
     if let Some(class) = class.filter(|_| migration != Some("v1")) {
         meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
-    }
-    if class.is_none() && migration == Some("v1") {
-        if !worker.deleted.is_empty() {
-            meta["migrations"] = json!({ "old_tag": "v1", "new_tag": "v2", "deleted_classes": worker.deleted });
-        }
     }
     (meta, complete)
 }
