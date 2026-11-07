@@ -13,8 +13,8 @@ export const retryWait = (n) => (n === 0 ? 0 : Math.min(5000, 125 << Math.min(n,
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Only a device of theirs
-/// asks, of their nodes, itself, saying whose it is (`x-one-user`), which a node checks against the device its
-/// connection proves. Asked again for a few seconds while no node answers, as one restarting doesn't; a call carries an
+/// asks, of their nodes, itself (the keyring says whose it is, `x-one-user`, which a node checks against the device its
+/// connection proves). Asked again for a few seconds while no node answers, as one restarting doesn't; a call carries an
 /// id, so it runs once however often it's sent.
 export async function api(path, { method = "GET", body, query, raw, signal, since } = {}) {
   const url = new URL(path, location.origin);
@@ -49,7 +49,7 @@ async function sending(url, method, body, raw, signal, trace) {
     }
   };
   for (let misses = 0; ; ) {
-    const headers = { [HEADER.user]: user };
+    const headers = {};
     if (trace) headers[HEADER.trace] = "1";
     if (body !== undefined) headers["content-type"] = "application/json";
     const sent = body === undefined ? undefined : JSON.stringify(body);

@@ -90,7 +90,7 @@ async function start() {
   }
   setJoining(false);
   joined.done();
-  await refreshApps().catch(() => {});
+  await refreshApps().catch((err) => windowShowing() || showUnreachable(err instanceof NodeError ? err.message : UNANSWERED));
   if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
   listen();
   if (platform.panel) return;
