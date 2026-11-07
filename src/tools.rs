@@ -14,7 +14,7 @@ pub use files::{FILE_LIMIT, as_file, mime, read_file};
 pub use help::{forms, list, optional, usage};
 pub use mcp::{BUDGET, MCP_FILE_LIMIT, mcp_content, mcp_files, mcp_schema, mcp_tool, within_budget};
 pub use input::{Flags, input, split, takes};
-pub use run::{Reader, Run, SENDS, dispatch};
+pub use run::{Run, dispatch};
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use crate::api::Client;
 use crate::cli::{Failed, asked_yes};
 use crate::config::CLI;
+use crate::core_tools::Reader;
 
 use files::show;
 use help::help;

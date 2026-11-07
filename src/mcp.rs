@@ -289,7 +289,7 @@ fn listed(node: &Client) -> Result<Vec<Value>, Value> {
     let apps = node.apps().map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     // MCP Apps' own version of a tool wins.
     let drawn: Vec<Value> = apps::tools().iter().map(|t| t["name"].clone()).collect();
-    let core = crate::core_tools::usable(node).iter().flat_map(crate::core_tools::Feature::mcp_tools).filter(|t| !drawn.contains(&t["name"])).collect::<Vec<_>>();
+    let core = crate::core_tools::mcp_tools().into_iter().filter(|t| !drawn.contains(&t["name"])).collect::<Vec<_>>();
     let mut tools: Vec<Value> = std::iter::once(deploy_tool()).chain(core).collect();
     for app in &apps {
         let name = app["name"].as_str().unwrap_or("");
@@ -372,11 +372,11 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             Err(e) => failed(format!("{e:#}")),
         },
         _ => {
-            let ran = tools::dispatch(node, name, input, tools::Reader::Mcp, agent, None);
+            let ran = tools::dispatch(node, name, input, crate::core_tools::Reader::Mcp, agent, None);
             with_trace(
                 match ran.ok {
                     // A script gets an empty list as it is; an agent reading gets it in words.
-                    Ok(ok) => match name.split_once('_').filter(|_| ok == json!([])).and_then(|(app, tool)| tools::find(node, app, tool)).and_then(|(a, o)| tools::none_said(node, &a, &o, &ok, tools::Reader::Mcp)) {
+                    Ok(ok) => match name.split_once('_').filter(|_| ok == json!([])).and_then(|(app, tool)| tools::find(node, app, tool)).and_then(|(a, o)| tools::none_said(node, &a, &o, &ok, crate::core_tools::Reader::Mcp)) {
                         Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
                         None => json!({ "content": tools::mcp_content(node, &ok) }),
                     },

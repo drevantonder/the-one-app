@@ -444,9 +444,9 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
     assert!(a.fill_for_service("shell", &mut input, &me, Some("notes")).await.is_err() || !input.to_string().contains("s3cret"), "a service its item doesn't name gets none of it");
 }
 
-/// A client device's MCP request (the remote MCP server's, say) is answered as its person, never as the node's own: its
-/// tools run as them, with the keys they hand, and a tool needing keys they didn't hand is answered 428 with what it
-/// needs, for them to hand and ask again.
+/// A client device's MCP request (the remote MCP server's, say) is answered as its person, never as the node's own: it
+/// lists every tool any client does, its tools run as them, with what they may do and the keys they hand, and a tool
+/// needing keys they didn't hand is answered 428 with what it needs, for them to hand and ask again.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_devices_mcp_runs_as_its_person() {
     use one::api::client::{InProcess, Via};
@@ -477,11 +477,13 @@ async fn a_client_devices_mcp_runs_as_its_person() {
     assert!(said.contains("You act for Sam") && !said.contains("You act for Andre"), "{said}");
     let (_, listed) = mcp(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await;
     let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
-    assert!(names.contains(&"notes_post") && !names.contains(&"logs"), "a sign-in from elsewhere reads no device's log: {names:?}");
-    assert!(names.contains(&"vault_list") && names.contains(&"push_send") && !names.contains(&"devices_remove") && !names.contains(&"backups_now"), "their own Vault and Push, not this machine's Devices or Backups: {names:?}");
+    assert!(["notes_post", "vault_list", "push_send", "logs", "devices_remove", "backups_now"].iter().all(|n| names.contains(n)), "every client lists the same tools: {names:?}");
     let (status, vault) = mcp(json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "vault_list", "arguments": {} } })).await;
     assert!(status == 200 && vault["result"]["isError"] != true, "Sam uses his own Vault: {vault}");
-    let (_, devices) = mcp(json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "devices_remove", "arguments": { "device": "mac" } } })).await;
+    let (_, logs) = mcp(json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "logs", "arguments": { "device": a.device_name() } } })).await;
+    assert!(logs["result"]["isError"] == true && logs.to_string().contains("admin"), "Sam reads no log of Andre's device: {logs}");
+    // A node signs who can do what only as its own person's device, for its own programs: a device answers that itself.
+    let (_, devices) = mcp(json!({ "jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": { "name": "devices_remove", "arguments": { "device": "mac", "confirm": true } } })).await;
     assert!(devices["result"]["isError"] == true, "{devices}");
     let (status, needs) = mcp(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "notes_post", "arguments": { "text": "from Sam" } } })).await;
     assert_eq!(status, 428, "{needs}");

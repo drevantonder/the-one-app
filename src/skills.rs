@@ -8,7 +8,7 @@
 use serde_json::{Value, json};
 
 use crate::config::{CLI, NAME, REPO, YOURS};
-use crate::tools::SENDS;
+use crate::core_tools::SENDS;
 
 /// Claude Code keeps only the first 4,096 characters (UTF-16 units) of an MCP server's instructions; stay under them.
 pub const INSTRUCTIONS_LIMIT: usize = 4000;
@@ -280,10 +280,10 @@ pub enum Mode {
 
 impl Mode {
     /// Who reads a search's answer in this mode: an MCP client calling tools, or a script.
-    pub fn reader(self) -> crate::tools::Reader {
+    pub fn reader(self) -> crate::core_tools::Reader {
         match self {
-            Mode::All => crate::tools::Reader::Mcp,
-            Mode::Code => crate::tools::Reader::Code,
+            Mode::All => crate::core_tools::Reader::Mcp,
+            Mode::Code => crate::core_tools::Reader::Code,
         }
     }
 }

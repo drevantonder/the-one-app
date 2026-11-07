@@ -14,11 +14,12 @@ mod update;
 
 use one::api::Client;
 use one::{build, tools};
-use one::tools::SENDS;
+use one::core_tools::SENDS;
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
 fn commands() -> Vec<Command> {
-    use one::node::{apps, blobs, groups, services, storage, vault};
+    use one::core_tools::groups;
+    use one::node::{apps, blobs, services, storage, vault};
     vec![
         network::commands(),
         groups::commands(),
@@ -40,8 +41,8 @@ fn commands() -> Vec<Command> {
 }
 
 /// Every built-in command, with what it takes, then the core's tools as commands: `help all`.
-fn every_command(node: &Client) -> String {
-    let core = tools::forms(&one::core_tools::listed(node));
+fn every_command() -> String {
+    let core = tools::forms(&one::core_tools::listed());
     format!(
         "Usage:\n{}\nThe core's own tools, each a command as an app's tools are (--help after one says what it takes):\n{}\n{NAME} holds one network. For another context, run that context's own app.",
         one::cli::help(commands().iter().flat_map(|c| &c.help)),
@@ -162,7 +163,7 @@ fn own() -> Command {
                     println!("{}", help(g.node));
                     println!("\n{}", connection(g.node));
                 }
-                ["help", "all"] => println!("{}", every_command(g.node)),
+                ["help", "all"] => println!("{}", every_command()),
                 ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
                     None => bail!("{}", tools::unknown(g.node, rest[0], None, Some(g.commands))?),
@@ -186,7 +187,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     {
         return None;
     }
-    let (commands, core) = (commands(), tools::forms(&one::core_tools::listed(node)));
+    let (commands, core) = (commands(), tools::forms(&one::core_tools::listed()));
     let forms: Vec<&(String, String)> = commands.iter().flat_map(|c| &c.help).chain(&core).collect();
     // The forms for the most words given that have any: vault answer's, else every vault form.
     let starts = |n: usize| -> Vec<&(String, String)> { forms.iter().copied().filter(|(usage, _)| usage.split_whitespace().take(n).eq(typed[..n].iter().copied())).collect() };

@@ -75,7 +75,6 @@ pub mod code;
 pub mod mcp;
 #[cfg(feature = "node")]
 pub mod tools;
-#[cfg(feature = "node")]
 pub mod core_tools;
 pub mod app;
 #[cfg(feature = "node")]
@@ -109,5 +108,4 @@ pub mod web;
 pub mod state;
 #[cfg(feature = "sign-in-proof")]
 pub mod settings;
-pub mod settings_tools;
 pub mod vault;

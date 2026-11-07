@@ -5,7 +5,6 @@
 use crate::config::YOURS;
 use super::*;
 
-pub mod tools;
 pub(crate) mod routes;
 use crate::bucket::Bucket;
 use data_encoding::BASE64URL_NOPAD as B64U;

@@ -1,10 +1,9 @@
 //! Push's tools: notifications to the person's own devices, for agents (apps push with `ctx.notify`).
 
-use anyhow::{Result, bail};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
+use super::{Feature, Request, Tool, as_given};
 use crate::config::YOURS;
-use crate::core_tools::{Asked, Feature};
 
 pub fn feature() -> Feature {
     Feature {
@@ -13,15 +12,15 @@ pub fn feature() -> Feature {
         description: "Sends notifications to your devices".into(),
         guide: "Push sends a notification to every device of yours that gets them: push_send with a title and a body. An app pushes with ctx.notify, and tapping its push opens its screen. Each one is sealed to the device it's for, so nothing on the way reads it. It says how many devices it went to, never whether anyone saw it.".into(),
         tools: tools(),
-        elsewhere: true,
-        run,
+        #[cfg(feature = "node")]
+        steps: super::no_steps,
     }
 }
 
-fn tools() -> Vec<Value> {
+fn tools() -> Vec<Tool> {
     let none = json!({ "type": "object", "properties": {} });
     vec![
-        json!({ "name": "send", "description": "Push a notification to your devices: { title, body?, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many devices it went to.",
+        Tool::asks(json!({ "name": "send", "description": "Push a notification to your devices: { title, body?, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many devices it went to.",
             "input": { "type": "object", "required": ["title"], "properties": {
                 "title": { "type": "string", "description": "one line" },
                 "body": { "type": "string", "description": "the text under it" },
@@ -29,17 +28,8 @@ fn tools() -> Vec<Value> {
                 "screen": { "type": "string", "description": "the screen it opens" },
                 "params": { "type": "object", "description": "that screen's params" },
                 "badge": { "type": "integer", "description": "the number on the app's icon; 0 clears it" },
-            } } }),
-        json!({ "name": "devices", "reads": true, "description": "Your devices that get notifications.", "input": none }),
-        json!({ "name": "status", "reads": true, "description": format!("Which push services {YOURS} sends through: apns, fcm, wns, webpush."), "input": none }),
+            } } }), |input, _| Ok(Request::post("/v1/push/send", Value::Object(input.clone()))), as_given),
+        Tool::asks(json!({ "name": "devices", "reads": true, "description": "Your devices that get notifications.", "input": none }), |_, _| Ok(Request::get("/v1/push/devices")), as_given),
+        Tool::asks(json!({ "name": "status", "reads": true, "description": format!("Which push services {YOURS} sends through: apns, fcm, wns, webpush."), "input": none }), |_, _| Ok(Request::get("/v1/push/status")), as_given),
     ]
-}
-
-fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
-    match tool {
-        "send" => asked.node.post("/v1/push/send", Value::Object(input.clone())),
-        "devices" => asked.node.get("/v1/push/devices"),
-        "status" => asked.node.get("/v1/push/status"),
-        other => bail!("no tool push_{other}"),
-    }
 }

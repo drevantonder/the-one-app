@@ -126,7 +126,7 @@ pub fn asked_yes(command: &str) -> Result<bool> {
     if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
         return Ok(false);
     }
-    eprint!("{command} {}. Go ahead? [y/N] ", crate::tools::SENDS);
+    eprint!("{command} {}. Go ahead? [y/N] ", crate::core_tools::SENDS);
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
     if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes") {

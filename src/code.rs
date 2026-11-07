@@ -12,7 +12,8 @@ use crate::skills::{Mode, path, ts};
 use serde_json::{Value, json};
 
 use crate::api::Client;
-use crate::tools::{self, Reader};
+use crate::core_tools::Reader;
+use crate::tools;
 
 /// The core's tools, then every app added for this user that has tools, as `GET /v1/apps` gives them, with each
 /// tool's input as MCP takes it (files explained, `device` and `confirm` where they apply).
@@ -23,7 +24,7 @@ pub fn catalog(node: &Client) -> Result<Vec<Value>> {
 /// What a search looks through: `catalog`'s apps, then the apps the person could add, which have no tools for
 /// them yet: those not added where they are, nor deleted.
 pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
-    let (mut apps, mut addable) = (crate::core_tools::listed(node), Vec::new());
+    let (mut apps, mut addable) = (crate::core_tools::listed(), Vec::new());
     for mut app in node.apps()? {
         let tools: Vec<Value> = app["tools"]
             .as_array()
@@ -259,7 +260,7 @@ const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
 pub fn execute_tool() -> Value {
     json!({
         "name": "execute",
-        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what {} needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", tools::SENDS, LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
+        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what {} needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", crate::core_tools::SENDS, LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
         "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
         "annotations": crate::skills::hints(false, false),
     })

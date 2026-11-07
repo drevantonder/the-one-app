@@ -1,19 +1,119 @@
 //! The core's own tools: add's and remove's, the Vault's, Backups', Groups', Devices', Widgets', Push's and logs', each defined beside its
-//! feature and listed here. Agents use them as they use apps' tools, by the same kind of name (`vault_list`, `logs`), on
-//! the command line and over MCP; but they're not apps, so no list of apps has them. The client runs each against the
-//! API of the node it asks (`api::Client`), as the person, never on another device.
+//! feature's others and listed here, the one list. Agents use them as they use apps' tools, by the same kind of name
+//! (`vault_list`, `logs`), on the command line and over MCP; but they're not apps, so no list of apps has them. Every
+//! client lists and runs the same ones: who may do what is the person's rules, and the device's keys. Most are one
+//! request (`Runs::Asks`), which a client asks its node as its person, or answers itself when it changes who can do
+//! what (`settings::answered`), signing that as its person's device; so the remote MCP server's devices answer those
+//! themselves (cloudflare/node/src/clients.rs). The rest take several requests, or what's on the machine the command
+//! line runs on (`Runs::Steps`).
 
 use anyhow::Result;
 use serde_json::{Map, Value, json};
 
+pub mod apps;
+pub mod backups;
+pub mod devices;
+pub mod groups;
+pub mod push;
+pub mod vault;
+pub mod widgets;
+
+/// What a tool that needs the person's yes does, wherever it's said.
+pub const SENDS: &str = "sends or can't be undone";
+
+/// Who reads what a tool says, and names tools and inputs their own way: someone at the command line, an MCP client, or a
+/// code mode script.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Reader {
+    Cli,
+    Mcp,
+    Code,
+}
+
+impl Reader {
+    /// How this reader says the person agreed.
+    pub fn confirm(self) -> &'static str {
+        match self {
+            Reader::Cli => "--confirm",
+            Reader::Mcp | Reader::Code => "confirm: true",
+        }
+    }
+
+    /// What a tool that sends or can't be undone takes, as this reader gives it.
+    pub fn needs_confirm(self) -> String {
+        format!("It {SENDS}: give {} once the person agreed.", self.confirm())
+    }
+
+    /// The refusal of `tool`, which sends or can't be undone, given without the person's yes.
+    pub fn unconfirmed(self, tool: &str) -> String {
+        format!("{tool} {SENDS}, and the person hasn't agreed to it: ask them, and give {} only if they say yes to this very action", self.confirm())
+    }
+
+    /// Its name on a call, which the node keeps with who used each app.
+    pub fn client(self) -> &'static str {
+        match self {
+            Reader::Cli => "cli",
+            Reader::Mcp => "mcp",
+            Reader::Code => "code",
+        }
+    }
+}
+
 /// Who runs a core tool, and how.
 pub struct Asked<'a> {
-    pub node: &'a crate::api::Client,
     pub agent: Option<&'a str>,
-    pub reader: crate::tools::Reader,
+    pub reader: Reader,
     /// The person agreed to what it sends or can't undo (`confirm: true`, `--confirm`).
     pub confirmed: bool,
 }
+
+/// A request of a node's API.
+pub struct Request {
+    pub method: &'static str,
+    /// With its query, if any.
+    pub path: String,
+    pub body: Option<Value>,
+}
+
+impl Request {
+    pub fn get(path: impl Into<String>) -> Request {
+        Request { method: "GET", path: path.into(), body: None }
+    }
+
+    pub fn post(path: impl Into<String>, body: Value) -> Request {
+        Request { method: "POST", path: path.into(), body: Some(body) }
+    }
+}
+
+/// How a tool runs.
+pub enum Runs {
+    /// One request, made from its input, and what it says once that's answered.
+    Asks { request: fn(&Map<String, Value>, &Asked) -> Result<Request>, said: fn(&Map<String, Value>, Value) -> Result<Value> },
+    /// Several, or what's on the machine the command line runs on: its feature's `steps`.
+    Steps,
+}
+
+pub struct Tool {
+    /// As an app lists a tool (`GET /v1/apps`): named after `<feature>_`, or as the feature, for its one tool with a
+    /// command of its own (`logs`).
+    pub spec: Value,
+    pub runs: Runs,
+}
+
+impl Tool {
+    pub fn asks(spec: Value, request: fn(&Map<String, Value>, &Asked) -> Result<Request>, said: fn(&Map<String, Value>, Value) -> Result<Value>) -> Tool {
+        Tool { spec, runs: Runs::Asks { request, said } }
+    }
+
+    pub fn steps(spec: Value) -> Tool {
+        Tool { spec, runs: Runs::Steps }
+    }
+}
+
+/// Runs a feature's tool that takes several steps (`Runs::Steps`), by its name in the feature, on a client that asks a
+/// node.
+#[cfg(feature = "node")]
+pub type Steps = fn(tool: &str, input: &Map<String, Value>, asked: &Asked, node: &crate::api::Client) -> Result<Value>;
 
 /// One feature of the core, and its tools.
 pub struct Feature {
@@ -21,21 +121,17 @@ pub struct Feature {
     pub title: &'static str,
     pub description: String,
     pub guide: String,
-    /// Its tools as an app lists them (`GET /v1/apps`): each named after `<name>_`, or as the feature, for its one tool
-    /// with a command of its own (`logs`).
-    pub tools: Vec<Value>,
-    /// Whether someone signed in from elsewhere may use it, or only this machine's own person.
-    pub elsewhere: bool,
-    /// Runs one of its tools, by its name in `tools`.
-    pub run: fn(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value>,
+    pub tools: Vec<Tool>,
+    #[cfg(feature = "node")]
+    pub steps: Steps,
 }
 
 impl Feature {
     /// Its tools as the command line, MCP, search and skills read a set of tools, in the shape an app lists them with:
-    /// those named `<name>_<tool>`, since one named as the feature is its own command. They run here, on the client
+    /// those named `<name>_<tool>`, since one named as the feature is its own command. They run on the client
     /// (`runs`), never as a call on a device.
     pub fn listed(&self) -> Value {
-        let tools: Vec<&Value> = self.tools.iter().filter(|t| t["name"] != self.name).collect();
+        let tools: Vec<&Value> = self.tools.iter().map(|t| &t.spec).filter(|t| t["name"] != self.name).collect();
         json!({ "name": self.name, "title": self.title, "description": self.description, "instructions": self.guide, "tools": tools, "runs": "client" })
     }
 
@@ -46,48 +142,19 @@ impl Feature {
             t => format!("{}_{t}", self.name),
         }
     }
-
-    /// Its tools as MCP lists them.
-    pub fn mcp_tools(&self) -> Vec<Value> {
-        let set = self.listed();
-        self.tools.iter().map(|t| crate::tools::mcp_tool(&set, t, self.mcp_name(t))).collect()
-    }
-
-    /// Runs its tool `name` (as MCP names it).
-    pub fn run(&self, name: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
-        let tool = name.strip_prefix(self.name).and_then(|t| t.strip_prefix('_')).unwrap_or(name);
-        (self.run)(tool, input, asked)
-    }
 }
 
+/// Every feature's, in the order they're listed.
 pub fn all() -> Vec<Feature> {
-    use crate::node::{apps, backups, devices, groups, push, vault, widgets};
-    vec![apps::tools::add_feature(), apps::tools::remove_feature(), vault::tools::feature(), backups::tools::feature(), groups::feature(), devices::tools::feature(), widgets::feature(), push::tools::feature(), crate::logs::feature()]
+    vec![apps::add_feature(), apps::remove_feature(), vault::feature(), backups::feature(), groups::feature(), devices::feature(), widgets::feature(), push::feature(), crate::logs::feature()]
 }
 
-/// Those whoever `node` asks for may use: a feature that's this machine's own person's (`elsewhere: false`) isn't for
-/// someone signed in from elsewhere.
-pub fn usable(node: &crate::api::Client) -> Vec<Feature> {
-    all().into_iter().filter(|f| f.elsewhere || !node.elsewhere()).collect()
-}
-
-/// The feature with the tool `name` (as MCP names it), and the tool.
-pub fn find(name: &str) -> Option<(Feature, Value)> {
+/// The feature with the tool `name` (as MCP names it), and the tool's place in it.
+pub fn find(name: &str) -> Option<(Feature, usize)> {
     all().into_iter().find_map(|f| {
-        let tool = f.tools.iter().find(|t| f.mcp_name(t) == name)?.clone();
-        Some((f, tool))
+        let at = f.tools.iter().position(|t| f.mcp_name(&t.spec) == name)?;
+        Some((f, at))
     })
-}
-
-/// The core's tools whoever `node` asks for may use, as the command line, search and skills read a set of tools
-/// (`Feature::listed`), each feature with any.
-pub fn listed(node: &crate::api::Client) -> Vec<Value> {
-    usable(node).iter().map(Feature::listed).filter(|f| f["tools"].as_array().is_some_and(|t| !t.is_empty())).collect()
-}
-
-/// `listed`, then each app as `GET /v1/apps` gives it.
-pub fn and_apps(node: &crate::api::Client) -> Result<Vec<Value>> {
-    Ok([listed(node), node.apps()?].concat())
 }
 
 /// A string input, or what to give.
@@ -95,13 +162,17 @@ pub fn text<'a>(input: &'a Map<String, Value>, key: &str) -> Result<&'a str> {
     input.get(key).and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("give {key}"))
 }
 
-/// A time, for people: today's as its hour, else its date.
-pub fn say_time(ms: u64) -> String {
-    let Ok(t) = jiff::Timestamp::from_millisecond(ms as i64) else { return String::new() };
-    let tz = jiff::tz::TimeZone::system();
-    let (t, today) = (t.to_zoned(tz.clone()), jiff::Timestamp::now().to_zoned(tz));
-    match t.date() == today.date() {
-        true => t.strftime("today at %H:%M").to_string(),
-        false => t.strftime("%-d %b at %H:%M").to_string(),
-    }
+/// What an answer gives, as it is.
+pub fn as_given(_: &Map<String, Value>, answer: Value) -> Result<Value> {
+    Ok(answer)
 }
+
+/// What an answer's `said` field says.
+pub fn its_said(_: &Map<String, Value>, answer: Value) -> Result<Value> {
+    Ok(answer["said"].clone())
+}
+
+#[cfg(feature = "node")]
+mod run;
+#[cfg(feature = "node")]
+pub use run::{and_apps, listed, mcp_tools, no_steps, say_time};

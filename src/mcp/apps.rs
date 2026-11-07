@@ -45,7 +45,7 @@ pub fn tools() -> Vec<Value> {
     let ui = json!({ "ui": { "resourceUri": view_uri() } });
     vec![
         {
-            let mut show = crate::node::widgets::feature().mcp_tools().remove(0);
+            let mut show = crate::core_tools::widgets::feature().mcp_tools().remove(0);
             show["_meta"] = ui.clone();
             show
         },
@@ -88,7 +88,7 @@ pub fn tools() -> Vec<Value> {
 /// Answers `widgets_show` and `screens_open`; None for any other tool.
 pub fn call(node: &Client, name: &str, input: &Value) -> Option<Value> {
     let result = match name {
-        "widgets_show" => crate::node::widgets::show(input, node),
+        "widgets_show" => crate::core_tools::widgets::show(&input.as_object().cloned().unwrap_or_default(), node),
         "screens_open" => screen(node, input),
         "screens_icons" => icons(input),
         "screens_changes" => changes(node, input),

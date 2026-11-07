@@ -154,38 +154,54 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
     out.into()
 }
 
-/// The answer to an MCP client's call of a tool that changes who can do what (`one::settings_tools`), which the device
-/// answers itself, signing what it changes as its person's: a node signs that only for its own machine's programs.
-/// None for any other MCP message, which goes to a node.
+/// The answer to an MCP client's call of a core tool that's one request the device answers itself (`one::core_tools`,
+/// `one::settings::answered`): one that changes who can do what, which it signs as its person's, as any device does.
+/// None for any other MCP message, which goes to a node, as its person.
 async fn tool_here(keyring: &Keyring, client: &one_client::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, one_client::Error>> {
+    use one::core_tools::{Asked, Reader, Runs};
     let msg: Value = serde_json::from_slice(body).ok()?;
     if msg["method"] != "tools/call" {
         return None;
     }
-    let tool = one::settings_tools::find(msg["params"]["name"].as_str()?)?;
-    let input = msg["params"]["arguments"].as_object().cloned().unwrap_or_default();
-    let said = match (tool.asks)(&input) {
-        Err(why) => Err(why),
-        Ok((path, asked)) => {
-            let request = one_client::Request { method: "POST".into(), path: path.into(), headers: vec![("content-type".into(), "application/json".into())], body: asked.to_string().into_bytes().into() };
-            let response = match keyring.request(client, on, request, until, None).await {
-                Ok(r) => r,
-                Err(err) => return Some(Err(err)),
-            };
-            let status = response.status;
-            let answer: Value = response.body.bytes().await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-            match status {
-                200 => Ok((tool.said)(&input, &answer)),
-                _ => Err(answer["error"].as_str().map_or_else(|| format!("That wasn't done ({status})."), str::to_string)),
-            }
-        }
+    let name = msg["params"]["name"].as_str()?;
+    let (feature, at) = one::core_tools::find(name)?;
+    let tool = &feature.tools[at];
+    let Runs::Asks { request, said } = tool.runs else { return None };
+    let mut input = msg["params"]["arguments"].as_object().cloned().unwrap_or_default();
+    let confirmed = input.remove("confirm") == Some(json!(true));
+    let asked = Asked { agent: None, reader: Reader::Mcp, confirmed };
+    // One it can't make here, from what's on a machine (a file's path), a node makes.
+    let asks = request(&input, &asked).ok().filter(|r| one::settings::answered(r.path.split('?').next().unwrap_or("")))?;
+    if tool.spec["confirm"] == true && !confirmed {
+        return Some(Ok(result(&msg, Err(Reader::Mcp.unconfirmed(name)))));
+    }
+    let request = one_client::Request {
+        method: asks.method.into(),
+        path: asks.path,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body: asks.body.map(|b| b.to_string().into_bytes()).unwrap_or_default().into(),
     };
+    let response = match keyring.request(client, on, request, until, None).await {
+        Ok(r) => r,
+        Err(err) => return Some(Err(err)),
+    };
+    let status = response.status;
+    let answer: Value = response.body.bytes().await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let said = match status {
+        200 => said(&input, answer).map_err(|e| format!("{e:#}")),
+        _ => Err(answer["error"].as_str().map_or_else(|| format!("That wasn't done ({status})."), str::to_string)),
+    };
+    Some(Ok(result(&msg, said)))
+}
+
+/// An MCP answer to `msg` of what a tool said, as a node's MCP answers it: text as it is, anything else as JSON.
+fn result(msg: &Value, said: Result<Value, String>) -> Vec<u8> {
     let result = match said {
         Ok(Value::String(text)) => json!({ "content": [{ "type": "text", "text": text }] }),
         Ok(other) => json!({ "content": [{ "type": "text", "text": other.to_string() }] }),
         Err(text) => json!({ "isError": true, "content": [{ "type": "text", "text": text }] }),
     };
-    Some(Ok(json!({ "jsonrpc": "2.0", "id": msg["id"], "result": result }).to_string().into_bytes()))
+    json!({ "jsonrpc": "2.0", "id": msg["id"], "result": result }).to_string().into_bytes()
 }
 
 fn failed(err: &one_client::Error) -> JsValue {

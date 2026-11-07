@@ -11,7 +11,6 @@ use crate::vault::{Items, Lookup};
 use super::*;
 
 
-pub mod tools;
 pub mod cli;
 pub(crate) mod routes;
 
@@ -20,11 +19,6 @@ const VAULT: (&str, &str) = (scopes::APP, scopes::CoreDb::Vault.name());
 /// How an agent is told to ask the person for an item it may use: a request with no app is for agents, the person's own
 /// items, which they use with `vault_fetch`.
 pub const ASK_FOR_AGENTS: &str = "vault_request, leaving out app,";
-
-/// The app a request is for: the one given, else agents.
-pub fn request_app(app: Option<&str>) -> &str {
-    app.unwrap_or(scopes::AGENTS)
-}
 
 /// Whether an app added can declare what it needs: the agents and the Vault itself are not apps.
 fn declares_needs(app: &str) -> bool {

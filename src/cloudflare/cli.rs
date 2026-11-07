@@ -179,7 +179,7 @@ pub fn commands() -> Command {
                         None => node.state().ok().and_then(|s| s.user).filter(|u| u.name.eq_ignore_ascii_case(name)).map(|u| u.id),
                     };
                     let invite = node.post("/v1/invite-link", json!({ "name": name, "admin": g.has("admin"), "user": user, "email": g.flag("email") }))?;
-                    println!("{}", crate::node::devices::tools::invited_said(name, &invite));
+                    println!("{}", crate::core_tools::devices::invited(name, &invite));
                 }
                 ["cloudflare", "set", name, value] => {
                     let mut settings = crate::cloudflare::Settings::load()?;

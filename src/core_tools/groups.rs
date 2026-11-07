@@ -3,33 +3,42 @@
 use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
 
-use crate::cli::{Command, Given};
-use crate::config::{CLI, YOURS};
-use crate::core_tools::{Asked, Feature};
+use super::{Asked, Feature, Request, Tool};
+use crate::config::YOURS;
 use crate::state::State;
 
 pub fn feature() -> Feature {
     let guide = format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined. Each person and group has a handle, like andre or family, unique among them, which apps call them by (Repos' addresses are <handle>/<repo>); groups_handle changes yours, or a group's you're an admin of.");
-    Feature { name: "groups", title: "Groups", description: format!("Who's in {YOURS}, and in each of its groups"), guide, tools: tools(), elsewhere: true, run }
+    Feature { name: "groups", title: "Groups", description: format!("Who's in {YOURS}, and in each of its groups"), guide, tools: tools(), #[cfg(feature = "node")] steps: super::no_steps }
 }
 
-fn tools() -> Vec<Value> {
+fn tools() -> Vec<Tool> {
     vec![
-        json!({ "name": "list", "reads": true, "description": format!("The people in {YOURS}, you first, each with their handle, as admin or member; then every group with its handle: who's in it and who's invited but hasn't joined yet."), "input": { "type": "object", "properties": {} } }),
-        json!({ "name": "handle", "description": "Change your handle, or a group's you're an admin of: what every app calls you or it by, like Repos' addresses <handle>/<repo>, which move with it.", "input": { "type": "object", "required": ["handle"], "properties": { "handle": { "type": "string", "description": "lowercase letters, digits and single hyphens, up to 39, not taken by anyone or any group, like andre-v" }, "group": { "type": "string", "description": "a group's name or id, from groups_list; omit for your own" } } } }),
+        Tool::asks(json!({ "name": "list", "reads": true, "description": format!("The people in {YOURS}, you first, each with their handle, as admin or member; then every group with its handle: who's in it and who's invited but hasn't joined yet."), "input": { "type": "object", "properties": {} } }), |_, _| Ok(Request::get("/v1/state")), list_said),
+        Tool::asks(json!({ "name": "handle", "description": "Change your handle, or a group's you're an admin of: what every app calls you or it by, like Repos' addresses <handle>/<repo>, which move with it.", "input": { "type": "object", "required": ["handle"], "properties": { "handle": { "type": "string", "description": "lowercase letters, digits and single hyphens, up to 39, not taken by anyone or any group, like andre-v" }, "group": { "type": "string", "description": "a group's name or id, from groups_list; omit for your own" } } } }), handle, handle_said),
     ]
 }
 
-fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
-    match tool {
-        "list" => Ok(json!(said(&asked.node.state()?))),
-        "handle" => {
-            let handle = crate::settings_tools::HANDLE;
-            let (path, body) = (handle.asks)(input).map_err(anyhow::Error::msg)?;
-            Ok((handle.said)(input, &asked.node.post(path, body)?))
-        }
-        other => bail!("no tool groups_{other}"),
-    }
+fn list_said(_: &Map<String, Value>, state: Value) -> Result<Value> {
+    Ok(json!(said(&serde_json::from_value(state)?)))
+}
+
+fn handle(input: &Map<String, Value>, _: &Asked) -> Result<Request> {
+    let handle = super::text(input, "handle")?;
+    let group = match input.get("group") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(g)) => Some(g),
+        Some(_) => bail!("group is a group's name or id, from groups_list"),
+    };
+    Ok(Request::post("/v1/handle", json!({ "handle": handle, "group": group })))
+}
+
+fn handle_said(input: &Map<String, Value>, _: Value) -> Result<Value> {
+    let handle = input.get("handle").and_then(Value::as_str).unwrap_or("");
+    Ok(json!(match input.get("group").and_then(Value::as_str) {
+        Some(group) => format!("{group}'s handle is now {handle}."),
+        None => format!("Your handle is now {handle}."),
+    }))
 }
 
 /// A person or group as groups_list says them: their name, then their handle (`Andre @andre`).
@@ -77,7 +86,9 @@ pub fn said(state: &State) -> String {
 }
 
 /// Making and joining groups, which aren't tools yet: Settings › Groups does them.
-pub fn commands() -> Command {
+#[cfg(feature = "node")]
+pub fn commands() -> crate::cli::Command {
+    use crate::cli::Command;
     Command {
         help: vec![
             ("group create <name>".into(), "a group, with you as its admin".into()),
@@ -89,7 +100,9 @@ pub fn commands() -> Command {
     }
 }
 
-fn cli(g: &Given) -> Result<bool> {
+#[cfg(feature = "node")]
+fn cli(g: &crate::cli::Given) -> Result<bool> {
+    use crate::config::CLI;
     match g.words().as_slice() {
         ["group", "create", name @ ..] if !name.is_empty() => {
             let r = g.node.post("/v1/group", json!({ "name": name.join(" ") }))?;

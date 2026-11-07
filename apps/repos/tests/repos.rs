@@ -248,7 +248,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
 
     let pem = String::from_utf8(std::process::Command::new("openssl").args(["genrsa", "-traditional", "2048"]).output().unwrap().stdout).unwrap();
     let global = one::database::scopes::Scope::Global;
-    a.vault_grant(&me, &global, &a.device_name(), true).await.unwrap();
+    one::settings::answer(&a, "POST", "/v1/vault/grant", json!({ "scope": "global", "device": a.device_name() }).to_string().as_bytes()).await.unwrap().unwrap();
     a.set_item(&me, &global, json!({ "title": "GitHub App", "type": "GitHub App", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
         "app_id": { "value": "1" }, "slug": { "value": "app" }, "client_id": { "value": "Iv1" }, "client_secret": { "value": "s", "secret": true },
         "private_key": { "value": pem, "secret": true }, "web": { "value": base }, "api": { "value": format!("{base}/api/v3") } } })).await.unwrap();

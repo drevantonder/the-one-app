@@ -31,7 +31,8 @@ fn run(g: &Given) -> Result<bool> {
             } else if let Some(item) = g.flag("item") {
                 body["item"] = json!(item);
             } else {
-                let r = super::tools::request(g.node, id)?;
+                let asking = crate::core_tools::vault::asking_for(id);
+                let r = crate::core_tools::vault::the_request(id, g.node.get(&asking.path)?)?;
                 let mut text = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
                 let text = text.trim_end_matches(['\n', '\r']);
