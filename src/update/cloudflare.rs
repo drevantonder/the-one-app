@@ -58,7 +58,10 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
         };
         match said {
             Ok(r) if r["exit"] == one::cli::exit::NO_SETTINGS => {}
-            Ok(r) if r["exit"] == one::cli::exit::REFUSED => println!("  {name}: {}", r["stderr"].as_str().unwrap_or("").trim()),
+            Ok(r) if r["exit"] == one::cli::exit::REFUSED => {
+                let said = r["stderr"].as_str().unwrap_or("").trim();
+                println!("  {name}: {}", said.strip_prefix(&format!("{CLI}: ")).unwrap_or(said));
+            }
             Ok(r) if r["exit"] == 0 => {
                 deployed = true;
                 println!("  {name}: deployed to Cloudflare at {commit}");
