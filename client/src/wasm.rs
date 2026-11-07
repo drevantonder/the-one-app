@@ -349,6 +349,78 @@ impl Response {
     }
 }
 
+/// Signing in at the network's address as a browser does (`sign_in::Auth`), each request sent by `http.send(method,
+/// url, type, body)` (a promise of `{ status, body }`, the body as text): the page keeps its registration and tokens,
+/// and goes to auth and back itself. A refusal throws an Error with `signedOut` if auth refused its tokens.
+#[wasm_bindgen]
+pub struct SignIn {
+    auth: crate::sign_in::Auth,
+    http: crate::js::Js,
+}
+
+async fn sent(http: &crate::js::Js, r: crate::sign_in::Request) -> Result<(u16, serde_json::Value), crate::sign_in::Failed> {
+    let (kind, body) = r.body.map_or((JsValue::NULL, JsValue::NULL), |(kind, body)| (kind.into(), body.into()));
+    let got = http.ask("send", &[r.method.into(), r.url.into(), kind, body]).await.map_err(|e| crate::sign_in::failed(e.to_string()))?;
+    let status = js_sys::Reflect::get(&got, &"status".into()).ok().and_then(|s| s.as_f64()).unwrap_or(0.0) as u16;
+    let said = js_sys::Reflect::get(&got, &"body".into()).ok().and_then(|b| b.as_string()).and_then(|b| serde_json::from_str(&b).ok()).unwrap_or_default();
+    Ok((status, said))
+}
+
+fn thrown(f: crate::sign_in::Failed) -> JsValue {
+    let err = js_sys::Error::new(&f.message);
+    let _ = js_sys::Reflect::set(&err, &"signedOut".into(), &f.signed_out.into());
+    err.into()
+}
+
+fn tokens(t: crate::sign_in::Tokens) -> String {
+    serde_json::json!({ "access": t.access, "refresh": t.refresh, "expiresIn": t.expires_in }).to_string()
+}
+
+#[wasm_bindgen]
+impl SignIn {
+    /// The auth of the network at `address`, as its metadata says.
+    pub async fn at(address: String, http: JsValue) -> Result<SignIn, JsValue> {
+        let http = crate::js::Js(http);
+        let (status, meta) = sent(&http, crate::sign_in::metadata(&address)).await.unwrap_or((0, serde_json::Value::Null));
+        Ok(SignIn { auth: crate::sign_in::Auth::of(&address, status, meta).map_err(thrown)?, http })
+    }
+
+    /// Registers this browser, called `name`, coming back to `back` → its client id.
+    pub async fn register(&self, name: String, back: String) -> Result<String, JsValue> {
+        let (status, out) = sent(&self.http, self.auth.registration(&name, &back, false).map_err(thrown)?).await.map_err(thrown)?;
+        crate::sign_in::Auth::registered(status, &out).map_err(thrown)
+    }
+
+    /// An authorization for `client`, coming back to `back`, for the device `join` names → `{ url, asked }` as JSON,
+    /// `asked` for `finish` once it's back.
+    pub fn ask(&self, client: String, back: String, join: String) -> Result<String, JsValue> {
+        let asked = self.auth.ask(&client, &back, Some(&join));
+        Ok(serde_json::json!({ "url": self.auth.url(&asked).map_err(thrown)?, "asked": asked.to_json() }).to_string())
+    }
+
+    /// What came back (`got`, its query's fields as JSON) to `asked` (`ask`'s), exchanged for tokens → `{ access,
+    /// refresh, expiresIn }` as JSON.
+    pub async fn finish(&self, asked: String, got: String) -> Result<String, JsValue> {
+        let asked = serde_json::from_str(&asked).ok().and_then(|a| crate::sign_in::Asked::from_json(&a)).ok_or_else(|| thrown(crate::sign_in::failed("That sign-in didn’t start here. Sign in again.")))?;
+        let got: std::collections::HashMap<String, String> = serde_json::from_str(&got).unwrap_or_default();
+        let (status, out) = sent(&self.http, self.auth.finishing(&asked, &got).map_err(thrown)?).await.map_err(thrown)?;
+        crate::sign_in::Auth::granted(status, &out).map(tokens).map_err(thrown)
+    }
+
+    /// `client`'s refresh token exchanged for new tokens, as `finish` gives them.
+    pub async fn refresh(&self, client: String, refresh: String) -> Result<String, JsValue> {
+        let (status, out) = sent(&self.http, self.auth.refresh_grant(&client, &refresh).map_err(thrown)?).await.map_err(thrown)?;
+        crate::sign_in::Auth::granted(status, &out).map(tokens).map_err(thrown)
+    }
+
+    /// `client`'s refresh token revoked, so it opens nothing again.
+    pub async fn revoke(&self, client: String, refresh: String) {
+        if let Some(r) = self.auth.revocation(&client, &refresh) {
+            let _ = sent(&self.http, r).await;
+        }
+    }
+}
+
 /// What's read next after `name` (`stored::following`), as JSON.
 #[wasm_bindgen]
 pub fn following(name: &str, n: u32) -> String {

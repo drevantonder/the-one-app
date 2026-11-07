@@ -39,7 +39,6 @@ mod device;
 pub use device::{Device, join_of, new_secret, open_note};
 #[cfg(not(target_family = "wasm"))]
 pub use one::push;
-#[cfg(not(target_family = "wasm"))]
 pub mod sign_in;
 
 /// How long a connection to a node may take before the next is started alongside it: the first up is asked, and the

@@ -9,77 +9,36 @@ import { h, ui } from "./view.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-const random = (n) => b64u(crypto.getRandomValues(new Uint8Array(n)));
-
 const KEPT = "one.signin";
 const CLIENT = "one.client";
+/// Where auth sends this browser back to, signed in.
+const back = () => `${location.origin}/callback`;
 
+/// This browser as an OAuth client of its network's auth, each step one-client's (`sign_in`, in the worker, net.js's
+/// `auth`): its registration and tokens kept here.
 const auth = {
   kept: () => JSON.parse(localStorage.getItem(KEPT) || "null"),
-  keep: (tokens) => localStorage.setItem(KEPT, JSON.stringify(tokens)),
+  /// What a grant gave, kept: the refresh token before anything else can ask, as each works once.
+  keep: (t, was) => localStorage.setItem(KEPT, JSON.stringify({ access: t.access, refresh: t.refresh || was, until: Date.now() + t.expiresIn * 1000 })),
+  /// Its id as a client of auth, as it registered, coming back here.
+  client: () => ((kept) => (kept?.redirect === back() ? kept.id : null))(JSON.parse(localStorage.getItem(CLIENT) || "null")),
 
-  async meta() {
-    const r = await fetch("/.well-known/oauth-authorization-server");
-    if (!r.ok) throw new Error("Auth isn’t answering. Try again in a moment.");
-    return r.json();
-  },
-
-  /// This browser, as a client of auth: registered the first time it signs in.
-  async client(meta) {
-    const kept = JSON.parse(localStorage.getItem(CLIENT) || "null");
-    if (kept?.redirect === `${location.origin}/callback`) return kept.id;
-    const r = await fetch(meta.registration_endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        client_name: browserName(),
-        redirect_uris: [`${location.origin}/callback`],
-        token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-      }),
-    });
-    const out = await r.json().catch(() => ({}));
-    if (!r.ok || !out.client_id) throw new Error(out.error_description || out.message || "Couldn't start signing in. Try again.");
-    localStorage.setItem(CLIENT, JSON.stringify({ id: out.client_id, redirect: `${location.origin}/callback` }));
-    return out.client_id;
-  },
-
-  /// Off to auth's sign-in page, coming back to /callback, then to where this was.
+  /// Off to auth's sign-in page, registered the first time, coming back to /callback, then to where this was. The
+  /// device it signs in for (`join`) its sign-in then names, so the person's devices can let it in by it.
   async start() {
-    const meta = await auth.meta();
-    const client = await auth.client(meta);
-    const verifier = random(32), state = random(16);
-    const challenge = b64u(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
-    sessionStorage.setItem("one.pkce", JSON.stringify({ verifier, state, back: location.pathname + location.search }));
-    const q = new URLSearchParams({
-      response_type: "code", client_id: client, redirect_uri: `${location.origin}/callback`, scope: "openid profile offline_access",
-      code_challenge: challenge, code_challenge_method: "S256", state,
-      // The device it signs in for, which its sign-in then names, so the person's devices can let it in by it.
-      join: await signingInFor(),
-    });
-    location.href = `${meta.authorization_endpoint}?${q}`;
+    const out = await net.auth({ step: "start", name: browserName(), back: back(), client: auth.client(), join: await signingInFor() });
+    localStorage.setItem(CLIENT, JSON.stringify({ id: out.client, redirect: back() }));
+    sessionStorage.setItem("one.pkce", JSON.stringify({ asked: out.asked, back: location.pathname + location.search }));
+    location.href = out.url;
   },
 
   /// Back from signing in: the code becomes tokens. → where to go now.
   async finish() {
-    const q = new URLSearchParams(location.search);
     const pkce = JSON.parse(sessionStorage.getItem("one.pkce") || "null");
     sessionStorage.removeItem("one.pkce");
-    if (q.get("error")) throw new Error(q.get("error_description") || q.get("error"));
-    if (!pkce || q.get("state") !== pkce.state || !q.get("code")) throw new Error("That sign-in didn't start here. Sign in again.");
-    const meta = await auth.meta();
-    const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
-    auth.keep(await auth.grant(meta, { grant_type: "authorization_code", code: q.get("code"), redirect_uri: `${location.origin}/callback`, client_id: client, code_verifier: pkce.verifier }));
+    if (!pkce) throw new Error("That sign-in didn’t start here. Sign in again.");
+    auth.keep((await net.auth({ step: "finish", asked: pkce.asked, got: Object.fromEntries(new URLSearchParams(location.search)) })).tokens);
     return pkce.back && pkce.back !== "/callback" ? pkce.back : "/";
-  },
-
-  async grant(meta, fields) {
-    const r = await fetch(meta.token_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields) });
-    const out = await r.json().catch(() => ({}));
-    if (!r.ok || !out.access_token) throw Object.assign(new Error(out.error_description || out.error || "Signing in didn't work."), { signedOut: r.status === 400 || r.status === 401 });
-    return { access: out.access_token, refresh: out.refresh_token, until: Date.now() + (out.expires_in || 3600) * 1000 };
   },
 
   /// An access token good for a minute more, new from the refresh token if it's older: one tab at a time, since
@@ -91,12 +50,9 @@ const auth = {
       const kept = auth.kept();
       if (fresh(kept)) return kept.access;
       if (!kept?.refresh) throw Object.assign(new Error("Signed out."), { signedOut: true });
-      const meta = await auth.meta();
-      const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
       try {
-        const tokens = await auth.grant(meta, { grant_type: "refresh_token", refresh_token: kept.refresh, client_id: client });
-        auth.keep({ ...tokens, refresh: tokens.refresh || kept.refresh });
-        return tokens.access;
+        auth.keep((await net.auth({ step: "refresh", client: auth.client(), refresh: kept.refresh })).tokens, kept.refresh);
+        return auth.kept().access;
       } catch (err) {
         if (err.signedOut) localStorage.removeItem(KEPT);
         throw err;
@@ -117,13 +73,7 @@ const auth = {
   async signOut() {
     const kept = auth.kept();
     localStorage.removeItem(KEPT);
-    try {
-      const meta = await auth.meta();
-      const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
-      if (kept?.refresh && meta.revocation_endpoint) {
-        await fetch(meta.revocation_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: kept.refresh, token_type_hint: "refresh_token", client_id: client }) });
-      }
-    } catch {}
+    if (kept?.refresh) await net.auth({ step: "revoke", client: auth.client(), refresh: kept.refresh }).catch(() => {});
   },
 };
 

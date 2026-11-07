@@ -25,7 +25,7 @@ function received(m) {
   if (!w) return;
   if (m.error !== undefined) {
     waiting.delete(m.id);
-    const err = Object.assign(new Error(m.error), { trace: m.trace, notLetIn: m.notLetIn, code: m.code });
+    const err = Object.assign(new Error(m.error), { trace: m.trace, notLetIn: m.notLetIn, signedOut: m.signedOut, code: m.code });
     if (w.body) w.body.error(err);
     else w.reject(err);
   } else if (m.status !== undefined) {
@@ -181,6 +181,12 @@ export const net = {
   /// (`ranks`, a number by key), and the Cloudflare node's key (`wakes`), which the relay never says is on.
   nodes(user, nodes, ranks = {}, wakes = null) {
     if (net.has) send({ op: "nodes", user, nodes, ranks, wakes });
+  },
+
+  /// A step of signing in at the network's auth (net-worker.js's `auth`): `{ step, … }` → what it gave.
+  async auth(step) {
+    if (!net.has) throw new Error("This browser can’t sign in here: update it, and try again.");
+    return ask({ op: "auth", ...step });
   },
 
   /// Asks auth to let this browser in as `user`'s device, signed in with `token`, called `name` (and with someone new's

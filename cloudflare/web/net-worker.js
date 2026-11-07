@@ -13,7 +13,8 @@
 // A tab says `start` with its person; then each `fetch` is answered with its status and headers, its body's parts as
 // they come, and `done` (or `error`); `cancel` stops one. What changes who can do what is a `fetch` too, of the path a
 // node's route has, which the keyring answers itself, signing it (one-client's `settings`). `settle`, `renew` and `push`
-// are the rest a device does as itself; `ask` and `waited`, what it does before it's one, asking to be let in. `kept` gives what a call that only reads answered last (one-client's
+// are the rest a device does as itself; `ask` and `waited`, what it does before it's one, asking to be let in; and
+// `auth`, signing in. `kept` gives what a call that only reads answered last (one-client's
 // `answers`), and `forget` forgets what this device kept, as it signs out. `nodes` gives the order to ask nodes in, which is remembered; `reconnect`
 // starts a fresh endpoint, after the network came back.
 
@@ -350,6 +351,27 @@ export function server(version) {
             if (m.wakes && nodes.includes(m.wakes)) s?.client.wakes(m.wakes);
             return s?.client.nodes(nodes);
           }
+          // Signing in at the network's auth, a step at a time (one-client's `sign_in`): this browser registered (as
+          // `name`, coming back to `back`) unless it has its `client` id, and an authorization asked for (`start`); what
+          // came back exchanged for tokens (`finish`); its refresh token exchanged for new ones (`refresh`), or revoked.
+          case "auth": {
+            const { SignIn } = await glue;
+            const http = {
+              async send(method, url, type, body) {
+                const r = await fetch(url, { method, headers: type ? { "content-type": type } : {}, body: body ?? undefined });
+                return { status: r.status, body: await r.text() };
+              },
+            };
+            const auth = await SignIn.at(location.origin, http);
+            if (m.step === "start") {
+              const client = m.client || (await auth.register(m.name, m.back));
+              return post({ id, client, ...JSON.parse(auth.ask(client, m.back, m.join)) });
+            }
+            if (m.step === "finish") return post({ id, tokens: JSON.parse(await auth.finish(JSON.stringify(m.asked), JSON.stringify(m.got))) });
+            if (m.step === "refresh") return post({ id, tokens: JSON.parse(await auth.refresh(m.client, m.refresh)) });
+            await auth.revoke(m.client, m.refresh);
+            return post({ id });
+          }
           // Asking auth to let this browser in, and what auth says of it while it waits (one-client's `join`).
           case "ask": {
             await (await asking(m.user)).ask(m.token, m.name, m.invite ?? undefined);
@@ -413,7 +435,7 @@ export function server(version) {
           }
         }
       } catch (err) {
-        post({ id, error: String(err?.message || err), trace: err?.trace || "", notLetIn: !!err?.notLetIn, code: err?.code || undefined });
+        post({ id, error: String(err?.message || err), trace: err?.trace || "", notLetIn: !!err?.notLetIn, signedOut: !!err?.signedOut, code: err?.code || undefined });
       }
     };
   }
