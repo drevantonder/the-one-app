@@ -123,11 +123,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if tag.is_some() {
         for mac in &macs {
             let name = mac["name"].as_str().unwrap_or("");
-            if mac["online"] != true {
-                println!("  {name}: offline; run this again when it's back");
-                continue;
-            }
-            match shell(mac, &mac_job(&commit, config_commit.as_deref()), 60) {
+            match mac_shell(mac, &mac_job(&commit, config_commit.as_deref()), 60) {
                 Ok(r) if r["exit"] == 0 => started.push((mac.clone(), Instant::now())),
                 Ok(r) => println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim()),
                 Err(err) => println!("  {name}: couldn't start its build: {err:#}"),

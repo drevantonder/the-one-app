@@ -2,26 +2,50 @@
 
 use super::*;
 
+/// Runs `command` on a Mac over Shell, or when the network doesn't see it online, over ssh by its name: a Mac on a build
+/// too old to speak the network's current messages is never seen online, and only this can bring it up to date.
+pub(super) fn mac_shell(mac: &Value, command: &str, timeout: u64) -> Result<Value> {
+    if mac["online"] == true {
+        return shell(mac, command, timeout);
+    }
+    let name = mac["name"].as_str().unwrap_or("");
+    // The script goes in whole, so what it runs can't read the rest of it.
+    let mut ssh = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", name, r#"sh -c "$(cat)""#])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("ssh {name}"))?;
+    std::io::Write::write_all(&mut ssh.stdin.take().context("ssh has no stdin")?, command.as_bytes())?;
+    let out = ssh.wait_with_output()?;
+    ensure!(out.status.code() != Some(255), "{}", String::from_utf8_lossy(&out.stderr).trim());
+    Ok(json!({ "exit": out.status.code().unwrap_or(1), "stdout": String::from_utf8_lossy(&out.stdout), "stderr": String::from_utf8_lossy(&out.stderr) }))
+}
+
 /// Has each Mac build `commit`'s app now, instead of anything older it's building, then the iPhone app, for the iPhone it
 /// reaches; says what its last builds did. True if a Mac was missed.
 pub(super) fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
     let mut missed = false;
     for mac in macs {
         let name = mac["name"].as_str().unwrap_or("");
-        if mac["online"] != true {
-            println!("  {name}: offline; run this again when it's back");
-            missed = true;
-            continue;
-        }
-        match shell(mac, &mac_follow(commit, config_commit), 60) {
-            Ok(r) if r["exit"] == 0 => {
+        match mac_shell(mac, &mac_follow(commit, config_commit), 60) {
+            Ok(r) => {
                 for line in r["stdout"].as_str().unwrap_or("").lines() {
                     if line.starts_with(' ') { println!("  {line}") } else { println!("  {name}: {line}") }
                 }
+                // It says why itself when it has no room to build.
+                if r["exit"] != 0 {
+                    missed = true;
+                    let why = r["stderr"].as_str().unwrap_or("").trim();
+                    if !why.is_empty() {
+                        println!("  {name}: couldn't start its build: {why}");
+                    }
+                }
             }
-            Ok(r) => {
+            Err(err) if mac["online"] != true => {
                 missed = true;
-                println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim());
+                println!("  {name}: the network doesn't see it, and ssh {name} doesn't answer either ({err:#}); run this again when it's back");
             }
             Err(err) => {
                 missed = true;
@@ -38,6 +62,8 @@ pub(super) struct MacSaid {
     pub(super) tried: String,
     pub(super) built: String,
     pub(super) failed_log: Option<String>,
+    /// Why it can't build for lack of disk, as `disk.sh check` says it, while it still can't.
+    pub(super) no_room: Option<String>,
     pub(super) phone: Option<String>,
 }
 
@@ -45,11 +71,13 @@ pub(super) fn mac_said(mac: &Value) -> Option<MacSaid> {
     let script = format!(
         r#"c="$HOME/Library/Caches/{CLI}"
 for f in want built tried phone.built phone.installed phone.failed; do printf '%s=%s\n' "$f" "$(cat "$c/$f" 2>/dev/null)"; done
-echo ---; tail -n 8 "$c/failed.log" 2>/dev/null"#
+echo ---; tail -n 8 "$c/failed.log" 2>/dev/null
+echo ---; if [ -f "$c/space" ]; then (cd "$c/src" && sh "$c/disk.sh" check) || exit 0; rm -f "$c/space"; fi"#
     );
-    let r = shell(mac, &script, 30).ok().filter(|r| r["exit"] == 0)?;
+    let r = mac_shell(mac, &script, 30).ok().filter(|r| r["exit"] == 0)?;
     let out = r["stdout"].as_str()?;
-    let (values, log) = out.split_once("---\n")?;
+    let (values, rest) = out.split_once("---\n")?;
+    let (log, space) = rest.split_once("---\n")?;
     let get = |key: &str| values.lines().find_map(|l| l.strip_prefix(&format!("{key}="))).unwrap_or("").trim().to_string();
     let commit_of = |v: String| v.split(' ').next().unwrap_or("").to_string();
     let (want, tried, built) = (commit_of(get("want")), commit_of(get("tried")), commit_of(get("built")));
@@ -63,7 +91,8 @@ echo ---; tail -n 8 "$c/failed.log" 2>/dev/null"#
     };
     // Failed: the last thing it was asked is what it tried, and that isn't what it built (a newer ask would differ).
     let failed = !tried.is_empty() && tried == want && tried != built;
-    Some(MacSaid { failed_log: failed.then(|| log.trim_end().to_string()), want, tried, built, phone })
+    let no_room = Some(space.trim_end().to_string()).filter(|s| !s.is_empty());
+    Some(MacSaid { failed_log: failed.then(|| log.trim_end().to_string()), no_room, want, tried, built, phone })
 }
 
 impl MacSaid {
@@ -150,6 +179,9 @@ last=$(cat "$c/phone.built" 2>/dev/null || true)
 if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- . ':!client/native/mac' ':!client/native/windows' ':!client/native/android' ':!service' ':!apps' ':!docs' ':!tests' ':!*.md' 2>/dev/null; then exit 3; fi
 CONFIG="$config" client/native/disk.sh retry client/native/iphone/build.sh device "$c/phone"
 JOB
+put disk.sh <<'JOB'
+{disk}
+JOB
 put follow.sh <<'JOB'
 # launchd runs this in the login shell, zsh on a Mac; the job control it uses is bash's.
 [ -n "$BASH_VERSION" ] || exec /bin/bash "$0" "$@"
@@ -206,8 +238,16 @@ JOB
 echo "{commit} {config}" > want
 pid=$(launchctl list | awk -v l="$label" '$3 == l {{ print $1 }}')
 if [ -n "$pid" ] && [ "$pid" != "-" ]; then exit 0; fi
+# Nothing builds now, so what a build left can go; and a Mac with no room says so now, which its build would only fail at.
+rm -f space
+if [ -d src ]; then
+	st=0; (cd src && sh "$c/disk.sh" prune) > prune.out 2>&1 || st=$?
+	cat prune.out
+	if [ $st != 0 ]; then cp prune.out space; exit 1; fi
+fi
 {start}"#,
         config = config_commit.unwrap_or(""),
+        disk = include_str!("../../client/native/disk.sh"),
         checkout = mac_checkout("$1", "${2:-}"),
         start = mac_start("follow.sh")
     )
@@ -259,13 +299,13 @@ pub(super) fn await_mac(mac: &Value) -> Result<(Vec<(String, String)>, Vec<Strin
     let status = loop {
         ensure!(Instant::now() < deadline, "its build took more than 30 minutes");
         std::thread::sleep(Duration::from_secs(5));
-        if let Ok(r) = shell(mac, &poll, 30)
+        if let Ok(r) = mac_shell(mac, &poll, 30)
             && let Some(code) = r["stdout"].as_str().and_then(|s| s.trim().parse::<i32>().ok())
         {
             break code;
         }
     };
-    let report = shell(mac, &format!(r#"c="$HOME/Library/Caches/{CLI}"; launchctl bootout "gui/$(id -u)/app.{CLI}.update" 2>/dev/null; cat "$c/assets.txt" 2>/dev/null; echo ---; grep '^warning: ' "$c/update.log"; tail -n 25 "$c/update.log""#), 30)?;
+    let report = mac_shell(mac, &format!(r#"c="$HOME/Library/Caches/{CLI}"; launchctl bootout "gui/$(id -u)/app.{CLI}.update" 2>/dev/null; cat "$c/assets.txt" 2>/dev/null; echo ---; grep '^warning: ' "$c/update.log"; tail -n 25 "$c/update.log""#), 30)?;
     let out = report["stdout"].as_str().unwrap_or("");
     let (made, log) = out.split_once("---\n").unwrap_or(("", out));
     if status != 0 {

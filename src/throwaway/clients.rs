@@ -11,7 +11,7 @@ use super::devices::{agent_devices, borrowed_for, devices, listed_devices};
 use super::network::client_session;
 
 mod android;
-mod apple;
+pub(super) mod apple;
 mod cli;
 mod linux;
 mod web;

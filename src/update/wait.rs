@@ -113,7 +113,7 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
             let mac = d["target"].as_str().is_some_and(|t| Platform::is_mac(t));
             let mut said = None;
             let running = has(commit, build, &mut fetched);
-            if mac && d["online"] == true && asked.get(key).is_none_or(|t| t.elapsed() > Duration::from_secs(6)) {
+            if mac && asked.get(key).is_none_or(|t| t.elapsed() > Duration::from_secs(6)) {
                 asked.insert(key.clone(), Instant::now());
                 said = mac_said(d);
                 if let Some(phone) = said.as_ref().and_then(|s| s.phone.clone()) {
@@ -146,6 +146,15 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
                 return true;
             }
             if let Some(s) = said.as_ref() {
+                if let Some(why) = &s.no_room {
+                    failed = true;
+                    let mut lines = why.lines();
+                    println!("  {name}: {}", lines.next().unwrap_or(""));
+                    for line in lines {
+                        println!("      {line}");
+                    }
+                    return false;
+                }
                 if let Some(log) = &s.failed_log {
                     failed = true;
                     println!("  {name}: its build of {} failed: the end of its log, ~/Library/Caches/{CLI}/update.log on {name}, is", &s.tried[..s.tried.len().min(12)]);
@@ -157,7 +166,9 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
                     }
                     return false;
                 }
-                reasons.insert(key.clone(), s.waiting_for(commit, short, build, &mut fetched));
+                let waiting = s.waiting_for(commit, short, build, &mut fetched);
+                let seen = if d["online"] == true { String::new() } else { format!("not seen on the network (a build too old to speak its messages isn't), so {CLI} update reaches it by ssh: ") };
+                reasons.insert(key.clone(), format!("{seen}{waiting}"));
             } else if d["online"] != true {
                 reasons.insert(key.clone(), format!("offline, on {build}; it updates itself when it's back"));
             } else if !mac {

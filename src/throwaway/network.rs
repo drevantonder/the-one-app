@@ -259,16 +259,8 @@ pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
         std::fs::write(dir.join("pids"), kept)?;
     }
     let _ = std::fs::remove_file(dir.join("pid"));
-    // The Mac app it started there (`client mac`), and the simulator it made there for the iPhone app (`client iphone`).
-    if clients && let Ok(host) = std::fs::read_to_string(dir.join("mac")) {
-        let job = format!("gui/$(id -u)/app.{CLI}.mac.throwaway");
-        let _ = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host.trim(), &format!("launchctl bootout {job}")]).output();
-        let _ = std::fs::remove_file(dir.join("mac"));
-    }
-    if clients && let Ok(host) = std::fs::read_to_string(dir.join("iphone")) {
-        let sim = format!("'{CLI} throwaway'");
-        let _ = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host.trim(), &format!("xcrun simctl shutdown {sim}; xcrun simctl delete {sim}")]).output();
-        let _ = std::fs::remove_file(dir.join("iphone"));
+    if clients {
+        super::clients::apple::stop(dir, delete);
     }
     if delete {
         // Its Linux devices, borrowed or spare, are its own containers on the machine's runtime, outside its folder.

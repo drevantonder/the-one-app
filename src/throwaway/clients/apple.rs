@@ -17,7 +17,6 @@ use super::super::network::spawn;
 pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool) -> Result<()> {
     let address = settings.address.as_str();
     let host = std::env::var("MAC").unwrap_or_else(|_| "mac".into());
-    std::fs::write(dir.join(if iphone { "iphone" } else { "mac" }), &host)?;
     let ssh = |command: &str| -> Result<String> {
         let out = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", &host, command]).output()?;
         anyhow::ensure!(out.status.success(), "on {host}: {command}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -25,6 +24,8 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     };
     // This checkout as it is now, tracked and new files, in the Mac's cache, where its builds stay between runs.
     let there = format!("Library/Caches/{CLI}/throwaway-{}", checkout.file_name().unwrap_or_default().to_string_lossy());
+    // What `stop` takes down there: this host's, and the copy's folder, which it deletes.
+    std::fs::write(dir.join(if iphone { "iphone" } else { "mac" }), format!("{host} {there}"))?;
     eprintln!("Copying this checkout to {host}:~/{there}…");
     let copied = std::process::Command::new("sh")
         .arg("-c")
@@ -32,8 +33,11 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         .current_dir(checkout)
         .status()?;
     anyhow::ensure!(copied.success(), "couldn't copy this checkout to {host}");
-    // The throwaway network's address and its bucket, at the same ports on the Mac, for as long as it runs.
+    // The copy says which port is its network's: it's in use while that port answers there, through the forward below, and
+    // the next throwaway or update on that Mac deletes it once it doesn't.
     let port = |a: &str| a.trim().rsplit_once(':').and_then(|(_, p)| p.trim_end_matches('/').parse::<u16>().ok());
+    ssh(&format!("echo {} > {there}/.throwaway-port && cd {there} && client/native/disk.sh sweep", port(address).unwrap_or_default()))?;
+    // The throwaway network's address and its bucket, at the same ports on the Mac, for as long as it runs.
     let mut forward = vec!["-N".to_string(), "-o".into(), "BatchMode=yes".into(), "-o".into(), "ExitOnForwardFailure=yes".into()];
     for p in [port(address), std::fs::read_to_string(dir.join("bucket-addr")).ok().as_deref().and_then(port)].into_iter().flatten() {
         forward.extend(["-R".to_string(), format!("{p}:127.0.0.1:{p}")]);
@@ -112,4 +116,22 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
   What it said: {host}:{log}; {CLI} throwaway stop stops it"
     );
     Ok(())
+}
+
+/// Takes down what `client mac` and `client iphone` started on the Mac: the Mac app, and the iPhone app's simulator, and
+/// with `delete`, the copy of this checkout they were built from.
+pub(crate) fn stop(dir: &Path, delete: bool) {
+    let on = |file: &str, mut command: String| {
+        let Ok(said) = std::fs::read_to_string(dir.join(file)) else { return };
+        let mut words = said.split_whitespace();
+        let host = words.next().unwrap_or_default();
+        if delete && let Some(there) = words.next() {
+            command += &format!("; rm -rf {}", shell_quote(there));
+        }
+        let _ = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, &command]).output();
+        let _ = std::fs::remove_file(dir.join(file));
+    };
+    on("mac", format!("launchctl bootout gui/$(id -u)/app.{CLI}.mac.throwaway"));
+    let sim = format!("'{CLI} throwaway'");
+    on("iphone", format!("xcrun simctl shutdown {sim}; xcrun simctl delete {sim}"));
 }
