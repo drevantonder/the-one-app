@@ -2,12 +2,15 @@
 
 use super::*;
 
-/// Deploys to Cloudflare, with the build being sent out (`commit`), from the one of `linux` that is the Workers' home
+/// Deploys to Cloudflare, with the build being sent out (`commit`), from the one of this person's Linux devices that is the Workers' home
 /// (`Settings::at_home`; another refuses, which says so and is passed over): only there are its secrets
 /// (`cloudflare deploy` in its home's cloudflare/). It waits for each to run that build, so it never
 /// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every network
 /// has its Workers on Cloudflare, so it fails if no device deployed them. True if it failed.
-pub(super) fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
+pub(super) fn deploy_cloudflare(commit: &str) -> bool {
+    // As they are now, not before the nodes restarted onto this build: a device that was away then may be back, and the
+    // Workers' home must not be left out because the list is old.
+    let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
     let home = format!("${{{}:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", one::config::env("HOME"));
     // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent out:
     // `exit::NOT_YET` says it isn't yet, `exit::NO_SETTINGS` that this device has none to deploy. Shell's program, which runs this on another
@@ -23,7 +26,8 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
         no_settings = one::cli::exit::NO_SETTINGS,
         not_yet = one::cli::exit::NOT_YET,
     );
-    let (here, others): (Vec<&Value>, Vec<&Value>) = linux.iter().filter(|d| d["online"] == true).partition(|d| d["here"] == true);
+    let (online, offline): (Vec<&Value>, Vec<&Value>) = linux.iter().partition(|d| d["online"] == true);
+    let (here, others): (Vec<&Value>, Vec<&Value>) = online.into_iter().partition(|d| d["here"] == true);
     let (mut failed, mut deployed) = (false, false);
     // This device first: if its settings are here, nothing is asked of another's Shell.
     for device in here.into_iter().chain(others) {
@@ -32,6 +36,7 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
         }
         let name = device["name"].as_str().unwrap_or("");
         let local = device["here"] == true;
+        println!("  {name}: deploying to Cloudflare");
         let deadline = Instant::now() + Duration::from_secs(180);
         let mut failures = 0;
         let said = loop {
@@ -70,7 +75,9 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
         }
     }
     if !deployed && !failed {
-        println!("  no device deployed to Cloudflare: none of them online has the settings");
+        let away: Vec<&str> = offline.iter().filter_map(|d| d["name"].as_str()).collect();
+        let away = if away.is_empty() { String::new() } else { format!(" ({} offline: run {CLI} update again when it's back)", away.join(", ")) };
+        println!("  no device deployed to Cloudflare: none of the online ones has the settings{away}");
     }
     failed || !deployed
 }

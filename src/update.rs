@@ -192,7 +192,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
     }
     add_where(&moved);
-    let cloudflare_failed = timed("deployed to Cloudflare", || deploy_cloudflare(&linux, short));
+    let cloudflare_failed = timed("deployed to Cloudflare", || deploy_cloudflare(short));
 
     let Some(tag) = tag else {
         if !macs.is_empty() {
