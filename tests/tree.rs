@@ -31,6 +31,29 @@ fn what_runs_in_wasm_builds() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// The native app (`client/native`, its own workspace that `cargo test` and `cargo build` never build) compiles for this
+/// machine's platform (Linux's Tauri build here) and, where the Android NDK is, for Android's arm64. Apple's targets only
+/// build on a Mac, so the iPhone's Rust and Swift are left to `iphone/build.sh`. It has its own target folder, so this
+/// neither waits on nor rebuilds the main workspace; warm, with nothing changed, it takes under a second.
+#[test]
+fn the_native_app_builds() {
+    let native = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../client/native"));
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let check = |args: &[&str], envs: &[(String, std::path::PathBuf)]| {
+        let out = std::process::Command::new(&cargo).args(["check", "--quiet"]).args(args).envs(envs.iter().map(|(k, v)| (k, v))).current_dir(native).output().expect("cargo check");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    };
+    check(&[], &[]);
+
+    // The NDK's compilers, which the C in the app's dependencies is built with, as `android/build.sh` finds them.
+    let sdk = std::env::var_os("ANDROID_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("HOME").unwrap()).join("Android/Sdk"));
+    let Some(bin) = std::fs::read_dir(sdk.join("ndk")).ok().and_then(|ndks| ndks.filter_map(Result::ok).map(|e| e.path()).max()).and_then(|ndk| std::fs::read_dir(ndk.join("toolchains/llvm/prebuilt")).ok()?.next()?.ok().map(|e| e.path().join("bin"))) else {
+        return;
+    };
+    let target = "aarch64-linux-android";
+    check(&["--lib", "--target", target], &[("CC_aarch64_linux_android".into(), bin.join(format!("{target}29-clang"))), ("AR_aarch64_linux_android".into(), bin.join("llvm-ar"))]);
+}
+
 /// The relay Worker runs a WebAssembly build of iroh-relay's protocol that `cloudflare/relay/build.sh` makes by hand from
 /// `relay/protos/` and commits: editing the sources without building, or moving the nodes to another iroh-relay than the
 /// files were copied from, leaves a relay that speaks something else than the nodes do.
