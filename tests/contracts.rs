@@ -365,96 +365,39 @@ fn the_service_worker_opens_notes_as_rust_does() {
     assert!(push::open_note(&secret, &keys::seal_to(&public, &serde_json::to_vec(&forged).unwrap()).unwrap()).is_err(), "Rust refuses the same");
 }
 
-/// A service answers its node in the words of `service/wire.json`, in whatever language it's written: registering what's
-/// about its machine, taking calls and answering with `ok`, `error` or `elsewhere`, registering again when its node
-/// forgets it, always with the token in its home. The node here is the real registry (`one::services`) behind its routes.
-/// Rust's Shell and Go's WhatsApp run as programs; the Swift helpers are held to the same file by `swift test` in
-/// `service/swift`, which needs a Mac.
+/// A service answers its node in the words of `service/wire.json`, in whatever language it's written: started as its
+/// endpoint starts it, registering what's about its machine, taking calls and answering with `ok`, `error` or
+/// `elsewhere`, registering again when its endpoint forgets it, always with the token in its home. What it talks to is
+/// the endpoint's own registry and routes (`one::services::Registry`). Rust's Shell and Go's WhatsApp run as programs;
+/// the Swift helpers are held to the same file by `swift test` in `service/swift`, which needs a Mac.
 mod service_protocol {
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::time::Duration;
 
-    use axum::extract::{Path as UrlPath, State};
-    use axum::http::{HeaderMap, StatusCode};
-    use axum::response::{IntoResponse, Response};
-    use axum::routing::{get, post};
-    use axum::{Json, Router};
+    use one::services::{Call, Elsewhere, Registry};
     use one::state::Me;
-    use one::services::{Call, Elsewhere, Services};
     use serde_json::{Value, json};
 
     const TOKEN: &str = "a token in the service's home";
 
-    struct Node {
-        services: Services,
-        /// How many times a service registered, and the requests that came without the token.
-        registered: tokio::sync::watch::Sender<usize>,
-        refused: Mutex<Vec<String>>,
-    }
-
-    type Shared = State<Arc<Node>>;
-
-    fn answered(node: &Node, headers: &HeaderMap, what: &str) -> Option<Response> {
-        if headers.get("x-one-local-token").and_then(|t| t.to_str().ok()) == Some(TOKEN) {
-            return None;
-        }
-        node.refused.lock().unwrap().push(what.to_string());
-        Some((StatusCode::UNAUTHORIZED, Json(json!({ "error": "send the local token" }))).into_response())
-    }
-
-    async fn register(State(node): Shared, headers: HeaderMap, UrlPath(app): UrlPath<String>, Json(describe): Json<Value>) -> Response {
-        if let Some(refused) = answered(&node, &headers, "register") {
-            return refused;
-        }
-        node.services.register(&app, describe);
-        node.registered.send_modify(|n| *n += 1);
-        Json(json!({})).into_response()
-    }
-
-    async fn next(State(node): Shared, headers: HeaderMap, UrlPath(app): UrlPath<String>) -> Response {
-        if let Some(refused) = answered(&node, &headers, "poll") {
-            return refused;
-        }
-        match node.services.next(&app).await {
-            Ok(Some(call)) => Json(call).into_response(),
-            Ok(None) => StatusCode::NO_CONTENT.into_response(),
-            Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{err:#}") }))).into_response(),
-        }
-    }
-
-    async fn reply(State(node): Shared, headers: HeaderMap, UrlPath((app, id)): UrlPath<(String, u64)>, Json(body): Json<Value>) -> Response {
-        if let Some(refused) = answered(&node, &headers, "reply") {
-            return refused;
-        }
-        match node.services.reply(&app, id, body) {
-            Ok(()) => Json(json!({})).into_response(),
-            Err(err) => (StatusCode::NOT_FOUND, Json(json!({ "error": format!("{err:#}") }))).into_response(),
-        }
-    }
-
-    /// A node's registry behind its routes, on a runtime of its own so that it can stop, as a node does, with its calls
-    /// waiting. It serves on a copy of `port`, which the test keeps open, so a node started again has the same address
-    /// and no other test's listener takes it in between.
-    fn start_node(port: &std::net::TcpListener) -> (Arc<Node>, tokio::runtime::Runtime) {
-        let node = Arc::new(Node { services: Services::default(), registered: tokio::sync::watch::channel(0).0, refused: Mutex::new(Vec::new()) });
+    /// A service's registry behind its routes, on a runtime of its own so that it can stop, as an endpoint does, with
+    /// its calls waiting. It serves on a copy of `port`, which the test keeps open, so one started again has the same
+    /// address and no other test's listener takes it in between.
+    fn start(name: &str, port: &std::net::TcpListener) -> (Arc<Registry>, tokio::runtime::Runtime) {
+        let registry = Registry::new(name, TOKEN);
         let listener = port.try_clone().unwrap();
         listener.set_nonblocking(true).unwrap();
-        let app = Router::new()
-            .route("/v1/services/{app}", post(register))
-            .route("/v1/services/{app}/calls", get(next))
-            .route("/v1/services/{app}/calls/{id}", post(reply))
-            .with_state(node.clone());
+        let routes = registry.routes();
         let server = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        server.spawn(async move { axum::serve(tokio::net::TcpListener::from_std(listener).unwrap(), app).await });
-        (node, server)
+        server.spawn(async move { axum::serve(tokio::net::TcpListener::from_std(listener).unwrap(), routes).await });
+        (registry, server)
     }
 
-    /// Waits for a service to register with `node`.
-    async fn registered(node: &Node, name: &str) {
-        let mut registered = node.registered.subscribe();
-        tokio::time::timeout(Duration::from_secs(60), registered.wait_for(|n| *n >= 1)).await.unwrap_or_else(|_| panic!("{name} never registered")).unwrap();
+    /// Waits for a service to register.
+    async fn registered(registry: &Registry, name: &str) {
+        tokio::time::timeout(Duration::from_secs(60), registry.services().registered(name)).await.unwrap_or_else(|_| panic!("{name} never registered"));
     }
 
     struct Running(Child);
@@ -478,7 +421,8 @@ mod service_protocol {
     struct Case {
         name: &'static str,
         program: PathBuf,
-        ok: (&'static str, Value),
+        /// A call it answers, and a field of its answer (a JSON pointer) with what it says there.
+        ok: (&'static str, Value, &'static str, Value),
         error: (&'static str, Value, &'static str),
         elsewhere: Option<(&'static str, Value)>,
         prefer: Value,
@@ -498,7 +442,7 @@ mod service_protocol {
             Case {
                 name: "shell",
                 program: Path::new(env!("CARGO_BIN_EXE_one")).with_file_name("one-shell"),
-                ok: ("run", json!({ "command": "printf hi" })),
+                ok: ("run", json!({ "command": "printf hi" }), "/stdout", json!("hi")),
                 error: ("run", json!({}), "give a command"),
                 elsewhere: None,
                 prefer: json!({ "run": "here" }),
@@ -506,7 +450,7 @@ mod service_protocol {
             Case {
                 name: "whatsapp",
                 program: built.made[0].1.clone(),
-                ok: ("_pairing", json!({})),
+                ok: ("_pairing", json!({}), "", json!({})),
                 error: ("accounts", json!(["not an object"]), "cannot unmarshal"),
                 elsewhere: Some(("chats", json!({}))),
                 prefer: Value::Null,
@@ -526,16 +470,14 @@ mod service_protocol {
             let name = case.name;
             let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let addr = port.local_addr().unwrap();
-            let (mut node, mut server) = start_node(&port);
+            let (mut registry, mut server) = start(name, &port);
 
             let home = crate::temp(&format!("service-{name}"));
-            std::fs::write(home.join("local-token"), format!("{TOKEN}\n")).unwrap();
+            std::fs::write(home.join(one::api::LOCAL_TOKEN), format!("{TOKEN}\n")).unwrap();
             let data = home.join("data");
             let _running = Running(
                 Command::new(&case.program)
-                    .env("ONE_ADDR", addr.to_string())
-                    .env("ONE_HOME", &home)
-                    .env(format!("{}_DATA", name.to_uppercase()), &data)
+                    .envs(one::services::program_env(name, addr, &home, &data))
                     .env("HOME", &home)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
@@ -545,41 +487,34 @@ mod service_protocol {
             );
 
             // It says only what's about its machine.
-            registered(&node, name).await;
-            let said = node.services.describe().pop().unwrap();
+            registered(&registry, name).await;
+            let said = registry.services().describe().pop().unwrap();
             let fields: Vec<&str> = said.as_object().unwrap().keys().map(String::as_str).filter(|k| !matches!(*k, "name" | "runs")).collect();
             assert!(fields.iter().all(|k| allowed.contains(k)), "{name} registered {fields:?}: wire.json allows {allowed:?}");
             assert!(said["version"].is_string(), "{name} says its version");
             assert_eq!(said["prefer"], case.prefer, "{name}'s functions about its own machine");
 
             // It answers a call, a refusal and, in Go, one that belongs on another device.
-            async fn ask(node: &Node, name: &str, function: &str, input: Value) -> anyhow::Result<one::services::Answer> {
-                node.services.call(name, function, input, me(), None).await
+            async fn ask(registry: &Registry, name: &str, function: &str, input: Value) -> anyhow::Result<one::services::Answer> {
+                registry.services().call(name, function, input, me(), None).await
             }
-            let (function, input) = case.ok.clone();
-            assert!(ask(&node, name, function, input).await.is_ok(), "{name} answers {function}");
+            let (function, input, field, says) = case.ok.clone();
+            let out = ask(&registry, name, function, input.clone()).await.unwrap_or_else(|err| panic!("{name} answers {function}: {err:#}"));
+            assert_eq!(out.ok.pointer(field), Some(&says), "{name} reads the call's input and answers it");
             let (function, input, why) = case.error.clone();
-            let err = ask(&node, name, function, input).await.unwrap_err();
+            let err = ask(&registry, name, function, input).await.unwrap_err();
             assert!(err.downcast_ref::<Elsewhere>().is_none() && format!("{err:#}").contains(why), "{name} answers a call it can't run with its error: {err:#}");
             if let Some((function, input)) = case.elsewhere.clone() {
-                let err = ask(&node, name, function, input).await.unwrap_err();
+                let err = ask(&registry, name, function, input).await.unwrap_err();
                 assert!(err.downcast_ref::<Elsewhere>().is_some(), "{name} says a call goes on to another device: {err:#}");
             }
-            if name == "shell" {
-                let out = ask(&node, name, "run", json!({ "command": "printf hi" })).await.unwrap();
-                assert_eq!(out.ok["stdout"], "hi", "{name} reads the call's input");
-            }
 
-            assert!(node.refused.lock().unwrap().is_empty(), "{name} sent without its token: {:?}", node.refused.lock().unwrap());
-
-            // It registers again with a node that starts again, which forgot it.
+            // It registers again with an endpoint that starts again, which forgot it.
             tokio::task::block_in_place(|| server.shutdown_timeout(Duration::from_secs(10)));
-            (node, server) = start_node(&port);
-            registered(&node, name).await;
-            assert!(node.services.has(name), "{name} is listed again");
-            let (function, input) = case.ok.clone();
-            assert!(ask(&node, name, function, input).await.is_ok(), "{name} answers the node that started again");
-            assert!(node.refused.lock().unwrap().is_empty(), "{name} sent without its token: {:?}", node.refused.lock().unwrap());
+            (registry, server) = start(name, &port);
+            registered(&registry, name).await;
+            let (function, input, ..) = case.ok.clone();
+            assert!(ask(&registry, name, function, input).await.is_ok(), "{name} answers the endpoint that started again");
             tokio::task::block_in_place(|| server.shutdown_timeout(Duration::from_secs(10)));
         }
     }

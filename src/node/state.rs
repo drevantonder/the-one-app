@@ -51,7 +51,6 @@ impl Node {
         let Ok(network) = self.0.network.lock() else { bail!("this device couldn't answer that: a bug in it, which its log shows") };
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { network.as_ref().map(|i| i.r.db().machine(&viewer.key)).transpose()?.flatten().map(|m| m.name.clone()).unwrap_or_default() };
         let backups = network.as_ref().map(|i| self.backup_problem(i, &viewer.user)).transpose()?.flatten();
-        let here_services = network.as_ref().map(|i| self.services_here(i)).transpose()?.unwrap_or_default();
         let here_parts = network.as_ref().map(|i| self.parts_here(i)).transpose()?;
         // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
         let looking = match (device, network.as_ref()) {
@@ -71,7 +70,7 @@ impl Node {
             {
                 l.containers.clear();
             }
-            let mut services: Vec<Service> = if s.key == self.0.id { here_services.clone() } else { session.map(|s| s.services.clone()).unwrap_or_default() };
+            let mut services: Vec<Service> = session.map(|s| s.services.clone()).unwrap_or_default();
             // What its services with endpoints of their own run there, as each says: they're part of it.
             for (k, p) in i.peers.iter().filter(|(k, _)| i.online(k)) {
                 if m.machine(k)?.is_some_and(|p| p.is(scopes::Kind::Service) && p.device == Some(s.key)) {

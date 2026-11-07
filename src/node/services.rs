@@ -8,40 +8,7 @@ use crate::state::Part;
 pub(crate) mod routes;
 pub mod cli;
 
-/// What registered with this device before, in its home.
-const OFFERED: &str = "offered.json";
-
 impl Node {
-    pub fn services(&self) -> &crate::services::Services {
-        &self.0.services
-    }
-
-    /// Registers a service, which says only what's about its machine; the node says so in its hello to the other
-    /// devices, and to shells when that changes it: an app of its name shows its picture (a Mac app's icon).
-    pub async fn register_service(&self, app: &str, describe: Value) -> Result<()> {
-        self.0.services.offer(app);
-        self.learn_app(app).await;
-        // Kept, so its switch shows while what offers it (the Mac app) isn't running.
-        let title = json!(self.service_title(app));
-        let mut kept = self.offered_before();
-        if kept.get(app) != Some(&title) {
-            kept.insert(app.to_string(), title);
-            crate::files::write_json(&self.0.dir.join(OFFERED), &kept);
-        }
-        if let Some(why) = self.removed_here(app) {
-            bail!("{why}");
-        }
-        self.stand_down(app)?;
-        if let Some(domain) = self.listed_as_app(app, describe.clone())["domain"].as_str() {
-            self.logo(domain, app);
-        }
-        if self.0.services.register(app, describe) {
-            self.emit(Event::Changed { apps: vec![app.to_string()] });
-        }
-        self.say_hello();
-        Ok(())
-    }
-
     /// Asks the app `app` what it is, so its service is listed as that and not as itself.
     pub(super) async fn learn_app(&self, app: &str) {
         let _ = self.0.apps.describe_any(app).await;
@@ -121,25 +88,6 @@ impl Node {
         self.say_hello();
     }
 
-    /// Whether this device's own endpoint for the service `name` serves it, as its last hello said: a Mac's helper app,
-    /// once macOS gave it its permission.
-    pub fn part_serves(&self, name: &str) -> bool {
-        self.with_or(false, |i| Ok(i.r.db().offering(name)?.into_iter().any(|s| s.device == Some(self.0.id) && i.online(&s.key) && i.peers.get(&s.key).is_some_and(|p| p.services.iter().any(|(n, ..)| n == name)))))
-    }
-
-    /// Refuses the Mac app's own copy of a service whose helper app serves it here now, and forgets it if it was
-    /// registered: the Mac app, asking again every few seconds, answers again only if the helper stops.
-    pub fn stand_down(&self, app: &str) -> Result<()> {
-        if self.part_serves(app) {
-            if self.0.services.forget(app) {
-                self.emit(Event::Changed { apps: vec![app.to_string()] });
-                self.say_hello();
-            }
-            bail!("{} runs as its own program on {} now", self.service_title(app), self.device_name());
-        }
-        Ok(())
-    }
-
     /// Says hello to this device's part `name`, a service endpoint of its own, which answers once it's up.
     pub async fn hello_part(&self, name: &str) {
         let keys: Vec<Key> = self.with_or(Default::default(), |i| Ok(i.r.db().offering(name)?.into_iter().filter(|s| s.device == Some(self.0.id)).map(|s| s.key).collect()));
@@ -172,28 +120,6 @@ impl Node {
         self.with_or(true, |i| Ok(!Self::off(i.r.db(), &self.0.id, crate::database::scopes::APPS_PART)?))
     }
 
-    /// The services serving on this device, whom each serves, and what each says it is. One its person switched off
-    /// here isn't served.
-    pub(super) fn services_here(&self, i: &Network) -> Result<Vec<Service>> {
-        let m = i.r.db();
-        let mut everyone = Vec::new();
-        for u in m.users()? {
-            if m.serves(&self.0.id, &u.id)? {
-                everyone.push(u.id);
-            }
-        }
-        let mut services = Vec::new();
-        for d in self.0.services.describe() {
-            if Self::off(m, &self.0.id, d["name"].as_str().unwrap_or(""))? {
-                continue;
-            }
-            let (name, users) = (d["name"].as_str().unwrap_or("").to_string(), if d["serves"] == "everyone" { everyone.clone() } else { vec![i.user.clone()] });
-            let d = self.listed_as_app(&name, d);
-            services.push((name, users, d));
-        }
-        Ok(services)
-    }
-
     /// What this device can run, as its hello says: each part (`apps`, the app service; the services built into it;
     /// those registered with it, as the Mac app's are, which it offers while switched off too; and those oned runs as
     /// its processes, its own or fetched from a release when switched on), with whether it's switched on and, while
@@ -204,12 +130,6 @@ impl Node {
         let on = |name: &str| -> Result<bool> { Ok(!Self::off(m, &self.0.id, name)?) };
         let mut out: BTreeMap<String, Part> = BTreeMap::new();
         out.insert(scopes::APPS_PART.into(), Part { on: on(scopes::APPS_PART)?, ..Part::off(scopes::APPS_PART) });
-        for (name, title) in self.offered_before() {
-            out.insert(name.clone(), Part { on: on(&name)?, title: title.as_str().map(str::to_string), ..Part::off(&name) });
-        }
-        for name in self.0.services.offered() {
-            out.insert(name.clone(), Part { on: on(&name)?, title: Some(self.service_title(&name)), ..Part::off(&name) });
-        }
         // A process of oned's is on only by its entry: with none, it's off; but a Mac helper the Mac app carries is on
         // unless switched off, as oned runs it.
         let switched = |name: &str| -> Result<bool> { Ok(m.switch(&self.0.id, name)?.is_some_and(|s| s.on) || (crate::oned::helper(name).is_some() && on(name)?)) };
@@ -227,29 +147,7 @@ impl Node {
                 (part.sandbox, part.person) = (held.sandbox, held.person);
             }
         }
-        // A registered one (the Mac app's), switched on but not registered now: starting while it registers again,
-        // as it does within seconds of this node or it starting; stopped once it hasn't for a while.
-        let starting = crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(60));
-        let lately: BTreeSet<String> = self.0.services.offered().into_iter().collect();
-        let before = self.offered_before();
-        for (name, part) in out.iter_mut() {
-            let registered = lately.contains(name) || before.contains_key(name);
-            if !registered || processes.contains(name) || !on(name)? || self.0.services.has(name) || part.problem.is_some() {
-                continue;
-            }
-            if starting || lately.contains(name) {
-                part.doing = Some("Starting".into());
-            } else {
-                part.problem = Some("It stopped, and hasn’t started again. Its device’s log says why.".into());
-            }
-        }
         Ok(out.into_values().collect())
-    }
-
-    /// The services that registered here before, by their titles: what the device can run while what offers them
-    /// isn't running.
-    fn offered_before(&self) -> BTreeMap<String, Value> {
-        crate::files::read_json(&self.0.dir.join(OFFERED))
     }
 
     /// Why a service isn't served here, if its person switched it off.
@@ -258,10 +156,6 @@ impl Node {
             let m = i.r.db();
             Ok(Self::off(m, &self.0.id, name)?.then(|| format!("{} is switched off on {}; its person switches it on in Settings › Devices", self.service_title(name), self.device_name())))
         })
-    }
-
-    pub(super) fn runs_service_here(&self, app: &str) -> bool {
-        self.0.services.has(app) && self.removed_here(app).is_none()
     }
 }
 

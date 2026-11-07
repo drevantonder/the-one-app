@@ -154,21 +154,7 @@ impl Node {
     /// Whether `host` is the name of an app or service, which an item's hosts name to let its fields into calls to
     /// that service: never a site's, so a web request to it gets none.
     pub fn names_app(&self, host: &str) -> bool {
-        self.0.services.has(host) || self.with_or(false, |i| Ok(i.r.db().app(host)?.is_some() || i.r.db().switches()?.keys().any(|(_, name)| name == host)))
-    }
-
-    /// Fills `text` for a service's call while it waits for the service's answer, as its app's requests are filled: from
-    /// the items switched on for the app of the service's name that the call's user may use, a secret field only when
-    /// `host` is one of its item's hosts, and only for this device's own person, whose keys it has. The service then
-    /// sends it to `host` itself.
-    pub async fn service_fill(&self, service: &str, call: u64, text: &str, host: &str) -> Result<String> {
-        ensure!(!self.names_app(host), "{host} is an app's name, not a site's");
-        let asked = self.0.services.caller_of(service, call).with_context(|| format!("no call {call} of {service}'s is waiting"))?;
-        let me = Caller::local(self)?;
-        ensure!(asked.user == me.user, "{} fills in only its own person's items", self.device_name());
-        let lookup = self.lookup(&me, service, &self.usable_scopes(&me.user)?).await?;
-        lookup.refuse_shut(text)?;
-        crate::vault::fill(text, host, |name| lookup.get(name))
+        self.with_or(false, |i| Ok(i.r.db().app(host)?.is_some() || i.r.db().switches()?.keys().any(|(_, name)| name == host)))
     }
 
     /// Makes an HTTP request for an agent of `caller`'s (`{ url, method?, headers?, body? }`), as the built-in agents

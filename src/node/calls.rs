@@ -488,7 +488,6 @@ impl Node {
             ensure!(self.names_cloudflare(req).is_none(), "{}", self.cloudflare_is_asked_directly());
             return Ok(vec![self.with(|i| i.r.db().find_runner(device))?]);
         }
-        let here = self.runs_service_here(&req.app);
         // A function of a service that's about its own machine (`prefer: { run: "here" }`: Shell's run, Models' here) runs on
         // the caller's first.
         let about_here = |d: &Value| d["prefer"][req.runs()] == "here";
@@ -502,7 +501,7 @@ impl Node {
                         part = true;
                     }
                 }
-                Ok(part || (here && self.services_here(i)?.iter().any(|d| d.0 == req.app && about_here(&d.2))))
+                Ok(part)
             })?;
         self.with(|i| {
             let m = i.r.db();
@@ -516,11 +515,7 @@ impl Node {
                 }
                 on
             } else {
-                let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
-                if here && ((me.user == i.user && !passed) || (self.0.services.serves_everyone(&req.app) && i.r.db().serves(&self.0.id, &me.user)?)) {
-                    s.push(self.0.id);
-                }
-                s
+                i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect()
             };
             let set = rank::set(&i.r.db().settings()?);
             let here_load = crate::load::current();
@@ -706,18 +701,7 @@ impl Node {
             return self.read_logs(req, &input, me).await;
         }
         if req.service.is_some() {
-            if !self.runs_service_here(&req.app) {
-                return Ok(Reply::Elsewhere(format!("{} doesn't run here", req.app)));
-            }
-            // A service that runs as this device's own person (Shell, say) never runs for a call another node passed
-            // on, from whichever path it came: a hacked node gets only the calls it ran.
-            if passed(me) && !self.0.services.serves_everyone(&req.app) {
-                return Ok(Reply::error(format!("{} runs only for its person's own devices", req.app)));
-            }
-            return match self.run_service(&req.app, &req.function, input, me, req.from.clone()).await {
-                Err(err) if err.is::<crate::services::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
-                other => other.map(Reply::Ok),
-            };
+            return Ok(Reply::Elsewhere(format!("{} doesn't run here", req.app)));
         }
         if !self.runs_apps() {
             return Ok(Reply::Elsewhere(format!("{} doesn't run apps: its person switched that off", self.device_name())));

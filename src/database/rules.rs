@@ -904,10 +904,10 @@ mod tests {
         assert!(net.db.switch(&linux_id, "whatsapp")?.unwrap().on && !net.db.switch(&linux_id, APPS_PART)?.unwrap().on);
         // linux lists its part; it lists it again naming itself, which an old listing lacked; Bob's device can't.
         let part = Dev::new(8);
-        let listed = |device: &Key| service_endpoint(&part.endpoint(), ANDRE, "linux", "whatsapp", false, device);
+        let listed = |device: &Key| service_endpoint(&part.endpoint(), ANDRE, "linux", "whatsapp", device);
         net.step(&linux, ANDRE, listed(&mac_id));
         assert!(net.step(&linux, ANDRE, listed(&linux_id)));
-        assert!(!net.step(&bobs, BOB, service_endpoint(&part.endpoint(), BOB, "linux", "whatsapp", false, &bobs_id)));
+        assert!(!net.step(&bobs, BOB, service_endpoint(&part.endpoint(), BOB, "linux", "whatsapp", &bobs_id)));
         let p = net.db.machine(&part.id())?.unwrap();
         assert_eq!((p.user.as_str(), p.device), (ANDRE, Some(linux_id)));
         // Nor is anything but a service listed again by its person.
@@ -1179,7 +1179,7 @@ mod tests {
             ("someone new, an admin", device(&gus.endpoint(), GUS, "gus's phone", &[Kind::Client], Some(("Gus", Role::Admin)))),
             ("bob's new client", device(&gus.endpoint(), BOB, "bob's laptop", &[Kind::Client], None)),
             ("bob's new compute", device(&gus.endpoint(), BOB, "bob's server", &[Kind::Compute], None)),
-            ("bob's new service", service_endpoint(&part.endpoint(), BOB, "box", "whatsapp", false, &box_.id())),
+            ("bob's new service", service_endpoint(&part.endpoint(), BOB, "box", "whatsapp", &box_.id())),
             ("andre's new client", device(&gus.endpoint(), ANDRE, "andre's laptop", &[Kind::Client], None)),
             ("fay's new client", device(&gus.endpoint(), FAY, "fay's laptop", &[Kind::Client], None)),
             ("bob's box listed again", device(&box_.endpoint(), BOB, "bob's box", &[Kind::Compute], None)),

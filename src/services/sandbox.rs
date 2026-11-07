@@ -332,10 +332,7 @@ pub fn launch(dir: &Path) -> Result<()> {
     let proxy = format!("http://{at}");
     let mut command = std::process::Command::new(dir.join(PROGRAM));
     command
-        .env("ONE_ADDR", at.to_string())
-        .env("ONE_HOME", dir)
-        .env("ONE_CLI", CLI)
-        .env(format!("{}_DATA", spec.name.to_uppercase().replace('-', "_")), &data)
+        .envs(crate::services::program_env(&spec.name, at, dir, &data))
         .env("TMPDIR", std::env::temp_dir())
         .current_dir(&data);
     for var in ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {

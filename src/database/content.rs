@@ -343,14 +343,9 @@ pub fn vault_answer(id: &str, declined: bool) -> Content {
     node(Change::VaultRequest, data)
 }
 
-/// Lists a service endpoint offering `service` as `user`'s, a part of `device`, by that device: `shared` if it serves
-/// everyone it may, not only them.
-pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, shared: bool, device: &Key) -> Content {
-    let mut data = json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service, "device": hex(device) });
-    if shared {
-        data["shared"] = json!(true);
-    }
-    node(Change::Device, data)
+/// Lists a service endpoint offering `service` as `user`'s, a part of `device`, by that device.
+pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, device: &Key) -> Content {
+    node(Change::Device, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service, "device": hex(device) }))
 }
 
 #[cfg(test)]
@@ -368,8 +363,7 @@ mod tests {
             ("device", device(&endpoint, user, "mac", &[Kind::Client], None)),
             ("device, new person", device(&endpoint, other, "phone", &[Kind::Client, Kind::Compute], Some(("Bob", Role::Member)))),
             ("passkey", passkey(&endpoint, user, "Passkey", "cred")),
-            ("service endpoint", service_endpoint(&endpoint, user, "whatsapp", "whatsapp", false, &[4; 32])),
-            ("service endpoint, shared", service_endpoint(&endpoint, user, "whatsapp", "whatsapp", true, &[4; 32])),
+            ("service endpoint", service_endpoint(&endpoint, user, "whatsapp", "whatsapp", &[4; 32])),
             ("role", role(other, Role::Admin)),
             ("remove person", remove_user(other)),
             ("remove device", remove_device(&[5; 32])),
@@ -434,7 +428,6 @@ device: {"app":"node","kind":"device","data":{"key":"010101010101010101010101010
 device, new person: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"phone","role":"member","roles":["client","compute"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"b000000000000002","user_name":"Bob"}}
 passkey: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"Passkey","passkey":"cred","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"a000000000000001"}}
 service endpoint: {"app":"node","kind":"device","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","key":"0101010101010101010101010101010101010101010101010101010101010101","name":"whatsapp","roles":["service"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","service":"whatsapp","user":"a000000000000001"}}
-service endpoint, shared: {"app":"node","kind":"device","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","key":"0101010101010101010101010101010101010101010101010101010101010101","name":"whatsapp","roles":["service"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","service":"whatsapp","shared":true,"user":"a000000000000001"}}
 role: {"app":"node","kind":"role","data":{"role":"admin","user":"b000000000000002"}}
 remove person: {"app":"node","kind":"remove","data":{"user":"b000000000000002"}}
 remove device: {"app":"node","kind":"remove","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505"}}

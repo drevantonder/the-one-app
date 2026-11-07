@@ -4,26 +4,9 @@
 use super::*;
 
 impl Node {
-    pub(in crate::node) async fn run_service(&self, app: &str, function: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
-        let everyone = self.0.services.serves_everyone(app) && self.with(|i| Ok(i.r.db().serves(&self.0.id, &me.user)?))?;
-        let user = if everyone { me.user.clone() } else { self.user()? };
-        ensure!(me.user == user, "{} runs only for {}'s own user", self.service_title(app), self.device_name());
-        let caller = self.me_for(me)?;
-        let mut input = input;
-        let used = self.fill_for_service(app, &mut input, me, from.as_deref()).await?;
-        let mut answer = self.0.services.call(app, function, input, caller.clone(), from).await?;
-        crate::vault::blot(&mut answer.ok, &used);
-        let scope = Scope::User(user.clone());
-        if !answer.blobs.is_empty() {
-            self.append_as(&scope, &user, content::keep(answer.blobs)).await?;
-        }
-        Ok(answer.ok)
-    }
-
     /// Fills in an app's call of `app`'s service (`from` the app that made it): the fields of the items it's switched on
     /// for, a secret one only for a service named among its item's hosts. → the secrets it filled, to blot out of the
-    /// answer. The node that runs the call fills it, whether the service runs here or as a service endpoint of its own,
-    /// which fills nothing itself.
+    /// answer. The node that runs the call fills it: a service endpoint fills nothing itself.
     pub async fn fill_for_service(&self, app: &str, input: &mut Value, me: &Caller, from: Option<&str>) -> Result<Vec<String>> {
         let used = std::sync::Mutex::new(Vec::<String>::new());
         if let Some(from) = from.filter(|_| input.to_string().contains("{{")) {

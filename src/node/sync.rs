@@ -190,7 +190,7 @@ impl Node {
         }
     }
 
-    /// Tells every other device which services serve its local user here and how loaded it is, now and then.
+    /// Tells every other device how loaded it is and what its parts are doing, now and then.
     pub(super) async fn presence_loop(self) {
         loop {
             if self.has_network() {
@@ -203,16 +203,16 @@ impl Node {
         }
     }
 
-    /// Says hello to every other device: as now and then, and when this device's services change. How far each is, is
+    /// Says hello to every other device: as now and then, and when this device's parts change. How far each is, is
     /// the round trip iroh measures to it.
     pub(super) fn say_hello(&self) {
-        let Ok((devices, services, parts)) = self.with(|i| {
+        let Ok((devices, parts)) = self.with(|i| {
             let devices: Vec<Key> = i.r.db().computes()?.into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((devices, self.services_here(i)?, self.parts_here(i)?))
+            Ok((devices, self.parts_here(i)?))
         }) else {
             return;
         };
-        let hello = json!({ "services": services, "load": crate::load::current(), "parts": parts });
+        let hello = json!({ "load": crate::load::current(), "parts": parts });
         for device in devices {
             let (node, hello) = (self.clone(), hello.clone());
             tokio::spawn(async move {
@@ -227,44 +227,15 @@ impl Node {
     }
 
     pub(super) fn hello_from(&self, from: &Key, hello: &Value) -> Result<()> {
-        let mut services: Vec<Service> = serde_json::from_value(hello["services"].clone()).unwrap_or_default();
-        // Whom each serves, no more than the entries allow: that device's own person, and for one that
-        // serves everyone, those the device serves.
-        self.with(|i| {
-            let m = i.r.db();
-            let owner = m.compute(from)?.map(|c| c.user).unwrap_or_default();
-            for (_, users, describe) in &mut services {
-                let everyone = describe["serves"] == "everyone";
-                let mut serves = Vec::new();
-                for u in users.iter() {
-                    if *u == owner || (everyone && m.serves(from, u)?) {
-                        serves.push(u.clone());
-                    }
-                }
-                *users = serves;
-            }
-            Ok(())
-        })?;
         let load = serde_json::from_value(hello["load"].clone()).ok();
         let parts = hello["parts"].as_array().map(|_| hello["parts"].clone());
-        // The services that came, went or changed there, whose apps shells list again.
-        let (new, changed) = self.with(|i| {
-            let before = i.peers.get(from).map(|p| p.services.clone());
-            let parts_changed = i.peers.get(from).is_some_and(|p| p.parts != parts);
-            let was = before.as_deref().unwrap_or_default();
-            let missing = |a: &[Service], b: &[Service]| a.iter().filter(|s| !b.contains(s)).map(|s| s.0.clone()).collect::<Vec<_>>();
-            let mut changed = missing(&services, was);
-            changed.extend(missing(was, &services));
-            changed.sort();
-            changed.dedup();
-            i.peers.insert(*from, Peer { services, load, parts, seen: Instant::now() });
-            Ok((before.is_none() || parts_changed, changed))
+        let new = self.with(|i| {
+            let changed = i.peers.get(from).is_none_or(|p| p.parts != parts);
+            i.peers.insert(*from, Peer { services: Vec::new(), load, parts, seen: Instant::now() });
+            Ok(changed)
         })?;
-        if new || !changed.is_empty() {
+        if new {
             self.emit(Event::Devices);
-        }
-        if !changed.is_empty() {
-            self.emit(Event::Changed { apps: changed });
         }
         Ok(())
     }

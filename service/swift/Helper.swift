@@ -4,7 +4,7 @@ import os
 /// A Mac service in Swift: a helper app of its own, carried inside the Mac app (Contents/Helpers), which its device's
 /// oned starts from a copy outside it (src/oned.rs's `placed`) as a process macOS holds responsible for itself, so
 /// macOS asks for, and records, its permission under its own name. oned tells it where to register (`ONE_ADDR`) and where the token it sends is (`ONE_HOME`). It
-/// registers only once it has what it needs from the person: until then the Mac app's own copy, if it has one, answers.
+/// registers only once it has what it needs from the person.
 public protocol Service: Sendable {
     var app: String { get }
     /// The Mac app it reaches, by bundle id, whose icon is its picture.
@@ -123,7 +123,6 @@ enum Wire {
     static func registration(localApp: String?) -> [String: Any] {
         var d: [String: Any] = ["version": build]
         if let localApp {
-            d["local_app"] = localApp
             if let image = appIcon(localApp) { (d["image"], d["image_kind"]) = (image, "icon") }
         }
         return d

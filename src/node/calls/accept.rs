@@ -74,7 +74,7 @@ impl Node {
         // A service that runs as this device's own person (Shell, say) runs only for a device of theirs, never for a
         // sign-in a node passes on.
         let resolved = self.resolve(req.clone());
-        ensure!(own || resolved.service.is_none() || self.0.services.serves_everyone(&resolved.app), "{} runs only for its person's own devices", resolved.app);
+        ensure!(own || resolved.service.is_none(), "{} runs only for its person's own devices", resolved.app);
         if !own && req.service.is_none() {
             let req = self.resolve(req.clone());
             let named = req.scopes.clone();

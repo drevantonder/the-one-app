@@ -29,6 +29,5 @@ private func wire() -> [String: Any] { try! JSONSerialization.jsonObject(with: D
     let allowed = Set(wire()["registers"] as! [String])
     let said = Wire.registration(localApp: "com.apple.iCal")
     #expect(said["version"] != nil)
-    #expect(said["local_app"] as? String == "com.apple.iCal")
     #expect(Set(said.keys).isSubset(of: allowed))
 }

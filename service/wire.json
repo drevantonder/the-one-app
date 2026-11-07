@@ -6,7 +6,7 @@
     "caller": { "key": "k1", "user": "u1", "name": "mac", "role": null, "user_name": "Ann", "handle": "ann", "agent": "Claude Code" },
     "from": "calendar"
   },
-  "registers": ["version", "prefer", "serves", "local_app", "image", "image_kind"],
+  "registers": ["version", "prefer", "image", "image_kind"],
   "replies": {
     "ok": { "ok": [{ "title": "Lunch" }] },
     "error": { "error": "give a title" },

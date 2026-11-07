@@ -48,16 +48,12 @@ impl Node {
     /// serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let mut out = self.catalog(viewer, false).await?;
-        let mut services = Vec::new();
-        if viewer.user == self.user()? {
-            services.extend(self.with(|i| self.services_here(i))?.into_iter().map(|d| d.2));
-        }
         let remote = self.with(|i| {
             let mut d: Vec<Value> = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
             d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());
             Ok(d)
         })?;
-        for mut describe in services.into_iter().chain(remote) {
+        for mut describe in remote {
             if out.iter().any(|a| a["name"] == describe["name"]) {
                 continue;
             }
@@ -98,8 +94,7 @@ impl Node {
             }
         }
         let mut services: Vec<Value> = self.with(|i| {
-            let here = self.services_here(i)?.into_iter().map(|d| d.2);
-            Ok(here.chain(i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter().map(|d| d.2.clone()))).collect())
+            Ok(i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter().map(|d| d.2.clone())).collect())
         })?;
         services.sort_by_key(|d| d["title"].as_str().or(d["name"].as_str()).unwrap_or("").to_lowercase());
         services.dedup_by(|a, b| a["name"] == b["name"]);

@@ -200,10 +200,10 @@ impl Node {
     }
 
     /// Lists one of this device's parts, the service `service`, as its person's, a part of this device (oned turned it
-    /// on, and it asked with its endpoint and whether it serves everyone), and tells the relay to let it in. It holds no
+    /// on, and it asked with its endpoint), and tells the relay to let it in. It holds no
     /// keys: the nodes that call it bring it the network's entries, which say who may. A part listed before it named its
     /// device is listed again, naming it.
-    pub async fn list_part(&self, endpoint: &crate::keys::Endpoint, service: &str, shared: bool) -> Result<()> {
+    pub async fn list_part(&self, endpoint: &crate::keys::Endpoint, service: &str) -> Result<()> {
         let user = self.user()?;
         let caller = Caller::own(self.0.id, user.clone());
         let listed = self.with(|i| {
@@ -219,7 +219,7 @@ impl Node {
         }
         if listed != Some(true) {
             let name = self.device_name();
-            self.member_content(&caller, content::service_endpoint(endpoint, &user, &name, service, shared, &self.0.id)).await?;
+            self.member_content(&caller, content::service_endpoint(endpoint, &user, &name, service, &self.0.id)).await?;
         }
         // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
         let (node, key) = (self.clone(), endpoint.key);

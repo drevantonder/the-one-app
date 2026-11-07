@@ -81,7 +81,7 @@ const FAR: Duration = Duration::from_millis(250);
 const TICK: Duration = Duration::from_secs(10);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
-/// How often a device says hello to the others: which services serve there, and how loaded it is.
+/// How often a device says hello to the others: how loaded it is, and what its parts are doing.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
 
@@ -92,7 +92,7 @@ pub fn now_ms() -> u64 {
 /// A service serving on a device: its name, the users it serves, and what it describes of itself.
 pub type Service = (String, Vec<String>, Value);
 
-/// Another device, as it last said hello: the services serving there, and how loaded it is.
+/// Another device, as it last said hello (a service endpoint: the service it offers), and how loaded it is.
 struct Peer {
     services: Vec<Service>,
     load: Option<crate::load::Load>,
@@ -158,7 +158,6 @@ pub struct Inner {
     id: Key,
     name: Mutex<String>,
     apps: Apps,
-    pub services: crate::services::Services,
     network: Exclusive<Option<Network>>,
     pairings: Mutex<HashMap<[u8; 16], pairing::Pairing>>,
     events: broadcast::Sender<Event>,
@@ -256,7 +255,6 @@ impl Node {
             id,
             name: Mutex::new(device.name),
             apps,
-            services: Default::default(),
             network: Exclusive::new(None),
             pairings: Mutex::new(pairing::load(dir)),
             events,

@@ -418,10 +418,6 @@ impl Node {
             // Read again, so each is brought to its new deploy's schema.
             self.close_dbs(|_, db| changed.iter().any(|app| db.starts_with(&format!("{app}/"))));
             self.emit(Event::Changed { apps: changed });
-            // The services of apps that came or changed are listed as their apps now say.
-            for app in self.0.services.offered() {
-                self.learn_app(&app).await;
-            }
             self.say_hello();
         }
         let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;

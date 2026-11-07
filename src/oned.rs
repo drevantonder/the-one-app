@@ -525,12 +525,12 @@ fn stop(name: &str, mut child: std::process::Child) {
     tracing::info!("oned stopped {name}");
 }
 
-/// Lists a part as it asked: its endpoint, and whether it serves everyone.
+/// Lists a part as it asked: its endpoint.
 async fn list(node: &Node, name: &str, asked: &str) -> anyhow::Result<()> {
     let asked: Value = serde_json::from_str(asked)?;
     let hexed = |k: &str| crate::keys::unhex(asked[k].as_str().unwrap_or(""));
     let endpoint = crate::keys::Endpoint { key: hexed("key")?, seal: hexed("seal")? };
-    node.list_part(&endpoint, name, asked["shared"] == true).await
+    node.list_part(&endpoint, name).await
 }
 
 /// Puts the usual tool folders on PATH: launchd starts the Mac's node with almost none, and the shell, agents and

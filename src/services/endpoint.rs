@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 
 use crate::keys::{Hash, Key, hex, short, unhex};
 use crate::database::scopes::{self, ScopeDb};
-use crate::services::Services;
+use crate::services::{Registry, Services, refused};
 
 /// The most an ask or its answer may carry, as between nodes.
 const MESSAGE_LIMIT: usize = 64 << 20;
@@ -86,9 +86,7 @@ struct Inner {
     /// (`database::steps`), kept in its folder as `steps`.
     steps: Mutex<Vec<Option<crate::database::steps::Given>>>,
     /// Where the program offering it registers and waits for calls.
-    services: Services,
-    /// What that program sends to say it's on this machine.
-    token: String,
+    registry: Arc<Registry>,
     endpoint: Mutex<Option<Endpoint>>,
     /// A connection to each node it asks for calls.
     conns: Mutex<HashMap<Key, Connection>>,
@@ -153,8 +151,7 @@ impl Service {
             network,
             known: Mutex::new(members),
             steps: Mutex::new(steps),
-            services: Services::default(),
-            token,
+            registry: Registry::new(name, &token),
             endpoint: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
             strangers: AtomicUsize::new(0),
@@ -178,11 +175,11 @@ impl Service {
 
     /// Where the program offering it registers.
     pub fn services(&self) -> &Services {
-        &self.0.services
+        self.0.registry.services()
     }
 
     pub fn token(&self) -> &str {
-        &self.0.token
+        self.0.registry.token()
     }
 
     /// Whose service it is, once a person's device approved it.
@@ -291,7 +288,7 @@ impl Service {
     async fn ask_to_be_listed(self) {
         let ask = self.0.dir.join("ask");
         loop {
-            let registered = !self.0.services.describe().is_empty();
+            let registered = !self.services().describe().is_empty();
             let listed = match (self.owner(), self.0.known.lock().unwrap().service(&self.key())) {
                 (Ok(owner), Ok(service)) => owner.is_some() && service.is_some_and(|s| s.device.is_some()),
                 (owner, service) => {
@@ -303,7 +300,7 @@ impl Service {
                 let _ = std::fs::remove_file(&ask);
             } else if !ask.exists() {
                 let me = self.endpoint();
-                let said = json!({ "key": hex(&me.key), "seal": hex(&me.seal), "shared": self.0.services.serves_everyone(&self.0.name) });
+                let said = json!({ "key": hex(&me.key), "seal": hex(&me.seal) });
                 if let Err(err) = write_private(&ask, said.to_string().as_bytes()) {
                     tracing::warn!("asking oned to list {}: {err:#}", self.0.name);
                 }
@@ -380,7 +377,7 @@ impl Service {
         if !may {
             return Ok(json!({ "error": format!("only {YOURS}'s devices are answered") }));
         }
-        let Some(mut describe) = self.0.services.describe().into_iter().next() else {
+        let Some(mut describe) = self.services().describe().into_iter().next() else {
             return Ok(json!({ "error": format!("{} isn't running here yet", self.0.name) }));
         };
         describe["runs"] = json!("service");
@@ -455,7 +452,7 @@ impl Service {
         };
         let input = if call["input"].is_null() { json!({}) } else { call["input"].clone() };
         let from = call["from"].as_str().map(str::to_string);
-        Ok(match self.0.services.call(&self.0.name, call["function"].as_str().unwrap_or(""), input, caller, from).await {
+        Ok(match self.services().call(&self.0.name, call["function"].as_str().unwrap_or(""), input, caller, from).await {
             Ok(answer) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
             Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
             Err(err) => json!({ "error": format!("{err:#}") }),
@@ -515,10 +512,6 @@ impl Service {
     /// machine as `/v1/state` says, and `/v1/call`, which a node of its person's runs.
     fn loopback(&self) -> Router {
         Router::new()
-            .route("/v1/services/{app}", post(register))
-            .route("/v1/services/{app}/calls", get(next_call))
-            .route("/v1/services/{app}/calls/{id}", post(reply))
-            .route("/v1/services/{app}/calls/{id}/vault", post(fill))
             .route("/v1/state", get(state))
             .route("/v1/call", post(call))
             .route("/v1/blobs", post(put_blob))
@@ -526,6 +519,7 @@ impl Service {
             // Its program's way out, from its sandbox: `CONNECT host:port`, to a host its app declares.
             .fallback(proxy)
             .with_state(self.clone())
+            .merge(self.0.registry.routes())
     }
 
     /// What `/v1/state` says here: this service as the device, and the others offering it, as far as it knows.
@@ -604,67 +598,12 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-fn refused(code: StatusCode, why: impl std::fmt::Display) -> Response {
-    (code, Json(json!({ "error": why.to_string() }))).into_response()
-}
-
-/// Whether a request is the program's on this machine: it sends the token in the service's folder.
-fn ours(s: &Service, headers: &HeaderMap) -> Result<(), Response> {
-    match headers.get(crate::protocol::header::LOCAL_TOKEN).and_then(|v| v.to_str().ok()) {
-        Some(t) if crate::keys::same_secret(t.as_bytes(), s.0.token.as_bytes()) => Ok(()),
-        _ => Err(refused(StatusCode::UNAUTHORIZED, "send the local token in the service's folder")),
-    }
-}
-
-fn this_one(s: &Service, app: &str) -> Result<(), Response> {
-    match app == s.0.name {
-        true => Ok(()),
-        false => Err(refused(StatusCode::NOT_FOUND, format!("this is {}'s service", s.0.name))),
-    }
-}
-
-async fn register(State(s): State<Service>, headers: HeaderMap, UrlPath(app): UrlPath<String>, Json(describe): Json<Value>) -> Response {
-    if let Err(r) = ours(&s, &headers).and_then(|_| this_one(&s, &app)) {
-        return r;
-    }
-    s.0.services.register(&app, describe);
-    Json(json!({})).into_response()
-}
-
-async fn next_call(State(s): State<Service>, headers: HeaderMap, UrlPath(app): UrlPath<String>) -> Response {
-    if let Err(r) = ours(&s, &headers).and_then(|_| this_one(&s, &app)) {
-        return r;
-    }
-    match s.0.services.next(&app).await {
-        Ok(Some(call)) => Json(json!(call)).into_response(),
-        Ok(None) => StatusCode::NO_CONTENT.into_response(),
-        Err(err) => refused(StatusCode::BAD_REQUEST, format!("{err:#}")),
-    }
-}
-
-async fn reply(State(s): State<Service>, headers: HeaderMap, UrlPath((app, id)): UrlPath<(String, u64)>, Json(body): Json<Value>) -> Response {
-    if let Err(r) = ours(&s, &headers).and_then(|_| this_one(&s, &app)) {
-        return r;
-    }
-    match s.0.services.reply(&app, id, body) {
-        Ok(()) => Json(json!({})).into_response(),
-        Err(err) => refused(StatusCode::BAD_REQUEST, format!("{err:#}")),
-    }
-}
-
-async fn fill(State(s): State<Service>, headers: HeaderMap) -> Response {
-    if let Err(r) = ours(&s, &headers) {
-        return r;
-    }
-    refused(StatusCode::NOT_IMPLEMENTED, "a service can't fill in the Vault's items yet: the call's node fills them in before it asks")
-}
-
 async fn proxy(State(s): State<Service>, req: axum::extract::Request) -> Response {
     crate::services::sandbox::connect(s.0.declared.as_ref(), req).await
 }
 
 async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
-    if let Err(r) = ours(&s, &headers) {
+    if let Err(r) = s.0.registry.ours(&headers) {
         return r;
     }
     match s.state() {
@@ -674,7 +613,7 @@ async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
 }
 
 async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
-    if let Err(r) = ours(&s, &headers) {
+    if let Err(r) = s.0.registry.ours(&headers) {
         return r;
     }
     match s.ask_node(body).await {
@@ -695,7 +634,7 @@ async fn get_blob(State(s): State<Service>, headers: HeaderMap, UrlPath(hash): U
 }
 
 async fn blobs(s: &Service, headers: &HeaderMap, method: &'static str, path: &str, body: Option<Vec<u8>>) -> Response {
-    if let Err(r) = ours(s, headers) {
+    if let Err(r) = s.0.registry.ours(headers) {
         return r;
     }
     let url = format!("http://{}{path}", crate::api::addr());
@@ -875,7 +814,6 @@ fn disclaimed(command: &std::process::Command) -> Result<libc::pid_t> {
 fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service) -> Result<Running> {
     use crate::services::sandbox::{How, Launch};
     let declared = service.0.declared.clone().unwrap_or_default();
-    let data_var = format!("{}_DATA", name.to_uppercase().replace('-', "_"));
     let launcher = PathBuf::from(std::env::current_exe()?.to_string_lossy().trim_end_matches(" (deleted)"));
     let mut command = match crate::services::sandbox::how(service.0.declared.as_ref(), "") {
         How::Unit => {
@@ -917,7 +855,7 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
             std::process::Command::new(program)
         }
     };
-    command.env("ONE_ADDR", at.to_string()).env("ONE_HOME", &service.0.dir).env("ONE_CLI", crate::config::CLI).env(&data_var, data);
+    command.envs(crate::services::program_env(name, at, &service.0.dir, data));
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::process::CommandExt;

@@ -71,9 +71,6 @@ struct Registered {
 /// The services registered over the local API.
 pub struct Services {
     by_app: Mutex<HashMap<String, std::sync::Arc<Registered>>>,
-    /// When each service last asked to register, switched on here or not: what this device could run (the Mac app's,
-    /// which it offers while it runs).
-    offered: Mutex<HashMap<String, Instant>>,
     next: std::sync::atomic::AtomicU64,
     /// Woken when a service registers, for a call waiting for one that is starting.
     registered: tokio::sync::Notify,
@@ -91,22 +88,6 @@ impl Services {
         before.is_none_or(|p| p.describe != describe || p.seen.lock().unwrap().elapsed() >= GONE_AFTER)
     }
 
-    /// Forgets `app`, registered here; whether it was. Calls waiting for its answer fail.
-    pub fn forget(&self, app: &str) -> bool {
-        self.by_app.lock().unwrap().remove(app).is_some()
-    }
-
-    /// Notes that `app` asked to register here, switched on or not.
-    pub fn offer(&self, app: &str) {
-        self.offered.lock().unwrap().insert(app.to_string(), Instant::now());
-    }
-
-    /// The services that asked to register here lately, switched on or not.
-    pub fn offered(&self) -> Vec<String> {
-        let offered = self.offered.lock().unwrap();
-        offered.iter().filter(|(_, at)| at.elapsed() < GONE_AFTER).map(|(n, _)| n.clone()).collect()
-    }
-
     fn get(&self, app: &str) -> Option<std::sync::Arc<Registered>> {
         let p = self.by_app.lock().unwrap().get(app).cloned()?;
         let fresh = p.seen.lock().unwrap().elapsed() < GONE_AFTER;
@@ -117,33 +98,32 @@ impl Services {
         self.get(app).is_some()
     }
 
-    /// Whether a registered service serves every user its device serves (`serves: "everyone"` in its description), not only
-    /// its device's local user.
-    pub fn serves_everyone(&self, app: &str) -> bool {
-        self.get(app).is_some_and(|p| p.describe["serves"] == "everyone")
-    }
-
     pub fn describe(&self) -> Vec<Value> {
         let names: Vec<String> = self.by_app.lock().unwrap().keys().cloned().collect();
         names.iter().filter_map(|n| self.get(n)).map(|p| p.describe.clone()).collect()
+    }
+
+    /// Waits until `app` is registered.
+    pub async fn registered(&self, app: &str) {
+        loop {
+            let registered = self.registered.notified();
+            tokio::pin!(registered);
+            registered.as_mut().enable();
+            if self.get(app).is_some() {
+                return;
+            }
+            registered.await;
+        }
     }
 
     /// Hands a call to the service and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
     /// caller's scope keeps, so the devices that hold the scope can fetch it.
     pub async fn call(&self, app: &str, function: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
         // A node that just started, an update's, waits a moment for its services to register again with it.
-        let until = Instant::now() + Duration::from_secs(5);
-        let p = loop {
-            let registered = self.registered.notified();
-            tokio::pin!(registered);
-            registered.as_mut().enable();
-            match self.get(app) {
-                None if crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(15)) && Instant::now() < until => {
-                    let _ = tokio::time::timeout(until.saturating_duration_since(Instant::now()), registered).await;
-                }
-                found => break found,
-            }
-        };
+        if crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(15)) {
+            let _ = tokio::time::timeout(Duration::from_secs(5), self.registered(app)).await;
+        }
+        let p = self.get(app);
         let p = p.ok_or_else(|| crate::protocol::Coded::error(crate::protocol::code::RESTARTING, format!("{app} isn't running on this device")))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
@@ -181,12 +161,6 @@ impl Services {
         Ok(())
     }
 
-    /// Whom a call of `app`'s that waits for its answer is for.
-    pub fn caller_of(&self, app: &str, id: u64) -> Option<Me> {
-        let p = self.get(app)?;
-        let replies = p.replies.lock().unwrap();
-        replies.get(&id).map(|(_, me)| me.clone())
-    }
 }
 
 /// A call's input as `T`, where none is an empty one and a field that's null is one not given, as Go's services read them.
@@ -199,4 +173,109 @@ pub fn input<T: serde::de::DeserializeOwned + Default>(input: &Value) -> Result<
         }
     }
     Ok(if input.is_null() { T::default() } else { serde_json::from_value(given(input)).map_err(|err| anyhow!("bad input: {err}"))? })
+}
+
+/// The environment a service's program starts with (`wire.json`'s `env`): where it registers, its folder, which holds
+/// the token it sends (`local-token`), the CLI it may run, and where its data goes.
+pub fn program_env(name: &str, at: std::net::SocketAddr, home: &std::path::Path, data: &std::path::Path) -> Vec<(String, std::ffi::OsString)> {
+    vec![
+        ("ONE_ADDR".into(), at.to_string().into()),
+        ("ONE_HOME".into(), home.into()),
+        ("ONE_CLI".into(), crate::config::CLI.into()),
+        (format!("{}_DATA", name.to_uppercase().replace('-', "_")), data.into()),
+    ]
+}
+
+/// What a service's program registers with and asks for its calls (`wire.json`), on its endpoint's loopback: each
+/// request with the token in its folder, for the service of its name only.
+pub struct Registry {
+    name: String,
+    token: String,
+    services: Services,
+}
+
+impl Registry {
+    pub fn new(name: &str, token: &str) -> std::sync::Arc<Registry> {
+        std::sync::Arc::new(Registry { name: name.into(), token: token.into(), services: Services::default() })
+    }
+
+    pub fn services(&self) -> &Services {
+        &self.services
+    }
+
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// Whether a request is the program's on this machine: it sends the token in the service's folder.
+    pub fn ours(&self, headers: &axum::http::HeaderMap) -> std::result::Result<(), axum::response::Response> {
+        match headers.get(crate::protocol::header::LOCAL_TOKEN).and_then(|v| v.to_str().ok()) {
+            Some(t) if crate::keys::same_secret(t.as_bytes(), self.token.as_bytes()) => Ok(()),
+            _ => Err(refused(axum::http::StatusCode::UNAUTHORIZED, "send the local token in the service's folder")),
+        }
+    }
+
+    fn this_one(&self, headers: &axum::http::HeaderMap, app: &str) -> std::result::Result<(), axum::response::Response> {
+        self.ours(headers)?;
+        match app == self.name {
+            true => Ok(()),
+            false => Err(refused(axum::http::StatusCode::NOT_FOUND, format!("this is {}'s service", self.name))),
+        }
+    }
+
+    pub fn routes(self: &std::sync::Arc<Self>) -> axum::Router {
+        use axum::extract::{Path, State};
+        use axum::http::{HeaderMap, StatusCode};
+        use axum::response::{IntoResponse, Response};
+        use axum::{Json, routing};
+        type Shared = State<std::sync::Arc<Registry>>;
+
+        async fn register(State(r): Shared, headers: HeaderMap, Path(app): Path<String>, Json(describe): Json<Value>) -> Response {
+            if let Err(refused) = r.this_one(&headers, &app) {
+                return refused;
+            }
+            r.services.register(&app, describe);
+            Json(json!({})).into_response()
+        }
+
+        async fn next_call(State(r): Shared, headers: HeaderMap, Path(app): Path<String>) -> Response {
+            if let Err(refused) = r.this_one(&headers, &app) {
+                return refused;
+            }
+            match r.services.next(&app).await {
+                Ok(Some(call)) => Json(json!(call)).into_response(),
+                Ok(None) => StatusCode::NO_CONTENT.into_response(),
+                Err(err) => refused(StatusCode::BAD_REQUEST, format!("{err:#}")),
+            }
+        }
+
+        async fn reply(State(r): Shared, headers: HeaderMap, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Response {
+            if let Err(refused) = r.this_one(&headers, &app) {
+                return refused;
+            }
+            match r.services.reply(&app, id, body) {
+                Ok(()) => Json(json!({})).into_response(),
+                Err(err) => refused(StatusCode::BAD_REQUEST, format!("{err:#}")),
+            }
+        }
+
+        async fn fill(State(r): Shared, headers: HeaderMap) -> Response {
+            if let Err(refused) = r.ours(&headers) {
+                return refused;
+            }
+            refused(StatusCode::NOT_IMPLEMENTED, "a service can't fill in the Vault's items yet: the call's node fills them in before it asks")
+        }
+
+        axum::Router::new()
+            .route("/v1/services/{app}", routing::post(register))
+            .route("/v1/services/{app}/calls", routing::get(next_call))
+            .route("/v1/services/{app}/calls/{id}", routing::post(reply))
+            .route("/v1/services/{app}/calls/{id}/vault", routing::post(fill))
+            .with_state(self.clone())
+    }
+}
+
+pub(crate) fn refused(code: axum::http::StatusCode, why: impl std::fmt::Display) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (code, axum::Json(json!({ "error": why.to_string() }))).into_response()
 }
