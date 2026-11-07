@@ -34,7 +34,10 @@ fn what_runs_in_wasm_builds() {
 /// The native app (`client/native`, its own workspace that `cargo test` and `cargo build` never build) compiles for this
 /// machine's platform (Linux's Tauri build here) and, where the Android NDK is, for Android's arm64. Apple's targets only
 /// build on a Mac, so the iPhone's Rust and Swift are left to `iphone/build.sh`. It has its own target folder, so this
-/// neither waits on nor rebuilds the main workspace; warm, with nothing changed, it takes under a second.
+/// neither waits on nor rebuilds the main workspace; warm, with nothing changed, it takes under a second. Android's check
+/// has a folder of its own too: `tauri`'s build script writes the Kotlin that `android/build.sh` compiles, only when it
+/// runs with `build.sh`'s environment, and doesn't run again when that changes, so a check without it first would leave
+/// the build in `target/` with no `TauriActivity`.
 #[test]
 fn the_native_app_builds() {
     let native = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../client/native"));
@@ -51,7 +54,7 @@ fn the_native_app_builds() {
         return;
     };
     let target = "aarch64-linux-android";
-    check(&["--lib", "--target", target], &[("CC_aarch64_linux_android".into(), bin.join(format!("{target}29-clang"))), ("AR_aarch64_linux_android".into(), bin.join("llvm-ar"))]);
+    check(&["--lib", "--target", target], &[("CC_aarch64_linux_android".into(), bin.join(format!("{target}29-clang"))), ("AR_aarch64_linux_android".into(), bin.join("llvm-ar")), ("CARGO_TARGET_DIR".into(), native.join("target/check-android"))]);
 }
 
 /// The relay Worker runs a WebAssembly build of iroh-relay's protocol that `cloudflare/relay/build.sh` makes by hand from
