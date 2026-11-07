@@ -32,10 +32,14 @@ fn dir() -> PathBuf {
     signed_in.with_file_name(name)
 }
 
-/// Whether this machine's node answers: then everything goes to it, as it always has.
+/// Whether this machine's node answers: then everything goes to it, as it always has. `<CLI>_NO_NODE` says to take
+/// none as there, for a CLI tried as a device on a computer that has one (`one throwaway client cli`).
 pub fn node_here() -> bool {
     static HERE: OnceLock<bool> = OnceLock::new();
     *HERE.get_or_init(|| {
+        if std::env::var_os(one::config::env("NO_NODE")).is_some() {
+            return false;
+        }
         let addrs = std::net::ToSocketAddrs::to_socket_addrs(&one::api::addr()).map(|a| a.collect::<Vec<_>>()).unwrap_or_default();
         addrs.iter().any(|a| std::net::TcpStream::connect_timeout(a, Duration::from_millis(500)).is_ok())
     })
