@@ -272,7 +272,7 @@ fn deploy_said(app: &str, r: &Value, added: bool) -> String {
         _ if added && tools.is_empty() => out.push("It has no tools.".into()),
         _ if added => out.push(format!("Its tools: {}.", tools.join(", "))),
         _ => out.push(format!(
-            "Put it on your page with apps_add {{ app: \"{app}\", scope: \"user\" }}; its tools come then{}, at once where your client takes list_changed, else in your next session.",
+            "Put it on your page with add {{ app: \"{app}\", scope: \"user\" }}; its tools come then{}, at once where your client takes list_changed, else in your next session.",
             if tools.is_empty() { String::new() } else { format!(" ({})", tools.join(", ")) }
         )),
     }

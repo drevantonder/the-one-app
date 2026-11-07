@@ -16,7 +16,7 @@ pub fn commands() -> Command {
             ("deploy <app> --version <hash>".into(), "deploy an earlier version again (deploys lists them): a rollback".into()),
             ("deploys <app>".into(), "an app's deploys, newest last".into()),
             ("source <app> [path] [--version <hash>]".into(), "an app's code as deployed: its files, or one of them".into()),
-            ("add <app> [--scope user|global|<group>]".into(), "add an app, and the apps it uses, for you, a group you admin or everyone".into()),
+            ("add <app> [--scope user|global|<group>] [--node <device>]".into(), "add an app, and the apps it uses, for you, a group you admin or everyone; --node is the device that runs its service, when it has one and you have more than one".into()),
             ("remove <app> [--scope s]".into(), "".into()),
             ("fork <app> <name> [--owner <owner>]".into(), "a new app from <app>'s code, with data of its own".into()),
             ("app delete|restore|erase <app>".into(), "delete an app you own (to Recently Deleted), restore it, or erase it for good".into()),
@@ -81,7 +81,7 @@ pub fn commands() -> Command {
                 }
                 ["add", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    g.node.post("/v1/add", json!({ "app": app, "scope": scope, "added": true }))?;
+                    g.node.post("/v1/add", json!({ "app": app, "scope": scope, "added": true, "node": g.flag("node") }))?;
                     println!("{app} is added to {scope}.");
                 }
                 ["app", how @ ("delete" | "restore" | "erase"), app] => {

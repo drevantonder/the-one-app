@@ -76,7 +76,7 @@ export default {
       },
       async run(ctx, input) {
         const s = input.scope === "global" ? ctx.global : ctx.user;
-        if (!s) throw new Error(input.scope === "global" ? "AI isn't added for everyone: an admin adds it with apps_add, app ai and scope global" : "AI isn't added for you: apps_add with app ai and scope user adds it");
+        if (!s) throw new Error(input.scope === "global" ? "AI isn't added for everyone: an admin adds it with add, app ai and scope global" : "AI isn't added for you: add with app ai and scope user adds it");
         if (input.scope === "global" && s.role !== "admin") throw new Error("only admins change everyone's AI: leave out scope to change your own");
         if (input.provider && !["local", "gemini"].includes(input.provider)) throw new Error(`provider is local or gemini, not ${JSON.stringify(input.provider)}`);
         for (const key of Object.keys(DEFAULTS)) if (input[key] !== undefined) s.exec("insert or replace into settings values (?, ?)", [key, JSON.stringify(input[key])]);

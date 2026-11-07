@@ -64,7 +64,7 @@ impl Node {
         let device = device.map(str::to_string).unwrap_or_else(|| self.device_name());
         let content = self.with(|i| {
             let scope = if on { added_scope(i, &caller.user, name)? } else { None };
-            service_entry(i.r.db(), &caller.user, &device, name, on, scope.as_ref())
+            crate::settings::service(i.r.db(), &caller.user, &device, name, on, scope.as_ref())
         })?;
         self.member_content(caller, content).await?;
         self.say_hello();
@@ -101,7 +101,7 @@ impl Node {
             let mut entries = Vec::new();
             for name in unnamed.chain(unrecorded) {
                 if let Some(scope) = added_scope(i, &caller.user, &name)?
-                    && let Ok(entry) = service_entry(m, &caller.user, &hex(&self.0.id), &name, true, Some(&scope))
+                    && let Ok(entry) = crate::settings::service(m, &caller.user, &hex(&self.0.id), &name, true, Some(&scope))
                 {
                     entries.push(entry);
                 }
@@ -263,38 +263,6 @@ impl Node {
     pub(super) fn runs_service_here(&self, app: &str) -> bool {
         self.0.services.has(app) && self.removed_here(app).is_none()
     }
-}
-
-/// The `service` entry that switches a part of a device's oned on or off, the device found by name or key prefix; for
-/// the device's person, or to switch it off, for who may add apps where it ran. A service runs for the app added in
-/// `scope`, which its writer may add apps to.
-pub(super) fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, scope: Option<&Scope>) -> Result<Content> {
-    if let Some(s) = scope.filter(|_| on) {
-        ensure!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
-    }
-    let managed = |k: &Key| -> Result<bool> { Ok(!on && db.switch(k, name)?.and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)))) };
-    // The Cloudflare node, by its name in run priority or its key: its admins switch its parts.
-    if let Some(k) = db.cloudflare_node()?.filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
-        ensure!(managed(&k)? || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
-        // It always runs apps; what else it can run is the services built for it that it carries.
-        ensure!(!on || crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
-        return Ok(content::service(&k, name, on, scope));
-    }
-    let mut found: Vec<scopes::Machine> = db.machines()?.into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
-    // A machine's services are named for it: by its name, it's its node.
-    if found.len() > 1 {
-        found.retain(|s| s.is(scopes::Kind::Compute));
-    }
-    let key = match found.as_slice() {
-        [s] => s.key,
-        // A node that was removed still has its records, which who added the app may switch off.
-        _ => match unhex(device).ok() {
-            Some(k) if managed(&k)? => k,
-            _ => bail!("no one device called {device}"),
-        },
-    };
-    ensure!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s person switches what it runs");
-    Ok(content::service(&key, name, on, scope))
 }
 
 /// The scope whose added app `name` is, as `user` sees it, for a service switched on with none said: their own, if

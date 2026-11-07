@@ -17,7 +17,11 @@ pub struct Tool {
 
 pub const HANDLE: Tool = Tool { name: "groups_handle", asks: handle, said: handle_said };
 
-pub const ALL: &[Tool] = &[HANDLE];
+pub const ADD: Tool = Tool { name: "add", asks: add, said: add_said };
+
+pub const REMOVE: Tool = Tool { name: "remove", asks: remove, said: remove_said };
+
+pub const ALL: &[Tool] = &[HANDLE, ADD, REMOVE];
 
 pub fn find(name: &str) -> Option<&'static Tool> {
     ALL.iter().find(|t| t.name == name)
@@ -39,4 +43,25 @@ fn handle_said(input: &Map<String, Value>, _: &Value) -> Value {
         Some(group) => format!("{group}'s handle is now {handle}."),
         None => format!("Your handle is now {handle}."),
     })
+}
+
+fn text<'a>(input: &'a Map<String, Value>, key: &str) -> Result<&'a str, String> {
+    input.get(key).and_then(Value::as_str).filter(|v| !v.trim().is_empty()).ok_or(format!("give {key}"))
+}
+
+fn add(input: &Map<String, Value>) -> Result<(&'static str, Value), String> {
+    let node = input.get("node").and_then(Value::as_str);
+    Ok(("/v1/add", json!({ "app": text(input, "app")?, "scope": text(input, "scope")?, "added": true, "node": node })))
+}
+
+fn add_said(input: &Map<String, Value>, _: &Value) -> Value {
+    json!(format!("Added {}.", input.get("app").and_then(Value::as_str).unwrap_or("it")))
+}
+
+fn remove(input: &Map<String, Value>) -> Result<(&'static str, Value), String> {
+    Ok(("/v1/add", json!({ "app": text(input, "app")?, "scope": text(input, "scope")?, "added": false })))
+}
+
+fn remove_said(input: &Map<String, Value>, _: &Value) -> Value {
+    json!(format!("Removed {}.", input.get("app").and_then(Value::as_str).unwrap_or("it")))
 }

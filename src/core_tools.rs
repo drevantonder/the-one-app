@@ -1,4 +1,4 @@
-//! The core's own tools: the Vault's, Backups', Groups', Devices', Widgets', Push's and logs', each defined beside its
+//! The core's own tools: add's and remove's, the Vault's, Backups', Groups', Devices', Widgets', Push's and logs', each defined beside its
 //! feature and listed here. Agents use them as they use apps' tools, by the same kind of name (`vault_list`, `logs`), on
 //! the command line and over MCP; but they're not apps, so no list of apps has them. The client runs each against the
 //! API of the node it asks (`api::Client`), as the person, never on another device.
@@ -61,8 +61,8 @@ impl Feature {
 }
 
 pub fn all() -> Vec<Feature> {
-    use crate::node::{backups, devices, groups, push, vault, widgets};
-    vec![vault::tools::feature(), backups::tools::feature(), groups::feature(), devices::tools::feature(), widgets::feature(), push::tools::feature(), crate::logs::feature()]
+    use crate::node::{apps, backups, devices, groups, push, vault, widgets};
+    vec![apps::tools::add_feature(), apps::tools::remove_feature(), vault::tools::feature(), backups::tools::feature(), groups::feature(), devices::tools::feature(), widgets::feature(), push::tools::feature(), crate::logs::feature()]
 }
 
 /// Those whoever `node` asks for may use: a feature that's this machine's own person's (`elsewhere: false`) isn't for

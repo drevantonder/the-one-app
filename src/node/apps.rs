@@ -4,6 +4,7 @@ use super::*;
 
 pub(crate) mod routes;
 pub mod cli;
+pub mod tools;
 
 impl Node {
     /// What people call `app`, for what they read: its title, or its service's, else its name.
@@ -366,10 +367,11 @@ impl Node {
     }
 
     /// The entries that add (or remove) `app` in `scope` for `caller`, with their own rights there. Adding it
-    /// also adds each app it uses, and each they use, that isn't added there yet, and runs its own services
-    /// for it on `node` (a device's name, or `cloudflare`), one node each: added again with another node, they move
-    /// there. The services of the apps it uses are theirs to place, each added with its own node (the App Store's
-    /// add does). Removing it stops its services there.
+    /// also adds each app it uses, and each they use, that isn't added there yet. Each of their services runs for
+    /// the scope on one node, a node of the caller's it can run on (or `cloudflare` for an admin): `node` (a device's
+    /// name) for `app`'s, which is asked for when there's a choice, and added again with another node, they move
+    /// there; and for an app it uses, `node` if it can run there, else its one node, if it has one, and it stays where
+    /// it runs already. Removing `app` stops its services there.
     pub(super) async fn add_entries(&self, caller: &Caller, app: &str, scope: &Scope, added: bool, node: Option<&str>) -> Result<Vec<(Scope, Content)>> {
         let mut wanted = vec![app.to_string()];
         let mut i = 0;
@@ -382,7 +384,15 @@ impl Node {
             }
             i += 1;
         }
-        let services = self.uses(app).await.1;
+        // Each one's title, services, and the nodes of the caller's they can run on.
+        let mut services = Vec::new();
+        for name in &wanted {
+            let nodes = match self.0.apps.describe_any(name).await {
+                Ok(described) => self.nodes_for(caller, &described),
+                Err(_) => None,
+            };
+            services.push((self.title(name).await, self.uses(name).await.1, nodes));
+        }
         self.with(|i| {
             let m = i.r.db();
             let named = scope_name(i, &scope.to_string())?;
@@ -399,18 +409,31 @@ impl Node {
             // Where each service runs for this scope now: stopped where it no longer should, started where it should.
             let ours = |s: &scopes::Switch| s.on && s.scope.as_deref() == Some(scope.to_string().as_str());
             let switches = m.switches()?;
-            for service in &services {
-                let running: Vec<Key> = switches.iter().filter(|((_, n), s)| n == service && ours(s)).map(|((k, _), _)| *k).collect();
-                let to = match node.filter(|_| added) {
-                    Some(node) => Some(service_entry(m, &caller.user, node, service, true, Some(scope))?),
-                    None => None,
+            for (n, (title, names, nodes)) in services.iter().enumerate() {
+                let listed = |node: &str| nodes.iter().flatten().find(|l| l.eq_ignore_ascii_case(node)).cloned();
+                let chosen = match (n, nodes) {
+                    (_, _) if !added => None,
+                    (0, Some(nodes)) => match node {
+                        Some(node) => Some(listed(node).with_context(|| format!("{title} can't run on {node}: it can run on {}", if nodes.is_empty() { "none of your nodes".to_string() } else { nodes.join(", ") }))?),
+                        None if nodes.len() > 1 => bail!("Where should {title} run? Give node: {}.", nodes.join(" or ")),
+                        None => nodes.first().cloned(),
+                    },
+                    (_, Some(nodes)) => node.and_then(listed).or_else(|| (nodes.len() == 1).then(|| nodes[0].clone())),
+                    _ => None,
                 };
-                let to_key = to.as_ref().and_then(|c| c.data["device"].as_str()).and_then(|k| unhex(k).ok());
-                for k in running.iter().filter(|k| !added || (to_key.is_some() && Some(**k) != to_key)) {
-                    out.push((Scope::Global, service_entry(m, &caller.user, &hex(k), service, false, None)?));
-                }
-                if let Some(to) = to.filter(|_| !running.contains(&to_key.unwrap_or_default())) {
-                    out.push((Scope::Global, to));
+                for service in names {
+                    let running: Vec<Key> = switches.iter().filter(|((_, name), s)| name == service && ours(s)).map(|((k, _), _)| *k).collect();
+                    let to = match chosen.as_deref().filter(|_| n == 0 || running.is_empty()) {
+                        Some(node) => Some(crate::settings::service(m, &caller.user, node, service, true, Some(scope))?),
+                        None => None,
+                    };
+                    let to_key = to.as_ref().and_then(|c| c.data["device"].as_str()).and_then(|k| unhex(k).ok());
+                    for k in running.iter().filter(|k| !added || (to_key.is_some() && Some(**k) != to_key)) {
+                        out.push((Scope::Global, crate::settings::service(m, &caller.user, &hex(k), service, false, None)?));
+                    }
+                    if let Some(to) = to.filter(|_| !running.contains(&to_key.unwrap_or_default())) {
+                        out.push((Scope::Global, to));
+                    }
                 }
             }
             Ok(out)

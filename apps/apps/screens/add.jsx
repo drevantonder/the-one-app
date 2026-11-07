@@ -45,7 +45,7 @@ function Add() {
     setError("")
     setPut((s) => ({ ...s, [p.id]: on }))
     try {
-      await one.call(on ? "add" : "remove", { app: name, scope: p.scope, confirm: true, ...(on && node ? { node } : {}) })
+      await one.call(on ? "_add" : "_remove", { app: name, scope: p.scope, ...(on && node ? { node } : {}) })
     } catch (err) {
       setError(said(err).title)
     }

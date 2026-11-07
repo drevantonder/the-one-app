@@ -19,7 +19,7 @@ use crate::config::YOURS;
 use crate::database::content::{self, Content};
 use crate::database::scopes::{self, Kind, Role, Scope, ScopeDb};
 use crate::database::steps::Welcome;
-use crate::keys::{self, Endpoint, Signs, hex};
+use crate::keys::{self, Endpoint, Key, Signs, hex, unhex};
 use crate::protocol::{Coded, code};
 
 /// How long app schedules last, unless their person renews them as they use the app.
@@ -82,7 +82,6 @@ enum Route {
     Runs,
     Service,
     Retire,
-    Add,
     ForgetSignIn,
     InviteLink,
     AppSchedules,
@@ -95,8 +94,8 @@ enum Route {
 
 /// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
 /// missing here or there), and `answered` tells a request that comes by of; and whether a machine with a node answers
-/// it with this alone (`on_a_node`), false where the node serves that path itself: its own name, and apps added to a
-/// page and services, which it serves for more than its own programs.
+/// it with this alone (`on_a_node`), false where the node serves that path itself: its own name, and services, which it serves for
+/// more than its own programs.
 const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/role", Route::Role, true),
     ("POST", "/v1/remove", Route::Remove, true),
@@ -110,8 +109,6 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/runs", Route::Runs, true),
     ("POST", "/v1/service", Route::Service, false),
     ("POST", "/v1/retire", Route::Retire, true),
-    // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
-    ("POST", "/v1/add", Route::Add, false),
     ("POST", "/v1/devices/forget-sign-in", Route::ForgetSignIn, true),
     ("POST", "/v1/invite-link", Route::InviteLink, true),
     ("POST", "/v1/app-schedules", Route::AppSchedules, true),
@@ -190,13 +187,6 @@ pub struct Invited {
 pub async fn answer(m: &impl Me, method: &str, path: &str, body: &[u8]) -> Option<Result<Value>> {
     let path = path.split('?').next().unwrap_or(path);
     let (_, _, route, _) = ROUTES.iter().find(|(m, p, _, _)| *m == method && *p == path)?;
-    if let Route::Add = route {
-        match read::<body::Add>(path, body) {
-            Ok(add) if add.scope != "global" => return None,
-            Err(err) => return Some(Err(err)),
-            Ok(_) => {}
-        }
-    }
     // What a request names (a group, a device) may be newer than this device last read: it reads what's new first.
     if let Err(err) = m.read().await {
         return Some(Err(err));
@@ -307,19 +297,6 @@ mod body {
     pub struct Retire {
         pub app: String,
         pub how: String,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub struct Add {
-        pub app: String,
-        pub scope: String,
-        #[serde(default = "yes")]
-        pub added: bool,
-    }
-
-    fn yes() -> bool {
-        true
     }
 
     #[derive(Deserialize)]
@@ -440,19 +417,14 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
         }
         Route::Service => {
             let body: body::Service = read(path, raw)?;
-            let device = m.who(|db| db.find_machine(&body.device))?;
-            m.write(content::service(&device, &body.name, body.on, None)).await?;
+            let user = m.user()?;
+            m.write(m.who(|db| service(db, &user, &body.device, &body.name, body.on, None))?).await?;
             done
         }
         Route::Retire => {
             let body: body::Retire = read(path, raw)?;
             let user = m.user()?;
             m.write(m.who(|db| retire(db, &user, &body.app, &body.how, &body.app))?).await?;
-            done
-        }
-        Route::Add => {
-            let body: body::Add = read(path, raw)?;
-            m.write(content::added(&body.app, body.added)).await?;
             done
         }
         Route::ForgetSignIn => {
@@ -502,6 +474,38 @@ pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> R
     ensure!(who.may(user, "delete", &scopes::app(app)), "Only {title}'s owners can delete, restore or erase it.");
     ensure!(how != "erased" || a.deleted.is_some(), "Delete {title} before erasing it.");
     content::retire(app, &a.owner.to_string(), how)
+}
+
+/// The `service` entry that switches a part of a device's oned on or off, the device found by name or key prefix; for
+/// the device's person, or to switch it off, for who may add apps where it ran. A service runs for the app added in
+/// `scope`, which its writer may add apps to.
+pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, scope: Option<&Scope>) -> Result<Content> {
+    if let Some(s) = scope.filter(|_| on) {
+        ensure!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
+    }
+    let managed = |k: &Key| -> Result<bool> { Ok(!on && db.switch(k, name)?.and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)))) };
+    // The Cloudflare node, by its name in run priority or its key: its admins switch its parts.
+    if let Some(k) = db.cloudflare_node()?.filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
+        ensure!(managed(&k)? || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
+        // It always runs apps; what else it can run is the services built for it that it carries.
+        ensure!(!on || crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
+        return Ok(content::service(&k, name, on, scope));
+    }
+    let mut found: Vec<scopes::Machine> = db.machines()?.into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+    // A machine's services are named for it: by its name, it's its node.
+    if found.len() > 1 {
+        found.retain(|s| s.is(scopes::Kind::Compute));
+    }
+    let key = match found.as_slice() {
+        [s] => s.key,
+        // A node that was removed still has its records, which who added the app may switch off.
+        _ => match unhex(device).ok() {
+            Some(k) if managed(&k)? => k,
+            _ => bail!("no one device called {device}"),
+        },
+    };
+    ensure!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s person switches what it runs");
+    Ok(content::service(&key, name, on, scope))
 }
 
 /// A group called `name`, with this person its first admin: → `{ group }`, its id.

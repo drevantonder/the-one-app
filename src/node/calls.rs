@@ -399,7 +399,7 @@ impl Node {
         let starting = info.as_ref().is_some_and(|a| a["runs_on"].as_array().is_some_and(|r| r.iter().any(|r| r["online"] == true)));
         let text = match &info {
             _ if starting => format!("{title} is starting: try again in a moment."),
-            Some(a) => format!("{title} isn't on any of your devices yet.{} apps_add {app} user adds it, on a node you choose (apps_devices {app} lists them).", a["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()),
+            Some(a) => format!("{title} isn't on any of your devices yet.{} add {app} adds it, on a node you choose (apps_devices {app} lists them).", a["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()),
             None => format!("{title} isn't on any of your devices yet."),
         };
         crate::protocol::Coded::new(crate::protocol::code::RESTARTING, text)

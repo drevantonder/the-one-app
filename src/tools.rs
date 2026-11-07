@@ -200,8 +200,8 @@ pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[
         }
         if addable(a) {
             return Ok(match cli {
-                true => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
-                false => format!("{title} isn't added yet: apps_add with app {app} and scope user adds it for the person, or global for everyone"),
+                true => format!("{title} isn't added yet: {CLI} add {app} adds it for you, or {CLI} add {app} --scope global for everyone"),
+                false => format!("{title} isn't added yet: add with app {app} and scope user adds it for the person, or global for everyone"),
             });
         }
         let (tool, tools) = (tool.unwrap_or(""), tools_of(a));

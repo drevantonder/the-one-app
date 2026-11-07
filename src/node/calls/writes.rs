@@ -167,7 +167,7 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
                 None if on => added_scope(i, &me.user, &name)?,
                 None => None,
             };
-            (Scope::Global, service_entry(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
+            (Scope::Global, crate::settings::service(i.r.db(), &me.user, &device, &name, on, scope.as_ref())?)
         }
         Append::Add { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("apps added, costs, statements and items are written on their own"),
     })

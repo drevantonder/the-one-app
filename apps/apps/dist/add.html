@@ -106,10 +106,9 @@ function x() {
 			[e.id]: t
 		}));
 		try {
-			await one.call(t ? "add" : "remove", {
+			await one.call(t ? "_add" : "_remove", {
 				app: E,
 				scope: e.scope,
-				confirm: !0,
 				...t && V ? { node: V } : {}
 			});
 		} catch (e) {

@@ -178,9 +178,8 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
     let add = |app: &Value| {
         let name = app["name"].as_str().unwrap_or("");
         let how = match how {
-            Reader::Cli => format!("{CLI} apps add {name} user"),
-            Reader::Mcp => format!("apps_add {{ app: \"{name}\", scope: \"user\" }}"),
-            Reader::Code => format!("tools.apps.add({{ app: \"{name}\", scope: \"user\" }})"),
+            Reader::Cli => format!("{CLI} add {name}"),
+            Reader::Mcp | Reader::Code => format!("add {{ app: \"{name}\", scope: \"user\" }}"),
         };
         format!("- {} ({name}): {}. {how} adds it for the person.", app["title"].as_str().unwrap_or(name), app["description"].as_str().unwrap_or("").trim().trim_end_matches('.'))
     };

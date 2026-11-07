@@ -49,7 +49,7 @@ pub use calls::{CallRequest, Elsewhere, Grant};
 use calls::{Granted, Reply};
 use apps::built_in_bundle;
 use scheduled::switch_entry;
-use services::{added_scope, service_entry};
+use services::added_scope;
 pub use releases::Build;
 pub use sessions::Needs;
 pub mod services;

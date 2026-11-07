@@ -83,21 +83,6 @@ function nodeFor(a, node) {
   return w.nodes[0];
 }
 
-async function usedWithService(ctx, a) {
-  const out = [];
-  const seen = new Set([a.name]);
-  const next = [...(a.uses?.apps || [])];
-  while (next.length) {
-    const name = next.shift();
-    if (seen.has(name)) continue;
-    seen.add(name);
-    const used = await find(ctx, name).catch(() => ({ name })); // an app this network doesn't have has no service to list
-    next.push(...(used.uses?.apps || []));
-    if (hasService(used)) out.push(used);
-  }
-  return out;
-}
-
 async function find(ctx, name) {
   const all = await ctx.catalog();
   const app = all.find((a) => a.name === name);
@@ -144,7 +129,7 @@ export default {
   icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
-  instructions: "The App Store lists every app in this network, where each is added and its code. apps_add adds one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
+  instructions: "The App Store lists every app in this network, where each is added and its code. the core's add adds one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
 
   // The apps whose schedule, where you may switch it, failed its last run.
   async badge(ctx) {
@@ -168,21 +153,12 @@ export default {
         ].join("\n");
       },
     },
-    add: {
+    _add: {
       reads: false,
-      description: "Add an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page. An app with a service runs it on node, one of your nodes it can run on (apps_devices lists them), or for everyone's or a group's, the Cloudflare node; asked when there's a choice.",
+      description: "For the screens: add an app in a place, as the core's add does, on node.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput, node: NODE } },
       async run(ctx, { app, scope, node }) {
-        const a = await find(ctx, app);
-        const place = placeOf(ctx, scope);
-        for (const used of await usedWithService(ctx, a)) {
-          const w = where(used);
-          if (used.runs_on?.some((r) => r.scope === (place === "user" ? `user:${ctx.me.user}` : place))) continue;
-          const on = w.nodes.find((n) => node && n.toLowerCase() === String(node).toLowerCase()) || (w.nodes.length === 1 ? w.nodes[0] : undefined);
-          if (on) ctx.add(used.name, place, true, on);
-        }
-        ctx.add(app, place, true, nodeFor(a, node));
-        return `Added ${a.title || app}.`;
+        ctx.add(app, placeOf(ctx, scope), true, node);
       },
     },
     move: {
@@ -193,20 +169,17 @@ export default {
         const a = await find(ctx, app);
         if (!hasService(a)) throw new Error(`${a.title || app} has no service to move`);
         const place = scope ? placeOf(ctx, scope) : a.runs_on?.find((r) => r.scope)?.scope || a.added?.find((s) => places(ctx).some((p) => p.may && p.id === s));
-        if (!place) throw new Error(`${a.title || app} isn't added anywhere you may move it: apps_add adds it`);
+        if (!place) throw new Error(`${a.title || app} isn't added anywhere you may move it: add adds it`);
         ctx.add(app, place === `user:${ctx.me.user}` ? "user" : place, true, nodeFor(a, node));
         return `${a.title || app} runs on ${node}.`;
       },
     },
-    remove: {
-      confirm: true,
+    _remove: {
       reads: false,
-      description: "Remove an app from a place: user (you), a group (by its name) or global (everyone). What it keeps there goes with it.",
+      description: "For the screens: remove an app from a place, as the core's remove does.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       async run(ctx, { app, scope }) {
-        await find(ctx, app);
         ctx.add(app, placeOf(ctx, scope), false);
-        return `Removed ${app}.`;
       },
     },
     delete: {
@@ -292,7 +265,7 @@ export default {
     },
     devices: {
       reads: true,
-      description: "Where an app's service runs (runs_on: each node, whether it's on, and what went wrong), the nodes it can run on (nodes, for apps_add and apps_move), and its problem when it runs on no node that's on.",
+      description: "Where an app's service runs (runs_on: each node, whether it's on, and what went wrong), the nodes it can run on (nodes, for add and apps_move), and its problem when it runs on no node that's on.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "the name of an app with a service, like whatsapp" } } },
       async run(ctx, { app }) {
         return where(await find(ctx, app));
