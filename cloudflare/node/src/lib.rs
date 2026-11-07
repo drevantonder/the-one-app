@@ -324,10 +324,10 @@ pub fn screen(context: &str, body: &str, linked: bool) -> Result<String, JsError
     Ok(one::screen::page(&serde_json::from_str(context)?, body, false, linked))
 }
 
-/// The custom build this node is: `{ name, cli, port, made_here }`.
+/// The custom build this node is: `{ name, cli, port, made_here }`, and the name a call gives for this node (`cloudflare`).
 #[wasm_bindgen]
 pub fn config() -> String {
-    json!({ "name": one::config::NAME, "cli": one::config::CLI, "port": one::config::PORT, "made_here": one::config::MADE_HERE }).to_string()
+    json!({ "name": one::config::NAME, "cli": one::config::CLI, "port": one::config::PORT, "made_here": one::config::MADE_HERE, "cloudflare": one::rank::CLOUDFLARE }).to_string()
 }
 
 /// Where an app's database of a scope is in the bucket (`src/database/stored.rs`): only of a scope there can be, and an app and

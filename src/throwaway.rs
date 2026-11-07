@@ -217,7 +217,7 @@ fn commands(mcp: &str) -> one::cli::Command {
             form("throwaway cloudflare node deploy", "run its Cloudflare node beside its Workers, as Cloudflare would".into()),
             form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows".into()),
             form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
-            form("throwaway client cli <command>", format!("a command from a computer that's only a device of its person's (no node), asking their nodes over iroh in run priority's order, as every client does: the Cloudflare node, once deployed, with {CLI} throwaway settings priority '{{\"cloudflare\":1}}'; --build <program> first runs another build of {CLI} (an older release's) as that device")),
+            form("throwaway client cli <command>", format!("a command from a computer that's only a device of its person's (no node), asking their nodes over iroh in run priority's order, as every client does: --device cloudflare asks the Cloudflare node, once deployed; --build <program> first runs another build of {CLI} (an older release's) as that device")),
             form("throwaway stop", format!("stop and delete it, and give back its devices; {CLI} throwaway then starts a new one")),
         ],
         run: |_| Ok(false),

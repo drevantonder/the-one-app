@@ -40,6 +40,9 @@ import { BLOBS, CODES, HEADER, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT } fr
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
 
+/// Whether a call's `device` names the Cloudflare node (this one), as `--device cloudflare` does: it runs here and is passed on to no machine.
+const namesThisNode = (device) => String(device || "").toLowerCase() === CONFIG.cloudflare;
+
 /// An answer named by its content, but for a page's nonce, as a node on a machine names it (src/screen.rs's `tag`): to
 /// a client that has it already, only that.
 async function tagged(request, body, type) {
@@ -524,7 +527,7 @@ class Person {
 
   /// The scopes a call reaches: an app's, as `Run.scopes` gives them; a service's, those it names, or its person's own.
   callScopes(who, view, req) {
-    const app = !req.service && !req.device && deployed(view, req.app);
+    const app = !req.service && (!req.device || namesThisNode(req.device)) && deployed(view, req.app);
     if (app) return new Run(this, who, view).scopes(app, req.scopes).map((h) => h.id);
     return (req.scopes || ["user"]).map((s) => (s === "user" ? `user:${who.user}` : s === "global" || String(s).includes(":") ? String(s) : `group:${s}`));
   }
@@ -824,7 +827,7 @@ async function hereCall(env, name, functionName, input) {
 /// A call of an app's own service, from the app running here: here when it can, else on a device that runs it; with
 /// device "all", every device's answer and this node's, as "Cloudflare".
 async function ownService(run, q, d) {
-  const cloudflare = String(q.device || "").toLowerCase() === "cloudflare";
+  const cloudflare = namesThisNode(q.device);
   if (q.device === "all") {
     const here = await hereCall(run.env, q.app, q.function, q.input).catch((err) => ({ ok: { error: err.message } }));
     const there = await machineCall(run, q, d).catch((err) => {
@@ -946,13 +949,15 @@ async function route(p, request) {
     const req = await bodyOf(request);
     if (typeof req !== "object" || req === null || Array.isArray(req)) refuse(400, "a call is an object");
     const run = new Run(p, who, await p.networkFor(who));
-    const app = !req.service && !req.device && deployed(run.view, req.app);
+    const named = namesThisNode(req.device);
+    const app = !req.service && (!req.device || named) && deployed(run.view, req.app);
     const d = app && (await p.describe(who, app));
-    // An app that keeps to its own data, in scopes this node runs, runs here; the rest on a machine, when one answers.
+    // An app that keeps to its own data, in scopes this node runs, runs here; the rest on a machine, when one answers,
+    // unless the call names this node.
     if (d && plain(d, run.view) && p.callScopes(who, run.view, req).every((s) => run.view.runs.includes(s))) return json(await run.call(req));
-    const r = await p.onMachine(who, run.view, req, 120_000);
+    const r = named ? null : await p.onMachine(who, run.view, req, 120_000);
     if (r) return json(r, r.ok !== undefined ? 200 : 400);
-    if (!d || !servedHere(run.view, d)) refuse(503, needsDevice(d, req.app));
+    if (!d || !servedHere(run.view, d)) refuse(503, named ? `the Cloudflare node can't run ${req.app} for you` : needsDevice(d, req.app));
     return json(await run.call(req));
   }
   const screenAt = path.match(/^\/v1\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);

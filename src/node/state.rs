@@ -204,7 +204,7 @@ impl Node {
         self.with_or(None, |i| Ok(of(i.r.db())?.map(|m| m.name))).unwrap_or_else(|| short(key))
     }
 
-    /// The network's compute devices' names by key (hex), and the Cloudflare node's: what a trace's reader calls the
+    /// The network's compute devices' names by key (hex), and the Cloudflare node's (`cloudflare`): what a trace's reader calls the
     /// nodes a client tried.
     pub fn compute_names(&self) -> Value {
         self.with(|i| {
@@ -214,7 +214,7 @@ impl Node {
                 names.insert(hex(&c.key), json!(m.machine_ever(&c.key)?.map(|d| d.name.clone()).unwrap_or_else(|| short(&c.key))));
             }
             if let Some(key) = m.cloudflare_node()? {
-                names.insert(hex(&key), json!("the Cloudflare node"));
+                names.insert(hex(&key), json!(rank::CLOUDFLARE));
             }
             Ok(Value::Object(names))
         })

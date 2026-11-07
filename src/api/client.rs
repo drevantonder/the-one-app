@@ -112,13 +112,27 @@ impl Client {
             if node.is_none() && tries.is_none() {
                 return vec![format!("no trace: this ran in {} here, not on a device", crate::config::CLI)];
             }
-            let answered = match node {
-                Some(_) => String::new(),
-                None => self.state().map(|s| s.device.name).unwrap_or_else(|_| "the device that answered".into()),
+            let names = match &node {
+                Some(n) => n["names"].clone(),
+                None => self.names(),
             };
-            crate::node::trace::said(tries.as_ref(), node.as_ref(), &answered)
+            crate::node::trace::said(tries.as_ref(), node.as_ref(), &names)
         });
         Called { ok: ok.map(|mut r| r["ok"].take()), trace }
+    }
+
+    /// The network's nodes' names by key (hex), for a trace of a call whose node sent none (the Cloudflare node sends no trace).
+    fn names(&self) -> Value {
+        let Ok(state) = self.state() else { return Value::Null };
+        let Some(network) = state.network else { return Value::Null };
+        let mut names = serde_json::Map::new();
+        for d in &network.devices {
+            names.insert(d.key.clone(), d.name.clone().into());
+        }
+        if let Some(cloudflare) = &network.cloudflare_node {
+            names.insert(cloudflare.key.clone(), crate::rank::CLOUDFLARE.into());
+        }
+        Value::Object(names)
     }
 
     /// What a call it made needed and wasn't handed, since this was last asked (`{ error, need, to, seal }`): the node's

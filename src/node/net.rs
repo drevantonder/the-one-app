@@ -584,7 +584,7 @@ impl Node {
     }
 
     /// Whether `key` is the network's Cloudflare node's endpoint, as `cloudflare node deploy` set it.
-    fn is_cloudflare_node(&self, key: &Key) -> bool {
+    pub(super) fn is_cloudflare_node(&self, key: &Key) -> bool {
         self.with_or(false, |i| Ok(i.r.db().setting(crate::database::scopes::CLOUDFLARE_NODE)?.is_some_and(|k| k == hex(key))))
     }
 

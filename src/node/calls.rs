@@ -249,6 +249,12 @@ impl Node {
     pub async fn call_picked(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let me = Caller { agent: req.agent.clone().or(me.agent), ..me };
         let req = self.identified(req)?;
+        // The Cloudflare node answers a device of the caller's that asks it itself, as no node does: this client is told so.
+        if let Some(cloudflare) = self.names_cloudflare(&req) {
+            let why = self.cloudflare_is_asked_directly();
+            trace::note(req.named(json!({ "step": "device", "device": self.device_name(), "result": "elsewhere", "here": true, "why": why })), Duration::ZERO);
+            return Err(Elsewhere { why, nodes: vec![hex(&cloudflare)] }.into());
+        }
         if req.service.is_some() || req.device.is_some() {
             return self.route(req, me).await;
         }
@@ -447,6 +453,16 @@ impl Node {
         Ok(Value::Object(out))
     }
 
+    /// The Cloudflare node's key, if the call names it (`--device cloudflare`).
+    fn names_cloudflare(&self, req: &CallRequest) -> Option<Key> {
+        let found = self.with(|i| i.r.db().find_runner(req.device.as_deref().unwrap_or_default())).ok()?;
+        self.is_cloudflare_node(&found).then_some(found)
+    }
+
+    fn cloudflare_is_asked_directly(&self) -> String {
+        format!("{} is asked by a device of yours itself, not through {}: from the web app, a phone, or a computer that runs no node of its own", crate::rank::CLOUDFLARE, self.device_name())
+    }
+
     /// The devices that might run a call, in the order it tries them: those that are up with room first; then the
     /// near before the far (FAR); then by the network's order (src/rank.rs); this device before another as good; then
     /// the nearest. A service about its own machine runs here first.
@@ -469,7 +485,8 @@ impl Node {
                 nodes.sort_by_key(|k| *k != self.0.id);
                 return Ok(nodes);
             }
-            return Ok(vec![self.find_device(device)?]);
+            ensure!(self.names_cloudflare(req).is_none(), "{}", self.cloudflare_is_asked_directly());
+            return Ok(vec![self.with(|i| i.r.db().find_runner(device))?]);
         }
         let here = self.runs_service_here(&req.app);
         // A function of a service that's about its own machine (`prefer: { run: "here" }`: Shell's run, Models' here) runs on

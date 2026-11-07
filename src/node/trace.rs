@@ -91,10 +91,10 @@ pub fn bucket(kind: &str, took: std::time::Duration, found: bool) {
 
 /// A call's trace as a few readable lines, in the Developer panel's words (src/screen/settings/devtools.jsx): the devices
 /// the client tried (`tries`, from the client library), what the one that answered did (`node`, its `x-one-trace`),
-/// each wait with its milliseconds, and the total. `answered` names the device when its node sent no trace.
-pub fn said(tries: Option<&Value>, node: Option<&Value>, answered: &str) -> Vec<String> {
+/// each wait with its milliseconds, and the total. `names` says the devices by key (hex): the answering node's, or the
+/// network's when it sent no trace, as the Cloudflare node sends none.
+pub fn said(tries: Option<&Value>, node: Option<&Value>, names: &Value) -> Vec<String> {
     let mut out = Vec::new();
-    let names = node.map(|n| n["names"].clone()).unwrap_or_default();
     let name = |key: &str| names[key].as_str().map(str::to_string).unwrap_or_else(|| format!("a device ({})", key.get(..6).unwrap_or(key)));
     let mut total = node.and_then(|n| n["ms"].as_u64()).unwrap_or(0);
     for t in tries.and_then(Value::as_array).into_iter().flatten() {
@@ -110,8 +110,11 @@ pub fn said(tries: Option<&Value>, node: Option<&Value>, answered: &str) -> Vec<
         total = total.max(t["at"].as_u64().unwrap_or(0) + ms);
     }
     match node {
-        Some(node) => steps(node, node["device"].as_str().unwrap_or(answered), &mut out),
-        None => out.push(format!("no trace from {answered}")),
+        Some(node) => steps(node, node["device"].as_str().unwrap_or("the device that answered"), &mut out),
+        None => {
+            let answered = tries.and_then(Value::as_array).into_iter().flatten().find(|t| t["result"] == "answered").and_then(|t| t["node"].as_str());
+            out.push(format!("no trace from {}", answered.map_or("the device that answered".into(), name)));
+        }
     }
     out.push(format!("total {total} ms"));
     out

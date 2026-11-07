@@ -211,13 +211,13 @@ fn status(node: &Client, state: &State) {
             println!("      Services: {}{off}", on.join(", "));
         }
     }
-    // Not a device, but a node like the rest: woken when asked, in its place in run priority.
+    // Not a device, but a node like the rest: woken when asked, in its place in run priority, and named as any is.
     if let Some(cloudflare) = &i.cloudflare_node {
         let at = match cloudflare.priority {
             Priority::Number(n) => n.to_string(),
             Priority::Last => "last".to_string(),
         };
-        println!("  ● Cloudflare node  run priority {at}");
+        println!("  ● {}  the Cloudflare node, run priority {at}", one::rank::CLOUDFLARE);
     }
     // A device that's only a client, a phone or a computer, is listed with them; a browser is a sign-in, not a device.
     let (browsers, clients): (Vec<&one::state::Client>, Vec<&one::state::Client>) = i.clients.iter().partition(|c| c.passkey.is_some() || is_browser(&c.name));

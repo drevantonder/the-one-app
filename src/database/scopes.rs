@@ -304,12 +304,24 @@ impl ScopeDb {
         }
     }
 
-    /// A node, which runs calls, as someone gives it, by its name or the start of its key.
+    /// A node on a machine, which runs calls, as someone gives it, by its name or the start of its key.
     pub fn find_node(&self, name: &str) -> Result<Key> {
-        let nodes = self.computes()?;
-        match nodes.iter().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).collect::<Vec<_>>().as_slice() {
-            [one] => Ok(one.key),
-            [] => Err(crate::protocol::Coded::error(crate::protocol::code::NOT_LISTED, format!("no device called {name}: your devices are {}", nodes.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ")))),
+        let nodes = self.computes()?.into_iter().map(|m| (m.key, m.name)).collect();
+        Self::find_among(nodes, name)
+    }
+
+    /// A node that runs a call, as someone names it for one (`--device`): a machine's, or the Cloudflare node, whose
+    /// name is `cloudflare` wherever a device is named.
+    pub fn find_runner(&self, name: &str) -> Result<Key> {
+        let mut nodes: Vec<(Key, String)> = self.computes()?.into_iter().map(|m| (m.key, m.name)).collect();
+        nodes.extend(self.cloudflare_node()?.map(|k| (k, crate::rank::CLOUDFLARE.to_string())));
+        Self::find_among(nodes, name)
+    }
+
+    fn find_among(nodes: Vec<(Key, String)>, name: &str) -> Result<Key> {
+        match nodes.iter().filter(|(k, n)| n.eq_ignore_ascii_case(name) || hex(k).starts_with(name)).collect::<Vec<_>>().as_slice() {
+            [(key, _)] => Ok(*key),
+            [] => Err(crate::protocol::Coded::error(crate::protocol::code::NOT_LISTED, format!("no device called {name}: your devices are {}", nodes.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ")))),
             _ => bail!("several devices match {name}"),
         }
     }
