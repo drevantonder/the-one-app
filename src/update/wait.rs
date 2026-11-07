@@ -9,7 +9,8 @@ pub(super) fn devices() -> Vec<Value> {
     state["network"]["devices"].as_array().into_iter().flatten().filter(|d| d["user"] == me).cloned().collect()
 }
 
-/// Waits for each of `wanted` to say it runs `commit`, and reports each. True if any didn't.
+/// Waits for each of `wanted` to say it runs `commit` and to be online again (a node restarting onto a build is listed
+/// as on it a moment before its link is back, and what deploys through it needs the link), and reports each. True if any didn't.
 pub(super) fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit: Duration) -> bool {
     let id = |d: &Value| d["key"].as_str().unwrap_or("").to_string();
     let name = |d: &Value| d["name"].as_str().unwrap_or("").to_string();
@@ -19,12 +20,17 @@ pub(super) fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit
         println!("  {}: offline; it updates itself when it's back", name(d));
     }
     let mut waiting: Vec<(String, String, String)> = online.into_iter().map(|d| (id(d), name(d), d["build"].as_str().unwrap_or("?").into())).collect();
+    let mut seen = std::collections::HashMap::<String, String>::new();
     let deadline = Instant::now() + limit;
     loop {
         let now = devices();
         waiting.retain(|(device, name, was)| {
             let Some(d) = now.iter().find(|d| d["key"] == device.as_str()) else { return true };
             if d["build"] == commit {
+                if d["online"] != true {
+                    seen.insert(device.clone(), format!("runs {commit}, but its link isn't back"));
+                    return true;
+                }
                 if was == commit {
                     println!("  {name}: already on {commit}");
                 } else {
@@ -38,8 +44,8 @@ pub(super) fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit
             return false;
         }
         if Instant::now() > deadline {
-            for (_, name, was) in &waiting {
-                println!("  {name}: still on {was}");
+            for (device, name, was) in &waiting {
+                println!("  {name}: {}", seen.get(device).cloned().unwrap_or_else(|| format!("still on {was}")));
             }
             return true;
         }
