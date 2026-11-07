@@ -396,18 +396,21 @@ export class Client extends DurableObject {
   }
 
   /// What its device's keyring is handed (cloudflare/node/src/clients.rs `On`, one-client's `js::On`): the network's
-  /// address, and its URL signer, which the keyring reads the bucket through, and the relay, which it tells as it takes
-  /// a device out (by their bindings: a Worker can't fetch its own zone's routes); its key's signature; this object's
-  /// storage; and whether the relay still lets it in.
+  /// address, and its URL signer, which the keyring reads the bucket through, auth, which it asks of devices waiting to
+  /// join and invites, and the relay, which it tells as it takes a device out (by their bindings: a Worker can't fetch
+  /// its own zone's routes); its key's signature; this object's storage; and whether the relay still lets it in.
   on(me) {
-    const storage = this.ctx.storage;
-    const to = { "/urls": this.env.SIGNER, [`${IROH_PATHS.relay}/tell`]: this.env.RELAY };
+    const { storage } = this.ctx;
+    const env = this.env;
+    const to = { "/urls": env.SIGNER, [`${IROH_PATHS.relay}/tell`]: env.RELAY };
     return {
-      address: origin(this.env),
+      address: origin(env),
       async ask(method, url, name, value, body) {
-        const binding = to[new URL(url).pathname];
-        if (!binding) throw new Error("the remote MCP server's devices ask only the URL signer and tell only the relay");
-        const r = await binding.fetch(url, { method, headers: { "content-type": "application/json" }, body });
+        const path = new URL(url).pathname;
+        const binding = path.startsWith("/api/auth/") ? env.AUTH : to[path];
+        if (!binding) throw new Error("the remote MCP server's devices ask only the URL signer and auth, and tell only the relay");
+        const headers = { "content-type": "application/json", ...(name ? { [name]: value } : {}) };
+        const r = await binding.fetch(url, { method, headers, body });
         return { status: r.status, body: await r.text() };
       },
       sign: (bytes) => signBytes(me.seed, bytes),
