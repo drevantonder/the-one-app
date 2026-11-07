@@ -8,12 +8,11 @@ use std::path::PathBuf;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
-use objc2_foundation::NSString;
+use objc2_foundation::{NSString, NSUserDefaults};
 
 use serde_json::{Value, json};
 
 pub use super::desktop::*;
-use super::apple::defaults;
 use super::menubar;
 
 /// What a call says it came from, and the platform as people say it.
@@ -77,11 +76,10 @@ pub fn approve_here(code: String) {
     std::thread::spawn(move || crate::local("/v1/devices/approve", Some(json!({ "code": crate::device_code(&code), "confirm": true })), 30));
 }
 
-/// What the old Mac app kept, taken over once; this Mac's node kept running; the Mac app's menus, with its keys; the
-/// widgets' own items, as last kept, until the node's answer redraws them.
+/// This Mac's node kept running; the Mac app's menus, with its keys; the widgets' own items, as last kept, until the
+/// node's answer redraws them.
 pub fn start(app: &tauri::App) {
     super::desktop::start(app);
-    super::apple::take_over(&crate::app().data);
     start_node();
     match app_menu(app.handle()) {
         Ok(menu) => drop(app.set_menu(menu)),
@@ -126,6 +124,10 @@ fn unregister(service: &AnyObject) -> bool {
 
 fn main_app() -> Retained<AnyObject> {
     unsafe { msg_send![class!(SMAppService), mainAppService] }
+}
+
+fn defaults() -> Retained<NSUserDefaults> {
+    NSUserDefaults::standardUserDefaults()
 }
 
 /// Whether it opens at login.

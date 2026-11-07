@@ -7,7 +7,6 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import app.client.widget.HomeWidgets
 import org.json.JSONObject
-import java.io.File
 import java.security.KeyStore
 import java.security.MessageDigest
 import javax.crypto.Cipher
@@ -53,10 +52,6 @@ object Host {
             HomeWidgets.reload(context)
             null
         }
-        "takeOver" -> {
-            takeOver(a.getString("scheme"))
-            null
-        }
         else -> throw IllegalArgumentException("Unknown")
     }
 
@@ -65,35 +60,6 @@ object Host {
         Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)?.ifEmpty { null } ?: android.os.Build.MODEL
 
     private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
-
-    /** What the Kotlin app kept, taken over once, so no one signs in again: its address, an invite's secret, its sign-in's
-     *  client, and who's signed in, as files in this app's folder; its refresh token as this app keeps it (`refresh`);
-     *  its device keys stay where they were (`device:…`, the same names). The old widgets' files are gone: the app keeps
-     *  them anew, and which widget each home-screen widget shows (`home-widgets`) is kept as it was. */
-    private fun takeOver(scheme: String) {
-        val files = context.filesDir
-        val p = prefs
-        val address = p.getString("address", null)
-        if (address != null && !File(files, "address").exists()) {
-            File(files, "address").writeText(address)
-            p.getString("invite", null)?.let { File(files, "invite").writeText(it) }
-            val client = p.getString("client", null)
-            if (client != null && p.getString("client.at", null) == address) File(files, "sign-in").writeText("$address\n$client\n$scheme://signed-in/")
-        }
-        val sealed = p.getString("tokens", null)
-        if (sealed != null) {
-            val tokens = runCatching { JSONObject(Keystore.open(sealed)) }.getOrNull()
-            val refresh = tokens?.optString("refresh").orEmpty()
-            if (refresh.isNotEmpty() && p.getString("refresh", null) == null) {
-                p.edit().putString("refresh", Keystore.seal(Base64.encodeToString(refresh.toByteArray(), Base64.NO_WRAP))).commit()
-                val sub = runCatching { JSONObject(String(Base64.decode(tokens!!.getString("access").split(".")[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP))).getString("sub") }.getOrNull()
-                if (sub != null && !File(files, "user").exists()) File(files, "user").writeText(sub)
-            }
-            p.edit().remove("tokens").commit()
-        }
-        File(files, "home-widgets.json").delete()
-        File(files, "home-widget-images").deleteRecursively()
-    }
 }
 
 /** Seals text with an AES key that lives in this device's keystore and can't be taken out of it (the Kotlin app's key, the

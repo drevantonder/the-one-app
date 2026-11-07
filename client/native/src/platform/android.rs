@@ -99,10 +99,8 @@ fn given() -> PathBuf {
     crate::app().data.join("given")
 }
 
-/// What the old Kotlin app kept, taken over once; and what screens gave to be shared, shown or saved is gone with the
-/// last run.
+/// What screens gave to be shared, shown or saved is gone with the last run.
 pub fn start(_: &tauri::App) {
-    take_over();
     let _ = std::fs::remove_dir_all(given());
 }
 
@@ -139,15 +137,6 @@ pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Resu
         }
         signed_in_at(u, !print)
     })
-}
-
-/// What the Kotlin app kept, taken over once (Kotlin's `Host.takeOver`, which reads its SharedPreferences and Keystore
-/// key): its address, an invite's secret, its sign-in's client and who's signed in, into this folder, and its refresh
-/// token into the secret store as this app keeps it. Its device keys are kept where they were.
-fn take_over() {
-    if let Err(e) = host("takeOver", json!({ "scheme": one::config::CLI })) {
-        one::logs::say(&format!("taking over the old app's sign-in: {e}"));
-    }
 }
 
 /// What the person calls this phone: its name in Settings, else its model.

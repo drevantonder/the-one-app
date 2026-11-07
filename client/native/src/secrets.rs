@@ -27,8 +27,7 @@ mod store {
 /// The Keychain, as the Mac and iPhone apps kept it (the Swift apps' DeviceKeys and Keychain, whose items this reads): on an
 /// iPhone readable once it's been unlocked since it started (a widget's button works from the lock screen), on this
 /// device only. On an iPhone the device keys are kept in the group Info.plist's `KeychainGroup` names (the App Group's),
-/// where the notification extension reads them too, moved there from where an older build kept them; the refresh token
-/// is the app's alone. A Mac names no group.
+/// where the notification extension reads them too; the refresh token is the app's alone. A Mac names no group.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod store {
     use security_framework::access_control::{ProtectionMode, SecAccessControl};
@@ -43,17 +42,17 @@ mod store {
         GROUP.get_or_init(|| crate::platform::apple::info("KeychainGroup")).clone()
     }
 
-    /// The item's query: in its group (`shared`), or where an older build kept it.
-    fn options(service: &str, account: &str, shared: bool) -> PasswordOptions {
+    /// The item's query, in its group.
+    fn options(service: &str, account: &str) -> PasswordOptions {
         let mut o = PasswordOptions::new_generic_password(service, account);
-        if shared && let Some(group) = group(service) {
+        if let Some(group) = group(service) {
             o.set_access_group(&group);
         }
         o
     }
 
     fn add(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
-        let mut o = options(service, account, true);
+        let mut o = options(service, account);
         if cfg!(target_os = "ios") || group(service).is_some() {
             let only = SecAccessControl::create_with_protection(Some(ProtectionMode::AccessibleAfterFirstUnlockThisDeviceOnly), 0).map_err(|e| e.to_string())?;
             o.set_access_control(only);
@@ -62,28 +61,16 @@ mod store {
     }
 
     pub fn get(service: &str, account: &str) -> Option<Vec<u8>> {
-        if let Ok(v) = generic_password(options(service, account, true)) {
-            return Some(v);
-        }
-        group(service)?;
-        // Moved, not copied: the old one goes only once the new one is kept.
-        let old = generic_password(options(service, account, false)).ok()?;
-        if add(service, account, &old).is_ok() {
-            let _ = delete_generic_password_options(options(service, account, false));
-        }
-        Some(old)
+        generic_password(options(service, account)).ok()
     }
 
     pub fn set(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
-        let _ = delete_generic_password_options(options(service, account, true));
+        let _ = delete_generic_password_options(options(service, account));
         add(service, account, value)
     }
 
     pub fn delete(service: &str, account: &str) {
-        let _ = delete_generic_password_options(options(service, account, true));
-        if group(service).is_some() {
-            let _ = delete_generic_password_options(options(service, account, false));
-        }
+        let _ = delete_generic_password_options(options(service, account));
     }
 }
 
