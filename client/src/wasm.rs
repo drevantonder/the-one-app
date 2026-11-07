@@ -96,6 +96,7 @@ impl Client {
 #[wasm_bindgen]
 pub struct Keyring {
     keyring: crate::keyring::Keyring<crate::js::Seal>,
+    me: one::keys::Endpoint,
     on: crate::js::On,
     client: std::cell::RefCell<Option<std::rc::Rc<crate::Client>>>,
     answers: std::cell::RefCell<Option<std::rc::Rc<crate::answers::Answers<crate::js::Shelf>>>>,
@@ -132,7 +133,26 @@ impl Keyring {
     #[wasm_bindgen(constructor)]
     pub fn new(key: String, seal: String, on: JsValue) -> Result<Keyring, JsError> {
         let opens = crate::js::Seal { public: self::key(&seal)?, js: crate::js::Js(on.clone()) };
-        Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), on: crate::js::On::of(on, self::key(&key)?), client: Default::default(), answers: Default::default() })
+        let me = one::keys::Endpoint { key: self::key(&key)?, seal: self::key(&seal)? };
+        Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), me, on: crate::js::On::of(on, self::key(&key)?), client: Default::default(), answers: Default::default() })
+    }
+
+    /// Asks auth to let this browser in, as the person signed in with `token`, calling it `name` (and with someone
+    /// new's `invite` secret, its proof): `join::ask`.
+    pub async fn ask(&self, token: String, name: String, invite: Option<String>) -> Result<(), Failed> {
+        crate::join::ask(&self.on, &token, &crate::join::asking(&self.me, &name, None, invite.as_deref())).await.map_err(Failed::of)
+    }
+
+    /// What auth says of its request now, acted on (`join::waited`): "signedOut", "approved", "gone" or "waiting".
+    pub async fn waited(&self, token: String) -> Result<String, Failed> {
+        use one::keys::Waited;
+        let said = match crate::join::waited(&self.on, &token, &self.me.key).await.map_err(Failed::of)? {
+            Waited::SignedOut => "signedOut",
+            Waited::Approved { .. } => "approved",
+            Waited::Gone => "gone",
+            Waited::Waiting => "waiting",
+        };
+        Ok(said.into())
     }
 
     /// Keeps, in `answers`, what its requests' calls that only read answered.

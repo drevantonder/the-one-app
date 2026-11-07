@@ -67,7 +67,7 @@ fn the_workers_and_nodes_seal_keys_for_each_other() {
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
 }
 
-/// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, join codes, invite proofs,
+/// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, join codes,
 /// passkeys' device keys and a session endpoint's certificate.
 #[test]
 fn a_device_signs_and_proves_as_the_nodes_read_it() {
@@ -87,14 +87,13 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
         "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
         "request": request, "now": 1_000_000 + keys::FRESH,
         "pair": { "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
-        "secret": B64U.encode(b"an invite's secret"), "prf": B64U.encode(&prf),
+        "prf": B64U.encode(&prf),
     }));
     assert_eq!(out["canonical"].as_str().unwrap().as_bytes(), keys::canonical(&fields), "canonical JSON");
     assert_eq!(out["signed"], request, "the same request signed the same, Ed25519 being deterministic");
     assert_eq!(out["checked"], json!(data_encoding::HEXLOWER.encode(signer.verifying_key().as_bytes())), "JavaScript checks a request Rust signed");
     assert!(keys::check_request("one/urls", &out["signed"], 1_000_000).is_ok(), "Rust checks one JavaScript signed");
     assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
-    assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
     let asking = keys::Endpoint { key: device, seal: device_seal };
     assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
     assert_eq!(b(&out["challenge"]), one::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
@@ -189,8 +188,8 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     assert!(!frozen(&elsewhere), "a freeze that isn't the network it joined");
     // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
     let welcome = steps::Welcome { freeze: 1, at: 3, hash: one::database::stored::state_hash(who.conn()).unwrap() };
-    let said = js(json!({ "op": "joining", "said": [[200, { "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() }]] }));
-    let given = json!({ "welcome": said["said"][0]["welcome"], "freeze": s1, "at": 3, "steps": [s2, s3] });
+    let keys::Waited::Approved { welcome: Some(said), .. } = keys::waited(200, &json!({ "approved": true, "root": root.to_hex(), "welcome": welcome.to_string() })) else { panic!("an approval's welcome is taken") };
+    let given = json!({ "welcome": said, "freeze": s1, "at": 3, "steps": [s2, s3] });
     let mut new = Reader::new(Some(root));
     add(&mut new, &given).unwrap();
     assert!(frozen(&new) && new.at() == 3, "a new device starts where it was welcomed");
@@ -208,13 +207,10 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     Ok(())
 }
 
-/// What sign-in's word on a device's request to be let in means (`keys::waited`): the web client reads it as native apps
-/// and the CLI do.
+/// What sign-in's word on a device's request to be let in means (`keys::waited`), which every client acts on
+/// (client/src/join.rs): an approval names only a network and a welcome that are one.
 #[test]
-fn a_client_reads_sign_ins_word_as_native_apps_do() {
-    let formats = Formats::start();
-    let js = |body: Value| formats.js(body);
-
+fn a_client_takes_only_a_network_and_a_welcome_that_are_one() {
     use one::keys::{Waited, waited};
     let root = "e".repeat(64);
     let said: Vec<(u16, Value)> = vec![
@@ -242,25 +238,6 @@ fn a_client_reads_sign_ins_word_as_native_apps_do() {
         (500, json!({ "approved": true })),
         (0, Value::Null),
     ];
-    let out = js(json!({ "op": "joining", "said": said.iter().map(|(status, body)| json!([status, body])).collect::<Vec<_>>() }));
-    for ((status, body), js) in said.iter().zip(out["said"].as_array().unwrap()) {
-        let rust = match waited(*status, body) {
-            Waited::SignedOut => json!({ "signedOut": true }),
-            Waited::Gone => json!({ "gone": true }),
-            Waited::Approved { root, welcome } => {
-                let mut v = json!({ "approved": true });
-                if let Some(g) = root {
-                    v["root"] = json!(g);
-                }
-                if let Some(w) = welcome {
-                    v["welcome"] = json!(w);
-                }
-                v
-            }
-            Waited::Waiting => json!({}),
-        };
-        assert_eq!(js, &rust, "{status} {body}");
-    }
     assert_eq!(waited(200, &said[2].1), Waited::Approved { root: Some(root.clone()), welcome: None }, "an approval names the network it's in");
     let welcomed = waited(200, &said[6].1);
     assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if one::database::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copy()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");

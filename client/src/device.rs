@@ -15,6 +15,7 @@ use one::keys::{self, Endpoint, Waited, hex};
 use serde_json::{Value, json};
 
 use crate::answers::{Answers, Files};
+use crate::join;
 use crate::bucket::Signed;
 pub(crate) use crate::keyring::now;
 use crate::keyring::{Address, HANDED_FOR, Keep, Keyring, error, refused};
@@ -167,21 +168,12 @@ impl Device {
     /// Asks auth to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
     /// secret, its proof).
     pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
-        let mut asked = json!({ "key": self.key(), "seal": hex(&self.me.seal), "name": name, "reads": one::database::READS });
-        if let Some(on) = self.on.lock().unwrap().clone() {
-            asked["device"] = json!(on);
-        }
-        if let Some(invite) = invite.filter(|i| !i.is_empty()) {
-            asked["proof"] = json!(keys::invite_proof(invite.as_bytes(), &self.me));
-        }
+        let on = self.on.lock().unwrap().clone();
+        let asked = join::asking(&self.me, name, on.as_deref(), invite);
         if let Stage::Off { asked: kept } = &mut *self.stage.lock().await {
             *kept = Some(asked.clone());
         }
-        let (status, out) = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(("authorization", format!("Bearer {token}"))), Some(asked)).await?;
-        if status != 200 {
-            return Err(failed(error(&out).unwrap_or_else(|| format!("Couldn't ask to be let in ({status})."))));
-        }
-        Ok(())
+        join::ask(self, token, &asked).await
     }
 
     /// Whether it's been let in: it reaches a node as itself. While it waits, what auth says of its request
@@ -189,19 +181,10 @@ impl Device {
     /// in (its root) is the only one it takes, kept before it reads any, so none it's shown first can be another; one
     /// gone from auth is asked again unless it's in; a sign-in that's no more fails, to sign in again.
     pub async fn wait(&self, token: &str) -> Result<bool, Error> {
-        let at = format!("{}/api/auth/devices/requests/{}", self.address, self.key());
-        let (status, said) = http("GET", &at, Some(("authorization", format!("Bearer {token}"))), None).await.unwrap_or((0, Value::Null));
-        let gone = match keys::waited(status, &said) {
+        let gone = match join::waited(self, token, &self.me.key).await? {
             Waited::SignedOut => return Err(failed("Sign in again.")),
             Waited::Waiting => return Ok(false),
-            Waited::Approved { root, welcome } => {
-                for (name, said) in [("root", root), ("welcome", welcome)] {
-                    if let Some(said) = said {
-                        self.put(name, said.as_bytes()).await.map_err(failed)?;
-                    }
-                }
-                false
-            }
+            Waited::Approved { .. } => false,
             Waited::Gone => true,
         };
         if self.connect().await? {
@@ -212,7 +195,7 @@ impl Device {
             _ => None,
         };
         if gone && let Some(asked) = asked {
-            let _ = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(("authorization", format!("Bearer {token}"))), Some(asked)).await;
+            let _ = join::ask(self, token, &asked).await;
         }
         Ok(false)
     }

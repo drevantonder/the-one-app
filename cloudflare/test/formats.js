@@ -1,5 +1,5 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { b64u, canonical, certify, checkCertificate, checkRequest, ed25519Public, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, openNote, openUnder, passkeyKeys, sealTo, sealUnder, signedRequest, waited, x25519Public } from "../shared/crypto.js";
+import { b64u, canonical, certify, checkCertificate, checkRequest, ed25519Public, hex, idOf, joinChallenge, joinCode, joinNonce, openNote, openUnder, passkeyKeys, sealTo, sealUnder, signedRequest, x25519Public } from "../shared/crypto.js";
 import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { AGENTS } from "../screen/agents.js";
 
@@ -20,7 +20,7 @@ const ops = {
   async sealUnder({ secret, plain }) {
     return { sealed: b64u.encode(await sealUnder(secret, b64u.decode(plain))), id: await idOf(secret) };
   },
-  async keys({ seed, domain, fields, at, request, now, pair, secret, prf }) {
+  async keys({ seed, domain, fields, at, request, now, pair, prf }) {
     const signedBy = await signedRequest(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), domain, fields, at);
     const checked = await checkRequest(domain, request, now).then((c) => c.by, (err) => ({ error: String(err) }));
     const pk = await passkeyKeys(b64u.decode(prf));
@@ -29,7 +29,6 @@ const ops = {
       signed: signedBy,
       checked,
       joinCode: await joinCode(hex.decode(pair.key), hex.decode(pair.seal)),
-      proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key), hex.decode(pair.seal)),
       nonce: await joinNonce(hex.decode(pair.seal), hex.decode(pair.key), hex.decode(pair.seal)),
       challenge: b64u.encode(joinChallenge(hex.decode(pair.seal), hex.decode(pair.key), hex.decode(pair.seal), 1_800_000_000_123)),
       passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal), sealPublic: hex.encode(await x25519Public(pk.seal)) },
@@ -38,10 +37,6 @@ const ops = {
   /// Who the Settings screens say agents are in an item's apps.
   async agents() {
     return AGENTS;
-  },
-  /// What auth's word says while a device waits to be let in: `[[status, said]]` → what each says.
-  async joining({ said }) {
-    return { said: said.map(([status, body]) => waited(status, body)) };
   },
   /// The bucket's names, the refusal the Workers make and the codes answers carry: `[prefix, n]` → each of the names, and `[scope, app, database]`
   /// → its prefix.

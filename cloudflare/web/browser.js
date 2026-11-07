@@ -2,9 +2,8 @@
 // person's passkey at its sign-in page), keeps its refresh token in this browser, and is its person's device
 // (device.js, and one-client's keyring in the SharedWorker, net.js), let in by another of theirs, by a passkey of theirs,
 // or by whoever invited them.
-import { waited } from "../shared/crypto.js";
-import { answer, browserKeys, browserName, codeOf, joinAsk, passkeyKeysOf, signingInFor } from "./device.js";
-import { del, put } from "./kept.js";
+import { browserKeys, browserName, codeOf, passkeyKeysOf, signingInFor } from "./device.js";
+import { del } from "./kept.js";
 import { net } from "./net.js";
 import { h, ui } from "./view.js";
 
@@ -128,11 +127,6 @@ const auth = {
   },
 };
 
-/// A request to the address that isn't a node's, with the access token: auth's own routes.
-async function bearer(path, init = {}) {
-  return fetch(path, { ...init, headers: { ...init.headers, authorization: `Bearer ${await auth.token()}` } });
-}
-
 export function browser() {
   /// This browser as its person's device, once it's listed as one (`join`): null until then.
   let device = null;
@@ -147,23 +141,18 @@ export function browser() {
     const keys = await browserKeys(user);
     if (await net.start(user).catch(() => false)) return (device = keys);
     const invite = sessionStorage.getItem("one.invite");
-    const ask = async () => answer(await bearer("/api/auth/devices/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await joinAsk(keys, browserName(), invite)) }));
+    const ask = async () => net.ask(user, await auth.token(), browserName(), invite);
     await ask();
     if (await byPasskey(user, keys, api)) return (device = keys);
     waiting(await codeOf(keys.key, keys.seal), !!invite);
     // Auth says once it was approved; then the relay lets it in. One gone from auth (approved and cleared, refused, or
-    // waited 15 minutes) is asked again, unless it's in. As every client does (`waited`).
+    // waited 15 minutes) is asked again, unless it's in.
     for (;;) {
       await sleep(2000);
-      const r = await bearer(`/api/auth/devices/requests/${keys.key}`).catch(() => null);
-      const said = waited(r?.status || 0, r?.ok ? await r.json().catch(() => ({})) : {});
-      if (said.signedOut) throw Object.assign(new Error("Signed out."), { signedOut: true });
-      // The network it was let into, as the device that approved it said: the only one it then takes; and where that
-      // device read who's who to, which it starts from.
-      if (said.root) await put(`root:${user}`, said.root);
-      if (said.welcome) await put(`welcome:${user}`, said.welcome);
-      if ((said.gone || said.approved) && (await net.start(user, true).catch(() => false))) break;
-      if (said.gone) await ask().catch(() => {});
+      const said = await net.waited(user, await auth.token()).catch(() => "waiting");
+      if (said === "signedOut") throw Object.assign(new Error("Signed out."), { signedOut: true });
+      if (["gone", "approved"].includes(said) && (await net.start(user, true).catch(() => false))) break;
+      if (said === "gone") await ask().catch(() => {});
     }
     sessionStorage.removeItem("one.invite");
     return (device = keys);

@@ -233,7 +233,6 @@ pub fn javascript() -> String {
          export const TIDIED = {tidied};\n\
          export const COPY = {copy};\n\
          export const STEP_DIGITS = {digits};\n\
-         export const NUMBER_MAX = {number_max};\n\
          export const NODE_APP = {node_app};\n\
          export const MAIN = {main};\n\
          export const VAULT = {vault};\n\
@@ -275,7 +274,6 @@ pub fn javascript() -> String {
         tidied = json!(TIDIED),
         copy = json!(COPY),
         digits = STEP_DIGITS,
-        number_max = crate::database::steps::NUMBER_MAX,
         node_app = json!(crate::database::scopes::APP),
         main = json!(crate::database::scopes::APP_DATABASE),
         vault = json!(crate::database::scopes::CoreDb::Vault.name()),

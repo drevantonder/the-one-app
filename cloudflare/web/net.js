@@ -183,6 +183,18 @@ export const net = {
     if (net.has) send({ op: "nodes", user, nodes, ranks, wakes });
   },
 
+  /// Asks auth to let this browser in as `user`'s device, signed in with `token`, called `name` (and with someone new's
+  /// `invite` secret, its proof).
+  async ask(user, token, name, invite) {
+    await ask({ op: "ask", user, token, name, invite });
+  },
+
+  /// What auth says of this browser's request now, acted on as every client does: "signedOut", "approved", "gone" or
+  /// "waiting".
+  async waited(user, token) {
+    return (await ask({ op: "waited", user, token })).said;
+  },
+
   /// As each start of a client does: this person's own things, settled by this device if they aren't.
   async settle() {
     if (net.has) await ask({ op: "settle" });

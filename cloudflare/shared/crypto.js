@@ -11,7 +11,7 @@
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
 // nonce ‖ AES-256-GCM(key, nonce, plain), with key and the copy's id both derived from the secret.
 
-import { CODES, ENDPOINT, FRESH, NUMBER_MAX, READS, SESSION, SIGNED_NOTE, SOCKET } from "./protocol.js";
+import { CODES, ENDPOINT, FRESH, READS, SESSION, SIGNED_NOTE, SOCKET } from "./protocol.js";
 
 const text = new TextEncoder();
 
@@ -255,12 +255,6 @@ export async function joinCode(key, seal) {
   return Array.from({ length: 8 }, (_, i) => BASE32[parseInt(bits.slice(i * 5, i * 5 + 5), 2)]).join("");
 }
 
-/// A newcomer's proof that their invite's secret was theirs: HKDF-SHA256(secret, "one/invite\0" ‖ their key ‖ their
-/// seal key), hex.
-export async function inviteProof(secret, key, seal) {
-  return hex.encode(await hkdf(secret, concat(text.encode("one/invite\0"), bytes(key), bytes(seal))));
-}
-
 /// The OIDC nonce a sign-in for a device in the network whose root is `root` asks its provider for
 /// (`sign_in_proof::nonce`): base64url(sha256("one/join\0" ‖ root ‖ key ‖ seal)).
 export async function joinNonce(root, key, seal) {
@@ -280,16 +274,3 @@ export async function passkeyKeys(prf) {
   return { sign: await hkdf(prf, "one/passkey-device/sign"), seal: await hkdf(prf, "one/passkey-device/seal") };
 }
 
-/// What auth said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
-/// `{ approved, root? }`, `{ gone }`, or `{}` while it waits. As src/keys.rs `waited`, which says what each means.
-export function waited(status, said) {
-  if (status === 401) return { signedOut: true };
-  if (status === 404) return { gone: true };
-  if (status >= 200 && status < 300 && said?.approved === true) {
-    // Where the approving device read who's who to (src/database/steps.rs `Welcome::parse`): `<freeze>.<at>.<hash>`.
-    const w = typeof said.welcome === "string" && /^([1-9]\d{0,15})\.([1-9]\d{0,15})\.[0-9a-f]{64}$/.exec(said.welcome);
-    const welcome = w && Number(w[2]) >= Number(w[1]) && Number(w[2]) <= NUMBER_MAX ? said.welcome : null;
-    return { approved: true, ...(isKey(said.root) ? { root: said.root } : {}), ...(welcome ? { welcome } : {}) };
-  }
-  return {};
-}

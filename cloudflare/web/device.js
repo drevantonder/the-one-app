@@ -4,11 +4,9 @@
 // worker that reaches the nodes (net-worker.js), which signs with these keys without reading them. The epoch, app and
 // database keys it opens live in that worker's WebAssembly memory.
 
-import { b64u, ed25519Public, hex, inviteProof, joinCode, passkeyKeys, x25519Public } from "../shared/crypto.js";
-import { READS } from "../shared/protocol.js";
+import { b64u, ed25519Public, hex, joinCode, passkeyKeys, x25519Public } from "../shared/crypto.js";
 import { del, get, put } from "./kept.js";
 
-const text = new TextEncoder();
 
 const raw = async (key) => new Uint8Array(await crypto.subtle.exportKey("raw", key));
 
@@ -48,18 +46,8 @@ export async function passkeyKeysOf(prf) {
   return { key: hex.encode(await ed25519Public(pk.sign)), seal: hex.encode(seal), sign: pk.sign, opens: { secret, public: seal } };
 }
 
-export async function joinAsk(keys, name, invite) {
-  return { key: keys.key, seal: keys.seal, name, reads: READS, ...(invite ? { proof: await inviteProof(text.encode(invite), hex.decode(keys.key), hex.decode(keys.seal)) } : {}) };
-}
-
 /// The code this browser shows to be approved: its key's, as 4 and 4.
 export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
-
-async function answer(r) {
-  const out = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(out.error || out.message || "That didn’t work. Try again."), { status: r.status });
-  return out;
-}
 
 /// What the person's devices call this browser: "Chrome on Mac".
 export function browserName() {
@@ -68,5 +56,3 @@ export function browserName() {
   const os = /iPhone|iPad/.test(ua) ? "iPhone" : /Mac OS X/.test(ua) ? "Mac" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
   return os ? `${browser} on ${os}` : browser;
 }
-
-export { answer };

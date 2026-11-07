@@ -13,7 +13,7 @@
 // A tab says `start` with its person; then each `fetch` is answered with its status and headers, its body's parts as
 // they come, and `done` (or `error`); `cancel` stops one. What changes who can do what is a `fetch` too, of the path a
 // node's route has, which the keyring answers itself, signing it (one-client's `settings`). `settle`, `renew` and `push`
-// are the rest a device does as itself. `kept` gives what a call that only reads answered last (one-client's
+// are the rest a device does as itself; `ask` and `waited`, what it does before it's one, asking to be let in. `kept` gives what a call that only reads answered last (one-client's
 // `answers`), and `forget` forgets what this device kept, as it signs out. `nodes` gives the order to ask nodes in, which is remembered; `reconnect`
 // starts a fresh endpoint, after the network came back.
 
@@ -172,6 +172,14 @@ export function server(version) {
     if (!answering.has(user)) answering.set(user, new Answers(shelf(user)));
     return answering.get(user);
   };
+
+  /// `user`'s device asking to be let in, before it's one: its keyring, which reaches auth and keeps what it's told.
+  async function asking(user) {
+    const [{ Keyring }, [, , { get }]] = await Promise.all([glue, code]);
+    const device = await get(`device:${user}`);
+    if (!device) throw new Error("This browser has no keys yet. Sign in again.");
+    return new Keyring(device.key, device.sealKey, await reaches(user, device, () => true, null));
+  }
 
   /// The session: none until a tab starts it (this worker, or this tab leading the others, is new); then its person, and
   /// `ready`, its client once it's started, or null if this browser isn't a device of theirs.
@@ -342,6 +350,13 @@ export function server(version) {
             if (m.wakes && nodes.includes(m.wakes)) s?.client.wakes(m.wakes);
             return s?.client.nodes(nodes);
           }
+          // Asking auth to let this browser in, and what auth says of it while it waits (one-client's `join`).
+          case "ask": {
+            await (await asking(m.user)).ask(m.token, m.name, m.invite ?? undefined);
+            return post({ id });
+          }
+          case "waited":
+            return post({ id, said: await (await asking(m.user)).waited(m.token) });
           // What a call that only reads answered last, kept here: at once, whether or not a session started.
           case "kept": {
             const got = await (await answersOf(m.user)).kept(m.app, m.tool, JSON.stringify(m.input ?? {}));
