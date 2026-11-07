@@ -319,8 +319,16 @@ fn signed(key: &ed25519_dalek::SigningKey, route: &str, mut fields: Value) -> Va
 
 /// An invite `by` an endpoint for `name`, as its device makes one: → its secret and the user id it's for.
 fn invited(k: &Workers, by: &ed25519_dalek::SigningKey, name: &str, email: Option<&str>) -> (String, String) {
-    let invite = cloudflare::invite(&k.address, by, name, None, email).unwrap();
-    (invite.link.split_once('#').unwrap().1.to_string(), invite.user)
+    let secret = B64U.encode(&rand::random::<[u8; 32]>());
+    let user = one::database::scopes::new_id();
+    let until = now() + 86_400_000;
+    let mut fields = json!({ "id": data_encoding::HEXLOWER.encode(&one::keys::sha256(secret.as_bytes())), "name": name, "user": user, "until": until });
+    if let Some(email) = email {
+        fields["email"] = json!(email);
+    }
+    let (status, out) = post(&format!("{}/api/auth/invites", k.address), &[], signed(by, "POST /api/auth/invites", fields));
+    assert_eq!(status, 200, "{out}");
+    (secret, user)
 }
 
 fn signs_in_with_passkey(browser: &mut Browser, passkey: &Passkey) -> u16 {
