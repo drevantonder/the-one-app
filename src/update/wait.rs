@@ -92,12 +92,24 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
         all.iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).map(|d| (d["key"].as_str().unwrap_or("").into(), d["name"].as_str().unwrap_or("").into(), d["build"].as_str().unwrap_or("?").into())).collect();
     let (started, deadline) = (Instant::now(), Instant::now() + limit);
     let (mut fetched, mut reasons, mut asked, mut phones) = (std::collections::HashSet::new(), std::collections::HashMap::new(), std::collections::HashMap::<String, Instant>::new(), std::collections::HashMap::<String, String>::new());
+    // Said at once, so a caller cut off before the end still saw what it waited for and who wasn't there.
+    println!("Waiting up to {}s for {} to run {short} or a later build.", limit.as_secs(), open.iter().map(|(_, name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
+    let mut offline = std::collections::HashSet::new();
+    for d in all.iter().filter(|d| d["online"] != true && open.iter().any(|(key, _, _)| d["key"] == key.as_str())) {
+        if !has(commit, d["build"].as_str().unwrap_or(""), &mut fetched) {
+            println!("  {}: offline, on {}: waiting for it to come back", d["name"].as_str().unwrap_or(""), d["build"].as_str().unwrap_or("?"));
+            offline.insert(d["key"].as_str().unwrap_or("").to_string());
+        }
+    }
     let mut failed = false;
     loop {
         let now = devices();
         open.retain(|(key, name, was)| {
             let Some(d) = now.iter().find(|d| d["key"] == key.as_str()) else { return true };
             let build = d["build"].as_str().unwrap_or("");
+            if d["online"] == true && offline.remove(key) {
+                println!("  {name}: back online, on {build}");
+            }
             let mac = d["target"].as_str().is_some_and(|t| Platform::is_mac(t));
             let mut said = None;
             let running = has(commit, build, &mut fetched);
