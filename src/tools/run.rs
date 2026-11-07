@@ -11,8 +11,16 @@ use crate::config::CLI;
 use crate::core_tools::Reader;
 
 impl Reader {
-    /// A tool as this reader calls it: `one gmail sign_in`, `gmail_sign_in`, `tools.gmail.sign_in`.
+    /// A tool as this reader calls it: `one gmail sign_in`, `gmail_sign_in`, `tools.gmail.sign_in`; a core tool named as
+    /// its feature (`logs`, `remove`) has no tool part: `one remove`, `remove`, `tools.remove`.
     pub fn named(self, app: &str, tool: &str) -> String {
+        if tool.is_empty() {
+            return match self {
+                Reader::Cli => format!("{CLI} {app}"),
+                Reader::Mcp => app.to_string(),
+                Reader::Code => format!("tools.{app}"),
+            };
+        }
         match self {
             Reader::Cli => format!("{CLI} {app} {tool}"),
             Reader::Mcp => format!("{app}_{tool}"),
