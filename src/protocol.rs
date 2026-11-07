@@ -42,6 +42,8 @@ pub mod header {
     pub const READS: &str = "x-one-reads";
     /// What a machine's own programs send a node of theirs to say they're its own.
     pub const LOCAL_TOKEN: &str = "x-one-local-token";
+    /// The code (`code`) of an error the node answers a running call's ask with, which the app's error then carries.
+    pub const CODE: &str = "x-one-code";
 }
 
 /// The paths of the local API that more than one place names: what is kept apart by what a request runs (`keys::Route`),
@@ -144,14 +146,6 @@ pub mod code {
         ALREADY_IN_NETWORK = "already_in_network",
         /// The device a pairing code is for couldn't be reached.
         UNREACHABLE = "unreachable",
-        /// An app's sign-in needs the Vault's `client` first (Google's OAuth client), which an admin sets once.
-        NO_CLIENT = "no_client",
-        /// A sign-in to finish that nothing is waiting for: it finished already, or was never started.
-        NOT_WAITING = "not_waiting",
-        /// A limit of what the person's plan gives (AI's, by the minute or the day), which asking again later gets past.
-        LIMIT = "limit",
-        /// A browser profile an app asked an agent device for that isn't there.
-        NO_PROFILE = "no_profile",
     }
 
     /// `not_let_in` as `notLetIn`, as `shared/protocol.js` names it.
@@ -251,8 +245,8 @@ pub fn javascript() -> String {
          export const tidiedName = (prefix) => `${{prefix}}/${{TIDIED}}`;\n\
          export const newestName = (prefix) => `${{prefix}}/${{NEWEST}}`;\n\
          export const updateRefusal = (yours) => {update}.replace(\"{{yours}}\", yours);\n\
-",
-        header = json!({ "keys": header::KEYS, "endpoint": header::ENDPOINT, "elsewhere": header::ELSEWHERE, "trace": header::TRACE, "user": header::USER, "request": header::REQUEST }),
+         {call}",
+        header = json!({ "keys": header::KEYS, "endpoint": header::ENDPOINT, "elsewhere": header::ELSEWHERE, "trace": header::TRACE, "user": header::USER, "request": header::REQUEST, "code": header::CODE }),
         urls = json!(URLS),
         relay = json!(RELAY),
         push = json!(PUSH),
@@ -283,5 +277,6 @@ pub fn javascript() -> String {
         yours = json!(crate::config::YOURS),
         codes = json!(code::ALL.iter().map(|c| (code::camel(c), c)).collect::<std::collections::BTreeMap<_, _>>()),
         update = json!(UPDATE_REFUSAL),
+        call = crate::call::javascript(),
     )
 }

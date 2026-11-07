@@ -157,16 +157,16 @@ impl Node {
         Ok(db)
     }
 
-    /// What the shim asks the node for a running call (`src/app/outbound.rs`): `POST /call { app, tool, input }` runs a
-    /// tool of an app the calling app uses, or a function of its own service, as its caller; `POST /blob` keeps a blob, `GET
-    /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the network's apps, `GET /devices` its devices.
-    pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
+    /// What the shim asks the node for a running call (`src/app/outbound.rs`), as `crate::call::Ask` names it.
+    pub async fn internal(&self, token: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
+        use crate::call::Ask;
         use axum::response::IntoResponse;
         let grant = &self.grant_of(token).context("only a running call asks the node")?;
+        let ask = path.strip_prefix('/').and_then(Ask::parse).with_context(|| format!("the node has no ask {path}"))?;
+        ensure!(!(grant.read_only && ask.writes()), "{}", crate::call::READ_ONLY);
         let ok = |v: Value| axum::Json(v).into_response();
-        Ok(match (method, path) {
-            ("POST", "/call") => {
-                ensure!(!grant.read_only, "this call only reads: it can't run other apps' tools");
+        Ok(match ask {
+            Ask::Call => {
                 let req: Value = serde_json::from_slice(&body)?;
                 let service = req["service"] == true;
                 let (app, runs) = (req["app"].as_str().unwrap_or(""), req[if service { "function" } else { "tool" }].as_str().unwrap_or(""));
@@ -189,7 +189,7 @@ impl Node {
                 // Part of the call that asked, in its trace: where it went and what that took.
                 ok(json!({ "ok": trace::within(grant.trace.clone(), Box::pin(self.route(call, grant.caller.clone()))).await? }))
             }
-            ("POST", "/query") => {
+            Ask::Query => {
                 let req: Value = serde_json::from_slice(&body)?;
                 let scope = Scope::parse(req["scope"].as_str().unwrap_or(""))?;
                 let params = req["params"].as_array().cloned().unwrap_or_default();
@@ -197,7 +197,7 @@ impl Node {
             }
             // Whether the caller may do each permission to each object asked (`ctx.<scope>.may`), in order: the core's
             // rows, and the app's own types (its `types`) and rows (its database's `relations` in that scope).
-            ("POST", "/may") => {
+            Ask::May => {
                 let req: Value = serde_json::from_slice(&body)?;
                 let scope = Scope::parse(req["scope"].as_str().unwrap_or(""))?;
                 let asks: Vec<(String, String)> = serde_json::from_value(req["asks"].clone())?;
@@ -208,8 +208,8 @@ impl Node {
                 };
                 ok(json!({ "ok": self.with(|i| Ok(i.r.db().app_may(&grant.caller.user, &asks, &types, &rows, now_ms())))? }))
             }
-            ("GET", "/vault") => ok(json!(self.lookup(&grant.caller, &grant.app, &grant.scopes).await?.for_app())),
-            ("POST", "/vault/match") => {
+            Ask::Vault => ok(json!(self.lookup(&grant.caller, &grant.app, &grant.scopes).await?.for_app())),
+            Ask::VaultMatch => {
                 // The item a sign-in would change rather than make: one of that type whose plain field has that value.
                 let req: Value = serde_json::from_slice(&body)?;
                 let scope = Scope::parse_for(req["scope"].as_str().unwrap_or("user"), &grant.caller.user)?;
@@ -219,7 +219,7 @@ impl Node {
                 let id = items.iter().filter(|(_, it)| it.kind == kind && it.fields.get(field).is_some_and(|f| !f.secret && Some(f.value.as_str()) == value)).min_by_key(|(_, it)| it.made).map(|(id, _)| id.clone());
                 ok(json!({ "id": id }))
             }
-            ("POST", "/blob") => {
+            Ask::BlobPut => {
                 let hash = self.put_blob(&body)?;
                 if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
                     g.puts.push(hash.clone());
@@ -230,8 +230,9 @@ impl Node {
                 }
                 ok(json!({ "blob": hash }))
             }
-            ("GET", p) if p.starts_with("/blob/") => {
-                let hash = &p["/blob/".len()..];
+            Ask::BlobGet => {
+                let req: Value = serde_json::from_slice(&body)?;
+                let hash = req["hash"].as_str().unwrap_or("");
                 let built_in = self.0.built_in.values().any(|h| h == hash);
                 // A call this machine's own programs asked may read what its local API would give them: a file put there to
                 // attach. A sign-in's asks here too, but reads only what its person may.
@@ -239,14 +240,14 @@ impl Node {
                 ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.may_read_blob(&grant.caller.user, hash)?, "no such blob for you");
                 self.blob(hash).await?.into_response()
             }
-            ("POST", "/appends") => {
+            Ask::Appends => {
                 ensure!(self.0.calls.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
                 let req: Value = serde_json::from_slice(&body)?;
                 let appends = crate::call::appends(&req["appends"])?;
                 self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller, grant.from.as_deref()).await?;
                 ok(json!({}))
             }
-            ("POST", "/done") => {
+            Ask::Done => {
                 let req: Value = serde_json::from_slice(&body)?;
                 if let Some(err) = req["error"].as_str() {
                     tracing::warn!("{}'s work after a call failed: {err}", grant.app);
@@ -256,21 +257,20 @@ impl Node {
                 }
                 ok(json!({}))
             }
-            ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
-            ("POST", "/code") => {
+            Ask::Catalog => ok(json!(self.catalog(&grant.caller, true).await?)),
+            Ask::Code => {
                 let req: Value = serde_json::from_slice(&body)?;
                 ok(self.source(req["app"].as_str().unwrap_or_default(), None, req["path"].as_str()).await?)
             }
-            ("GET", "/failing") => ok(json!(self.failing_schedules(&grant.caller).await?)),
+            Ask::Failing => ok(json!(self.failing_schedules(&grant.caller).await?)),
             // A push to the caller's devices, from this app, through the network's push Worker.
-            ("POST", "/notify") => {
-                ensure!(!grant.read_only, "this call only reads: it can't push");
+            Ask::Notify => {
                 let send: crate::push::Send = serde_json::from_slice(&body)?;
                 ok(json!({ "ok": self.push_note(&grant.caller.user, &send.note(&grant.app)?).await? }))
             }
-            ("GET", "/devices") => ok(json!(self.state_for(&grant.caller)?.network.map(|n| n.devices).unwrap_or_default())),
+            Ask::Devices => ok(json!(self.state_for(&grant.caller)?.network.map(|n| n.devices).unwrap_or_default())),
             // Run priority's order, as the person the call is for: only an admin changes it.
-            ("GET", "/order") => {
+            Ask::Order => {
                 let network = self.state_for(&grant.caller)?.network;
                 let mut order: Vec<Value> = network.iter().flat_map(|n| &n.devices).map(|s| json!({ "name": s.name, "key": s.key, "kind": s.kind, "priority": s.priority, "online": s.now.online, "here": s.me })).collect();
                 if let Some(cloudflare) = network.as_ref().and_then(|n| n.cloudflare_node.as_ref()) {
@@ -280,14 +280,13 @@ impl Node {
                 order.sort_by_cached_key(|s| (rank::priority(&set, s["key"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
                 ok(json!({ "order": order, "admin": network.is_some_and(|n| n.role == Some(crate::database::scopes::Role::Admin)) }))
             }
-            ("POST", "/priority") => {
-                ensure!(!grant.read_only, "this call only reads: it can't change run priority");
+            Ask::Priority => {
                 let req: Value = serde_json::from_slice(&body)?;
                 let priority = rank::Priority::from_value(&req["priority"]).context("a run priority is a number from 1, or \"last\"")?;
                 self.set_priority(&grant.caller, req["device"].as_str().unwrap_or(""), priority).await?;
                 ok(json!({}))
             }
-            _ => bail!("the node has no {method} {path}"),
+            Ask::Fetch => bail!("{}'s requests go out as they're made here", grant.app),
         })
     }
 }

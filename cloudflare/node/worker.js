@@ -35,7 +35,7 @@ import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
 import { Refused, json, near, refuse, textOf } from "./http.js";
-import { BLOBS, CODES, HEADER, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT } from "./protocol.js";
+import { ASKS, BLOBS, CODES, HEADER, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT } from "./protocol.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -696,7 +696,7 @@ class Run {
       const body = { ...fields, me: this.view.me, now: Date.now(), scopes, read_only: !writes, token: crypto.randomUUID(), from, address: this.env.ADDRESS?.replace(/\/$/, "") ?? null, handles: this.view.handles };
       const reply = await p.appWorker(this.who, app).getEntrypoint("Call").run(what, null, body, new ForCall(this, app, call, finished, depth));
       if (call.need) throw call.need;
-      if (reply.error !== undefined) refuse(400, reply.error);
+      if (reply.error !== undefined) refuse(400, reply.error, reply.code ? { code: reply.code } : undefined);
       if (writes) {
         const wrote = await call.write(reply.appends || []);
         later = reply.later === true;
@@ -871,22 +871,23 @@ class ForCall extends RpcTarget {
     return { status: r.status, headers: Object.fromEntries(r.headers), body64 };
   }
 
-  async ask(path, method, body) {
+  /// One of an app's asks (src/call.rs: `Ask`), as a machine's node answers it: a Response, an error's code in its header.
+  async ask(name, body) {
     try {
       const { who, view, person } = this.run;
       const q = body ? JSON.parse(typeof body === "string" ? body : new TextDecoder().decode(body)) : {};
-      switch (`${method} ${path}`) {
-        case "POST query":
+      switch (name) {
+        case "query":
           return Response.json({ ok: await this.call.query(q.scope, q.sql, q.params || []) });
-        case "POST may":
+        case "may":
           return Response.json({ ok: await this.call.may(q.scope, q.asks) });
-        case "POST appends":
+        case "appends":
           await this.call.write(q.appends || []);
           return Response.json({});
-        case "POST done":
+        case "done":
           this.done();
           return Response.json({});
-        case "POST call": {
+        case "call": {
           // Only to the apps it says it uses, and never to a service: a service is its app's alone, and an app with one
           // runs on a machine, never here. A service, or an app this node can't run, goes to a node on a machine.
           const mine = await person.describe(who, this.app);
@@ -899,19 +900,21 @@ class ForCall extends RpcTarget {
           if (!d || !servedHere(view, d)) return Response.json(await machineCall(this.run, q, d));
           return Response.json(await this.run.call({ app: q.app, tool: q.tool, input: q.input }, this.app.name, this.depth + 1));
         }
-        case "GET vault":
+        case "vault":
           return new Response(vault_items(await this.call.vault(), this.app.name, who.user), { headers: { "content-type": "application/json" } });
-        case "POST fetch":
+        case "fetch":
           return Response.json(await this.fetch(q));
-        case "GET catalog":
+        case "catalog":
           return Response.json(await this.run.apps());
-        case "GET devices":
+        case "devices":
           return Response.json(view.state.network.devices);
       }
-      return new Response(`a Cloudflare node doesn't do ${path} for apps yet, and ${OFF}`, { status: 501 });
+      if (ASKS[name]) return new Response(`a Cloudflare node doesn't do ${name} for apps yet, and ${OFF}`, { status: 501 });
+      refuse(400, `the node has no ask ${name}`);
     } catch (err) {
       if (err.status === 428) this.call.need = err;
-      return new Response(err.message, { status: err.status === 503 ? 503 : 400 });
+      const code = err.said?.code;
+      return new Response(err.message, { status: err.status === 503 ? 503 : 400, headers: code ? { [HEADER.code]: code } : {} });
     }
   }
 }
@@ -926,7 +929,7 @@ async function machineCall(run, q, d) {
 
 function answered(out, app) {
   if (out.ok !== undefined) return out;
-  refuse(400, out.error || out.elsewhere || `${app} failed`);
+  refuse(400, out.error || out.elsewhere || `${app} failed`, out.code ? { code: out.code } : undefined);
 }
 
 /// An app's screen, as its page (src/screen.rs).

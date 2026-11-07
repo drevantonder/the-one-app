@@ -20,7 +20,7 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
 
 /// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
 pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, Vec<u8>)> {
-    let shim = include_str!("../app/runtime/shim.js");
+    let shim = crate::call::shim();
     let services = crate::config::CLOUDFLARE_SERVICES;
     let imports: String = services.iter().enumerate().map(|(i, (name, _))| format!("import s{i} from {};\n", json!(format!("./service-{name}.js")))).collect();
     let named: Vec<String> = services.iter().enumerate().map(|(i, (name, _))| format!("{}: s{i}", json!(name))).collect();

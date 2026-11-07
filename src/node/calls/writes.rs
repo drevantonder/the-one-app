@@ -15,15 +15,9 @@ impl Node {
         // What it spent on AI counts against the app that called it, if one did.
         let (costs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Cost { .. }));
         for cost in costs {
-            if let Append::Cost { data } = cost {
+            if let Append::Cost { model, usd, input, output } = cost {
                 let to = from.unwrap_or(app);
-                let said = status::Said::Cost {
-                    app: to.into(),
-                    model: data["model"].as_str().unwrap_or("?").into(),
-                    usd: data["usd"].as_f64().unwrap_or(0.0),
-                    input: data["input"].as_u64().unwrap_or(0),
-                    output: data["output"].as_u64().unwrap_or(0),
-                };
+                let said = status::Said::Cost { app: to.into(), model, usd, input, output };
                 self.write_insight(to, me, said);
             }
         }
@@ -88,7 +82,7 @@ impl Node {
                 self.emit(Event::Changed { apps: vec![app.to_string()] });
             }
             for item in items {
-                if let Append::Vault { id, scope, data, same, release } = item {
+                if let Append::Vault { id, scope, item: data, same, release } = item {
                     self.call_item(app, me, scopes, &id, scope, data, same, release).await?;
                 }
             }

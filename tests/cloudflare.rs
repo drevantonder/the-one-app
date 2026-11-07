@@ -45,7 +45,7 @@ fn module(entry: &str) -> Vec<u8> {
 static LISTENING: std::sync::Mutex<Vec<std::net::TcpListener>> = std::sync::Mutex::new(Vec::new());
 
 /// A port of this machine's that stays ours: nothing else, another test's workerd included, can take it.
-fn port() -> u16 {
+pub(crate) fn port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     LISTENING.lock().unwrap().push(listener);
@@ -56,7 +56,7 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
 }
 
-struct Running {
+pub(crate) struct Running {
     child: std::process::Child,
     dir: std::path::PathBuf,
 }
@@ -69,7 +69,7 @@ impl Drop for Running {
     }
 }
 
-fn run(services: Vec<Served>) -> Running {
+pub(crate) fn run(services: Vec<Served>) -> Running {
     let dir = crate::temp("workerd");
     let listening = {
         let mut held = LISTENING.lock().unwrap();

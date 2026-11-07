@@ -259,7 +259,7 @@ fn the_workers_name_the_buckets_objects_as_nodes_do() {
     assert_eq!(out["prefixes"], json!(["user-abc/tally/main", "global/node/scope"]), "where an app's database of a scope is");
     assert_eq!(out["refusal"], json!(one::protocol::update_refusal("your One App network")), "what a device that reads less is told");
     use one::protocol::code;
-    assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notAdded": code::NOT_ADDED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED, "pairingUsed": code::PAIRING_USED, "badPairingCode": code::BAD_PAIRING_CODE, "alreadyInNetwork": code::ALREADY_IN_NETWORK, "unreachable": code::UNREACHABLE, "noClient": code::NO_CLIENT, "notWaiting": code::NOT_WAITING, "limit": code::LIMIT, "noProfile": code::NO_PROFILE }), "the codes answers carry");
+    assert_eq!(out["codes"], json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notAdded": code::NOT_ADDED, "taken": code::TAKEN, "replayed": code::REPLAYED, "already": code::ALREADY, "notListed": code::NOT_LISTED, "pairingUsed": code::PAIRING_USED, "badPairingCode": code::BAD_PAIRING_CODE, "alreadyInNetwork": code::ALREADY_IN_NETWORK, "unreachable": code::UNREACHABLE }), "the codes answers carry");
 }
 
 /// The Settings screens say who agents are in an item's apps (`src/screen/settings/agents.js`) by the name the node
@@ -750,4 +750,128 @@ fn the_apis_paths_are_never_taken_for_an_apps() {
             assert!(one::protocol::path::ROOTS.contains(&segments[0]), "{path} would be an app's: add {} to protocol::path::ROOTS", segments[0]);
         }
     }
+}
+
+/// An app runs the same on a machine's node and on the Cloudflare node: the shim it runs in, asked as each node asks it
+/// (over HTTP with its asks going out through the node, and by RPC with the node answering them), gives the same answer,
+/// the same error and code, the same code on an error the node answers its ask with, and writes the node reads.
+#[test]
+fn an_app_answers_the_same_on_a_machine_and_on_the_cloudflare_node() {
+    const APP: &str = r#"
+        export default {
+          name: "probe",
+          uses: { apps: ["other"] },
+          tools: {
+            reads: { run: async (ctx) => ctx.user.query("SELECT 1 AS n") },
+            writes: { run: async (ctx, input) => {
+              ctx.user.exec("INSERT INTO notes (text) VALUES (?)", [input.text]);
+              ctx.user.check("SELECT 1", [], "changed");
+              ctx.user.forget("ab".repeat(32));
+              ctx.cost({ model: "m", usd: 0.5, input: 3, output: 4 });
+              await ctx.vault.create({ title: "T", fields: { user: { value: "ann" } }, hosts: ["x.com"], same: "user" });
+              ctx.vault.update("v1", { title: "U" });
+              ctx.vault.release("v1");
+              ctx.add("other", "user", true, "linux");
+              ctx.retire("other", "deleted");
+              ctx.source("other", "https://example.com");
+              ctx.service("other", "linux", true, "global");
+              ctx.schedule("other", "daily", "user", false);
+              return "wrote";
+            } },
+            fails: { run: async () => { throw Object.assign(new Error("sign in first"), { code: "not_signed_in" }); } },
+            asks: { run: async (ctx) => {
+              try {
+                return await ctx.apps.other.anything();
+              } catch (err) {
+                return { error: err.message, code: err.code ?? null };
+              }
+            } },
+          },
+        };
+    "#;
+    let runner = format!(
+        r#"
+        import {{ RpcTarget, WorkerEntrypoint }} from "cloudflare:workers";
+        const SHIM = {shim};
+        const APP = {app};
+        const CODE = {code};
+        // The node, answering what the app asks the same however it asks.
+        function answer(name, body) {{
+          if (name === "query") return Response.json({{ ok: [{{ n: 1 }}] }});
+          if (name === "vault.match") return Response.json({{ id: "v0" }});
+          if (name === "call") return new Response("not yours to call", {{ status: 400, headers: {{ [CODE]: "refused" }} }});
+          return new Response(`no ask ${{name}}`, {{ status: 400 }});
+        }}
+        // A machine's node: the app's asks reach it as requests to one.internal.
+        export class Node extends WorkerEntrypoint {{
+          async fetch(req) {{
+            return answer(new URL(req.url).pathname.slice(1), await req.text());
+          }}
+        }}
+        // The Cloudflare node: it hands the app this to ask.
+        class Asks extends RpcTarget {{
+          ask(name, body) {{
+            return answer(name, body);
+          }}
+        }}
+        export default {{
+          async fetch(req, env) {{
+            const app = env.LOADER.get("probe", () => ({{ compatibilityDate: {date}, compatibilityFlags: ["nodejs_als"], mainModule: "shim.js", modules: {{ "shim.js": SHIM, "app.js": APP }}, globalOutbound: env.NODE }}));
+            const tool = new URL(req.url).searchParams.get("tool");
+            const body = {{ tool, input: {{ text: "hi" }}, me: {{ user: "u1" }}, now: 1, scopes: [{{ id: "user:u1", name: "Ann" }}], read_only: false, token: "t" }};
+            const machine = await (await app.getEntrypoint().fetch("http://app/call", {{ method: "POST", body: JSON.stringify(body) }})).json();
+            const cloudflare = await app.getEntrypoint("Call").run("call", null, body, new Asks());
+            return Response.json({{ machine, cloudflare }});
+          }},
+        }};
+        "#,
+        shim = json!(one::call::shim()),
+        app = json!(APP),
+        code = json!(one::protocol::header::CODE),
+        date = json!(one::app::runtime::COMPATIBILITY_DATE),
+    );
+    let at = format!("127.0.0.1:{}", crate::cloudflare::port());
+    let _running = crate::cloudflare::run(vec![one::cloudflare::Served {
+        name: "runner".into(),
+        module: runner.into_bytes(),
+        modules: vec![],
+        class: None,
+        listen: Some(at.clone()),
+        bindings: vec![("LOADER".into(), "loader:".into()), ("NODE".into(), "service:runner:Node".into())],
+        assets: None,
+        outbound: None,
+    }]);
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let ask = |tool: &str| -> Value { serde_json::from_str(&agent.get(format!("http://{at}/?tool={tool}")).call().unwrap().body_mut().read_to_string().unwrap()).unwrap() };
+    for (tool, expected) in [
+        ("reads", json!({ "ok": [{ "n": 1 }], "appends": [], "later": false })),
+        ("fails", json!({ "error": "sign in first", "code": "not_signed_in" })),
+        ("asks", json!({ "ok": { "error": "not yours to call", "code": "refused" }, "appends": [], "later": false })),
+    ] {
+        let both = ask(tool);
+        assert_eq!(both["machine"], expected, "{tool} on a machine");
+        assert_eq!(both["cloudflare"], expected, "{tool} on the Cloudflare node");
+    }
+    let both = ask("writes");
+    assert_eq!(both["machine"], both["cloudflare"], "the same writes on both");
+    let appends = one::call::appends(&both["machine"]["appends"]).unwrap_or_else(|err| panic!("the node reads what the shim hands it: {err:#}\n{}", both["machine"]["appends"]));
+    assert_eq!(appends.len(), 12, "every write the app made: {appends:?}");
+}
+
+/// What the shim asks the node is what `one::call::Ask` names, and the Cloudflare node answers exactly those it says it
+/// does (a machine's node answers each, which the compiler holds it to).
+#[test]
+fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let names: std::collections::BTreeMap<&str, bool> = one::call::Ask::names().collect();
+    let quoted = |text: &str, before: &str| -> std::collections::BTreeSet<String> { text.split(before).skip(1).filter_map(|rest| Some(rest.split_once('"')?.0.to_string())).collect() };
+    let shim = std::fs::read_to_string(root.join("src/app/runtime/shim.js")).unwrap();
+    let asked: std::collections::BTreeSet<String> = quoted(&shim, "ask(\"").union(&quoted(&shim, "post(\"")).cloned().collect();
+    let unknown: Vec<&String> = asked.iter().filter(|a| !names.contains_key(a.as_str())).collect();
+    assert!(unknown.is_empty(), "the shim asks what src/call.rs doesn't name: {unknown:?}");
+    let worker = std::fs::read_to_string(root.join("cloudflare/node/worker.js")).unwrap();
+    let ask = worker.split("  async ask(name, body) {").nth(1).expect("the Cloudflare node's ForCall.ask").split("\n  }\n").next().unwrap();
+    let answered = quoted(ask, "case \"");
+    let said: std::collections::BTreeSet<String> = names.iter().filter(|(_, on)| **on).map(|(n, _)| n.to_string()).collect();
+    assert_eq!(answered, said, "the asks the Cloudflare node answers, and those src/call.rs says it does");
 }

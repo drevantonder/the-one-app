@@ -1,7 +1,8 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's deployed code; this turns it
 // into a Worker that answers the node: tools, widgets, hooks and screens. Its databases, one per scope, are the
 // node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write. A node on a
-// machine asks it over HTTP (`fetch`); the Cloudflare node by RPC (`Call`), handing it what answers for the node.
+// machine asks it over HTTP (`fetch`); the Cloudflare node by RPC (`Call`), handing it what answers for the node. What
+// it asks and hands back is src/call.rs's (`ASKS`, `READ_ONLY`, `CODE_HEADER`, written before this when it's built).
 import { AsyncLocalStorage } from "node:async_hooks";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
@@ -65,12 +66,20 @@ function describe() {
   };
 }
 
-/// Asks the node something for the call with `token`: other apps' tools and its own service's functions, blobs, the network's apps.
-async function askNode(token, path, init = {}) {
-  const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": token } }));
-  if (!r.ok) throw Object.assign(new Error(await r.text()), r.headers.has("x-one-code") ? { code: r.headers.get("x-one-code") } : {});
+/// The node's answer to an ask, as a Response: its error, with the code the node gave it, thrown.
+async function answered(r) {
+  if (!r.ok) throw Object.assign(new Error(await r.text()), r.headers.has(CODE_HEADER) ? { code: r.headers.get(CODE_HEADER) } : {});
   return r;
 }
+
+/// How the shim asks the node `name` (an ask of `ASKS`) for a call, with `send(name, body)` the way its node answers:
+/// the same on a machine and on the Cloudflare node.
+const asking = (send, body) => async (name, data) => {
+  const ask = ASKS[name];
+  if (!ask) throw new Error(`the node has no ask ${name}`);
+  if (ask.writes && body.read_only) throw new Error(READ_ONLY);
+  return answered(await send(name, data ?? null));
+};
 
 /// After a call returned: waits for the work it left running (ctx.waitUntil), hands the node what that work wrote,
 /// and says it's done.
@@ -85,11 +94,11 @@ async function finish(ask, later, appends) {
     }
   }
   try {
-    if (appends.length) await ask("appends", { method: "POST", body: JSON.stringify({ appends: appends.splice(0) }) });
+    if (appends.length) await ask("appends", JSON.stringify({ appends: appends.splice(0) }));
   } catch (err) {
     error ||= String(err?.message ?? err);
   }
-  await ask("done", { method: "POST", body: JSON.stringify({ error }) }).catch(() => {});
+  await ask("done", JSON.stringify({ error })).catch(() => {});
 }
 
 /// A widget's options' defaults, as its render sees them when a person chose none.
@@ -111,35 +120,39 @@ async function widgetOptions(widget, ctx) {
 
 /// What a call, widget or hook gets: the caller, and a handle on each scope the node lets it reach.
 function context(ask, body, appends, later) {
+  const writing = () => {
+    if (body.read_only) throw new Error(READ_ONLY);
+  };
+  const post = async (name, data) => (await ask(name, JSON.stringify(data))).json();
   const handle = (s) => ({
     id: s.id, name: s.name, role: s.role,
     /// Reads this scope's database: the rows, each an object by column. It sees what the call writes only once the
     /// call has returned.
-    query: async (q, params = []) => (await (await ask("query", { method: "POST", body: JSON.stringify({ scope: s.id, sql: q, params }) })).json()).ok,
+    query: async (q, params = []) => (await post("query", { scope: s.id, sql: q, params })).ok,
     /// Whether the caller may do `permission` (a verb) to `object` (`<type>:<id>`), as the core's rows and this scope's
     /// `relations`, by the app's own `types`, say: `may("push", "repo:" + id)`, `may("use", "group:" + id)`. Given a
     /// list of [permission, object], whether to each, in order, asked at once: `may([["push", a], ["manage", a]])`.
     may: async (permission, object) => {
       const asks = Array.isArray(permission) ? permission : [[permission, object]];
-      const ok = (await (await ask("may", { method: "POST", body: JSON.stringify({ scope: s.id, asks }) })).json()).ok;
+      const ok = (await post("may", { scope: s.id, asks })).ok;
       return Array.isArray(permission) ? ok : ok[0] === true;
     },
     /// Writes this scope's database once the call returns, with every other statement it ran, as one transaction;
     /// `blobs` are blobs the scope keeps from now on.
     exec: (q, params = [], blobs = []) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ scope: s.id, exec: String(q), params, blobs });
+      writing();
+      appends.push({ kind: "exec", scope: s.id, sql: String(q), params, blobs });
     },
     /// Says the write holds only while a query's first value is true, as it runs: when it isn't (another call wrote
     /// first), the call fails with `message` and writes nothing.
     check: (q, params = [], message = "the data changed meanwhile: try again") => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ scope: s.id, exec: String(q), params, check: String(message) });
+      writing();
+      appends.push({ kind: "exec", scope: s.id, sql: String(q), params, check: String(message) });
     },
     /// Says this scope no longer needs a blob it kept: once no scope does, devices delete it.
     forget: (hash) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ forget: String(hash), scope: s.id });
+      writing();
+      appends.push({ kind: "forget", blob: String(hash), scope: s.id });
     },
   });
   const scopes = body.scopes.map(handle);
@@ -159,7 +172,7 @@ function context(ask, body, appends, later) {
             // An option it doesn't know (one renamed, say) fails, rather than running the call somewhere else.
             const [unknown] = Object.keys(other);
             if (unknown) throw new Error(`${unknown} isn't an option of ctx.${kind} calls: give device`);
-            return (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, service: kind === "services", [kind === "services" ? "function" : "tool"]: tool, input, device }) })).json()).ok;
+            return (await post("call", { app: name, service: kind === "services", [kind === "services" ? "function" : "tool"]: tool, input, device })).ok;
           };
         },
       });
@@ -187,12 +200,12 @@ function context(ask, body, appends, later) {
     /// it (ctx.from), or else of this one.
     cost: (spent) => {
       if (body.read_only) return;
-      appends.push({ cost: { model: String(spent?.model ?? "?"), usd: Number(spent?.usd) || 0, input: Number(spent?.input) || 0, output: Number(spent?.output) || 0 } });
+      appends.push({ kind: "cost", model: String(spent?.model ?? "?"), usd: Number(spent?.usd) || 0, input: Math.round(Number(spent?.input) || 0), output: Math.round(Number(spent?.output) || 0) });
     },
     /// Keeps work going after the call returns (an AI read, a copy to Drive), up to 10 minutes: its requests and
     /// calls still go out as this call's, and what it writes is written when it's done.
     waitUntil: (promise) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      writing();
       later.push(Promise.resolve(promise));
     },
     now: () => body.now,
@@ -203,8 +216,8 @@ function context(ask, body, appends, later) {
     apps: used("apps"),
     services: used("services"),
     blob: {
-      put: async (bytes) => (await (await ask("blob", { method: "POST", body: bytes })).json()).blob,
-      get: async (hash) => new Uint8Array(await (await ask(`blob/${hash}`)).arrayBuffer()),
+      put: async (bytes) => (await (await ask("blob.put", bytes)).json()).blob,
+      get: async (hash) => new Uint8Array(await (await ask("blob.get", JSON.stringify({ hash }))).arrayBuffer()),
     },
     /// The Vault, as this app may use it: the items it's switched on for (a secret field as { secret: true }, never its
     /// value), and making, changing and letting go of items. A field goes into a request as {{<item id>:<field>}}.
@@ -214,38 +227,35 @@ function context(ask, body, appends, later) {
       /// hosts }), in the caller's scope by default; with `same`, a plain field's name, changes the item of that type
       /// whose field has that value instead (every secret field given anew). Gives its id.
       async create({ scope = "user", same, ...item }) {
-        if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+        writing();
         const at = scope === "user" ? scopes.find((s) => s.id.startsWith("user:"))?.id : scope;
         if (!at) throw new Error("this device doesn't keep your data: use one of your own devices");
         let id = null;
-        if (same) id = (await (await ask("vault/match", { method: "POST", body: JSON.stringify({ scope: at, type: item.type ?? "", field: same, value: item.fields?.[same]?.value }) })).json()).id;
+        if (same) id = (await post("vault.match", { scope: at, type: item.type ?? "", field: same, value: item.fields?.[same]?.value })).id;
         id ||= [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
-        appends.push({ vault: id, scope: at, item, same: same ?? null });
+        appends.push({ kind: "vault", id, scope: at, item, same: same ?? null });
         return id;
       },
       /// Changes an item it's switched on for: { title?, type?, domain?, fields?, hosts? }, its hosts only with every
       /// secret field given anew.
       update: (id, changes) => {
-        if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-        appends.push({ vault: String(id), item: changes ?? {} });
+        writing();
+        appends.push({ kind: "vault", id: String(id), item: changes ?? {} });
       },
       /// Switches this app off for an item (signing out an account); the item goes once no app uses it.
       release: (id) => {
-        if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-        appends.push({ vault: String(id), release: true });
+        writing();
+        appends.push({ kind: "vault", id: String(id), release: true });
       },
     },
     /// Pushes a notification to each of the caller's devices that gets them, { title, body?, screen?, params? };
     /// tapping it opens this app's screen. → { sent, devices, why? }: how many it went to, and why none, if none.
-    notify: async (push) => {
-      if (body.read_only) throw new Error("this call only reads: it can't push");
-      return (await (await ask("notify", { method: "POST", body: JSON.stringify(push) })).json()).ok;
-    },
+    notify: async (push) => (await post("notify", push)).ok,
     /// Every app in the network, as `GET /v1/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
     /// An app's code as deployed (the release's, for a built-in app no one has added): `{ files: [{ path, size }] }`, or
     /// with `path`, `{ path, text }` for that file.
-    code: async (app, path) => (await ask("code", { method: "POST", body: JSON.stringify({ app, path }) })).json(),
+    code: async (app, path) => post("code", { app, path }),
     /// The schedules the caller may switch, of the apps they may use, that are on and failed their last run, each as
     /// `catalog` gives an app's `schedules`, with its `app`.
     failing: async () => (await ask("failing")).json(),
@@ -256,53 +266,51 @@ function context(ask, body, appends, later) {
     /// caller is an admin. Given a device (its name or key, or "cloudflare") and a priority, gives it that one first,
     /// for an admin.
     order: async (device, priority) => {
-      if (device !== undefined) {
-        if (body.read_only) throw new Error("this call only reads: it can't change run priority");
-        await ask("priority", { method: "POST", body: JSON.stringify({ device, priority }) });
-      }
+      if (device !== undefined) await post("priority", { device, priority });
       return (await ask("order")).json();
     },
     /// Adds (or with `added: false`, removes) an app in a scope, with the caller's own rights there.
     add: (name, scope, added = true, node) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ add: name, scope, added, ...(node ? { node } : {}) });
+      writing();
+      appends.push({ kind: "add", app: name, scope, added, ...(node ? { node } : {}) });
     },
     /// Deletes an app ("deleted": to Recently Deleted), restores it ("restored") or erases it for good ("erased"),
     /// for someone acting for its owner.
     retire: (name, how) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ retire: name, how });
+      writing();
+      appends.push({ kind: "retire", app: name, how });
     },
     /// Sets where an app's code is kept (a web address or `<cli>://<repo>`), or with "" clears it, for someone acting
     /// for its owner.
     source: (name, link) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ app_source: name, link: String(link ?? "") });
+      writing();
+      appends.push({ kind: "source", app: name, link: String(link ?? "") });
     },
     /// Runs an app's service on a device (by name) or stops it there, for the app added in `scope` (by default where the
     /// caller sees it added): for the device's person, or to stop it, for who may add apps where it ran.
     service: (name, device, on = false, scope) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ service: name, device, on, ...(scope ? { scope } : {}) });
+      writing();
+      appends.push({ kind: "service", name, device, on, ...(scope ? { scope } : {}) });
     },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     schedule: (name, schedule, scope, on = true) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ switch: schedule, app: name, scope, on });
+      writing();
+      appends.push({ kind: "switch", schedule, app: name, scope, on });
     },
   };
 }
 
 /// Answers one of the node's requests: `describe`, `screen` (with `name`), or a call, widget, its options, a badge or
-/// a hook, for `body`; `ask` is how it asks the node, `waitUntil` how work outlives the reply, and `out`, if given,
+/// a hook, for `body`; `send` is how it asks the node, `waitUntil` how work outlives the reply, and `out`, if given,
 /// sends the app's requests out. → what the reply says.
-async function handle(what, name, body, ask, waitUntil, out) {
+async function handle(what, name, body, send, waitUntil, out) {
   if (broken) return { error: broken };
   if (what === "describe") return { ok: describe() };
   if (what === "screen") return { ok: app.screens?.[name]?.html ?? null };
   try {
     const appends = [];
     const later = [];
+    const ask = asking(send, body);
     const ctx = context(ask, body, appends, later);
     let run;
     if (what === "call") {
@@ -342,21 +350,18 @@ export default {
     const url = new URL(req.url);
     const what = url.pathname.split("/").pop();
     const body = ["describe", "screen"].includes(what) ? {} : await req.json();
-    const reply = await handle(what, url.searchParams.get("name"), body, (path, init) => askNode(body.token, path, init), (p) => execution.waitUntil(p));
+    const send = (name, data) => fetchOut(new Request(`http://one.internal/${name}`, { method: "POST", body: data, headers: { "x-one-call": body.token } }));
+    const reply = await handle(what, url.searchParams.get("name"), body, send, (p) => execution.waitUntil(p));
     return json(reply, reply.error === undefined ? 200 : 400);
   },
 };
 
-/// The Cloudflare node runs an app through this: `node.ask(path, init)` answers what the node does for a call, as
-/// `askNode`'s requests are answered on a machine, with a Response.
+/// The Cloudflare node runs an app through this: `node.ask(name, body)` answers what the node does for a call with a
+/// Response, as a machine's node answers it over HTTP.
 export class Call extends WorkerEntrypoint {
   async run(what, name, body, node) {
-    const ask = async (path, init = {}) => {
-      const r = await node.ask(path, init.method || "GET", init.body ?? null);
-      if (!r.ok) throw new Error(await r.text());
-      return r;
-    };
-    return handle(what, name, body, ask, (p) => this.ctx.waitUntil(p), (req) => sent(ask, req));
+    const send = (name, data) => node.ask(name, data);
+    return handle(what, name, body, send, (p) => this.ctx.waitUntil(p), (req) => sent(asking(send, body), req));
   }
 }
 
@@ -372,7 +377,7 @@ const b64u = {
 /// An app's request, made by the Cloudflare node through the vault, which fills in the Vault's items.
 async function sent(ask, req) {
   const body = ["GET", "HEAD"].includes(req.method) ? undefined : b64u.encode(new Uint8Array(await req.arrayBuffer()));
-  const r = await ask("fetch", { method: "POST", body: JSON.stringify({ url: req.url, method: req.method, headers: Object.fromEntries(req.headers), body64: body }) });
+  const r = await ask("fetch", JSON.stringify({ url: req.url, method: req.method, headers: Object.fromEntries(req.headers), body64: body }));
   const got = await r.json();
   const headers = new Headers(got.headers);
   for (const h of ["content-encoding", "content-length", "transfer-encoding"]) headers.delete(h);

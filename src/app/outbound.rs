@@ -13,8 +13,6 @@ use axum::response::{IntoResponse, Response};
 
 use crate::node::Node;
 
-/// The header an error's code (`protocol::code`) is answered in, to an app.
-const CODE_HEADER: &str = "x-one-code";
 const LIMIT: usize = 64 << 20;
 
 pub fn router(node: Node) -> axum::Router {
@@ -29,7 +27,7 @@ async fn handle(State(node): State<Node>, req: Request) -> Response {
         Err(err) => {
             let mut reply = (StatusCode::BAD_GATEWAY, format!("{err:#}")).into_response();
             if let Some(code) = crate::protocol::Coded::of(&err).and_then(|c| c.parse().ok()) {
-                reply.headers_mut().insert(CODE_HEADER, code);
+                reply.headers_mut().insert(crate::protocol::header::CODE, code);
             }
             reply
         }
@@ -47,7 +45,7 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     };
     if host == "one.internal" {
         let body = axum::body::to_bytes(body, LIMIT).await?;
-        return node.internal(&header("x-one-call").unwrap_or_default(), parts.method.as_str(), parts.uri.path(), body.to_vec()).await;
+        return node.internal(&header("x-one-call").unwrap_or_default(), parts.uri.path(), body.to_vec()).await;
     }
     let scheme = header("x-forwarded-proto").filter(|p| p == "https").unwrap_or_else(|| "http".into());
     if node.names_app(&host) {

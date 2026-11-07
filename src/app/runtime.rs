@@ -544,7 +544,7 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16, outbound: u16,
         let app_dir = modules.join(name);
         std::fs::create_dir_all(&app_dir)?;
         std::fs::write(app_dir.join("app.js"), source)?;
-        std::fs::write(app_dir.join("shim.js"), include_str!("runtime/shim.js"))?;
+        std::fs::write(app_dir.join("shim.js"), crate::call::shim())?;
         services.push(format!("(name = {}, worker = .app{i})", quote(&format!("app-{name}"))));
         bindings.push(format!("(name = {}, service = {})", quote(name), quote(&format!("app-{name}"))));
         workers.push(format!(
