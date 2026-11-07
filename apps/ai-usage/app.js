@@ -182,8 +182,6 @@ async function refresh(b, id, ask, now) {
     results.push({ provider: id, device: machine, devices, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
   }
   b.exec("delete from snapshots where at < ?", [PRUNE()]);
-  // Rows from before accounts had labels go once the service answers; until then they're better kept than blank.
-  if (reads.length) b.exec("delete from snapshots where provider = ? and account is null and at < ?", [id, now]);
   const gone = (r) => r.device in (answers || {}) && !failed[r.device] && !unread[r.account || ""];
   for (const r of snap) if (!seen.has(r.account || "") && gone(r)) b.exec("delete from snapshots where provider = ? and ifnull(account, '') = ?", [id, r.account || ""]);
   // The writes land when this call returns, so the merge happens here.

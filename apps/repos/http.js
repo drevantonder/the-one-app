@@ -36,10 +36,10 @@ export async function serve(ctx, g, api, { method, path, query, body }) {
   const branches = await g.query("select branch, head from branches where repo = ? order by branch", [r.id]);
   if (file === "info/refs") return text(branches.map((b) => `${b.head}\trefs/heads/${b.branch}\n`).join(""));
   if (file === "HEAD") return text(`ref: refs/heads/${api.defaultBranch(branches.map((b) => b.branch)) || "main"}\n`);
-  if (file === "objects/info/packs") return text((await indexed(ctx, g, r.id)).map((p) => `P pack-${p.name}.pack\n`).join("") + "\n");
+  if (file === "objects/info/packs") return text((await indexed(g, r.id)).map((p) => `P pack-${p.name}.pack\n`).join("") + "\n");
   const want = /^objects\/pack\/pack-([0-9a-f]{40})\.(pack|idx)$/.exec(file);
   if (want) {
-    const p = (await indexed(ctx, g, r.id)).find((p) => p.name === want[1]);
+    const p = (await indexed(g, r.id)).find((p) => p.name === want[1]);
     if (!p) return missing();
     return { status: 200, type: "application/octet-stream", blob: want[2] === "pack" ? p.pack : p.idx };
   }
@@ -47,20 +47,8 @@ export async function serve(ctx, g, api, { method, path, query, body }) {
   return missing();
 }
 
-/// A pack kept before indexes were gets its index here.
-async function indexed(ctx, g, repo) {
-  const rows = await g.query(
-    "select p.hash as pack, i.name, i.idx, i.size from packs p left join indexes i on i.pack = p.hash where p.repo = ? order by p.time, p.hash",
-    [repo],
-  );
-  for (const row of rows.filter((r) => !r.idx)) {
-    const bytes = await ctx.blob.get(row.pack);
-    const { name, entries } = await check(bytes);
-    Object.assign(row, { name, idx: await ctx.blob.put(await idx(entries, name)), size: bytes.length });
-    g.exec("insert or ignore into indexes values (?, ?, ?, ?)", [row.pack, row.name, row.idx, row.size], [row.idx]);
-  }
-  return rows;
-}
+const indexed = (g, repo) =>
+  g.query("select p.hash as pack, i.name, i.idx, i.size from packs p join indexes i on i.pack = p.hash where p.repo = ? order by p.time, p.hash", [repo]);
 
 async function advertise(g, r) {
   const branches = r && !r.deleted ? await g.query("select branch, head from branches where repo = ? order by branch", [r.id]) : [];
@@ -129,12 +117,12 @@ async function receive(ctx, g, api, owner, name, found, hash) {
 
 async function kept(ctx, g, repo) {
   const have = new Set();
-  for (const p of await indexed(ctx, g, repo)) for (const e of listed(await ctx.blob.get(p.idx))) have.add(e.sha);
+  for (const p of await indexed(g, repo)) for (const e of listed(await ctx.blob.get(p.idx))) have.add(e.sha);
   return have;
 }
 
 async function keep(ctx, g, repo, pack) {
-  const rows = await indexed(ctx, g, repo);
+  const rows = await indexed(g, repo);
   let newest = [{ bytes: pack.bytes, name: pack.name, entries: pack.entries, size: pack.bytes.length }];
   let sum = pack.bytes.length;
   for (let i = rows.length - 1; i >= 0; i--) {
