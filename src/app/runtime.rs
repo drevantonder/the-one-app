@@ -94,8 +94,6 @@ impl Apps {
     }
 
     fn start_blocking(dir: &Path, outbound: u16, apart: bool) -> Result<Self> {
-        // Where apps' stores were kept before each app's databases were in the bucket.
-        let _ = std::fs::remove_dir_all(dir.join("storage"));
         // Held for as long as the node runs, and handed to each workerd: no one takes the port meanwhile.
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();

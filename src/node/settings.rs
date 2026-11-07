@@ -170,7 +170,6 @@ impl Node {
     /// theirs (`settings::requests`), as their approving it would, with no one tapping; any other waits for them to
     /// approve it by its code. Nodes that only run calls let in no one.
     pub(super) async fn sign_in_loop(self) {
-        self.move_invites().await;
         loop {
             tokio::time::sleep(SIGN_INS_EVERY).await;
             let mine = self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == i.user)));
@@ -180,27 +179,6 @@ impl Node {
             if let Err(err) = crate::settings::requests(&self).await {
                 tracing::debug!("looking for devices let in by their sign-in: {err:#}");
             }
-        }
-    }
-
-    /// The invites this machine's person made from it, which it kept in their own scope (an `invites` database) before
-    /// it kept them as every device does: moved once, as they last only days.
-    async fn move_invites(&self) {
-        const KEPT: &str = "invites.json";
-        if self.kept(KEPT).await.is_some() {
-            return;
-        }
-        let moved = async {
-            let scope = Scope::User(self.user()?);
-            let db = self.database(&scope, scopes::APP, "invites", Some(Vec::new()), None).await?;
-            let mut db = db.lock().await;
-            db.catch_up(&self.bucket()?).await?;
-            let rows = db.query("select user, secret, name, role, until from invites where until > ?", &[json!(now_ms())])?;
-            let invites: serde_json::Map<String, Value> = rows.into_iter().filter_map(|r| Some((r["user"].as_str()?.to_string(), json!({ "secret": r["secret"], "name": r["name"], "role": r["role"], "until": r["until"] })))).collect();
-            self.keep(KEPT, Value::Object(invites).to_string().as_bytes()).await
-        };
-        if let Err(err) = moved.await {
-            tracing::debug!("moving this machine's invites: {err:#}");
         }
     }
 
