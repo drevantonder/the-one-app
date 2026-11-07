@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use one::api::client::{Answer, Client, Via};
 use one::config::CLI;
 use one::cloudflare::Settings;
@@ -89,9 +89,17 @@ pub(crate) fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
     Ok((held, format!("{}:{}", addr.ip(), u16::from_be(got.sin_port))))
 }
 
+/// A new throwaway network, which is left only whole: one that fails to start (its Workers' code doesn't parse) is deleted,
+/// so the next `throwaway` makes another where this one stopped, as its error says why.
 pub(crate) fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new throwaway network for this checkout…");
     stop(dir, true)?;
+    create(dir).inspect_err(|_| {
+        let _ = stop(dir, true);
+    })
+}
+
+fn create(dir: &Path) -> Result<String> {
     // Called what the person is called in their own network, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
     let mine = quick.get(format!("http://{}/v1/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<one::state::State>().ok());
@@ -153,11 +161,11 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     };
     let mut command = one::oned::command(&[])?;
     Throwaway::tell(&mut command, dir, &addr);
-    let pid = spawn(dir, &mut command, "node.log", false)?;
-    std::fs::write(dir.join("pid"), pid.to_string())?;
+    let node_program = spawn(dir, &mut command, "node.log", false)?;
+    std::fs::write(dir.join("pid"), node_program.to_string())?;
     std::fs::write(dir.join("addr"), &addr)?;
     let node = node_at(dir, &addr);
-    wait_for(|| node.get("/v1/state").is_ok(), &dir.join("node.log"))?;
+    wait_for(|| node.get("/v1/state").is_ok(), node_program, &dir.join("node.log"))?;
     Ok(addr)
 }
 
@@ -200,15 +208,26 @@ pub(crate) fn spawn_cloudflare(dir: &Path, settings: &Settings, node: &str) -> R
     // Beside its node, which it asks for the network's devices, for its relay to take only them.
     let mut workers = std::process::Command::new(std::env::current_exe()?);
     Throwaway::tell(workers.args(["cloudflare", "serve"]), dir, node);
-    spawn(dir, &mut workers, "cloudflare.log", false)?;
+    let program = spawn(dir, &mut workers, "cloudflare.log", false)?;
     let url = format!("{}/.well-known/oauth-authorization-server", settings.address);
-    wait_for(|| agent().get(&url).call().is_ok_and(|r| r.status().is_success()), &dir.join("cloudflare.log"))
+    wait_for(|| agent().get(&url).call().is_ok_and(|r| r.status().is_success()), program, &dir.join("cloudflare.log"))
 }
 
-pub(crate) fn wait_for(ready: impl Fn() -> bool, log: &Path) -> Result<()> {
+/// Waits for `ready`, while `program` runs: a program that has stopped (its code didn't parse) fails at once, with the end of
+/// its `log`, which says why.
+pub(crate) fn wait_for(ready: impl Fn() -> bool, program: u32, log: &Path) -> Result<()> {
     let start = Instant::now();
     while !ready() {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(120), "the throwaway network didn't start: {}", log.display());
+        // This process started it, so it's waited for here: a program that stopped is otherwise still there, as a zombie.
+        let stopped = unsafe { libc::waitpid(program as i32, std::ptr::null_mut(), libc::WNOHANG) } != 0;
+        if stopped || start.elapsed() >= Duration::from_secs(120) {
+            let text = std::fs::read_to_string(log).unwrap_or_default();
+            let tail: Vec<&str> = text.lines().rev().take(12).collect();
+            let tail = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+            let name = log.file_name().unwrap_or_default().to_string_lossy();
+            let why = if stopped { "a program of it stopped" } else { "a program of it didn't answer in time" };
+            bail!("the throwaway network didn't start: {why}. The end of {name}:\n{tail}");
+        }
         std::thread::sleep(Duration::from_millis(250));
     }
     Ok(())
