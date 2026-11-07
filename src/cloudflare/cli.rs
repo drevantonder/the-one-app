@@ -173,27 +173,13 @@ pub fn commands() -> Command {
                     println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
                 }
                 ["cloudflare", "invite", name] => {
-                    let settings = crate::cloudflare::Settings::load()?;
                     // This machine's person, inviting themselves to their own network, is who they are in it.
                     let user = match g.flag("user") {
                         Some(user) => Some(user.to_string()),
                         None => node.state().ok().and_then(|s| s.user).filter(|u| u.name.eq_ignore_ascii_case(name)).map(|u| u.id),
                     };
-                    let email = g.flag("email");
-                    // Someone new is invited by this machine's node, which keeps the secret for their first device's approval.
-                    if user.is_none() && email.is_none() {
-                        println!("{}", crate::node::devices::tools::invited_said(name, &node.post("/v1/invite-link", json!({ "name": name, "admin": g.has("admin") }))?));
-                    } else {
-                        let key = crate::node::device_key(&crate::home())?;
-                        let invite = crate::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;
-                        let days = crate::sign_in_proof::INVITE_DAYS;
-                        let how = if crate::config::SIGN_IN == crate::config::SignIn::Google { "they sign in with Google and join" } else { "they make their passkey and join" };
-                        println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
-                        let me = node.state().ok().and_then(|s| s.user).map(|u| u.id);
-                        if user.is_some() && user == me {
-                            println!("\nIt opens their browser waiting for approval, with a code: approve it here with {CLI} devices approve <code> --confirm.");
-                        }
-                    }
+                    let invite = node.post("/v1/invite-link", json!({ "name": name, "admin": g.has("admin"), "user": user, "email": g.flag("email") }))?;
+                    println!("{}", crate::node::devices::tools::invited_said(name, &invite));
                 }
                 ["cloudflare", "set", name, value] => {
                     let mut settings = crate::cloudflare::Settings::load()?;

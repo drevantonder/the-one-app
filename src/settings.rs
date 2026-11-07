@@ -289,7 +289,7 @@ async fn answered_by(m: &impl Me, route: Route, body: &Value) -> Result<Value> {
             m.write(content::forget_sign_in(&key)).await?;
             done
         }
-        Route::InviteLink => invite(m, &text(body, "name"), if body["admin"] == true { Role::Admin } else { Role::Member }).await?,
+        Route::InviteLink => invite(m, &text(body, "name"), if body["admin"] == true { Role::Admin } else { Role::Member }, body["user"].as_str(), body["email"].as_str()).await?,
         Route::AppSchedules => app_schedules_asked(m, body).await?,
         Route::Requests => requests(m).await?,
         Route::Approve => approve_code(m, &text(body, "code"), body["confirm"] == true).await?,
@@ -512,19 +512,28 @@ async fn keep_invites(m: &impl Me, invites: &BTreeMap<String, Invited>) -> Resul
     m.keep(INVITES, Value::Object(kept).to_string().as_bytes()).await
 }
 
-/// An invite link for someone new called `name`, as `role`, made by this admin's device: its secret stays here, to
-/// check the newcomer's device by when it asks to be let in; auth is told only its hash. → `{ link, until }`.
-async fn invite(m: &impl Me, name: &str, role: Role) -> Result<Value> {
+/// An invite link for someone called `name`, as `role`, made by this admin's device: its secret stays here, to check
+/// the newcomer's device by when it asks to be let in; auth is told only its hash. A new person gets a new id; `user`
+/// invites someone who's in the network already, as who they are, and `email` is the Google account people sign up
+/// with where they sign in with Google. → `{ link, until }`.
+async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: Option<&str>) -> Result<Value> {
     let name = name.trim();
     ensure!(!name.is_empty(), "Give their name.");
+    ensure!(crate::config::SIGN_IN != crate::config::SignIn::Google || email.is_some(), "People here sign in with Google: give the Google account they sign up with.");
     let secret = B64U.encode(&rand::random::<[u8; 32]>());
-    let user = scopes::new_id();
+    let new = user.is_none();
+    let user = user.map(str::to_string).unwrap_or_else(scopes::new_id);
     let until = m.now() + crate::sign_in_proof::INVITE_DAYS * DAY;
-    let fields = json!({ "id": hex(&keys::sha256(secret.as_bytes())), "name": name, "user": user, "until": until });
+    let mut fields = json!({ "id": hex(&keys::sha256(secret.as_bytes())), "name": name, "user": user, "until": until });
+    if let Some(email) = email {
+        fields["email"] = json!(email);
+    }
     ask_auth(m, "POST", "/api/auth/invites", fields).await?;
-    let mut kept = invites(m).await;
-    kept.insert(user, Invited { secret: secret.clone(), name: name.to_string(), role, until });
-    keep_invites(m, &kept).await?;
+    if new {
+        let mut kept = invites(m).await;
+        kept.insert(user, Invited { secret: secret.clone(), name: name.to_string(), role, until });
+        keep_invites(m, &kept).await?;
+    }
     Ok(json!({ "link": format!("{}/invite#{secret}", m.address().unwrap_or_default()), "until": until }))
 }
 

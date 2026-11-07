@@ -1134,38 +1134,6 @@ impl Cloudflare {
     }
 }
 
-/// An invite link: opening it lets its person sign up, once, as who it says.
-pub struct Invite {
-    pub link: String,
-    /// The id they'll have in the network.
-    pub user: String,
-    /// Until when it works, in milliseconds since 1970.
-    pub until: u64,
-}
-
-
-/// Invites someone to join the network at `address`, `name` only a label, as `user` (who they'll be in the network; a
-/// new id if not given), and where people sign in with Google, as the Google account `email`. The link's secret is
-/// made here and never leaves but in the link: auth is told only its hash, in a request signed with
-/// `key`, an admin's device's.
-pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: Option<&str>, email: Option<&str>) -> Result<Invite> {
-    ensure!(!name.trim().is_empty(), "give their name");
-    ensure!(!google() || email.is_some(), "people here sign in with Google: --email says which account they sign up with");
-    let user = user.map(str::to_string).unwrap_or_else(crate::database::scopes::new_id);
-    let secret = B64U.encode(&rand::random::<[u8; 32]>());
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
-    let until = now + crate::sign_in_proof::INVITE_DAYS * 86_400_000;
-    let mut fields = json!({ "route": "POST /api/auth/invites", "id": data_encoding::HEXLOWER.encode(&crate::keys::sha256(secret.as_bytes())), "name": name.trim(), "user": user, "until": until });
-    if let Some(email) = email {
-        fields["email"] = json!(email);
-    }
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-    let mut resp = agent.post(format!("{address}/api/auth/invites")).send_json(crate::keys::signed_request(key, crate::protocol::AUTH_DOMAIN, fields, now))?;
-    let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-    ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("auth made no invite"));
-    Ok(Invite { link: format!("{address}/invite#{secret}"), user, until })
-}
-
 fn mime(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "html" => "text/html; charset=utf-8",
