@@ -71,7 +71,8 @@ pub fn run(rest: &[String]) -> Result<()> {
     if rest.first().map(String::as_str) == Some("client") && rest.get(1).map(String::as_str) == Some("web") {
         rebuild::web_client_built(&checkout, rest)?;
     }
-    if rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
+    // Its remote MCP server (`/mcp`) is its Workers' only in a build that holds the Cloudflare node, which `cargo build` alone doesn't make.
+    if one::config::CLOUDFLARE_NODE.is_empty() || rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
         rebuild::cloudflare_node_built(&checkout, rest)?;
     }
     let addr = match running(&dir) {

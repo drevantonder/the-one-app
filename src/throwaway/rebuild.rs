@@ -24,7 +24,7 @@ pub(crate) fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
     rebuilt(checkout, rest, &format!("target/debug/{CLI} again with the web client"))
 }
 
-/// For `throwaway cloudflare node deploy` from this checkout's own debug build: the Cloudflare node's WebAssembly built (as a dev
+/// For `throwaway cloudflare node deploy`, and any throwaway start by a build without it, from this checkout's own debug build: the Cloudflare node's WebAssembly built (as a dev
 /// build, not release) into target/cloudflare-node, as it is now (cargo keeps what hasn't changed), and this build made again
 /// with it if it holds another, as `throwaway client web` does with the client's, so the two builds agree: every build of
 /// this checkout holds both once they're there, and the throwaway network's relay (which names the Cloudflare node) starts for
