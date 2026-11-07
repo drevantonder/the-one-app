@@ -186,9 +186,7 @@ pub async fn hand_over(listener: i32, args: &[String]) -> Result<()> {
     // Closed on exec, on Linux and macOS alike, but for the end handed to the new build.
     let (read, write) = std::io::pipe().context("pipe")?;
     let next = if runtime() == RUNTIMES[0] { RUNTIMES[1] } else { RUNTIMES[0] };
-    let exe = std::env::current_exe()?;
-    // The path, not the program this process runs: an update replaced it.
-    let exe = exe.to_string_lossy().trim_end_matches(" (deleted)").to_string();
+    let exe = crate::this_program()?;
     let mut command = std::process::Command::new(&exe);
     // Started by the name this one was (oned), which says what it is.
     if let Some(name) = std::env::args_os().next() {
@@ -207,7 +205,7 @@ pub async fn hand_over(listener: i32, args: &[String]) -> Result<()> {
             Ok(())
         });
     }
-    let mut child = command.spawn().with_context(|| format!("start {exe}"))?;
+    let mut child = command.spawn().with_context(|| format!("start {}", exe.display()))?;
     drop(write);
     let said = tokio::time::timeout(
         READY_WITHIN,

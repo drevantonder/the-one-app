@@ -20,6 +20,12 @@ pub mod config {
 
 use std::path::PathBuf;
 
+/// The path this program runs from, to start it again: its file, where a rebuild or update has replaced it (Linux then names
+/// the replaced file "… (deleted)", which starts nothing).
+pub fn this_program() -> std::io::Result<PathBuf> {
+    Ok(PathBuf::from(std::env::current_exe()?.to_string_lossy().trim_end_matches(" (deleted)")))
+}
+
 /// Where this machine's node keeps its data: `<CLI>_HOME`, else `~/.local/share/<cli>`.
 pub fn home() -> PathBuf {
     match std::env::var_os(config::env("HOME")) {

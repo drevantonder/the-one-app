@@ -39,9 +39,7 @@ pub fn invoked() -> bool {
 
 pub fn command(args: &[&str]) -> std::io::Result<std::process::Command> {
     use std::os::unix::process::CommandExt;
-    // The path, not the program this process runs: an update may have replaced it.
-    let exe = std::env::current_exe()?.to_string_lossy().trim_end_matches(" (deleted)").to_string();
-    let mut command = std::process::Command::new(exe);
+    let mut command = std::process::Command::new(crate::this_program()?);
     command.arg0(name()).args(args);
     Ok(command)
 }
@@ -637,7 +635,7 @@ async fn serve(args: &[String]) -> Result<()> {
         async move {
             loop {
                 crate::handoff::wanted().await;
-                tracing::info!("handing over to {}", std::env::current_exe().map(|e| e.display().to_string().trim_end_matches(" (deleted)").to_string()).unwrap_or_default());
+                tracing::info!("handing over to {}", crate::this_program().unwrap_or_default().display());
                 node.handing_over(true).await;
                 match crate::handoff::hand_over(fd, &args).await {
                     Ok(()) => return node.handed_over(),

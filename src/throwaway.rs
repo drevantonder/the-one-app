@@ -99,9 +99,9 @@ pub fn run(rest: &[String]) -> Result<()> {
     // As one of its programs: its home, so the CLI asks its node with its token, as nobody signed in, and its Cloudflare
     // settings are its own Workers'; and its mode, so nothing of this machine's own network's is touched.
     use std::os::unix::process::CommandExt;
-    let mut again = std::process::Command::new(std::env::current_exe()?);
+    let mut again = std::process::Command::new(one::this_program()?);
     Throwaway::tell(&mut again, &dir, &addr);
-    Err(again.arg("throwaway").args(rest).exec().into())
+    Err(anyhow::Error::from(again.arg("throwaway").args(rest).exec()).context("running the command in the throwaway network"))
 }
 
 /// A command, run as a program of the throwaway network: `sign-in` and `git`, which are its own, or any other command, which

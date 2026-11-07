@@ -814,7 +814,7 @@ fn disclaimed(command: &std::process::Command) -> Result<libc::pid_t> {
 fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service) -> Result<Running> {
     use crate::services::sandbox::{How, Launch};
     let declared = service.0.declared.clone().unwrap_or_default();
-    let launcher = PathBuf::from(std::env::current_exe()?.to_string_lossy().trim_end_matches(" (deleted)"));
+    let launcher = crate::this_program()?;
     let mut command = match crate::services::sandbox::how(service.0.declared.as_ref(), "") {
         How::Unit => {
             let launch = Launch { name: name.into(), own_network: !declared.any_host(), ports: declared.local_ports(), data: None };

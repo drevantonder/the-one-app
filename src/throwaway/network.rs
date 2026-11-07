@@ -141,7 +141,7 @@ fn create(dir: &Path) -> Result<String> {
 pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, client: bool) -> Result<u32> {
     use std::os::unix::process::CommandExt;
     let log = std::fs::File::create(dir.join(log))?;
-    let child = command.env(one::config::env("HOME"), dir).stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn()?;
+    let child = command.env(one::config::env("HOME"), dir).stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn().with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
     one::mode::record(dir, child.id(), client)?;
     Ok(child.id())
 }
@@ -206,7 +206,7 @@ pub(crate) fn spawn_cloudflare(dir: &Path, settings: &Settings, node: &str) -> R
         anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} was taken by another program while it was stopped: {CLI} throwaway stop, then {CLI} throwaway for a new one on free ports");
     }
     // Beside its node, which it asks for the network's devices, for its relay to take only them.
-    let mut workers = std::process::Command::new(std::env::current_exe()?);
+    let mut workers = std::process::Command::new(one::this_program()?);
     Throwaway::tell(workers.args(["cloudflare", "serve"]), dir, node);
     let program = spawn(dir, &mut workers, "cloudflare.log", false)?;
     let url = format!("{}/.well-known/oauth-authorization-server", settings.address);
