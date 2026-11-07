@@ -29,16 +29,16 @@ async fn pair(State(node): State<Node>, me: Me, Body(body): Body<Pair>) -> Reply
     Ok(Json(json!({ "code": code, "user": user })))
 }
 
-/// Renames one of its person's devices (by its `key`), or with no key, this one, for this machine's own programs.
+/// Renames this device, for this machine's own programs: another is renamed as any device's person does
+/// (`settings::answer`).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Name {
     name: String,
-    key: Option<String>,
 }
 
-async fn name(State(node): State<Node>, me: Me, Body(body): Body<Name>) -> Reply {
-    node.rename(&me.caller, body.key.as_deref(), given(&body.name, "name")?).await?;
+async fn name(State(node): State<Node>, Body(body): Body<Name>) -> Reply {
+    node.rename_device(given(&body.name, "name")?).await?;
     done()
 }
 

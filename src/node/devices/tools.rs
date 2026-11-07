@@ -118,5 +118,6 @@ fn removed_said(r: &Value) -> String {
 
 pub fn invited_said(name: &str, r: &Value) -> String {
     let days = crate::sign_in_proof::INVITE_DAYS;
-    format!("Send {name} this link. It works once, for {days} days: opening it, they join. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
+    let how = if crate::config::SIGN_IN == crate::config::SignIn::Google { "they sign in with Google and join" } else { "they join" };
+    format!("Send {name} this link. It works once, for {days} days: opening it, {how}. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
 }

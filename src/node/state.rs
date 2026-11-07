@@ -140,24 +140,6 @@ impl Node {
         Ok(())
     }
 
-    /// Renames one of `caller`'s devices, by its key (hex), or with none, this one, for this machine's own programs.
-    pub async fn rename(&self, caller: &Caller, key: Option<&str>, name: &str) -> Result<()> {
-        let name = name.trim();
-        let key = match key {
-            Some(k) => crate::keys::unhex(k).context("a device's key is 64 hex characters")?,
-            None => {
-                ensure!(caller.key == self.0.id, "say which device");
-                self.0.id
-            }
-        };
-        ensure!(!name.is_empty(), "give a name");
-        ensure!(self.with(|i| Ok(i.r.db().may(&caller.user, "rename", &scopes::device(&key))))?, "only its person or an admin renames a device");
-        if key == self.0.id {
-            return self.rename_device(name).await;
-        }
-        self.member_content(caller, content::rename("key", &hex(&key), name)).await
-    }
-
     pub fn find_device(&self, name: &str) -> Result<Key> {
         self.with(|i| i.r.db().find_node(name))
     }
