@@ -112,6 +112,8 @@ pub async fn save(name: String, data: Vec<u8>, preview: bool) -> Result<(), Stri
     give(std::env::temp_dir().join("screen-files"), name, data, preview).await
 }
 
+pub fn start(_: &tauri::App) {}
+
 /// The App Group's folder (Info.plist's `AppGroup`), which the widgets and the notification extension share.
 fn group() -> Option<PathBuf> {
     let group = NSString::from_str(&super::apple::info("AppGroup")?);

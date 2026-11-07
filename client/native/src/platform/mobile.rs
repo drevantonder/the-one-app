@@ -18,8 +18,6 @@ pub(super) fn registered(plugin: PluginHandle<tauri::Wry>) {
     let _ = PLUGIN.set(plugin);
 }
 
-pub fn start(_: &tauri::App) {}
-
 /// Asks the plugin and waits for its answer, which it gives on the main thread: so never from there.
 pub fn ask(method: &str, args: Value) -> Result<Value, String> {
     PLUGIN.get().ok_or("The app hasn't started yet.")?.run_mobile_plugin(method, args).map_err(|e| e.to_string())
