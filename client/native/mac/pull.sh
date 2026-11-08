@@ -157,12 +157,6 @@ if ! same "$running" "$want_commit"; then
 	if [ -n "$app" ] && same "$(cut -d' ' -f2 <<< "$app")" "$want_commit"; then
 		take "$(cut -d' ' -f4 <<< "$app")" "$want_commit"
 	else
-		# No Mac has published it yet. Without the release key to publish its own, it waits a while for one that has; with none, it builds.
-		if ! sh -c "$signer" > /dev/null 2>&1; then
-			[ "$want_commit" = "$(cut -d' ' -f1 seen 2>/dev/null)" ] || echo "$want_commit $(date +%s)" > seen
-			wait=$(( $(cut -d' ' -f2 seen) + 1200 - $(date +%s) ))
-			[ "$wait" -le 0 ] || fail "waiting ${wait}s for a Mac to publish ${want_commit:0:12} before building it here"
-		fi
 		build_here
 	fi
 fi
