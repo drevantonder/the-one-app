@@ -234,7 +234,7 @@ fn fetched(data: &Path, address: &str) -> Result<(), String> {
     if b.committed <= has {
         return Err(format!("refused {}: it's older than what this has", b.commit));
     }
-    if !b.commit.chars().all(|c| c.is_ascii_alphanumeric()) {
+    if !b.commit.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err("refused a bundle whose commit isn't one".into());
     }
     keep(data, &bytes, &b)?;
