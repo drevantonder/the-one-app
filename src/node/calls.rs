@@ -460,7 +460,7 @@ impl Node {
     }
 
     fn cloudflare_is_asked_directly(&self) -> String {
-        format!("{} is asked by a device of yours itself, not through {}: from the web app, a phone, or a computer that runs no node of its own", crate::rank::CLOUDFLARE, self.device_name())
+        format!("{} is asked by a device of yours itself, not through {}, which runs a node: from the web app, a phone, or the command line of a computer that runs no node of its own (one <command> --device {}). From this one, leave --device off and the nearest device that can runs it", crate::rank::CLOUDFLARE, self.device_name(), crate::rank::CLOUDFLARE)
     }
 
     /// The devices that might run a call, in the order it tries them: those that are up with room first; then the

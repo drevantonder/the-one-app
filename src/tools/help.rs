@@ -80,6 +80,9 @@ pub(super) fn help(app: &Value, tool: &Value, call: bool) -> String {
     if call && !own_device(tool) {
         rows.push(("--device <name>".into(), device_about(app).into()));
     }
+    if call {
+        rows.push(super::scopes::flag());
+    }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
     rows.push(("--json".into(), "print what it gives back as JSON".into()));
     if tool["confirm"] == true {

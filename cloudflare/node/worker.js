@@ -675,7 +675,17 @@ class Run {
     if (!named) return app.reach;
     if (!Array.isArray(named)) refuse(400, "scopes is a list");
     const ids = named.map((s) => String(s)).map((s) => (s === "user" ? `user:${this.who.user}` : s === "global" || s.includes(":") ? s : `group:${s}`));
-    return ids.map((id) => app.reach.find((h) => h.id === id) || refuse(403, `${app.name} isn't on any of your pages in ${id}`));
+    return ids.map((id) => app.reach.find((h) => h.id === id) || refuse(403, this.notOnPages(app.name, id)));
+  }
+
+  /// Why an app reaches nothing here: it isn't added, or it's added only for the person alone, whose own scope this node
+  /// reads only if they chose it to run their own things.
+  notOnPages(name, scope = null) {
+    const own = `user:${this.who.user}`;
+    if ((scope === null || scope === own) && !this.view.runs.includes(own)) {
+      return `${name} isn't on a page this node reads: it reads what's added for everyone and your groups, not what's added for you alone. Run it on one of your devices instead (--device <name>; one status lists them).`;
+    }
+    return `${name} isn't on any of your pages${scope ? ` in ${scope === own ? "your own" : scope}` : ""}`;
   }
 
   /// Runs one of an app's requests (`call`, `widget`, `options`, `badge`) with `body`'s own fields, over `scopes`.
@@ -686,7 +696,7 @@ class Run {
     const p = this.person;
     const d = await p.describe(this.who, app);
     if (!servedHere(this.view, d)) refuse(503, needsDevice(d, app.name));
-    if (!scopes.length) refuse(403, `${d.title || app.name} isn't on any of your pages`);
+    if (!scopes.length) refuse(403, this.notOnPages(d.title || app.name));
     const writes = what === "call";
     const call = new Call(p, this.who, app, scopes.map((h) => h.id), this.view);
     let finished;

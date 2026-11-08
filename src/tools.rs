@@ -7,6 +7,7 @@ mod help;
 mod input;
 mod mcp;
 mod run;
+mod scopes;
 mod words;
 
 pub use check::{check, nearest};
@@ -71,9 +72,12 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
         print!("{}", help(a, o, call));
         return Ok(());
     }
+    let scopes = match call {
+        true => flags.remove("scopes").map(|given| scopes::read(given.iter().flatten().map(String::as_str))).transpose().map_err(typed)?,
+        false => None,
+    };
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
     let device = if call && !own_device(o) { take("device") } else { None };
-    let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some();
     let files: Vec<String> = flags.remove("file").unwrap_or_default().into_iter().flatten().collect();

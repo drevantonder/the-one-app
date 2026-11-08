@@ -45,6 +45,7 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
     }
     // A call runs on a device, which can say what it did; the core's tools run here (`core_tools`).
     if app["runs"] != "client" {
+        schema["properties"]["scopes"] = super::scopes::schema();
         schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
     }
     if tool["confirm"] == true {

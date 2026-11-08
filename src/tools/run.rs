@@ -50,10 +50,14 @@ pub fn dispatch(node: &Client, name: &str, mut input: Map<String, Value>, reader
         let Some((set, tool)) = found else { bail!("{}", unknown_tool(node, name)?) };
         super::check(&super::mcp_schema(&set, &tool), &Value::Object(input.clone()))?;
         let device = if super::own_device(&tool) { None } else { input.remove("device").and_then(|d| d.as_str().map(str::to_string)) };
+        let scopes = match input.remove("scopes") {
+            Some(Value::Array(names)) => Some(super::scopes::read(names.iter().filter_map(Value::as_str))?),
+            _ => None,
+        };
         let confirmed = input.remove("confirm") == Some(json!(true));
         let trace = input.remove("trace") == Some(json!(true));
         super::mcp_files(node, &tool, &mut input)?;
-        Ok((tool["confirm"] == true, Run { reader, device, scopes: None, agent, confirmed, trace }))
+        Ok((tool["confirm"] == true, Run { reader, device, scopes, agent, confirmed, trace }))
     })();
     match checked {
         Ok((confirm, how)) => run(node, name, confirm, input, how),
