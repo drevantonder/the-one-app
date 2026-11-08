@@ -25,7 +25,7 @@ use crate::database::scopes::{self, ScopeDb};
 use crate::database::content;
 use crate::database::scopes::{Principal, ScopeState};
 use crate::rank;
-use crate::release::{self, Release};
+use crate::release;
 use crate::schedules::{self, Schedule};
 use crate::replica::{Handled, Replica};
 
@@ -167,8 +167,6 @@ pub struct Inner {
     writes: tokio::sync::Mutex<()>,
     /// Wakes the task that loads deploys and announces this device.
     changed: tokio::sync::Notify,
-    /// Wakes the task that updates this node to a newer release.
-    released: tokio::sync::Notify,
     /// What the record at the network's address last said (`crate::latest`), and why it couldn't take it, if so.
     latest: Mutex<crate::latest::Latest>,
     updating: Mutex<Option<String>>,
@@ -265,7 +263,6 @@ impl Node {
             events,
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),
-            released: tokio::sync::Notify::new(),
             latest: Mutex::new(Default::default()),
             updating: Mutex::new(None),
             bundles: Mutex::new(BTreeMap::new()),
@@ -328,7 +325,6 @@ impl Node {
         tokio::spawn(node.clone().tick_loop());
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
-        tokio::spawn(node.clone().update_loop());
         tokio::spawn(node.clone().pull_loop());
         tokio::spawn(node.clone().sign_in_loop());
         let worker = node.clone();

@@ -9,8 +9,7 @@
 //! user whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
 //! its device lists it. Its program is its app's own (`apps/<name>/service/`), and oned runs only a build its app's
 //! latest deploy names for this platform (`bundle::SERVICES`), which `<cli> deploy` builds where it's run, or, for one
-//! whose deploy names none, as a built-in app's, the newest `<cli> update` built and published signed with the release
-//! key (a `service-release` step). oned fetches it, checks its hash or signature and puts
+//! whose deploy names none, as a built-in app's, the newest `<cli> update` published (`crate::latest`). oned fetches it, checks its hash and puts
 //! it at `~/.local/bin/<cli>-<name>` when it's switched on and again when another is named or a newer one's published;
 //! a Mac app carries the built-in ones in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
 //! stopping, failed and why) and how it runs: in its sandbox as its app declares (`sandbox`, which oned tells each
@@ -209,7 +208,7 @@ fn taken(name: &str) -> (Option<u64>, String) {
 fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, build: &Build) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let (bytes, kept) = match build {
-        Build::Released(r) => (runtime.block_on(node.release_bytes(r))?, format!("{} {}", r.committed, r.blob)),
+        Build::Released(r) => (runtime.block_on(node.thing_bytes(r))?, format!("{} {}", r.committed, r.sha256)),
         Build::Deployed(hash) => (runtime.block_on(node.service_build(hash))?, format!("deploy {hash}")),
         Build::None => anyhow::bail!("its deploy names no build for this platform"),
     };
@@ -321,7 +320,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                             let newer = match (r, had, blob.is_empty()) {
                                 (_, None, _) => true,
                                 (Build::Deployed(hash), ..) => *hash != blob,
-                                (Build::Released(r), Some(_), false) => r.blob != blob && committed.is_none_or(|c| r.committed >= c),
+                                (Build::Released(r), Some(_), false) => r.sha256 != blob && committed.is_none_or(|c| r.committed >= c),
                                 (Build::Released(r), Some(when), true) => r.committed > when,
                                 (Build::None, ..) => false,
                             };
@@ -614,6 +613,13 @@ async fn serve(args: &[String]) -> Result<()> {
             if let Err(err) = crate::git_wire::wire(&address) {
                 tracing::warn!("{err:#}");
             }
+        });
+    }
+    // The Mac's job beside the app takes its updates (`client/native/mac/pull.sh`): each app brings the job it was built with.
+    if cfg!(target_os = "macos") && matches!(mode, crate::mode::Mode::Own) && crate::release::in_app_bundle() && let Ok(address) = node.address() {
+        std::thread::spawn(move || match std::process::Command::new("sh").args(["-c", &crate::latest::mac_job(&address)]).stdout(std::process::Stdio::null()).status() {
+            Ok(s) if s.success() => tracing::info!("the Mac's update job is in place"),
+            done => tracing::warn!("putting the Mac's update job in place: {done:?}"),
         });
     }
     if handed.is_some() {

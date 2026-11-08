@@ -123,21 +123,18 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
     Ok(Some(done))
 }
 
-/// Has the node publish the program at `path` as a release, signed with `key`: this node's (`service` none) or that
-/// service's. → what it answered.
+/// Has the node publish the program at `path` as this node's build (`service` none) or that service's, in the record
+/// at the network's address. → what it said.
 pub fn publish(node: &crate::api::Client, path: &Path, key: &ssh_key::PrivateKey, version: &Version, service: Option<&str>) -> Result<Value> {
     if version.commit.ends_with("+dirty") {
         bail!("that build has uncommitted changes; commit, build again, then publish");
     }
-    let signature = crate::release::sign(key, &std::fs::read(path)?)?;
-    let body = json!({ "path": path, "commit": version.commit, "target": version.target, "committed": version.committed, "signature": signature, "service": service });
-    let answered = node.post(if service.is_some() { "/v1/service-release" } else { "/v1/node-release" }, body)?;
     let name = match service {
         Some(service) => crate::latest::Thing::service_name(service, &version.target),
         None => crate::latest::Thing::node_name(&version.target),
     };
     publish_latest(node, key, &[(name, Some(path.to_path_buf()), version.clone(), "-".to_string())])?;
-    Ok(answered)
+    Ok(json!({ "commit": version.commit, "target": version.target }))
 }
 
 /// Puts `things`' files where devices take them, and adds them to the record at the network's address, signed with the

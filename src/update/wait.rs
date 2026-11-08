@@ -53,11 +53,6 @@ pub(super) fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit
     }
 }
 
-/// What an update says last, when the Macs are still building in the background.
-pub(super) fn says_wait(short: &str) {
-    println!("The Macs build it in the background: {CLI} status --until {short} waits for them, and for every device's services.");
-}
-
 /// `status --until <commit> [--device <name>]… [--timeout <time>]`.
 pub fn wait(g: &one::cli::Given) -> Result<()> {
     g.takes_only(&["until", "device", "timeout"])?;
@@ -77,9 +72,9 @@ pub fn wait(g: &one::cli::Given) -> Result<()> {
 }
 
 /// Waits until each of the user's devices online now (or those named, online or not) runs `commit`, or a build with it
-/// in, and its services answer, or a Mac's build of it fails; says what each did, and fails unless all made it. One that
-/// isn't named and is offline at the start isn't waited for: it's named, with how far behind it is, and updates itself
-/// when it's back. Shell on a Mac says how its builds went, which `follow` set up.
+/// in, and its services answer, or its update fails; says what each did, and fails unless all made it. One that isn't
+/// named and is offline at the start isn't waited for: it's named, with how far behind it is, and updates itself when
+/// it's back. Why one hasn't yet is what its own node or Mac job says (`updating`).
 pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     let short = &commit[..commit.len().min(12)];
     // Says so when no node answers, which later polls (a node restarting on the new build) never do.
@@ -104,7 +99,7 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
         return Ok(());
     }
     let (started, deadline) = (Instant::now(), Instant::now() + limit);
-    let (mut reasons, mut asked, mut phones) = (std::collections::HashMap::new(), std::collections::HashMap::<String, Instant>::new(), std::collections::HashMap::<String, String>::new());
+    let mut reasons = std::collections::HashMap::new();
     println!("Waiting up to {}s for {} to run {short} or a later build.", limit.as_secs(), open.iter().map(|(_, name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
     let mut offline: std::collections::HashSet<String> = waited.iter().filter(|d| d["online"] != true && !has(commit, d["build"].as_str().unwrap_or(""), &mut fetched)).map(|d| d["key"].as_str().unwrap_or("").to_string()).collect();
     for d in waited.iter().filter(|d| offline.contains(d["key"].as_str().unwrap_or(""))) {
@@ -119,16 +114,7 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
             if d["online"] == true && offline.remove(key) {
                 println!("  {name}: back online, on {build}");
             }
-            let mac = d["target"].as_str().is_some_and(|t| Platform::is_mac(t));
-            let mut said = None;
             let running = has(commit, build, &mut fetched);
-            if mac && asked.get(key).is_none_or(|t| t.elapsed() > Duration::from_secs(6)) {
-                asked.insert(key.clone(), Instant::now());
-                said = mac_said(d);
-                if let Some(phone) = said.as_ref().and_then(|s| s.phone.clone()) {
-                    phones.insert(key.clone(), phone);
-                }
-            }
             if running {
                 let troubled: Vec<String> = d["parts"]
                     .as_array()
@@ -146,43 +132,18 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
                     } else {
                         println!("  {name}: {was} → {build} ({}s)", started.elapsed().as_secs());
                     }
-                    if let Some(phone) = phones.get(key) {
-                        println!("    {phone}");
-                    }
                     return false;
                 }
                 reasons.insert(key.clone(), format!("runs {build}, but its services aren't all answering: {}", troubled.join("; ")));
                 return true;
             }
-            if let Some(s) = said.as_ref() {
-                if let Some(why) = &s.no_room {
-                    failed = true;
-                    let mut lines = why.lines();
-                    println!("  {name}: {}", lines.next().unwrap_or(""));
-                    for line in lines {
-                        println!("      {line}");
-                    }
-                    return false;
-                }
-                if let Some(log) = &s.failed_log {
-                    failed = true;
-                    println!("  {name}: its build of {} failed: the end of its log, ~/Library/Caches/{CLI}/update.log on {name}, is", &s.tried[..s.tried.len().min(12)]);
-                    for line in log.lines() {
-                        println!("      {line}");
-                    }
-                    if let Some(phone) = phones.get(key) {
-                        println!("    {phone}");
-                    }
-                    return false;
-                }
-                let waiting = s.waiting_for(commit, short, build, &mut fetched);
-                let seen = if d["online"] == true { String::new() } else { format!("not seen on the network (a build too old to speak its messages isn't), so {CLI} update reaches it by ssh: ") };
-                reasons.insert(key.clone(), format!("{seen}{waiting}"));
-            } else if d["online"] != true {
-                reasons.insert(key.clone(), format!("offline, on {build}; it updates itself when it's back"));
-            } else if !mac {
-                reasons.insert(key.clone(), format!("still on {build}"));
+            let said = d["updating"].as_str().unwrap_or("");
+            if let Some(why) = said.strip_prefix("Failed: ") {
+                failed = true;
+                println!("  {name}: {why}");
+                return false;
             }
+            reasons.insert(key.clone(), if d["online"] != true { format!("offline, on {build}; it updates itself when it's back") } else if said.is_empty() { format!("still on {build}") } else { format!("on {build}: {said}") });
             true
         });
         if open.is_empty() {

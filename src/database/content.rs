@@ -412,11 +412,6 @@ mod tests {
             ("vault declined", vault_answer("e000000000000008", true)),
             ("vault set", vault_answer("e000000000000008", false)),
             ("freeze", crate::database::steps::Freeze { at: 2, hash: "a".repeat(64), logs: BTreeMap::from([("global".into(), 2), (scope.to_string(), 0)]) }.content()),
-            ("release", crate::release::content(&crate::release::Release { commit: "abc".into(), target: "x86_64-unknown-linux-gnu".into(), blob: "d".repeat(64), size: 9, committed: 1, signature: "sig".into(), service: None })),
-            (
-                "service release",
-                crate::release::content(&crate::release::Release { commit: "abc".into(), target: "x86_64-unknown-linux-gnu".into(), blob: "d".repeat(64), size: 9, committed: 1, signature: "sig".into(), service: Some("whatsapp".into()) }),
-            ),
         ];
         let first = first("Home", user, "Andre", &endpoint, "mac", &[Kind::Client], &[3; 32], &"e".repeat(64));
         let said: String = std::iter::once(format!("first: {first}\n")).chain(built.iter().map(|(name, c)| format!("{name}: {}\n", serde_json::to_string(c).unwrap()))).collect();
@@ -473,7 +468,5 @@ vault request, plain: {"app":"node","kind":"vault-request","data":{"agent":null,
 vault declined: {"app":"node","kind":"vault-request","data":{"declined":true,"id":"e000000000000008"}}
 vault set: {"app":"node","kind":"vault-request","data":{"id":"e000000000000008","set":true}}
 freeze: {"app":"node","kind":"freeze","data":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","logs":{"global":2,"group:c000000000000003":0}}}
-release: {"app":"node","kind":"node-release","data":{"blob":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","commit":"abc","committed":1,"signature":"sig","size":9,"target":"x86_64-unknown-linux-gnu"},"blobs":["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]}
-service release: {"app":"node","kind":"service-release","data":{"blob":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","commit":"abc","committed":1,"service":"whatsapp","signature":"sig","size":9,"target":"x86_64-unknown-linux-gnu"},"blobs":["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]}
 "#;
 }

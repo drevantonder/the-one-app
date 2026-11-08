@@ -2,97 +2,15 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use ssh_key::{HashAlg, LineEnding, PrivateKey, PublicKey, SshSig};
+use ssh_key::{HashAlg, LineEnding, PrivateKey};
 
-use crate::database::content::{self, Change, Content};
-
-use crate::keys::Key;
-
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Release {
-    pub commit: String,
-    pub target: String,
-    pub blob: String,
-    pub size: u64,
-    /// When the commit was made, in seconds since 1970. A device never takes a release older than its build.
-    #[serde(default)]
-    pub committed: u64,
-    /// The publisher's signature over the binary, as `ssh-keygen -Y sign -n release` makes it.
-    #[serde(default)]
-    pub signature: String,
-    /// For a service in another language's release, which (`whatsapp`): its program, not the node.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service: Option<String>,
-}
-
-/// The namespace release signatures are made in, so nothing else the key signs passes for a release.
+/// The namespace a release's GitHub assets are signed in, which `install.sh` checks.
 pub const NAMESPACE: &str = "release";
-
-pub fn content(release: &Release) -> Content {
-    Content { blobs: vec![release.blob.clone()], ..content::node(kind(release.service.as_deref()), json!(release)) }
-}
-
-/// A service's release is a step of its own kind, which a device that doesn't know it ignores.
-fn kind(service: Option<&str>) -> Change {
-    if service.is_some() { Change::ServiceRelease } else { Change::NodeRelease }
-}
 
 pub fn sign(key: &PrivateKey, bytes: &[u8]) -> Result<String> {
     Ok(key.sign(NAMESPACE, HashAlg::Sha512, bytes)?.to_pem(LineEnding::LF)?)
-}
-
-pub fn verify(key: &str, bytes: &[u8], signature: &str) -> Result<()> {
-    ensure!(signed_by(key, signature), "it isn't signed by this build's release key");
-    let sig = SshSig::from_pem(signature)?;
-    PublicKey::from_openssh(key)?.verify(NAMESPACE, bytes, &sig).map_err(|_| anyhow!("its signature doesn't match the binary"))
-}
-
-/// Whether a signature claims to be `key`'s, which can be told before the binary it's over is here.
-fn signed_by(key: &str, signature: &str) -> bool {
-    let (Ok(key), Ok(sig)) = (PublicKey::from_openssh(key), SshSig::from_pem(signature)) else { return false };
-    sig.public_key() == key.key_data() && sig.namespace() == NAMESPACE
-}
-
-/// What `global` said of releases, oldest first, as each release's content and who published it, from its scope
-/// database's steps (`ScopeDb::releases`).
-pub fn said(steps: &[(crate::database::content::Content, Key, u64)]) -> Vec<(crate::database::content::Content, Key)> {
-    steps.iter().map(|(c, k, _)| (c.clone(), *k)).collect()
-}
-
-/// The newest release for `target` signed with `key`, of the node or the service `service`, and the device that
-/// published it, of what `said` gives. Any device may publish or pass on a release: only the signature counts. The
-/// newest of any newer ones without it is logged.
-pub fn latest_said(key: &str, said: &[(crate::database::content::Content, Key)], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
-    let releases = said.iter().rev().filter(|(c, _)| c.is(kind(service)));
-    let mut logged = false;
-    for (content, author) in releases {
-        let e = Said { content, author: *author };
-        let Ok(r) = serde_json::from_value::<Release>(e.content.data.clone()) else { continue };
-        if r.target != target || r.service.as_deref() != service {
-            continue;
-        }
-        if signed_by(key, &r.signature) {
-            return Some((r, e.author));
-        }
-        if !std::mem::replace(&mut logged, true) {
-            tracing::warn!("ignoring the release of {} by {}: it isn't signed by this build's release key", r.commit, &crate::keys::hex(&e.author)[..8]);
-        }
-    }
-    None
-}
-
-struct Said<'a> {
-    content: &'a crate::database::content::Content,
-    author: Key,
-}
-
-/// Whether a node running `build`, committed at `committed`, takes `r`: a different build, and not an older one.
-pub fn wanted(r: &Release, build: &str, committed: u64) -> bool {
-    r.commit != build && r.committed >= committed
 }
 
 /// Blobs are files named by their BLAKE3 hash.
@@ -111,12 +29,6 @@ pub fn put_blob(dir: &Path, bytes: &[u8]) -> Result<String> {
         std::fs::rename(&tmp, &path)?;
     }
     Ok(hash)
-}
-
-/// Replaces the running binary with `bytes`, `r`'s signed binary, once it says it's that build and no older than this one.
-/// The service manager starts the new one when this one exits.
-pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
-    install_commit(&r.commit, bytes)
 }
 
 /// Whether this program runs from inside an app bundle, which updates as a whole, by what the Mac's job installs.
@@ -190,37 +102,6 @@ mod tests {
 
     fn public(key: &PrivateKey) -> String {
         key.public_key().to_openssh().unwrap()
-    }
-
-    fn release(commit: &str, committed: u64, signature: String) -> Release {
-        Release { commit: commit.into(), target: "t".into(), blob: "b".repeat(64), size: 3, committed, signature, service: None }
-    }
-
-    fn said(releases: &[Release]) -> Vec<(Content, Key)> {
-        releases.iter().map(|r| (content(r), [1; 32])).collect()
-    }
-
-    #[test]
-    fn unsigned_and_wrongly_signed_releases_dont() {
-        let (publisher, someone) = (key(1), key(2));
-        let good = release("good", 20, sign(&publisher, b"bin").unwrap());
-        let unsigned = release("unsigned", 30, String::new());
-        let theirs = release("theirs", 40, sign(&someone, b"bin").unwrap());
-        let garbled = release("garbled", 50, "-----BEGIN SSH SIGNATURE-----\nnope\n-----END SSH SIGNATURE-----\n".into());
-        let all = said(&[good.clone(), unsigned, theirs.clone(), garbled]);
-        assert_eq!(latest_said(&public(&publisher), &all, "t", None).unwrap().0.commit, "good", "newer releases without its signature don't count");
-        assert!(latest_said(&public(&publisher), &all, "other target", None).is_none());
-        // A service's release is its program's, never the node's, nor another service's.
-        let whatsapp = Release { service: Some("whatsapp".into()), ..release("whatsapp", 60, sign(&publisher, b"go").unwrap()) };
-        let all = [all, said(std::slice::from_ref(&whatsapp))].concat();
-        assert_eq!(latest_said(&public(&publisher), &all, "t", None).unwrap().0.commit, "good");
-        assert_eq!(latest_said(&public(&publisher), &all, "t", Some("whatsapp")).unwrap().0, whatsapp);
-        assert!(latest_said(&public(&publisher), &all, "t", Some("push")).is_none());
-        assert!(verify(&public(&publisher), b"bin", &theirs.signature).is_err());
-        assert!(verify(&public(&publisher), b"something else", &good.signature).is_err(), "a signature over another binary");
-        assert!(verify(&public(&publisher), b"bin", "").is_err());
-        let elsewhere = key(1).sign("file", HashAlg::Sha512, b"bin").unwrap().to_pem(LineEnding::LF).unwrap();
-        assert!(verify(&public(&publisher), b"bin", &elsewhere).is_err(), "the key's signatures for anything but releases");
     }
 
     /// install.sh's own `fetch`, from a folder of files (curl reads file:// too), as the installer runs it.

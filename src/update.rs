@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use one::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
+use one::latest::{Latest, Thing};
 use one::release::Version;
 use one::{cache, release};
 use serde_json::{Value, json};
@@ -33,10 +34,12 @@ pub use services::try_service;
 pub fn commands() -> one::cli::Command {
     one::cli::Command {
         help: vec![
-            ("update".into(), "build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere".into()),
+            ("update".into(), "build main's tip (tested before it was pushed) and publish it: every device takes it itself".into()),
             ("release <vX.Y.Z>".into(), "the same, signed off and published on GitHub for the installer".into()),
             ("publish [binary]".into(), "sign and publish a build you made; every device on its platform updates".into()),
             ("web bundle [--out <folder>]".into(), "write this build's web client as a bundle for the native apps, ready to sign".into()),
+            ("update mac-job".into(), format!("the shell that sets up a Mac to take its own updates: {CLI} update mac-job | ssh <mac> sh, once, for a Mac too old to have the job its app starts")),
+            ("publish-app --zip <zip> [--config <commit>]".into(), "publish this Mac's built app, so every Mac downloads it instead of building it".into()),
             ("services try apps/<name> [--device <name>]".into(), "put your checkout's build of an app's service on a device of yours (here by default, else over ssh by its name) and switch it on, until a newer one is published".into()),
         ],
         run: |g| {
@@ -52,6 +55,8 @@ pub fn commands() -> one::cli::Command {
                 }
                 ["services", "try", dir] => try_service(Path::new(dir), g.flag("device"))?,
                 ["web", "bundle"] => println!("{}", web_bundle(Path::new(g.flag("out").unwrap_or(".")))?.display()),
+                ["update", "mac-job"] => print!("{}", one::latest::mac_job(&crate::node().state()?.address().context("this network has no address yet")?)),
+                ["publish-app"] => publish_app(Path::new(g.flag("zip").context("give the app with --zip")?), g.flag("config").unwrap_or("-"))?,
                 _ => return Ok(false),
             }
             Ok(true)
@@ -59,12 +64,12 @@ pub fn commands() -> one::cli::Command {
     }
 }
 
-/// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
-/// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
-/// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
-/// takes, and which deploys the Workers on Cloudflare (and the Cloudflare node with it) from the device they're deployed from (the first to
-/// deploy them: no other does). Beside it runs `after-update` in this device's home, if there is one: what else is built from main here, like
-/// another custom build's update.
+/// Builds the tip of main and publishes it; with a tag, also on GitHub. It only publishes (to the record at the network's
+/// address, `one::latest`): each device takes it itself, by its node or its Mac job, whenever it's up. It sends out only what
+/// changed since the last update here: apps by their deploy, and the node and services built and published, then the Workers
+/// on Cloudflare (and the Cloudflare node with them), deployed from their one home (the first to deploy them: no other
+/// does) once it takes this build. Beside it runs `after-update` in this device's home, if there is one: what else is built
+/// from main here, like another custom build's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
@@ -86,23 +91,19 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let short = short.as_str();
     // Whoever pushed since another update began is in what it sent out, if it got to their commit.
     let this = format!("{commit} {}", config_commit.as_deref().unwrap_or(""));
-    // What the last update here sent everywhere, and, apart, what it sent the Macs: a Mac that was off doesn't hold back
-    // the rest, which would send everything since again each time.
+    // What the last update here sent out.
     let done = cache().join("updated");
     let last = std::fs::read_to_string(&done).ok();
-    let mac_done = cache().join("updated-mac");
-    let mac_last = std::fs::read_to_string(&mac_done).ok().or_else(|| last.clone());
     let released = services_released();
     let unreleased = services(&src).iter().any(|n| !released.contains_key(n));
-    if tag.is_none() && last.as_deref() == Some(this.as_str()) && mac_last.as_deref() == Some(this.as_str()) && !unreleased {
-        println!("Every device already runs {short}, main's tip: the last update here sent it out.");
+    if tag.is_none() && last.as_deref() == Some(this.as_str()) && !unreleased {
+        println!("Already published {short}, main's tip: the last update here sent it out.");
         return Ok(());
     }
     if let Some(tag) = tag {
         ensure!(!succeeds(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
     let mut parts = last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this));
-    parts.mac = mac_last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this)).mac;
     if tag.is_some() {
         (parts.node, parts.mac) = (true, true);
     }
@@ -113,35 +114,12 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         }
     }
     parts.services.retain(|n| services(&src).contains(n));
-    let macs: Vec<Value> =
-        if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| Platform::is_mac(t))).collect() } else { Vec::new() };
-
     let sends = parts.node || parts.mac || !parts.apps.is_empty() || !parts.services.is_empty();
     let after = if sends && tag.is_none() { after_update()? } else { None };
-    // The Macs start first, since their builds take longest: an update's in the background, and a release's with what it
-    // publishes, which it waits for.
-    let (mut missed, mut missed_macs) = (false, false);
-    let mut started = Vec::new();
-    if tag.is_some() {
-        for mac in &macs {
-            let name = mac["name"].as_str().unwrap_or("");
-            match mac_shell(mac, &mac_job(&commit, config_commit.as_deref()), 60) {
-                Ok(r) if r["exit"] == 0 => started.push((mac.clone(), Instant::now())),
-                Ok(r) => println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim()),
-                Err(err) => println!("  {name}: couldn't start its build: {err:#}"),
-            }
-        }
-    } else {
-        missed_macs = follow(&macs, &commit, config_commit.as_deref());
-    }
-    let mark_macs = |missed_macs: bool| {
-        if !missed_macs {
-            let _ = std::fs::write(&mac_done, &this);
-        }
-    };
+    let mut missed = false;
     let moved = retire_gone(&src, &parts.renamed)?;
     if parts.mac {
-        publish_source(&src, &commit, config_commit.as_deref().unwrap_or("-"), &release_key()?)?;
+        publish_source(&src, &commit, config_commit.as_deref().unwrap_or("-"), tag.is_some(), &release_key()?)?;
     }
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
@@ -152,13 +130,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         if !sends {
             println!("Nothing to send out: what changed since the last update here isn't in any build.");
         }
-        if !macs.is_empty() {
-            says_wait(short);
-        }
         if !missed {
             std::fs::write(&done, &this)?;
         }
-        mark_macs(missed_macs);
         return finish(after);
     }
 
@@ -176,18 +150,13 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     let version = Version::of(&binary).context("ask the new build what it is")?;
     let short = version.commit.as_str();
-    // Which devices to wait for, asked before this device's own node restarts on the new build.
-    let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
-    // Services first, so a node that no longer carries one finds it out.
+    // This device's own node takes it too, and the built-in apps are deployed from its build.
+    let here: Vec<Value> = devices().into_iter().filter(|d| d["here"] == true).collect();
     let mut failed = !publish_services(&src, &parts.services, &key, &commit);
-    if !linux.is_empty() && linux.iter().all(|d| d["build"] == short) {
-        println!("  every Linux device already runs {short}");
-    } else {
-        let published = timed("published the node", || build::publish(&crate::node(), &binary, &key, &version, None))?;
-        println!("{}", build::published_said(&published, None));
-    }
+    let published = timed("published the node", || build::publish(&crate::node(), &binary, &key, &version, None))?;
+    println!("{}", build::published_said(&published, None));
     let started_at = Instant::now();
-    failed |= timed("waited for the Linux devices", || await_builds(&linux, short, started_at, Duration::from_secs(180)));
+    failed |= timed("waited for this device", || await_builds(&here, short, started_at, Duration::from_secs(180)));
     if let Err(err) = timed("deployed the built-in apps", deploy_built_in) {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
@@ -199,15 +168,12 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         println!("  couldn't publish the web client for the native apps: {err:#}");
     }
 
+    println!("Published {short}: every device takes it itself. {CLI} status --until {short} waits for the online ones, and says about the rest.");
     let Some(tag) = tag else {
-        if !macs.is_empty() {
-            says_wait(short);
-        }
         let after = finish(after);
-        ensure!(!failed, "not every device runs {short}");
-        ensure!(!cloudflare_failed, "every device runs {short}, but it isn't deployed to Cloudflare");
+        ensure!(!failed, "this device didn't take {short}");
+        ensure!(!cloudflare_failed, "published {short}, but it isn't deployed to Cloudflare");
         std::fs::write(&done, &this)?;
-        mark_macs(missed_macs);
         return after;
     };
     let mut assets = Vec::new();
@@ -236,25 +202,15 @@ pub fn run(tag: Option<&str>) -> Result<()> {
             }
         }
     }
-    for (mac, since) in &started {
-        let name = mac["name"].as_str().unwrap_or("");
-        match await_mac(mac) {
-            Ok((made, warnings)) => {
-                for w in warnings {
-                    println!("  {name}: {w}");
-                }
-                failed |= await_builds(std::slice::from_ref(mac), short, *since, Duration::from_secs(120));
-                for (hash, asset) in made {
-                    let bytes = blob(&hash).with_context(|| format!("get {asset} from {name}"))?;
-                    std::fs::write(dir.join(&asset), bytes)?;
-                    assets.push(asset);
-                }
-            }
-            Err(err) => {
-                failed = true;
-                println!("  {name}: {err:#}");
-            }
+    // The Mac app, once a Mac that holds the key has built and published it (`source-release`, which notarizes it).
+    match timed("waited for a Mac's app", || await_app(&commit, &key_address(), Duration::from_secs(30 * 60))) {
+        Ok(Some((thing, address))) => {
+            let zip = app_zip();
+            std::fs::write(dir.join(&zip), one::latest::download(&address, &thing)?)?;
+            assets.push(zip);
         }
+        Ok(None) => println!("No Mac published the app for {short}, so {tag} has none."),
+        Err(err) => println!("  couldn't get a Mac's app: {err:#}"),
     }
     for p in &PLATFORMS {
         if !assets.contains(&p.asset()) {
@@ -269,7 +225,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let mut gh = Command::new("gh");
     gh.current_dir(&dir).args(["release", "create", tag, "--repo", REPO, "--target", &commit, "--generate-notes"]).args(&assets);
     show(&mut gh)?;
-    ensure!(!failed, "released {tag}, but not every device runs it");
+    ensure!(!failed, "released {tag}, but this device didn't take it");
     ensure!(!cloudflare_failed, "released {tag}, but it isn't deployed to Cloudflare");
     Ok(())
 }
@@ -359,6 +315,24 @@ fn version_tag(tag: &str) -> bool {
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
+fn key_address() -> String {
+    crate::node().state().ok().and_then(|s| s.address().map(str::to_string)).unwrap_or_default()
+}
+
+/// Waits for a Mac to publish its app built from `commit`: → it, and where it's read from.
+fn await_app(commit: &str, address: &str, limit: Duration) -> Result<Option<(Thing, String)>> {
+    let deadline = Instant::now() + limit;
+    while Instant::now() < deadline {
+        if let Some(text) = one::latest::fetch(address)?
+            && let Some(thing) = Latest::read(RELEASE_KEY, &text)?.things.into_iter().find(|t| t.name.starts_with("app/") && t.commit == commit)
+        {
+            return Ok(Some((thing, address.to_string())));
+        }
+        std::thread::sleep(Duration::from_secs(20));
+    }
+    Ok(None)
+}
+
 /// What the Mac app is published as.
 fn app_zip() -> String {
     format!("{CLI}-macos.zip")
@@ -380,10 +354,15 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
 }
 
 /// Says in the record that this commit is the one to build: every Mac takes the app published for it, or builds it itself
-/// if none is.
-fn publish_source(src: &Path, commit: &str, config: &str, key: &ssh_key::PrivateKey) -> Result<()> {
+/// if none is. A release's asks for its app notarized, which is every release's.
+fn publish_source(src: &Path, commit: &str, config: &str, release: bool, key: &ssh_key::PrivateKey) -> Result<()> {
     let committed = git(src, &["log", "-1", "--format=%ct", commit])?.trim().parse().context("the commit's date")?;
-    build::publish_latest(&crate::node(), key, &[("source".into(), None, Version { commit: commit.into(), target: "-".into(), committed }, config.into())])
+    let version = Version { commit: commit.into(), target: "-".into(), committed };
+    let mut things: Vec<(String, Option<PathBuf>, Version, String)> = vec![("source".into(), None, version.clone(), config.into())];
+    if release {
+        things.push(("source-release".into(), None, version, config.into()));
+    }
+    build::publish_latest(&crate::node(), key, &things)
 }
 
 /// A clean clone of the repo, kept in the cache, at the tip of main on GitHub. Build output stays, so builds are quick.
@@ -426,11 +405,6 @@ fn run_here(command: &str) -> Result<Value> {
 fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
     let r = crate::node().post("/v1/call", json!({ "device": device["name"], "service": "shell", "app": "shell", "function": "run", "input": { "command": command, "timeout": timeout } }))?;
     Ok(r["ok"].clone())
-}
-
-fn blob(hash: &str) -> Result<Vec<u8>> {
-    let mut resp = crate::agent().get(format!("http://{}/v1/blobs/{hash}", one::api::addr())).call()?;
-    Ok(resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)
 }
 
 /// This build's web client written to `dir` as `<commit>.bundle`, not yet signed: gzip, for `update` and `release` to sign and publish.

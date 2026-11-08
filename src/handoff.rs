@@ -149,7 +149,7 @@ pub fn able() {
 
 /// Restarts the node on the program now at its path: handed over, or, where that can't be, exited for its supervisor
 /// to start again. One that will hand over but doesn't serve yet does nothing: asked again once it does (as
-/// `Node::update_loop` asks), it hands over, rather than exiting with nothing to start it again. → whether it asked.
+/// `Node::pull_loop` asks), it hands over, rather than exiting with nothing to start it again. → whether it asked.
 pub fn restart() -> bool {
     if ABLE.load(std::sync::atomic::Ordering::SeqCst) {
         WANTED.notify_one();

@@ -320,10 +320,6 @@ impl Node {
                 }
             }
         }
-        // A release is a step, which changes who's who: the updater looks again.
-        if handled.members {
-            self.0.released.notify_one();
-        }
         if !handled.lost.is_empty() {
             self.forget_sessions_of(&handled.lost);
         }
