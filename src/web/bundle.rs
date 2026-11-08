@@ -36,20 +36,6 @@ impl Bundle {
         Bundle { commit: commit.to_string(), committed, shell: super::SHELL, files: super::files() }
     }
 
-    /// What it is, for telling whether a publish changes anything: its files, whichever commit made them.
-    #[cfg(feature = "node")]
-    pub fn id(&self) -> String {
-        use sha2::Digest;
-        let mut hash = sha2::Sha256::new();
-        for (path, bytes) in &self.files {
-            hash.update(path.as_bytes());
-            hash.update((bytes.len() as u64).to_le_bytes());
-            hash.update(bytes);
-        }
-        hash.update(self.shell.to_le_bytes());
-        data_encoding::HEXLOWER.encode(&hash.finalize())
-    }
-
     /// As gzip, to sign and send.
     #[cfg(feature = "node")]
     pub fn packed(&self) -> Result<Vec<u8>> {

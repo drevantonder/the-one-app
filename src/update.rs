@@ -194,6 +194,10 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
     add_where(&moved);
     let cloudflare_failed = timed("deployed to Cloudflare", || deploy_cloudflare(short));
+    if let Err(err) = timed("published the web client", || publish_web(&binary, &key, &version, config_commit.as_deref().unwrap_or("-"))) {
+        failed = true;
+        println!("  couldn't publish the web client for the native apps: {err:#}");
+    }
 
     let Some(tag) = tag else {
         if !macs.is_empty() {
@@ -436,6 +440,26 @@ fn web_bundle(dir: &Path) -> Result<PathBuf> {
     let path = dir.join(format!("{}.bundle", one::config::BUILD));
     std::fs::write(&path, bundle.packed()?)?;
     Ok(path)
+}
+
+/// The web client of the build at `binary`, signed with the release key and named in the record the native apps read,
+/// unless it's what was last published from here: an update that didn't change it costs a phone nothing.
+fn publish_web(binary: &Path, key: &ssh_key::PrivateKey, version: &Version, config: &str) -> Result<()> {
+    let dir = cache().join("web");
+    let _ = std::fs::remove_dir_all(&dir);
+    let out = Command::new(binary).args(["web", "bundle", "--out"]).arg(&dir).output().context("run the new build")?;
+    ensure!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr).trim());
+    let packed = std::fs::read(dir.join(format!("{}.bundle", version.commit)))?;
+    let last = cache().join("published-web");
+    if std::fs::read(&last).is_ok_and(|was| was == packed) {
+        println!("  the web client hasn't changed");
+        return Ok(());
+    }
+    let file = dir.join(format!("{}.signed", version.commit));
+    std::fs::write(&file, one::web::bundle::signed(key, &packed)?)?;
+    build::publish_latest(&crate::node(), key, &[("web".into(), Some(file), version.clone(), config.into())])?;
+    std::fs::write(&last, packed)?;
+    Ok(())
 }
 
 /// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform
