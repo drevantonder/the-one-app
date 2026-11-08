@@ -1,4 +1,4 @@
-/* The theme: shadcn's neutral, light and dark, as variables, and what code is coloured with. Dark is the person's, by
+/* The theme: shadcn's neutral, light and dark, as variables, and what code is coloured with. Dark is the user's, by
    prefers-color-scheme, which the web client and the shells set from Settings › Appearance. ui.css has them for every
    screen; the auth pages (auth.css) for the Workers' pages, which can't have React. */
 :root {
@@ -38,7 +38,7 @@
   --diff-add: #e6ffec; --diff-add-number: #ccffd8; --diff-del: #ffebe9; --diff-del-number: #ffd7d5;
   color-scheme: light dark;
   /* The shells and the web client zoom pages to fit the old kit's 17px text to the platform's; this kit is sized for
-     the web as it is. A shell's zoom for the person's own text size (iPhone's, Android's) is set on the element, so
+     the web as it is. A shell's zoom for the user's own text size (iPhone's, Android's) is set on the element, so
      it stays. Unlayered, so it wins over theirs by being more specific. */
   zoom: 1;
 }

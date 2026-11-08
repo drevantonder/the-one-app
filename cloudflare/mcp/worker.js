@@ -1,5 +1,5 @@
-// The remote MCP server: remote MCP clients' device. ChatGPT, Claude.ai and the like can't run our code, so each one a person
-// signs in with is a device of theirs here, a client of the network like any app, which the person approves like any
+// The remote MCP server: remote MCP clients' device. ChatGPT, Claude.ai and the like can't run our code, so each one a user
+// signs in with is a device of theirs here, a client of the network like any app, which the user approves like any
 // device. It speaks MCP to them over HTTPS at `<address>/mcp`, and asks a node's own `/mcp` as that device, over iroh
 // (`<cli>/http/1`, one-client in cloudflare/node/src/clients.rs), handing it the keys a call needs, sealed to that node and
 // bound to the device's key; it sends nodes no token. A tool that changes who can do what it answers itself, signing
@@ -8,12 +8,12 @@
 // A device's secret is kept only sealed under its client's own tokens (copies.js), so nothing here opens it alone: the
 // Worker is on its clients' token path (its own token endpoint, in the authorization server's metadata it serves for
 // MCP clients, passing each request on to auth), sealing the secret under each new refresh and access token. A client's
-// first sign-in makes its device and asks auth to let it join; the person approves it by its code on one of their
+// first sign-in makes its device and asks auth to let it join; the user approves it by its code on one of their
 // devices, which lists it, seals it the keys of their scopes and lets it in at the relay. Until then its MCP requests
 // are answered with that code. Signing in again makes a new device, as the old one's secret opened only under the
 // tokens it had.
 //
-// Each device is a Durable Object (`Client`), one per client and person, so no two people's state meet: its iroh
+// Each device is a Durable Object (`Client`), one per client and user, so no two users' state meet: its iroh
 // endpoint, with no socket, which the relay hands the datagrams sent to its key by RPC (`deliver`), its connections to
 // nodes kept warm between calls, and the keys it opened, all while it's asked; once nobody has asked for `IDLE`, it
 // closes its endpoint, forgets its keys and ends itself.
@@ -355,7 +355,7 @@ export class Client extends DurableObject {
   }
 
   /// Reads who's who from the bucket (what's new, after the first time), one reading at a time, and the nodes it asks
-  /// with it: those who's who lists as running its person's calls, that are on the relay now, in run priority's
+  /// with it: those who's who lists as running its user's calls, that are on the relay now, in run priority's
   /// order as it last read it.
   see(me) {
     const reading = this.viewing.then(async () => {
@@ -449,7 +449,7 @@ export class Client extends DurableObject {
   }
 
   /// Removes the devices this one replaced, made by earlier sign-ins of the same client, once this one's approved: as
-  /// its person's device, which takes each off the relay and signs it removed. Tried once a device each time the object
+  /// its user's device, which takes each off the relay and signs it removed. Tried once a device each time the object
   /// starts.
   async removeReplaced(me) {
     if (this.removedFor === me.key) return;

@@ -1,18 +1,18 @@
 // Auth: who you are, and nothing more. Better Auth, in a Durable Object: signing in by passkey, or, on a
-// network whose people sign in with their work Google account (`SIGN_IN`), by Google at the network's domain
+// network whose users sign in with their work Google account (`SIGN_IN`), by Google at the network's domain
 // (`JOIN_DOMAIN`) too, though never for an admin (`passkey_only`), who signs in with a passkey; and an OAuth server (per
 // MCP's authorization spec) that every client signs in through: the iPhone and Mac apps, and MCP clients like Claude
 // Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at /api/auth/jwks, so nodes check them
-// offline. It opens nothing: keys are only on people's devices, so faking a sign-in opens nothing either. A passkey's
+// offline. It opens nothing: keys are only on users' devices, so faking a sign-in opens nothing either. A passkey's
 // PRF output stays in the browser (pages.js).
 //
-// Nobody signs up uninvited, the network's first person too: an admin's device makes a secret, and tells auth its hash,
+// Nobody signs up uninvited, the network's first user too: an admin's device makes a secret, and tells auth its hash,
 // who it's for and until when, signed with its endpoint key (`POST /api/auth/invites`); opening `<address>/invite#
-// <secret>` lets that person sign up once, as the id and name the invite gives them. At a workplace too: signing in
+// <secret>` lets that user sign up once, as the id and name the invite gives them. At a workplace too: signing in
 // with Google makes someone only with an invite for that Google account's email.
 //
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
-// its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
+// its user (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
 // `&root=`, the network's root as the approving device holds it: the only network the new device then takes, so no
 // node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
@@ -21,24 +21,24 @@
 // its device's oned lists it.
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
-// hex), so a device of the person's can check it themselves (src/sign_in_proof.rs) and let the device in with no one
+// hex), so a device of the user's can check it themselves (src/sign_in_proof.rs) and let the device in with no one
 // tapping: with Google, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
 // and keeps the token Google gave; with a passkey, the prompt's challenge names it, the network and when
 // (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
-// request to join (`sign_in`), never checked here: only the person's devices count it, and only for an account their
+// request to join (`sign_in`), never checked here: only the user's devices count it, and only for an account their
 // own devices recorded. Refusing a request forgets its proof too. A throwaway network's auth signs its own ID token, with
 // nothing else to show.
 //
 // Only a device that signed in itself is let in by its sign-in: a sign-in finished from a link opened on another device
-// (the CLI's sign-in link, or any link sent to the person) could have been started by anyone, who'd then hold the token
+// (the CLI's sign-in link, or any link sent to the user) could have been started by anyone, who'd then hold the token
 // it gave. Auth tells them apart by the client whose token asks to join: one whose every sign-in comes back to the
 // device it was made on (the web client's page, the native apps' `<cli>://signed-in/` or loopback) signed in itself;
 // any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
-// which the person's devices approve only by a tap.
+// which the user's devices approve only by a tap.
 //
-// It pushes (`PUSH`, the push Worker's entrypoint for the network's own Workers) to the person's devices, never the one asking: "<device>
+// It pushes (`PUSH`, the push Worker's entrypoint for the network's own Workers) to the user's devices, never the one asking: "<device>
 // wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`; and
-// "<device> joined · <place>" once one is approved, opening Settings › Devices. It knows a person's devices as those that
+// "<device> joined · <place>" once one is approved, opening Settings › Devices. It knows a user's devices as those that
 // asked to join as them here, or said they're theirs as they asked which wait (`devices`), and those that registered
 // with the push Worker as theirs, by a request each signed (`PUSH.theirs`): only for whom to push to, since a device
 // opens a note, and acts on its code, only as the network's signed steps say.
@@ -48,10 +48,10 @@
 // (`RELAY.allowed(key)`), an admin's for what only admins do. A POST's body is the signed request; a GET's or DELETE's
 // is in `x-one-request`, as base64url of its JSON.
 //
-// A throwaway network's auth (`SIGN_IN` is "throwaway") lets in its first person (`THROWAWAY_USER`, `THROWAWAY_NAME`) with no passkey and
+// A throwaway network's auth (`SIGN_IN` is "throwaway") lets in its first user (`THROWAWAY_USER`, `THROWAWAY_NAME`) with no passkey and
 // no Google: its sign-in page goes straight on. Someone it invites joins by opening their link, again with no passkey,
-// and is then who that browser signs in as. It's for testing clients without a person: only `one throwaway` turns it on
-// (cloudflare::Settings::throwaway_person), on Workers that listen only on their own machine, and `cloudflare deploy` refuses it,
+// and is then who that browser signs in as. It's for testing clients without a user: only `one throwaway` turns it on
+// (cloudflare::Settings::throwaway_user), on Workers that listen only on their own machine, and `cloudflare deploy` refuses it,
 // so no real network's auth ever does this.
 
 import { DurableObject } from "cloudflare:workers";
@@ -70,7 +70,7 @@ import { codePage, invitePage, passkeysPage, signInPage, throwawayPage } from ".
 import { DurableObjectDialect } from "./sql.js";
 
 const hex16 = () => hex.encode(random(8));
-/// Where a client's sign-in goes, in words: the site it goes back to, or an app on the person's device (one listening on
+/// Where a client's sign-in goes, in words: the site it goes back to, or an app on the user's device (one listening on
 /// it, or its own link scheme), or the device that showed them a code.
 function goesTo(uri, origin) {
   let url;
@@ -97,9 +97,9 @@ const refuse = (status, message) => {
 };
 const INVITE = 30 * 86_400_000;
 const REQUEST = 15 * 60_000;
-/// How long a request waits for a device to let it in by itself before its person is pushed "wants in".
+/// How long a request waits for a device to let it in by itself before its user is pushed "wants in".
 const WANTS_IN = 10_000;
-/// The most devices of one person pushed to, the newest.
+/// The most devices of one user pushed to, the newest.
 const PUSHED_TO = 20;
 const CODE = 10 * 60_000;
 /// How lately someone signed in for a client to be added as them, or a passkey added.
@@ -132,7 +132,7 @@ async function hash(secret) {
   return hex.encode(await sha256(secret));
 }
 
-/// A passkey's name, for the person's list of them: its maker's, if it says, a security key's, or the device it was
+/// A passkey's name, for the user's list of them: its maker's, if it says, a security key's, or the device it was
 /// made on.
 function passkeyName(aaguid, transports = [], agent = "") {
   const known = getAuthenticatorName(aaguid);
@@ -166,25 +166,25 @@ export class Auth extends DurableObject {
     this.skew = env.TEST ? -86_400_000 : 0;
     const sql = ctx.storage.sql;
     // Invites, by their secret's hash, and `by`, the endpoint that made one; kept once used, for the requests of the
-    // device its person joined with.
+    // device its user joined with.
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
     // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`;
     // `approved`, when a device said it let it in, `root`, the network it said it let it into, and `welcome`, where
     // it said to start reading who's who from; `place`, the city it asked from; `device`, the device it's part of;
     // `by_link`, whether its sign-in was finished from a link opened elsewhere (`signsInHere`); and `told`, when its
-    // person was pushed that it wants in.
+    // user was pushed that it wants in.
     sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, root text, welcome text, place text, device text, by_link integer, told integer)");
-    // A person's devices, by key, as they asked to join here or said they're theirs, for pushes.
+    // A user's devices, by key, as they asked to join here or said they're theirs, for pushes.
     sql.exec("create table if not exists devices (key text primary key, user text not null, at integer not null)");
-    // Devices whose request was turned down, whose person isn't pushed again when they ask again.
+    // Devices whose request was turned down, whose user isn't pushed again when they ask again.
     sql.exec("create table if not exists refused (key text primary key, at integer not null)");
-    // The people who sign in only with a passkey: admins.
+    // The users who sign in only with a passkey: admins.
     sql.exec("create table if not exists passkey_only (user text primary key)");
     // Signed requests taken, until they're too old to take again.
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
     sql.exec("create table if not exists google_starts (id text primary key, query text not null, made integer not null, join_for text)");
-    // What a person's sign-in for a device showed (`{ id_token }` or `{ passkey }`), by that device's key and the person,
+    // What a user's sign-in for a device showed (`{ id_token }` or `{ passkey }`), by that device's key and the user,
     // for its request to join to carry.
     sql.exec("create table if not exists proofs (key text not null, user text not null, proof text not null, made integer not null, primary key (key, user))");
     this.ready = ctx.blockConcurrencyWhile(async () => {
@@ -322,11 +322,11 @@ export class Auth extends DurableObject {
         return new Response(meta.body, { status: meta.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
       }
       const name = this.auth.options.appName;
-      // What its pages say: the custom build's name, and what a person joins ("your One App network").
+      // What its pages say: the custom build's name, and what a user joins ("your One App network").
       const look = { name, yours: this.env.YOURS };
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const throwaway = this.env.SIGN_IN === "throwaway";
-      if (path === "/sign-in" && request.method === "GET") return html(throwaway ? throwawayPage({ ...look, person: this.env.THROWAWAY_NAME }) : signInPage({ ...look, google }));
+      if (path === "/sign-in" && request.method === "GET") return html(throwaway ? throwawayPage({ ...look, user: this.env.THROWAWAY_NAME }) : signInPage({ ...look, google }));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
       if (path === "/sign-in/google" && request.method === "POST" && google) return await this.startGoogle(request, await request.json());
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
@@ -359,7 +359,7 @@ export class Auth extends DurableObject {
       return json({});
     }
     if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
-    if (path === "/api/auth/people/admin" && method === "POST") return json(await this.setAdmin(request));
+    if (path === "/api/auth/users/admin" && method === "POST") return json(await this.setAdmin(request));
     if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
@@ -397,7 +397,7 @@ export class Auth extends DurableObject {
   }
 
   /// Someone signed in: by a session here, or an access token auth signed. → their user id, or null.
-  async person(request) {
+  async user(request) {
     return (await this.asker(request))?.user || null;
   }
 
@@ -417,18 +417,18 @@ export class Auth extends DurableObject {
   }
 
   /// An invite, made by an admin's device: `{ id, name, user, email?, until }`, `id` the sha256 (hex) of the secret
-  /// its link carries, `user` the id they'll have. On a network whose people sign in with Google, `email` is the
-  /// Google account they sign up with. Another invite for the same person, not yet used, replaces it.
+  /// its link carries, `user` the id they'll have. On a network whose users sign in with Google, `email` is the
+  /// Google account they sign up with. Another invite for the same user, not yet used, replaces it.
   async invite(request) {
     const signed = await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")));
     if (!signed?.admin) refuse(403, "Only an admin's device invites someone.");
     const { id, name, user, email, until } = signed.fields;
     if (!isKey(id)) refuse(400, "an invite's id is the sha256 of its secret, in hex");
-    if (typeof name !== "string" || !name.trim()) refuse(400, "give the person's name");
+    if (typeof name !== "string" || !name.trim()) refuse(400, "give the user's name");
     if (!USER.test(user || "")) refuse(400, "a user id is 16 hex characters");
     if (!(Number.isSafeInteger(until) && until > Date.now() && until <= Date.now() + INVITE)) refuse(400, "an invite works for up to 30 days");
     if (email != null && (typeof email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(email))) refuse(400, `${email} isn't an email`);
-    if (this.env.SIGN_IN === "google" && !String(email || "").toLowerCase().endsWith(`@${this.env.JOIN_DOMAIN}`)) refuse(400, `People here sign in with Google: give their email at ${this.env.JOIN_DOMAIN}.`);
+    if (this.env.SIGN_IN === "google" && !String(email || "").toLowerCase().endsWith(`@${this.env.JOIN_DOMAIN}`)) refuse(400, `Users here sign in with Google: give their email at ${this.env.JOIN_DOMAIN}.`);
     const sql = this.ctx.storage.sql;
     if (sql.exec("select 1 from user where id = ?", user).toArray().length) refuse(409, `${name.trim()} has joined already.`);
     sql.exec("delete from invites where until <= ? and used is null", Date.now());
@@ -483,7 +483,7 @@ export class Auth extends DurableObject {
   }
 
   /// A passkey's assertion Better Auth just checked: kept if its challenge names a device (`namingDevice`), with the
-  /// passkey's public key, which counts only if a person approves that device by its code.
+  /// passkey's public key, which counts only if a user approves that device by its code.
   keepAssertion(resp) {
     try {
       this.keepAssertionNow(resp);
@@ -542,7 +542,7 @@ export class Auth extends DurableObject {
     this.expire();
     const sql = this.ctx.storage.sql;
     const [had] = sql.exec("select user, seal, approved, told from requests where key = ?", key).toArray();
-    if (had && had.user !== user) refuse(409, "Another person's device asked with that key.");
+    if (had && had.user !== user) refuse(409, "Another user's device asked with that key.");
     // Asked again once it's approved (it restarted while waiting): still approved, for it to see.
     if (had?.approved && had.seal === seal) return { until: had.approved + REQUEST };
     let invite = null;
@@ -553,7 +553,7 @@ export class Auth extends DurableObject {
     const made = Date.now();
     // Where it asked from, as Cloudflare places it: its city, shown beside its code.
     const place = typeof request.cf?.city === "string" ? request.cf.city.slice(0, 64) : null;
-    // Asked again while it waits: its person isn't pushed again.
+    // Asked again while it waits: its user isn't pushed again.
     const told = had && had.user === user && had.seal === seal ? had.told : null;
     sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link, told) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1, told);
     this.theirs(key, user);
@@ -583,7 +583,7 @@ export class Auth extends DurableObject {
     if (next?.at != null) await this.ctx.storage.setAlarm(Math.max(next.at + WANTS_IN, Date.now() + 1000));
   }
 
-  /// Pushes a note about the request `r` to its person's devices, but the one asking: tapping it opens Settings ›
+  /// Pushes a note about the request `r` to its user's devices, but the one asking: tapping it opens Settings ›
   /// Devices. Never fails what it's said with.
   async push(r, note) {
     if (!this.env.PUSH) return;
@@ -601,27 +601,27 @@ export class Auth extends DurableObject {
   shown(rows) {
     const sql = this.ctx.storage.sql;
     return rows.map((r) => {
-      const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
+      const user_name = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
       const [signed] = sql.exec("select proof from proofs where key = ? and user = ?", r.key, r.user).toArray();
       const signIn = signed && (r.by_link ? { by_link: JSON.parse(signed.proof) } : JSON.parse(signed.proof));
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.root ? { root: r.root } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, user_name, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.root ? { root: r.root } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
     });
   }
 
-  /// Requests waiting: the signed-in person's own devices', or, for a signed request from one of the network's
-  /// devices, every one: a device approves only its own person's, or a newcomer's whose invite its person keeps, as
+  /// Requests waiting: the signed-in user's own devices', or, for a signed request from one of the network's
+  /// devices, every one: a device approves only its own user's, or a newcomer's whose invite its user keeps, as
   /// the steps it writes count only then. Signed in and signed both, it's their device asking: kept as theirs, for
   /// pushes, and shown their own.
   async requests(request) {
     this.expire();
     const sql = this.ctx.storage.sql;
-    const user = bearer(request) ? await this.person(request) : null;
+    const user = bearer(request) ? await this.user(request) : null;
     const signed = user ? await this.signed(request).catch(() => null) : await this.signed(request);
     if (signed && !user) {
       return { requests: this.shown(sql.exec("select * from requests where approved is null order by made").toArray()) };
     }
     if (signed) this.theirs(signed.by, user);
-    const theirs = user || (await this.person(request)) || refuse(401, "Sign in first.");
+    const theirs = user || (await this.user(request)) || refuse(401, "Sign in first.");
     return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", theirs).toArray()) };
   }
 
@@ -630,7 +630,7 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     const signed = await this.signed(request);
     const [row] = sql.exec("select * from requests where key = ?", key).toArray();
-    const ok = row && (signed || row.user === ((await this.person(request)) || refuse(401, "Sign in first.")));
+    const ok = row && (signed || row.user === ((await this.user(request)) || refuse(401, "Sign in first.")));
     if (!ok) refuse(404, "No request waits with that key: it was approved, refused or waited too long.");
     return row;
   }
@@ -670,7 +670,7 @@ export class Auth extends DurableObject {
 
   /// What a client's tokens are for, whatever it asks: the network's address (a sign-in at its nodes, through the
   /// gateway) only for its own apps, each a client whose every redirect comes back to one of them (`firstParty`);
-  /// any other, a remote MCP client, gets `<address>/mcp`, the remote MCP server's, where it's a device of its person's,
+  /// any other, a remote MCP client, gets `<address>/mcp`, the remote MCP server's, where it's a device of its user's,
   /// which nodes refuse.
   async audience(clientId) {
     const address = JSON.parse(this.env.RESOURCES || "[]")[0] || this.env.ADDRESS;
@@ -716,7 +716,7 @@ export class Auth extends DurableObject {
 
   /// What signing in to a client (its authorization's `query`) says: its name (the network's, for the web client, which
   /// is at its address), where its sign-in goes (its redirect_uri, if it's one of the client's, else its first), since
-  /// the name is only what it calls itself, the person's, if they're signed in here already, and whether they're back
+  /// the name is only what it calls itself, the user's, if they're signed in here already, and whether they're back
   /// from the Google sign-in this browser started for it, which goes straight on.
   async about(request, query) {
     const session = await this.auth.api.getSession({ headers: request.headers });
@@ -726,12 +726,12 @@ export class Auth extends DurableObject {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
     const goes = web ? null : goesTo(uris.includes(redirect) ? redirect : uris[0], origin);
-    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, person: session?.user.name || null, fresh: !!(await this.started(request, session, query)) };
+    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!(await this.started(request, session, query)) };
   }
 
   // Signing in to a client with Google goes straight on once Google says yes, with no second tap, but only for the
   // authorization this browser started it for: a sign-in with Google made for another client (the web client's, a
-  // minute ago) gives nothing to a client whose link the person was sent. Starting one keeps a secret in a cookie only
+  // minute ago) gives nothing to a client whose link the user was sent. Starting one keeps a secret in a cookie only
   // this address sets, with a hash of the authorization's query; coming back, the two must match, once.
 
   async startGoogle(request, { oauth_query }) {
@@ -761,7 +761,7 @@ export class Auth extends DurableObject {
   }
 
   // Signing in with a code, for a client with no browser of its own (the CLI on a device with no screen): it makes an authorization
-  // request coming back to /sign-in/code/done and gets a short code for it; the person opens /sign-in/code on any
+  // request coming back to /sign-in/code/done and gets a short code for it; the user opens /sign-in/code on any
   // device, types the code (or follows its link), and signs in there with their passkey; the client takes the
   // authorization code by its state and turns it into tokens with its PKCE verifier, which only it has.
 
@@ -821,7 +821,7 @@ export class Auth extends DurableObject {
     return invite;
   }
 
-  /// Makes the invite's person, as their first passkey is registered (or as a throwaway network's link is opened), and
+  /// Makes the invite's user, as their first passkey is registered (or as a throwaway network's link is opened), and
   /// spends the invite: the database hook lets only them in.
   async admit(invite, user) {
     if (user.id !== invite.user) refuse(400, "That passkey was made for someone else.");
@@ -839,7 +839,7 @@ export class Auth extends DurableObject {
 
   async inviteAbout({ secret }) {
     const invite = await this.openInvite(secret);
-    return { person: invite.name, until: invite.until, email: invite.email };
+    return { user: invite.name, until: invite.until, email: invite.email };
   }
 
   /// Joining with Google: the invite's secret kept in a cookie for Google's answer, whose email must be the invite's.
@@ -880,16 +880,16 @@ export class Auth extends DurableObject {
 }
 
 /// A throwaway network's sign-in, with no passkey: whoever is signed in here already (someone who joined in this browser),
-/// or `person` by name (someone who joined; of two with a name, the one a device was let in for), or else its first person, made the first time; and joining with an
-/// invite link, which signs its person in here.
+/// or `user` by name (someone who joined; of two with a name, the one a device was let in for), or else its first user, made the first time; and joining with an
+/// invite link, which signs its user in here.
 function throwawayNetwork(auth, id, name) {
   const signIn = async (ctx, user) => {
     await setSessionCookie(ctx, { session: await ctx.context.internalAdapter.createSession(user.id), user });
     await tryProof(ctx, user);
-    return ctx.json({ person: user.name });
+    return ctx.json({ user: user.name });
   };
   // For a sign-in for a device (`join`), an ID token of auth's own, as a provider's would be, naming that device:
-  // so the person's devices are seen to let it in by its sign-in. `spoil` names another device instead, as a token they
+  // so the user's devices are seen to let it in by its sign-in. `spoil` names another device instead, as a token they
   // must refuse.
   const tryProof = async (ctx, user) => {
     const join = JOIN.test(ctx.body?.join || "") ? ctx.body.join : null;
@@ -907,17 +907,17 @@ function throwawayNetwork(auth, id, name) {
     endpoints: {
       signInToThrowaway: createAuthEndpoint("/throwaway/sign-in", { method: "POST" }, async (ctx) => {
         const adapter = ctx.context.internalAdapter;
-        const person = typeof ctx.body?.person === "string" ? ctx.body.person.trim().toLowerCase() : "";
-        if (person) {
-          // Invited again, a name is two people here: the one with a device let in is who joined, else the latest to open a link.
-          const [row] = auth.ctx.storage.sql.exec("select id from user where lower(name) = ? order by exists (select 1 from requests where requests.user = user.id and approved is not null) desc, createdAt desc limit 1", person).toArray();
-          if (!row && person !== name.toLowerCase()) refuse(404, `Nobody called ${ctx.body.person} has joined.`);
+        const wanted = typeof ctx.body?.user === "string" ? ctx.body.user.trim().toLowerCase() : "";
+        if (wanted) {
+          // Invited again, a name is two users here: the one with a device let in is who joined, else the latest to open a link.
+          const [row] = auth.ctx.storage.sql.exec("select id from user where lower(name) = ? order by exists (select 1 from requests where requests.user = user.id and approved is not null) desc, createdAt desc limit 1", user).toArray();
+          if (!row && wanted !== name.toLowerCase()) refuse(404, `Nobody called ${ctx.body.user} has joined.`);
           return signIn(ctx, row ? await adapter.findUserById(row.id) : await first(adapter));
         }
         const already = await getSessionFromCtx(ctx);
         if (already) {
           await tryProof(ctx, already.user);
-          return ctx.json({ person: already.user.name });
+          return ctx.json({ user: already.user.name });
         }
         return signIn(ctx, await first(adapter));
       }),

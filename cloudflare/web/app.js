@@ -64,7 +64,7 @@ export function app(native) {
     return `${about.cli}://settings/${encodeURIComponent(r.name)}`;
   }
 
-  /// A Mac's own node joining a network with a pairing code another of its person's computers shows, then signing in
+  /// A Mac's own node joining a network with a pairing code another of its user's computers shows, then signing in
   /// to it here; Cancel goes back to `welcome`.
   function showPairing(welcome, error) {
     const join = async (code) => {
@@ -129,7 +129,7 @@ export function app(native) {
         try {
           await native.address(typed);
           about = await native.about();
-          // An invite opens in the browser, where its person makes their passkey; then they sign in with it here.
+          // An invite opens in the browser, where its user makes their passkey; then they sign in with it here.
           if (/\/invite#./.test(typed)) return (await native.open(new URL(typed.includes("://") ? typed : `https://${typed}`).href), again(undefined, "Made your passkey? Sign in with it."));
           await platform.signIn();
         } catch (err) {

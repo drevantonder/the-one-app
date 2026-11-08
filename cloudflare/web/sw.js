@@ -3,7 +3,7 @@
 // styles are named by their content (`?v=`), so the browser keeps them for good. Nothing else is touched: a node's
 // answers, signing in and every other file go to the network as they would without this.
 //
-// And its notifications: a push (cloudflare/push/) carries a note sealed to one of this browser's devices (one per person
+// And its notifications: a push (cloudflare/push/) carries a note sealed to one of this browser's devices (one per user
 // signed in here), which it opens with that device's seal key, kept in IndexedDB where it can't be read out
 // (device.js), and shows; tapping it opens the screen it names. A note it can't open still shows that one came, as
 // browsers require of every push, and so does one whose signature is wrong.

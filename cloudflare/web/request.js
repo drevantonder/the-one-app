@@ -1,4 +1,4 @@
-// The request path: a request to the person's nodes, as this device (the platform's `fetch`: in a browser, one-client's
+// The request path: a request to the user's nodes, as this device (the platform's `fetch`: in a browser, one-client's
 // keyring in the SharedWorker, net.js; in the app, its own client), asked again while no node answers, watched for
 // this device being taken out, and traced in Developer mode.
 import { HEADER } from "../shared/protocol.js";
@@ -12,7 +12,7 @@ export const UNANSWERED = "Your devices aren’t answering. Make sure one of the
 export const retryWait = (n) => (n === 0 ? 0 : Math.min(5000, 125 << Math.min(n, 6)));
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Only a device of theirs
+/// A request to the node, as this user: JSON in and out, or with `raw` the response itself. Only a device of theirs
 /// asks, of their nodes, itself (the keyring says whose it is, `x-one-user`, which a node checks against the device its
 /// connection proves). Asked again for a few seconds while no node answers, as one restarting doesn't; a call carries an
 /// id, so it runs once however often it's sent.
@@ -65,7 +65,7 @@ async function sending(url, method, body, raw, signal, trace) {
         throw Object.assign(new NodeError(err.message), { status: 403 });
       }
       if (err.removed || signal?.aborted || misses >= 5) throw err;
-      // A request that fails may be one a device taken out of its person's devices can't make.
+      // A request that fails may be one a device taken out of its user's devices can't make.
       if (await takenOut()) throw gone();
       await sleep(retryWait(misses++));
       continue;
@@ -130,7 +130,7 @@ let removed = false;
 const onRemoved = [];
 export const whenRemoved = (fn) => onRemoved.push(fn);
 
-/// Whether this device isn't one of its person's devices any more, which a request can wait on for a long time
+/// Whether this device isn't one of its user's devices any more, which a request can wait on for a long time
 /// without an answer.
 async function takenOut() {
   if (removed) return true;

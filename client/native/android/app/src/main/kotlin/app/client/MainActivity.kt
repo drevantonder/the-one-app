@@ -25,7 +25,7 @@ class MainActivity : TauriActivity() {
         // for the starts after it (ClientApp): a debug build's alone.
         if (BuildConfig.DEBUG) ClientApp.settings(intent?.extras)
         enableEdgeToEdge()
-        // As the person last chose, from the first frame.
+        // As the user last chose, from the first frame.
         appearance(getSharedPreferences("app", Context.MODE_PRIVATE).getString("appearance", "automatic"), recreate = false)
         super.onCreate(savedInstanceState)
         // Edge to edge, but its content kept clear of the system bars and the keyboard, which the window behind it shows.
@@ -80,7 +80,7 @@ class MainActivity : TauriActivity() {
         webView.setBackgroundColor(colour())
     }
 
-    /** Light, dark or automatic ("automatic", "light", "dark"), as the person chose. */
+    /** Light, dark or automatic ("automatic", "light", "dark"), as the user chose. */
     fun appearance(value: String?, recreate: Boolean = true) {
         AppCompatDelegate.setDefaultNightMode(when (value) {
             "light" -> AppCompatDelegate.MODE_NIGHT_NO
@@ -90,7 +90,7 @@ class MainActivity : TauriActivity() {
         if (recreate) bars()
     }
 
-    /** Whether the page draws dark: as the person chose, or the phone's own for automatic. Read from what's kept, not this
+    /** Whether the page draws dark: as the user chose, or the phone's own for automatic. Read from what's kept, not this
      *  activity's configuration, which isn't dark yet as a start in dark begins. */
     private fun dark(): Boolean = when (getSharedPreferences("app", Context.MODE_PRIVATE).getString("appearance", "automatic")) {
         "dark" -> true

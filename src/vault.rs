@@ -73,7 +73,7 @@ struct Secrets {
 pub struct Sealing<'a> {
     pub keys: Option<&'a BTreeMap<u32, [u8; 32]>>,
     pub public: Option<(u32, [u8; 32])>,
-    /// The scope's name and the machines that open its Vault, as a person reads them.
+    /// The scope's name and the machines that open its Vault, as a user reads them.
     pub scope: &'a str,
     pub machines: &'a str,
 }
@@ -319,7 +319,7 @@ pub fn for_app(id: &str, scope: &str, item: &Item) -> Value {
     json!({ "id": id, "scope": scope, "title": item.title, "type": item.kind, "domain": item.domain, "hosts": item.hosts, "fields": fields, "app": item.app, "time": item.made })
 }
 
-/// An item's fields as a person sees them: each name, whether it's secret, and a plain one's value.
+/// An item's fields as a user sees them: each name, whether it's secret, and a plain one's value.
 pub fn fields_shown(item: &Item) -> Vec<Value> {
     item.fields.iter().map(|(n, f)| if f.secret { json!({ "name": n, "secret": true }) } else { json!({ "name": n, "secret": false, "value": f.value }) }).collect()
 }

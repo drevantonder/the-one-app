@@ -1,9 +1,9 @@
-// GitHub's repos in Repos, connected rather than copied: every repo a person's GitHub can see is
+// GitHub's repos in Repos, connected rather than copied: every repo a user's GitHub can see is
 // github.com/<owner>/<repo>, and each tool on one asks GitHub's API at once, in the shapes Repos' own give.
 //
 // The network's GitHub App, which an admin makes once from Repos' Settings with GitHub's App Manifest flow, is a
 // "GitHub App" item in Everyone's Vault: its id, client id, client secret and private key, the secrets sent only to
-// GitHub. Each person signs in to their own GitHub accounts with it (user tokens, which it refreshes), each a "GitHub
+// GitHub. Each user signs in to their own GitHub accounts with it (user tokens, which it refreshes), each a "GitHub
 // account" item in their own Vault. A group's admins connect an organization by installing the App on it: its repos
 // show for the group's members, read and written as the App's installation (whose short-lived tokens it asks for with
 // a JWT the Vault signs with the App's key), unless their own sign-in reaches the repo, which is used instead.
@@ -216,9 +216,9 @@ async function open(ctx, repo) {
   return { app, c, full: r.full_name, r, name: `${PREFIX}${r.full_name}` };
 }
 
-const person = (u) => (u ? { handle: u.login, name: u.login } : null);
+const userOf = (u) => (u ? { handle: u.login, name: u.login } : null);
 const about = (g) => ({
-  owner: person(g.owner), yours: !!g.permissions?.admin, push: !!g.permissions?.push,
+  owner: userOf(g.owner), yours: !!g.permissions?.admin, push: !!g.permissions?.push,
   from: g.parent ? `${PREFIX}${g.parent.full_name}` : null, open_issues: g.open_issues_count ?? 0, github: { url: g.html_url, private: !!g.private },
 });
 const enc = (path) => String(path || "").split("/").filter(Boolean).map(encodeURIComponent).join("/");
@@ -266,13 +266,13 @@ function changed(f) {
 }
 
 const issueShape = (i) => ({
-  number: i.number, title: i.title, state: i.state, state_reason: i.state_reason || null, author: person(i.user),
+  number: i.number, title: i.title, state: i.state, state_reason: i.state_reason || null, author: userOf(i.user),
   labels: (i.labels || []).map((l) => ({ name: l.name, color: l.color, description: l.description || "" })),
-  assignees: (i.assignees || []).map(person), comments: i.comments ?? 0,
-  created: i.created_at, updated: i.updated_at, closed: i.closed_at, closed_by: person(i.closed_by),
+  assignees: (i.assignees || []).map(userOf), comments: i.comments ?? 0,
+  created: i.created_at, updated: i.updated_at, closed: i.closed_at, closed_by: userOf(i.closed_by),
 });
 
-/// What a person filed through an organization's installation says, so the issue shows who in the network filed it.
+/// What a user filed through an organization's installation says, so the issue shows who in the network filed it.
 const signed = (ctx, o, text, verb) => (o.c.kind === "installation" ? `${text || ""}\n\n<sub>${verb} by ${ctx.me.user_name || ctx.me.name} through ${ctx.address ? new URL(ctx.address).host : "Repos"}</sub>`.replace(/^\n\n/, "") : text);
 const quote = (s) => (/\s/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
 const ON_GITHUB = (o, what) => new Error(`${o.name} is on GitHub: ${what} there, at ${o.r.html_url}`);
@@ -404,7 +404,7 @@ export const run = {
     const me = o.c.login?.toLowerCase(), push = !!o.r.permissions?.push, author = !!me && i.user?.login?.toLowerCase() === me;
     return {
       repo: o.name, ...issueShape(i), body: i.body || "", url: i.html_url,
-      comments: comments.map((c) => ({ id: String(c.id), author: person(c.user), body: c.body || "", created: c.created_at, updated: c.updated_at, yours: !!me && c.user?.login?.toLowerCase() === me })),
+      comments: comments.map((c) => ({ id: String(c.id), author: userOf(c.user), body: c.body || "", created: c.created_at, updated: c.updated_at, yours: !!me && c.user?.login?.toLowerCase() === me })),
       can: { edit: author || push, close: author || push, triage: push, delete: false },
     };
   },
@@ -446,12 +446,12 @@ export const run = {
     const o = await open(ctx, input.repo);
     if (!String(input.body || "").trim()) throw new Error("a comment needs some text");
     const r = await send(o.app, o.c, "POST", `/repos/${o.full}/issues/${Number(input.number)}/comments`, { body: signed(ctx, o, input.body, "Commented") });
-    return { repo: o.name, number: Number(input.number), id: String(r.json.id), author: person(r.json.user), body: r.json.body, created: r.json.created_at, updated: r.json.updated_at, yours: true };
+    return { repo: o.name, number: Number(input.number), id: String(r.json.id), author: userOf(r.json.user), body: r.json.body, created: r.json.created_at, updated: r.json.updated_at, yours: true };
   },
   async edit_comment(ctx, input) {
     const o = await open(ctx, input.repo);
     const r = await send(o.app, o.c, "PATCH", `/repos/${o.full}/issues/comments/${encodeURIComponent(input.id)}`, { body: input.body });
-    return { repo: o.name, id: String(r.json.id), author: person(r.json.user), body: r.json.body, created: r.json.created_at, updated: r.json.updated_at, yours: true };
+    return { repo: o.name, id: String(r.json.id), author: userOf(r.json.user), body: r.json.body, created: r.json.created_at, updated: r.json.updated_at, yours: true };
   },
   async delete_comment(ctx, input) {
     const o = await open(ctx, input.repo);
@@ -478,7 +478,7 @@ export const run = {
     await send(o.app, o.c, "DELETE", `/repos/${o.full}/labels/${encodeURIComponent(name)}`);
     return `Deleted the label ${name} from ${o.name}.`;
   },
-  async _people(ctx, { repo }) {
+  async _users(ctx, { repo }) {
     const o = await open(ctx, repo);
     const r = await send(o.app, o.c, "GET", `/repos/${o.full}/assignees?per_page=100`, null, { ok: [403, 404] });
     return Array.isArray(r.json) ? r.json.map((u) => ({ handle: u.login, name: u.login })) : [];
@@ -516,7 +516,7 @@ export async function list(ctx) {
     if (!reaches.has(`${ctx.me.user} ${key}`)) reaches.set(`${ctx.me.user} ${key}`, { who: all[k].login || all[k].org, time: Date.now() });
   }));
   return [...seen.values()].sort((a, b) => Date.parse(b.pushed_at || b.updated_at) - Date.parse(a.pushed_at || a.updated_at)).map((g) => ({
-    repo: `${PREFIX}${g.full_name}`, name: g.name, owner: person(g.owner), from: null, branch: g.default_branch, branches: null,
+    repo: `${PREFIX}${g.full_name}`, name: g.name, owner: userOf(g.owner), from: null, branch: g.default_branch, branches: null,
     created: g.created_at, updated: g.pushed_at || g.updated_at, open_issues: g.open_issues_count ?? 0, deleted: null,
     yours: !!g.permissions?.admin, push: !!g.permissions?.push, github: { url: g.html_url, private: !!g.private, fork: !!g.fork },
   }));
@@ -543,14 +543,14 @@ export function tools({ global }) {
     },
     sign_in: {
       reads: false,
-      description: "Start signing a GitHub account in to Repos, so its repos show beside the network's own: gives { url, then }. The person opens url, lets the network's GitHub App act for them, and GitHub sends them back to finish.",
+      description: "Start signing a GitHub account in to Repos, so its repos show beside the network's own: gives { url, then }. The user opens url, lets the network's GitHub App act for them, and GitHub sends them back to finish.",
       input: { type: "object", properties: { account: { type: "string", description: "a GitHub username to suggest to GitHub, like one that needs signing in again" } } },
       async run(ctx, { account }) {
         if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
         const app = await appItem(ctx);
         if (!app) throw noApp(ctx);
         const q = new URLSearchParams({ client_id: app.fields.client_id.value, redirect_uri: redirect(ctx), state: "repos/settings", ...(account ? { login: account } : {}) });
-        return { url: `${webOf(app)}/login/oauth/authorize?${q}`, then: "The person opens url and lets the App act for them; GitHub sends them back to Repos' Settings, which finishes. If it doesn't, give the address their browser came back to to repos_finish_sign_in." };
+        return { url: `${webOf(app)}/login/oauth/authorize?${q}`, then: "The user opens url and lets the App act for them; GitHub sends them back to Repos' Settings, which finishes. If it doesn't, give the address their browser came back to to repos_finish_sign_in." };
       },
     },
     finish_sign_in: {
@@ -596,7 +596,7 @@ export function tools({ global }) {
     },
     create_github_app: {
       reads: false,
-      description: "For an admin, once for everyone: start making the network's GitHub App, with which people sign in to GitHub and groups connect organizations. Gives { url }: the admin opens it and confirms on GitHub, which sends them back to Repos' Settings to finish.",
+      description: "For an admin, once for everyone: start making the network's GitHub App, with which users sign in to GitHub and groups connect organizations. Gives { url }: the admin opens it and confirms on GitHub, which sends them back to Repos' Settings to finish.",
       input: { type: "object", properties: {
         org: { type: "string", description: "a GitHub organization to own the App, by its login; omit for the admin's own account" },
         github: { type: "string", description: "GitHub's address if it isn't https://github.com (GitHub Enterprise)" },
@@ -683,7 +683,7 @@ export function tools({ global }) {
       reads: false,
       confirm: true,
       description: "For a group's admins: stop showing a connected GitHub organization's repos to the group. The App stays installed on GitHub until its owners uninstall it there.",
-      input: { type: "object", required: ["org"], properties: { org: { type: "string", description: "the organization's login, as repos_github lists it" }, confirm: { type: "boolean", description: "true once the person agreed" } } },
+      input: { type: "object", required: ["org"], properties: { org: { type: "string", description: "the organization's login, as repos_github lists it" }, confirm: { type: "boolean", description: "true once the user agreed" } } },
       async run(ctx, { org }) {
         const g = global(ctx);
         const rows = (await g.query("select * from github_orgs where lower(org) = lower(?)", [String(org || "")])).filter((o) => adminOf(ctx, o.owner));

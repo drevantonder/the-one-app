@@ -65,7 +65,7 @@ function Join({ code, qr, text, note, onSignOut }: { code: string; qr: string; t
   )
 }
 
-/// A wait the person sees: a spinner and what it's for.
+/// A wait the user sees: a spinner and what it's for.
 function Starting({ label = "Starting" }: { label?: string }) {
   return (
     <Centered className="flex-row gap-2 text-sm text-muted-foreground">

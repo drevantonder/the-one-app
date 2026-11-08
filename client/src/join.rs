@@ -1,4 +1,4 @@
-//! Asking to be let in as a person's device, the same for every client (a native app's `Device`, a browser's
+//! Asking to be let in as a user's device, the same for every client (a native app's `Device`, a browser's
 //! `Keyring` in its worker): what it asks auth with, and what auth says of its request while it waits, acted on. How
 //! long it waits between asks, and what it shows meanwhile, are its own.
 
@@ -21,7 +21,7 @@ pub fn asking(me: &Endpoint, name: &str, on: Option<&str>, invite: Option<&str>)
     asked
 }
 
-/// Asks auth, as the person signed in with `token`, to let it in with `asked`.
+/// Asks auth, as the user signed in with `token`, to let it in with `asked`.
 pub async fn ask(at: &impl Address, token: &str, asked: &Value) -> Result<(), Error> {
     let (status, out) = at.ask("POST", &format!("{}/api/auth/devices/requests", at.address()), Some(("authorization", format!("Bearer {token}"))), Some(asked.clone())).await?;
     if status != 200 {

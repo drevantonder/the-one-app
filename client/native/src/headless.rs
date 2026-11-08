@@ -4,7 +4,7 @@
 //! (an answer on stdout); Swift and Kotlin call `run_here` across FFI or JNI. Whatever a platform would otherwise work
 //! out itself (a note's link, a widget's id or headline) is worked out here, so they only show it.
 //!
-//! - `call` `{ app, tool, input }`: runs a tool as the person, then keeps the widgets again → `{ "ok": … }`
+//! - `call` `{ app, tool, input }`: runs a tool as the user, then keeps the widgets again → `{ "ok": … }`
 //! - `widgets` `{}`: the pages' widgets kept again where the platform's own read them (`crate::widgets_dir`) → `{ "dir" }`
 //! - `open-note` `{ n }`: a pushed note opened with this device's key → `{ id, title, body, app, badge, link, join }`,
 //!   `link` what a tap opens and `join` the code of a device asking to join, if it does
@@ -95,7 +95,7 @@ pub fn serve() {
     });
 }
 
-/// The person signed in here, and this device's key for them: `(address, "<address> <user>", key)`.
+/// The user signed in here, and this device's key for them: `(address, "<address> <user>", key)`.
 fn signed_in(data: &std::path::Path) -> Result<(String, String, [u8; 32]), String> {
     let address = crate::address_in(data).ok_or("Sign in first.")?;
     let user = crate::kept_in(data, "user").ok_or("Sign in first.")?;

@@ -1,8 +1,8 @@
 // Computer Use: the devices agents can use, and the tools they use them with. Agent devices are Linux devices with a
-// browser on the person's devices, which Agent Devices runs (Podman, or a Mac's containers); the person's own
+// browser on the user's devices, which Agent Devices runs (Podman, or a Mac's containers); the user's own
 // devices are here too once they let agents use them, through the computer service, a helper app inside the Mac app (service/). Use,
 // tools and screen go to a device when one is named; this app keeps who used which device when, as `session`
-// entries in the person's own scope. Agent Devices (apps/agent-devices) is the person's page for them. Its screen is
+// entries in the user's own scope. Agent Devices (apps/agent-devices) is the user's page for them. Its screen is
 // React, in screens/, built into dist/ when it's deployed (`one deploy apps/computer`), which is committed because a
 // release ships the app as it is.
 
@@ -40,10 +40,10 @@ const KINDS = { linux: "Linux with a browser", chrome: "Chrome", windows: "Windo
 
 function shown(d) {
   const b = d.borrowed;
-  const use = b?.signing_in ? `the person is signing in to sites in the ${b.profile || "browser"} profile`
+  const use = b?.signing_in ? `the user is signing in to sites in the ${b.profile || "browser"} profile`
     : b ? `borrowed by ${b.by || "an agent"} for ${b.for || "something"} since ${new Date(b.since).toISOString().slice(0, 16)}Z`
     : d.spare ? "the spare, kept ready for agent-devices_borrow"
-    : d.kind === "linux" ? "a lasting device of the person's" : "free to borrow";
+    : d.kind === "linux" ? "a lasting device of the user's" : "free to borrow";
   return {
     name: d.name, kind: d.kind, title: KINDS[d.kind] || d.kind, on: d.on, ...(d.of ? { of: d.of } : {}),
     state: d.state, use, ...(d.size ? { size: d.size } : {}),
@@ -67,9 +67,9 @@ export default {
   advanced: true,
   description: "Devices your agents can use: agent devices with a browser, and your own devices when you let them",
   needs: "Needs a Linux device with Podman, or a Mac",
-  instructions: "Computer Use acts on devices: agent devices (Linux with a browser, Windows, Android and iPhones, on the person's own devices) and the person's own devices they let agents use (own: true in computer_list, like their Mac). Agent Devices (agent-devices_*) gets you one and gives it back; Computer Use (computer_*) acts on it.\n\nTo browse, agent-devices_borrow with for (a few words the person sees) gives you a Linux device whose browser starts signed in to a browser profile's sites. Pass its name as device to every call, then:\n1. computer_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":<the profile borrow gave>} starts its browser.\n2. computer_use with tool list_windows gives the browser's pid and window_id.\n3. computer_get_browser_state with those gives target_id and tab_id; with those, it reads the page and the refs of what's on it.\n4. computer_browser_navigate, _click, _type, _select and _pointer act on it; on an agent device, click and pointer take input_route \"dom_event\". Read the page again after each.\nA browser idle for 5 minutes closes: prepare it again.\nBorrowed with kind chrome (quicker, where agent-devices_kinds lists it), the device is that browser: borrow gives target_id and tab_id, so skip steps 1 to 3 and read the page with computer_get_browser_state. Give the device back with agent-devices_give_back when done; one left 15 minutes without a call is given back for you.\n\nWhen a site needs the person to sign in, agent-devices_sign_in gives them a link to do it themselves; for a challenge, give them computer_view's link. Never sign in or submit forms for them unless they asked.\n\nAnything else on a device (apps, windows, keyboard and mouse, and Windows, Android and iPhones): computer_tools lists what it takes, computer_use runs one, and computer_screen shows the screen. An iPhone takes no clicks or typing.\n\nOn the person's own device, do only what they asked of it, and never read their messages, mail, browser sessions or files unless they asked. They see in their menu bar while you use it, and can stop you.",
+  instructions: "Computer Use acts on devices: agent devices (Linux with a browser, Windows, Android and iPhones, on the user's own devices) and the user's own devices they let agents use (own: true in computer_list, like their Mac). Agent Devices (agent-devices_*) gets you one and gives it back; Computer Use (computer_*) acts on it.\n\nTo browse, agent-devices_borrow with for (a few words the user sees) gives you a Linux device whose browser starts signed in to a browser profile's sites. Pass its name as device to every call, then:\n1. computer_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":<the profile borrow gave>} starts its browser.\n2. computer_use with tool list_windows gives the browser's pid and window_id.\n3. computer_get_browser_state with those gives target_id and tab_id; with those, it reads the page and the refs of what's on it.\n4. computer_browser_navigate, _click, _type, _select and _pointer act on it; on an agent device, click and pointer take input_route \"dom_event\". Read the page again after each.\nA browser idle for 5 minutes closes: prepare it again.\nBorrowed with kind chrome (quicker, where agent-devices_kinds lists it), the device is that browser: borrow gives target_id and tab_id, so skip steps 1 to 3 and read the page with computer_get_browser_state. Give the device back with agent-devices_give_back when done; one left 15 minutes without a call is given back for you.\n\nWhen a site needs the user to sign in, agent-devices_sign_in gives them a link to do it themselves; for a challenge, give them computer_view's link. Never sign in or submit forms for them unless they asked.\n\nAnything else on a device (apps, windows, keyboard and mouse, and Windows, Android and iPhones): computer_tools lists what it takes, computer_use runs one, and computer_screen shows the screen. An iPhone takes no clicks or typing.\n\nOn the user's own device, do only what they asked of it, and never read their messages, mail, browser sessions or files unless they asked. They see in their menu bar while you use it, and can stop you.",
   uses: { apps: ["agent-devices"], services: ["computer"] },
-  service: { network: [], person: true, platforms: ["mac"] },
+  service: { network: [], user: true, platforms: ["mac"] },
   labs: {
     mirroring: { title: "iPhone Mirroring", description: "Use your iPhone through a Mac." },
   },
@@ -97,11 +97,11 @@ export default {
     },
     view: {
       reads: false,
-      description: "A link for the person to watch and use an agent device in their browser: to solve a challenge or sign in, or to see what an agent is doing. Gives the link and when it stops working. Not for your own devices: the person sees those on the Computer Use page.",
+      description: "A link for the user to watch and use an agent device in their browser: to solve a challenge or sign in, or to see what an agent is doing. Gives the link and when it stops working. Not for your own devices: the user sees those on the Computer Use page.",
       input: {"properties": {"device": DEVICE, "minutes": {"description": "how long the link works; default 60, at most 1440", "type": "integer"}}, "type": "object"},
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (d) throw new Error(`${d} is the person's own device: they watch it on the Computer Use page and on the device itself, and stop agents there.`);
+        if (d) throw new Error(`${d} is the user's own device: they watch it on the Computer Use page and on the device itself, and stop agents there.`);
         return act(ctx, "view", input);
       },
     },
@@ -169,7 +169,7 @@ export default {
       description: "Start the browser the browser tools act on, or attach them to one that's open. On an agent device: allow_launch true and profile { mode: \"isolated_named\", name: <the profile agent-devices_borrow gave> }. In a browser open on your own device: pid, window_id and strategy { kind: \"existing_profile\" }, when computer_get_browser_state asks for it. It says why if it can't, having changed nothing. A browser it started closes after 5 minutes idle; prepare it again.",
       input: {"additionalProperties": true, "properties": {
         "allow_launch": {"description": "true to start a browser of its own, with profile", "type": "boolean"},
-        "delivery_mode": {"default": "background", "description": "background (the default) refuses where attaching would bring the browser in front of the person; foreground allows it and puts their app back after", "enum": ["background", "foreground"], "type": "string"},
+        "delivery_mode": {"default": "background", "description": "background (the default) refuses where attaching would bring the browser in front of the user; foreground allows it and puts their app back after", "enum": ["background", "foreground"], "type": "string"},
         "device": DEVICE,
         "pid": {"description": "the browser's process id, from computer_use list_windows; not needed with allow_launch", "type": "integer"},
         "profile": {"additionalProperties": false, "description": "the browser profile to start with allow_launch: { mode: \"isolated_named\", name } keeps it after, { mode: \"isolated_new\" } is a fresh one", "properties": {"mode": {"enum": ["isolated_new", "isolated_named"], "type": "string"}, "name": {"description": "with isolated_named: the profile's name, as agent-devices_borrow gives it", "type": "string"}}, "required": ["mode"], "type": "object"},
@@ -257,7 +257,7 @@ export default {
       run: (ctx, input) => act(ctx, "browser_pointer", input),
     },
     _devices: {
-      description: "The person's devices that agents may use once they let them, each with whether they do and who is using it now, and the recent sessions.",
+      description: "The user's devices that agents may use once they let them, each with whether they do and who is using it now, and the recent sessions.",
       input: { type: "object", properties: {} },
       run: async (ctx) => ({
         devices: (await devices(ctx)).map(({ mirroring, ...d }) => (ctx.labs.mirroring ? { ...d, mirroring } : d)),
@@ -311,7 +311,7 @@ export default {
       },
     },
     _allow: {
-      description: "Lets agents use one of the person's devices, or stops them. Turning it on asks the person at the device first.",
+      description: "Lets agents use one of the user's devices, or stops them. Turning it on asks the user at the device first.",
       input: { type: "object", properties: { device: { type: "string" }, on: { type: "boolean" } }, required: ["device", "on"] },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);

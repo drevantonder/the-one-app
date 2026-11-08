@@ -25,7 +25,7 @@ impl Node {
     }
 
     /// Switches a part of a device's oned (a service, or `apps`, the app service) on or off there (this device if none
-    /// is named), for the device's person: that device's oned starts or stops it.
+    /// is named), for the device's user: that device's oned starts or stops it.
     pub async fn set_service(&self, caller: &Caller, device: Option<&str>, name: &str, on: bool) -> Result<()> {
         ensure!(device.is_some() || caller.key == self.0.id, "say which device");
         let device = device.map(str::to_string).unwrap_or_else(|| self.device_name());
@@ -101,7 +101,7 @@ impl Node {
         self.with_or(false, |i| Ok(i.r.db().offering(name)?.into_iter().any(|s| s.device == Some(self.0.id) && i.peers.get(&s.key).is_some_and(|p| p.seen >= since))))
     }
 
-    /// What the app `name` this device runs says of its service's wrapper (`service: { network, person }` in its
+    /// What the app `name` this device runs says of its service's wrapper (`service: { network, user }` in its
     /// app.js), or why it can't be read: the app isn't running here, or its deploy says nothing of it.
     pub async fn service_declared(&self, name: &str) -> Result<crate::services::sandbox::Declared> {
         ensure!(self.0.apps.has(name), "its app isn't running on this device");
@@ -114,7 +114,7 @@ impl Node {
         &self.0.apps
     }
 
-    /// Whether this device runs apps' calls: unless its person switched its app service off.
+    /// Whether this device runs apps' calls: unless its user switched its app service off.
     pub fn runs_apps(&self) -> bool {
         // What it can't read, it keeps running.
         self.with_or(true, |i| Ok(!Self::off(i.r.db(), &self.0.id, crate::database::scopes::APPS_PART)?))
@@ -144,17 +144,17 @@ impl Node {
         }
         for (name, held) in self.0.parts.held() {
             if let Some(part) = out.get_mut(&name) {
-                (part.sandbox, part.person) = (held.sandbox, held.person);
+                (part.sandbox, part.user) = (held.sandbox, held.user);
             }
         }
         Ok(out.into_values().collect())
     }
 
-    /// Why a service isn't served here, if its person switched it off.
+    /// Why a service isn't served here, if its user switched it off.
     pub fn removed_here(&self, name: &str) -> Option<String> {
         self.with_or(None, |i| {
             let m = i.r.db();
-            Ok(Self::off(m, &self.0.id, name)?.then(|| format!("{} is switched off on {}; its person switches it on in Settings › Devices", self.service_title(name), self.device_name())))
+            Ok(Self::off(m, &self.0.id, name)?.then(|| format!("{} is switched off on {}; its user switches it on in Settings › Devices", self.service_title(name), self.device_name())))
         })
     }
 }

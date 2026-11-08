@@ -37,7 +37,7 @@ pub struct Run<'a> {
     pub scopes: Option<Vec<String>>,
     /// The agent credited, if one asked.
     pub agent: Option<&'a str>,
-    /// The person agreed to what it sends or can't undo (`confirm: true`, `--confirm`).
+    /// The user agreed to what it sends or can't undo (`confirm: true`, `--confirm`).
     pub confirmed: bool,
     pub trace: bool,
 }
@@ -65,7 +65,7 @@ pub fn dispatch(node: &Client, name: &str, mut input: Map<String, Value>, reader
     }
 }
 
-/// Runs the tool `name` (as MCP names it) as the person: the core's (`core_tools`), else an app's, as a call. What
+/// Runs the tool `name` (as MCP names it) as the user: the core's (`core_tools`), else an app's, as a call. What
 /// sends or can't be undone (`confirm`) runs only once they agreed.
 pub fn run(node: &Client, name: &str, confirm: bool, input: Map<String, Value>, how: Run) -> Called {
     let refused = |why: String| Called { ok: Err(Failed::Refused(why).into()), trace: None };

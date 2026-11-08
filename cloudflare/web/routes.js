@@ -1,6 +1,6 @@
 // The URL is the place: `/` (You), `/page/<scope>`, `/accounts` (every page's), `/settings`, `/settings/<screen>?params=`
 // (a Settings screen), `/app/<app>/<screen>?params=&scope=`; and `/vault?id=&scope=`, a request for an item, as a sheet
-// over You. Each is a screen: the client's own (`own`, by name), or an app's. The sidebar lists the person's pages,
+// over You. Each is a screen: the client's own (`own`, by name), or an app's. The sidebar lists the user's pages,
 // their apps and Settings' items (`sections`). The window goes to each as the URL changes (`whenMoved`).
 import { platform } from "./platform.js";
 import { accountsOn, appBadge, appsOn, here, label, pages, settingsItems } from "./store.js";

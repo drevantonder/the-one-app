@@ -3,7 +3,7 @@
 
 uniffi::setup_scaffolding!();
 
-/// Why a note didn't open, in words a person reads.
+/// Why a note didn't open, in words a user reads.
 #[derive(Debug, uniffi::Error)]
 pub enum OneError {
     Failed { reason: String },

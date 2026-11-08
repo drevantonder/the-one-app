@@ -10,7 +10,7 @@ export function GoogleSettings({ title, blurb }) {
   // What's under way: a link to sign in at (`link`), finishing one (`finishing`), or why one failed (`why`, with its retry).
   const [step, setStep] = useState(null)
   const [signing, setSigning] = useState(false)
-  // Not set up for anyone yet, and not this person's to set up: what to do, and no button that can't work.
+  // Not set up for anyone yet, and not this user's to set up: what to do, and no button that can't work.
   const [blocked, setBlocked] = useState(null)
 
   const stop = () => (setSigning(false), setStep(null))

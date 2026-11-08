@@ -481,7 +481,7 @@ pub struct Check<'a> {
 }
 
 /// Restores each scope's newest snapshot from a place, checking every blob, and who's who from `global`'s steps the
-/// place's copy of the bucket holds. Says what came back: each scope's blobs and databases, and by name the people and
+/// place's copy of the bucket holds. Says what came back: each scope's blobs and databases, and by name the users and
 /// apps; how much the network's backup takes there; what's wrong (`problems`), and the scopes whose snapshots none of
 /// `keys` opens (`unchecked`); no scopes at all if nothing's there yet. Databases are `check_databases'`.
 pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
@@ -522,7 +522,7 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
         "network": m.name()?,
         "bytes": bytes,
         "scopes": scopes,
-        "people": m.users()?.into_iter().filter(|u| !u.removed).map(|u| u.name).collect::<Vec<_>>(),
+        "users": m.users()?.into_iter().filter(|u| !u.removed).map(|u| u.name).collect::<Vec<_>>(),
         "apps": m.apps()?.into_iter().filter(|a| !a.erased && a.bundle.is_some()).map(|a| a.name).collect::<Vec<_>>(),
         "problems": problems,
         "unchecked": unchecked,
@@ -595,7 +595,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
     for (database, (at, copied)) in &snapshot.databases {
         let Some((app, db)) = database.split_once('/') else { continue };
         let prefix = crate::bucket::database_prefix(scope, app, db);
-        // What a person calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
+        // What a user calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
         let said = match (crate::database::scopes::CoreDb::of(app, db), app, db) {
             (Some(core), ..) => core.said().to_string(),
             (None, crate::database::scopes::APP, db) => db.to_string(),
@@ -734,7 +734,7 @@ mod tests {
         };
         let (problems, restored, report) = checked();
         assert_eq!(problems, Vec::<String>::new());
-        assert_eq!((report["network"].as_str(), report["people"].clone()), (Some("Home"), json!(["Andre"])), "who's who from its steps");
+        assert_eq!((report["network"].as_str(), report["users"].clone()), (Some("Home"), json!(["Andre"])), "who's who from its steps");
         let snapshot = restored[0].snapshot.clone();
         assert_eq!(snapshot.databases["tally/main"], (at, copy));
         assert_eq!(check_databases(&place, network, &snapshot, &epochs, Some(&bucket)).await, Vec::<String>::new(), "every database restores from the backup");

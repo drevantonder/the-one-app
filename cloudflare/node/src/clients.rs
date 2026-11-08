@@ -121,7 +121,7 @@ pub fn device_nodes(me: &str, nodes: Vec<String>) -> Result<(), JsError> {
     client.set_nodes(&keys(&nodes)?).map_err(thrown)
 }
 
-/// Asks the first of the device `me`'s nodes that answers, as its person, with the keys that kind of request needs
+/// Asks the first of the device `me`'s nodes that answers, as its user, with the keys that kind of request needs
 /// (`Keyring::request`), handed until `until` (ms), through `on` (`On`): `headers` names and values, one after the other.
 /// → `{ node, status, headers, body }`, `node` the key (hex) of the node that answered, the body whole, at most
 /// `ANSWER_MOST`. Throws with `sent: false` if it reached none, and `notLetIn` if who's who doesn't list it.
@@ -155,8 +155,8 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
 }
 
 /// The answer to an MCP client's call of a core tool that's one request the device answers itself (`one::core_tools`,
-/// `one::settings::answered`): one that changes who can do what, which it signs as its person's, as any device does.
-/// None for any other MCP message, which goes to a node, as its person.
+/// `one::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
+/// None for any other MCP message, which goes to a node, as its user.
 async fn tool_here(keyring: &Keyring, client: &one_client::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, one_client::Error>> {
     use one::core_tools::{Asked, Reader, Runs};
     let msg: Value = serde_json::from_slice(body).ok()?;
@@ -222,7 +222,7 @@ pub async fn device_close(me: String) {
 }
 
 /// What the device `me` (hex), whose seal key's secret is `seal`, knows of who's who, read through `on` (`On`): the first
-/// time, everything, after that what's new. → `{ user, nodes: [{ key, seal }] }`: its person as who's who lists it, and
+/// time, everything, after that what's new. → `{ user, nodes: [{ key, seal }] }`: its user as who's who lists it, and
 /// the nodes it may ask, hex. Throws with `notLetIn` until who's who lists it as a client device, with its keys.
 #[wasm_bindgen]
 pub async fn device_view(me: String, seal: Vec<u8>, on: JsValue) -> Result<String, JsValue> {

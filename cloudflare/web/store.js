@@ -1,4 +1,4 @@
-// What the window shows, as the person's nodes say it: their state (`/v1/state`), their apps and their badges, kept
+// What the window shows, as the user's nodes say it: their state (`/v1/state`), their apps and their badges, kept
 // here as the window was last so it draws at once; the devices waiting to be let in; and signing out, which forgets it.
 // The window draws it again whenever it changes (`whenChanged`).
 import { platform } from "./platform.js";
@@ -20,7 +20,7 @@ const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
 const keepsAccounts = (a) => !!a?.tools?.some((t) => t.accounts);
 const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
 
-/// Every page this person can read, as the sidebar lists them: the node's (`pages` in `/v1/state`).
+/// Every page this user can read, as the sidebar lists them: the node's (`pages` in `/v1/state`).
 export const pages = () => store.state?.pages || [];
 const page = (scope) => pages().find((p) => p.scope === scope);
 export const appsOn = (p) => store.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
@@ -43,7 +43,7 @@ export function withWaiting(state) {
   return { ...state, settings_items: items };
 }
 
-/// What Settings shows this person, in order, as the node says (`settings_items`).
+/// What Settings shows this user, in order, as the node says (`settings_items`).
 export const settingsItems = () => withWaiting(store.state)?.settings_items || [];
 /// Whether a url is this site's: a page the gateway serves, shown in place rather than in a new tab.
 export const here = (url) => new URL(url, location.href).origin === location.origin;
@@ -102,7 +102,7 @@ export const lastAt = () => Number(localStorage.getItem(`${LAST}.at`)) || null;
 let joining = false;
 export const isJoining = () => joining;
 export const setJoining = (on) => (joining = on);
-/// Settled once this device has been let in as its person's device, or needn't be: what screens ask waits for it,
+/// Settled once this device has been let in as its user's device, or needn't be: what screens ask waits for it,
 /// since only a device hands a node the keys it needs.
 export const joined = (() => {
   let done;
@@ -158,7 +158,7 @@ export async function signOut(why) {
 }
 whenRemoved(signOut);
 
-/// Signs out as a device: out of its person's devices first, so signing in again replaces it, then its tokens go.
+/// Signs out as a device: out of its user's devices first, so signing in again replaces it, then its tokens go.
 export async function leave() {
   await platform.leave(api);
   return signOut();

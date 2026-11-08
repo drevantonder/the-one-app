@@ -1,21 +1,21 @@
-//! A service's sandbox: what its program may reach, as its app declares (`service: { network, person }` in its
+//! A service's sandbox: what its program may reach, as its app declares (`service: { network, user }` in its
 //! app.js, `Declared`), and how this machine holds it to that (`How`). The service's endpoint (`oned <name>`,
 //! src/services/endpoint.rs) holds its key and starts its program; the program never sees the key.
 //!
-//! - **Linux**, a service not run as the person: a unit of the template `<cli>-service@.service`, which `<cli> services
-//!   sandbox` writes once as root (install.sh runs it) with a polkit rule letting the node's person start and stop
+//! - **Linux**, a service not run as the user: a unit of the template `<cli>-service@.service`, which `<cli> services
+//!   sandbox` writes once as root (install.sh runs it) with a polkit rule letting the node's user start and stop
 //!   only those. systemd gives it its own OS user (`DynamicUser=`), its own folder (`StateDirectory=`), no home and a
 //!   read-only system. Its program, our launcher (`oned --sandboxed=<dir>`, `launch`) and a socket to its endpoint
 //!   are put in its folder here (`dir`), which the unit sees read-only at `/run/<cli>`.
-//! - **Linux**, one run as the person: the same launcher, started by its endpoint as the person.
-//! - **Mac**: its program under a Seatbelt profile (`sandbox-exec`) written from its declaration, as the person: only
-//!   its own folder, unless it runs as the person, and the network only through its endpoint.
+//! - **Linux**, one run as the user: the same launcher, started by its endpoint as the user.
+//! - **Mac**: its program under a Seatbelt profile (`sandbox-exec`) written from its declaration, as the user: only
+//!   its own folder, unless it runs as the user, and the network only through its endpoint.
 //!
 //! On Linux the launcher gives the program a network of its own with nothing in it (an unprivileged user and network
 //! namespace), and forwards a port there to its endpoint's socket, where the program finds the services' API and a
 //! proxy (`connect`) that reaches only the hosts its app declares (`HTTPS_PROXY`). A declared port on this machine
 //! (`127.0.0.1:11434`) is forwarded at the same port. A service declaring `"*"` reaches any host; one also run as the
-//! person runs as before, outside any sandbox.
+//! user runs as before, outside any sandbox.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -26,13 +26,13 @@ use serde::{Deserialize, Serialize};
 use crate::config::{CLI, NAME};
 
 /// What an app declares its service may do: the hosts it may reach (`"*"`: any; `"*.example.com"`: that domain's;
-/// `"host:port"`: only that port), and whether it runs as the node's person, with their files.
+/// `"host:port"`: only that port), and whether it runs as the node's user, with their files.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Declared {
     #[serde(default)]
     pub network: Vec<String>,
     #[serde(default)]
-    pub person: bool,
+    pub user: bool,
 }
 
 impl Declared {
@@ -62,13 +62,13 @@ impl Declared {
 /// How a service's program runs on this machine.
 #[derive(Clone, Debug, PartialEq)]
 pub enum How {
-    /// As the person, as a plain process: one declared to run as them with any host; or, saying why, one this machine
+    /// As the user, as a plain process: one declared to run as them with any host; or, saying why, one this machine
     /// can't sandbox.
     Plain(Option<String>),
     /// Linux: a unit of its own, as its own OS user.
     Unit,
-    /// Linux: the launcher, as the person.
-    Person,
+    /// Linux: the launcher, as the user.
+    User,
     /// Mac: under a Seatbelt profile.
     Seatbelt,
 }
@@ -78,14 +78,14 @@ pub fn how(declared: Option<&Declared>, device: &str) -> How {
     let Some(d) = declared else {
         return How::Plain(Some("Its app doesn’t say what it may reach.".into()));
     };
-    if d.person && d.any_host() {
+    if d.user && d.any_host() {
         return How::Plain(None);
     }
     if cfg!(target_os = "macos") {
         return How::Seatbelt;
     }
-    if d.person {
-        return How::Person;
+    if d.user {
+        return How::User;
     }
     match template().exists() {
         true => How::Unit,
@@ -117,7 +117,7 @@ pub fn unit(name: &str) -> String {
     format!("{CLI}-service@{}.service", instance(name))
 }
 
-/// Where its sandbox's folders are: in the person's home, but not the node's, which a throwaway network has apart.
+/// Where its sandbox's folders are: in the user's home, but not the node's, which a throwaway network has apart.
 fn root() -> PathBuf {
     crate::user_home().join(".local/share").join(format!("{CLI}-services"))
 }
@@ -127,10 +127,10 @@ pub fn dir(name: &str) -> PathBuf {
     root().join(instance(name))
 }
 
-/// The script, run as root, that lets this machine's person start services in their sandbox: the unit template and
+/// The script, run as root, that lets this machine's user start services in their sandbox: the unit template and
 /// the polkit rule, and polkit itself if it's missing. `<cli> services sandbox | sudo sh`; install.sh runs it.
 pub fn setup_script() -> Result<String> {
-    let user = std::env::var("USER").ok().filter(|u| !u.is_empty() && u != "root").context("run it as the node's person, not root: <cli> services sandbox | sudo sh")?;
+    let user = std::env::var("USER").ok().filter(|u| !u.is_empty() && u != "root").context("run it as the node's user, not root: <cli> services sandbox | sudo sh")?;
     ensure!(user.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)), "{user} isn't a user name this can write");
     let home = crate::user_home();
     let home = home.to_str().filter(|h| !h.contains(['\n', '"', '\'', '\\', '$', '`', ' '])).context("the home folder's path has characters a unit can't take")?;
@@ -275,8 +275,8 @@ pub fn systemctl(args: &[&str]) -> Result<String> {
     Ok(said)
 }
 
-/// The Seatbelt profile for a service on a Mac: everything as the person, but the network only to its endpoint (and
-/// the ports here it declares), unless it declares any host; and, unless it runs as the person, no files of theirs
+/// The Seatbelt profile for a service on a Mac: everything as the user, but the network only to its endpoint (and
+/// the ports here it declares), unless it declares any host; and, unless it runs as the user, no files of theirs
 /// but its own folder, `data`, and its `program`.
 pub fn seatbelt(declared: &Declared, endpoint: u16, data: &Path, token: &Path, program: &Path) -> String {
     let quoted = |p: &Path| format!("\"{}\"", p.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\""));
@@ -287,7 +287,7 @@ pub fn seatbelt(declared: &Declared, endpoint: u16, data: &Path, token: &Path, p
             profile.push_str(&format!("(allow network-outbound (remote ip \"localhost:{port}\"))\n"));
         }
     }
-    if !declared.person {
+    if !declared.user {
         profile.push_str("(deny file-read* file-write* (subpath \"/Users\") (subpath \"/Volumes\") (subpath \"/private/var/folders\"))\n");
         profile.push_str(&format!("(allow file-read* file-write* (subpath {}))\n", quoted(data)));
         profile.push_str(&format!("(allow file-read* (literal {}) (literal {}))\n", quoted(token), quoted(program)));
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn hosts() {
-        let d = Declared { network: vec!["web.whatsapp.com".into(), "*.whatsapp.net".into(), "127.0.0.1:11434".into()], person: false };
+        let d = Declared { network: vec!["web.whatsapp.com".into(), "*.whatsapp.net".into(), "127.0.0.1:11434".into()], user: false };
         assert!(d.allows("web.whatsapp.com", 443));
         assert!(d.allows("mmg.whatsapp.net", 443));
         assert!(!d.allows("whatsapp.net.evil.com", 443));
@@ -562,6 +562,6 @@ mod tests {
         assert!(!d.allows("127.0.0.1", 22));
         assert_eq!(d.local_ports(), vec![11434]);
         assert!(!d.any_host());
-        assert!(Declared { network: vec!["*".into()], person: true }.allows("anything.com", 22));
+        assert!(Declared { network: vec!["*".into()], user: true }.allows("anything.com", 22));
     }
 }

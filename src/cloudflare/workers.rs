@@ -37,7 +37,7 @@ pub struct Worker {
 
 /// The network's Workers, in the order they're deployed.
 ///
-/// Auth's Durable Object `Auth` holds every person's passkeys and accounts. The paths under `/api/auth` name the
+/// Auth's Durable Object `Auth` holds every user's passkeys and accounts. The paths under `/api/auth` name the
 /// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer, so they never change.
 pub const WORKERS: &[Worker] = &[
     Worker { name: "auth", entry: "auth/worker.js", class: Some("Auth"), place: Some(|s| (s.auth_url.as_str(), s.ports[0])), node_build: false, serves_web: false, reads_bucket: false, bindings: auth_bindings },
@@ -97,16 +97,16 @@ pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
 
 /// How a network's Workers are set up, wherever they run: kept in `<home>/cloudflare/settings.json`, with its secrets in
 /// `.env.local` beside it, which Varlock reads (see `SCHEMA`): their values, for Workers tried here, or
-/// `op(op://…)` references to 1Password, for one people use, so no file here holds them.
+/// `op(op://…)` references to 1Password, for a real network, so no file here holds them.
 #[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct Settings {
     /// The network's name, as sign-in screens say it.
     pub name: String,
-    /// The network's address, the one people use: the gateway's, which sends signing in to auth, MCP to the MCP
+    /// The network's address, the one users use: the gateway's, which sends signing in to auth, MCP to the MCP
     /// Worker, the relay's paths to the relay and the rest to the web client. Passkeys belong to its host name, so it
     /// doesn't change.
     pub address: String,
-    /// Where the CLI's Cloudflare commands reach auth; people reach it at the address.
+    /// Where the CLI's Cloudflare commands reach auth; users reach it at the address.
     pub auth_url: String,
     /// Whether the network has a Cloudflare node (`cloudflare node deploy`), which the relay wakes.
     #[serde(default)]
@@ -140,7 +140,7 @@ pub struct Settings {
     /// in the app (App Links) only if the address lists the app's package and one of them.
     #[serde(default)]
     pub android: Vec<String>,
-    /// For a network whose people sign in with Google (`config::SIGN_IN`): the Google OAuth client they sign in
+    /// For a network whose users sign in with Google (`config::SIGN_IN`): the Google OAuth client they sign in
     /// with, `(id, secret)`.
     #[serde(default, skip_serializing)]
     pub google: Option<(String, String)>,
@@ -152,11 +152,11 @@ pub struct Settings {
     /// with the Workers, and the custom build's APNs, FCM and WNS credentials, as its admin adds them.
     #[serde(default, skip)]
     pub push: std::collections::BTreeMap<String, String>,
-    /// A throwaway network's one person, `(id, name)`, whom its auth lets in with no passkey and no Google, so clients
+    /// A throwaway network's one user, `(id, name)`, whom its auth lets in with no passkey and no Google, so clients
     /// are tested with nobody there. Only `one throwaway` sets it, on the Workers it runs beside its throwaway network, listening
-    /// only on this machine; `deploy` refuses settings with it, so no Workers people use ever have it.
+    /// only on this machine; `deploy` refuses settings with it, so no Workers users use ever have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub throwaway_person: Option<(String, String)>,
+    pub throwaway_user: Option<(String, String)>,
     /// The device the Workers are deployed from, `(key in hex, name as it was)`: the first to deploy them, where their
     /// secrets are. Another device's deploy would upload over its, and make the secrets they make for themselves
     /// again (`at_home`).
@@ -174,7 +174,7 @@ fn google() -> bool {
 /// What Varlock reads the Workers' secrets by, each named as the Workers' binding is; `.env.local` gives their values.
 const SCHEMA: &str = "\
 # The Workers' secrets, read with Varlock: their values are in .env.local, as written for Workers tried on this
-# machine, or op(op://…) references to 1Password for one people use. Never print them.
+# machine, or op(op://…) references to 1Password for a real network. Never print them.
 # @defaultSensitive=true
 # @defaultRequired=true
 # ---
@@ -182,7 +182,7 @@ AUTH_SECRET=
 # The network's bucket's credentials, which only the URL signer holds.
 # @optional
 BUCKET=
-# For a network whose people sign in with Google: their Google OAuth client.
+# For a network whose users sign in with Google: their Google OAuth client.
 # @optional
 GOOGLE_CLIENT_ID=
 # @optional
@@ -359,9 +359,9 @@ impl Settings {
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
         settings.cloudflare_node_key = get("CLOUDFLARE_NODE_KEY").unwrap_or_default();
         settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
-        if settings.throwaway_person.is_none() && google() {
+        if settings.throwaway_user.is_none() && google() {
             settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
-            ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
+            ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client users sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
         }
         Ok(settings)
     }
@@ -409,7 +409,7 @@ impl Settings {
             devices: vec![],
             push: [("VAPID_KEY".to_string(), vapid_key())].into(),
             root: None,
-            throwaway_person: None,
+            throwaway_user: None,
             home: None,
             dir: crate::home(),
         }
@@ -417,14 +417,14 @@ impl Settings {
 
     /// A throwaway network's Workers (`one throwaway`): on free ports here, its address its gateway's at 127.0.0.1, which `one throwaway`
     /// lets each device it borrows reach at the same address; its bucket where its node serves its data (`bucket`), and
-    /// `person` signed in with nothing to show.
-    pub fn for_throwaway(home: &Path, bucket: &str, person: (String, String)) -> Result<Settings> {
+    /// `user` signed in with nothing to show.
+    pub fn for_throwaway(home: &Path, bucket: &str, user: (String, String)) -> Result<Settings> {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
         let ports = [free()?, free()?];
         let mut settings = Settings::new("Throwaway", &format!("http://127.0.0.1:{}", ports[1]));
         settings.auth_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
-        settings.throwaway_person = Some(person);
+        settings.throwaway_user = Some(user);
         settings.dir = home.to_path_buf();
         // Its node serves its data there (throwaway::bucket), signatures unchecked: the URL signer holds these.
         settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway", "region": "auto", "key_id": "throwaway", "secret": "throwaway" }));
@@ -572,7 +572,7 @@ fn auth_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         // Whether a request's signer is one of the network's endpoints, and an admin's.
         plain("RELAY", "service:relay"),
-        // Pushes to a person's devices, by the push Worker's entrypoint for the network's own Workers.
+        // Pushes to a user's devices, by the push Worker's entrypoint for the network's own Workers.
         plain("PUSH", "service:push:Sender"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", settings.name.clone()),
@@ -580,7 +580,7 @@ fn auth_bindings(settings: &Settings) -> Vec<Binding> {
         // Its own apps' sign-ins come back to `<cli>://signed-in/`.
         plain("CLI", crate::config::CLI),
     ];
-    if let Some((id, name)) = &settings.throwaway_person {
+    if let Some((id, name)) = &settings.throwaway_user {
         out.extend([plain("SIGN_IN", "throwaway"), plain("THROWAWAY_USER", id.clone()), plain("THROWAWAY_NAME", name.clone())]);
     } else if google() {
         out.extend([plain("SIGN_IN", "google"), plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN)]);
@@ -623,7 +623,7 @@ pub fn served_with(settings: &Settings, web: &Path, cloudflare_node: Option<Modu
             bindings: worker.bindings(settings).into_iter().map(|(n, v, _)| (n, v)).collect(),
             assets: worker.serves_web.then(|| web.to_path_buf()),
             // A throwaway network's URL signer, and the remote MCP server's devices reading by its URLs, reach its bucket on this machine.
-            outbound: (worker.reads_bucket && settings.throwaway_person.is_some()).then(|| NEARBY.to_string()),
+            outbound: (worker.reads_bucket && settings.throwaway_user.is_some()).then(|| NEARBY.to_string()),
         });
     }
     served.extend(node);
@@ -706,7 +706,7 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let web = dir.join("web");
     let served = served(settings, &web)?;
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
-    ensure!(settings.throwaway_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
+    ensure!(settings.throwaway_user.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
     let mut files = settings.web();
     parses(&files)?;
@@ -1186,7 +1186,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)]) -
 }
 
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
-    ensure!(settings.throwaway_person.is_none(), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network");
+    ensure!(settings.throwaway_user.is_none(), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network");
     if workers.iter().any(|w| w.serves_web) {
         parses(web)?;
     }

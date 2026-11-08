@@ -649,7 +649,7 @@ function Z(t) {
 	}), n[9] = o, n[10] = s, n[11] = u, n[12] = d) : d = n[12], d;
 }
 function te(t) {
-	let n = e(46), { r, busy: i, answer: a } = t, s = r.yours ? "" : `${r.person}’s first device`, c;
+	let n = e(46), { r, busy: i, answer: a } = t, s = r.yours ? "" : `${r.user}’s first device`, c;
 	n[0] !== r.place || n[1] !== s ? (c = [s, r.place].filter(Boolean), n[0] = r.place, n[1] = s, n[2] = c) : c = n[2];
 	let l = c.join(" · "), u = `${r.device} wants to join`, d;
 	n[3] === r.device ? d = n[4] : (d = R(r.device), n[3] = r.device, n[4] = d);
@@ -775,7 +775,7 @@ function re(t) {
 			"?"
 		]
 	}), n[3] = l.device, n[4] = y);
-	let b = l.new ? `${l.person}’s first device. They join ${O}.` : "It can open everything you can.", x;
+	let b = l.new ? `${l.user}’s first device. They join ${O}.` : "It can open everything you can.", x;
 	n[5] === b ? x = n[6] : (x = /* @__PURE__ */ w("div", {
 		className: "text-sm text-muted-foreground",
 		children: b
@@ -1216,7 +1216,7 @@ function he({ m: e, cellOpen: t, tap: n }) {
 	if (!r.length) return /* @__PURE__ */ w(s, { children: "None of your devices runs services." });
 	let i = {};
 	for (let t of r.flatMap((e) => e.parts)) i[t.name] ||= e.partTitle(t);
-	let o = Object.keys(i).sort((e, t) => (t === "apps") - (e === "apps") || i[e].localeCompare(i[t])), c = o.filter((e) => r.some((t) => t.parts.some((t) => t.name === e && t.on && t.person))).map((e) => i[e]), l = (t) => t === "apps" ? {
+	let o = Object.keys(i).sort((e, t) => (t === "apps") - (e === "apps") || i[e].localeCompare(i[t])), c = o.filter((e) => r.some((t) => t.parts.some((t) => t.name === e && t.on && t.user))).map((e) => i[e]), l = (t) => t === "apps" ? {
 		name: "apps",
 		title: "Runs apps",
 		icon: "squares-four",

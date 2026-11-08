@@ -61,7 +61,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
     super.init()
     // Before the app has finished starting, so a notification that started it is told here.
     UNUserNotificationCenter.current().delegate = self
-    // The person's Appearance from a window's first frame, not a flash of the other one first.
+    // The user's Appearance from a window's first frame, not a flash of the other one first.
     NotificationCenter.default.addObserver(forName: UIWindow.didBecomeVisibleNotification, object: nil, queue: .main) { note in
       (note.object as? UIWindow).map(Self.appear)
     }
@@ -112,7 +112,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
 
   // MARK: Notifications
 
-  /// Whether it shows notifications, asking the person first if `ask` and they haven't said → granted, denied or
+  /// Whether it shows notifications, asking the user first if `ask` and they haven't said → granted, denied or
   /// default.
   @objc public func notify(_ invoke: Invoke) throws {
     let args = try invoke.parseArgs(AskArgs.self)
@@ -132,7 +132,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
     }
   }
 
-  /// This iPhone's APNs token (hex), for the push Worker; asking the person to notify the first time. A token comes
+  /// This iPhone's APNs token (hex), for the push Worker; asking the user to notify the first time. A token comes
   /// whatever they answer, for pushes that only wake the app.
   @objc public func push(_ invoke: Invoke) throws {
     DispatchQueue.main.async {
@@ -151,7 +151,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
     }
   }
 
-  /// What waits for the person, on the app's icon.
+  /// What waits for the user, on the app's icon.
   @objc public func badge(_ invoke: Invoke) throws {
     let args = try invoke.parseArgs(CountArgs.self)
     UNUserNotificationCenter.current().setBadgeCount(args.count)
@@ -164,7 +164,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
   }
 
   /// A tapped notification opens its screen (the app's Rust takes the link); Approve and Not Me answer the device that
-  /// asked to join, as this device, where the person's node checks the request is theirs.
+  /// asked to join, as this device, where the user's node checks the request is theirs.
   func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
     let info = response.notification.request.content.userInfo
     if let code = info["join"] as? String, [Notes.approve, Notes.notMe].contains(response.actionIdentifier) {
@@ -201,7 +201,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
     }
   }
 
-  /// The document camera → `{ files }`, each page a JPEG; none if the person cancels.
+  /// The document camera → `{ files }`, each page a JPEG; none if the user cancels.
   @objc public func scan(_ invoke: Invoke) throws {
     DispatchQueue.main.async {
       Files.scan(from: self.top) { result in
@@ -238,7 +238,7 @@ class OnePlugin: Plugin, UNUserNotificationCenterDelegate, ASWebAuthenticationPr
     invoke.resolve()
   }
 
-  /// Light, dark or automatic, as the person chose: now, and from the first frame of every start.
+  /// Light, dark or automatic, as the user chose: now, and from the first frame of every start.
   @objc public func appearance(_ invoke: Invoke) throws {
     let args = try invoke.parseArgs(ValueArgs.self)
     UserDefaults.standard.set(args.value, forKey: "appearance")

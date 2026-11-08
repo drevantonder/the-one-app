@@ -37,7 +37,7 @@ struct Account {
 }
 
 fn reading(a: &Account) -> Value {
-    // The label a person tells accounts apart by, as claude-swap's list gave them: the team (Personal for one's own
+    // The label a user tells accounts apart by, as claude-swap's list gave them: the team (Personal for one's own
     // plan) and the email.
     let label = if a.email.is_empty() { String::new() } else if a.org.is_empty() || a.org.ends_with("'s Organization") { format!("Personal · {}", a.email) } else { format!("{} · {}", a.org, a.email) };
     let mut out = json!({ "provider": a.provider, "account": label, "email": a.email, "org": a.org, "active": a.active, "disabled": a.disabled, "plan": a.plan });
@@ -179,7 +179,7 @@ fn claude_swap_accounts() -> Vec<Account> {
 }
 
 /// Claude Code's own sign-in, when no claude-swap is here: `~/.claude/.credentials.json` (on a Mac, the Keychain
-/// item Claude Code uses), its person and team from `~/.claude.json`'s oauthAccount.
+/// item Claude Code uses), its user and team from `~/.claude.json`'s oauthAccount.
 fn claude_code_account() -> Option<Account> {
     let config = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".claude"));
     let text = std::fs::read_to_string(config.join(".credentials.json")).ok().or_else(|| keychain("Claude Code-credentials", ""))?;

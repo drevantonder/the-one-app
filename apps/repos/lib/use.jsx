@@ -1,4 +1,4 @@
-// What every Repos screen shares: a call's answer, kept fresh; the room a screen has; times and names as a person
+// What every Repos screen shares: a call's answer, kept fresh; the room a screen has; times and names as a user
 // reads them; and where git reaches a repo.
 import { createContext, useCallback, useContext, useEffect, useState } from "react"
 import { ListSkeleton, Problem, useWidth } from "@one/ui"

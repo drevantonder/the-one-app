@@ -22,7 +22,7 @@ pub use super::mobile::*;
 
 tauri::ios_plugin_binding!(init_plugin_one);
 
-/// What a call says it came from (as the iPhone app's did), and the platform as people say it.
+/// What a call says it came from (as the iPhone app's did), and the platform as users say it.
 pub const CLIENT: &str = "phone";
 pub const LABEL: &str = "iPhone";
 
@@ -85,7 +85,7 @@ pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Resu
     signing.sign_in_here(join, |u| signed_in_at(u, true))
 }
 
-/// In a build with pushes (Info.plist's `Push`), once it's let in: asks the person the first time, and gives the push
+/// In a build with pushes (Info.plist's `Push`), once it's let in: asks the user the first time, and gives the push
 /// Worker this iPhone's token, each start, as a token can change. Its notification extension opens each one.
 pub fn let_in(device: Arc<one_client::Device>) {
     if super::apple::info_true("Push") {
@@ -123,7 +123,7 @@ fn group() -> Option<PathBuf> {
     Some(PathBuf::from(path?.to_string()))
 }
 
-/// What the person calls this iPhone (UIDevice's name, which is "iPhone" unless the app may know theirs).
+/// What the user calls this iPhone (UIDevice's name, which is "iPhone" unless the app may know theirs).
 pub fn name() -> Option<String> {
     let device: Retained<AnyObject> = unsafe { msg_send![class!(UIDevice), currentDevice] };
     let name: Option<Retained<NSString>> = unsafe { msg_send![&device, name] };

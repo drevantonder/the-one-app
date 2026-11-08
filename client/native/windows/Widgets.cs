@@ -1,5 +1,5 @@
 // The Widgets board's widgets (Win+W), as the iPhone's (client/native/iphone/Widget): one kind, a widget from your pages, the one its
-// person chooses (another than those already pinned, until they do), drawn at the size it's placed at as an Adaptive
+// user chooses (another than those already pinned, until they do), drawn at the size it's placed at as an Adaptive
 // Card (WidgetCard.cs), its buttons and toggles running the widget's tools. Windows starts this helper as the
 // package's COM server for the board (Helper.cs). It draws from what the app keeps of every page's widgets for the
 // platform's own (client/native/src/widgets.rs), which the app writes whenever it sees them change, and asks the app,
@@ -70,7 +70,7 @@ public static class WidgetCache
         return ago.TotalDays < 1 ? $"Updated {(int)ago.TotalHours} hr ago" : $"Updated {at.ToLocalTime():d MMM}";
     }
 
-    /// The app wrote them again (it read them, or its person signed out there): `changed`, once it's done.
+    /// The app wrote them again (it read them, or its user signed out there): `changed`, once it's done.
     public static FileSystemWatcher Watch(Action changed)
     {
         Directory.CreateDirectory(Dir);

@@ -1,27 +1,27 @@
-//! A sign-in a person's own devices check themselves, without trusting the network's Workers, before one of them lets a new device
+//! A sign-in a user's own devices check themselves, without trusting the network's Workers, before one of them lets a new device
 //! in with no one tapping anything (docs/plan-device-approval.md). The new device's sign-in names it: an OIDC
 //! provider's ID token carries `nonce(device)`, which sign-in puts in the request it sends the provider, and a passkey's
 //! assertion signs `challenge(device, time)`, which sign-in makes the passkey prompt's challenge. Sign-in passes the token or
-//! the assertion on with the device's request to join, unchanged (`Proof`), and a device of the person's checks it:
+//! the assertion on with the device's request to join, unchanged (`Proof`), and a device of the user's checks it:
 //!
 //! - an ID token: signed by a key its issuer publishes (`keys_at`, only issuers named here), for one of the OIDC
-//!   clients the network's admins said its people sign in with (`CLIENTS`, a setting their device signs, never auth's
+//!   clients the network's admins said its users sign in with (`CLIENTS`, a setting their device signs, never auth's
 //!   word), issued just now (`FRESH`), and naming this device in this network;
-//! - a passkey's assertion: of this network's address, the person present, naming this device in this network just now,
+//! - a passkey's assertion: of this network's address, the user present, naming this device in this network just now,
 //!   and signed by the passkey's public key.
 //!
 //! Both name the network by its root (`Network::root`), so a sign-in made for another network lets no device in by itself:
 //! it's approved by its code.
 //!
 //! Only a device that signed in itself is let in by its sign-in. One whose sign-in was finished from a link opened
-//! elsewhere (the CLI's sign-in link, or any link sent to the person) could be anyone's who sent it, so sign-in passes its
+//! elsewhere (the CLI's sign-in link, or any link sent to the user) could be anyone's who sent it, so sign-in passes its
 //! proof on as `Proof::ByLink`, which is checked to record what it signed in with but never vouches: it's approved by a
 //! tap on its card, which names it and where it is. Auth tells the two apart by where the sign-in that asked came back
 //! to, which phishing can't change; a tampered sign-in could lie, which is the Cloudflare account's trust, as below.
 //!
 //! What it signs in with (`Account`) is recorded in the `device` entry that lists the device (`sign_in`), so the next
-//! device's proof is checked against the accounts the signed entries record for that person (`vouches`), never against
-//! what sign-in says. The first is recorded when a person, or for a newcomer the inviting admin, approves a device by its
+//! device's proof is checked against the accounts the signed entries record for that user (`vouches`), never against
+//! what sign-in says. The first is recorded when a user, or for a newcomer the inviting admin, approves a device by its
 //! code: what that device signed in with is then theirs, and their devices show it (and forget it) under its Sign-ins.
 //! A passkey's public key then comes from auth, which keeps it: passkeys are made on auth's own page, so no client sees
 //! one made without auth's code in between. Email links and passwords make no proof: only auth can check those, so
@@ -60,7 +60,7 @@ pub fn challenge(root: &[u8; 32], device: &Endpoint, at: u64) -> Vec<u8> {
     [DOMAIN, root, &device.key, &device.seal, &at.to_be_bytes()].concat()
 }
 
-/// The setting naming the OIDC clients a network's people sign in with, "<issuer> <client id>", one a line: an ID
+/// The setting naming the OIDC clients a network's users sign in with, "<issuer> <client id>", one a line: an ID
 /// token for any other counts for nothing, however it's signed. The device that deploys to Cloudflare writes it, as an
 /// admin's (`cloudflare deploy`, and `one throwaway` for its own).
 pub const CLIENTS: &str = "sign_in_clients";
@@ -74,7 +74,7 @@ pub struct Network {
     /// Its address, whose host is its passkeys' relying party.
     pub address: String,
     pub root: [u8; 32],
-    /// The OIDC clients its people sign in with, `(issuer, client id)`, from its `CLIENTS` setting.
+    /// The OIDC clients its users sign in with, `(issuer, client id)`, from its `CLIENTS` setting.
     pub clients: Vec<(String, String)>,
 }
 
@@ -85,7 +85,7 @@ impl Network {
     }
 }
 
-/// What a person signs in with, as the `device` entry that listed one of their devices records it.
+/// What a user signs in with, as the `device` entry that listed one of their devices records it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Account {
@@ -118,7 +118,7 @@ impl Account {
 pub enum Proof {
     IdToken(String),
     /// A passkey's assertion, each part base64url as WebAuthn's JSON has it, and the public key auth holds for it,
-    /// which counts only when a person approves the device by its code.
+    /// which counts only when a user approves the device by its code.
     Passkey { credential: String, authenticator_data: String, client_data: String, signature: String, public_key: String },
     /// A sign-in finished from a link opened on another device, not on the device asking: what it shows counts only for
     /// a device approved by a tap.
@@ -139,7 +139,7 @@ impl Proof {
     }
 }
 
-/// Where an issuer publishes the keys it signs ID tokens with, for the issuers a person's devices take: Google,
+/// Where an issuer publishes the keys it signs ID tokens with, for the issuers a user's devices take: Google,
 /// Apple, Microsoft (any tenant), and, for a throwaway network (`one throwaway`) at `address`, a loopback address only it has, its
 /// own sign-in. None for any other.
 pub fn keys_at(issuer: &str, address: &str) -> Option<String> {
@@ -165,7 +165,7 @@ pub fn check(proof: &Proof, device: &Endpoint, network: &Network, jwks: Option<&
         Proof::IdToken(token) => {
             let account = id_token(token, device, network, jwks.context("no keys to check its ID token with")?, now)?;
             let Account::Provider { issuer, audience, .. } = &account else { unreachable!() };
-            ensure!(network.clients.iter().any(|(i, a)| i == issuer && a == audience), "that ID token is for {audience} at {issuer}, not a client this network's people sign in with");
+            ensure!(network.clients.iter().any(|(i, a)| i == issuer && a == audience), "that ID token is for {audience} at {issuer}, not a client this network's users sign in with");
             Ok(account)
         }
         Proof::Passkey { credential, public_key, .. } => {
@@ -177,7 +177,7 @@ pub fn check(proof: &Proof, device: &Endpoint, network: &Network, jwks: Option<&
 }
 
 /// Whether `proof` lets `device` in with no one tapping: it's checked, and what it signs in with is one of `accounts`,
-/// the person's as the signed entries record them, a passkey checked against the public key recorded for it. → that
+/// the user's as the signed entries record them, a passkey checked against the public key recorded for it. → that
 /// account.
 #[cfg(feature = "sign-in-proof")]
 pub fn vouches(proof: &Proof, device: &Endpoint, network: &Network, jwks: Option<&Value>, accounts: &[Account], now: u64) -> Result<Account> {
@@ -271,7 +271,7 @@ fn ed25519(public: &[u8], message: &[u8], sig: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Whether a passkey's assertion names `device`, just now, at the network's `address`, with the person present, and
+/// Whether a passkey's assertion names `device`, just now, at the network's `address`, with the user present, and
 /// `public_key` (COSE, base64url) signed it.
 #[cfg(feature = "sign-in-proof")]
 fn assertion(proof: &Proof, device: &Endpoint, network: &Network, public_key: &str, now: u64) -> Result<()> {
@@ -287,7 +287,7 @@ fn assertion(proof: &Proof, device: &Endpoint, network: &Network, public_key: &s
     fresh(at, now)?;
     let host = origin.split_once("://").map_or(origin, |(_, h)| h).split(['/', ':']).next().unwrap_or("");
     ensure!(auth_data.len() >= 37 && auth_data[..32] == sha256(host.as_bytes()), "it's a passkey for another site");
-    ensure!(auth_data[32] & 0x01 != 0, "the person wasn't there to tap it");
+    ensure!(auth_data[32] & 0x01 != 0, "the user wasn't there to tap it");
     let signed = [&auth_data[..], &sha256(&client_json)].concat();
     cose_verify(&b64(public_key)?, &signed, &sig).context("its signature isn't that passkey's")
 }
@@ -336,7 +336,7 @@ mod tests {
     const OURS: &str = "1234-ours.apps.googleusercontent.com";
     const ROOT: [u8; 32] = [3; 32];
 
-    /// The network checking, whose people sign in with Google for `OURS`.
+    /// The network checking, whose users sign in with Google for `OURS`.
     fn ours() -> Network {
         Network::new(ADDRESS, ROOT, Some(&format!("{GOOGLE} {OURS}")))
     }
@@ -398,7 +398,7 @@ mod tests {
             c
         };
         refused(with("sub", json!("2002")), "another account's");
-        refused(with("aud", json!("someone-else.apps.googleusercontent.com")), "not a client this network's people sign in with");
+        refused(with("aud", json!("someone-else.apps.googleusercontent.com")), "not a client this network's users sign in with");
         refused(with("nonce", json!(nonce(&ROOT, &device(2)))), "for another device");
         refused(with("nonce", json!(nonce(&[4; 32], &d))), "for another device");
         refused(with("nonce", Value::Null), "for another device");
@@ -427,7 +427,7 @@ mod tests {
         // another app's client (an attacker's own), or with the network naming no client, is recorded as nothing.
         let theirs_app = p.token(with("aud", json!("attackers-app.apps.googleusercontent.com")));
         let err = check(&Proof::IdToken(theirs_app), &d, &ours(), Some(&jwks), NOW).unwrap_err().to_string();
-        assert!(err.contains("not a client this network's people sign in with"), "{err}");
+        assert!(err.contains("not a client this network's users sign in with"), "{err}");
         let none = Network::new(ADDRESS, ROOT, None);
         assert!(check(&Proof::IdToken(p.token(Provider::claims(&d))), &d, &none, Some(&jwks), NOW).is_err());
         let recorded = check(&Proof::IdToken(p.token(Provider::claims(&d))), &d, &ours(), Some(&jwks), NOW).unwrap();

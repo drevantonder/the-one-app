@@ -1,5 +1,5 @@
-//! A service's program in its sandbox (src/services/sandbox.rs) reaches only what its app declares: as the person, the network
-//! only through its endpoint, to the hosts declared; in its own unit, on a machine set up for one, not the person's
+//! A service's program in its sandbox (src/services/sandbox.rs) reaches only what its app declares: as the user, the network
+//! only through its endpoint, to the hosts declared; in its own unit, on a machine set up for one, not the user's
 //! home or another service's folder either.
 
 #![cfg(target_os = "linux")]
@@ -102,21 +102,21 @@ fn said(lines: impl Iterator<Item = String>) -> std::collections::BTreeMap<Strin
     out
 }
 
-/// A file in the person's home, beside every service's sandbox folder, which only a service run as the person reads.
+/// A file in the user's home, beside every service's sandbox folder, which only a service run as the user reads.
 fn secret(of: &str) -> std::path::PathBuf {
     let secret = one::services::sandbox::dir("sandbox-test").with_file_name(format!("test-secret-{of}-{}", std::process::id()));
     std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
-    std::fs::write(&secret, "the person's").unwrap();
+    std::fs::write(&secret, "the user's").unwrap();
     secret
 }
 
-/// As the person: their files, but the network only through its endpoint, and only the declared port.
+/// As the user: their files, but the network only through its endpoint, and only the declared port.
 #[test]
 fn a_service_reaches_only_what_its_app_declares() {
     let dir = super::temp("sandbox");
-    let secret = secret("person");
+    let secret = secret("user");
     let (declared, undeclared) = (server(), server());
-    let app = Declared { network: vec![format!("127.0.0.1:{declared}")], person: true };
+    let app = Declared { network: vec![format!("127.0.0.1:{declared}")], user: true };
     let name = format!("sandbox-test-{}", std::process::id());
     let launch = Launch { name: name.clone(), own_network: true, ports: vec![declared], data: Some(dir.join("data")) };
     let script = program(&dir, &secret, declared, undeclared);
@@ -128,23 +128,23 @@ fn a_service_reaches_only_what_its_app_declares() {
     let got = said(String::from_utf8_lossy(&out.stdout).lines().map(str::to_string));
     let _ = std::fs::remove_dir_all(&sandbox);
     let _ = std::fs::remove_file(&secret);
-    assert_eq!(got.get("home").map(String::as_str), Some("the person's"), "as the person, it reads their files: {got:?} {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(got.get("home").map(String::as_str), Some("the user's"), "as the user, it reads their files: {got:?} {}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(got.get("declared").map(String::as_str), Some("ok"), "{got:?}");
     assert_eq!(got.get("undeclared").map(String::as_str), Some("refused"), "{got:?}");
     assert_eq!(got.get("proxied").map(String::as_str), Some("refused"), "{got:?}");
 }
 
-/// In its own unit, as its own user: none of the person's files, nor another service's folder. This machine needs the
+/// In its own unit, as its own user: none of the user's files, nor another service's folder. This machine needs the
 /// unit's template (`one services sandbox | sudo sh`), and the test fails without it: a machine that can't run it
 /// can't say its services are kept in.
 #[test]
-fn a_service_in_its_own_unit_sees_none_of_the_persons_files() {
+fn a_service_in_its_own_unit_sees_none_of_the_users_files() {
     let template = one::services::sandbox::template();
     assert!(template.exists(), "this machine has no {}: set it up with `one services sandbox | sudo sh`", template.display());
     let dir = super::temp("sandbox-unit");
     let secret = secret("unit");
     let (declared, undeclared) = (server(), server());
-    let app = Declared { network: vec![format!("127.0.0.1:{declared}")], person: false };
+    let app = Declared { network: vec![format!("127.0.0.1:{declared}")], user: false };
     let name = "sandbox-test";
     // One run at a time on a machine: the unit is the same for all of them.
     let lock = std::fs::File::create(one::services::sandbox::dir(name).with_extension("lock")).unwrap();

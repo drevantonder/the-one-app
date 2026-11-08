@@ -65,7 +65,7 @@ pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&s
 /// Puts the Cloudflare node in the Cloudflare account of the network's Workers, with no address, and
 /// the relay again, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
-    anyhow::ensure!(settings.throwaway_person.is_none(), "a throwaway network's Workers run only beside its throwaway network");
+    anyhow::ensure!(settings.throwaway_user.is_none(), "a throwaway network's Workers run only beside its throwaway network");
     anyhow::ensure!(settings.cloudflare_node_endpoint().is_some(), "the Cloudflare node has no key: cloudflare node deploy makes one");
     let modules = modules()?;
     let name = NODE.worker_name();

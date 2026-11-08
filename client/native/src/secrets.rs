@@ -1,5 +1,5 @@
 //! The OS's secret store (the Secret Service, the Credential Manager, the Keychain), its items named as the Mac and
-//! iPhone apps named theirs, so the native app reads those: this app's device keys, one for each person at each address
+//! iPhone apps named theirs, so the native app reads those: this app's device keys, one for each user at each address
 //! (service `<cli> device`, account `<address> <sub>`, or `signing in` until a sign-in says whose), and the sign-in's
 //! refresh token (service `<cli> sign-in`, account `refresh`). Kept as bytes, as they were.
 
@@ -109,7 +109,7 @@ mod store {
     }
 }
 
-/// `<cli> <name>`; a throwaway build's, `<cli> throwaway <name>`, beside the person's own.
+/// `<cli> <name>`; a throwaway build's, `<cli> throwaway <name>`, beside the user's own.
 fn service(name: &str) -> String {
     let throwaway = if env!("IDENTIFIER").ends_with(".throwaway") { " throwaway" } else { "" };
     format!("{}{throwaway} {name}", one::config::CLI)
@@ -146,7 +146,7 @@ pub fn device_made(id: &str) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-/// The key the next sign-in is for, made the first time, so the person's devices can let it in by that sign-in.
+/// The key the next sign-in is for, made the first time, so the user's devices can let it in by that sign-in.
 pub fn signing_in() -> Result<[u8; 32], String> {
     if let Some(key) = device(SIGNING_IN) {
         return Ok(key);
@@ -156,7 +156,7 @@ pub fn signing_in() -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-/// An iPhone's id of its own, made the first time and kept past signing out (not a person's device key): what signing
+/// An iPhone's id of its own, made the first time and kept past signing out (not a user's device key): what signing
 /// in again replaces its sign-in under, as the iPhone app's was.
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 pub fn this_device() -> Result<[u8; 32], String> {

@@ -95,7 +95,7 @@ def sessions(since):
                 continue
             content = (e.get("message") or {}).get("content")
             if e.get("type") == "user" and (isinstance(content, str) or any(isinstance(c, dict) and c.get("type") == "text" for c in content or [])):
-                last = None  # a person's message: the time before it was theirs
+                last = None  # a user's message: the time before it was theirs
                 continue
             if not isinstance(content, list):
                 continue

@@ -9,7 +9,7 @@ use crate::config::{CLI, TARGET};
 use crate::release::Version;
 use serde_json::{Value, json};
 
-/// A platform a release is for: what installers and nodes name it, and what Go and a person do.
+/// A platform a release is for: what installers and nodes name it, and what Go and a user do.
 pub struct Platform {
     /// Rust's target triple, which a node and a release name it by.
     pub target: &'static str,
@@ -331,7 +331,7 @@ pub fn bun() -> Result<PathBuf> {
 
 /// A browser with no window on this machine, for drawing screens (one throwaway's web client, the tests), started as lean as
 /// it still works: CHROME's, Playwright's headless shell (a third of Chrome's memory), the usual Chromes, or
-/// Playwright's Chromium. Each app's frame keeps a process of its own, as in people's browsers, which the headless shell
+/// Playwright's Chromium. Each app's frame keeps a process of its own, as in users' browsers, which the headless shell
 /// doesn't do by itself and one throwaway's script needs to reach the frames.
 pub fn chrome() -> Option<std::process::Command> {
     let playwright = |prefix: &str, names: &[&str]| -> Option<PathBuf> {

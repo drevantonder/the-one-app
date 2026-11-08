@@ -1,4 +1,4 @@
-//! A CLI that's only a device of the throwaway network's person, as on a computer where no node runs.
+//! A CLI that's only a device of the throwaway network's user, as on a computer where no node runs.
 
 use std::path::{Path, PathBuf};
 
@@ -8,7 +8,7 @@ use one::config::CLI;
 use super::super::devices::{approve_code, is_code};
 
 /// `command`, run by this build's CLI as on a computer where no node runs: a client device of the throwaway network's
-/// person, with a home of its own beside it (`cli/`), which asks their nodes over iroh as every client does, in run
+/// user, with a home of its own beside it (`cli/`), which asks their nodes over iroh as every client does, in run
 /// priority's order (`client_device`). The first time it signs in with no passkey, and the throwaway network's machine
 /// approves the code it shows. `--build <program>` runs another build of the CLI (an older release's, say) as that
 /// device, with a home of its own (`cli-<its name>/`).
@@ -31,7 +31,7 @@ pub(crate) fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[S
     let joined = home.join("joined");
     if !joined.exists() {
         use std::io::BufRead;
-        eprintln!("Signing in a CLI as a device of the throwaway network's person…");
+        eprintln!("Signing in a CLI as a device of the throwaway network's user…");
         let mut child = as_device(&["sign-in".into(), "--address".into(), settings.address.clone()]).stdout(std::process::Stdio::piped()).spawn()?;
         for line in std::io::BufReader::new(child.stdout.take().context("no output from signing in")?).lines() {
             let line = line?;
@@ -47,7 +47,7 @@ pub(crate) fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[S
         std::fs::write(&joined, "")?;
     }
     if command.is_empty() {
-        println!("A CLI that's only a device of the throwaway network's person is signed in: {CLI} throwaway client cli <command> runs one as it.");
+        println!("A CLI that's only a device of the throwaway network's user is signed in: {CLI} throwaway client cli <command> runs one as it.");
         return Ok(());
     }
     let status = as_device(command).status()?;

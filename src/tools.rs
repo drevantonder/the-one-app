@@ -38,7 +38,7 @@ pub fn find(node: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
     Some((a, o))
 }
 
-/// A command's exit code for what went wrong: 2 what was typed is wrong, 3 refused (it needs --confirm, the person
+/// A command's exit code for what went wrong: 2 what was typed is wrong, 3 refused (it needs --confirm, the user
 /// isn't allowed, or isn't signed in), 1 anything else.
 pub fn exit_code(err: &anyhow::Error) -> i32 {
     match err.downcast_ref::<Failed>() {
@@ -100,7 +100,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
         }
     }
     check(&o["input"], &Value::Object(input.clone())).map_err(typed)?;
-    // At a terminal, the person is asked here; what they said is checked where every tool runs.
+    // At a terminal, the user is asked here; what they said is checked where every tool runs.
     let confirmed = confirmed || (o["confirm"] == true && asked_yes(&Reader::Cli.named(app, tool))?);
     let how = Run { reader: Reader::Cli, device, scopes, agent: g.agent, confirmed, trace: g.trace };
     let ran = run::run(node, &Reader::Mcp.named(app, tool), o["confirm"] == true, input, how);
@@ -165,7 +165,7 @@ pub fn in_cli_words(node: &Client, text: &str) -> String {
 }
 
 /// An empty list of accounts, from a tool that says it lists them (`accounts: true`), in words, with what to do:
-/// screens want the list, a person or agent reading wants this.
+/// screens want the list, a user or agent reading wants this.
 pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, reader: Reader) -> Option<String> {
     if tool["accounts"] != true || ok.as_array().is_none_or(|a| !a.is_empty()) {
         return None;
@@ -193,7 +193,7 @@ pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[
     let cli = commands.is_some();
     let apps = crate::core_tools::and_apps(node)?;
     let tools_of = |a: &Value| -> Vec<String> { a["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
-    // One the person could add: the node lists it, without tools for them, since it isn't added where they are.
+    // One the user could add: the node lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["tools"].is_null() && a["deleted"].is_null();
     if let Some(a) = apps.iter().find(|a| a["name"] == app) {
         let title = a["title"].as_str().unwrap_or(app);
@@ -206,7 +206,7 @@ pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[
         if addable(a) {
             return Ok(match cli {
                 true => format!("{title} isn't added yet: {CLI} add {app} adds it for you, or {CLI} add {app} --scope global for everyone"),
-                false => format!("{title} isn't added yet: add with app {app} and scope user adds it for the person, or global for everyone"),
+                false => format!("{title} isn't added yet: add with app {app} and scope user adds it for the user, or global for everyone"),
             });
         }
         let (tool, tools) = (tool.unwrap_or(""), tools_of(a));
@@ -239,7 +239,7 @@ pub fn own_device(tool: &Value) -> bool {
     tool["input"]["properties"].get("device").is_some()
 }
 
-/// Whether an app's calls run on a device of the person's choosing: it runs on every device, or uses a service (Shell
+/// Whether an app's calls run on a device of the user's choosing: it runs on every device, or uses a service (Shell
 /// on a named device, iMessage on the Mac), so MCP and search offer `device` as the CLI's `--device` does.
 fn runs_on_devices(app: &Value) -> bool {
     app["runs"] == "here" || app["uses"]["services"].as_array().is_some_and(|s| !s.is_empty())

@@ -6,7 +6,7 @@ impl Node {
     /// Runs a call another device, `remote`, asked for. A sign-in's runs only if its token is its caller's, with the
     /// keys handed with it, never this device's own: from a node, only in scopes that node runs. One with no token runs
     /// only from a client device of its caller, as that device's own: only then are this device's keys used, and only
-    /// for its own person, whose device that is.
+    /// for its own user, whose device that is.
     pub(in crate::node) async fn accept_call(&self, remote: Key, request: &Value) -> Reply {
         match self.accept(remote, request).await {
             Ok((mut req, me)) => {
@@ -24,11 +24,11 @@ impl Node {
         }
     }
 
-    /// Runs a call one of the network's services asked for, as its person, wherever it runs: a service writes nothing
+    /// Runs a call one of the network's services asked for, as its user, wherever it runs: a service writes nothing
     /// itself, and asks for the calls the program it offers makes (`/v1/call` where it's hosted).
     pub(in crate::node) async fn accept_service_call(&self, remote: Key, request: &Value) -> Reply {
         match self.accept_service(remote, request) {
-            // Its own service on another of its person's devices: sent there.
+            // Its own service on another of its user's devices: sent there.
             Ok((req, me)) if req.device.is_some() => match self.route(req, me).await {
                 Ok(ok) => Reply::Ok(ok),
                 Err(err) => Reply::failed(&err),
@@ -38,14 +38,14 @@ impl Node {
         }
     }
 
-    /// What a service may have run, as `service::limited` says: only its own app, in its person's own scope, here on
-    /// a node of that person's own, whose keys it is run with until grants land, calling no other app. A hacked
-    /// service gets no more than its own app's tools for its own person.
+    /// What a service may have run, as `service::limited` says: only its own app, in its user's own scope, here on
+    /// a node of that user's own, whose keys it is run with until grants land, calling no other app. A hacked
+    /// service gets no more than its own app's tools for its own user.
     pub(super) fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let me = self.check_caller(remote, request)?;
         ensure!(request["me"]["token"].is_null(), "a service asks with no sign-in");
         let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote)?.map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this network")?;
-        ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own person's node");
+        ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own user's node");
         let mut req: CallRequest = serde_json::from_value(crate::services::endpoint::limited(&name, request)?)?;
         let resolved = self.resolve(req.clone());
         ensure!(resolved.app == name, "a service asks only for its own app, {name}");
@@ -71,10 +71,10 @@ impl Node {
         if !serves {
             (req.from, req.depth) = (None, 0);
         }
-        // A service that runs as this device's own person (Shell, say) runs only for a device of theirs, never for a
+        // A service that runs as this device's own user (Shell, say) runs only for a device of theirs, never for a
         // sign-in a node passes on.
         let resolved = self.resolve(req.clone());
-        ensure!(own || resolved.service.is_none(), "{} runs only for its person's own devices", resolved.app);
+        ensure!(own || resolved.service.is_none(), "{} runs only for its user's own devices", resolved.app);
         if !own && req.service.is_none() {
             let req = self.resolve(req.clone());
             let named = req.scopes.clone();
@@ -100,7 +100,7 @@ impl Node {
         let scopes: Vec<Scope> = named.iter().map(|s| Scope::parse_for(s.as_str().context("a scope is its name")?, user)).collect::<Result<_>>()?;
         self.with(|i| {
             let m = i.r.db();
-            ensure!(scopes.iter().all(|s| m.may(user, "use", &scopes::object(s))), "that call reaches a scope its person may not use");
+            ensure!(scopes.iter().all(|s| m.may(user, "use", &scopes::object(s))), "that call reaches a scope its user may not use");
             ensure!(!machine || scopes.iter().all(|s| m.runs_for(from, s)), "{} doesn't run every scope that call names", short(from));
             Ok(())
         })?;
@@ -108,7 +108,7 @@ impl Node {
     }
 
     /// Who a call another device passed on is for: with a sign-in's token, someone that device's node serves or whose
-    /// client it is; with none, only the person whose client device `remote` is, asking itself; a person's service asks as
+    /// client it is; with none, only the user whose client device `remote` is, asking itself; a user's service asks as
     /// them, as itself.
     pub(in crate::node) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;

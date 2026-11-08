@@ -31,7 +31,7 @@ enum Files {
   }
 
   /// The document camera: finds each page's edges and straightens it, several in a row → each page as a JPEG
-  /// `{ name, type, size, base64 }`, "Scan <date> <n>.jpg"; none if the person cancels.
+  /// `{ name, type, size, base64 }`, "Scan <date> <n>.jpg"; none if the user cancels.
   static func scan(from top: UIViewController?, done: @escaping (Result<[[String: Any]], Error>) -> Void) {
     guard VNDocumentCameraViewController.isSupported else {
       return done(.failure(NSError(domain: "one", code: 1, userInfo: [NSLocalizedDescriptionKey: "This device can’t scan documents. Choose the files instead."])))

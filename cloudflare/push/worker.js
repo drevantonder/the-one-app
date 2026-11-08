@@ -8,7 +8,7 @@
 // the network's endpoints: `{ via, address, env?, topic?, keys?, seal }`, `via` one of apns (address: the APNs token,
 // hex; topic: the app's bundle id, one of `APNS_TOPICS`; env: sandbox or production), fcm (its FCM token), wns (its
 // channel URI) or webpush (its subscription's endpoint, with `keys: { p256dh, auth }`), and `seal`, its seal key (hex),
-// which only the network's own Workers seal to (below); and `user`, its person, as who's who lists it, once the device
+// which only the network's own Workers seal to (below); and `user`, its user, as who's who lists it, once the device
 // knows. `POST /push/unregister` forgets it.
 //
 // One of the network's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }] }`,
@@ -19,8 +19,8 @@
 //
 // The network's own Workers send through the `Sender` entrypoint, by binding: auth, for a device asking to join, whose
 // note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`); and asks
-// which devices registered as a person's (`theirs`), whom it pushes about their devices joining. That is only where to
-// send: a device names its person unchecked, so one that lies gets notes sealed to itself, which let no one in.
+// which devices registered as a user's (`theirs`), whom it pushes about their devices joining. That is only where to
+// send: a device names its user unchecked, so one that lies gets notes sealed to itself, which let no one in.
 //
 // Sends are limited: each sender `SENDS` requests a minute, each device `NOTES` notes a minute.
 //
@@ -116,7 +116,7 @@ export class Push extends DurableObject {
     if (!VIAS.includes(via)) refuse(400, `via is one of ${VIAS.join(", ")}`);
     if (typeof address !== "string" || !address || address.length > 1024) refuse(400, "say its address");
     if (!isKey(seal)) refuse(400, "seal is its seal key, hex");
-    if (user != null && !(typeof user === "string" && /^[\w-]{1,64}$/.test(user))) refuse(400, "user is its person's id");
+    if (user != null && !(typeof user === "string" && /^[\w-]{1,64}$/.test(user))) refuse(400, "user is its user's id");
     if (via === "apns") {
       if (!/^[0-9a-f]{16,200}$/.test(address)) refuse(400, "an APNs token is hex");
       if (!["sandbox", "production"].includes(env)) refuse(400, "env is sandbox or production");

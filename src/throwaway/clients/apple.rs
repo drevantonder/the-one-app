@@ -10,9 +10,9 @@ use super::super::devices::{approve_code, didnt_sign_in, shell_quote};
 use super::super::network::spawn;
 
 /// The Mac app (client/native), or with `iphone` the iPhone app on a simulator, as this checkout builds it, on the Mac `MAC` names to ssh (`mac` if none), beside the
-/// person's own app there: a throwaway's build (its own id, folder and Keychain items), in the Mac's logged-in session,
+/// user's own app there: a throwaway's build (its own id, folder and Keychain items), in the Mac's logged-in session,
 /// reaching the throwaway network at its address through ports ssh forwards there. Signed in as the throwaway network's
-/// first person as linux() is: its Sign In pressed, the sign-in approved as them and opened there, its code approved.
+/// first user as linux() is: its Sign In pressed, the sign-in approved as them and opened there, its code approved.
 /// What it keeps stays on the Mac, so a new build is still signed in; it's started again each time.
 pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, iphone: bool) -> Result<()> {
     let address = settings.address.as_str();
@@ -83,14 +83,14 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
             break;
         }
         match said.lines().rev().find_map(|l| l.trim().strip_prefix("Sign in: ")) {
-            // Approved as the person, then back to the app at its loopback port, which only the Mac reaches.
+            // Approved as the user, then back to the app at its loopback port, which only the Mac reaches.
             Some(url) if !signed => {
                 let back = crate::sign_in::approved_on_throwaway(address, url, None)?;
                 ssh(&format!("curl -s -m 30 -o /dev/null {}", shell_quote(&back)))?;
                 signed = true;
             }
             Some(_) => {}
-            // Signed out: its Sign In, pressed for the person.
+            // Signed out: its Sign In, pressed for the user.
             None => drop(eval(super::PRESS_SIGN_IN)),
         }
         if let Some(code) = said.lines().rev().find_map(|l| l.trim().strip_prefix("Code: "))

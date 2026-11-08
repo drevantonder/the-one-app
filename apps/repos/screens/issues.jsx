@@ -91,7 +91,7 @@ function Issues() {
   for (const k of ["label", "assignee", "author", "q"]) if (f[k]) input[k] = f[k]
   const list = useCall("issues", input, true)
   const labels = useCall("labels", { repo: P.repo })
-  const people = useCall("_people", { repo: P.repo })
+  const users = useCall("_users", { repo: P.repo })
   const d = list.data
   const filtered = !!(f.label || f.assignee || f.author || f.q)
   // The tab's count is the repo's open issues, whatever the filters.
@@ -128,7 +128,7 @@ function Issues() {
       </>
     )
   }
-  const names = (people.data || []).map((p) => ({ value: p.handle, title: p.name }))
+  const names = (users.data || []).map((p) => ({ value: p.handle, title: p.name }))
   const none = filtered ? "No issues match." : f.state === "open" ? "No open issues." : "No closed issues."
   const left = (
     <div className="flex max-w-2xl flex-col gap-3">

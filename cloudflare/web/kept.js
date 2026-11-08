@@ -1,4 +1,4 @@
-// What this browser keeps in IndexedDB's `one` database, its one store: its keys by person (`device:<user>`), the
+// What this browser keeps in IndexedDB's `one` database, its one store: its keys by user (`device:<user>`), the
 // nodes it asks (`nodes:<user>`), and what its keyring keeps (`<name>:<user>`,
 // one-client's `keyring::Keep`). A module of its own, for the worker that reaches the nodes (net-worker.js) to read
 // with nothing else.

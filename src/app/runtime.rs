@@ -50,7 +50,7 @@ pub struct Context {
     pub token: String,
     /// The app whose `ctx.apps` made the call, if one did.
     pub from: Option<String>,
-    /// The network's address, where a sign-in elsewhere sends the person back (`<address>/back`).
+    /// The network's address, where a sign-in elsewhere sends the user back (`<address>/back`).
     pub address: Option<String>,
     /// Everyone's and every group's handle (`ScopeDb::handles`).
     pub handles: Value,
@@ -221,7 +221,7 @@ impl Apps {
     }
 
     /// A widget's tree at `size` (`small`, `medium`, `large` or `xl`), which its render sees as `ctx.size`, with the
-    /// options a person chose for it (`ctx.options`, its own defaults for the rest).
+    /// options a user chose for it (`ctx.options`, its own defaults for the rest).
     pub async fn widget(&self, app: &str, name: &str, size: &str, options: &Value, ctx: &Context) -> Result<Value> {
         Ok(self.ask(app, "widget", json!({ "name": name, "size": size, "options": options, "labs": crate::labs::of_app(&ctx.labs, app), "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token, "handles": ctx.handles })).await?["ok"].clone())
     }

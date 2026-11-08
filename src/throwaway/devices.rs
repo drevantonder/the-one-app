@@ -109,7 +109,7 @@ pub(crate) fn is_code(text: &str) -> bool {
     text.len() == 9 && text.char_indices().all(|(i, c)| if i == 4 { c == ' ' } else { c.is_ascii_uppercase() || ('2'..='7').contains(&c) })
 }
 
-/// A native client's code, approved by the throwaway network's machine, as its person's device: then it's let in.
+/// A native client's code, approved by the throwaway network's machine, as its user's device: then it's let in.
 pub(crate) fn approve_code(dir: &Path, code: &str) -> Result<()> {
     eprintln!("Approving the device that shows {code}…");
     let approved = super::network::node_in(dir)?.post("/v1/devices/approve", json!({ "code": code.replace(' ', ""), "confirm": true }));

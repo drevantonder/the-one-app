@@ -13,7 +13,7 @@ impl Feature {
         self.tools.iter().map(|t| crate::tools::mcp_tool(&set, &t.spec, self.mcp_name(&t.spec))).collect()
     }
 
-    /// Runs its tool at `at` (`super::find`) as the person, asking `node`.
+    /// Runs its tool at `at` (`super::find`) as the user, asking `node`.
     pub fn run(&self, at: usize, input: &Map<String, Value>, asked: &Asked, node: &Client) -> Result<Value> {
         let tool = &self.tools[at];
         match tool.runs {
@@ -51,7 +51,7 @@ pub fn and_apps(node: &Client) -> Result<Vec<Value>> {
     Ok([listed(), node.apps()?].concat())
 }
 
-/// A time, for people: today's as its hour, else its date.
+/// A time, for users: today's as its hour, else its date.
 pub fn say_time(ms: u64) -> String {
     let Ok(t) = jiff::Timestamp::from_millisecond(ms as i64) else { return String::new() };
     let tz = jiff::tz::TimeZone::system();

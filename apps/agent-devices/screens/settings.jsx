@@ -1,4 +1,4 @@
-// Settings: on each of the person's machines running Agent Devices, whether agents may borrow Chrome run straight on it,
+// Settings: on each of the user's machines running Agent Devices, whether agents may borrow Chrome run straight on it,
 // without a container. The service keeps the switch on each machine, with its default (on where the machine runs only its
 // owner's calls).
 import { useEffect, useState } from "react"

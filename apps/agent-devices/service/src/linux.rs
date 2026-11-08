@@ -687,7 +687,7 @@ impl Containers for Apple {
     }
 
     /// Builds with container's builder, a VM of its own, stopped once the image is built: it holds memory the Mac's
-    /// person needs.
+    /// user needs.
     fn build(&self, image: &str, dir: &Path) -> Result<()> {
         let built = ctr(&["build", "--tag", image, &dir.to_string_lossy()]);
         if let Err(err) = ctr(&["builder", "stop"]) {
@@ -762,10 +762,10 @@ impl Containers for Apple {
     }
 }
 
-/// Devices run Cua's image with Google Chrome in place of its Chromium, so the person can sign in to the browser as
+/// Devices run Cua's image with Google Chrome in place of its Chromium, so the user can sign in to the browser as
 /// their Google account. Chrome's terms don't let us pass it on, so each device builds the image itself, downloading
 /// Chrome from Google, and builds it again each week for Chrome's security fixes. Cua's image turns browser sign-in
-/// and sync off for Chromium; Chrome's policies here leave them to the person.
+/// and sync off for Chromium; Chrome's policies here leave them to the user.
 ///
 /// Cua's viewer refuses to be shown in a frame (frame-ancestors 'none', built into cua-spacesd); apps show it inside
 /// their own screens, and its link's ticket is what lets someone watch, so the recipe lets any page frame it, a

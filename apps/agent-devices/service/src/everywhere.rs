@@ -1,4 +1,4 @@
-//! This service reaches the same service on the person's other devices through its own node's local API, as any app
+//! This service reaches the same service on the user's other devices through its own node's local API, as any app
 //! would: list and backups show every device's agent devices, and move restores one on another. Calls passed on carry
 //! here: true, so they go no further.
 
@@ -80,7 +80,7 @@ impl Devices {
         Ok(self.host.post("/v1/call", &json!({ "app": NAME, "tool": tool, "input": input }))?["ok"].clone())
     }
 
-    /// This device's name and the person's other online devices that run agent devices, as the node says.
+    /// This device's name and the user's other online devices that run agent devices, as the node says.
     pub(super) fn hosts(&self) -> Result<(String, Vec<String>)> {
         let (me, all) = self.ordered()?;
         let others = all.into_iter().filter(|s| *s != me).collect();

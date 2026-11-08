@@ -3,7 +3,7 @@
      it at, and links to your One App network's address: the config's, or none yet for a build without one); beside it
      the helper (Helper.cs), started for its toasts, its pushes, and the Widgets board's widgets as the package's COM
      server. build.sh fills in the @…@ from config.toml, and repeats the widget's definition: the board pins only one of
-     each definition, so there are a few alike, each showing whichever widget from your pages its person chooses. -->
+     each definition, so there are a few alike, each showing whichever widget from your pages its user chooses. -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"

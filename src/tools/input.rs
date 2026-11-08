@@ -172,7 +172,7 @@ fn value(flag: &str, values: &[Option<String>], prop: Option<&Value>) -> Result<
     }
 }
 
-/// Fills missing inputs from stdin: a person at a terminal types each, a line each; or what's piped, a JSON object of
+/// Fills missing inputs from stdin: a user at a terminal types each, a line each; or what's piped, a JSON object of
 /// inputs, or the one missing input's text.
 pub(super) fn from_stdin(schema: &Value, missing: &[String], input: &mut Map<String, Value>) -> Result<()> {
     let props = schema["properties"].as_object().cloned().unwrap_or_default();

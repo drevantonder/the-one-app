@@ -62,7 +62,7 @@ impl Kind for Windows {
     }
 
     fn limits(&self) -> &'static str {
-        "mouse, keyboard and commands; the person watches and uses it through view"
+        "mouse, keyboard and commands; the user watches and uses it through view"
     }
 
     fn input(&self) -> bool {
@@ -200,7 +200,7 @@ impl Kind for Windows {
     }
 
     fn open(&self, _: &Devices, v: &Vm, url: &str) -> Result<()> {
-        // Windows shows nothing an SSH session starts, so a task signed in as the person's account opens it.
+        // Windows shows nothing an SSH session starts, so a task signed in as the user's account opens it.
         self.ssh(
             v,
             &format!(

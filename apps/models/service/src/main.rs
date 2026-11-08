@@ -1,4 +1,4 @@
-//! Models' service: the local models its device serves with Ollama, for apps and agents on any of its person's devices.
+//! Models' service: the local models its device serves with Ollama, for apps and agents on any of its user's devices.
 
 use std::time::Duration;
 

@@ -1,5 +1,5 @@
-// Contacts: Contacts on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets
-// reach Contacts; this app is what people and agents use, wherever they are.
+// Contacts: Contacts on the user's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets
+// reach Contacts; this app is what users and agents use, wherever they are.
 
 const CARD = "{ id, name, nickname, organization, job, phones, emails, addresses, birthday, urls }, each only when the card has it";
 
@@ -11,14 +11,14 @@ export default {
   color: "#8e8e93",
   description: "Contacts on your Mac, for your apps and agents",
   needs: "Needs a Mac",
-  instructions: "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; contacts_me is the person's own card.",
+  instructions: "Contacts are the user's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; contacts_me is the user's own card.",
   uses: { services: ["contacts"] },
-  service: { network: [], person: true, platforms: ["mac"] },
+  service: { network: [], user: true, platforms: ["mac"] },
 
   tools: {
     search: {
       reads: true,
-      description: `Find people in the person's contacts by name, email address or phone number, for someone's number or address before writing to them. Gives each ${CARD}, by name.`,
+      description: `Find people in the user's contacts by name, email address or phone number, for someone's number or address before writing to them. Gives each ${CARD}, by name.`,
       input: {
         type: "object",
         required: ["query"],
@@ -37,7 +37,7 @@ export default {
     },
     me: {
       reads: true,
-      description: `The person's own card, the one Contacts marks as theirs: ${CARD}. Use it for their own name, number or address.`,
+      description: `The user's own card, the one Contacts marks as theirs: ${CARD}. Use it for their own name, number or address.`,
       input: { type: "object", properties: {} },
       run: (ctx, input) => ctx.services.contacts.me(input),
     },

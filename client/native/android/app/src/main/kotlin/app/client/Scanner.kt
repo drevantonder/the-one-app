@@ -29,7 +29,7 @@ import kotlin.coroutines.resumeWithException
 // Scanning paper for a screen (`one.scan()`), with Google's document scanner, which comes with Google Play services and
 // draws its own camera: it finds each page's edges and straightens it, several in a row. Each page comes back as the
 // iPhone's document camera gives it (client/native/iphone/Sources/OneNative/Files.swift): a JPEG `{ name, type, size, base64 }`; none
-// if the person cancels.
+// if the user cancels.
 object Scanner {
     private var asked = 0
 

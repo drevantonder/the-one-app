@@ -6,7 +6,7 @@ port = 4747
 # What the App Store calls the apps made in the network, beside the ones built in.
 made_here = "Made here"
 # A custom build that serves one network (a workplace's) gives its address, so its native app never asks where;
-# empty, the person types it.
+# empty, the user types it.
 address = ""
 # Where `one update` and `one release` get the code, and the installer the releases.
 repo = "drevantonder/the-one-app"
@@ -20,14 +20,14 @@ apps = ["repos", "apps"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.
 always_on = []
-# How people sign in, which says who they are and opens no key (cloudflare/auth/worker.js): keys are only on their devices,
+# How users sign in, which says who they are and opens no key (cloudflare/auth/worker.js): keys are only on their devices,
 # and a new device gets in only when one of theirs approves it. "passkey": a passkey, whose PRF output, kept in the
-# browser, makes it a device of its own there. "google": for a workplace whose people sign in with their Google account
+# browser, makes it a device of its own there. "google": for a workplace whose users sign in with their Google account
 # at join_domain, joining with an invite for its email; admins still sign in with a passkey.
 sign_in = "passkey"
 join_domain = ""
 # Where the network's relay is made (a Cloudflare location hint: wnam, enam, sam, weur, eeur, apac, oc, afr or me), near
-# its people, since every packet between devices that can't reach each other directly goes through it; empty for
+# its users, since every packet between devices that can't reach each other directly goes through it; empty for
 # wherever its first request came from.
 relay_location = "oc"
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),

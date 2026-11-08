@@ -10,7 +10,7 @@ pub mod config {
         format!("{}_{suffix}", CLI.to_uppercase().replace('-', "_"))
     }
 
-    /// How this build's people sign in (`sign_in` in the config): with a passkey, or with their workplace's Google account.
+    /// How this build's users sign in (`sign_in` in the config): with a passkey, or with their workplace's Google account.
     #[derive(PartialEq, Eq)]
     pub enum SignIn {
         Passkey,

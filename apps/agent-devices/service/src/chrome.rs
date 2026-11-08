@@ -5,7 +5,7 @@
 //! Chrome's own sandbox stays on.
 //!
 //! Whether a machine runs chrome devices is its owner's to say. Until they say, it does where the machine runs only its
-//! owner's own calls, and doesn't where it runs a group's, global's or another person's too (Where Things Run): their
+//! owner's own calls, and doesn't where it runs a group's, global's or another user's too (Where Things Run): their
 //! data is on it. What the owner chose is kept in chrome.json in this service's folder, and holds whatever the machine
 //! comes to run.
 
@@ -192,7 +192,7 @@ pub struct State {
     replies: HashMap<i64, std::result::Result<Value, String>>,
     /// Pages by session.
     pub pages: HashMap<String, Page>,
-    /// The page the person sees and computer_use acts on, by target.
+    /// The page the user sees and computer_use acts on, by target.
     current: String,
     /// Chrome's user agent, without "Headless".
     ua: String,
@@ -249,7 +249,7 @@ pub fn live_browser(v: &Vm) -> Result<Arc<Browser>> {
 }
 
 /// What Chrome starts with, as the Linux devices' Chrome does where it makes sense: no first-run screens, sign-ins kept
-/// in the profile's own store (basic on Linux, as a profile made in a Linux device was; on a Mac, never the person's
+/// in the profile's own store (basic on Linux, as a profile made in a Linux device was; on a Mac, never the user's
 /// keychain), and headless at the size of a Linux device's screen.
 fn chrome_args(dir: &str) -> Vec<String> {
     let mut args: Vec<String> = ["--headless=new", "--remote-debugging-pipe", &format!("--user-data-dir={dir}"), "--window-size=1280,800", "--no-first-run", "--no-default-browser-check", "--disable-search-engine-choice-screen", "--hide-crash-restore-bubble"]
@@ -668,7 +668,7 @@ impl Browser {
         Ok(session)
     }
 
-    /// The page the person sees, a new one if every tab closed: its session. Chrome attaches each page as it opens.
+    /// The page the user sees, a new one if every tab closed: its session. Chrome attaches each page as it opens.
     pub fn current_page(&self) -> Result<String> {
         for _ in 0..50 {
             {
@@ -885,7 +885,7 @@ impl Devices {
             owner = me.user.clone();
         }
         // Who asked must own the machine: here, and again there when it's passed on, where it's asked as this machine's
-        // person, so it's passed on only for the person whose machines both are.
+        // user, so it's passed on only for the user whose machines both are.
         may_choose(&caller.user, &owner, &on)?;
         if on != me.name {
             if here {
@@ -937,7 +937,7 @@ impl Devices {
     pub(super) fn borrow_chrome(&self, caller: &Caller, input: &Input) -> Result<Value> {
         let why = text(input, "for");
         if why.is_empty() {
-            bail!("say what it's for, in a few words: the person sees it");
+            bail!("say what it's for, in a few words: the user sees it");
         }
         let no = self.chrome_why_not();
         if !no.is_empty() {

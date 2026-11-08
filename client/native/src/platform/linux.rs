@@ -9,7 +9,7 @@ pub use super::desktop::*;
 
 use crate::app;
 
-/// What a call says it came from, and the platform as people say it.
+/// What a call says it came from, and the platform as users say it.
 pub const CLIENT: &str = "linux";
 pub const LABEL: &str = "Linux";
 /// How far, in points, the tray's flyouts keep from the bar and the edges (a gap from its panel), and whether its tray is at

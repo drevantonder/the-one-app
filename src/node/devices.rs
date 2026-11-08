@@ -45,15 +45,15 @@ pub(super) struct Owed {
 /// which kind of device takes which is its rule's.
 pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[scopes::Kind]) -> Result<bool> {
     let theirs = kinds.iter().any(|k| matches!(k, scopes::Kind::Client | scopes::Kind::Service));
-    Ok(db.user(user)?.is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::person(user)))
+    Ok(db.user(user)?.is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::user_principal(user)))
 }
 
 impl Node {
-    /// What's sealed of a scope's keys, for any person of the network, since it opens only with keys they may hold:
+    /// What's sealed of a scope's keys, for any user of the network, since it opens only with keys they may hold:
     /// with `to`, each of its epochs sealed to that endpoint, `{ epoch, sealed: { n: base64url } }`, `epoch` the newest
     /// made; with `app`, the app's key in each epoch, sealed under that epoch's, `{ sealed: { n: base64url } }`.
     pub async fn sealed_keys(&self, caller: &Caller, scope: &Scope, to: Option<&str>, app: Option<&str>) -> Result<Value> {
-        ensure!(self.is_user(&caller.user), "only the network's people read its keys");
+        ensure!(self.is_user(&caller.user), "only the network's users read its keys");
         let bucket = self.bucket()?;
         let newest = self.newest_epoch(scope).await?;
         let name = scope.to_string();
@@ -107,7 +107,7 @@ impl Node {
             let (Some(to), None) = (to, app) else { bail!("a Vault key is sealed to a machine, or recovery, and is no app's") };
             self.with(|i| {
                 let db = i.r.db();
-                ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s person, or its admins, say which machines open its Vault");
+                ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its admins, say which machines open its Vault");
                 let newest = db.vault(scope)?.filter(|v| v.n == n).with_context(|| format!("{scope}'s newest Vault key isn't {n}"))?;
                 ensure!(to == "recovery" || newest.to.contains(&crate::keys::unhex(to)?), "{scope}'s Vault key {n} doesn't open on that machine");
                 Ok(())
@@ -131,10 +131,10 @@ impl Node {
                         "recovery" => ensure!(db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins seal its keys to the recovery key"),
                         to => {
                             let key = crate::keys::unhex(to)?;
-                            // A scope's epochs are its people's client devices' alone: a node is handed a call's keys,
-                            // and a service holds none, reading nothing and asking its person's node to write.
+                            // A scope's epochs are its users' client devices' alone: a node is handed a call's keys,
+                            // and a service holds none, reading nothing and asking its user's node to write.
                             let listed = db.client(&key)?.context("a scope's keys are sealed only to client devices and the recovery key")?;
-                            ensure!(db.may(&listed.user, "use", &scopes::object(scope)), "that endpoint's person doesn't use {scope}");
+                            ensure!(db.may(&listed.user, "use", &scopes::object(scope)), "that endpoint's user doesn't use {scope}");
                             ensure!(db.service(&key)?.is_none(), "a service is sealed no keys");
                         }
                     }
@@ -161,7 +161,7 @@ impl Node {
                 let key = crate::keys::unhex(to)?;
                 self.with(|i| {
                     let db = i.r.db();
-                    ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s person, or its group's admins, choose where its apps' schedules run");
+                    ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its group's admins, choose where its apps' schedules run");
                     ensure!(db.machine(&key)?.is_some(), "that endpoint isn't one of the network's");
                     Ok(())
                 })?;
@@ -175,7 +175,7 @@ impl Node {
 }
 
 impl Node {
-    /// The network's address, where people sign in.
+    /// The network's address, where users sign in.
     pub fn address(&self) -> Result<String> {
         self.with(|i| super::calls::address(i.r.db()))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
     }
@@ -199,7 +199,7 @@ impl Node {
         }
     }
 
-    /// Lists one of this device's parts, the service `service`, as its person's, a part of this device (oned turned it
+    /// Lists one of this device's parts, the service `service`, as its user's, a part of this device (oned turned it
     /// on, and it asked with its endpoint), and tells the relay to let it in. It holds no
     /// keys: the nodes that call it bring it the network's entries, which say who may. A part listed before it named its
     /// device is listed again, naming it.
@@ -235,7 +235,7 @@ impl Node {
         Ok(())
     }
 
-    /// Erases what this device keeps (by name or key), for its person or an admin asking from one of their own devices,
+    /// Erases what this device keeps (by name or key), for its user or an admin asking from one of their own devices,
     /// directly: asked of another device, it says to ask that one, if it's on. Once it has answered, its oned stops its
     /// parts and deletes its home (its copies of the network's data, the pages it kept, and each service's folder and
     /// data, WhatsApp's link among them), then stops. Removing it next takes it out. → what's erasing.
@@ -248,7 +248,7 @@ impl Node {
         }
         self.with(|i| {
             let db = i.r.db();
-            ensure!(caller.key != self.0.id && db.client(&caller.key)?.is_some() && db.may(&caller.user, "remove", &scopes::device(&key)), "only {name}'s person or an admin erases it, from another of their devices");
+            ensure!(caller.key != self.0.id && db.client(&caller.key)?.is_some() && db.may(&caller.user, "remove", &scopes::device(&key)), "only {name}'s user or an admin erases it, from another of their devices");
             Ok(())
         })?;
         tracing::warn!("asked to erase what {name} keeps: its oned does, then stops");
@@ -256,7 +256,7 @@ impl Node {
         Ok(json!({ "erasing": name }))
     }
 
-    /// Makes, in the background, each scope's keys that are owed, of what this device's person makes them of: a new
+    /// Makes, in the background, each scope's keys that are owed, of what this device's user makes them of: a new
     /// epoch a removal or stopped app schedules asked for (`ScopeDb::owed`) that the device writing it didn't make (it failed,
     /// or went off first); or a new epoch or Vault key pair where the newest's entry lists this device but it was never
     /// sealed to it, as when the device making it stopped between its entry and its seals, so nobody holds it. Only

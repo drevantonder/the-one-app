@@ -1,20 +1,20 @@
-//! The scope database: who and what a scope has (people, groups, devices, who holds which role, epochs, app schedules, apps,
+//! The scope database: who and what a scope has (users, groups, devices, who holds which role, epochs, app schedules, apps,
 //! deploys, apps added, services, settings, the Vault's bookkeeping, recovery) as SQLite rows: the truth, written as
 //! signed steps (`steps`). Each step is applied by its kind's rule (`rules`) to a fresh copy of the database
 //! (`fresh`), and what follows from its rows is worked out again (`derive`), the same on every reader. It's small, so
 //! it's copied at each step.
 //!
 //! Every scope's database has the same tables, `permissions`' among them with its defaults. What `global`'s entries
-//! say of the whole network (people, groups, invites, devices, relations, epochs and app schedules of every scope, apps,
+//! say of the whole network (users, groups, invites, devices, relations, epochs and app schedules of every scope, apps,
 //! services, settings, Vault keys, recovery) is filled in only in `global`'s, which everyone in the network reads; a
-//! person's or group's has only its own state (apps added, schedules, Vault requests, pages, forgotten blobs), which
+//! user's or group's has only its own state (apps added, schedules, Vault requests, pages, forgotten blobs), which
 //! only those who use it may read.
 //!
 //! Who may do what is `permissions::may` over `relations`, whose objects are `object(scope)`, `device(key)`,
 //! `service(key)` and `app(name)`. Whether an object exists (a device still listed, a group made) is the tables' to
 //! say, not `may`'s: the network's admins may remove every device, listed or not.
 //!
-//! People and groups are named as `person:<id>` and `group:<id>`; an app owned by the network's admins as `admins`.
+//! Users and groups are named as `user:<id>` and `group:<id>`; an app owned by the network's admins as `admins`.
 //! Keys and hashes are lowercase hex, times milliseconds, flags 0 or 1, and lists and arrangements JSON.
 //!
 //! Its state hash is any database's (`stored::state_hash`): its rows', whatever order they were written in, and whatever
@@ -43,7 +43,7 @@ CREATE TABLE network (
 ) STRICT;
 CREATE TABLE principals (
   id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL CHECK (kind IN ('person', 'group')),
+  kind TEXT NOT NULL CHECK (kind IN ('user', 'group')),
   name TEXT NOT NULL,
   handle TEXT NOT NULL,
   removed INTEGER NOT NULL
@@ -77,7 +77,7 @@ CREATE TABLE runs (
   device TEXT NOT NULL,
   PRIMARY KEY (principal, device)
 ) STRICT;
--- Each person whose own device said where their things run, nowhere besides their own machines among them.
+-- Each user whose own device said where their things run, nowhere besides their own machines among them.
 CREATE TABLE runs_chosen (
   principal TEXT PRIMARY KEY
 ) STRICT;
@@ -212,8 +212,8 @@ CREATE TABLE releases (
 ) STRICT;
 ";
 
-pub fn person(id: &str) -> String {
-    format!("person:{id}")
+pub fn user_principal(id: &str) -> String {
+    format!("user:{id}")
 }
 
 pub fn group(id: &str) -> String {
@@ -232,12 +232,12 @@ pub fn app(name: &str) -> String {
     format!("app:{name}")
 }
 
-/// A scope, as an object of permissions: the network, a group, or a person's own.
+/// A scope, as an object of permissions: the network, a group, or a user's own.
 pub fn object(scope: &Scope) -> String {
     match scope {
         Scope::Global => permissions::NETWORK.into(),
         Scope::Group(g) => group(g),
-        Scope::User(u) => person(u),
+        Scope::User(u) => user_principal(u),
     }
 }
 
@@ -250,7 +250,7 @@ pub fn role(r: Role) -> &'static str {
 
 pub fn owner(p: &Principal) -> String {
     match p {
-        Principal::User(id) => person(id),
+        Principal::User(id) => user_principal(id),
         Principal::Group(id) => group(id),
         Principal::Admins => "admins".into(),
     }
@@ -328,8 +328,8 @@ pub fn fresh(from: &Connection, scope: &Scope) -> Result<Connection> {
 }
 
 /// What only one way of saying it is kept of in `global`'s database: one network row; each device's sign-in as this
-/// release knows its shape, or none; the recovery keys in the order they were set, the network's last; each person's
-/// one role in the network and each group; invites only of people still in, to groups that are; and keys sealed and
+/// release knows its shape, or none; the recovery keys in the order they were set, the network's last; each user's
+/// one role in the network and each group; invites only of users still in, to groups that are; and keys sealed and
 /// opened only for each scope's newest.
 fn canonical(db: &Connection) -> Result<()> {
     db.execute("INSERT INTO network SELECT 0, NULL, '', 0, NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM network)", [])?;
@@ -355,7 +355,7 @@ fn canonical(db: &Connection) -> Result<()> {
         DELETE FROM app_schedule_keys WHERE NOT EXISTS (SELECT 1 FROM app_schedules a
             WHERE a.device = app_schedule_keys.device AND a.scope = app_schedule_keys.scope AND a.app = app_schedule_keys.app);
         DELETE FROM runs WHERE principal NOT IN (SELECT principal FROM runs_chosen);
-        DELETE FROM invites WHERE principal NOT IN (SELECT id FROM principals WHERE kind = 'person' AND removed = 0)
+        DELETE FROM invites WHERE principal NOT IN (SELECT id FROM principals WHERE kind = 'user' AND removed = 0)
             OR invited_to NOT IN (SELECT id FROM principals WHERE kind = 'group');
         UPDATE invites SET role = 'member' WHERE role != 'admin';",
     )?;
@@ -363,44 +363,44 @@ fn canonical(db: &Connection) -> Result<()> {
 }
 
 /// Works out again, in `global`'s database, what follows from its rows, which no step writes: everyone owns their own
-/// scope, each device listed its person, and each app its owners (the network's or a group's admins, or a person still
+/// scope, each device listed its user, and each app its owners (the network's or a group's admins, or a user still
 /// in); a shared service is everyone's to use; the Cloudflare node, which an admin's setting names, is the network's
-/// admins' device; and which devices run each scope's calls. A person's own scope runs on their machines they listed
+/// admins' device; and which devices run each scope's calls. A user's own scope runs on their machines they listed
 /// themselves (one an admin listed for them runs only what that admin's could), and on others their own device chose
 /// (`runs`); a group's on its admins' machines and the network's; `global`'s on the network's admins'; and every one
-/// but a person's own on the Cloudflare node, which runs a person's own only once they chose it. Only people still in,
-/// and devices still listed, hold anything; a person's role in the network or a group is the only row a step writes.
+/// but a user's own on the Cloudflare node, which runs a user's own only once they chose it. Only users still in,
+/// and devices still listed, hold anything; a user's role in the network or a group is the only row a step writes.
 pub fn derive(db: &Connection) -> Result<()> {
     let cloudflare: Option<String> = db.query_row("SELECT value FROM settings WHERE name = ?1", [super::scopes::CLOUDFLARE_NODE], |r| r.get(0)).optional()?;
     let cloudflare = cloudflare.and_then(|k| crate::keys::unhex(&k).ok()).map(|k| hex(&k));
     db.execute_batch(&format!(
         "DELETE FROM relations WHERE NOT {RULE} AND NOT (
-            substr(subject, 1, 7) = 'person:' AND relation IN ('admin', 'member')
-            AND subject IN (SELECT id FROM principals WHERE kind = 'person' AND removed = 0)
+            substr(subject, 1, 5) = 'user:' AND relation IN ('admin', 'member')
+            AND subject IN (SELECT id FROM principals WHERE kind = 'user' AND removed = 0)
             AND (object = '{n}' OR object IN (SELECT id FROM principals WHERE kind = 'group')));
-        DELETE FROM relations WHERE relation = 'member' AND substr(subject, 1, 7) = 'person:'
+        DELETE FROM relations WHERE relation = 'member' AND substr(subject, 1, 5) = 'user:'
             AND EXISTS (SELECT 1 FROM relations a WHERE a.subject = relations.subject AND a.object = relations.object AND a.relation = 'admin');
-        INSERT OR IGNORE INTO relations SELECT id, 'member', '{n}', NULL FROM principals p WHERE kind = 'person' AND removed = 0
+        INSERT OR IGNORE INTO relations SELECT id, 'member', '{n}', NULL FROM principals p WHERE kind = 'user' AND removed = 0
             AND NOT EXISTS (SELECT 1 FROM relations r WHERE r.subject = p.id AND r.object = '{n}');
-        INSERT OR IGNORE INTO relations SELECT id, 'owner', id, NULL FROM principals WHERE kind = 'person' AND removed = 0;
+        INSERT OR IGNORE INTO relations SELECT id, 'owner', id, NULL FROM principals WHERE kind = 'user' AND removed = 0;
         CREATE TEMP TABLE listed AS SELECT d.key, d.principal, d.listed_by, d.compute, d.service, d.shared FROM devices d
-            JOIN principals p ON p.id = d.principal AND p.kind = 'person' AND p.removed = 0 WHERE d.removed = 0;
+            JOIN principals p ON p.id = d.principal AND p.kind = 'user' AND p.removed = 0 WHERE d.removed = 0;
         INSERT OR IGNORE INTO relations SELECT principal, 'owner', 'device:' || key, NULL FROM listed;
         INSERT OR IGNORE INTO relations SELECT iif(shared, '{n}#member', principal), 'user', 'service:' || key, NULL FROM listed WHERE service IS NOT NULL;
         INSERT OR IGNORE INTO relations
-        SELECT iif(substr(owner, 1, 7) = 'person:', owner, iif(substr(owner, 1, 6) = 'group:', owner || '#admin', '{n}#admin')), 'owner', 'app:' || name, NULL
-        FROM apps WHERE substr(owner, 1, 7) != 'person:' OR owner IN (SELECT id FROM principals WHERE kind = 'person' AND removed = 0);
+        SELECT iif(substr(owner, 1, 5) = 'user:', owner, iif(substr(owner, 1, 6) = 'group:', owner || '#admin', '{n}#admin')), 'owner', 'app:' || name, NULL
+        FROM apps WHERE substr(owner, 1, 5) != 'user:' OR owner IN (SELECT id FROM principals WHERE kind = 'user' AND removed = 0);
         INSERT OR IGNORE INTO relations
         WITH admins AS (SELECT subject FROM relations WHERE relation = 'admin' AND object = '{n}'),
             computes AS (SELECT key, principal, listed_by FROM listed WHERE compute = 1),
             grps AS (SELECT id FROM principals WHERE kind = 'group'),
-            people AS (SELECT id FROM principals WHERE kind = 'person')
+            users AS (SELECT id FROM principals WHERE kind = 'user')
         SELECT 'device:' || key, 'runner', '{n}', NULL FROM computes WHERE principal IN admins
         UNION ALL
         SELECT 'device:' || c.key, 'runner', g.id, NULL FROM computes c, grps g
             WHERE c.principal IN admins OR EXISTS (SELECT 1 FROM relations r WHERE r.subject = c.principal AND r.relation = 'admin' AND r.object = g.id)
         UNION ALL
-        SELECT 'device:' || c.key, 'runner', u.id, NULL FROM computes c, people u
+        SELECT 'device:' || c.key, 'runner', u.id, NULL FROM computes c, users u
             WHERE (c.principal = u.id AND c.listed_by = u.id) OR EXISTS (SELECT 1 FROM runs WHERE principal = u.id AND device = c.key);
         DROP TABLE temp.listed;",
         n = permissions::NETWORK
@@ -408,13 +408,13 @@ pub fn derive(db: &Connection) -> Result<()> {
     if let Some(k) = cloudflare {
         db.execute(&format!("INSERT OR IGNORE INTO relations VALUES ('{}#admin', 'admin', 'device:' || ?1, NULL)", permissions::NETWORK), [&k])?;
         // Unless it's a machine of someone's too, which runs what theirs do.
-        let computes = "SELECT d.key FROM devices d JOIN principals p ON p.id = d.principal AND p.kind = 'person' AND p.removed = 0 WHERE d.removed = 0 AND d.compute = 1";
+        let computes = "SELECT d.key FROM devices d JOIN principals p ON p.id = d.principal AND p.kind = 'user' AND p.removed = 0 WHERE d.removed = 0 AND d.compute = 1";
         db.execute(
             &format!(
                 "INSERT OR IGNORE INTO relations
                 SELECT 'device:' || ?1, 'runner', o, NULL FROM (
                     SELECT '{n}' o UNION ALL SELECT id FROM principals WHERE kind = 'group'
-                    UNION ALL SELECT principal FROM runs WHERE device = ?1 AND principal IN (SELECT id FROM principals WHERE kind = 'person'))
+                    UNION ALL SELECT principal FROM runs WHERE device = ?1 AND principal IN (SELECT id FROM principals WHERE kind = 'user'))
                 WHERE ?1 NOT IN ({computes})",
                 n = permissions::NETWORK
             ),

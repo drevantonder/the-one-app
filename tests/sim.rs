@@ -333,7 +333,7 @@ fn write(id: u64, device: usize, attempt: i64) -> impl FnMut(&rusqlite::Connecti
     }
 }
 
-/// Retries what the link fails, as a device does when a person tries again, until a link this bad can't be to blame.
+/// Retries what the link fails, as a device does when a user tries again, until a link this bad can't be to blame.
 async fn retry<T>(mut f: impl AsyncFnMut() -> Result<T>) -> T {
     let mut last = None;
     for _ in 0..10_000 {

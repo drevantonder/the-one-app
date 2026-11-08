@@ -92,13 +92,13 @@ impl Node {
     }
 
     /// Creates the network, with every built-in app added (owned by admins), so anyone may add one to their own page,
-    /// and these added to `global`. Its first person is `user` if given (who they were in a network this one
+    /// and these added to `global`. Its first user is `user` if given (who they were in a network this one
     /// replaces, so their account at its sign-in is still theirs), else someone new. Who's who is its scope database from
     /// its first freeze on, which its new recovery key signs as it starts (`steps::first_freeze`).
     pub async fn create_with(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str]) -> Result<String> {
         self.ensure_no_network()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the network a name, and yourself one");
-        ensure!(user.is_none_or(|u| u.len() == 16 && u.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))), "a person's id is 16 hex digits, like 976091fe8c23a057");
+        ensure!(user.is_none_or(|u| u.len() == 16 && u.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))), "a user's id is 16 hex digits, like 976091fe8c23a057");
         let user = user.map_or_else(new_id, str::to_string);
         let recovery = SigningKey::from_bytes(&rand::random());
         let me = crate::keys::Endpoint::of(&self.0.key);
@@ -131,7 +131,7 @@ impl Node {
         self.read_steps().await?;
         ensure!(self.frozen(), "the new network's freeze didn't count");
         let me = Caller::own(self.0.id, user);
-        // Its Vault and its first person's own open on this machine, so a new network fills items with no other step.
+        // Its Vault and its first user's own open on this machine, so a new network fills items with no other step.
         for scope in [Scope::Global, Scope::User(me.user.clone())] {
             crate::settings::new_vault_key(self, &scope, 1, &[self.0.id]).await?;
         }

@@ -15,7 +15,7 @@ use windows_collections::IIterable;
 
 pub use super::desktop::*;
 
-/// What a call says it came from, and the platform as people say it.
+/// What a call says it came from, and the platform as users say it.
 pub const CLIENT: &str = "windows";
 pub const LABEL: &str = "Windows";
 /// How far, in points, the tray's flyouts keep from the taskbar and the edges (Windows 11's own), and its taskbar at the
@@ -120,7 +120,7 @@ pub fn login() -> Option<bool> {
     Some(startup().and_then(|t| t.State()).is_ok_and(|s| s == StartupTaskState::Enabled || s == StartupTaskState::EnabledByPolicy))
 }
 
-/// Opens at login, or doesn't; one the person turned off in Windows' own settings stays off until they turn it on there.
+/// Opens at login, or doesn't; one the user turned off in Windows' own settings stays off until they turn it on there.
 pub fn set_login(on: bool) {
     let set = || -> windows::core::Result<()> {
         let task = startup()?;

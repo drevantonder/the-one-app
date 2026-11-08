@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::cli::{Command, Given};
 
-/// The person's own answer to a request for an item, with its values on stdin: not a tool, since an agent that answered
+/// The user's own answer to a request for an item, with its values on stdin: not a tool, since an agent that answered
 /// one would see the secret vault_request keeps from it.
 pub fn commands() -> Command {
     Command {

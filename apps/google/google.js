@@ -185,7 +185,7 @@ export function google({ app, title, scopes, base }) {
     },
     sign_in: {
       reads: false,
-      description: `Start signing a Google account in to ${title}, or allowing ${title} on one already signed in to another Google app: gives { url, then }. The person opens url and signs in, and Google sends them back to finish.`,
+      description: `Start signing a Google account in to ${title}, or allowing ${title} on one already signed in to another Google app: gives { url, then }. The user opens url and signs in, and Google sends them back to finish.`,
       input: { type: "object", properties: {
         account: { type: "string", description: "the account's address, like someone@gmail.com, to suggest it to Google; for one that needs signing in again, as accounts lists it" },
       } },
@@ -193,7 +193,7 @@ export function google({ app, title, scopes, base }) {
         if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
         return {
           url: await startSignIn(ctx, account),
-          then: `The person opens url and signs in, and Google sends them back to finish; ${app}_accounts then lists the account. If it doesn't, give the address their browser came back to to ${app}_finish_sign_in.`,
+          then: `The user opens url and signs in, and Google sends them back to finish; ${app}_accounts then lists the account. If it doesn't, give the address their browser came back to to ${app}_finish_sign_in.`,
         };
       },
     },

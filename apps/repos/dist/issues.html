@@ -605,13 +605,13 @@ function fe(t) {
 	let ae = ne, K;
 	n[24] === G ? K = n[25] : (K = () => G("reopen", "reopen_issue", ye), n[24] = G, n[25] = K);
 	let se = K, fe;
-	n[26] !== g || n[27] !== r ? (fe = async () => {
+	n[26] !== r || n[27] !== g ? (fe = async () => {
 		try {
-			_(g || await one.call("_people", { repo: r })), j("assign");
+			_(g || await one.call("_users", { repo: r })), j("assign");
 		} catch (e) {
 			C(N(e).title);
 		}
-	}, n[26] = g, n[27] = r, n[28] = fe) : fe = n[28];
+	}, n[26] = r, n[27] = g, n[28] = fe) : fe = n[28];
 	let q = fe, J;
 	n[29] === r ? J = n[30] : (J = async () => {
 		try {
@@ -873,7 +873,7 @@ function fe(t) {
 		done: () => j(null)
 	}), n[143] = H, n[144] = h, n[145] = O, n[146] = lt) : lt = n[146];
 	let ut;
-	n[147] !== h.assignees || n[148] !== h.number || n[149] !== O || n[150] !== d || n[151] !== g || n[152] !== r ? (ut = O === "assign" && g && /* @__PURE__ */ k(ue, {
+	n[147] !== h.assignees || n[148] !== h.number || n[149] !== O || n[150] !== d || n[151] !== r || n[152] !== g ? (ut = O === "assign" && g && /* @__PURE__ */ k(ue, {
 		title: "Assignees",
 		items: g.map(ge),
 		chosen: h.assignees.map(he),
@@ -884,7 +884,7 @@ function fe(t) {
 		}),
 		empty: "No one to assign.",
 		done: () => (j(null), d.reload())
-	}), n[147] = h.assignees, n[148] = h.number, n[149] = O, n[150] = d, n[151] = g, n[152] = r, n[153] = ut) : ut = n[153];
+	}), n[147] = h.assignees, n[148] = h.number, n[149] = O, n[150] = d, n[151] = r, n[152] = g, n[153] = ut) : ut = n[153];
 	let $;
 	n[154] !== h.labels || n[155] !== h.number || n[156] !== O || n[157] !== d || n[158] !== r ? ($ = O?.labels && /* @__PURE__ */ k(ue, {
 		title: "Labels",
@@ -1172,7 +1172,7 @@ function Te() {
 		"author",
 		"q"
 	]) t[e] && (b[e] = t[e]);
-	let x = M("issues", b, !0), T = M("labels", { repo: q.repo }), E = M("_people", { repo: q.repo }), D = x.data, j = !!(t.label || t.assignee || t.author || t.q), P = a(null);
+	let x = M("issues", b, !0), T = M("labels", { repo: q.repo }), E = M("_users", { repo: q.repo }), D = x.data, j = !!(t.label || t.assignee || t.author || t.q), P = a(null);
 	D && !j && (P.current = {
 		open_issues: D.open_issues,
 		yours: D.yours

@@ -43,7 +43,7 @@ fn page(headers: &axum::http::HeaderMap, html: String) -> Response {
 }
 
 async fn events(State(node): State<Node>, me: Me) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
-    // Someone other than this machine's person hears only of the apps they reach.
+    // Someone other than this machine's user hears only of the apps they reach.
     let user = (node.user().ok().as_deref() != Some(me.caller.user.as_str())).then_some(me.caller.user);
     let events = node.clone();
     let stream = BroadcastStream::new(node.subscribe())

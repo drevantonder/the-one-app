@@ -1,5 +1,5 @@
-// Calendar: Calendar on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Calendar;
-// this app is what people and agents use, wherever they are.
+// Calendar: Calendar on the user's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Calendar;
+// this app is what users and agents use, wherever they are.
 
 const TIME = "an ISO 8601 date (2026-11-01) or date-time (2026-11-01T09:00); without an offset, in the Mac's time zone";
 const ID = { type: "string", description: "the event's id, as calendar_events gives it; a repeating event's names one occurrence" };
@@ -22,9 +22,9 @@ export default {
   color: "#ff3b30",
   description: "Calendar on your Mac, for your apps and agents",
   needs: "Needs a Mac",
-  instructions: "Calendar is the person's Apple Calendar through their Mac: every account it has, such as iCloud, Google or Exchange. calendar_events lists events in a time range, by default the coming week. Times are ISO 8601; without an offset they're in the Mac's time zone.",
+  instructions: "Calendar is the user's Apple Calendar through their Mac: every account it has, such as iCloud, Google or Exchange. calendar_events lists events in a time range, by default the coming week. Times are ISO 8601; without an offset they're in the Mac's time zone.",
   uses: { services: ["calendar"] },
-  service: { network: [], person: true, platforms: ["mac"] },
+  service: { network: [], user: true, platforms: ["mac"] },
 
   tools: {
     calendars: {

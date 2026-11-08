@@ -53,7 +53,7 @@ ours() {
 	done | tr '\n' '\0' | xargs -0 du -sk 2>/dev/null | sort -rn | head -5 | awk '{ size = $1; sub(/^[0-9]+[ \t]+/, ""); printf "    %5.1f GB  %s\n", size / 1048576, $0 }'
 }
 
-# The biggest folders in the person's home, the guarded ones macOS asks about (Documents, Pictures…) left out.
+# The biggest folders in the user's home, the guarded ones macOS asks about (Documents, Pictures…) left out.
 biggest() {
 	for d in "$HOME"/* "$HOME"/Library/* "$HOME"/Library/Caches/* "$HOME"/Library/Developer/*; do
 		case $d in

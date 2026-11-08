@@ -1,7 +1,7 @@
 //! How a client device reaches its network's nodes: an iroh endpoint of the device's own key, through the relay at
 //! the network's address (and natively, directly where a path opens), connections raced to the nodes the relay says
 //! are on, in the order things run on them, the first up asked and each kept open, and each request to one node alone,
-//! HTTP/1.1 on a stream of its own, which the node answers with its local API as the device's person
+//! HTTP/1.1 on a stream of its own, which the node answers with its local API as the device's user
 //! (src/node/net.rs). The same natively, for the CLI and the apps, and in browsers as WebAssembly (src/wasm.rs).
 //!
 //! A device whose key can't be read out (a browser's, in WebCrypto) is reached as an endpoint of a key of the session's,
@@ -196,7 +196,7 @@ struct Inner {
 
 /// How a client answers a node that asks for its log over a connection the client opened: the ask as JSON (`logs`'s
 /// `since`, `grep` and `lines`), and the answer as JSON (`{ ok }` or `{ error }`). A node asks only for someone who may
-/// remove this device: its person and the network's admins (src/node/calls/running.rs).
+/// remove this device: its user and the network's admins (src/node/calls/running.rs).
 pub type Asked = Arc<dyn Fn(serde_json::Value) -> serde_json::Value + Send + Sync>;
 
 /// The most a node's ask may say.

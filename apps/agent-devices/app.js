@@ -1,4 +1,4 @@
-// Agent Devices: the devices agents use, on the person's own devices, which the agent-devices service runs: Linux with a
+// Agent Devices: the devices agents use, on the user's own devices, which the agent-devices service runs: Linux with a
 // browser (Podman, or a Mac's containers), with a screen or without one, and Windows, Android and iPhones where a
 // device can run them (the service says which kinds each one can). Its page shows them;
 // Computer Use (apps/computer) is what agents use them with. A browser profile a device starts with is a Vault item
@@ -33,7 +33,7 @@ async function profile(ctx, name) {
   const found = all.find((i) => i.id === name || i.title.toLowerCase() === want);
   if (found) return found;
   if (name === undefined || name === null) return null;
-  throw Object.assign(new Error(`No browser profile ${name}: ${all.length ? `there's ${all.map((i) => i.title).join(", ")}` : "there are none yet"}. The person adds them in the Vault.`), { code: "no_profile" });
+  throw Object.assign(new Error(`No browser profile ${name}: ${all.length ? `there's ${all.map((i) => i.title).join(", ")}` : "there are none yet"}. The user adds them in the Vault.`), { code: "no_profile" });
 }
 
 /// A profile as the service takes it: its key is a placeholder the node fills in, for the service only.
@@ -43,7 +43,7 @@ const kindArg = { type: "string", enum: ["linux", "chrome", "windows", "android"
 const deviceArg = { type: "string", description: "an agent device's name, from computer_list, like pool-745f3e or windows" };
 const sizeArg = { type: "string", enum: ["small", "medium", "large"], description: "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small" };
 
-const named = { type: "string", description: "a browser profile's name, like Personal or Work: a Browser profile in the person's Vault" };
+const named = { type: "string", description: "a browser profile's name, like Personal or Work: a Browser profile in the user's Vault" };
 
 export default {
   name: "agent-devices",
@@ -54,9 +54,9 @@ export default {
   advanced: true,
   description: "Devices your agents use: Linux with a browser, Windows, Android and iPhones",
   needs: "Needs a Linux device with Podman, or a Mac",
-  instructions: "Agent Devices are devices, on the person's own devices, that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where one of their devices can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Where kinds lists chrome as available, kind chrome is quicker (under a second) and lighter: the device's own Chrome, without a container, whose borrow gives target_id and tab_id for the browser tools at once, with no browser_prepare or list_windows; its owner allows it in Agent Devices' Settings. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or Work) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
+  instructions: "Agent Devices are devices, on the user's own devices, that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where one of their devices can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Where kinds lists chrome as available, kind chrome is quicker (under a second) and lighter: the device's own Chrome, without a container, whose borrow gives target_id and tab_id for the browser tools at once, with no browser_prepare or list_windows; its owner allows it in Agent Devices' Settings. Windows, Android and iPhone devices are the user's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or Work) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the user to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the user keeps.",
   uses: { services: ["agent-devices"] },
-  service: { network: ["*"], person: true, platforms: ["linux", "mac"] },
+  service: { network: ["*"], user: true, platforms: ["linux", "mac"] },
   vault: {
     profile: { title: TYPE, type: TYPE, hosts: ["agent-devices"], fields: { _profile_key: { label: "Key", secret: true } }, make: "add_profile", actions: { sign_in: "Sign In to a Site" } },
   },
@@ -68,9 +68,9 @@ export default {
   tools: {
     borrow: {
       reads: false,
-      description: "Get a device to use with computer_* for as long as you need it, and its name. Linux (the default kind): one of your own, ready at once, its browser starting with a copy of a browser profile (the one called default, unless you name one; \"\" for none). Windows, Android or iPhone: the person's lasting device, one agent at a time, or with copy, a throwaway copy of it. Give it back with agent-devices_give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
+      description: "Get a device to use with computer_* for as long as you need it, and its name. Linux (the default kind): one of your own, ready at once, its browser starting with a copy of a browser profile (the one called default, unless you name one; \"\" for none). Windows, Android or iPhone: the user's lasting device, one agent at a time, or with copy, a throwaway copy of it. Give it back with agent-devices_give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
       input: { type: "object", required: ["for"], properties: {
-        for: { type: "string", description: "what you need it for, in a few words, e.g. Reading Messenger; the person sees it" },
+        for: { type: "string", description: "what you need it for, in a few words, e.g. Reading Messenger; the user sees it" },
         kind: kindArg,
         device: { type: "string", description: "a lasting device's name, from computer_list, like windows; default the kind's first" },
         copy: { type: "boolean", description: "a throwaway copy, not the lasting device: for anything that changes or might break it" },
@@ -99,7 +99,7 @@ export default {
     },
     sign_in: {
       reads: false,
-      description: "For the person: opens a page in a browser on a browser profile, on a device with a screen, and gives a link for them to sign in to sites there themselves. Their sign-ins are saved when they're done (agent-devices_save_profile), or when its time is up.",
+      description: "For the user: opens a page in a browser on a browser profile, on a device with a screen, and gives a link for them to sign in to sites there themselves. Their sign-ins are saved when they're done (agent-devices_save_profile), or when its time is up.",
       input: { type: "object", properties: {
         profile: named,
         item: { type: "string", description: "the profile's Vault item, instead of its name" },
@@ -114,7 +114,7 @@ export default {
     },
     save_profile: {
       reads: false,
-      description: "Save a browser profile's sign-ins now: from the device signing in to it, which closes, or with device, from that device's browser. Only when the person asked: borrowed devices start from saved profiles.",
+      description: "Save a browser profile's sign-ins now: from the device signing in to it, which closes, or with device, from that device's browser. Only when the user asked: borrowed devices start from saved profiles.",
       input: { type: "object", properties: { profile: named, item: { type: "string", description: "the profile's Vault item, instead of its name" }, device: deviceArg } },
       run: async (ctx, input) => {
         const p = await profile(ctx, input.item || input.profile || "default");
@@ -123,7 +123,7 @@ export default {
     },
     add_profile: {
       reads: false,
-      description: "Add a browser profile with no sign-ins yet, as a Vault item, for the person to sign in to sites in with agent-devices_sign_in.",
+      description: "Add a browser profile with no sign-ins yet, as a Vault item, for the user to sign in to sites in with agent-devices_sign_in.",
       input: { type: "object", properties: { profile: { type: "string", description: "its name, like Personal or Work" }, title: { type: "string", description: "the same, as the Vault gives it" } } },
       run: async (ctx, input) => {
         const title = String(input.profile || input.title || "").trim();
@@ -155,7 +155,7 @@ export default {
     },
     create: {
       reads: false,
-      description: "Create a lasting device and start it, for the person, on the first of their devices in run priority (device-activity_order) that runs its kind and has room: Linux with a browser of its own (the default), Android or an iPhone. Takes a minute or two. Agents borrow instead.",
+      description: "Create a lasting device and start it, for the user, on the first of their devices in run priority (device-activity_order) that runs its kind and has room: Linux with a browser of its own (the default), Android or an iPhone. Takes a minute or two. Agents borrow instead.",
       input: {"properties": {"device": {"description": "its name: lowercase letters, digits and dashes, like work-browser", "type": "string"}, "kind": kindArg, "size": sizeArg}, "required": ["device"], "type": "object"},
       run: (ctx, input) => service(ctx, "create", input),
     },
@@ -180,7 +180,7 @@ export default {
     delete: {
       reads: false,
       confirm: true,
-      description: "Delete a lasting device and everything in it, its sign-ins too, for good (agent-devices_backup first keeps a copy). Only when the person asked. A borrowed one goes with agent-devices_give_back.",
+      description: "Delete a lasting device and everything in it, its sign-ins too, for good (agent-devices_backup first keeps a copy). Only when the user asked. A borrowed one goes with agent-devices_give_back.",
       input: {"properties": {"device": deviceArg}, "required": ["device"], "type": "object"},
       run: (ctx, input) => service(ctx, "delete", input),
     },
@@ -240,7 +240,7 @@ export default {
     },
     adopt: {
       reads: false,
-      description: "For the person: make something already on one of their devices a lasting device: a Windows VM's folder with its disk, an Android Virtual Device, or an iPhone simulator.",
+      description: "For the user: make something already on one of their devices a lasting device: a Windows VM's folder with its disk, an Android Virtual Device, or an iPhone simulator.",
       input: { type: "object", required: ["device", "kind", "on"], properties: {
         device: { type: "string", description: "its name: lowercase letters, digits and dashes, like windows" }, kind: kindArg, on: { type: "string", description: "one of your devices, by name, where it is" },
         dir: { type: "string", description: "windows: its folder" }, id: { type: "string", description: "android: its AVD's name; iphone: its simulator's UDID" },

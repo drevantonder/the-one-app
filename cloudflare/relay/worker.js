@@ -36,7 +36,7 @@
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
 // - `{ add, role, admin? }`: a key (hex) to let in, and what it is: a client by any key on the list, a compute or a
-//   service only by an admin's or a compute's (nodes add the computers they pair and their people's services), and an
+//   service only by an admin's or a compute's (nodes add the computers they pair and their users' services), and an
 //   admin only by an admin's; one already in is changed only by an admin's, keeping who let it in.
 // - `{ remove }`: a key to take out, by an admin, the key that let it in, or itself, with the keys it let in that aren't
 //   admins', and theirs, and the pairing codes they made; never the last admin. A pairing code's computer is taken out
@@ -171,7 +171,7 @@ async function tell(env, request) {
   }
 }
 
-/// The network's one relay, made near its people.
+/// The network's one relay, made near its users.
 const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 
 /// What the remote MCP server asks the relay, by its binding: its devices' own bindings, and who's here; and what any
@@ -497,7 +497,7 @@ export class Relay extends DurableObject {
       return { error: String(e.message || e) };
     }
     if (fields.bind !== true || typeof name !== "string" || !name || name.length > 256) return { error: "a binding is a key's signed bind, to an object's name" };
-    if (!this.key(fields.by)) return { error: "that key isn't one of the network's: a device of its person approves it", code: CODES.notLetIn };
+    if (!this.key(fields.by)) return { error: "that key isn't one of the network's: a device of its user approves it", code: CODES.notLetIn };
     if (this.sockets.has(fields.by)) return { error: "that key is connected here itself" };
     const until = Date.now() + 3_600_000;
     const ticket = hex.encode(crypto.getRandomValues(new Uint8Array(32)));

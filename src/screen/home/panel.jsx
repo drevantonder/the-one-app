@@ -11,7 +11,7 @@ import { createRoot } from "react-dom/client"
 import { Button, Icon, Skeleton, WidgetCard, cn } from "@one/ui"
 import { home } from "./lib/model.js"
 
-/// Each widget on the person's pages once, in their pages' order, at its medium size.
+/// Each widget on the user's pages once, in their pages' order, at its medium size.
 function widgets() {
   const seen = new Set(), out = []
   for (const p of home.pages()) {
@@ -25,7 +25,7 @@ function widgets() {
   return out
 }
 
-/// What a widget's buttons and links do here: run its tool as the person, then draw again; open where it links, or
+/// What a widget's buttons and links do here: run its tool as the user, then draw again; open where it links, or
 /// its app, in the app's window.
 const host = (p) => ({
   async run(app, tool, input) {
@@ -43,7 +43,7 @@ const host = (p) => ({
   },
 })
 
-/// The person's devices, this one first.
+/// The user's devices, this one first.
 function devices() {
   // This device: the computer's own node, as the app says (`here`), not whichever node answered.
   const state = home.data.state, me = state?.user?.id, here = one.params?.here

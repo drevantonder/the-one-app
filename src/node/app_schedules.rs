@@ -1,5 +1,5 @@
-//! App schedules (GLOSSARY.md): an app's schedules run in a scope on a machine its person chose, with that app's keys
-//! there sealed to the machine (`keys::app_schedules_key_name`) while the log says so. Their person's devices set them
+//! App schedules (GLOSSARY.md): an app's schedules run in a scope on a machine its user chose, with that app's keys
+//! there sealed to the machine (`keys::app_schedules_key_name`) while the log says so. Their user's devices set them
 //! (`settings`), and renew them as they use the app, so app schedules nobody uses, or whose machine is off, end by
 //! themselves; a machine that holds them opens that app's databases there with their keys alone, as a call opens what
 //! it was handed, and never its other apps'. They're an `app-schedules` step.
@@ -12,12 +12,12 @@ pub(super) struct State {
     keys: Mutex<HashMap<(Scope, String), crate::database::stored::Keys>>,
     /// The Vault secret keys sealed to this machine, by scope and number, each the one its `vault` entry names.
     pub(super) vault: Mutex<HashMap<(Scope, u32), [u8; 32]>>,
-    /// Held while this machine renews its person's app schedules.
+    /// Held while this machine renews its user's app schedules.
     renewing: tokio::sync::Mutex<()>,
 }
 
 impl Node {
-    /// Renews, in the background, each of this machine's person's app schedules of `app` that's due, and stops each of
+    /// Renews, in the background, each of this machine's user's app schedules of `app` that's due, and stops each of
     /// theirs that ran out (`settings::renew_app_schedules`): as they use it here, and now and then. One renewal at a
     /// time; one asked meanwhile is passed over.
     pub(super) fn renew_app_schedules(&self, app: &str) {

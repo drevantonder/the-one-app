@@ -70,7 +70,7 @@ impl Node {
             let m = i.r.db();
             ensure!(m.compute(&self.0.id)?.is_some(), "this device isn't in {} yet", crate::config::YOURS);
             let kinds = if user.as_ref().is_none_or(|u| *u == asker.user) { MACHINE } else { &[scopes::Kind::Compute][..] };
-            ensure!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds)?, "only admins pair other people's machines");
+            ensure!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds)?, "only admins pair other users' machines");
             ensure!(m.serves(&self.0.id, &asker.user)?, "{} doesn't serve you", self.device_name());
             Ok(())
         })?;
@@ -176,8 +176,8 @@ impl Node {
         let (root, bucket) = self.with(|i| Ok((i.r.root().map(|r| r.to_hex()).context("no network")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let endpoint = crate::keys::Endpoint { key, seal: crate::keys::twin_public(&key)? };
-        // A machine of the person's own is their device too. An admin lists another person's as compute, which runs
-        // what that admin's listing may (`global`, groups) but never that person's own scope, until a device of theirs
+        // A machine of the user's own is their device too. An admin lists another user's as compute, which runs
+        // what that admin's listing may (`global`, groups) but never that user's own scope, until a device of theirs
         // lists it again (`scope::derive`'s runners).
         let roles = if user == pairing.user { MACHINE } else { &[scopes::Kind::Compute][..] };
         // Listed already by a join with this code that didn't finish: only the relay's left.

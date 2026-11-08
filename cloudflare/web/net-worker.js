@@ -5,12 +5,12 @@
 // Its endpoint is a key of the session's, made here, which the browser's device key vouches for (`certify`): that key
 // can't be read out of WebCrypto, and iroh signs with raw bytes. The relay and nodes take the endpoint as the device.
 //
-// The browser as a device of its person is one-client's keyring (client/src/keyring.rs, `Keyring` in its WebAssembly),
+// The browser as a device of its user is one-client's keyring (client/src/keyring.rs, `Keyring` in its WebAssembly),
 // here too: who's who as it reads it from the bucket itself, the keys it opens, and each request, with the keys its kind
 // needed, sealed to the one node it's sent to. Its seal key's secret stays in WebCrypto: the keyring asks it for each
 // secret it agrees (`shared`).
 //
-// A tab says `start` with its person; then each `fetch` is answered with its status and headers, its body's parts as
+// A tab says `start` with its user; then each `fetch` is answered with its status and headers, its body's parts as
 // they come, and `done` (or `error`); `cancel` stops one. What changes who can do what is a `fetch` too, of the path a
 // node's route has, which the keyring answers itself, signing it (one-client's `settings`). `settle`, `renew` and `push`
 // are the rest a device does as itself; `ask` and `waited`, what it does before it's one, asking to be let in; and
@@ -68,14 +68,14 @@ export function server(version) {
   // Imported here, not above, so the WebAssembly is fetched first.
   const code = Promise.all([import("/shared/crypto.js"), import("/shared/protocol.js"), import("/kept.js")]);
   /// Of `keys`, the nodes the network's signed steps, as `device` last read them, list as running something of its
-  /// person's: all of them before it's read any. A node the relay or a node names besides isn't asked.
+  /// user's: all of them before it's read any. A node the relay or a node names besides isn't asked.
   function theirs(device, keys) {
     const listed = device && JSON.parse(device.nodes()).nodes;
     return listed?.length ? keys.filter((key) => listed.includes(key)) : keys;
   }
 
   /// What `user`'s device (`me`, its keys as kept) reaches through JavaScript (one-client's `js::On`, which reads the
-  /// bucket through the URL signer with these): the network's address, and a JSON request to it; what it keeps, in IndexedDB by person, or in `memory` for one asked as for a while; whether the relay still
+  /// bucket through the URL signer with these): the network's address, and a JSON request to it; what it keeps, in IndexedDB by user, or in `memory` for one asked as for a while; whether the relay still
   /// lets it in (`still`); its key's signature, and the secret its seal key agrees with another's, neither key read.
   async function reaches(user, me, still, memory) {
     const [{ signBytes }, , { del, get, put }] = await code;
@@ -104,7 +104,7 @@ export function server(version) {
   }
 
   /// Where this browser keeps its calls' answers for `user` (one-client's `answers::Shelf`): IndexedDB's `one.answers`,
-  /// each sealed (AES-GCM) under a key of its own that WebCrypto never lets out, made for one person: another's
+  /// each sealed (AES-GCM) under a key of its own that WebCrypto never lets out, made for one user: another's
   /// sign-in finds only what it can't open, which goes.
   function shelf(user) {
     const done = (req) => new Promise((ok, fail) => ((req.onsuccess = () => ok(req.result)), (req.onerror = () => fail(req.error))));
@@ -166,7 +166,7 @@ export function server(version) {
     };
   }
 
-  /// Each person's answers kept in this browser (`Answers`), made the first time they're asked for.
+  /// Each user's answers kept in this browser (`Answers`), made the first time they're asked for.
   const answering = new Map();
   const answersOf = async (user) => {
     const { Answers } = await glue;
@@ -182,7 +182,7 @@ export function server(version) {
     return new Keyring(device.key, device.sealKey, await reaches(user, device, () => true, null));
   }
 
-  /// The session: none until a tab starts it (this worker, or this tab leading the others, is new); then its person, and
+  /// The session: none until a tab starts it (this worker, or this tab leading the others, is new); then its user, and
   /// `ready`, its client once it's started, or null if this browser isn't a device of theirs.
   let session = null;
   let renewal = null;
@@ -195,7 +195,7 @@ export function server(version) {
     const [mine, nodes] = await getAll([`device:${user}`, `nodes:${user}`]);
     const device = as || mine;
     if (!device) return null;
-    // Its keyring, made while the session's key is: this browser's, or another device's of its person's asked as while
+    // Its keyring, made while the session's key is: this browser's, or another device's of its user's asked as while
     // it lets this one in (a passkey's), which keeps nothing.
     let made = null;
     const making = glue.then(async ({ Keyring }) => {
@@ -230,7 +230,7 @@ export function server(version) {
     // on the relay's network now (`online`, raced first): waited for only the first time; after that, the nodes it
     // asked before are asked at once, and the computes only checked beside them.
     const computes = ask(certificate).then(async (asked) => {
-      // Not let in: this browser isn't one of its person's devices (yet, or any more).
+      // Not let in: this browser isn't one of its user's devices (yet, or any more).
       if (asked.status === 403) return null;
       if (!asked.ok) throw new Error(`${Yours} isn't answering.`);
       const said = await asked.json();
@@ -370,20 +370,20 @@ export function server(version) {
             const got = await (await answersOf(m.user)).kept(m.app, m.tool, JSON.stringify(m.input ?? {}));
             return post({ id, kept: got ? JSON.parse(got) : null });
           }
-          // Signed out: what this device kept as its person's goes.
+          // Signed out: what this device kept as its user's goes.
           case "forget": {
             const s = await session?.ready.catch(() => null);
             await s?.keyring.forget();
             await (await answersOf(m.user || "")).forget();
             return post({ id });
           }
-          // As each start of a client does: its person's own things, settled if they aren't.
+          // As each start of a client does: its user's own things, settled if they aren't.
           case "settle": {
             const s = await session?.ready;
             if (s) await s.keyring.settle();
             return post({ id });
           }
-          // Its person's app schedules of `app`, renewed as they use it.
+          // Its user's app schedules of `app`, renewed as they use it.
           case "renew": {
             const s = await session?.ready;
             if (s) await s.keyring.renewAppSchedules(m.app);

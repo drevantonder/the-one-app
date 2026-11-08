@@ -23,7 +23,7 @@ const missing = (why = "not found") => text(why, 404);
 
 export async function serve(ctx, g, api, { method, path, query, body }) {
   const m = /^([^/]+)\/([^/]+?)(?:\.git)?\/(.+)$/.exec(path || "");
-  if (!m || m[1].endsWith(".git")) return missing(`A repo's address is <your One App network's address>/repos/<owner>/<repo>.git, its owner a person's or group's handle: repos_list has them`);
+  if (!m || m[1].endsWith(".git")) return missing(`A repo's address is <your One App network's address>/repos/<owner>/<repo>.git, its owner a user's or group's handle: repos_list has them`);
   const [, owner, name, file] = m;
   const service = new URLSearchParams(query || "").get("service");
   const found = await api.find(ctx, g, owner, name);

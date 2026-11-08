@@ -1,6 +1,6 @@
-// WhatsApp: the person's WhatsApp accounts, each a phone linked to one of their devices as WhatsApp Desktop is linked.
+// WhatsApp: the user's WhatsApp accounts, each a phone linked to one of their devices as WhatsApp Desktop is linked.
 // The whatsapp service links the phone and keeps its messages, on each device whose owner installed it; this app is
-// what people and agents use.
+// what users and agents use.
 
 import settings from "./dist/settings.html" with { type: "text" };
 
@@ -20,13 +20,13 @@ const ACCOUNT = { type: "string", description: "which WhatsApp account: its numb
 const CHAT = "the chat: its name as whatsapp_chats gives it, or a part of it only one chat has; or a phone number with its country code (+61 400 000 000), or a JID (61400000000@s.whatsapp.net)";
 const DEVICE = { type: "string", description: "which of your devices that run WhatsApp to link it on, by name, as apps_devices whatsapp says where it runs; default the nearest. One account may be linked on several" };
 const LIMIT = { type: "integer", description: "at most this many; default 30" };
-const LINES = "one a line, \"[3 Nov 2026 09:00] Sam: text\", times in the time zone of the device it's linked on, and You for the person";
+const LINES = "one a line, \"[3 Nov 2026 09:00] Sam: text\", times in the time zone of the device it's linked on, and You for the user";
 
 async function running(ctx) {
   return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("whatsapp")).map((s) => s.name);
 }
 
-// Each account is a Vault item too, so the person's Vault lists it: its number and the device it's linked on, plain,
+// Each account is a Vault item too, so the user's Vault lists it: its number and the device it's linked on, plain,
 // with no secret, since the link itself stays in the service on that device. Linking finishes on the phone after
 // sign_in returns, so listing the accounts makes the items of new ones, and lets go of those whose every device
 // answered without them. A device that didn't answer leaves its accounts as they were.
@@ -68,9 +68,9 @@ export default {
   domain: "whatsapp.com",
   description: "Your WhatsApp chats, for your agents: read, search and send",
   needs: "Needs a device of yours to link your phone to",
-  instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. Each list pages back with limit and skip. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
+  instructions: "WhatsApp is the user's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. Each list pages back with limit and skip. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
   uses: { services: ["whatsapp"] },
-  service: { network: ["web.whatsapp.com", "*.whatsapp.net"], person: false, platforms: ["linux", "mac"] },
+  service: { network: ["web.whatsapp.com", "*.whatsapp.net"], user: false, platforms: ["linux", "mac"] },
   vault: VAULT,
 
   tools: {
@@ -92,7 +92,7 @@ export default {
     },
     sign_in: {
       reads: false,
-      description: "For the person: link a WhatsApp account to this device, as WhatsApp Desktop is linked. Gives a QR code to scan on their phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code shows on the phone itself. Chats arrive over the next few minutes.",
+      description: "For the user: link a WhatsApp account to this device, as WhatsApp Desktop is linked. Gives a QR code to scan on their phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code shows on the phone itself. Chats arrive over the next few minutes.",
       input: { type: "object", properties: { phone: { type: "string", description: "the account's number with its country code, like +61 400 000 000, for a code to type on the phone" }, device: DEVICE } },
       run: (ctx, input) => service(ctx, "sign_in", input),
     },
@@ -127,7 +127,7 @@ export default {
     },
     search: {
       reads: true,
-      description: "WhatsApp messages containing some text, across every chat or in one, newest last: to find something said when you don't know which chat. One a line, \"[3 Nov 2026 09:00] Sam in Family: text\", the chat only when it isn't Sam's own and \"You to Sam\" for the person's, times in the time zone of the device it's linked on. Page back with skip.",
+      description: "WhatsApp messages containing some text, across every chat or in one, newest last: to find something said when you don't know which chat. One a line, \"[3 Nov 2026 09:00] Sam in Family: text\", the chat only when it isn't Sam's own and \"You to Sam\" for the user's, times in the time zone of the device it's linked on. Page back with skip.",
       input: {
         type: "object",
         required: ["query"],
@@ -144,14 +144,14 @@ export default {
     send: {
       reads: false,
       confirm: true,
-      description: "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. It sends a real message to a real person and can't be taken back: only what the person asked to send, to whom they asked. Says to whom it went.",
+      description: "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. It sends a real message to a real person and can't be taken back: only what the user asked to send, to whom they asked. Says to whom it went.",
       input: {
         type: "object",
         required: ["chat", "text"],
         properties: {
           account: ACCOUNT,
           chat: { type: "string", description: `${CHAT}; or a contact's exact name, for someone with no chat yet` },
-          text: { type: "string", description: "the message, exactly as the person approved it" },
+          text: { type: "string", description: "the message, exactly as the user approved it" },
         },
       },
       run: (ctx, input) => service(ctx, "send", input),
@@ -165,7 +165,7 @@ export default {
     sign_out: {
       reads: false,
       confirm: true,
-      description: "Unlink a WhatsApp account: removes this device from the phone's linked devices and deletes the messages kept here. It can't be undone: linking again needs the phone, and the deleted messages don't come back. Only when the person asks to sign out.",
+      description: "Unlink a WhatsApp account: removes this device from the phone's linked devices and deletes the messages kept here. It can't be undone: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
       input: { type: "object", properties: { account: { type: "string", description: "the account's number, as whatsapp_accounts lists them; needed when several are linked here" }, device: { type: "string", description: "the device it's linked on, as whatsapp_accounts lists it: for an account linked on several" } } },
       async run(ctx, input) {
         const out = await service(ctx, "sign_out", input);

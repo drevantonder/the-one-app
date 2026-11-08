@@ -27,7 +27,7 @@ pub fn app_route(path: &str) -> bool {
 pub(super) fn routes() -> Routes {
     Routes::default()
         .route("/v1/call", Who::SignedIn, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
-        // An app's own requests, run as its tool `_http` for its person, whose checks are the app's: git's, to Repos.
+        // An app's own requests, run as its tool `_http` for its user, whose checks are the app's: git's, to Repos.
         .route(APP_ROUTE, Who::SignedIn, any(app_http))
 }
 
@@ -45,7 +45,7 @@ async fn call_for(node: &Node, me: Me, mut req: CallRequest, picks: bool) -> any
     Ok(json!({ "ok": node.call_as(req, me.caller).await? }))
 }
 
-/// A call the Cloudflare node passes on over iroh (src/node/net.rs): its person's, as `me.user` says, run with the keys
+/// A call the Cloudflare node passes on over iroh (src/node/net.rs): its user's, as `me.user` says, run with the keys
 /// of its databases they handed the Cloudflare node, which it hands this device (`keys`, sealed to it for the
 /// Cloudflare node's key, `Credential::Passed`) for the scopes the call names alone, and never this device's own: no
 /// access token comes with it, so none of theirs reaches a node on a machine, whose owner could use it as them.
@@ -61,13 +61,13 @@ pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::
         let handed = keys.as_ref().and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("a call passed on brings the keys it was handed"))?;
         let credential = node.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
-        // As the Cloudflare node's, never this device's own: no service counts it as its person's own node.
+        // As the Cloudflare node's, never this device's own: no service counts it as its user's own node.
         call_for(node, Me { caller: Caller { key: remote, user, agent: None, credential }, sign_in: Some(client) }, serde_json::from_value(call)?, false).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))
 }
 
-/// A request to `/<app>/<path>`, answered by the app's `_http` tool, run as whoever asked (this machine's person,
+/// A request to `/<app>/<path>`, answered by the app's `_http` tool, run as whoever asked (this machine's user,
 /// a client device's, or a sign-in's), whose checks are the app's own: the body reaches it as a blob, read as it comes
 /// and deleted once it's answered unless something keeps it, and it answers `{ status, type, text }`, or
 /// `{ status, type, blob }` for bytes it keeps.

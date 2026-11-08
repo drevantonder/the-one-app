@@ -17,8 +17,8 @@ pub struct Caller {
 /// (sessions.rs) and never this device's own.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Credential {
-    /// None: this device's own programs, or a device or service of its own person asking as itself. Its calls use this
-    /// device's own keys, for its own person alone.
+    /// None: this device's own programs, or a device or service of its own user asking as itself. Its calls use this
+    /// device's own keys, for its own user alone.
     Own,
     /// An access token the network's sign-in signed, passed on with its calls to another device, with the keys it was
     /// handed.

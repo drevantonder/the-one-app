@@ -18,7 +18,7 @@ fn view_uri() -> String {
 pub fn resources() -> Vec<Value> {
     vec![json!({
         "uri": view_uri(), "name": "view", "mimeType": MIME,
-        "description": "The person's widgets and app screens, drawn inline.",
+        "description": "The user's widgets and app screens, drawn inline.",
         "_meta": { "ui": { "prefersBorder": true } },
     })]
 }
@@ -51,7 +51,7 @@ pub fn tools() -> Vec<Value> {
         },
         json!({
             "name": "screens_open",
-            "description": "Open one of an app's screens inline, where the chat can draw it, for the person to use there.",
+            "description": "Open one of an app's screens inline, where the chat can draw it, for the user to use there.",
             "inputSchema": { "type": "object", "required": ["app"], "properties": {
                 "app": { "type": "string", "description": "the app's name, like gmail" },
                 "screen": { "type": "string", "description": "the screen's name; main by default" },
@@ -122,7 +122,7 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     let address = node.state().ok().and_then(|s| s.address().map(|a| a.trim_end_matches('/').to_string()));
     let web = address.map(|a| format!("{a}/app/{}/{}?{}", urlencode(app), urlencode(screen), query.iter().map(|(k, v)| format!("{k}={}", urlencode(v))).collect::<Vec<_>>().join("&")));
     Ok(json!({
-        "content": [{ "type": "text", "text": format!("Opened {app}'s {screen} screen for the person.") }],
+        "content": [{ "type": "text", "text": format!("Opened {app}'s {screen} screen for the user.") }],
         "structuredContent": { "app": app, "screen": screen, "scope": input["scope"], "title": title, "web": web, "html": html },
     }))
 }

@@ -1,6 +1,6 @@
 // Every screen showing: the one beside the sidebar, and the sheets over it, each an app's or the client's own, in a
 // sandboxed frame whose bridge (src/screen/bridge.js) this page answers: an app's acting only as that app, and only the
-// client's own as the person (settings.js).
+// client's own as the user (settings.js).
 import { offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
@@ -25,7 +25,7 @@ const asset = (name) => (files[name] ? `/${name}?v=${files[name]}` : `/${name}`)
 
 /// Phosphor's icons, from the address once (and then the browser's cache), for those the bridge asks for: on this
 /// page, and in screens' frames. Asked for last, so that on a first visit the client's WebAssembly, which the first
-/// answer from the person's machines waits for, gets the connection first.
+/// answer from the user's machines waits for, gets the connection first.
 let icons;
 export async function iconPaths(names = []) {
   icons ||= fetch(asset("icons.json"), { priority: "low" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))).catch((err) => ((icons = null), Promise.reject(err)));
@@ -86,7 +86,7 @@ function screenPage(r) {
   return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope, linked: true }, raw: true, since: developer.on() ? since : undefined }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
 }
 
-/// One of the client's own screens' pages, which act as the person, so never a node's: the address's
+/// One of the client's own screens' pages, which act as the user, so never a node's: the address's
 /// `screens/<name>.html` (src/screen.rs's `client_template`), with a nonce of its own and its params filled in.
 async function ownPage(r) {
   const resp = await fetch(asset(`screens/${files[`screens/${r.name}.html`] ? r.name : "missing"}.html`));
@@ -331,7 +331,7 @@ export function openSheet(r) {
 }
 
 /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
-/// the client's own screens', as the person, which no app's may.
+/// the client's own screens', as the user, which no app's may.
 addEventListener("message", async (e) => {
   const still = frames.find((x) => x.still?.frame.contentWindow === e.source)?.still;
   if (still && e.data?.oneFrame) return void still.frame.contentWindow.postMessage({ oneScreen: still.html }, "*");
@@ -365,7 +365,7 @@ addEventListener("message", async (e) => {
       },
       open: (m) => {
         const params = JSON.stringify(m.params || {});
-        // Any screen may send its person to choose the device that runs its app's schedules, in Settings › Devices.
+        // Any screen may send its user to choose the device that runs its app's schedules, in Settings › Devices.
         // An app's says only which app's schedules, and where: no code to approve.
         const to = m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params: mine ? params : JSON.stringify({ schedules: m.params?.schedules, scope: m.params?.scope }) }
           : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }

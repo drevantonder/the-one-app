@@ -3,7 +3,7 @@
 // author edits, closes and reopens it; those who push to the repo (its owners and collaborators) do that to any of its
 // issues, and label and assign them and manage its labels; its owners delete an issue, or anyone's comment. What the
 // tools give is GitHub's shape where it has one (number, state, state_reason, labels with their colour), with
-// people by handle, so a GitHub repo's issues could come back the same.
+// users by handle, so a GitHub repo's issues could come back the same.
 
 /// GitHub's labels, which every new repo starts with: name, colour (hex, no #) and description.
 export const LABELS = [
@@ -24,7 +24,7 @@ const REASONS = ["completed", "not_planned"];
 
 const NUMBER = { type: "integer", description: "the issue's number in its repo, like 12 for #12, from repos_issues" };
 const LABEL_NAMES = { type: "array", items: { type: "string" }, description: "label names, from repos_labels, like [\"bug\"]: the issue's labels become exactly these ([] for none)" };
-const ASSIGNEES = { type: "array", items: { type: "string" }, description: "people's handles, from groups_list, like [\"sam\"], at most 10: the issue's assignees become exactly these ([] for none)" };
+const ASSIGNEES = { type: "array", items: { type: "string" }, description: "users' handles, from groups_list, like [\"sam\"], at most 10: the issue's assignees become exactly these ([] for none)" };
 const BODY = (what) => ({ type: "string", description: `${what}, in Markdown (GitHub's), up to 65536 characters` });
 
 function number(n) {
@@ -51,9 +51,9 @@ const like = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
 
 export function tools(R) {
   const { global, named, object, rights, who, byHandle, handles, randomId, iso, REPO } = R;
-  const person = (ctx, id) => who(ctx, `user:${id}`);
+  const userOf = (ctx, id) => who(ctx, `user:${id}`);
   const COMMENT_ID = { type: "string", description: "a comment's id, from repos_issue's comments" };
-  const CONFIRM = { type: "boolean", description: "true once the person agreed: it can't be undone" };
+  const CONFIRM = { type: "boolean", description: "true once the user agreed: it can't be undone" };
 
   async function issueAt(g, r, n) {
     const i = (await g.query("select * from issues where repo = ? and number = ?", [r.id, number(n)]))[0];
@@ -71,11 +71,11 @@ export function tools(R) {
       g.query(`select number, count(*) as n from comments where repo = ? and number in (${placeholders(ns)}) group by number`, [r.id, ...ns]),
     ]);
     return rows.map((i) => ({
-      number: i.number, title: i.title, state: i.state, state_reason: i.state_reason, author: person(ctx, i.user),
+      number: i.number, title: i.title, state: i.state, state_reason: i.state_reason, author: userOf(ctx, i.user),
       labels: labels.filter((l) => l.number === i.number).map(({ name, color, description }) => ({ name, color, description })),
-      assignees: assignees.filter((a) => a.number === i.number).map((a) => person(ctx, a.user)),
+      assignees: assignees.filter((a) => a.number === i.number).map((a) => userOf(ctx, a.user)),
       comments: comments.find((c) => c.number === i.number)?.n ?? 0,
-      created: i.created, updated: i.updated, closed: i.closed, closed_by: i.closed_by ? person(ctx, i.closed_by) : null,
+      created: i.created, updated: i.updated, closed: i.closed, closed_by: i.closed_by ? userOf(ctx, i.closed_by) : null,
     }));
   }
 
@@ -89,7 +89,7 @@ export function tools(R) {
     });
   }
 
-  function people(ctx, hs) {
+  function users(ctx, hs) {
     if (!Array.isArray(hs)) throw new Error('give assignees as a list of handles, like ["sam"]');
     const ids = [...new Set(hs.map((h) => {
       const p = byHandle(ctx, String(h).replace(/^@/, ""));
@@ -108,7 +108,7 @@ export function tools(R) {
   function addComment(ctx, g, r, n, text) {
     const id = randomId();
     g.exec("insert into comments values (?, ?, ?, ?, ?, ?, ?)", [id, r.id, n, ctx.me.user, text, ctx.now(), ctx.now()]);
-    return { id, author: person(ctx, ctx.me.user), body: text, created: ctx.now(), updated: ctx.now(), yours: true };
+    return { id, author: userOf(ctx, ctx.me.user), body: text, created: ctx.now(), updated: ctx.now(), yours: true };
   }
 
   async function commentAt(g, r, id) {
@@ -127,8 +127,8 @@ export function tools(R) {
           repo: REPO,
           state: { type: "string", enum: ["open", "closed", "all"], description: "open (the default), closed or all" },
           label: { type: "string", description: "only issues with this label, by name, from repos_labels" },
-          assignee: { type: "string", description: "only issues assigned to this person, by handle, from groups_list; none for those assigned to no one" },
-          author: { type: "string", description: "only issues this person opened, by handle, from groups_list" },
+          assignee: { type: "string", description: "only issues assigned to this user, by handle, from groups_list; none for those assigned to no one" },
+          author: { type: "string", description: "only issues this user opened, by handle, from groups_list" },
           q: { type: "string", description: "words to find in issues' titles, bodies and comments, or a number like 12 or #12" },
           page: { type: "integer", description: "which 25: 0 (the default) for the newest, 1 for the 25 before them, and on while more is true" },
         },
@@ -146,11 +146,11 @@ export function tools(R) {
         if (assignee === "none") where.push("not exists (select 1 from issue_assignees a where a.repo = i.repo and a.number = i.number)");
         else if (assignee) {
           where.push("exists (select 1 from issue_assignees a where a.repo = i.repo and a.number = i.number and a.user = ?)");
-          params.push(people(ctx, [assignee])[0]);
+          params.push(users(ctx, [assignee])[0]);
         }
         if (author) {
           where.push("i.user = ?");
-          params.push(people(ctx, [author])[0]);
+          params.push(users(ctx, [author])[0]);
         }
         const words = String(q || "").trim();
         if (words) {
@@ -190,7 +190,7 @@ export function tools(R) {
         const author = i.user === ctx.me.user;
         return iso({
           repo: r.path, ...shaped, body: i.body,
-          comments: comments.map((c) => ({ id: c.id, author: person(ctx, c.user), body: c.body, created: c.created, updated: c.updated, yours: c.user === ctx.me.user })),
+          comments: comments.map((c) => ({ id: c.id, author: userOf(ctx, c.user), body: c.body, created: c.created, updated: c.updated, yours: c.user === ctx.me.user })),
           can: { edit: author || push, close: author || push, triage: push, delete: yours },
         });
       },
@@ -209,7 +209,7 @@ export function tools(R) {
         const push = await g.may("push", object(r));
         may(push || !(input.labels?.length || input.assignees?.length), `only ${pushers(r)} label and assign its issues: open it without labels or assignees`);
         const labels = input.labels ? await labelsNamed(g, r, input.labels) : [];
-        const assignees = input.assignees ? people(ctx, input.assignees) : [];
+        const assignees = input.assignees ? users(ctx, input.assignees) : [];
         const n = r.issues + 1, now = ctx.now();
         g.check("select issues = ? from repos where id = ?", [r.issues, r.id], "someone opened an issue meanwhile: try again");
         g.exec("update repos set issues = ? where id = ?", [n, r.id]);
@@ -217,8 +217,8 @@ export function tools(R) {
         for (const l of labels) g.exec("insert into issue_labels values (?, ?, ?)", [r.id, n, l.name]);
         for (const a of assignees) g.exec("insert into issue_assignees values (?, ?, ?)", [r.id, n, a]);
         return iso({
-          repo: r.path, number: n, title: t, body: b, state: "open", state_reason: null, author: person(ctx, ctx.me.user), labels,
-          assignees: assignees.map((a) => person(ctx, a)), comments: 0, created: now, updated: now, closed: null, closed_by: null,
+          repo: r.path, number: n, title: t, body: b, state: "open", state_reason: null, author: userOf(ctx, ctx.me.user), labels,
+          assignees: assignees.map((a) => userOf(ctx, a)), comments: 0, created: now, updated: now, closed: null, closed_by: null,
         });
       },
     },
@@ -248,8 +248,8 @@ export function tools(R) {
           for (const l of out.labels) g.exec("insert into issue_labels values (?, ?, ?)", [r.id, i.number, l.name]);
         }
         if (input.assignees !== undefined) {
-          const ids = people(ctx, input.assignees);
-          out.assignees = ids.map((a) => person(ctx, a));
+          const ids = users(ctx, input.assignees);
+          out.assignees = ids.map((a) => userOf(ctx, a));
           g.exec("delete from issue_assignees where repo = ? and number = ?", [r.id, i.number]);
           for (const a of ids) g.exec("insert into issue_assignees values (?, ?, ?)", [r.id, i.number, a]);
         }
@@ -336,7 +336,7 @@ export function tools(R) {
         const text = body(input.body, "a comment");
         if (!text.trim()) throw new Error("a comment needs some text: repos_delete_comment deletes one");
         g.exec("update comments set body = ?, updated = ? where id = ?", [text, ctx.now(), c.id]);
-        return iso({ repo: r.path, number: c.number, id: c.id, author: person(ctx, c.user), body: text, created: c.created, updated: ctx.now(), yours: true });
+        return iso({ repo: r.path, number: c.number, id: c.id, author: userOf(ctx, c.user), body: text, created: c.created, updated: ctx.now(), yours: true });
       },
     },
     delete_comment: {
@@ -423,7 +423,7 @@ export function tools(R) {
         return `Deleted the label ${l.name} from ${r.path}.`;
       },
     },
-    _people: {
+    _users: {
       reads: true,
       description: "Everyone in the network, by handle and name, for the screens' assignee and author pickers; for a GitHub repo, those GitHub lets its issues be assigned to.",
       input: { type: "object", properties: { repo: REPO } },

@@ -1,4 +1,4 @@
-// The Vault: the items on each page this person keeps (theirs, their groups' as an admin, everyone's as an admin),
+// The Vault: the items on each page this user keeps (theirs, their groups' as an admin, everyone's as an admin),
 // searchable, each with what it's for and the apps that use it. The node never gives a secret field's value, so this
 // screen never has one: replacing one sends the new value once.
 //
@@ -20,7 +20,7 @@ const has = (a, tool) => (Array.isArray(a?.tools) ? a.tools.some((o) => (o.name 
 const shown = (item) => item.fields.filter((f) => !f.name.startsWith("_"))
 // Its one short line: what it is, else its first plain field; none when what it is is its title.
 const line = (item) => (item.type ? (item.type === item.title ? "" : item.type) : shown(item).find((f) => !f.secret && f.value)?.value || "")
-// A field's name as a person reads it: `client_id` is "Client ID".
+// A field's name as a user reads it: `client_id` is "Client ID".
 const fieldLabel = (name) => {
   const words = name.split(/[_\-.]/).filter(Boolean).map((w) => (["id", "url", "api", "pin", "otp"].includes(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase()))
   return words.length ? [words[0][0].toUpperCase() + words[0].slice(1), ...words.slice(1)].join(" ") : name
@@ -29,7 +29,7 @@ const sites = (text) => text.split(",").map((s) => s.trim().toLowerCase()).filte
 const said = (err) => one.plain(err).title
 const KEY = { name: "Item", icon: "key", color: "#8e8e93" }
 
-// The pages this person keeps items on: theirs, the groups they're an admin of, and everyone's as an admin.
+// The pages this user keeps items on: theirs, the groups they're an admin of, and everyone's as an admin.
 function pagesFrom(state) {
   const admin = (scope) => scope === "user" || (scope === "global" ? state.user?.role === "admin" : state.network?.groups.find((g) => `group:${g.id}` === scope)?.role === "admin")
   return (state.pages || []).filter((p) => admin(p.scope))
@@ -47,7 +47,7 @@ function know(apps) {
     names,
     // An item's icon: the logo of the site it's for, else the icon of the app that made or uses it, else a key.
     icon: (item) => (item.image ? { name: item.title, image: item.image, image_kind: item.image_kind } : app(item.app || item.apps[0]) || { ...KEY, name: item.title }),
-    // The items the apps added for this person make, as their `vault` says.
+    // The items the apps added for this user make, as their `vault` says.
     makers: () => apps.filter((a) => a.added?.length).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.make && n.type).map((n) => ({ app: a.name, tool: n.make, type: n.type }))).sort((x, y) => x.type.localeCompare(y.type)),
     // What the apps switched on for an item do with items of its type.
     actions: (item) => apps.filter((a) => item.apps.includes(a.name)).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.type && n.type === item.type).flatMap((n) => Object.entries(n.actions || {}).map(([tool, title]) => ({ app: a.name, tool, title })))).sort((x, y) => x.title.localeCompare(y.title)),
@@ -163,7 +163,7 @@ function Vault() {
     }
   }, [items, opening])
 
-  // New: an item a person types, or with the apps that make items of a type, one of those.
+  // New: an item a user types, or with the apps that make items of a type, one of those.
   function startNew() {
     const made = k.makers()
     setMaking(made.length ? { made } : { item: true })
@@ -542,7 +542,7 @@ function Using({ app, title, on, set }) {
   )
 }
 
-// The New dialog's choice: an item a person types, or one an app makes.
+// The New dialog's choice: an item a user types, or one an app makes.
 function Choose({ k, made, open, setOpen, pick }) {
   return (
     <ResponsiveDialog open={open} onOpenChange={setOpen} title="New" action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>}>
@@ -556,7 +556,7 @@ function Choose({ k, made, open, setOpen, pick }) {
   )
 }
 
-// A new item a person types: its page, title, fields (each secret or not) and the sites they're sent to.
+// A new item a user types: its page, title, fields (each secret or not) and the sites they're sent to.
 function NewItem({ pages, scope, open, setOpen, done }) {
   const [page, setPage] = useState(scope)
   const [drafts, setDrafts] = useState([{ n: 0, secret: true }])
@@ -609,7 +609,7 @@ function NewItem({ pages, scope, open, setOpen, done }) {
   )
 }
 
-// A new item an app makes, of a type it uses: the person names it.
+// A new item an app makes, of a type it uses: the user names it.
 function MakeItem({ maker, open, setOpen, done }) {
   const [error, setError] = useState("")
   const [adding, setAdding] = useState(false)

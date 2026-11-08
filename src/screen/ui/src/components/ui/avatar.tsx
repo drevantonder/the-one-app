@@ -21,7 +21,7 @@ function initialsOf(name: string) {
 /// (`AvatarFallback`). `size` is `sm`, `default` or `lg`, or a number of pixels.
 ///
 /// Given a `name` it draws their initials itself, grey; with an `id` too, white on a colour that stays the same for
-/// that id, so a person or group is the same colour wherever they're shown.
+/// that id, so a user or group is the same colour wherever they're shown.
 function Avatar({ className, size = "default", name, id, style, children, ...props }: React.ComponentProps<typeof AvatarPrimitive.Root> & {
   size?: "sm" | "default" | "lg" | number
   name?: string

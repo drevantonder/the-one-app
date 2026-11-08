@@ -1,4 +1,4 @@
-//! How each app's calls went here: loop guards that stop an app, its failures recorded, and what its people see of them.
+//! How each app's calls went here: loop guards that stop an app, its failures recorded, and what its users see of them.
 
 use super::*;
 
@@ -65,14 +65,14 @@ impl Node {
                 return Ok(None);
             }
             let name = |u: &str| user_name(m, u);
-            let mut people: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
+            let mut users: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
             let mut errors: BTreeMap<(String, String), (u64, u64, u64, String)> = BTreeMap::new();
             let mut cost: BTreeMap<String, (f64, u64, u64, u64)> = BTreeMap::new();
             for (log, status) in &i.status {
                 let Ok(scope) = Scope::parse(log) else { continue };
                 let Some(ins) = status.insights.get(app).filter(|_| m.may(&viewer.user, "use", &scopes::object(&scope))) else { continue };
                 for ((user, client), u) in &ins.used {
-                    let p = people.entry((user.clone(), client.clone())).or_default();
+                    let p = users.entry((user.clone(), client.clone())).or_default();
                     p.0 += u.days;
                     p.1 = p.1.max(u.last);
                     if u.agent.is_some() {
@@ -97,7 +97,7 @@ impl Node {
                 }
             }
             let mut usage: Vec<Value> = Vec::new();
-            for ((u, client), (days, last, agent)) in people {
+            for ((u, client), (days, last, agent)) in users {
                 usage.push(json!({ "user": name(&u)?, "client": client, "agent": agent, "days": days, "last": last }));
             }
             usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));

@@ -1,6 +1,6 @@
 //! The last answer of each call an app's screens make that only reads (`reads: true`), for bridge.js's `kept`: a page
 //! opened before shows at once while it asks again. Each client keeps them sealed where it keeps things (`Shelf`), for
-//! its person alone, and forgets them as it signs out or is taken out: a native app as files in its folder, sealed under
+//! its user alone, and forgets them as it signs out or is taken out: a native app as files in its folder, sealed under
 //! a key from the device's own (`keys::answers_key`); a browser in IndexedDB, under a WebCrypto key of its own that
 //! can't be read (cloudflare/web/net-worker.js).
 
@@ -17,7 +17,7 @@ use crate::{Body, Error, Response};
 const MOST: usize = 300;
 const BIGGEST: usize = 1_000_000;
 
-/// Where a client keeps answers, sealed for its person: each by its name, the oldest past `most` going as one is put.
+/// Where a client keeps answers, sealed for its user: each by its name, the oldest past `most` going as one is put.
 pub trait Shelf {
     /// What's kept as `name`, opened: none if it isn't, or doesn't open.
     fn get(&self, name: &str) -> impl Future<Output = Option<Vec<u8>>>;
@@ -148,12 +148,12 @@ mod tests {
         crate::Response { node: [0; 32], status: 200, headers: Vec::new(), body: crate::Body::whole(body.to_vec()), trace: None }
     }
 
-    /// What a native app keeps of its screens' calls, to show at once next time (one-client's `Answers`), is its person's
-    /// alone: only what tools that only read answered, sealed under that device's own key, so another person's
+    /// What a native app keeps of its screens' calls, to show at once next time (one-client's `Answers`), is its user's
+    /// alone: only what tools that only read answered, sealed under that device's own key, so another user's
     /// sign-in on the same computer (a device with its own key, even in the same folder) opens none of it; and it's gone
     /// once the device signs out.
     #[tokio::test]
-    async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
+    async fn what_a_native_app_keeps_of_its_calls_is_its_users_alone() {
         let dir = std::env::temp_dir().join(format!("one-answers-{}", std::process::id()));
         let (andre, sam) = ([1; 32], [2; 32]);
         let apps = serde_json::to_vec(&serde_json::json!([{ "name": "tally", "tools": [{ "name": "topics", "reads": true }, { "name": "post", "reads": false }] }])).unwrap();

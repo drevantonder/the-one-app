@@ -1,4 +1,4 @@
-//! What this process is for: the person's own network (`Own`), or a throwaway network's (`one throwaway`), which has a home
+//! What this process is for: the user's own network (`Own`), or a throwaway network's (`one throwaway`), which has a home
 //! and address of its own and must touch nothing of the real one's (`~/.local/bin`, the harnesses' configs, git's config).
 //! `one throwaway` tells every program it starts, by `Throwaway::tell`, and it's read here once, as the program starts: no code
 //! asks the environment, settings or a flag whether this is one.

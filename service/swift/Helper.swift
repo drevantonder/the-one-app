@@ -4,12 +4,12 @@ import os
 /// A Mac service in Swift: a helper app of its own, carried inside the Mac app (Contents/Helpers), which its device's
 /// oned starts from a copy outside it (src/oned.rs's `placed`) as a process macOS holds responsible for itself, so
 /// macOS asks for, and records, its permission under its own name. oned tells it where to register (`ONE_ADDR`) and where the token it sends is (`ONE_HOME`). It
-/// registers only once it has what it needs from the person.
+/// registers only once it has what it needs from the user.
 public protocol Service: Sendable {
     var app: String { get }
     /// The Mac app it reaches, by bundle id, whose icon is its picture.
     var localApp: String? { get }
-    /// What it still needs from the person before it can answer (a permission macOS hasn't given it), in words for
+    /// What it still needs from the user before it can answer (a permission macOS hasn't given it), in words for
     /// them; nil once it has it. Asked every few seconds until then: asking macOS, which shows its prompt, is done once.
     func needs() async -> String?
     func run(_ function: String, _ input: Input) async throws -> Any

@@ -25,7 +25,7 @@ pub fn commands() -> Command {
                                 let version = installed.iter().find(|d| d.name == p.name).and_then(|d| d.version.as_deref()).map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
                                 let doing = p.doing.as_ref().map(|d| format!(", {}", d.to_lowercase())).unwrap_or_default();
                                 let problem = p.problem.as_ref().map(|w| format!(": {w}")).unwrap_or_default();
-                                let held = match (&p.sandbox, p.person) {
+                                let held = match (&p.sandbox, p.user) {
                                     (Some(why), _) => format!(", without its sandbox: {why}"),
                                     (None, true) => ", as you".into(),
                                     _ => String::new(),
@@ -59,7 +59,7 @@ pub fn commands() -> Command {
                         }
                     }
                 }
-                // What lets this machine's person start services in their sandbox, for root to run once: `| sudo sh`.
+                // What lets this machine's user start services in their sandbox, for root to run once: `| sudo sh`.
                 ["services", "sandbox"] => print!("{}", crate::services::sandbox::setup_script()?),
                 ["services", how @ ("on" | "off"), name] => {
                     let device = g.flag("device");

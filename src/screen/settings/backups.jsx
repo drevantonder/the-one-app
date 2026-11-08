@@ -11,7 +11,7 @@ const name = (device) => String(device || "").replace(/\.local$/, "")
 const list = (items) => [...items].join(", ")
 const said = (err) => one.plain(err).title
 
-// A time for people: "14:00" (today) or "3 Nov, 14:00"; with `day`, "Today, 14:00", "Yesterday, 14:00" or
+// A time for users: "14:00" (today) or "3 Nov, 14:00"; with `day`, "Today, 14:00", "Yesterday, 14:00" or
 // "Monday 3 November, 14:00".
 function when(ms, day) {
   const d = new Date(ms), time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
@@ -32,7 +32,7 @@ function size(bytes) {
 // A place's icon: a disk for a folder, else a cloud.
 const placeApp = (kind) => ({ name: kind, icon: kind === "folder" ? "hard-drive" : "cloud", color: "#8e8e93" })
 
-// Whose data a snapshot holds, by name: Everyone, a person, a group.
+// Whose data a snapshot holds, by name: Everyone, a user, a group.
 const whose = (network, scope) => scope === "global" ? "Everyone"
   : scope.startsWith("user:") ? (network.users || []).find((u) => `user:${u.id}` === scope)?.name || "Someone"
   : scope.startsWith("group:") ? (network.groups || []).find((g) => `group:${g.id}` === scope)?.name || "A group"

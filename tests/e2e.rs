@@ -61,7 +61,7 @@ fn invited(secret: &str) -> one::settings::Invited {
     serde_json::from_value(json!({ "secret": secret, "name": "Sam", "role": "member", "until": u64::MAX })).unwrap()
 }
 
-/// Sam, invited by `a`'s person as a member, let in with his first device, `key`, as `a` approves it: → his id.
+/// Sam, invited by `a`'s user as a member, let in with his first device, `key`, as `a` approves it: → his id.
 pub(crate) async fn let_sam_in(a: &Node, key: &ed25519_dalek::SigningKey) -> String {
     let sam = one::database::scopes::new_id();
     one::settings::approve(a, &asks(key, &sam, Some(b"the-invites-secret")), Some(&invited("the-invites-secret"))).await.unwrap();
@@ -120,7 +120,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let checked = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None }).unwrap().0;
     assert_eq!(checked["problems"], json!([]), "{checked}");
     assert_eq!(checked["network"], "Home");
-    assert_eq!(checked["people"], json!(["Andre"]));
+    assert_eq!(checked["users"], json!(["Andre"]));
     assert!(checked["apps"].as_array().unwrap().contains(&json!("notes")), "{checked}");
     let mine = format!("user:{}", me.user);
     let items = backed_up(&dir, &network, &one::keys::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
@@ -179,7 +179,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(!planted.exists(), "nothing was written there");
     assert!(place("Unnamed bucket").is_none(), "{}", a.backups().unwrap());
 
-    // A place typed into the sheet on the person's device is a place too.
+    // A place typed into the sheet on the user's device is a place too.
     let asked = a.request_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "title": "Sheet bucket" })).await.unwrap();
     let answer = json!({ "fields": { "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" } });
     a.answer_request(&me, &global, asked["id"].as_str().unwrap(), &answer).await.unwrap();
@@ -227,10 +227,10 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-/// A device is approved only by its person's own device, or a newcomer's by the admin whose invite their proof was made
+/// A device is approved only by its user's own device, or a newcomer's by the admin whose invite their proof was made
 /// with; a device removed opens no epoch made after.
 #[tokio::test(flavor = "multi_thread")]
-async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
+async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     let dir = temp("approve");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir, false).await.unwrap();
@@ -351,10 +351,10 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
     assert!(!said.contains("private thought") && !said.contains(&a.user().unwrap()), "a trace holds names and timings alone: {said}");
 }
 
-/// A device's log is read over the network by whoever may remove the device (its person, and the network's admins), never
+/// A device's log is read over the network by whoever may remove the device (its user, and the network's admins), never
 /// by another member, and what's returned is capped.
 #[tokio::test(flavor = "multi_thread")]
-async fn only_a_devices_person_or_an_admin_reads_its_logs() {
+async fn only_a_devices_user_or_an_admin_reads_its_logs() {
     let dir = temp("logs");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir, false).await.unwrap();
@@ -444,11 +444,11 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
     assert!(a.fill_for_service("shell", &mut input, &me, Some("notes")).await.is_err() || !input.to_string().contains("s3cret"), "a service its item doesn't name gets none of it");
 }
 
-/// A client device's MCP request (the remote MCP server's, say) is answered as its person, never as the node's own: it
+/// A client device's MCP request (the remote MCP server's, say) is answered as its user, never as the node's own: it
 /// lists every tool any client does, its tools run as them, with what they may do and the keys they hand, and a tool
 /// needing keys they didn't hand is answered 428 with what it needs, for them to hand and ask again.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_client_devices_mcp_runs_as_its_person() {
+async fn a_client_devices_mcp_runs_as_its_user() {
     use one::api::client::{InProcess, Via};
     let a = start("mcp").await;
     create(&a, "Home", "Andre").await;
@@ -484,7 +484,7 @@ async fn a_client_devices_mcp_runs_as_its_person() {
     assert!(logs["result"]["isError"] == true && logs.to_string().contains("admin"), "Sam reads no log of Andre's device: {logs}");
     let (_, backups) = mcp(json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": "backups_status", "arguments": {} } })).await;
     assert!(backups["result"]["isError"] == true && backups.to_string().contains("Only admins"), "Backups are admins': {backups}");
-    // A node signs who can do what only as its own person's device, for its own programs: a device answers that itself.
+    // A node signs who can do what only as its own user's device, for its own programs: a device answers that itself.
     let (_, devices) = mcp(json!({ "jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": { "name": "devices_remove", "arguments": { "device": "mac", "confirm": true } } })).await;
     assert!(devices["result"]["isError"] == true, "{devices}");
     let (status, needs) = mcp(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "notes_post", "arguments": { "text": "from Sam" } } })).await;

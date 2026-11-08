@@ -2,10 +2,10 @@ import AppKit
 import ApplicationServices
 import Helper
 
-/// Lets the person's own agents use this Mac (its apps, keyboard and pointer) once they turn it on, through Cua Driver
+/// Lets the user's own agents use this Mac (its apps, keyboard and pointer) once they turn it on, through Cua Driver
 /// (github.com/trycua/cua). It runs as this helper's child, embedded, so the Accessibility and Screen Recording
 /// permissions it needs are this helper's, granted once, rather than Cua Driver's own. Its tools act in the background
-/// where they can, with an agent cursor of their own, so the person's pointer stays theirs. The node serves a service
+/// where they can, with an agent cursor of their own, so the user's pointer stays theirs. The node serves a service
 /// only to its Mac's local user, so only the owner's agents reach it. Computer Use lists it beside the agent devices.
 struct ComputerApp: Service {
     let app = "computer"
@@ -34,7 +34,7 @@ struct ComputerApp: Service {
             return try await computer.driver.tools(input.string("name"))
         case "_use":
             let tool = try input.text("tool")
-            guard !ComputerUse.withheld.contains(tool) else { throw Refusal("\(tool) isn't offered on a person's own Mac") }
+            guard !ComputerUse.withheld.contains(tool) else { throw Refusal("\(tool) isn't offered on a user's own Mac") }
             try await computer.ready()
             try await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
             let args = try JSONSerialization.data(withJSONObject: input.value("args") as? [String: Any] ?? [:])
@@ -57,7 +57,7 @@ struct ComputerApp: Service {
             return json(try await computer.driver.call("get_desktop_state", Data(#"{"max_image_dimension":\#(width)}"#.utf8)))
         case "_mirror_use":
             let tool = try input.text("tool")
-            guard !ComputerUse.withheld.contains(tool) else { throw Refusal("\(tool) isn't offered on a person's own Mac") }
+            guard !ComputerUse.withheld.contains(tool) else { throw Refusal("\(tool) isn't offered on a user's own Mac") }
             try await computer.ready()
             try await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
             let args = try JSONSerialization.data(withJSONObject: input.value("args") as? [String: Any] ?? [:])
@@ -72,14 +72,14 @@ struct ComputerApp: Service {
     private func json(_ data: Data) -> Any { (try? JSONSerialization.jsonObject(with: data)) ?? NSNull() }
 }
 
-/// Whether agents may use this Mac, and who is using it now. Off until the person turns it on, in the menu bar's
+/// Whether agents may use this Mac, and who is using it now. Off until the user turns it on, in the menu bar's
 /// panel or from the Computer Use page; turning it off stops Cua Driver, so no call gets through after.
 @MainActor @Observable
 final class ComputerUse {
     static let shared = ComputerUse()
 
-    /// Cua Driver's tools a person's own Mac doesn't offer: ones that change or update the driver itself, replay
-    /// what it recorded, or force apps to quit, losing the person's work.
+    /// Cua Driver's tools a user's own Mac doesn't offer: ones that change or update the driver itself, replay
+    /// what it recorded, or force apps to quit, losing the user's work.
     nonisolated static let withheld: Set<String> = ["check_for_update", "install_extension", "install_ffmpeg", "set_config", "replay_trajectory", "kill_app"]
 
     /// Whether agents may, kept with the Mac app's own settings, whose menu turns it on and off too.
@@ -130,7 +130,7 @@ final class ComputerUse {
         return "\(thisApp) needs Accessibility and Screen & System Audio Recording. Allow them in System Settings → Privacy & Security: turn on \(thisApp) in each."
     }
 
-    /// Asked from another device, or by an agent: the person at this Mac says whether agents may use it. Nobody may
+    /// Asked from another device, or by an agent: the user at this Mac says whether agents may use it. Nobody may
     /// be there, so it gives up after a minute, still off.
     func ask(from device: String?) {
         guard !on, !asking else { return }
@@ -149,7 +149,7 @@ final class ComputerUse {
         if answer == .alertFirstButtonReturn { turnOn() }
     }
 
-    /// The person turned it on: macOS asks them for what it needs, now, while they're at the Mac.
+    /// The user turned it on: macOS asks them for what it needs, now, while they're at the Mac.
     func turnOn() {
         Self.settings?.set(true, forKey: "computerUse")
         if !AXIsProcessTrusted() {
@@ -384,7 +384,7 @@ actor CuaDriver {
     }
 
     /// Starts it embedded: its permissions are this app's, and it never asks macOS for them itself (turning it on
-    /// does). It may show macOS's one-time question about capturing the screen directly, which the person was asked
+    /// does). It may show macOS's one-time question about capturing the screen directly, which the user was asked
     /// to expect when they turned it on. Stopped meanwhile, what it started is stopped too.
     private func launch() async throws {
         guard let path = Self.path else { throw Refusal("Cua Driver isn't installed on this Mac: get it from github.com/trycua/cua.") }

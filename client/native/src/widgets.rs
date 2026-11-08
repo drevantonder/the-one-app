@@ -1,4 +1,4 @@
-//! Every page's widgets, as the app last had them from the person's devices, kept where the platform's own widgets
+//! Every page's widgets, as the app last had them from the user's devices, kept where the platform's own widgets
 //! read them (the iPhone's home screen, the Windows Widgets board, Android's home screen, the Mac's menu bar), since
 //! those can't ask a node themselves: `widgets.json`, with what each would otherwise work out itself (its `id`, `kind`,
 //! `headline`; `fetched` in seconds since 1970), which they only draw; `icons.json` with the Phosphor icons they draw, and `images/<first 12 bytes of the URL's SHA-256,
@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 /// The most a widget's picture may be.
 const IMAGE_MOST: usize = 2 << 20;
 
-/// Asks the person's devices for every page's widgets and keeps them in `dir`. Pages a device didn't answer for keep
+/// Asks the user's devices for every page's widgets and keeps them in `dir`. Pages a device didn't answer for keep
 /// what they had; `fetched` says when all last answered.
 ///
 /// One at a time: each writes the same files (through the same `.part` name), and the window's events, the five-minute
@@ -86,7 +86,7 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     Ok(())
 }
 
-/// Signed out: none of the person's widgets or pictures are left, and the platform's widgets say to sign in.
+/// Signed out: none of the user's widgets or pictures are left, and the platform's widgets say to sign in.
 pub fn forget(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir.join("images"));
     let _ = write(&dir.join("widgets.json"), br#"{"widgets":[],"signedOut":true}"#);

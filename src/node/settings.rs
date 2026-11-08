@@ -1,4 +1,4 @@
-//! A machine with a node as its person's own device (`crate::settings::Me`), as it's listed (`MACHINE`): what its CLI,
+//! A machine with a node as its user's own device (`crate::settings::Me`), as it's listed (`MACHINE`): what its CLI,
 //! MCP and Mac app change of who can do what is signed by it, with the one copy every client runs; and as a client of
 //! theirs, it lets in their new devices whose sign-in shows they're theirs, with no one tapping, as Settings does while
 //! it lists requests.
@@ -7,7 +7,7 @@ use super::*;
 use crate::bucket::Bucket;
 use crate::settings::Me;
 
-/// How often a client of its person's looks for their new devices whose sign-in lets them in.
+/// How often a client of its user's looks for their new devices whose sign-in lets them in.
 const SIGN_INS_EVERY: Duration = Duration::from_secs(4);
 
 /// How long an issuer's keys are kept before they're fetched again: a key it no longer signs with goes within the hour.
@@ -147,7 +147,7 @@ impl Node {
     }
 
     /// What each start of a device does once it's in (`settings::settle_own`), in the background, on a client of its
-    /// person's: their own scope's first epoch made as this node makes any it needs, one at a time.
+    /// user's: their own scope's first epoch made as this node makes any it needs, one at a time.
     pub(super) fn settle_own(&self) {
         let Ok(me) = self.with(|i| Ok(i.r.db().client(&self.0.id)?.filter(|c| c.user == i.user).map(|c| c.user))) else { return };
         let Some(me) = me else { return };
@@ -161,12 +161,12 @@ impl Node {
                 crate::settings::settle_own(&node, None).await
             };
             if let Err(err) = settled.await {
-                tracing::warn!("settling this person's own things: {err:#}");
+                tracing::warn!("settling this user's own things: {err:#}");
             }
         });
     }
 
-    /// Every few seconds, on a client of its person's, lets in each of their new devices whose sign-in shows it's
+    /// Every few seconds, on a client of its user's, lets in each of their new devices whose sign-in shows it's
     /// theirs (`settings::requests`), as their approving it would, with no one tapping; any other waits for them to
     /// approve it by its code. Nodes that only run calls let in no one.
     pub(super) async fn sign_in_loop(self) {
@@ -194,9 +194,9 @@ impl Node {
         let (endpoint, user, name) = (*r.endpoint(), r.user().to_string(), r.name().to_string());
         let theirs = format!("the recovery key lets in a device of someone already in {}", crate::config::YOURS);
         ensure!(!r.new(), "{theirs}");
-        let person = self.with(|i| Ok(i.r.db().user(&user)?.map(|u| u.name)))?.context(theirs)?;
+        let user_name = self.with(|i| Ok(i.r.db().user(&user)?.map(|u| u.name)))?.context(theirs)?;
         if !confirm {
-            return Ok(json!({ "device": name, "person": person, "recovery": true }));
+            return Ok(json!({ "device": name, "user": user_name, "recovery": true }));
         }
         self.read_scope_now(&Scope::Global).await?;
         // Listed already by an approval that didn't finish: the rest is done again, each step once.
@@ -216,7 +216,7 @@ impl Node {
         if let Err(err) = crate::settings::mark_approved(self, &endpoint.key).await {
             tracing::warn!("marking a request approved at auth: {err:#}");
         }
-        Ok(json!({ "device": name, "person": person, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
+        Ok(json!({ "device": name, "user": user_name, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
     }
 
     /// Seals each epoch of `scope` its entries made, opened through the recovery key's copy, to `to` where it isn't yet.

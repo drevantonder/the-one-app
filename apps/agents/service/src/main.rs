@@ -1,4 +1,4 @@
-//! AGENTS.md's service: writes the person's AGENTS.md and skills, as its app keeps them, into every agent harness on its
+//! AGENTS.md's service: writes the user's AGENTS.md and skills, as its app keeps them, into every agent harness on its
 //! device, as it starts and every minute after, so a harness installed later gets them too. A file is written only if
 //! it's missing or unchanged since this service last wrote it, so an edit made on disk is never overwritten;
 //! `agents_set` keeps it for every device. The node writes the rest (its MCP server, prompt hook and built-in skills).

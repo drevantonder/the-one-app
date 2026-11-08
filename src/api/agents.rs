@@ -1,4 +1,4 @@
-//! What agents read from the node: its skills at `/llms.txt`, on its Tailscale address too for agents on the person's
+//! What agents read from the node: its skills at `/llms.txt`, on its Tailscale address too for agents on the user's
 //! other devices, and what an agent harness's prompt hook asks.
 
 use axum::Router;
@@ -12,14 +12,14 @@ use crate::node::{Caller, Node};
 
 use super::{Routes, Who, port};
 
-/// The skills for this machine's person (src/skills.rs).
+/// The skills for this machine's user (src/skills.rs).
 async fn skills(node: &Node) -> Vec<crate::skills::Skill> {
     let apps = match Caller::local(node) {
         Ok(me) => node.apps(&me).await.map(|a| json!(a)).unwrap_or_else(|err| {
             tracing::warn!("the skills leave out apps' own: {err:#}");
             json!([])
         }),
-        // A node not in a network yet has no person whose apps they'd be.
+        // A node not in a network yet has no user whose apps they'd be.
         Err(_) => json!([]),
     };
     crate::skills::all(apps.as_array().map(Vec::as_slice).unwrap_or_default())
@@ -48,7 +48,7 @@ async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, 
 }
 
 /// Serves the skills, and nothing else, on this machine's Tailscale address and the local API's port, so an agent on
-/// any of the person's devices can read them, starting at /llms.txt. Looks again every minute: Tailscale may come up
+/// any of the user's devices can read them, starting at /llms.txt. Looks again every minute: Tailscale may come up
 /// later, or move.
 pub async fn serve_guide(node: Node) {
     let port = port();

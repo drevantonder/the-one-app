@@ -5,7 +5,7 @@
 //! finds what it needs here. Another way to run a kind (Windows in a Windows machine's Hyper-V) is one more runtime in
 //! `RUNTIMES`.
 //!
-//! A lasting device is the person's, borrowed by one agent at a time; a copy is a throwaway one made from a lasting
+//! A lasting device is the user's, borrowed by one agent at a time; a copy is a throwaway one made from a lasting
 //! device for one agent, deleted when it's given back.
 
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ pub const LINUX: &str = "linux";
 pub trait Kind: Sync {
     /// As tools take it: windows, android, iphone.
     fn name(&self) -> &'static str;
-    /// As a person reads it.
+    /// As a user reads it.
     fn title(&self) -> &'static str;
     /// Why this machine can't run it, or "".
     fn can(&self) -> String;
@@ -592,7 +592,7 @@ impl Devices {
             Some(v) => v,
             None => {
                 if lasting.is_empty() && k.name() != "android" && k.name() != "iphone" {
-                    bail!("there's no {} device here to borrow or copy: the person makes one with create", k.title());
+                    bail!("there's no {} device here to borrow or copy: the user makes one with create", k.title());
                 }
                 let from = lasting.first();
                 if !copy
@@ -892,7 +892,7 @@ impl Devices {
                     self.awake(&mut v)?;
                     let m = minutes(input, 60, 1440);
                     let url = super::viewer::vm_view_url(&v, m)?;
-                    Ok(json!(format!("{url}\nThe link works for {m} minutes, on the person's own devices.")))
+                    Ok(json!(format!("{url}\nThe link works for {m} minutes, on the user's own devices.")))
                 }
                 "screen" => self.screen_now(&v.name, super::width(input)),
                 "tools" => Ok(json!(vm_tools(k))),
@@ -950,7 +950,7 @@ impl Devices {
         }
         let why = text(input, "for");
         if why.is_empty() {
-            bail!("say what it's for, in a few words: the person sees it");
+            bail!("say what it's for, in a few words: the user sees it");
         }
         let got = self.borrow_vm(k, name, flag(input, "copy"), Loan { by: or(&text(input, "by"), &caller.name()), r#for: why, ..Default::default() })?;
         let me = self.me();
@@ -959,7 +959,7 @@ impl Devices {
         } else if got.name.starts_with(POOL_PREFIX) {
             format!("{}, a throwaway {} device of your own, deleted with everything in it when you give it back", got.name, k.title())
         } else {
-            format!("{}, the person's lasting {} device: leave it as you found it", got.name, k.title())
+            format!("{}, the user's lasting {} device: leave it as you found it", got.name, k.title())
         };
         let msg = format!(
             "Borrowed {what}. Pass device {:?} to computer_screen and computer_use (computer_tools says what it takes: {}). Give it back with give_back when done.",

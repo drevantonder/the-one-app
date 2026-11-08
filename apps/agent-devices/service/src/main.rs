@@ -50,7 +50,7 @@ pub const NAME: &str = "agent-devices";
 
 type Input = Map<String, Value>;
 
-/// Who a call is from: the device it came from, and its person's id.
+/// Who a call is from: the device it came from, and its user's id.
 #[derive(Clone, Default)]
 pub struct Caller {
     pub name: String,
@@ -299,7 +299,7 @@ impl Devices {
         let here = flag(&input, "here");
         input.remove("here");
         if !name.is_empty() && !here && (!LOCAL.contains(&function) || function == "borrow") && self.vm_named(&name).is_none() {
-            // An agent device on another of the person's devices: the call goes on to it. One moved from here is
+            // An agent device on another of the user's devices: the call goes on to it. One moved from here is
             // there, but for deleting it here.
             let mut pass = |on: &str| {
                 input.insert("device".into(), json!(name));
@@ -417,7 +417,7 @@ impl Devices {
                 }
                 let minutes = minutes(&input, 60, 1440);
                 let url = self.view_url(&d, minutes)?;
-                ok(json!(format!("{url}\nThe link works for {minutes} minutes, on the person's own devices.")))
+                ok(json!(format!("{url}\nThe link works for {minutes} minutes, on the user's own devices.")))
             }
             "screen" => ok(self.screen_now(name, width(&input))?),
             "tools" => ok(self.list_tools(name, &text(&input, "name"))?),
@@ -433,7 +433,7 @@ impl Devices {
             "borrow" => {
                 let why = text(&input, "for");
                 if why.is_empty() {
-                    bail!("say what it's for, in a few words: the person sees it");
+                    bail!("say what it's for, in a few words: the user sees it");
                 }
                 let p = profiles::profile_in(&input)?;
                 if !here && let Some(r) = self.first(function, kinds::LINUX, "", &input) {

@@ -131,7 +131,7 @@ pub struct Address {
 }
 
 /// What a device sends the push Worker to register `address` (`POST <address>/push/register`): signed with its key,
-/// naming its seal key `seal`, which only the network's own Workers seal to, and its person `user`, as its own entries
+/// naming its seal key `seal`, which only the network's own Workers seal to, and its user `user`, as its own entries
 /// list it, whom sign-in pushes about their devices joining.
 pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, user: Option<&str>, at: u64) -> Result<Value> {
     Ok(crate::keys::signed_request(key, DOMAIN, register_fields(seal, address, user)?, at))

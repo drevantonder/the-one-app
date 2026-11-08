@@ -1,8 +1,8 @@
 // The web client: the window of every client, in a browser and in the app (platform.js says which, once). It asks the
-// person's nodes as their device (request.js), and draws the window (window.js) around screens it frames (screens.js),
+// user's nodes as their device (request.js), and draws the window (window.js) around screens it frames (screens.js),
 // at the place the URL names (routes.js), from what the nodes say (store.js). App screens are untrusted: each runs in a
 // sandboxed frame, and this page answers its bridge, making each call itself; the client's own screens (Settings) are
-// answered as the person (settings.js). The modules import only downward, as each is named by its content with its
+// answered as the user (settings.js). The modules import only downward, as each is named by its content with its
 // imports' names in it (src/web.rs): view, platform, request, store, routes, offline, settings, screens, window, web.
 //
 // The bridge (src/screen/), loaded after this, gives `one`; this page answers it for its own use (`__one.host`).
@@ -32,7 +32,7 @@ async function start() {
   if (problem) return showSignedOut(problem);
   // A new device's QR: Approve, with its code.
   if (location.pathname === "/approve") history.replaceState(null, "", href(own("devices", { approve: location.hash.slice(1) })));
-  // `/back?state=<app>/<screen>[/<the app's own>]&…`: where a sign-in at another site sends the person back (an app's
+  // `/back?state=<app>/<screen>[/<the app's own>]&…`: where a sign-in at another site sends the user back (an app's
   // `ctx.address`).
   // It opens that app's screen with the whole address as `params.back`, which finishes it. A browser that isn't
   // signed in here passes it on to the app on this phone or computer, which opens the same screen from `<cli>://open`.
@@ -52,7 +52,7 @@ async function start() {
     history.replaceState(null, "", "/");
   }
   // Everything the window opens on, asked for at once: its screen, beside the node's state and apps; meanwhile the
-  // window as it was last. Its screens' asks wait until this is its person's device (`joined`).
+  // window as it was last. Its screens' asks wait until this is its user's device (`joined`).
   ask(route());
   if (lastWindow()) render();
   else show(h(ui.Starting));

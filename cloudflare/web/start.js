@@ -2,7 +2,7 @@
 // starts this browser's one client (net-worker.js, by the name one-files gives it) with whoever is signed in here, so
 // its WebAssembly and the relay's socket are on their way while the page draws. net.js talks to it.
 (() => {
-  // Light or dark as the person chose, where it isn't the system's: the page's own colour now, and nothing drawn until
+  // Light or dark as the user chose, where it isn't the system's: the page's own colour now, and nothing drawn until
   // web.js has switched its rules to it (`schemed`), so no frame is the other's. Shown anyway after a second.
   const look = localStorage.getItem("one.appearance");
   if (look === "light" || look === "dark") {

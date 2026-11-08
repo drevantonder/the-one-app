@@ -1,5 +1,5 @@
 //! How a client asks its node's local API: the CLI and its MCP server over HTTP, as one of this machine's own programs or
-//! as a device of its person's (src/main.rs), and the node's own MCP in the node itself (`InProcess`), with the proof
+//! as a device of its user's (src/main.rs), and the node's own MCP in the node itself (`InProcess`), with the proof
 //! of who asks that the request it answers came with.
 
 use std::io::Read;
@@ -24,7 +24,7 @@ pub trait Via: Send + Sync {
     /// Asks `method` `path`: an error only when no node answered. `wait` bounds the whole answer, for one that streams.
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<Duration>) -> Result<Answer>;
 
-    /// The devices the last request tried before one answered, for its trace: a device of its person's asks them over
+    /// The devices the last request tried before one answered, for its trace: a device of its user's asks them over
     /// the network (client/src/lib.rs).
     fn tries(&self) -> Option<Value> {
         None
@@ -46,7 +46,7 @@ pub struct Called {
 }
 
 impl Client {
-    /// `elsewhere`: it asks for someone who isn't this machine's own person, a device of theirs or a sign-in, whose MCP
+    /// `elsewhere`: it asks for someone who isn't this machine's own user, a device of theirs or a sign-in, whose MCP
     /// request the node answers.
     pub fn new(via: impl Via + 'static, elsewhere: bool) -> Client {
         Client { via: std::sync::Arc::new(via), elsewhere, needed: Mutex::new(None), apps: Mutex::new(None) }

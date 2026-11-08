@@ -223,8 +223,8 @@ var H = one.params, U = (t) => {
 };
 function W(t) {
 	let n = e(40), { d: r, done: i } = t, [o, c] = a(""), [m, _] = a(""), v, y, b, x, S, T, E, O, k;
-	if (n[0] !== r.people || n[1] !== i || n[2] !== o) {
-		let e = o.trim().toLowerCase(), t = r.people.filter((t) => !e || t.name.toLowerCase().includes(e) || t.handle.includes(e)), a;
+	if (n[0] !== r.users || n[1] !== i || n[2] !== o) {
+		let e = o.trim().toLowerCase(), t = r.users.filter((t) => !e || t.name.toLowerCase().includes(e) || t.handle.includes(e)), a;
 		n[12] === i ? a = n[13] : (a = async (e) => {
 			_("");
 			try {
@@ -254,13 +254,13 @@ function W(t) {
 			className: "relative",
 			children: [h, /* @__PURE__ */ C(d, {
 				className: "pl-8",
-				placeholder: "Find people",
-				"aria-label": "Find people",
+				placeholder: "Find users",
+				"aria-label": "Find users",
 				value: o,
 				onChange: A,
 				autoFocus: !0
 			})]
-		}), n[20] = o, n[21] = b), x = r.people.length ? t.length ? /* @__PURE__ */ C(f, { children: t.map((e) => /* @__PURE__ */ C(p, {
+		}), n[20] = o, n[21] = b), x = r.users.length ? t.length ? /* @__PURE__ */ C(f, { children: t.map((e) => /* @__PURE__ */ C(p, {
 			leading: /* @__PURE__ */ C(s, {
 				name: e.name,
 				size: 32
@@ -282,7 +282,7 @@ function W(t) {
 		}) : /* @__PURE__ */ C("p", {
 			className: "text-sm text-muted-foreground",
 			children: "Everyone pushes to it already."
-		}), n[0] = r.people, n[1] = i, n[2] = o, n[3] = v, n[4] = y, n[5] = b, n[6] = x, n[7] = S, n[8] = T, n[9] = E, n[10] = O, n[11] = k;
+		}), n[0] = r.users, n[1] = i, n[2] = o, n[3] = v, n[4] = y, n[5] = b, n[6] = x, n[7] = S, n[8] = T, n[9] = E, n[10] = O, n[11] = k;
 	} else v = n[3], y = n[4], b = n[5], x = n[6], S = n[7], T = n[8], E = n[9], O = n[10], k = n[11];
 	let A;
 	n[22] === r.repo ? A = n[23] : (A = /* @__PURE__ */ w("p", {

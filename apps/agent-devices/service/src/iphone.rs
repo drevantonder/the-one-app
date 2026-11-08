@@ -1,6 +1,6 @@
 //! iPhones and iPads in Xcode's Simulator on a Mac, each a simulator of its own (simctl), with no window unless the
-//! person opens Simulator. Simulator takes no clicks or typing from outside it, so agents get pictures, URLs, apps and
-//! commands, and the person uses it in Simulator on the Mac. A copy is a clone of a stopped lasting device, or with the
+//! user opens Simulator. Simulator takes no clicks or typing from outside it, so agents get pictures, URLs, apps and
+//! commands, and the user uses it in Simulator on the Mac. A copy is a clone of a stopped lasting device, or with the
 //! lasting one running, a new simulator of the same model.
 
 use anyhow::{Result, bail};
@@ -38,7 +38,7 @@ impl Kind for Iphone {
     }
 
     fn limits(&self) -> &'static str {
-        "no clicks, typing or keys: Simulator takes none from agents. Pictures, open_url, install_app (an .app built for the simulator) and run_command (a program in the simulator) work; the person uses it in Simulator on the Mac"
+        "no clicks, typing or keys: Simulator takes none from agents. Pictures, open_url, install_app (an .app built for the simulator) and run_command (a program in the simulator) work; the user uses it in Simulator on the Mac"
     }
 
     fn input(&self) -> bool {
@@ -129,7 +129,7 @@ impl Kind for Iphone {
     }
 
     fn act(&self, _: &Devices, _: &Vm, _: &Action) -> Result<()> {
-        bail!("Simulator takes no clicks, typing or keys from agents: open_url, install_app and run_command work, and the person uses it in Simulator on the Mac")
+        bail!("Simulator takes no clicks, typing or keys from agents: open_url, install_app and run_command work, and the user uses it in Simulator on the Mac")
     }
 
     fn open(&self, _: &Devices, v: &Vm, url: &str) -> Result<()> {

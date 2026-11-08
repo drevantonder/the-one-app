@@ -1,5 +1,5 @@
 # The `one` program: the CLI, MCP and the node it serves (src/main.rs and the modules beside it). A package of its own,
-# not the root's, since it's a client too: on a computer with no node it asks its person's nodes as a device of theirs,
+# not the root's, since it's a client too: on a computer with no node it asks its user's nodes as a device of theirs,
 # through `one-client`, which depends on `one` itself, and Cargo allows no package to depend on its own dependent.
 [package]
 name = "one-cli"

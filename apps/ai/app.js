@@ -1,5 +1,5 @@
 // AI for apps: read a photo or PDF with a prompt, and ask a decision model typed questions. It reads with the user's
-// local models (the models service, on the device that has them) or with Gemini once the person's Vault has a Gemini
+// local models (the models service, on the device that has them) or with Gemini once the user's Vault has a Gemini
 // key item for it (its secret field `gemini_key`). Apps use it as ctx.apps.ai.read and ctx.apps.ai.decide, so none of them holds a key.
 
 const DEFAULTS = { provider: "local", local_device: null, read_model: "gemma4:12b", decide_model: "clef-flash", gemini_model: "gemini-3.5-flash-lite" };
@@ -46,7 +46,7 @@ export default {
   color: "#af52de",
   advanced: true,
   description: "Reads photos and PDFs and answers questions, for your apps",
-  instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your devices, or Gemini once the person's Vault has a Gemini key for it: ask with vault_request, app ai, need gemini); ai_set changes them.",
+  instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your devices, or Gemini once the user's Vault has a Gemini key for it: ask with vault_request, app ai, need gemini); ai_set changes them.",
   uses: { apps: ["models"] },
   vault: {
     gemini: { title: "Gemini key", type: "API key", domain: "aistudio.google.com", hosts: ["generativelanguage.googleapis.com"], fields: { gemini_key: { label: "API key", secret: true } } },

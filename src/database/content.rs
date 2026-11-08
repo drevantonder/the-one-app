@@ -127,7 +127,7 @@ impl Change {
     }
 
     /// Whether it changes only its own scope's state, wherever it's written; every other kind written in `global` is
-    /// who's who, which only its person's own devices write.
+    /// who's who, which only its user's own devices write.
     pub fn own(self) -> bool {
         matches!(self, Change::Schedule | Change::VaultRequest | Change::Keep | Change::Forget | Change::Arrange)
     }
@@ -137,7 +137,7 @@ pub fn node(change: Change, data: Value) -> Content {
     Content::new(APP, change.name(), data)
 }
 
-/// What a network starts with, as its first freeze's copy holds it (`steps::first_freeze`): its name, its first person
+/// What a network starts with, as its first freeze's copy holds it (`steps::first_freeze`): its name, its first user
 /// and their device, the recovery key, and the hash of `global`'s first epoch (`keys::epoch_hash`), made with it.
 pub fn first(name: &str, user: &str, user_name: &str, device: &crate::keys::Endpoint, device_name: &str, roles: &[Kind], recovery: &Key, epoch: &str) -> Value {
     let device = json!({ "key": hex(&device.key), "seal": hex(&device.seal), "name": device_name, "roles": roles });
@@ -198,25 +198,25 @@ pub fn member(group: &str, user: &str, role: Option<Role>) -> Content {
     node(Change::Member, json!({ "group": group, "user": user, "role": role }))
 }
 
-/// Turns down a device that asked to join as this person's, before it's listed ("Not Me"): every device of theirs
+/// Turns down a device that asked to join as this user's, before it's listed ("Not Me"): every device of theirs
 /// then refuses it.
 pub fn refuse(endpoint: &crate::keys::Endpoint, name: &str) -> Content {
     node(Change::Refuse, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "name": name }))
 }
 
-/// Forgets what one of this person's devices signed in with (`Machine::sign_in`).
+/// Forgets what one of this user's devices signed in with (`Machine::sign_in`).
 pub fn forget_sign_in(key: &Key) -> Content {
     node(Change::ForgetSignIn, json!({ "key": hex(key) }))
 }
 
-/// Renames a device (`key`), a person (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
+/// Renames a device (`key`), a user (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
 pub fn rename(what: &str, id: &str, name: &str) -> Content {
     let mut data = json!({ "name": name });
     data[what] = json!(id);
     node(Change::Rename, data)
 }
 
-/// Changes a person's (`what` user) or a group's (`group`) handle.
+/// Changes a user's (`what` user) or a group's (`group`) handle.
 pub fn handle(what: &str, id: &str, handle: &str) -> Content {
     let mut data = json!({ "handle": handle });
     data[what] = json!(id);
@@ -308,7 +308,7 @@ pub fn forget(blob: &str) -> Content {
     node(Change::Forget, json!({ "blob": blob.to_lowercase() }))
 }
 
-/// A page arranged by its person, in their own scope: its items, the apps taken off it, and with their own page
+/// A page arranged by its user, in their own scope: its items, the apps taken off it, and with their own page
 /// (`user`), `pages`, the order of their groups' pages and those they hid.
 pub fn arrange(page: &str, items: Value, hidden: Value, pages: Value) -> Content {
     let mut data = json!({ "page": page, "items": items, "hidden": if hidden.is_null() { json!([]) } else { hidden } });
@@ -319,7 +319,7 @@ pub fn arrange(page: &str, items: Value, hidden: Value, pages: Value) -> Content
 }
 
 /// What a Vault request asks for: `id`'s item for `app`, its `title`, `fields` (`{ name: { secret } }`) and `hosts`, the
-/// `need` the app declares it as, if it does, `why` for the person, and the agent that asked.
+/// `need` the app declares it as, if it does, `why` for the user, and the agent that asked.
 pub struct Request<'a> {
     pub id: &'a str,
     pub app: &'a str,
@@ -361,11 +361,11 @@ mod tests {
         let scope = Scope::Group(g.into());
         let built = [
             ("device", device(&endpoint, user, "mac", &[Kind::Client], None)),
-            ("device, new person", device(&endpoint, other, "phone", &[Kind::Client, Kind::Compute], Some(("Bob", Role::Member)))),
+            ("device, new user", device(&endpoint, other, "phone", &[Kind::Client, Kind::Compute], Some(("Bob", Role::Member)))),
             ("passkey", passkey(&endpoint, user, "Passkey", "cred")),
             ("service endpoint", service_endpoint(&endpoint, user, "whatsapp", "whatsapp", &[4; 32])),
             ("role", role(other, Role::Admin)),
-            ("remove person", remove_user(other)),
+            ("remove user", remove_user(other)),
             ("remove device", remove_device(&[5; 32])),
             ("setting", setting("name", Some("Ours"))),
             ("setting back", setting("name", None)),
@@ -377,9 +377,9 @@ mod tests {
             ("refuse", refuse(&endpoint, "stranger")),
             ("forget sign-in", forget_sign_in(&[5; 32])),
             ("rename device", rename("key", &hex(&[5; 32]), "laptop")),
-            ("rename person", rename("user", other, "Robert")),
+            ("rename user", rename("user", other, "Robert")),
             ("rename group", rename("group", g, "The Band")),
-            ("handle person", handle("user", other, "bob")),
+            ("handle user", handle("user", other, "bob")),
             ("handle group", handle("group", g, "band")),
             ("epoch", epoch(&scope, 2, &[[6; 32], [7; 32]], &"f".repeat(64))),
             ("vault", vault(&Scope::User(user.into()), 1, &[8; 32], &[[6; 32]])),
@@ -425,11 +425,11 @@ mod tests {
 
     const GOLDEN: &str = r#"first: {"device":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"mac","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202"},"epoch":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Home","recovery":"0303030303030303030303030303030303030303030303030303030303030303","user":"a000000000000001","user_name":"Andre"}
 device: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"mac","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"a000000000000001"}}
-device, new person: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"phone","role":"member","roles":["client","compute"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"b000000000000002","user_name":"Bob"}}
+device, new user: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"phone","role":"member","roles":["client","compute"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"b000000000000002","user_name":"Bob"}}
 passkey: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"Passkey","passkey":"cred","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"a000000000000001"}}
 service endpoint: {"app":"node","kind":"device","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","key":"0101010101010101010101010101010101010101010101010101010101010101","name":"whatsapp","roles":["service"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","service":"whatsapp","user":"a000000000000001"}}
 role: {"app":"node","kind":"role","data":{"role":"admin","user":"b000000000000002"}}
-remove person: {"app":"node","kind":"remove","data":{"user":"b000000000000002"}}
+remove user: {"app":"node","kind":"remove","data":{"user":"b000000000000002"}}
 remove device: {"app":"node","kind":"remove","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505"}}
 setting: {"app":"node","kind":"setting","data":{"name":"name","value":"Ours"}}
 setting back: {"app":"node","kind":"setting","data":{"name":"name","value":null}}
@@ -441,9 +441,9 @@ member out: {"app":"node","kind":"member","data":{"group":"c000000000000003","ro
 refuse: {"app":"node","kind":"refuse","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"stranger","seal":"0202020202020202020202020202020202020202020202020202020202020202"}}
 forget sign-in: {"app":"node","kind":"forget-sign-in","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505"}}
 rename device: {"app":"node","kind":"rename","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505","name":"laptop"}}
-rename person: {"app":"node","kind":"rename","data":{"name":"Robert","user":"b000000000000002"}}
+rename user: {"app":"node","kind":"rename","data":{"name":"Robert","user":"b000000000000002"}}
 rename group: {"app":"node","kind":"rename","data":{"group":"c000000000000003","name":"The Band"}}
-handle person: {"app":"node","kind":"rename","data":{"handle":"bob","user":"b000000000000002"}}
+handle user: {"app":"node","kind":"rename","data":{"handle":"bob","user":"b000000000000002"}}
 handle group: {"app":"node","kind":"rename","data":{"group":"c000000000000003","handle":"band"}}
 epoch: {"app":"node","kind":"epoch","data":{"hash":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","n":2,"scope":"group:c000000000000003","to":["0606060606060606060606060606060606060606060606060606060606060606","0707070707070707070707070707070707070707070707070707070707070707"]}}
 vault: {"app":"node","kind":"vault","data":{"n":1,"public":"0808080808080808080808080808080808080808080808080808080808080808","scope":"user:a000000000000001","to":["0606060606060606060606060606060606060606060606060606060606060606"]}}

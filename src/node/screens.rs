@@ -1,4 +1,4 @@
-//! What people see of apps: widgets, badges, screens and the clients' own screens, and how their pages are arranged.
+//! What users see of apps: widgets, badges, screens and the clients' own screens, and how their pages are arranged.
 
 use super::*;
 

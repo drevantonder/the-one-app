@@ -1,4 +1,4 @@
-// AGENTS.md: the AGENTS.md and skills every agent harness on every device gets. They're records in the person's own
+// AGENTS.md: the AGENTS.md and skills every agent harness on every device gets. They're records in the user's own
 // database, oldest first, each a revision; the newest of each says what's current. Its service (service/), on each
 // device it's switched on for, asks for them (_files) and writes them into each harness's folders there.
 
@@ -6,7 +6,7 @@ const SKILL = { description: "the skill's name, from agents_skills, like writing
 
 async function records(ctx) {
   const db = ctx.user;
-  if (!db) throw new Error("AGENTS.md is each person's own: this call reaches no one's");
+  if (!db) throw new Error("AGENTS.md is each user's own: this call reaches no one's");
   const rows = await db.query("select n, kind, data, time, by, device from records order by n");
   return rows.map((r) => ({ id: String(r.n), kind: r.kind, data: JSON.parse(r.data), time: r.time, by: r.by, device: r.device }));
 }
@@ -119,7 +119,7 @@ export default {
   advanced: true,
   description: "Your agents' instructions and skills, on every device",
   instructions: "agents_get and agents_set read and replace the AGENTS.md every agent harness on every device gets (Codex, Amp, OpenCode). Skills live in every harness's skills folder: agents_skills lists them, agents_skill reads one, agents_skill_set adds or replaces one (all its files), agents_skill_remove removes one. agents_history lists AGENTS.md's revisions (or a skill's), and agents_restore brings an old one back. Every device's harnesses also get the board's prompt hook and this network's MCP server from its node.",
-  service: { person: true, platforms: ["linux", "mac"] },
+  service: { user: true, platforms: ["linux", "mac"] },
   schema: {
     user: [`
       create table records (n integer primary key, kind text not null, data text not null, time integer not null, by text not null, device text not null);

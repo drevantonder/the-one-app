@@ -13,7 +13,7 @@ use crate::keys::{Hash, Key, hex, unhex};
 
 use crate::permissions;
 
-pub use super::scope::{app, device, group, object, person, service};
+pub use super::scope::{app, device, group, object, user_principal, service};
 
 pub const NETWORK: &str = permissions::NETWORK;
 
@@ -36,7 +36,7 @@ pub fn app_relations(app: &Connection) -> Vec<Relation> {
 }
 
 fn id(of: &str) -> String {
-    of.strip_prefix("person:").or_else(|| of.strip_prefix("group:")).unwrap_or(of).to_string()
+    of.strip_prefix("user:").or_else(|| of.strip_prefix("group:")).unwrap_or(of).to_string()
 }
 
 fn role_of(name: &str) -> Role {
@@ -49,7 +49,7 @@ fn key(text: &str) -> Key {
 
 fn owner_of(text: &str) -> Principal {
     match text.split_once(':') {
-        Some(("person", id)) => Principal::User(id.into()),
+        Some(("user", id)) => Principal::User(id.into()),
         Some(("group", id)) => Principal::Group(id.into()),
         _ => Principal::Admins,
     }
@@ -58,7 +58,7 @@ fn owner_of(text: &str) -> Principal {
 /// A principal as an object of permissions: the scope it acts for.
 pub fn owner_object(p: &Principal) -> String {
     match p {
-        Principal::User(u) => person(u),
+        Principal::User(u) => user_principal(u),
         Principal::Group(g) => group(g),
         Principal::Admins => NETWORK.into(),
     }
@@ -127,7 +127,7 @@ impl ScopeDb {
     /// Whether `user` may do `verb` to `object` (`object(scope)`, `group(id)`, `device(key)`, …). Unknown means no, and
     /// so does a database that can't answer.
     pub fn may(&self, user: &str, verb: &str, object: &str) -> bool {
-        self.asks(&person(user), verb, object)
+        self.asks(&user_principal(user), verb, object)
     }
 
     /// Whether the device `key` may do `verb` to `object`: `run` a scope's calls.
@@ -144,12 +144,12 @@ impl ScopeDb {
 
     /// Whether `giver` may give `user` the role `relation` on `object`, for good.
     pub fn may_give(&self, giver: &str, user: &str, relation: &str, object: &str) -> bool {
-        permissions::may_give(&self.db, &person(giver), &person(user), relation, object, None, self.now).unwrap_or(false)
+        permissions::may_give(&self.db, &user_principal(giver), &user_principal(user), relation, object, None, self.now).unwrap_or(false)
     }
 
     /// Whether `taker` may take the role `relation` on `object` from `user`.
     pub fn may_take(&self, taker: &str, user: &str, relation: &str, object: &str) -> bool {
-        permissions::may_take(&self.db, &person(taker), &person(user), relation, object, self.now).unwrap_or(false)
+        permissions::may_take(&self.db, &user_principal(taker), &user_principal(user), relation, object, self.now).unwrap_or(false)
     }
 
     /// Whether `user` may do each verb to each object of `asks`, in order (`ctx.<scope>.may` in an app), by the core's
@@ -180,8 +180,8 @@ impl ScopeDb {
                     tx.execute("INSERT OR IGNORE INTO relations VALUES (?1, ?2, ?3, ?4)", params![subject, relation, on, until])?;
                 }
             }
-            permissions::close(&tx, Some(&person(user)))?;
-            asks.iter().map(|(verb, object)| permissions::may(&tx, &person(user), verb, object, now)).collect()
+            permissions::close(&tx, Some(&user_principal(user)))?;
+            asks.iter().map(|(verb, object)| permissions::may(&tx, &user_principal(user), verb, object, now)).collect()
         };
         ask().unwrap_or_else(|err| {
             tracing::warn!("asking what {user} may do in an app: {err:#}");
@@ -199,7 +199,7 @@ impl ScopeDb {
     }
 
     pub fn may_scopes(&self, user: &str, verb: &str) -> Result<Vec<Scope>> {
-        let may = self.objects(&person(user), verb)?;
+        let may = self.objects(&user_principal(user), verb)?;
         Ok(self.scopes()?.into_iter().filter(|s| permissions::allows(&may, &object(s))).collect())
     }
 
@@ -210,14 +210,14 @@ impl ScopeDb {
 
     /// Whether `key` runs any of `user`'s calls: some scope they may use.
     pub fn serves(&self, key: &Key, user: &str) -> Result<bool> {
-        let uses = self.objects(&person(user), "use")?;
+        let uses = self.objects(&user_principal(user), "use")?;
         Ok(self.user(user)?.is_some() && self.run_by(key)?.iter().any(|s| permissions::allows(&uses, &object(s))))
     }
 
     /// The devices a call of `user`'s reaching `scopes` may be passed on to: each runs every one of them, all of which
     /// `user` may use, so none is handed a call, or its keys, that isn't theirs to run.
     pub fn runners(&self, user: &str, scopes: &[Scope]) -> Result<Vec<Machine>> {
-        let uses = self.objects(&person(user), "use")?;
+        let uses = self.objects(&user_principal(user), "use")?;
         if self.user(user)?.is_none() || !scopes.iter().all(|s| permissions::allows(&uses, &object(s))) {
             return Ok(Vec::new());
         }
@@ -326,7 +326,7 @@ impl ScopeDb {
         }
     }
 
-    /// A person as someone gives them, by their id or name.
+    /// A user as someone gives them, by their id or name.
     pub fn find_user(&self, name: &str) -> Result<String> {
         match self.users()?.into_iter().filter(|u| !u.removed && (u.id == name || u.name.eq_ignore_ascii_case(name))).collect::<Vec<_>>().as_slice() {
             [one] => Ok(one.id.clone()),
@@ -344,32 +344,32 @@ impl ScopeDb {
         }
     }
 
-    /// Everyone who's been in the network, removed people too, by id.
+    /// Everyone who's been in the network, removed users too, by id.
     pub fn users(&self) -> Result<Vec<User>> {
         self.rows(
             "SELECT p.id, p.name, p.handle, p.removed, coalesce((SELECT min(relation) FROM relations WHERE subject = p.id AND object = ?1), 'member')
-             FROM principals p WHERE p.kind = 'person' ORDER BY p.id",
+             FROM principals p WHERE p.kind = 'user' ORDER BY p.id",
             [NETWORK],
             |r| Ok(User { id: id(&r.get::<_, String>(0)?), name: r.get(1)?, handle: r.get(2)?, removed: r.get(3)?, role: role_of(&r.get::<_, String>(4)?) }),
         )
     }
 
-    /// A person of the network, not removed.
+    /// A user of the network, not removed.
     pub fn user(&self, user: &str) -> Result<Option<User>> {
         self.row(
             "SELECT p.name, p.handle, coalesce((SELECT min(relation) FROM relations WHERE subject = p.id AND object = ?2), 'member')
              FROM principals p WHERE p.id = ?1 AND p.removed = 0",
-            params![person(user), NETWORK],
+            params![user_principal(user), NETWORK],
             |r| Ok(User { id: user.to_string(), name: r.get(0)?, handle: r.get(1)?, removed: false, role: role_of(&r.get::<_, String>(2)?) }),
         )
     }
 
-    /// A person as they were last in the network, removed or not.
+    /// A user as they were last in the network, removed or not.
     pub fn user_ever(&self, user: &str) -> Result<Option<User>> {
         if let Some(u) = self.user(user)? {
             return Ok(Some(u));
         }
-        self.row("SELECT name, handle FROM principals WHERE id = ?1 AND kind = 'person'", [person(user)], |r| {
+        self.row("SELECT name, handle FROM principals WHERE id = ?1 AND kind = 'user'", [user_principal(user)], |r| {
             Ok(User { id: user.to_string(), name: r.get(0)?, handle: r.get(1)?, removed: true, role: Role::Member })
         })
     }
@@ -390,7 +390,7 @@ impl ScopeDb {
         };
         let members = self
             .rows(
-                "SELECT subject, min(relation) FROM relations WHERE object = ?1 AND substr(subject, 1, 7) = 'person:' AND relation IN ('admin', 'member') GROUP BY subject",
+                "SELECT subject, min(relation) FROM relations WHERE object = ?1 AND substr(subject, 1, 5) = 'user:' AND relation IN ('admin', 'member') GROUP BY subject",
                 [group(g)],
                 |r| Ok((id(&r.get::<_, String>(0)?), role_of(&r.get::<_, String>(1)?))),
             )?
@@ -404,7 +404,7 @@ impl ScopeDb {
         Ok(self
             .row(
                 "SELECT min(relation) FROM relations WHERE subject = ?1 AND object = ?2 AND relation IN ('admin', 'member') HAVING count(*) > 0",
-                params![person(user), group(g)],
+                params![user_principal(user), group(g)],
                 |r| r.get::<_, String>(0),
             )?
             .map(|r| role_of(&r)))
@@ -414,14 +414,14 @@ impl ScopeDb {
         Ok(self
             .rows(
                 "SELECT object, min(relation) FROM relations WHERE subject = ?1 AND substr(object, 1, 6) = 'group:' AND relation IN ('admin', 'member') GROUP BY object",
-                [person(user)],
+                [user_principal(user)],
                 |r| Ok((id(&r.get::<_, String>(0)?), role_of(&r.get::<_, String>(1)?))),
             )?
             .into_iter()
             .collect())
     }
 
-    /// A person's role in a scope: in the network, in a group, and admin of their own.
+    /// A user's role in a scope: in the network, in a group, and admin of their own.
     pub fn role_in(&self, user: &str, scope: &Scope) -> Result<Option<Role>> {
         Ok(match scope {
             Scope::Global => self.user(user)?.map(|u| u.role),
@@ -440,7 +440,7 @@ impl ScopeDb {
         }
         let in_groups = self.rows(
             "SELECT r.subject, r.object, min(r.relation) FROM relations r JOIN principals g ON g.id = r.object AND g.kind = 'group'
-             WHERE substr(r.subject, 1, 7) = 'person:' AND r.relation IN ('admin', 'member') GROUP BY r.subject, r.object",
+             WHERE substr(r.subject, 1, 5) = 'user:' AND r.relation IN ('admin', 'member') GROUP BY r.subject, r.object",
             [],
             |r| Ok((id(&r.get::<_, String>(0)?), id(&r.get::<_, String>(1)?), role_of(&r.get::<_, String>(2)?))),
         )?;
@@ -456,13 +456,13 @@ impl ScopeDb {
         Ok(out)
     }
 
-    /// Whose a handle is: a person's (removed people keep theirs) or a group's.
+    /// Whose a handle is: a user's (removed users keep theirs) or a group's.
     pub fn by_handle(&self, handle: &str) -> Result<Option<Principal>> {
         Ok(self.row("SELECT id FROM principals WHERE handle = ?1 ORDER BY kind DESC LIMIT 1", [handle], |r| r.get::<_, String>(0))?.map(|p| owner_of(&p)))
     }
 
     /// Everyone's and every group's handle, as apps get them (`ctx.handles`): `{ handle, id, name }`, `id` being
-    /// `user:<id>` or `group:<id>`; a removed person's with `removed`, and a group's with its `members`' roles by id.
+    /// `user:<id>` or `group:<id>`; a removed user's with `removed`, and a group's with its `members`' roles by id.
     pub fn handles(&self) -> Result<Value> {
         let users = self.users()?.into_iter().map(|u| {
             let mut v = json!({ "handle": u.handle, "id": format!("user:{}", u.id), "name": u.name });
@@ -475,11 +475,11 @@ impl ScopeDb {
         Ok(Value::Array(users.chain(groups).collect()))
     }
 
-    /// Every scope there is: `global`, each group's and each person's (removed people's too: removing deletes nothing).
+    /// Every scope there is: `global`, each group's and each user's (removed users' too: removing deletes nothing).
     pub fn scopes(&self) -> Result<Vec<Scope>> {
         let mut out = vec![Scope::Global];
         out.extend(self.rows("SELECT id FROM principals WHERE kind = 'group' ORDER BY id", [], |r| r.get::<_, String>(0))?.iter().map(|g| Scope::Group(id(g))));
-        out.extend(self.rows("SELECT id FROM principals WHERE kind = 'person' ORDER BY id", [], |r| r.get::<_, String>(0))?.iter().map(|u| Scope::User(id(u))));
+        out.extend(self.rows("SELECT id FROM principals WHERE kind = 'user' ORDER BY id", [], |r| r.get::<_, String>(0))?.iter().map(|u| Scope::User(id(u))));
         Ok(out)
     }
 
@@ -488,7 +488,7 @@ impl ScopeDb {
         self.rows(&format!("{MACHINE} ORDER BY d.key"), [], machine)
     }
 
-    /// A device of the network: listed, not removed, and its person not removed.
+    /// A device of the network: listed, not removed, and its user not removed.
     pub fn machine(&self, k: &Key) -> Result<Option<Machine>> {
         Ok(self.machine_ever(k)?.filter(|m| !m.removed))
     }
@@ -502,7 +502,7 @@ impl ScopeDb {
         Ok(self.machines()?.into_iter().filter(|m| !m.removed && m.is(kind)).collect())
     }
 
-    /// One of a person's own devices, which signs for them.
+    /// One of a user's own devices, which signs for them.
     pub fn client(&self, k: &Key) -> Result<Option<Machine>> {
         Ok(self.machine(k)?.filter(|m| m.is(Kind::Client)))
     }
@@ -546,15 +546,15 @@ impl ScopeDb {
         Ok(self.setting(CLOUDFLARE_NODE)?.and_then(|k| unhex(&k).ok()))
     }
 
-    /// Where a person's own things run besides their own machines, as their own device last said, if it has.
+    /// Where a user's own things run besides their own machines, as their own device last said, if it has.
     pub fn runs(&self, user: &str) -> Result<Option<BTreeSet<Key>>> {
-        if self.row("SELECT 1 FROM runs_chosen WHERE principal = ?1", [person(user)], |_| Ok(()))?.is_none() {
+        if self.row("SELECT 1 FROM runs_chosen WHERE principal = ?1", [user_principal(user)], |_| Ok(()))?.is_none() {
             return Ok(None);
         }
-        Ok(Some(self.rows("SELECT device FROM runs WHERE principal = ?1", [person(user)], |r| r.get::<_, String>(0))?.iter().map(|k| key(k)).collect()))
+        Ok(Some(self.rows("SELECT device FROM runs WHERE principal = ?1", [user_principal(user)], |r| r.get::<_, String>(0))?.iter().map(|k| key(k)).collect()))
     }
 
-    /// The parts of each device its person switched on or off, by (device, part), each service's with the scope whose
+    /// The parts of each device its user switched on or off, by (device, part), each service's with the scope whose
     /// added app it runs for. A copy from before services named their scope reads as naming none.
     pub fn switches(&self) -> Result<BTreeMap<(Key, String), Switch>> {
         let scoped = self.row("SELECT 1 FROM pragma_table_info('services') WHERE name = 'scope'", [], |_| Ok(()))?.is_some();
@@ -829,7 +829,7 @@ impl CoreDb {
         }
     }
 
-    /// What a person calls it.
+    /// What a user calls it.
     pub fn said(self) -> &'static str {
         match self {
             CoreDb::Scope => "who's who",
@@ -897,13 +897,13 @@ impl std::fmt::Display for Principal {
 pub struct User {
     pub id: String,
     pub name: String,
-    /// What every app calls them by in addresses and lists (`valid_handle`), unique among people and groups.
+    /// What every app calls them by in addresses and lists (`valid_handle`), unique among users and groups.
     pub handle: String,
     pub role: Role,
     pub removed: bool,
 }
 
-/// What an endpoint does: a client is what a person and their agents use, and signs for them; compute runs apps'
+/// What an endpoint does: a client is what a user and their agents use, and signs for them; compute runs apps'
 /// calls; a service offers a device's abilities.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -939,17 +939,17 @@ pub struct Machine {
     pub passkey: Option<String>,
     /// For a service endpoint, the service it offers (`whatsapp`): what calls naming it reach.
     pub service: Option<String>,
-    /// For a service endpoint, whether it serves everyone its person's listing lets it (a push sender, say), not only
-    /// its own person.
+    /// For a service endpoint, whether it serves everyone its user's listing lets it (a push sender, say), not only
+    /// its own user.
     pub shared: bool,
     /// The device it's part of, when it's one's: for a service, its device's oned; for a native app's sign-in, the
     /// device it's on (that device's oned, or an id of the device's own).
     pub device: Option<Key>,
-    /// Who listed it: its person, from one of their own devices, or an admin.
+    /// Who listed it: its user, from one of their own devices, or an admin.
     pub by: String,
     /// When it was listed, as its entry says (ms).
     pub since: u64,
-    /// What it signed in with, when that was checked as it was let in (`sign_in_proof`): one of its person's accounts,
+    /// What it signed in with, when that was checked as it was let in (`sign_in_proof`): one of its user's accounts,
     /// which their next device's sign-in is checked against. None for a shape this release doesn't know.
     pub sign_in: Option<crate::sign_in_proof::Account>,
     /// The city it asked to join from, as its request said.
@@ -967,7 +967,7 @@ impl Machine {
 pub struct Group {
     pub id: String,
     pub name: String,
-    /// As a person's: unique among people and groups.
+    /// As a user's: unique among users and groups.
     pub handle: String,
     pub members: BTreeMap<String, Role>,
     pub invited: BTreeMap<String, Role>,
@@ -993,7 +993,7 @@ pub struct App {
 }
 
 /// The latest `service` entry for a part of a device's oned (a service, or `apps`, the app service): on or off there,
-/// as the device's person switched it.
+/// as the device's user switched it.
 #[derive(Clone, Debug)]
 pub struct Switch {
     pub on: bool,
@@ -1034,7 +1034,7 @@ pub fn source_link(v: &Value) -> Result<String> {
     Ok(link.to_string())
 }
 
-/// A person's or group's handle: lowercase letters, digits and single hyphens, neither first nor last, up to 39
+/// A user's or group's handle: lowercase letters, digits and single hyphens, neither first nor last, up to 39
 /// characters, like GitHub's logins.
 pub fn valid_handle(h: &str) -> bool {
     !h.is_empty() && h.len() <= 39 && h.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !h.starts_with('-') && !h.ends_with('-') && !h.contains("--")
@@ -1062,7 +1062,7 @@ pub struct ScopeState {
     pub added_by: BTreeMap<String, (String, u64)>,
     /// Each schedule switched on or off here, by (app, schedule): (on, by whom, when).
     pub switches: BTreeMap<(String, String), (bool, String, u64)>,
-    /// Apps' and agents' requests for a person's item here, by id.
+    /// Apps' and agents' requests for a user's item here, by id.
     pub requests: BTreeMap<String, VaultRequest>,
     /// The blobs this scope's apps said they no longer need, though their entries name them.
     pub forgotten: BTreeSet<String>,
@@ -1071,7 +1071,7 @@ pub struct ScopeState {
     pub arrangements: BTreeMap<String, Value>,
 }
 
-/// An app's or agent's request for a person's item that an app may use: the fields it wants (name, and whether
+/// An app's or agent's request for a user's item that an app may use: the fields it wants (name, and whether
 /// secret), what for, who asked, and how it was answered: (`set` or `declined`, by whom, when).
 #[derive(Clone, Debug)]
 pub struct VaultRequest {
@@ -1087,7 +1087,7 @@ pub struct VaultRequest {
     pub answer: Option<(String, String, u64)>,
 }
 
-/// A page a person arranges: their own (`user`), a group's (`group:<id>`) or everyone's (`global`).
+/// A page a user arranges: their own (`user`), a group's (`group:<id>`) or everyone's (`global`).
 pub fn valid_page(page: &str) -> bool {
     page == "user" || page == "global" || page.strip_prefix("group:").is_some_and(is_id)
 }
@@ -1115,12 +1115,12 @@ pub(crate) mod tests {
         db.execute_batch(permissions::SCHEMA).unwrap();
         db.execute_batch(permissions::DEFAULTS).unwrap();
         for (s, r, o) in [
-            ("person:alice", "member", NETWORK),
-            ("person:bob", "member", NETWORK),
-            ("person:carol", "member", NETWORK),
-            ("person:dave", "member", NETWORK),
-            ("person:alice", "admin", "group:g"),
-            ("person:bob", "member", "group:g"),
+            ("user:alice", "member", NETWORK),
+            ("user:bob", "member", NETWORK),
+            ("user:carol", "member", NETWORK),
+            ("user:dave", "member", NETWORK),
+            ("user:alice", "admin", "group:g"),
+            ("user:bob", "member", "group:g"),
         ] {
             db.execute("INSERT INTO relations VALUES (?1, ?2, ?3, NULL)", [s, r, o]).unwrap();
         }
@@ -1132,11 +1132,11 @@ pub(crate) mod tests {
         let rows: Vec<Relation> = [
             ("group:g#admin", "owner", "repo:1"),
             ("group:g#member", "collaborator", "repo:1"),
-            ("person:dave", "collaborator", "repo:1"),
-            ("person:carol", "owner", "repo:2"),
-            ("person:erin", "owner", "repo:1"),
-            ("person:carol", "admin", NETWORK),
-            ("person:carol", "fan", "group:g"),
+            ("user:dave", "collaborator", "repo:1"),
+            ("user:carol", "owner", "repo:2"),
+            ("user:erin", "owner", "repo:1"),
+            ("user:carol", "admin", NETWORK),
+            ("user:carol", "fan", "group:g"),
             ("#collaborator", "owner", "repo:1"),
             ("@", "owner", "repo:*"),
         ]

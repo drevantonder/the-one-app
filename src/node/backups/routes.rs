@@ -71,12 +71,12 @@ async fn place(State(node): State<Node>, me: Me, Body(mut body): Body<Place>) ->
         return Ok(Json(json!({})));
     }
     if me.agent.is_some() && body.secret.is_some() {
-        return Err(anyhow::anyhow!("agents never handle a place's key: ask the person with request").into());
+        return Err(anyhow::anyhow!("agents never handle a place's key: ask the user with request").into());
     }
     Ok(Json(node.add_place(&me, &serde_json::to_value(body)?).await?))
 }
 
-/// S3-compatible storage at `endpoint` to ask the person for a bucket and its key of, on their own device.
+/// S3-compatible storage at `endpoint` to ask the user for a bucket and its key of, on their own device.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Request {

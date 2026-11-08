@@ -2,12 +2,12 @@ import AppIntents
 import Foundation
 
 #if !WIDGET
-/// The app's Rust (src/platform/iphone.rs `one_ios`), which runs a widget's tool as the person, then draws the widgets again.
+/// The app's Rust (src/platform/iphone.rs `one_ios`), which runs a widget's tool as the user, then draws the widgets again.
 @_silgen_name("one_ios") private func oneIOS(_ kind: UnsafePointer<CChar>, _ json: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
 @_silgen_name("one_ios_free") private func oneIOSFree(_ s: UnsafeMutablePointer<CChar>?)
 #endif
 
-/// What runs a home-screen widget's tools: the app, which reaches the person's devices, in its own process (each tool's
+/// What runs a home-screen widget's tools: the app, which reaches the user's devices, in its own process (each tool's
 /// intent is a Live Activity intent, so the system starts the app for it if it must). The widget only names them.
 enum WidgetActions {
     static func run(_ app: String, _ tool: String, _ input: Data) async throws {

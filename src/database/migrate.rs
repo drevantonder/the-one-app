@@ -4,7 +4,8 @@
 //! step `grant`; the apps added to a scope, its table `installs` (`installed`, `installed_by`, `installed_at`) and
 //! steps `install` and `uninstall`; the permission to choose which devices keep a scope's apps running, run its calls and open its Vault
 //! was `keep`. The setting that names the Cloudflare node was `serverless`. The Vault's agents, in an item's apps and a
-//! request's app, were `agents`, the AGENTS.md app's name, which never used the Vault.
+//! request's app, were `agents`, the AGENTS.md app's name, which never used the Vault. A user, as a principal and a
+//! type of object, was a `person`.
 
 use rusqlite::Connection;
 use serde_json::Value;
@@ -41,11 +42,47 @@ pub fn database(db: &Connection) -> rusqlite::Result<()> {
              UPDATE roles SET type = 'network' WHERE type = 'install';
              UPDATE roles SET permissions = replace(permissions, '\"keep\"', '\"choose-devices\"');
              UPDATE relations SET object = 'network:' || substr(object, 9) WHERE object LIKE 'install:%';
-             UPDATE relations SET subject = 'network:' || substr(subject, 9) WHERE subject LIKE 'install:%';",
+             UPDATE relations SET subject = 'network:' || substr(subject, 9) WHERE subject LIKE 'install:%';
+             UPDATE types SET name = 'user' WHERE name = 'person';
+             UPDATE roles SET type = 'user' WHERE type = 'person';",
         )?;
+    }
+    if has("principals") {
+        // The copy's table still has its old CHECK; `scope::fresh` makes the new one from these rows.
+        db.pragma_update(None, "ignore_check_constraints", true)?;
+        db.execute_batch("UPDATE principals SET kind = 'user' WHERE kind = 'person'")?;
+        db.pragma_update(None, "ignore_check_constraints", false)?;
+    }
+    for (table, column) in NAMES_A_USER {
+        let there: bool = db.query_row("SELECT count(*) FROM pragma_table_info(?1) WHERE name = ?2", [table, column], |r| r.get::<_, i64>(0))? > 0;
+        if there {
+            db.execute_batch(&format!("UPDATE {table} SET {column} = 'user:' || substr({column}, 8) WHERE {column} LIKE 'person:%'"))?;
+        }
     }
     Ok(())
 }
+
+/// Every column of the scope database that holds a user as `user:<id>`, once `person:<id>`.
+const NAMES_A_USER: &[(&str, &str)] = &[
+    ("network", "recovery_used_by"),
+    ("principals", "id"),
+    ("invites", "principal"),
+    ("devices", "principal"),
+    ("devices", "listed_by"),
+    ("runs", "principal"),
+    ("runs_chosen", "principal"),
+    ("app_schedules", "principal"),
+    ("apps", "owner"),
+    ("apps", "deleted_by"),
+    ("deploys", "deployed_by"),
+    ("services", "switched_by"),
+    ("added", "added_by"),
+    ("schedules", "switched_by"),
+    ("vault_requests", "asked_by"),
+    ("vault_requests", "answered_by"),
+    ("relations", "subject"),
+    ("relations", "object"),
+];
 
 /// A signed step's or entry's content as an earlier release wrote it, in this release's names: app schedules' step,
 /// adding and removing an app, and the types, roles and rules a release's `defaults` step says.
@@ -77,11 +114,13 @@ pub fn vault_apps(apps: &mut std::collections::BTreeSet<String>, before: Option<
     }
 }
 
-/// Every name in a release's types, roles and rules: the network's type, its objects and usersets, and the verb.
+/// Every name in a release's types, roles and rules: the network's type and a user's, their objects and usersets, and the verb.
 fn renamed(v: &mut Value) {
     match v {
         Value::String(s) if s == "install" => *s = "network".into(),
         Value::String(s) if s.starts_with("install:") => *s = format!("network:{}", &s["install:".len()..]),
+        Value::String(s) if s == "person" => *s = "user".into(),
+        Value::String(s) if s.starts_with("person:") => *s = format!("user:{}", &s["person:".len()..]),
         // A role's or type's verbs, as the JSON array of text a row holds.
         Value::String(s) if s.contains("\"keep\"") => *s = s.replace("\"keep\"", "\"choose-devices\""),
         Value::Array(a) => a.iter_mut().for_each(renamed),
@@ -99,19 +138,22 @@ mod tests {
         let old = Connection::open_in_memory().unwrap();
         let new = Connection::open_in_memory().unwrap();
         let now = crate::permissions::DEFAULTS;
-        let then = now.replace("'network'", "'install'").replace("network:", "install:").replace("\"choose-devices\"", "\"keep\"");
+        let then = now.replace("'network'", "'install'").replace("network:", "install:").replace("\"choose-devices\"", "\"keep\"").replace("('user',", "('person',").replace("user:*", "person:*");
         let schema = crate::database::scope::SCHEMA;
         let schema_then = schema.replace("TABLE network ", "TABLE install ").replace("TABLE app_schedules ", "TABLE keeps ").replace("TABLE app_schedule_keys ", "TABLE keep_keys ")
-            .replace("TABLE added (\n  app TEXT PRIMARY KEY,\n  added INTEGER NOT NULL,\n  added_by TEXT NOT NULL,\n  added_at", "TABLE installs (\n  app TEXT PRIMARY KEY,\n  installed INTEGER NOT NULL,\n  installed_by TEXT NOT NULL,\n  installed_at");
+            .replace("TABLE added (\n  app TEXT PRIMARY KEY,\n  added INTEGER NOT NULL,\n  added_by TEXT NOT NULL,\n  added_at", "TABLE installs (\n  app TEXT PRIMARY KEY,\n  installed INTEGER NOT NULL,\n  installed_by TEXT NOT NULL,\n  installed_at")
+            .replace("CHECK (kind IN ('user', 'group'))", "CHECK (kind IN ('person', 'group'))");
         assert_ne!(schema, schema_then, "the old tables' names");
         for (db, schema, defaults) in [(&old, &schema_then, &then), (&new, &schema.to_string(), &now.to_string())] {
             db.execute_batch(crate::permissions::SCHEMA).unwrap();
             db.execute_batch(schema).unwrap();
             db.execute_batch(defaults).unwrap();
-            db.execute("INSERT INTO relations VALUES ('person:a', 'admin', ?1, NULL)", [crate::permissions::NETWORK.replace("network:", if std::ptr::eq(db, &old) { "install:" } else { "network:" })]).unwrap();
+            let (user, kind) = if std::ptr::eq(db, &old) { ("person:a", "person") } else { ("user:a", "user") };
+            db.execute("INSERT INTO principals VALUES (?1, ?2, 'A', 'a', 0)", [user, kind]).unwrap();
+            db.execute("INSERT INTO relations VALUES (?1, 'admin', ?2, NULL)", [user.to_string(), crate::permissions::NETWORK.replace("network:", if std::ptr::eq(db, &old) { "install:" } else { "network:" })]).unwrap();
         }
         old.execute("INSERT INTO installs VALUES ('notes', 1, 'person:a', 0)", []).unwrap();
-        new.execute("INSERT INTO added VALUES ('notes', 1, 'person:a', 0)", []).unwrap();
+        new.execute("INSERT INTO added VALUES ('notes', 1, 'user:a', 0)", []).unwrap();
         database(&old).unwrap();
         database(&new).unwrap();
         assert_eq!(crate::database::stored::state_hash(&old).unwrap(), crate::database::stored::state_hash(&new).unwrap());
@@ -122,7 +164,7 @@ mod tests {
         database(&old).unwrap();
         assert_eq!(old.query_row("SELECT app FROM vault_requests", [], |r| r.get::<_, String>(0)).unwrap(), crate::database::scopes::AGENTS);
         crate::permissions::close(&old, None).unwrap();
-        assert!(crate::permissions::may(&old, "person:a", "choose-devices", crate::permissions::NETWORK, 0).unwrap());
+        assert!(crate::permissions::may(&old, "user:a", "choose-devices", crate::permissions::NETWORK, 0).unwrap());
     }
 
     #[test]
@@ -142,11 +184,11 @@ mod tests {
         content(&mut request);
         assert_eq!(request.data["app"], crate::database::scopes::AGENTS);
         let mut defaults = Content::new(crate::database::scopes::APP, "defaults", serde_json::json!({
-            "types": [["install", "[\"use\",\"keep\"]"]], "roles": [["install", "admin", "[\"keep\"]", "[]"]], "rules": [["install:global#admin", "admin", "install:*"]],
+            "types": [["install", "[\"use\",\"keep\"]"], ["person", "[]"]], "roles": [["install", "admin", "[\"keep\"]", "[]"], ["person", "owner", "[]", "[]"]], "rules": [["install:global#admin", "admin", "install:*"], ["@", "owner", "person:*"]],
         }));
         content(&mut defaults);
         assert_eq!(defaults.data, serde_json::json!({
-            "types": [["network", "[\"use\",\"choose-devices\"]"]], "roles": [["network", "admin", "[\"choose-devices\"]", "[]"]], "rules": [["network:global#admin", "admin", "network:*"]],
+            "types": [["network", "[\"use\",\"choose-devices\"]"], ["user", "[]"]], "roles": [["network", "admin", "[\"choose-devices\"]", "[]"], ["user", "owner", "[]", "[]"]], "rules": [["network:global#admin", "admin", "network:*"], ["@", "owner", "user:*"]],
         }));
     }
 }

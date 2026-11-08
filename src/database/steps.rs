@@ -1,7 +1,7 @@
 //! A scope database's steps: the database is the truth, and every change to it is a step at the next free position of
 //! its own in the bucket, which the bucket keeps in one order.
 //!
-//! A step is one change, signed by the device that made it as its person (`Step`): its content (`content`'s kinds), for
+//! A step is one change, signed by the device that made it as its user (`Step`): its content (`content`'s kinds), for
 //! one position. Its position is signed in it (its `seq`), so a step can't be written twice, or anywhere but where its
 //! writer meant it: one that loses its position to another is signed again for the next. A node only carries a client's
 //! step to the bucket: it can hold one back, but change none.
@@ -34,8 +34,8 @@
 //! 1. the network's first step and its recovery key: the freeze's copy, checked as above; and only the recovery key
 //!    lets a device in by itself;
 //! 2. epochs never go down: a step names its scope's epoch its writer knew, never one above the database's;
-//! 3. its signer is one of its person's own devices still listed, or for a scope's own state, a device that runs the
-//!    scope's calls for them (`rules::signed`); and its person holds the permission the change needs, at that step:
+//! 3. its signer is one of its user's own devices still listed, or for a scope's own state, a device that runs the
+//!    scope's calls for them (`rules::signed`); and its user holds the permission the change needs, at that step:
 //!    `may`, `may_give`, `may_take` and `may_make` over the database's rows, each kind's once (`rules::apply`).
 //!
 //! A step that doesn't count is passed over, its position taken, as a database's are: nothing it says happens. What a
@@ -401,7 +401,7 @@ pub fn first_freeze(recovery: &SigningKey, root: Hash, start: &Value, user: &str
     Ok(Given { step, copy: Some(db.bytes()?) })
 }
 
-/// `global`'s database as a new network starts, `root`, from `start` (`content::first`): its first person, device,
+/// `global`'s database as a new network starts, `root`, from `start` (`content::first`): its first user, device,
 /// epoch and recovery key, with this release's types, roles and rules.
 pub fn first(root: Hash, start: &Value, now: u64) -> Result<ScopeDb> {
     let db = super::scope::empty(&Scope::Global)?;
@@ -1044,7 +1044,7 @@ pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
 /// the database had; the network's own roles stay.
 fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Step) -> Result<Applied> {
     // Whose it is first: one that doesn't count is passed over, whatever release it names.
-    ensure!(who.client(&step.author())?.is_some_and(|c| c.user == step.user()), "only a person's own device writes for them");
+    ensure!(who.client(&step.author())?.is_some_and(|c| c.user == step.user()), "only a user's own device writes for them");
     ensure!(who.may(step.user(), "change-roles", scopes::NETWORK), "only the network's admins say the release's roles");
     let reads = u32::try_from(step.content.data["reads"].as_u64().context("a release's roles name its version")?)?;
     ensure!(reads <= READS, Newer);
@@ -1192,7 +1192,7 @@ pub(crate) mod tests {
         let global = global_of(&h);
         let scope = Scope::User(ANDRE.into());
         let conn = super::super::scope::empty(&scope).unwrap();
-        conn.execute_batch(r#"INSERT INTO added VALUES ('notes', 1, 'person:a000000000000001', 0); INSERT INTO pages VALUES ('user', '{"items":["notes"]}');"#).unwrap();
+        conn.execute_batch(r#"INSERT INTO added VALUES ('notes', 1, 'user:a000000000000001', 0); INSERT INTO pages VALUES ('user', '{"items":["notes"]}');"#).unwrap();
         let mut db = ScopeDb::open(conn, 0).unwrap();
         let freeze = Freeze { at: 2, hash: "0".repeat(64), logs: [("global".to_string(), 9), (scope.to_string(), 4)].into() };
         let given = start(&mac, &scope, ANDRE, 1, 0, &mut db).unwrap();
@@ -1311,7 +1311,7 @@ pub(crate) mod tests {
         assert!(apply(&db, None, &Scope::Global, &step(2, READS)).is_err(), "the same release's again changes nothing");
         // What each `READS` reads, from the first that reads the scope database (2): add `(READS, hash)`
         // when a release changes them, and read one more.
-        const PINNED: &[(u32, &str)] = &[(2, "1a26a7b14a1b8998d5edcf6b6d00db14a698c6109eb865f7bd8e7c86dcd295a4"), (3, "e614e4c705368711133be27dd44ff51c24ff89da7fe059001ad3990f0b454a67"), (4, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (5, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (6, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (7, "623223311093180cd17e55f5a9933c62c2b900d16936ed9bb902b30999c175a7")];
+        const PINNED: &[(u32, &str)] = &[(2, "1a26a7b14a1b8998d5edcf6b6d00db14a698c6109eb865f7bd8e7c86dcd295a4"), (3, "e614e4c705368711133be27dd44ff51c24ff89da7fe059001ad3990f0b454a67"), (4, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (5, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (6, "faa5b6936f41b2763b4a4a4533d82323bb60e068ba3822ed6bafbf4e2921fd6b"), (7, "623223311093180cd17e55f5a9933c62c2b900d16936ed9bb902b30999c175a7"), (8, "5088091c0646f689ee10f3190a3c1a933d9b2e34ac27c254c7df547f7573f688")];
         let mut h = blake3::Hasher::new();
         h.update(super::super::scope::SCHEMA.as_bytes());
         h.update(permissions::SCHEMA.as_bytes());

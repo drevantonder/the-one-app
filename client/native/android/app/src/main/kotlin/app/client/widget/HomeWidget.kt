@@ -123,7 +123,7 @@ private object Keys {
 }
 
 /** A widget's button or toggle: drawn as done at once (a toggle switched, a button dimmed), then its tool runs, as the
- *  person, in the app's library, and every widget redraws from what it did; back as it was if it didn't work. */
+ *  user, in the app's library, and every widget redraws from what it did; back as it was if it didn't work. */
 class RunTool : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         HomeWidgets.start(context)

@@ -47,7 +47,7 @@ pub trait Bucket {
     }
 }
 
-/// What went wrong at a place, so a person can be told how to fix it.
+/// What went wrong at a place, so a user can be told how to fix it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trouble {
     /// The place rejected the key.

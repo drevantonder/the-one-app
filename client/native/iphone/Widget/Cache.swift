@@ -28,7 +28,7 @@ struct WidgetCache: Codable {
     }
     var network: String?
     var widgets: [Item]
-    /// The person signed out, so the home-screen widgets say to sign in.
+    /// The user signed out, so the home-screen widgets say to sign in.
     var signedOut: Bool?
     /// When the app last had them from your devices.
     var fetched: Date?
@@ -53,7 +53,7 @@ struct WidgetCache: Codable {
         try? data.write(to: file, options: .atomic)
     }
 
-    /// Signed out: none of the person's widgets or their images are left for the home screen's.
+    /// Signed out: none of the user's widgets or their images are left for the home screen's.
     static func forget() {
         WidgetCache(widgets: [], signedOut: true).save()
         WidgetImages.forget()

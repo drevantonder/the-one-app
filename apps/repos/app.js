@@ -2,9 +2,9 @@
 // pushes over HTTP through the node's local API (http.js), and a repo's packs are blobs. No git runs here: pages read
 // the packs themselves (browse.js, git.js).
 //
-// As on GitHub, a repo is <owner>/<name>, its owner a person or a group, by their handle (ctx.handles), so a handle's
+// As on GitHub, a repo is <owner>/<name>, its owner a user or a group, by their handle (ctx.handles), so a handle's
 // change moves its repos' addresses. Everyone reads and forks every repo. Its owner pushes, and its collaborators: a
-// person's repo is theirs, and they add and remove collaborators; a group's is its admins', its members are its
+// user's repo is theirs, and they add and remove collaborators; a group's is its admins', its members are its
 // collaborators, and its admins add others. Who's which is the network's permissions (`types`, and the rows of
 // `relations`, which ctx.global.may reads). Owners delete a repo, as apps are: it waits in Recently Deleted, read by no
 // one, until they restore it or erase it, and its packs, for good. Rows name a repo by its id (an older repo's is the
@@ -43,8 +43,8 @@ const REPO = { type: "string", description: "a repo as <owner>/<name>, from repo
 const REF = { type: "string", description: "a branch, like main, or a commit's sha, from repos_branches or repos_log; default main, else the first branch" };
 const PATH = { type: "string", description: "a path in the repo, like src/app.js or docs; omit for the whole repo" };
 const SHA = { type: "string", description: "a commit's sha, full or its first 7 characters, from repos_log" };
-const USER = { type: "string", description: "a person's handle, from groups_list, like sam" };
-const CONFIRM = { type: "boolean", description: "true once the person agreed: it changes who may push" };
+const USER = { type: "string", description: "a user's handle, from groups_list, like sam" };
+const CONFIRM = { type: "boolean", description: "true once the user agreed: it changes who may push" };
 
 const handles = (ctx) => ctx.handles;
 const byId = (ctx, id) => handles(ctx).find((h) => h.id === id) || null;
@@ -91,12 +91,12 @@ const randomId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) =>
 
 const object = (r) => `repo:${r.id}`;
 
-/// Writes a new repo, or a fork of `from` (a row) with its branches and history as they are now: its owner's, a person
+/// Writes a new repo, or a fork of `from` (a row) with its branches and history as they are now: its owner's, a user
 /// or a group's admins, and a group's members its collaborators.
 function newRepo(ctx, g, { name, owner, from = null }) {
   const id = randomId();
   g.exec(`insert into repos (id, owner, name, "from", created, user) values (?, ?, ?, ?, ?, ?)`, [id, owner, name, from?.id ?? null, ctx.now(), ctx.me.user]);
-  const holders = owner.startsWith("group:") ? [[`${owner}#admin`, "owner"], [`${owner}#member`, "collaborator"]] : [[`person:${owner.slice(5)}`, "owner"]];
+  const holders = owner.startsWith("group:") ? [[`${owner}#admin`, "owner"], [`${owner}#member`, "collaborator"]] : [[owner, "owner"]];
   for (const [subject, relation] of holders) g.exec("insert into relations (subject, relation, object, by, time) values (?, ?, ?, ?, ?)", [subject, relation, object({ id }), ctx.me.user, ctx.now()]);
   if (from) {
     g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ?`, [id, ctx.me.user, ctx.me.user_name || ctx.me.name, ctx.now(), from.id]);
@@ -179,7 +179,7 @@ const app = {
   color: "#5856d6",
   advanced: true,
   description: "Git hosting for you and your agents: clone, push and suggest changes",
-  instructions: `Repos is git hosting for the person and their agents, as on GitHub. A repo is <owner>/<name>, its owner a person or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a person adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them). GitHub's repos show beside them, as github.com/<owner>/<name>: those the person's own GitHub accounts see (repos_accounts, repos_sign_in) and those of GitHub organizations connected for their groups. Reading and the issue tools work on them the same, asking GitHub at once, and what they write goes to GitHub; clone one from GitHub's own address (repos_get gives it).`,
+  instructions: `Repos is git hosting for the user and their agents, as on GitHub. A repo is <owner>/<name>, its owner a user or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a user adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them). GitHub's repos show beside them, as github.com/<owner>/<name>: those the user's own GitHub accounts see (repos_accounts, repos_sign_in) and those of GitHub organizations connected for their groups. Reading and the issue tools work on them the same, asking GitHub at once, and what they write goes to GitHub; clone one from GitHub's own address (repos_get gives it).`,
   vault: github.VAULT,
 
   schema: {
@@ -218,16 +218,17 @@ const app = {
       insert into labels select r.id, d.column1, d.column2, d.column3 from repos r, (values ${issues.LABELS.map((l) => `(${l.map(sql).join(", ")})`).join(", ")}) d;`,
       github.SCHEMA,
       // Who holds a role on a repo, as the network's permissions' rows (subject, relation, object, until), and who gave
-      // it when: its owner (a person, or a group's admins), a group's members as its collaborators, and the
+      // it when: its owner (a user, or a group's admins), a group's members as its collaborators, and the
       // collaborators its owners added.
       `create table relations (subject text not null, relation text not null, object text not null, until integer, by text, time integer,
                                primary key (subject, relation, object));
       create index relations_by_object on relations (object, relation);
-      insert into relations select 'person:' || substr(owner, 6), 'owner', 'repo:' || id, null, user, created from repos where owner like 'user:%';
+      insert into relations select 'user:' || substr(owner, 6), 'owner', 'repo:' || id, null, user, created from repos where owner like 'user:%';
       insert into relations select owner || '#admin', 'owner', 'repo:' || id, null, user, created from repos where owner like 'group:%';
       insert into relations select owner || '#member', 'collaborator', 'repo:' || id, null, user, created from repos where owner like 'group:%';
-      insert or ignore into relations select 'person:' || user, 'collaborator', 'repo:' || repo, null, by, time from collaborators;
+      insert or ignore into relations select 'user:' || user, 'collaborator', 'repo:' || repo, null, by, time from collaborators;
       drop table collaborators;`,
+      `update relations set subject = 'user:' || substr(subject, 8) where subject like 'person:%';`,
     ],
   },
 
@@ -316,19 +317,19 @@ const app = {
     },
     collaborators: {
       reads: true,
-      description: "Who pushes to a repo: its owner; for a group's, its members (its admins own it); and the collaborators its owners added, each with who added them when. yours says whether you own it, to add and remove them; people, whom you could add.",
+      description: "Who pushes to a repo: its owner; for a group's, its members (its admins own it); and the collaborators its owners added, each with who added them when. yours says whether you own it, to add and remove them; users, whom you could add.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
         const group = r.owner.startsWith("group:") ? byId(ctx, r.owner) : null;
         const members = Object.entries(group?.members || {}).map(([user, role]) => ({ ...who(ctx, `user:${user}`), role }));
-        const added = (await g.query("select subject, by, time from relations where object = ? and relation = 'collaborator' and subject like 'person:%' order by time", [object(r)]))
-          .map((c) => ({ ...who(ctx, `user:${c.subject.slice(7)}`), by: ownerName(ctx, `user:${c.by}`), time: c.time }));
+        const added = (await g.query("select subject, by, time from relations where object = ? and relation = 'collaborator' and subject like 'user:%' order by time", [object(r)]))
+          .map((c) => ({ ...who(ctx, c.subject), by: ownerName(ctx, `user:${c.by}`), time: c.time }));
         const yours = await g.may("manage", object(r));
         const taken = new Set([r.owner.slice(5), ...Object.keys(group?.members || {}), ...added.map((c) => byHandle(ctx, c.handle)?.id.slice(5))]);
-        const people = yours ? handles(ctx).filter((h) => h.id.startsWith("user:") && !h.removed && !taken.has(h.id.slice(5))).map((h) => ({ handle: h.handle, name: h.name })) : [];
-        return iso({ repo: r.path, owner: who(ctx, r.owner), group: !!group, members, collaborators: added, yours, people });
+        const users = yours ? handles(ctx).filter((h) => h.id.startsWith("user:") && !h.removed && !taken.has(h.id.slice(5))).map((h) => ({ handle: h.handle, name: h.name })) : [];
+        return iso({ repo: r.path, owner: who(ctx, r.owner), group: !!group, members, collaborators: added, yours, users });
       },
     },
     add_collaborator: {
@@ -343,7 +344,7 @@ const app = {
         const id = h.id.slice(5);
         if (r.owner === h.id) throw new Error(`${h.name} owns ${r.path}`);
         if (byId(ctx, r.owner)?.members?.[id]) throw new Error(`${h.name} is in ${ownerName(ctx, r.owner)}, so pushes to ${r.path} already`);
-        global(ctx).exec("insert or ignore into relations (subject, relation, object, by, time) values (?, 'collaborator', ?, ?, ?)", [`person:${id}`, object(r), ctx.me.user, ctx.now()]);
+        global(ctx).exec("insert or ignore into relations (subject, relation, object, by, time) values (?, 'collaborator', ?, ?, ?)", [`user:${id}`, object(r), ctx.me.user, ctx.now()]);
         return `${h.name} pushes to ${r.path} now.`;
       },
     },
@@ -358,7 +359,7 @@ const app = {
         const h = byHandle(ctx, user);
         if (!h || !h.id.startsWith("user:")) throw new Error(`no one has the handle ${user}`);
         const id = h.id.slice(5);
-        const row = [`person:${id}`, object(r)];
+        const row = [`user:${id}`, object(r)];
         if (!(await g.query("select 1 from relations where subject = ? and relation = 'collaborator' and object = ?", row)).length) {
           throw new Error(byId(ctx, r.owner)?.members?.[id] ? `${h.name} pushes to ${r.path} as a member of ${ownerName(ctx, r.owner)}: take them out of the group to stop that` : `${h.name} isn't a collaborator of ${r.path}`);
         }

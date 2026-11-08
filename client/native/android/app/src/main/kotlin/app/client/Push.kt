@@ -22,7 +22,7 @@ import org.json.JSONObject
 // Notifications. The network's push Worker (cloudflare/push/) carries each note, sealed to this phone's device, through
 // Firebase Cloud Messaging as a data message alone (`n`, base64url), which wakes this app; the app's library opens it with
 // the device's key (Native "open-note"), asking nothing of the network, and this shows it. Tapping one opens the app
-// screen it names. A device asking its person to join shows Approve and Not Me, answered from here (PushActions) as
+// screen it names. A device asking its user to join shows Approve and Not Me, answered from here (PushActions) as
 // Settings › Devices answers them. Firebase is the custom build's own project (config.toml's `firebase`), which a build
 // without one leaves out: then this phone registers nothing and gets no notifications.
 

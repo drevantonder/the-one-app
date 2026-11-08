@@ -1,5 +1,5 @@
 // The Cloudflare node: a node of the network on Cloudflare Workers, which client devices ask over iroh as they ask
-// any node, last in run priority's order: when none of their person's machines answers. It holds no keys. Each
+// any node, last in run priority's order: when none of their user's machines answers. It holds no keys. Each
 // request is from the device its connection proved (or the device that vouched for that session's key, as nodes take
 // one: `x-one-endpoint`), says whose it is (`x-one-user`), which the network must list that device as, and
 // brings the keys of the databases its call reaches, sealed to this node for that device (`x-one-keys`); one that lacks
@@ -12,16 +12,16 @@
 //
 // It answers what it can itself (the network's state, apps, widgets, badges, screens, and the calls of apps that keep
 // to their own data). A call of an app that needs a machine goes on to the network's nodes on machines over iroh, from
-// this node's own endpoint, to a node that runs every scope the call reaches for its person, with only that call's
+// this node's own endpoint, to a node that runs every scope the call reaches for its user, with only that call's
 // keys, sealed to it; with none answering, and for anything else only a machine has, it says plainly that it needs a
 // device that's off.
 //
-// Its Durable Objects are of one class, `Node`, in two parts. Each person's requests run in an object of their own
+// Its Durable Objects are of one class, `Node`, in two parts. Each user's requests run in an object of their own
 // (`user:<id>`), which alone holds what they handed and what it opened with it: their databases, the steps it read,
-// their apps' isolates and its own copy of what it read from the bucket, so nothing one person's call opened is ever
+// their apps' isolates and its own copy of what it read from the bucket, so nothing one user's call opened is ever
 // another's. The object `node` is this node as an iroh endpoint (src/net.rs), of its own key, with no socket, which
 // the relay wakes with the datagrams sent to it and which sends its own back through the relay; it passes each request
-// it gets to the asker's person's object, and asks devices for calls for them, its connections living as long as it does.
+// it gets to the asker's user's object, and asks devices for calls for them, its connections living as long as it does.
 // It ends itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
 //
 // Bindings: SIGNER (the URL signer), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its endpoint's
@@ -63,15 +63,15 @@ const BODY_MOST = 4 << 20;
 const SIGN_INS_MOST = 64;
 const DATABASES_MOST = 512;
 
-/// Who a client's request is from, as the endpoint object proved it and passes it to a person's object: `{ device,
-/// until }`. Only the endpoint object sets it: nothing else reaches a person's object.
+/// Who a client's request is from, as the endpoint object proved it and passes it to a user's object: `{ device,
+/// until }`. Only the endpoint object sets it: nothing else reaches a user's object.
 const FROM = "x-one-from";
-/// Whose a request says it is: the person's object it goes to, which checks the network lists its device as theirs.
+/// Whose a request says it is: the user's object it goes to, which checks the network lists its device as theirs.
 const USER = HEADER.user;
 /// How long the keys a request hands are kept, at most: they come again with the next.
 const HANDED_FOR = 3_600_000;
 
-const personOf = (env, user) => env.NODE.get(env.NODE.idFromName(`user:${user}`), near(env));
+const userOf = (env, user) => env.NODE.get(env.NODE.idFromName(`user:${user}`), near(env));
 
 async function bodyOf(request) {
   const text = await textOf(request, BODY_MOST);
@@ -88,7 +88,7 @@ const following = (name, n) => JSON.parse(after(name, n));
 
 const newestOf = (scope, app, database) => `${prefix(scope, app, database)}/newest`;
 
-/// What a person's object has read from the bucket, as sealed as it was there, in its own storage: every name but a
+/// What a user's object has read from the bucket, as sealed as it was there, in its own storage: every name but a
 /// database's `newest` is created once and never changed, so a copy or step kept here is never stale, and a wake reads
 /// only what's newer from the bucket. It holds no keys, so this opens nothing. Kept to `SEALED_MOST`, the least lately
 /// used going first; an erased app's are forgotten.
@@ -298,13 +298,13 @@ function serially(db, f) {
 
 const OPEN_MOST = 4;
 
-class Person {
+class User {
   constructor(object) {
     const { env, ctx } = object;
     Object.assign(this, { env, ctx, object, owner: null });
     this.bucket = new Bucket(env, new Sealed(ctx.storage.sql));
     /// The keys handed for each device's requests (`x-one-keys`), by its key: `{ until, keys }`, `keys` a
-    /// database's (`<scope>/<app>/<database>`) keys by epoch, base64url. Forgotten when they expire, or its person loses
+    /// database's (`<scope>/<app>/<database>`) keys by epoch, base64url. Forgotten when they expire, or its user loses
     /// the scope.
     this.handed = new Map();
     /// When each scope's steps were last read here, and with which keys.
@@ -318,7 +318,7 @@ class Person {
     this.described = new Map();
   }
 
-  /// Whom a request is from: the device the endpoint object proved, for this object's person, until when its word
+  /// Whom a request is from: the device the endpoint object proved, for this object's user, until when its word
   /// lasts (a session's certificate's). Whether the network lists it as theirs is checked as soon as the network's
   /// steps are read (`networkFor`), before anything else of theirs is: until then the keys it hands only read those
   /// steps, and are kept, and what they open fetched, only once it's checked (`forgetLost`). Keys sealed to another
@@ -415,7 +415,7 @@ class Person {
     }
   }
 
-  /// Reads `scopes`' steps for a request, each with the keys its person handed: a scope whose they didn't hand is
+  /// Reads `scopes`' steps for a request, each with the keys its user handed: a scope whose they didn't hand is
   /// asked for with 428, so its steps are never shown to someone who can't open them.
   async readScopes(who, scopes) {
     await Promise.all(scopes.map((scope) => this.withKeys(who, scope, NODE_APP, LOG, async (keys) => {
@@ -426,8 +426,8 @@ class Person {
     })));
   }
 
-  /// Refuses a device the network doesn't list as its person's, forgetting what it handed, and forgets what a
-  /// device was handed for scopes its person may no longer use, as soon as the network says so.
+  /// Refuses a device the network doesn't list as its user's, forgetting what it handed, and forgets what a
+  /// device was handed for scopes its user may no longer use, as soon as the network says so.
   forgetLost(who) {
     const { scopes, joined, removed, device, runs } = JSON.parse(scopes_of(this.owner, who.user, who.device));
     if (removed || !joined || device == null) {
@@ -445,7 +445,7 @@ class Person {
     return runs;
   }
 
-  /// The network as a request's person sees it (src/lib.rs: `network`): `{ state, apps, me, epochs, runs }`, `runs` the
+  /// The network as a request's user sees it (src/lib.rs: `network`): `{ state, apps, me, epochs, runs }`, `runs` the
   /// scopes of theirs this node runs, from the steps of Everyone's, their own and the groups' they handed the keys of.
   /// Their device is checked first.
   async networkFor(who) {
@@ -474,8 +474,8 @@ class Person {
     return this.modules.get(hash);
   }
 
-  /// An app's latest deploy, in an isolate of its own for this person alone: no network, and the node's answers handed
-  /// in with each call. Another person's calls never share its module's state.
+  /// An app's latest deploy, in an isolate of its own for this user alone: no network, and the node's answers handed
+  /// in with each call. Another user's calls never share its module's state.
   appWorker(who, app) {
     return this.env.LOADER.get(`${this.owner}/${app.name}-${app.bundle}`, async () => ({
       compatibilityDate,
@@ -525,7 +525,7 @@ class Person {
     return db;
   }
 
-  /// The scopes a call reaches: an app's, as `Run.scopes` gives them; a service's, those it names, or its person's own.
+  /// The scopes a call reaches: an app's, as `Run.scopes` gives them; a service's, those it names, or its user's own.
   callScopes(who, view, req) {
     const app = !req.service && (!req.device || namesThisNode(req.device)) && deployed(view, req.app);
     if (app) return new Run(this, who, view).scopes(app, req.scopes).map((h) => h.id);
@@ -549,7 +549,7 @@ class Person {
     return out;
   }
 
-  /// Asks the network's nodes on machines that run every scope `call` reaches for its person (`runners`), in Where
+  /// Asks the network's nodes on machines that run every scope `call` reaches for its user (`runners`), in Where
   /// Things Run's order until one is reached, to run it as them, with only the keys of those scopes they handed this
   /// node, sealed to that node: → its answer, `{ ok }` or what failed as `/v1/call` says it; or null
   /// if none was reached. Keys it says it needs that this node holds go with the call again; the rest are its caller's
@@ -585,10 +585,10 @@ class Person {
   }
 }
 
-/// A call's databases, opened from the bucket, or kept open in its person's object, as it first reaches each.
+/// A call's databases, opened from the bucket, or kept open in its user's object, as it first reaches each.
 class Call {
-  constructor(person, who, app, scopes, view) {
-    Object.assign(this, { person, who, app, scopes, view, dbs: new Map() });
+  constructor(user, who, app, scopes, view) {
+    Object.assign(this, { user, who, app, scopes, view, dbs: new Map() });
   }
 
   db(scope) {
@@ -598,7 +598,7 @@ class Call {
   }
 
   async open(scope) {
-    const p = this.person;
+    const p = this.user;
     const migrations = JSON.stringify((await p.describe(this.who, this.app)).schema?.[kindOf(scope)] || []);
     const at = prefix(scope, this.app.name, "main");
     const current = this.view.epochs[scope] ?? p.epochs([scope])[scope];
@@ -610,9 +610,9 @@ class Call {
   async on(scope, f, writes = false) {
     const { db, keys, current: then } = await this.db(scope);
     return serially(db, () => {
-      const current = writes ? this.person.epochs([scope])[scope] : then;
+      const current = writes ? this.user.epochs([scope])[scope] : then;
       if (!opens(db.handle, keys, current)) {
-        if (!Object.hasOwn(JSON.parse(keys), current)) this.person.lacking([{ scope, epoch: current, app: this.app.name, database: "main" }], this.who);
+        if (!Object.hasOwn(JSON.parse(keys), current)) this.user.lacking([{ scope, epoch: current, app: this.app.name, database: "main" }], this.who);
         refuse(503, "its database was closed while it ran: try again");
       }
       return f(db.handle);
@@ -622,7 +622,7 @@ class Call {
   /// The Vault's items in the scopes the call named: each one's `vault` database (the node's), opened with the keys
   /// handed for it, for this call alone, as `[[scope, handle]]` (JSON); those it lacks are said with 428, all at once.
   vault() {
-    const p = this.person;
+    const p = this.user;
     this.items ||= (async () => {
       const lacks = this.scopes.filter((scope) => !p.keysOf(this.who, scope, NODE_APP, VAULT));
       if (lacks.length) await p.needs(lacks.map((scope) => ({ scope, app: NODE_APP, database: VAULT, have: [] })), this.who);
@@ -640,8 +640,8 @@ class Call {
   /// core's rows, and the app's own types and its rows in `scope` (src/node/calls/running.rs: `/may`).
   async may(scope, asks) {
     if (!this.scopes.includes(scope)) refuse(403, `the call didn't name ${scope}`);
-    const types = (await this.person.describe(this.who, this.app)).types;
-    const ask = (handle) => JSON.parse(may(this.person.owner, handle, this.who.user, JSON.stringify(asks), JSON.stringify(types || {}), Date.now()));
+    const types = (await this.user.describe(this.who, this.app)).types;
+    const ask = (handle) => JSON.parse(may(this.user.owner, handle, this.who.user, JSON.stringify(asks), JSON.stringify(types || {}), Date.now()));
     return types ? this.on(scope, ask) : ask(undefined);
   }
 
@@ -649,7 +649,7 @@ class Call {
   /// machine's answers, and devices read what changed from the bucket. → the databases it wrote.
   async write(appends) {
     const each = JSON.parse(statements(JSON.stringify(appends), JSON.stringify(this.scopes)));
-    for (const [scope, list] of Object.entries(each)) await this.on(scope, (handle) => write(handle, this.person.bucket, JSON.stringify(list)), true);
+    for (const [scope, list] of Object.entries(each)) await this.on(scope, (handle) => write(handle, this.user.bucket, JSON.stringify(list)), true);
     return Object.keys(each).map((scope) => prefix(scope, this.app.name, "main"));
   }
 
@@ -665,11 +665,11 @@ class Call {
 
 /// A request's work, as each app it runs asks the node things (src/node/calls/running.rs: `internal`).
 class Run {
-  constructor(person, who, view) {
-    Object.assign(this, { person, who, view, env: person.env, ctx: person.ctx });
+  constructor(user, who, view) {
+    Object.assign(this, { user, who, view, env: user.env, ctx: user.ctx });
   }
 
-  /// The scope handles an app reaches for this person (src/lib.rs: `network`'s `reach`), or those of `named` (`user`,
+  /// The scope handles an app reaches for this user (src/lib.rs: `network`'s `reach`), or those of `named` (`user`,
   /// `global`, a group's id or `group:<id>`) it reaches: no other.
   scopes(app, named) {
     if (!named) return app.reach;
@@ -678,7 +678,7 @@ class Run {
     return ids.map((id) => app.reach.find((h) => h.id === id) || refuse(403, this.notOnPages(app.name, id)));
   }
 
-  /// Why an app reaches nothing here: it isn't added, or it's added only for the person alone, whose own scope this node
+  /// Why an app reaches nothing here: it isn't added, or it's added only for the user alone, whose own scope this node
   /// reads only if they chose it to run their own things.
   notOnPages(name, scope = null) {
     const own = `user:${this.who.user}`;
@@ -693,7 +693,7 @@ class Run {
   /// until it says it's done. `from` is the app whose `ctx.apps` made it. → what the app gave.
   async run(app, what, fields, scopes, from = null, depth = 0) {
     if (depth > 8) refuse(400, "apps called each other too deep");
-    const p = this.person;
+    const p = this.user;
     const d = await p.describe(this.who, app);
     if (!servedHere(this.view, d)) refuse(503, needsDevice(d, app.name));
     if (!scopes.length) refuse(403, this.notOnPages(d.title || app.name));
@@ -721,7 +721,7 @@ class Run {
   }
 
   async call(req, from = null, depth = 0) {
-    const p = this.person;
+    const p = this.user;
     const app = deployed(this.view, req.app) || refuse(404, `no app named ${req.app}`);
     const scopes = this.scopes(app, req.scopes);
     // The keys of every database it may open, asked for at once, before it runs, unless each has its scope's current.
@@ -740,12 +740,12 @@ class Run {
       .filter((p) => p.scopes.length);
   }
 
-  /// Every widget of a page, drawn for this person (src/node/screens.rs: `widgets`). One whose app needs a device says so.
+  /// Every widget of a page, drawn for this user (src/node/screens.rs: `widgets`). One whose app needs a device says so.
   async widgets(page) {
     const key = page === `user:${this.who.user}` ? "user" : page;
     const placed = (this.view.state.arrangements?.[key]?.items || []).filter((i) => typeof i.widget === "string" && i.options && Object.keys(i.options).length);
     const each = await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
-      const d = await this.person.describe(this.who, app).catch(keysFirst);
+      const d = await this.user.describe(this.who, app).catch(keysFirst);
       return Promise.all((d?.widgets || []).map(async (w) => {
         const size = w.size || "medium";
         const draw = (at, options) => this.run(app, "widget", { name: w.name, size: at, options }, scopes);
@@ -780,7 +780,7 @@ class Run {
   async badges(page) {
     const out = {};
     await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
-      const d = await this.person.describe(this.who, app).catch(keysFirst);
+      const d = await this.user.describe(this.who, app).catch(keysFirst);
       if (d?.badge !== true || !servedHere(this.view, d)) return;
       const n = await this.run(app, "badge", {}, scopes).catch((err) => {
         console.error(`${app.name}'s badge: ${err.message}`);
@@ -791,14 +791,14 @@ class Run {
     return out;
   }
 
-  /// Every app in the network, with what each does for this person where it's added for them (src/node/apps.rs:
+  /// Every app in the network, with what each does for this user where it's added for them (src/node/apps.rs:
   /// `catalog`). What it says of itself comes from its latest deploy.
   /// `light`, as a window draws them (src/node/apps.rs: `apps_drawn`): what shows each one and where.
   async apps({ light = false } = {}) {
     const drawn = ["name", "title", "icon", "color", "domain", "image", "image_kind", "added", "deleted", "screens", "widgets", "owner"];
     return Promise.all(this.view.apps.map(async ({ reach, ...info }) => {
       const app = deployed(this.view, info.name);
-      const d = app && (await this.person.describe(this.who, app).catch(keysFirst));
+      const d = app && (await this.user.describe(this.who, app).catch(keysFirst));
       const mine = reach.length > 0;
       const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "needs"];
       for (const [k, v] of Object.entries(d || {})) if (k !== "name" && k !== "schedules" && (mine || shown.includes(k))) info[k] = v;
@@ -884,7 +884,7 @@ class ForCall extends RpcTarget {
   /// One of an app's asks (src/call.rs: `Ask`), as a machine's node answers it: a Response, an error's code in its header.
   async ask(name, body) {
     try {
-      const { who, view, person } = this.run;
+      const { who, view, user } = this.run;
       const q = body ? JSON.parse(typeof body === "string" ? body : new TextDecoder().decode(body)) : {};
       switch (name) {
         case "query":
@@ -900,13 +900,13 @@ class ForCall extends RpcTarget {
         case "call": {
           // Only to the apps it says it uses, and never to a service: a service is its app's alone, and an app with one
           // runs on a machine, never here. A service, or an app this node can't run, goes to a node on a machine.
-          const mine = await person.describe(who, this.app);
+          const mine = await user.describe(who, this.app);
           if (q.service && q.app === this.app.name && onHere(view, q.app)) return Response.json(await ownService(this.run, q, mine));
           if (q.service || q.device === "all") refuse(403, `${this.app.name} can't call the ${q.app} service: a service is only its own app's, so call the ${q.app} app's tools with ctx.apps`);
           if (!mine?.uses?.apps?.includes(q.app)) refuse(403, `${this.app.name} doesn't use ${q.app}`);
           const callee = deployed(view, q.app);
           if (!callee) refuse(404, `no app named ${q.app}`);
-          const d = q.device ? null : await person.describe(who, callee);
+          const d = q.device ? null : await user.describe(who, callee);
           if (!d || !servedHere(view, d)) return Response.json(await machineCall(this.run, q, d));
           return Response.json(await this.run.call({ app: q.app, tool: q.tool, input: q.input }, this.app.name, this.depth + 1));
         }
@@ -929,10 +929,10 @@ class ForCall extends RpcTarget {
   }
 }
 
-/// An app's call that needs a node on a machine (a service's, or one of an app that uses one), as this person.
+/// An app's call that needs a node on a machine (a service's, or one of an app that uses one), as this user.
 async function machineCall(run, q, d) {
   const call = { app: q.app, ...(q.service ? { function: q.function } : { tool: q.tool }), input: q.input ?? {}, service: q.service ? q.app : undefined, device: q.device };
-  const out = await run.person.onMachine(run.who, run.view, call, 15_000);
+  const out = await run.user.onMachine(run.who, run.view, call, 15_000);
   if (!out) refuse(503, needsDevice(d, q.app));
   return answered(out, q.app);
 }
@@ -943,8 +943,8 @@ function answered(out, app) {
 }
 
 /// An app's screen, as its page (src/screen.rs).
-async function screenOf(request, person, who, view, app, name, params, scope) {
-  const reply = await person.appWorker(who, app).getEntrypoint("Call").run("screen", name, {}, null);
+async function screenOf(request, user, who, view, app, name, params, scope) {
+  const reply = await user.appWorker(who, app).getEntrypoint("Call").run("screen", name, {}, null);
   const body = reply.ok ?? "";
   const context = { app: app.name, screen: name, params, me: view.me, scope, config: { name: CONFIG.name, cli: CONFIG.cli, api: `http://localhost:${CONFIG.port}`, made_here: CONFIG.made_here } };
   return screenPage(request, screen(JSON.stringify(context), body, new URL(request.url).searchParams.get("linked") === "true"));
@@ -1008,7 +1008,7 @@ async function route(p, request) {
     return json(await run.badges(scope));
   }
   // Anything else only a machine does: to a client that asks one itself (`x-one-elsewhere`), the machines of its
-  // person's that are on, as a node on a machine names those that run a call it can't (421).
+  // user's that are on, as a node on a machine names those that run a call it can't (421).
   if (request.headers.get(HEADER.elsewhere)) {
     const view = await p.networkFor(p.whom(request));
     const theirs = view.state.network.devices.filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
@@ -1061,7 +1061,7 @@ export default {
   fetch: () => json({ error: "the Cloudflare node is asked over iroh, as any node is" }, 404),
 };
 
-/// A Durable Object of the Cloudflare node: a person's (`user:<id>`), where their requests run, or the node's
+/// A Durable Object of the Cloudflare node: a user's (`user:<id>`), where their requests run, or the node's
 /// endpoint (`node`), which the relay wakes and which asks devices for calls.
 export class Node extends DurableObject {
   constructor(ctx, env) {
@@ -1077,9 +1077,9 @@ export class Node extends DurableObject {
 
   async fetch(request) {
     if (this.isEndpoint) return json({ error: "the Cloudflare node's endpoint answers only asks over iroh" }, 400);
-    this.person ||= new Person(this);
+    this.user ||= new User(this);
     try {
-      return await route(this.person, request);
+      return await route(this.user, request);
     } catch (err) {
       return failure(err);
     }
@@ -1163,7 +1163,7 @@ export class Node extends DurableObject {
   }
 
   /// A client device's request over iroh (`remote` its key, hex; `headers` names and values, one after the other):
-  /// answered in its person's object, as `x-one-user` names them, with who asked as the connection proved it.
+  /// answered in its user's object, as `x-one-user` names them, with who asked as the connection proved it.
   /// → `{ status, headers, body }`.
   async asked(remote, method, path, headers, body) {
     this.asking++;
@@ -1179,7 +1179,7 @@ export class Node extends DurableObject {
         h.delete("authorization");
         if (body.length > BODY_MOST) refuse(413, "that's more than a request may carry");
         const request = new Request(`${this.env.ADDRESS}${path.startsWith("/") ? path : `/${path}`}`, { method, headers: h, body: ["GET", "HEAD"].includes(method) ? null : body });
-        return personOf(this.env, user).fetch(request);
+        return userOf(this.env, user).fetch(request);
       })().catch(failure);
       return { status: r.status, headers: [...r.headers].flat(), body: new Uint8Array(await r.arrayBuffer()) };
     } finally {

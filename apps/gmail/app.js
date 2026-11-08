@@ -1,4 +1,4 @@
-// Gmail: the person's own Gmail accounts, as a pure app: Google's API and the Vault, no service. Each account's
+// Gmail: the user's own Gmail accounts, as a pure app: Google's API and the Vault, no service. Each account's
 // refresh token is a secret field of its Google account item, which the node fills in only for Google's token
 // address, so no app or agent ever reads it; each call gets a fresh access token with it. Signing in is the same in
 // every Google app: see google/google.js.
@@ -288,9 +288,9 @@ export default {
   icon: "envelope",
   color: "#ea4335",
   description: "Your Gmail accounts, for you and your agents: search, read, label, draft and send",
-  instructions: "Gmail is the person's Gmail accounts. gmail_search finds messages with Gmail's search syntax " +
+  instructions: "Gmail is the user's Gmail accounts. gmail_search finds messages with Gmail's search syntax " +
     "(q: from:, is:unread, in:inbox, newer_than:2d, ...); gmail_read reads one and gmail_thread a whole conversation; gmail_attachment gets one of a message's files. " +
-    "gmail_label archives (remove INBOX), marks read (remove UNREAD), stars or labels messages. Write with gmail_draft and let the person send it, unless they asked you to send: " +
+    "gmail_label archives (remove INBOX), marks read (remove UNREAD), stars or labels messages. Write with gmail_draft and let the user send it, unless they asked you to send: " +
     "gmail_send and gmail_send_draft send real email to real people. With several accounts, each tool takes account; gmail_accounts lists them.",
   vault,
   schema,
@@ -381,7 +381,7 @@ export default {
     },
     labels: {
       reads: true,
-      description: "The account's labels, Gmail's own (INBOX, UNREAD, STARRED, ...) first, then the person's: each its name, and its id where that differs. gmail_label and gmail_search's labelIds take either.",
+      description: "The account's labels, Gmail's own (INBOX, UNREAD, STARRED, ...) first, then the user's: each its name, and its id where that differs. gmail_label and gmail_search's labelIds take either.",
       input: withAccount({}),
       async run(ctx, { account: a }) {
         const { labels = [] } = await api(ctx, await account(ctx, a), "GET", "labels");
@@ -419,7 +419,7 @@ export default {
     },
     trash: {
       reads: false,
-      description: "Move messages to the trash. They stay there 30 days, where the person can take them out again in Gmail.",
+      description: "Move messages to the trash. They stay there 30 days, where the user can take them out again in Gmail.",
       input: withAccount({ ids: ids("the messages' ids, from gmail_search") }, ["ids"]),
       async run(ctx, { account: a, ids: given }) {
         const email = await account(ctx, a);
@@ -446,7 +446,7 @@ export default {
     },
     draft: {
       reads: false,
-      description: "Save an email as a draft (text, HTML or both, with files if given) for the person to check and send, or replace a draft. Use it rather than gmail_send unless the person asked you to send. Gives the draft's id.",
+      description: "Save an email as a draft (text, HTML or both, with files if given) for the user to check and send, or replace a draft. Use it rather than gmail_send unless the user asked you to send. Gives the draft's id.",
       input: withAccount({ ...writing, id: str("a draft's id, from gmail_drafts, to replace that draft") }),
       async run(ctx, input) {
         const email = await account(ctx, input.account);
@@ -464,7 +464,7 @@ export default {
     send_draft: {
       reads: false,
       confirm: true,
-      description: "Send a draft as it is. This sends real email to real people: only when the person asked to send this one.",
+      description: "Send a draft as it is. This sends real email to real people: only when the user asked to send this one.",
       input: withAccount({ id: str("the draft's id, from gmail_drafts or gmail_draft") }, ["id"]),
       async run(ctx, { account: a, id }) {
         id = need(id, "id: a draft's id, from gmail_drafts");
@@ -486,7 +486,7 @@ export default {
     send: {
       reads: false,
       confirm: true,
-      description: "Send an email (text, HTML or both, with files if given), or a reply. This sends real email to real people: only what the person asked to send; otherwise gmail_draft. Gives the sent message's id.",
+      description: "Send an email (text, HTML or both, with files if given), or a reply. This sends real email to real people: only what the user asked to send; otherwise gmail_draft. Gives the sent message's id.",
       input: withAccount(writing),
       async run(ctx, input) {
         const email = await account(ctx, input.account);

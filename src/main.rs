@@ -79,7 +79,7 @@ fn help(node: &Client) -> String {
 {yours}
 A tool's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
 from stdin. --file <input>=<path> gives a file, --out <path> saves what comes back, --device <name> runs it there,
-and --confirm goes ahead with what {SENDS}, once the person agreed. --json prints what comes back
+and --confirm goes ahead with what {SENDS}, once the user agreed. --json prints what comes back
 as JSON. --trace prints what the call did, and where, after its answer: use it, and {CLI} logs <device>, before ssh.
 
 Exit codes: 0 done, 2 what was typed is wrong, 3 refused (needs --confirm, not allowed, or not signed in), 1 anything
@@ -269,7 +269,7 @@ fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
 }
 
 /// An HTTP client for this machine's node, as one of its own programs; or, where none runs and this computer is a
-/// device of its person, for their nodes, over iroh (`client_device::route`).
+/// device of its user, for their nodes, over iroh (`client_device::route`).
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).middleware(client_device::route).build().into()
 }

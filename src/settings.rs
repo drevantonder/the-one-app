@@ -1,5 +1,5 @@
-//! What a device changes of who can do what, signed by itself as its person's device: Settings' changes (roles, groups,
-//! handles, names, settings, removing a device or a person, the new epochs that go with it), letting devices in or
+//! What a device changes of who can do what, signed by itself as its user's device: Settings' changes (roles, groups,
+//! handles, names, settings, removing a device or a user, the new epochs that go with it), letting devices in or
 //! turning them down, inviting someone new, and app schedules. Every device runs this one copy (`Me`): each client
 //! through its keyring (client/src/settings.rs), and a machine with a node as its own device, which its CLI and MCP
 //! use (src/node/settings.rs). Each is asked as a node's route of the same path (`ROUTES`).
@@ -22,17 +22,17 @@ use crate::database::steps::Welcome;
 use crate::keys::{self, Endpoint, Key, Signs, hex, unhex};
 use crate::protocol::{Coded, code};
 
-/// How long app schedules last, unless their person renews them as they use the app.
+/// How long app schedules last, unless their user renews them as they use the app.
 pub const APP_SCHEDULES_DAYS: u64 = 30;
 const DAY: u64 = 86_400_000;
 /// The invites this device made, by who they're for: their secret, name, role and until when.
 const INVITES: &str = "invites.json";
 
-/// A device signing who can do what as its person's.
+/// A device signing who can do what as its user's.
 pub trait Me: Signs {
     /// What `f` finds in who's who as this device last read it.
     fn who<R>(&self, f: impl FnOnce(&ScopeDb) -> Result<R>) -> Result<R>;
-    /// Its person: `code::NOT_LET_IN` before who's who lists it.
+    /// Its user: `code::NOT_LET_IN` before who's who lists it.
     fn user(&self) -> Result<String>;
     /// Its seal key's public half, which what's sealed to it is sealed to.
     fn seal(&self) -> [u8; 32];
@@ -63,7 +63,7 @@ pub trait Me: Signs {
     fn now(&self) -> u64;
     /// Waits `ms`, on its runtime.
     fn wait(&self, ms: u64) -> impl Future<Output = ()>;
-    /// Takes itself out of its person's devices, as it signs out.
+    /// Takes itself out of its user's devices, as it signs out.
     fn leave(&self) -> impl Future<Output = Result<()>>;
 }
 
@@ -148,7 +148,7 @@ pub struct Asked {
 }
 
 impl Asked {
-    /// A request as auth lists it: `{ key, seal, user, name, person?, proof?, device?, made?, place?, sign_in? }`.
+    /// A request as auth lists it: `{ key, seal, user, name, user?, proof?, device?, made?, place?, sign_in? }`.
     pub fn of(r: &Value) -> Option<Asked> {
         let endpoint = Endpoint { key: keys::unhex(r["key"].as_str()?).ok()?, seal: keys::unhex(r["seal"].as_str()?).ok()? };
         let code = keys::join_code(&endpoint);
@@ -159,7 +159,7 @@ impl Asked {
         &self.endpoint
     }
 
-    /// Its person, by id.
+    /// Its user, by id.
     pub fn user(&self) -> &str {
         &self.user
     }
@@ -219,7 +219,7 @@ mod body {
         pub role: scopes::Role,
     }
 
-    /// A device by its key or name, or a person by their id or name, with all their devices.
+    /// A device by its key or name, or a user by their id or name, with all their devices.
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     pub struct Remove {
@@ -264,7 +264,7 @@ mod body {
         pub role: Option<scopes::Role>,
     }
 
-    /// A group's handle, or with no `group`, this person's.
+    /// A group's handle, or with no `group`, this user's.
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     pub struct Handle {
@@ -383,8 +383,8 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
         }
         Route::Remove => match read(path, raw)? {
             body::Remove { key: Some(key), user: None } => remove(m, &key).await?,
-            body::Remove { key: None, user: Some(user) } => remove_person(m, &user).await?,
-            _ => bail!("Give a device's key or a person, not both."),
+            body::Remove { key: None, user: Some(user) } => remove_user(m, &user).await?,
+            _ => bail!("Give a device's key or a user, not both."),
         },
         Route::Settings => {
             let body: body::Setting = read(path, raw)?;
@@ -484,7 +484,7 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
     })
 }
 
-/// Says which machines open a Vault: `device` added to them or taken off, by its person or its admins. Always a new
+/// Says which machines open a Vault: `device` added to them or taken off, by its user or its admins. Always a new
 /// key pair (`new_vault_key`); what's sealed to the old one is sealed to the new by a machine that opens both, at its
 /// next write there. → `{ said }`.
 async fn vault_grant(m: &impl Me, body: body::VaultGrant) -> Result<Value> {
@@ -492,7 +492,7 @@ async fn vault_grant(m: &impl Me, body: body::VaultGrant) -> Result<Value> {
     let given = body.scope.as_deref().unwrap_or("user");
     let (scope, endpoint, name, current) = m.who(|who| {
         let scope = Scope::parse_for(given, &user).or_else(|_| who.find_group(given).map(Scope::Group))?;
-        ensure!(who.may(&user, "choose-devices", &scopes::object(&scope)), "Only this Vault's person, or its admins, say which machines open it.");
+        ensure!(who.may(&user, "choose-devices", &scopes::object(&scope)), "Only this Vault's user, or its admins, say which machines open it.");
         let endpoint = who.find_node(&body.device)?;
         let current = who.vault(&scope)?.unwrap_or_default();
         Ok((scope, endpoint, who.machine(&endpoint)?.map(|d| d.name).unwrap_or_default(), current))
@@ -530,7 +530,7 @@ pub async fn new_vault_key(m: &impl Me, scope: &Scope, n: u32, to: &[[u8; 32]]) 
 }
 
 /// The step that deletes `app` (`deleted`), restores it (`restored`) or erases it for good (`erased`), as `user`, who
-/// acts for its owner, says it: whoever writes it, from any device or an app's call. `title` is what people call it.
+/// acts for its owner, says it: whoever writes it, from any device or an app's call. `title` is what users call it.
 /// A deleted app stops running and leaves every page, but keeps its data until it's erased, which deletes its keys in
 /// the bucket as each node reads the step (`Node::follow_erased`).
 pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> Result<Content> {
@@ -541,7 +541,7 @@ pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> R
 }
 
 /// The `service` entry that switches a part of a device's oned on or off, the device found by name or key prefix; for
-/// the device's person, or to switch it off, for who may add apps where it ran. A service runs for the app added in
+/// the device's user, or to switch it off, for who may add apps where it ran. A service runs for the app added in
 /// `scope`, which its writer may add apps to.
 pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, scope: Option<&Scope>) -> Result<Content> {
     if let Some(s) = scope.filter(|_| on) {
@@ -568,11 +568,11 @@ pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, sco
             _ => bail!("no one device called {device}"),
         },
     };
-    ensure!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s person switches what it runs");
+    ensure!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s user switches what it runs");
     Ok(content::service(&key, name, on, scope))
 }
 
-/// A group called `name`, with this person its first admin: → `{ group }`, its id.
+/// A group called `name`, with this user its first admin: → `{ group }`, its id.
 async fn group(m: &impl Me, name: &str) -> Result<Value> {
     let name = name.trim();
     ensure!(!name.is_empty(), "Give the group a name.");
@@ -581,7 +581,7 @@ async fn group(m: &impl Me, name: &str) -> Result<Value> {
     Ok(json!({ "group": group }))
 }
 
-/// As each start of a device does: says where its person's own things run (the machines that run everyone's), if they
+/// As each start of a device does: says where its user's own things run (the machines that run everyone's), if they
 /// haven't; names the device it's on in its listing, if it was listed before sign-ins named it (`on_device`); and makes
 /// their own scope's first epoch, if it has none. What's to do is looked at again in what it reads fresh, as another
 /// device of theirs may have done it.
@@ -618,7 +618,7 @@ pub async fn settle_own(m: &impl Me, on_device: Option<&str>) -> Result<()> {
 
 /// Starts epoch `n` of a scope: a random key, its `epoch` step naming its hash written first (which, first in causal
 /// order, makes it), then, once who's who says it did, sealed to the recovery key and to each client device of the
-/// people who open it but `except` (keys being taken out), this device among them unless it's going.
+/// users who open it but `except` (keys being taken out), this device among them unless it's going.
 pub async fn new_epoch(m: &impl Me, scope: &Scope, n: u32, except: &[[u8; 32]]) -> Result<()> {
     let me = Endpoint { key: m.public(), seal: m.seal() };
     let (recovery, to) = m.who(|who| {
@@ -646,7 +646,7 @@ pub async fn new_epoch(m: &impl Me, scope: &Scope, n: u32, except: &[[u8; 32]]) 
     Ok(())
 }
 
-/// A new epoch of each scope this person may start one of, sealed to none of `except`: → those it left to one of their
+/// A new epoch of each scope this user may start one of, sealed to none of `except`: → those it left to one of their
 /// admins, by name.
 async fn renew(m: &impl Me, scopes: &[Scope], except: &[[u8; 32]]) -> Result<Vec<String>> {
     let user = m.user()?;
@@ -705,8 +705,8 @@ async fn seen(m: &impl Me) -> Result<Value> {
     Ok(if status == 200 { out["seen"].clone() } else { json!({}) })
 }
 
-/// Takes one of this person's devices out (by its key or name), or for an admin, anyone's: off the network first,
-/// then unlisted, it and its parts; then each scope its person opens that this person may move on gets a new epoch
+/// Takes one of this user's devices out (by its key or name), or for an admin, anyone's: off the network first,
+/// then unlisted, it and its parts; then each scope its user opens that this user may move on gets a new epoch
 /// it doesn't have. Itself, it leaves (`Me::leave`).
 async fn remove(m: &impl Me, device: &str) -> Result<Value> {
     let key = m.who(|who| who.find_machine(device))?;
@@ -716,7 +716,7 @@ async fn remove(m: &impl Me, device: &str) -> Result<Value> {
     let user = m.user()?;
     let (name, keys, scopes) = m.who(|who| {
         let it = who.machine(&key)?.filter(|d| !d.removed).ok_or_else(|| anyhow!("That device isn’t listed."))?;
-        ensure!(who.may(&user, "remove", &scopes::device(&key)), "Only its person or an admin takes a device out.");
+        ensure!(who.may(&user, "remove", &scopes::device(&key)), "Only its user or an admin takes a device out.");
         let keys: Vec<[u8; 32]> = std::iter::once(key).chain(who.machines()?.into_iter().filter(|d| d.device == Some(key) && d.key != key && !d.removed).map(|d| d.key)).collect();
         let scopes = who.scopes()?.into_iter().filter(|s| who.may(&it.user, "use", &scopes::object(s))).collect::<Vec<_>>();
         Ok((it.name, keys, scopes))
@@ -729,13 +729,13 @@ async fn remove(m: &impl Me, device: &str) -> Result<Value> {
     Ok(json!({ "removed": name, "not_renewed": left }))
 }
 
-/// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they
+/// Takes a user out, for an admin: each of their devices off the network first, then them, then each scope they
 /// could open but their own gets a new epoch they don't have.
-async fn remove_person(m: &impl Me, person: &str) -> Result<Value> {
+async fn remove_user(m: &impl Me, named: &str) -> Result<Value> {
     let user = m.user()?;
     let me = m.public();
     let (gone, name, keys, scopes) = m.who(|who| {
-        let gone = who.find_user(person)?;
+        let gone = who.find_user(named)?;
         ensure!(gone != user, "You can’t remove yourself. Another admin can.");
         ensure!(who.may(&user, "remove", scopes::NETWORK), "Only an admin takes someone out.");
         let name = who.user(&gone)?.map(|u| u.name).unwrap_or_default();
@@ -783,13 +783,13 @@ async fn keep_invites(m: &impl Me, invites: &BTreeMap<String, Invited>) -> Resul
 }
 
 /// An invite link for someone called `name`, as `role`, made by this admin's device: its secret stays here, to check
-/// the newcomer's device by when it asks to be let in; auth is told only its hash. A new person gets a new id; `user`
-/// invites someone who's in the network already, as who they are, and `email` is the Google account people sign up
+/// the newcomer's device by when it asks to be let in; auth is told only its hash. A new user gets a new id; `user`
+/// invites someone who's in the network already, as who they are, and `email` is the Google account users sign up
 /// with where they sign in with Google. → `{ link, until }`.
 async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: Option<&str>) -> Result<Value> {
     let name = name.trim();
     ensure!(!name.is_empty(), "Give their name.");
-    ensure!(crate::config::SIGN_IN != crate::config::SignIn::Google || email.is_some(), "People here sign in with Google: give the Google account they sign up with.");
+    ensure!(crate::config::SIGN_IN != crate::config::SignIn::Google || email.is_some(), "Users here sign in with Google: give the Google account they sign up with.");
     let secret = B64U.encode(&rand::random::<[u8; 32]>());
     let new = user.is_none();
     let user = user.map(str::to_string).unwrap_or_else(scopes::new_id);
@@ -807,7 +807,7 @@ async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: 
     Ok(json!({ "link": format!("{}/invite#{secret}", m.address().unwrap_or_default()), "until": until }))
 }
 
-/// Devices waiting that this device may let in: its person's own, and someone new from an invite made here, whose
+/// Devices waiting that this device may let in: its user's own, and someone new from an invite made here, whose
 /// proof is that invite's; but those taken out or turned down. Each with the invite it came from, if it did.
 async fn waiting(m: &impl Me) -> Result<Vec<(Asked, Option<Invited>)>> {
     let user = m.user()?;
@@ -864,7 +864,7 @@ pub async fn mark_approved(m: &impl Me, key: &[u8; 32]) -> Result<()> {
 }
 
 /// Devices waiting that this device may let in, as Settings › Devices shows them, each with its code and what
-/// approving it records as what they sign in with. One of its person's own whose sign-in shows it's theirs (one of
+/// approving it records as what they sign in with. One of its user's own whose sign-in shows it's theirs (one of
 /// the accounts their devices record) is let in by it, not shown.
 pub async fn requests(m: &impl Me) -> Result<Value> {
     let user = m.user()?;
@@ -877,7 +877,7 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
                 Err(err) => tracing::warn!("letting {} in by its sign-in: {err:#}", r.name),
             }
         }
-        let mut shown = json!({ "device": r.name, "person": invite.as_ref().map_or(r.said["person"].clone(), |i| json!(i.name)), "code": r.code, "made": r.said["made"], "place": r.said["place"] });
+        let mut shown = json!({ "device": r.name, "user": invite.as_ref().map_or(r.said["user_name"].clone(), |i| json!(i.name)), "code": r.code, "made": r.said["made"], "place": r.said["place"] });
         shown[if invite.is_some() { "new" } else { "yours" }] = json!(true);
         if let Some(account) = signed_in_with(m, &r, None).await {
             shown["sign_in"] = json!(account);
@@ -887,7 +887,7 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
     Ok(json!(out))
 }
 
-/// What `r`'s sign-in shows it signed in with, checked here (`sign_in_proof`): against `accounts`, its person's as
+/// What `r`'s sign-in shows it signed in with, checked here (`sign_in_proof`): against `accounts`, its user's as
 /// their devices record them, for one let in by it, or with none, for one approved by its code. None if it shows
 /// nothing that checks out.
 async fn signed_in_with(m: &impl Me, r: &Asked, accounts: Option<&[crate::sign_in_proof::Account]>) -> Option<crate::sign_in_proof::Account> {
@@ -909,14 +909,14 @@ async fn signed_in_with(m: &impl Me, r: &Asked, accounts: Option<&[crate::sign_i
 async fn approve_code(m: &impl Me, code: &str, confirm: bool) -> Result<Value> {
     let (r, invite) = waiting_with(m, code).await?;
     if !confirm {
-        let person = invite.as_ref().map_or(r.said["person"].clone(), |i| json!(i.name));
-        return Ok(json!({ "device": r.name, "person": person, "new": invite.is_some() }));
+        let user = invite.as_ref().map_or(r.said["user_name"].clone(), |i| json!(i.name));
+        return Ok(json!({ "device": r.name, "user": user, "new": invite.is_some() }));
     }
     approve(m, &r, invite.as_ref()).await
 }
 
 /// Lets in a device that asked: lists it (and for a newcomer, them), with what it signed in with, the device it's
-/// on and where it asked from; seals it each epoch this device opens of the scopes its person uses; takes their
+/// on and where it asked from; seals it each epoch this device opens of the scopes its user uses; takes their
 /// sign-in before on the same device out; lets it onto the network; and marks its request approved with where this
 /// device read who's who to, which the device waiting starts from. → `{ device, sealed, not_sealed }`.
 pub async fn approve(m: &impl Me, r: &Asked, invite: Option<&Invited>) -> Result<Value> {
@@ -982,7 +982,7 @@ pub async fn approve(m: &impl Me, r: &Asked, invite: Option<&Invited>) -> Result
     }
     if m.address().is_some() {
         if invite.is_some_and(|i| i.role == Role::Admin)
-            && let Err(err) = ask_auth(m, "POST", "/api/auth/people/admin", json!({ "user": r.user, "admin": true })).await
+            && let Err(err) = ask_auth(m, "POST", "/api/auth/users/admin", json!({ "user": r.user, "admin": true })).await
         {
             tracing::warn!("telling auth {} is an admin: {err:#}", r.name);
         }
@@ -1008,7 +1008,7 @@ async fn seal_held(m: &impl Me, scope: &Scope, to: &Endpoint) -> Result<()> {
     Ok(())
 }
 
-/// Turns down the device waiting with `code`: one of its person's own by a step, so none of their devices lets it
+/// Turns down the device waiting with `code`: one of its user's own by a step, so none of their devices lets it
 /// in after; either way its request is forgotten at auth. → which it was.
 async fn refuse(m: &impl Me, code: &str) -> Result<Value> {
     let (r, invite) = waiting_with(m, code).await?;
@@ -1052,7 +1052,7 @@ async fn app_schedules_asked(m: &impl Me, body: body::AppSchedules) -> Result<Va
     })
 }
 
-/// Runs `app`'s schedules in `scope` on one of its person's devices (`endpoint`) for `days`, 30 at most (0 stops
+/// Runs `app`'s schedules in `scope` on one of its user's devices (`endpoint`) for `days`, 30 at most (0 stops
 /// them): the app's key in each epoch of the scope sealed to it first, then the app schedules naming each one's
 /// hash. Stopping them starts a new epoch of the scope, which the device isn't sealed, so the keys it held open
 /// nothing written after. → until when.
@@ -1078,7 +1078,7 @@ async fn set_app_schedules(m: &impl Me, endpoint: &[u8; 32], app: &str, scope: &
     Ok(until)
 }
 
-/// Renews this person's app schedules of `app` as they use it: once a day at most, and at once when the scope has
+/// Renews this user's app schedules of `app` as they use it: once a day at most, and at once when the scope has
 /// an epoch their keys don't reach; one of theirs that ran out is stopped, as Stop does. Only those the network's
 /// steps hold, never those a node lists: a hacked one could list itself.
 pub async fn renew_app_schedules(m: &impl Me, app: &str) {
@@ -1106,7 +1106,7 @@ pub async fn renew_app_schedules(m: &impl Me, app: &str) {
     }
 }
 
-/// Whose a scope is, as a person reads it: everyone's, a group's or someone's, by name.
+/// Whose a scope is, as a user reads it: everyone's, a group's or someone's, by name.
 fn whose(who: &ScopeDb, scope: &Scope) -> Result<String> {
     Ok(match scope {
         Scope::Global => "everyone".into(),

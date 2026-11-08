@@ -1,7 +1,7 @@
 //! The node hooks this machine's agent harnesses up to itself, on every device: each harness installed here gets this
 //! network's MCP server and the node's prompt hook, git sends Repos the node's token, and the built-in skills
 //! (`src/skills.rs`) go in each skills folder. A file is written only if it's missing or unchanged since the node last
-//! wrote it, so an edit made on disk is never overwritten. The person's own AGENTS.md and skills are an app's, whose
+//! wrote it, so an edit made on disk is never overwritten. The user's own AGENTS.md and skills are an app's, whose
 //! service writes them beside these, and marks them as its own.
 
 use std::collections::{BTreeMap, HashMap};
@@ -30,7 +30,7 @@ fn built_in(name: &str) -> bool {
 const EVERY: Duration = Duration::from_secs(60);
 
 /// Sets up every harness installed on this device, as the node serving it at `addr` from `home` does as it starts and
-/// every minute: the MCP server, the prompt hook, git's token for Repos and the built-in skills of the person's apps.
+/// every minute: the MCP server, the prompt hook, git's token for Repos and the built-in skills of the user's apps.
 pub async fn keep(node: crate::node::Node, home: PathBuf, addr: String) {
     loop {
         if node.has_network() && let Ok(me) = crate::node::Caller::local(&node) {
@@ -190,7 +190,7 @@ fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
 }
 
 /// Git reaches Repos at the node (`git clone http://localhost:<port>/repos/<owner>/<repo>.git`) as one of this machine's own
-/// programs: the person's git config includes one of the node's, which only they can read, sending its token there.
+/// programs: the user's git config includes one of the node's, which only they can read, sending its token there.
 fn git(node_home: &Path, addr: &str) {
     let Some(token) = crate::api::local_token(node_home) else { return };
     let port = crate::api::port_of(addr);

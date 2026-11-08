@@ -29,7 +29,7 @@ async fn pair(State(node): State<Node>, me: Me, Body(body): Body<Pair>) -> Reply
     Ok(Json(json!({ "code": code, "user": user })))
 }
 
-/// Renames this device, for this machine's own programs: another is renamed as any device's person does
+/// Renames this device, for this machine's own programs: another is renamed as any device's user does
 /// (`settings::answer`).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

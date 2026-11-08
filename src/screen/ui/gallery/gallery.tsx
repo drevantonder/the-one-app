@@ -75,7 +75,7 @@ const items = [
   { id: "wifi", title: "Office Wi-Fi", sub: "network: Office-5G", app: { name: "wifi", icon: "wifi-high", color: "#8e8e93" } },
 ]
 
-const people = [
+const users = [
   { account: "ana@example.org", ok: true },
   { account: "work@example.org", ok: true },
   { account: "old@example.org", ok: false },
@@ -150,7 +150,7 @@ function TextAndMarkdown() {
 
 /// The accounts of an app that keeps them: rows with Sign Out, what's wrong on the row, Add Account below.
 function Accounts() {
-  const [accounts, setAccounts] = useState(people)
+  const [accounts, setAccounts] = useState(users)
   const [profile, setProfile] = useState("personal")
   return (
     <div className="flex flex-col gap-6">

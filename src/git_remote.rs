@@ -2,7 +2,7 @@
 //! (`url.<CLI>::<address>/.insteadOf`) to reach it as `<CLI>::<address>/<app>/…`, so it runs this program as
 //! `git-remote-<CLI>`, its remote helper. That runs git's own HTTP transport (`git remote-http`) for the address, with
 //! this program as its proxy while it runs: what git asks goes where every command's request goes, to this machine's
-//! node, or from a computer that's only a device, over iroh to its person's nodes (`client_device::instead`). Git's own
+//! node, or from a computer that's only a device, over iroh to its user's nodes (`client_device::instead`). Git's own
 //! transport speaks git; the proxy only carries it, and answers only the git it started (a secret only that git has).
 
 use std::io::Read;
@@ -63,7 +63,7 @@ fn here(asked: &str) -> Result<String> {
     Ok(crate::sign_in::kept().map(|k| k.address.trim_end_matches('/').to_string()).unwrap_or_default())
 }
 
-/// Carries what git asks of an app's address on this machine's node, or its person's nodes, until this program exits.
+/// Carries what git asks of an app's address on this machine's node, or its user's nodes, until this program exits.
 fn proxy(listener: std::net::TcpListener, auth: String) {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     runtime.block_on(async move {

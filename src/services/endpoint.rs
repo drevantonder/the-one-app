@@ -1,11 +1,11 @@
 //! A service endpoint: a device's abilities (a service) offered over iroh, as a part of its device's oned, a process of
 //! its own (`oned <name>`). It's an endpoint of its own key, kept in its folder, and gets in when its device's oned lists
-//! it as its person's, a part of that device (`Node::list_part`), which tells the relay to let it in. It holds no keys
+//! it as its user's, a part of that device (`Node::list_part`), which tells the relay to let it in. It holds no keys
 //! and reads no bucket: the nodes that call it bring it `global`'s scope database's steps, from the first freeze naming
 //! the network's root (which oned gives it, so nothing on the way can make it another network's), from which it works out who's who and
-//! checks each caller by itself: a compute endpoint of the network that runs the calls of a person it serves. The program offering it, its
+//! checks each caller by itself: a compute endpoint of the network that runs the calls of a user it serves. The program offering it, its
 //! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
-//! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
+//! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its user's runs (`/v1/call` on the loopback).
 
 use crate::config::YOURS;
 use std::collections::HashMap;
@@ -46,7 +46,7 @@ const STREAMS: u32 = 32;
 const CONNECT: Duration = Duration::from_secs(10);
 
 /// The network a service is in, as its device's oned gives it: its address, where its relay and auth are, its root,
-/// which its first freeze names, and the person whose service it is.
+/// which its first freeze names, and the user whose service it is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Network {
     pub address: String,
@@ -60,7 +60,7 @@ impl Network {
         dir.join("network.json")
     }
 
-    /// Gives it to the service kept in `dir`, the first time: a service is another network's or person's only once
+    /// Gives it to the service kept in `dir`, the first time: a service is another network's or user's only once
     /// its folder goes.
     pub fn give(&self, dir: &Path) -> Result<()> {
         std::fs::create_dir_all(dir)?;
@@ -182,13 +182,13 @@ impl Service {
         self.0.registry.token()
     }
 
-    /// Whose service it is, once a person's device approved it.
+    /// Whose service it is, once a user's device approved it.
     pub fn owner(&self) -> Result<Option<String>> {
         self.owner_in(&self.0.known.lock().unwrap())
     }
 
     fn owner_in(&self, m: &ScopeDb) -> Result<Option<String>> {
-        // Only a listing as the person whose link it was given counts: nobody else can make it theirs.
+        // Only a listing as the user whose link it was given counts: nobody else can make it theirs.
         Ok(m.service(&self.key())?.filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.network.user).map(|s| s.user))
     }
 
@@ -200,7 +200,7 @@ impl Service {
         let router = self.loopback();
         // A program in a sandbox reaches it through a socket in its sandbox's folder.
         #[cfg(target_os = "linux")]
-        if matches!(crate::services::sandbox::how(self.0.declared.as_ref(), ""), crate::services::sandbox::How::Unit | crate::services::sandbox::How::Person) {
+        if matches!(crate::services::sandbox::how(self.0.declared.as_ref(), ""), crate::services::sandbox::How::Unit | crate::services::sandbox::How::User) {
             use std::os::unix::fs::PermissionsExt;
             let dir = crate::services::sandbox::dir(&self.0.name);
             std::fs::create_dir_all(&dir)?;
@@ -214,7 +214,7 @@ impl Service {
                     tracing::warn!("the service's socket stopped: {err:#}");
                 }
             });
-            // What a unit's program says, which systemd would keep where its person can't read it.
+            // What a unit's program says, which systemd would keep where its user can't read it.
             let path = dir.join(crate::services::sandbox::LOG);
             let _ = std::fs::remove_file(&path);
             let log = tokio::net::UnixListener::bind(&path)?;
@@ -284,7 +284,7 @@ impl Service {
 
     /// Asks its device's oned to list it, once the program offering it has said what it is (so whether it serves
     /// everyone): `ask` in its folder, its endpoint and that, which oned reads and lists, until it's listed as its
-    /// person's and as part of a device (one listed before parts named their device is listed again).
+    /// user's and as part of a device (one listed before parts named their device is listed again).
     async fn ask_to_be_listed(self) {
         let ask = self.0.dir.join("ask");
         loop {
@@ -428,7 +428,7 @@ impl Service {
             (Some(Ok(key)), Some(user)) => (key, user.to_string()),
             _ => return Ok(json!({ "error": "who's asking?" })),
         };
-        // A sign-in a node passed on counts only once this service has checked it's that person's itself.
+        // A sign-in a node passed on counts only once this service has checked it's that user's itself.
         let signed_in = match me["token"].as_str() {
             Some(token) => self.signed_in(token, &user).await,
             None => false,
@@ -439,14 +439,14 @@ impl Service {
             if let Err(err) = may_call(m, &self.key(), &remote, &key, &user, signed_in) {
                 return Ok(json!({ "error": format!("{err:#}") }));
             }
-            let person = m.user(&user)?;
+            let member = m.user(&user)?;
             crate::state::Me {
                 key: hex(&key),
                 user: user.clone(),
                 name: m.machine(&key)?.map(|d| d.name).unwrap_or_default(),
-                role: person.as_ref().map(|u| u.role),
-                user_name: person.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
-                handle: person.map(|u| u.handle).unwrap_or_default(),
+                role: member.as_ref().map(|u| u.role),
+                user_name: member.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
+                handle: member.map(|u| u.handle).unwrap_or_default(),
                 agent: me["agent"].as_str().map(str::to_string),
             }
         };
@@ -466,8 +466,8 @@ impl Service {
         matches!(claims, Ok(Ok(c)) if c.sub == user)
     }
 
-    /// Asks a node of its person's own to run a call, as them: the first that answers. A service asks only for its own
-    /// app, in its person's own scope (`limited`), which their node runs with its own keys until grants land.
+    /// Asks a node of its user's own to run a call, as them: the first that answers. A service asks only for its own
+    /// app, in its user's own scope (`limited`), which their node runs with its own keys until grants land.
     pub async fn ask_node(&self, call: Value) -> Result<Value> {
         let owner = self.owner()?.context("this service isn't approved yet")?;
         let mut call = limited(&self.0.name, &call)?;
@@ -509,7 +509,7 @@ impl Service {
     }
 
     /// The loopback the program offering it registers at, with the local token in its folder: the services' API, its
-    /// machine as `/v1/state` says, and `/v1/call`, which a node of its person's runs.
+    /// machine as `/v1/state` says, and `/v1/call`, which a node of its user's runs.
     fn loopback(&self) -> Router {
         Router::new()
             .route("/v1/state", get(state))
@@ -552,19 +552,19 @@ impl Service {
 }
 
 /// Whether a node, `remote`, may ask this service (`me`) for a call by `user` from their device `key`: this service
-/// serves them (its own person, or everyone, as its listing says), and the node is one of their own, calling for its
-/// own person; or, for a service that serves everyone, a node that runs their calls bringing their sign-in, which this
+/// serves them (its own user, or everyone, as its listing says), and the node is one of their own, calling for its
+/// own user; or, for a service that serves everyone, a node that runs their calls bringing their sign-in, which this
 /// service checked (`signed_in`). A node of someone else's, an admin's too, never calls as them otherwise.
 pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str, signed_in: bool) -> Result<()> {
     let service = m.service(me)?.with_context(|| format!("this service isn't one of {YOURS}'s yet"))?;
     let node = m.compute(remote)?.with_context(|| format!("only {YOURS}'s devices are answered"))?;
-    ensure!(m.may(user, "use", &scopes::service(me)), "{} serves only its own person", service.service.as_deref().unwrap_or("this service"));
+    ensure!(m.may(user, "use", &scopes::service(me)), "{} serves only its own user", service.service.as_deref().unwrap_or("this service"));
     let own = node.user == user && (*key == *remote || m.client(key)?.is_some_and(|c| c.user == user));
-    ensure!(own || (service.shared && signed_in && m.serves(remote, user)?), "{} may not call as that person", short(remote));
+    ensure!(own || (service.shared && signed_in && m.serves(remote, user)?), "{} may not call as that user", short(remote));
     Ok(())
 }
 
-/// What a service may ask its person's node to run: only its own app (`name`), in its person's own scope, calling no
+/// What a service may ask its user's node to run: only its own app (`name`), in its user's own scope, calling no
 /// other app, and naming a device only to reach itself there (Agent Devices listing every device's); until grants
 /// land, that app's database there is all it reaches. → the call.
 pub fn limited(name: &str, call: &Value) -> Result<Value> {
@@ -575,7 +575,7 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
         Value::Array(s) => s.iter().all(|s| s == "user"),
         _ => false,
     };
-    ensure!(scopes_ok, "a service's calls reach only its person's own scope");
+    ensure!(scopes_ok, "a service's calls reach only its user's own scope");
     let mut asked = json!({ "app": name, "service": call["service"], "input": call["input"], "scopes": ["user"] });
     for field in ["tool", "function", "device"] {
         if call[field].is_string() {
@@ -826,7 +826,7 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
             crate::services::sandbox::systemctl(&["start", &unit])?;
             return Ok(Running::Unit(unit));
         }
-        How::Person => {
+        How::User => {
             let launch = Launch { name: name.into(), own_network: !declared.any_host(), ports: declared.local_ports(), data: Some(data.to_path_buf()) };
             let dir = crate::services::sandbox::prepare(name, program, &launcher, service.token(), &launch)?;
             crate::oned::command(&[&format!("--sandboxed={}", dir.display())])?
@@ -841,7 +841,7 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
                 command.env(var, &proxy);
             }
             command.env("NO_PROXY", "localhost,127.0.0.1").env("no_proxy", "localhost,127.0.0.1");
-            if !declared.person {
+            if !declared.user {
                 let tmp = data.join("tmp");
                 std::fs::create_dir_all(&tmp)?;
                 command.env("TMPDIR", tmp);

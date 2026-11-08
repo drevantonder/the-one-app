@@ -21,7 +21,7 @@ export const refusal = (status, why, headers = {}) => json(typeof why === "strin
 
 export const CORS = { "access-control-allow-origin": "*" };
 
-/// Where a Durable Object is made: near its people (`LOCATION`, a location hint), not wherever its first request came from.
+/// Where a Durable Object is made: near its users (`LOCATION`, a location hint), not wherever its first request came from.
 export const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 
 /// A request's body as text, or null if it's more than `most` bytes.

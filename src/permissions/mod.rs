@@ -5,17 +5,17 @@
 //!   (`group:0123456789abcdef`); `<type>:*` is every object of that type, for rules.
 //! - **Roles.** A role is a name and a set of its type's permissions (`roles`). `builtin` marks the ones the release
 //!   ships; a network adds its own. A role of the release's may also give others of its type that its holders don't
-//!   hold (`gives`): the network's admins add people to every group without opening any.
+//!   hold (`gives`): the network's admins add users to every group without opening any.
 //! - **Relations.** A row of `relations` says its subject holds a role (its `relation`) on its object, until a time
-//!   (milliseconds; NULL for good). A subject is a principal (`person:<id>`, `device:<key in hex>`), everyone who
+//!   (milliseconds; NULL for good). A subject is a principal (`user:<id>`, `device:<key in hex>`), everyone who
 //!   holds a role on an object (`group:<id>#member`), or a rule: `#<role>`, everyone who holds that role on the row's
 //!   own object (`('#admin', 'member', 'group:*')`: a group's admins are its members), or `@`, each object of the
-//!   type itself (`('@', 'owner', 'person:*')`: everyone owns their own scope). A role held on `<type>:*` is held on
+//!   type itself (`('@', 'owner', 'user:*')`: everyone owns their own scope). A role held on `<type>:*` is held on
 //!   each object of that type, for usersets and rules too. A role reached through others lasts only as long as each.
 //! - **Rules are the release's**: a row whose subject is `#…` or `@`, or that names `*`, is written by `DEFAULTS` and
 //!   by nothing else, and nobody gives or takes one.
-//! - **Principals are people in the network, and their devices.** A person holds nothing while they hold no role on
-//!   the network, so removing them is taking that; a device holds nothing unless a person in the network, or the
+//! - **Principals are users in the network, and their devices.** A user holds nothing while they hold no role on
+//!   the network, so removing them is taking that; a device holds nothing unless a user in the network, or the
 //!   network (`network:global#…`), holds a role on it by a row of its own, so removing it is taking its owner's row.
 //!
 //! Unknown means no: a type, role or permission this release doesn't know grants nothing, nor anything reached
@@ -24,7 +24,7 @@
 //! The core's types, their default roles and the rules between them are `DEFAULTS`, rows like any others. Apps add
 //! their own types (`repo`) the same way. Who holds what through them is worked out once the rows are written
 //! (`close`), so each check is a lookup. It works out holdings only for principals some row names as its subject,
-//! which is enough while the release's `@` rules are only `person:*`'s: an `@` rule of another type needs it to work
+//! which is enough while the release's `@` rules are only `user:*`'s: an `@` rule of another type needs it to work
 //! them out for that type's objects too. Four checks read them:
 //! - `may`: whether a principal holds a permission on an object, now.
 //! - `may_give`: no escalation. You give a role only where you may `invite`, only one you hold there yourself (or
@@ -75,7 +75,7 @@ const FOREVER: i64 = i64::MAX;
 /// The core's types and roles, and the rules between them: run on a database `SCHEMA` made, after it. Each release
 /// writes its own; a network's roles and rows are left as they are.
 pub const DEFAULTS: &str = r#"
--- Verbs, each for what a person does:
+-- Verbs, each for what a user does:
 --   use: open its data and its apps
 --   invite: give its roles to others (only those you hold, or a role of yours gives)
 --   remove: take its roles from others, and start its next key
@@ -83,7 +83,7 @@ pub const DEFAULTS: &str = r#"
 --   rename: change its name and handle
 --   add-apps: make, add and remove its apps, switch their schedules, and ask for Vault items for them
 --   choose-devices: choose which devices keep its apps running, run its calls and open its Vault
---   run: run its calls (a machine whose person holds it, or a device that does)
+--   run: run its calls (a machine whose user holds it, or a device that does)
 --   make-groups, change-settings, change-roles: what they say, in the network
 --   add-devices: list their phones, computers and services; add-machines: list machines that run things for them
 --   switch: turn a device's services on and off
@@ -92,7 +92,7 @@ pub const DEFAULTS: &str = r#"
 -- A device's and an app's roles come only with making them (may_make): nobody gives one.
 insert or replace into types (name, permissions) values
     ('network', '["use","invite","remove","add-apps","choose-devices","run","make-groups","change-settings","change-roles"]'),
-    ('person', '["use","remove","rename","add-apps","choose-devices","run","add-devices","add-machines"]'),
+    ('user', '["use","remove","rename","add-apps","choose-devices","run","add-devices","add-machines"]'),
     ('group', '["use","invite","remove","leave","rename","add-apps","choose-devices","run"]'),
     ('device', '["rename","remove","switch"]'),
     ('service', '["use","invite","remove","leave"]'),
@@ -104,10 +104,10 @@ insert or replace into roles (type, name, permissions, builtin) values
     ('network', 'admin', '["use","invite","remove","add-apps","choose-devices","run","make-groups","change-settings","change-roles"]', 1),
     ('network', 'member', '["use","make-groups"]', 1),
     ('network', 'runner', '["run"]', 1),
-    -- a person's own scope is theirs; the network's admins only rename them and add machines for them
-    ('person', 'owner', '["use","remove","rename","add-apps","choose-devices","run","add-devices","add-machines"]', 1),
-    ('person', 'admin', '["rename","add-machines"]', 1),
-    ('person', 'runner', '["run"]', 1),
+    -- a user's own scope is theirs; the network's admins only rename them and add machines for them
+    ('user', 'owner', '["use","remove","rename","add-apps","choose-devices","run","add-devices","add-machines"]', 1),
+    ('user', 'admin', '["rename","add-machines"]', 1),
+    ('user', 'runner', '["run"]', 1),
     ('group', 'admin', '["use","invite","remove","leave","rename","add-apps","choose-devices","run"]', 1),
     ('group', 'member', '["use","leave"]', 1),
     ('group', 'runner', '["run"]', 1),
@@ -118,20 +118,20 @@ insert or replace into roles (type, name, permissions, builtin) values
     ('vault', 'owner', '["use","change","invite","remove"]', 1),
     ('vault', 'user', '["use","leave"]', 1),
     ('app', 'owner', '["deploy","delete"]', 1);
--- the network's admins, who manage every group and add people to it, or make someone its admin
+-- the network's admins, who manage every group and add users to it, or make someone its admin
 -- (so a group whose admins have all gone gets a new one), but open none
 insert or replace into roles (type, name, permissions, gives, builtin) values
     ('group', 'manager', '["invite","remove","rename","run"]', '["member","admin"]', 1);
 
 delete from relations where substr(subject, 1, 1) in ('#', '@') or instr(subject, '*') > 0 or instr(object, '*') > 0;
 insert into relations (subject, relation, object, until) values
-    ('@', 'owner', 'person:*', null),
+    ('@', 'owner', 'user:*', null),
     ('#admin', 'member', 'network:*', null),
     ('#admin', 'member', 'group:*', null),
     ('#owner', 'user', 'service:*', null),
     ('#owner', 'user', 'vault:*', null),
     ('network:global#admin', 'manager', 'group:*', null),
-    ('network:global#admin', 'admin', 'person:*', null),
+    ('network:global#admin', 'admin', 'user:*', null),
     ('network:global#admin', 'admin', 'device:*', null);
 "#;
 
@@ -159,7 +159,7 @@ fn ms(t: u64) -> i64 {
 
 /// Every role each principal holds on which object, through usersets and rules, at any time: `held(principal, object,
 /// role, until)`, only roles of known types, `until` the soonest of the rows it came through. A principal is anyone a
-/// row names as itself (`person:…`, `device:…`), or as the holders of a role on it; or only `?1`, if it's given. A
+/// row names as itself (`user:…`, `device:…`), or as the holders of a role on it; or only `?1`, if it's given. A
 /// role reached through others lasts only as long as each, so one is held at a time only by a way whose soonest until
 /// is after it.
 const HELD: &str = "
@@ -204,7 +204,7 @@ held(principal, object, role, until) as (
 /// Works out who holds what, once, for every check to look up: each principal's roles on each object with the latest
 /// they last to (`held`), until when each counts (`counting`), and so what each may do to each object until when
 /// (`allowed`), in tables of the connection's own (`temp`, so no state hash or changeset sees them). Run it once the
-/// rows are written, and again whenever they change: until it's run, every check fails. `only` one person, for asking
+/// rows are written, and again whenever they change: until it's run, every check fails. `only` one user, for asking
 /// of rows added for a moment (an app's own), leaves everyone else out. Kept in memory, as no device need have a place
 /// for temporary files.
 pub fn close(conn: &Connection, only: Option<&str>) -> Result<()> {
@@ -242,10 +242,10 @@ pub fn close(conn: &Connection, only: Option<&str>) -> Result<()> {
         [only],
     )?;
     conn.execute_batch(&format!(
-        "-- a person counts while they hold a role on the network
+        "-- a user counts while they hold a role on the network
         insert into temp.counting select principal, max(until) from temp.held
-        where substr(principal, 1, 7) = 'person:' and object in ('{NETWORK}', 'network:*') group by principal;
-        -- a device, while the network's holders of a role, or a person who counts, hold one on it by a row of its own
+        where substr(principal, 1, 5) = 'user:' and object in ('{NETWORK}', 'network:*') group by principal;
+        -- a device, while the network's holders of a role, or a user who counts, hold one on it by a row of its own
         insert into temp.counting
         select r.object, max(min(coalesce(r.until, {FOREVER}), iif(substr(r.subject, 1, {n}) = '{NETWORK}#', {FOREVER}, c.until)))
         from relations r join roles ro on ro.type = 'device' and ro.name = r.relation join types t on t.name = ro.type
@@ -288,14 +288,14 @@ fn holds(conn: &Connection, who: &str, object: &str, now: u64) -> Result<Vec<Hel
     .collect()
 }
 
-/// Whether `principal` counts now: a person who holds a role on the network, or a device that such a person, or the
+/// Whether `principal` counts now: a user who holds a role on the network, or a device that such a user, or the
 /// network, holds a role on by a row of its own.
 fn counts(conn: &Connection, principal: &str, now: u64) -> Result<bool> {
     let mut q = conn.prepare_cached("select exists (select 1 from temp.counting where principal = ?1 and until > ?2)")?;
     Ok(q.query_row(params![principal, ms(now)], |r| r.get(0))?)
 }
 
-/// Whether `principal` (`person:…`, `device:…`) may do `permission` to `object` at `now` (ms): it counts, and holds a
+/// Whether `principal` (`user:…`, `device:…`) may do `permission` to `object` at `now` (ms): it counts, and holds a
 /// role on the object, or on every object of its type, that has the permission, and the type has it too.
 pub fn may(conn: &Connection, principal: &str, permission: &str, object: &str, now: u64) -> Result<bool> {
     let Some(ty) = type_of(object) else {
@@ -334,11 +334,11 @@ fn role(conn: &Connection, ty: &str, name: &str) -> Result<Option<(Vec<String>, 
     })
 }
 
-/// Whether `subject` is the network's last lasting admin: no other person is one for good.
+/// Whether `subject` is the network's last lasting admin: no other user is one for good.
 pub fn last_admin(conn: &Connection, subject: &str) -> Result<bool> {
     Ok(conn.query_row(
         "select exists (select 1 from relations where subject = ?1 and relation = ?2 and object = ?3 and until is null)
-            and not exists (select 1 from relations where subject != ?1 and substr(subject, 1, 7) = 'person:'
+            and not exists (select 1 from relations where subject != ?1 and substr(subject, 1, 5) = 'user:'
                 and relation = ?2 and object = ?3 and until is null)",
         params![subject, ADMIN, NETWORK],
         |r| r.get(0),
@@ -377,7 +377,7 @@ pub fn may_take(conn: &Connection, taker: &str, subject: &str, relation: &str, o
 
 /// Whether `maker` may make `object`, new (no row of `relations` names it; whether it was once is the tables' to say),
 /// with its first row `(subject, relation, object)`, for good: they may `verb` on `container` (`add-devices` or
-/// `add-machines` on a person for a device, `add-apps` on a scope for an app or Vault item, `switch` on a device for
+/// `add-machines` on a user for a device, `add-apps` on a scope for an app or Vault item, `switch` on a device for
 /// a service: the caller says which), and the subject is themselves, the container, or a role on it
 /// (`group:<id>#admin`).
 #[allow(clippy::too_many_arguments)]
@@ -416,39 +416,39 @@ mod tests {
         )
         .unwrap();
         let rows: &[(&str, &str, &str, Option<i64>)] = &[
-            ("person:alice", "admin", "network:global", None),
-            ("person:bob", "member", "network:global", None),
-            ("person:carol", "member", "network:global", None),
-            ("person:gina", "member", "network:global", None),
-            ("person:hana", "member", "network:global", None),
-            ("person:erin", "member", "network:global", Some(1000)),
-            ("person:frank", "member", "network:global", Some(2000)),
-            ("person:dave", "superuser", "network:global", None),
-            ("person:dave", "admin", "rocket:1", None),
-            ("person:bob", "admin", "rocket:1", None),
-            ("person:bob", "owner", "person:bob", None),
-            ("person:carol", "admin", "group:g", None),
-            ("person:bob", "member", "group:g", None),
-            ("person:gina", "host", "group:g", None),
-            ("person:hana", "admin", "group:h", Some(2000)),
+            ("user:alice", "admin", "network:global", None),
+            ("user:bob", "member", "network:global", None),
+            ("user:carol", "member", "network:global", None),
+            ("user:gina", "member", "network:global", None),
+            ("user:hana", "member", "network:global", None),
+            ("user:erin", "member", "network:global", Some(1000)),
+            ("user:frank", "member", "network:global", Some(2000)),
+            ("user:dave", "superuser", "network:global", None),
+            ("user:dave", "admin", "rocket:1", None),
+            ("user:bob", "admin", "rocket:1", None),
+            ("user:bob", "owner", "user:bob", None),
+            ("user:carol", "admin", "group:g", None),
+            ("user:bob", "member", "group:g", None),
+            ("user:gina", "host", "group:g", None),
+            ("user:hana", "admin", "group:h", Some(2000)),
             ("group:g#member", "user", "vault:group:g/token", None),
             ("group:g#admin", "owner", "vault:group:g/token", None),
-            ("person:frank", "user", "vault:group:g/token", None),
+            ("user:frank", "user", "vault:group:g/token", None),
             ("group:g#manager", "user", "vault:group:g/wifi", None),
             ("rocket:1#admin", "user", "vault:group:g/wifi", None),
-            ("person:bob", "owner", "device:bb", None),
+            ("user:bob", "owner", "device:bb", None),
             ("network:global#member", "user", "service:ss", None),
-            ("person:bob", "owner", "service:sb", None),
+            ("user:bob", "owner", "service:sb", None),
             ("group:g#admin", "owner", "app:notes", None),
-            ("person:bob", "owner", "device:cc", None),
-            ("device:cc", "runner", "person:bob", None),
+            ("user:bob", "owner", "device:cc", None),
+            ("device:cc", "runner", "user:bob", None),
             ("network:global#admin", "admin", "device:sl", None),
             ("device:sl", "runner", "network:global", None),
             ("device:zz", "runner", "network:global", None),
-            ("person:ivan", "owner", "person:ivan", None),
-            ("person:ivan", "owner", "device:ii", None),
+            ("user:ivan", "owner", "user:ivan", None),
+            ("user:ivan", "owner", "device:ii", None),
             ("device:ii", "runner", "group:g", None),
-            ("person:bob", "barista", "café:1", None),
+            ("user:bob", "barista", "café:1", None),
         ];
         for (s, r, o, u) in rows {
             conn.execute("insert into relations values (?1, ?2, ?3, ?4)", params![s, r, o, u]).unwrap();
@@ -456,58 +456,58 @@ mod tests {
         close(&conn, None).unwrap();
         let now = 1500;
         let may_cases: &[(&str, &str, &str, bool)] = &[
-            ("person:alice", "change-settings", "network:global", true),
-            ("person:bob", "change-settings", "network:global", false),
-            ("person:bob", "use", "network:global", true),
-            ("person:bob", "make-groups", "network:global", true),
-            ("person:bob", "invite", "network:global", false),
-            ("person:erin", "use", "network:global", false),
-            ("person:frank", "use", "network:global", true),
-            ("person:nobody", "use", "network:global", false),
+            ("user:alice", "change-settings", "network:global", true),
+            ("user:bob", "change-settings", "network:global", false),
+            ("user:bob", "use", "network:global", true),
+            ("user:bob", "make-groups", "network:global", true),
+            ("user:bob", "invite", "network:global", false),
+            ("user:erin", "use", "network:global", false),
+            ("user:frank", "use", "network:global", true),
+            ("user:nobody", "use", "network:global", false),
             // a group's members, and its admins through the rule that they're members too
-            ("person:bob", "use", "group:g", true),
-            ("person:bob", "invite", "group:g", false),
-            ("person:carol", "use", "vault:group:g/token", true),
-            ("person:carol", "change", "vault:group:g/token", true),
-            ("person:bob", "use", "vault:group:g/token", true),
-            ("person:bob", "change", "vault:group:g/token", false),
-            ("person:carol", "deploy", "app:notes", true),
-            ("person:bob", "deploy", "app:notes", false),
+            ("user:bob", "use", "group:g", true),
+            ("user:bob", "invite", "group:g", false),
+            ("user:carol", "use", "vault:group:g/token", true),
+            ("user:carol", "change", "vault:group:g/token", true),
+            ("user:bob", "use", "vault:group:g/token", true),
+            ("user:bob", "change", "vault:group:g/token", false),
+            ("user:carol", "deploy", "app:notes", true),
+            ("user:bob", "deploy", "app:notes", false),
             // a network's own role reaches only what it says, not what members get
-            ("person:gina", "use", "group:g", true),
-            ("person:gina", "use", "vault:group:g/token", false),
-            // the network's admins manage every group, rename every person and look after every device, and open none
-            ("person:alice", "invite", "group:g", true),
-            ("person:alice", "use", "group:g", false),
-            ("person:alice", "use", "vault:group:g/token", false),
-            ("person:alice", "rename", "person:bob", true),
-            ("person:alice", "use", "person:bob", false),
-            ("person:bob", "use", "person:bob", true),
-            ("person:carol", "use", "person:carol", true),
-            ("person:carol", "use", "person:bob", false),
-            ("person:alice", "remove", "device:bb", true),
-            ("person:alice", "switch", "device:bb", false),
-            ("person:bob", "switch", "device:bb", true),
-            ("person:carol", "use", "service:ss", true),
-            ("person:erin", "use", "service:ss", false),
-            ("device:cc", "run", "person:bob", true),
-            ("device:cc", "use", "person:bob", false),
+            ("user:gina", "use", "group:g", true),
+            ("user:gina", "use", "vault:group:g/token", false),
+            // the network's admins manage every group, rename every user and look after every device, and open none
+            ("user:alice", "invite", "group:g", true),
+            ("user:alice", "use", "group:g", false),
+            ("user:alice", "use", "vault:group:g/token", false),
+            ("user:alice", "rename", "user:bob", true),
+            ("user:alice", "use", "user:bob", false),
+            ("user:bob", "use", "user:bob", true),
+            ("user:carol", "use", "user:carol", true),
+            ("user:carol", "use", "user:bob", false),
+            ("user:alice", "remove", "device:bb", true),
+            ("user:alice", "switch", "device:bb", false),
+            ("user:bob", "switch", "device:bb", true),
+            ("user:carol", "use", "service:ss", true),
+            ("user:erin", "use", "service:ss", false),
+            ("device:cc", "run", "user:bob", true),
+            ("device:cc", "use", "user:bob", false),
             // a role held on every group reaches what's written for one group's holders of it
-            ("person:alice", "use", "vault:group:g/wifi", true),
-            ("person:carol", "use", "vault:group:g/wifi", false),
+            ("user:alice", "use", "vault:group:g/wifi", true),
+            ("user:carol", "use", "vault:group:g/wifi", false),
             // someone out of the network holds nothing, nor do their devices; a device nobody in it holds holds nothing
-            ("person:ivan", "use", "person:ivan", false),
+            ("user:ivan", "use", "user:ivan", false),
             ("device:ii", "run", "group:g", false),
             ("device:sl", "run", "network:global", true),
             ("device:zz", "run", "network:global", false),
             // unknown means no, through usersets too
-            ("person:bob", "fly", "network:global", false),
-            ("person:dave", "change-settings", "network:global", false),
-            ("person:dave", "use", "rocket:1", false),
-            ("person:bob", "use", "vault:group:g/wifi", false),
+            ("user:bob", "fly", "network:global", false),
+            ("user:dave", "change-settings", "network:global", false),
+            ("user:dave", "use", "rocket:1", false),
+            ("user:bob", "use", "vault:group:g/wifi", false),
             ("#admin", "use", "network:global", false),
             ("network:global#admin", "change-settings", "network:global", false),
-            ("person:alice", "use", "network", false),
+            ("user:alice", "use", "network", false),
         ];
         for (who, what, on, expected) in may_cases {
             assert_eq!(may(&conn, who, what, on, now).unwrap(), *expected, "may({who}, {what}, {on})");
@@ -517,82 +517,82 @@ mod tests {
         // No escalation: only a role you hold (or one of yours gives), for no longer than you hold it; nothing on a
         // device or an app, and no rule; and the network's last admin stays.
         let give_cases: &[(&str, &str, &str, &str, Option<u64>, bool)] = &[
-            ("person:carol", "person:erin", "member", "group:g", None, true),
-            ("person:carol", "person:erin", "admin", "group:g", None, true),
-            ("person:bob", "person:erin", "member", "group:g", None, false),
-            ("person:gina", "person:erin", "host", "group:g", None, true),
-            ("person:gina", "person:gina", "member", "group:g", None, false),
-            ("person:gina", "person:erin", "member", "group:g", None, false),
-            // the network's admins add people to every group, and make someone its admin only as the release says
-            ("person:alice", "person:erin", "member", "group:g", None, true),
-            ("person:alice", "person:erin", "admin", "group:g", None, true),
-            ("person:alice", "person:erin", "member", "group:h", None, true),
-            ("person:hana", "person:erin", "member", "group:h", None, false),
-            ("person:hana", "person:erin", "member", "group:h", Some(2000), true),
-            ("person:hana", "person:erin", "admin", "group:h", Some(2500), false),
-            ("person:alice", "person:bob", "admin", "network:global", None, true),
-            ("person:alice", "person:alice", "admin", "network:global", Some(3000), false),
-            ("person:bob", "person:erin", "member", "network:global", None, false),
-            ("person:carol", "person:erin", "superuser", "group:g", None, false),
-            ("person:carol", "person:erin", "user", "vault:group:g/token", None, true),
-            ("person:carol", "network:global#member", "user", "vault:group:g/token", None, true),
-            ("person:bob", "person:erin", "user", "vault:group:g/token", None, false),
-            ("person:bob", "person:carol", "user", "service:sb", None, true),
-            ("person:bob", "person:carol", "owner", "device:bb", None, false),
-            ("person:carol", "person:erin", "owner", "app:notes", None, false),
-            ("person:alice", "person:bob", "manager", "group:*", None, false),
-            ("person:alice", "#admin", "admin", "network:global", None, false),
-            ("person:ivan", "person:erin", "owner", "person:ivan", None, false),
+            ("user:carol", "user:erin", "member", "group:g", None, true),
+            ("user:carol", "user:erin", "admin", "group:g", None, true),
+            ("user:bob", "user:erin", "member", "group:g", None, false),
+            ("user:gina", "user:erin", "host", "group:g", None, true),
+            ("user:gina", "user:gina", "member", "group:g", None, false),
+            ("user:gina", "user:erin", "member", "group:g", None, false),
+            // the network's admins add users to every group, and make someone its admin only as the release says
+            ("user:alice", "user:erin", "member", "group:g", None, true),
+            ("user:alice", "user:erin", "admin", "group:g", None, true),
+            ("user:alice", "user:erin", "member", "group:h", None, true),
+            ("user:hana", "user:erin", "member", "group:h", None, false),
+            ("user:hana", "user:erin", "member", "group:h", Some(2000), true),
+            ("user:hana", "user:erin", "admin", "group:h", Some(2500), false),
+            ("user:alice", "user:bob", "admin", "network:global", None, true),
+            ("user:alice", "user:alice", "admin", "network:global", Some(3000), false),
+            ("user:bob", "user:erin", "member", "network:global", None, false),
+            ("user:carol", "user:erin", "superuser", "group:g", None, false),
+            ("user:carol", "user:erin", "user", "vault:group:g/token", None, true),
+            ("user:carol", "network:global#member", "user", "vault:group:g/token", None, true),
+            ("user:bob", "user:erin", "user", "vault:group:g/token", None, false),
+            ("user:bob", "user:carol", "user", "service:sb", None, true),
+            ("user:bob", "user:carol", "owner", "device:bb", None, false),
+            ("user:carol", "user:erin", "owner", "app:notes", None, false),
+            ("user:alice", "user:bob", "manager", "group:*", None, false),
+            ("user:alice", "#admin", "admin", "network:global", None, false),
+            ("user:ivan", "user:erin", "owner", "user:ivan", None, false),
         ];
         for (giver, to, role, on, until, expected) in give_cases {
             assert_eq!(may_give(&conn, giver, to, role, on, *until, now).unwrap(), *expected, "may_give({giver}, {to}, {role}, {on}, {until:?})");
         }
         let take_cases: &[(&str, &str, &str, &str, bool)] = &[
-            ("person:alice", "person:alice", "admin", "network:global", false),
-            ("person:alice", "person:bob", "member", "network:global", true),
-            ("person:bob", "person:bob", "member", "group:g", true),
-            ("person:bob", "person:carol", "admin", "group:g", false),
-            ("person:alice", "person:carol", "admin", "group:g", true),
-            ("person:bob", "person:bob", "member", "network:global", false),
-            ("person:carol", "person:frank", "user", "vault:group:g/token", true),
-            ("person:frank", "person:frank", "user", "vault:group:g/token", true),
-            ("person:bob", "person:frank", "user", "vault:group:g/token", false),
-            ("person:bob", "person:carol", "user", "service:sb", true),
-            ("person:alice", "person:bob", "owner", "device:bb", true),
-            ("person:carol", "group:g#admin", "owner", "app:notes", false),
+            ("user:alice", "user:alice", "admin", "network:global", false),
+            ("user:alice", "user:bob", "member", "network:global", true),
+            ("user:bob", "user:bob", "member", "group:g", true),
+            ("user:bob", "user:carol", "admin", "group:g", false),
+            ("user:alice", "user:carol", "admin", "group:g", true),
+            ("user:bob", "user:bob", "member", "network:global", false),
+            ("user:carol", "user:frank", "user", "vault:group:g/token", true),
+            ("user:frank", "user:frank", "user", "vault:group:g/token", true),
+            ("user:bob", "user:frank", "user", "vault:group:g/token", false),
+            ("user:bob", "user:carol", "user", "service:sb", true),
+            ("user:alice", "user:bob", "owner", "device:bb", true),
+            ("user:carol", "group:g#admin", "owner", "app:notes", false),
             // the release's rules
-            ("person:alice", "#admin", "member", "group:*", false),
-            ("person:alice", "network:global#admin", "manager", "group:*", false),
-            ("person:bob", "@", "owner", "person:*", false),
+            ("user:alice", "#admin", "member", "group:*", false),
+            ("user:alice", "network:global#admin", "manager", "group:*", false),
+            ("user:bob", "@", "owner", "user:*", false),
         ];
         for (taker, from, role, on, expected) in take_cases {
             assert_eq!(may_take(&conn, taker, from, role, on, now).unwrap(), *expected, "may_take({taker}, {from}, {role}, {on})");
         }
-        conn.execute("insert into relations values ('person:bob', 'admin', 'network:global', null)", []).unwrap();
+        conn.execute("insert into relations values ('user:bob', 'admin', 'network:global', null)", []).unwrap();
         close(&conn, None).unwrap();
-        assert!(may_take(&conn, "person:alice", "person:alice", "admin", "network:global", now).unwrap());
-        // A person's own scope is theirs by the release's rule, whatever happens to a row saying so.
-        conn.execute("delete from relations where subject = 'person:bob' and object = 'person:bob'", []).unwrap();
+        assert!(may_take(&conn, "user:alice", "user:alice", "admin", "network:global", now).unwrap());
+        // A user's own scope is theirs by the release's rule, whatever happens to a row saying so.
+        conn.execute("delete from relations where subject = 'user:bob' and object = 'user:bob'", []).unwrap();
         close(&conn, None).unwrap();
-        assert!(may(&conn, "person:bob", "use", "person:bob", now).unwrap());
+        assert!(may(&conn, "user:bob", "use", "user:bob", now).unwrap());
         // A rule taken anyway comes back with the release.
         conn.execute("delete from relations where subject = '#admin' and object = 'group:*'", []).unwrap();
         conn.execute_batch(DEFAULTS).unwrap();
         close(&conn, None).unwrap();
-        assert!(may(&conn, "person:carol", "leave", "group:g", now).unwrap());
+        assert!(may(&conn, "user:carol", "leave", "group:g", now).unwrap());
 
         // The first row of a new device, Vault item, service or app: by whoever may make it there, to its container.
         let make_cases: &[(&str, &str, &str, &str, &str, &str, bool)] = &[
-            ("person:carol", "add-apps", "group:g", "group:g#admin", "owner", "vault:group:g/new", true),
-            ("person:bob", "add-apps", "group:g", "group:g#admin", "owner", "vault:group:g/new", false),
-            ("person:carol", "add-apps", "group:g", "group:g#admin", "owner", "app:notes", false),
-            ("person:carol", "add-apps", "group:g", "network:global#admin", "owner", "app:new", false),
-            ("person:carol", "add-apps", "group:g", "group:g#admin", "owner", "app:new", true),
-            ("person:alice", "add-machines", "person:bob", "person:bob", "owner", "device:new", true),
-            ("person:carol", "add-machines", "person:bob", "person:bob", "owner", "device:new", false),
-            ("person:bob", "add-devices", "person:bob", "person:bob", "owner", "device:new", true),
-            ("person:bob", "switch", "device:bb", "device:bb#owner", "owner", "service:new", true),
-            ("person:bob", "switch", "device:bb", "device:bb#owner", "owner", "service:*", false),
+            ("user:carol", "add-apps", "group:g", "group:g#admin", "owner", "vault:group:g/new", true),
+            ("user:bob", "add-apps", "group:g", "group:g#admin", "owner", "vault:group:g/new", false),
+            ("user:carol", "add-apps", "group:g", "group:g#admin", "owner", "app:notes", false),
+            ("user:carol", "add-apps", "group:g", "network:global#admin", "owner", "app:new", false),
+            ("user:carol", "add-apps", "group:g", "group:g#admin", "owner", "app:new", true),
+            ("user:alice", "add-machines", "user:bob", "user:bob", "owner", "device:new", true),
+            ("user:carol", "add-machines", "user:bob", "user:bob", "owner", "device:new", false),
+            ("user:bob", "add-devices", "user:bob", "user:bob", "owner", "device:new", true),
+            ("user:bob", "switch", "device:bb", "device:bb#owner", "owner", "service:new", true),
+            ("user:bob", "switch", "device:bb", "device:bb#owner", "owner", "service:*", false),
         ];
         for (maker, verb, container, subject, role, object, expected) in make_cases {
             assert_eq!(may_make(&conn, maker, verb, container, subject, role, object, now).unwrap(), *expected, "may_make({maker}, {verb}, {container}, {subject}, {object})");

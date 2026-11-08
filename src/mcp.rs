@@ -51,8 +51,8 @@ fn say(answered: Option<(Value, bool)>) -> std::io::Result<()> {
     out.flush()
 }
 
-/// MCP over Streamable HTTP, at `/mcp`: for a client device over iroh, as its person (the remote MCP server,
-/// cloudflare/mcp/, is remote MCP clients' device), or for a program on this machine, as its person. Each POST is
+/// MCP over Streamable HTTP, at `/mcp`: for a client device over iroh, as its user (the remote MCP server,
+/// cloudflare/mcp/, is remote MCP clients' device), or for a program on this machine, as its user. Each POST is
 /// answered with JSON; the server sends nothing unasked, so there's no stream to GET. A tool that needs keys it wasn't
 /// handed is answered 428 with what it needs, as `/v1/call` is, for its caller to hand them and ask again. Nothing is
 /// kept between requests, since the next may reach another node: the session id carries only the client's name,
@@ -185,7 +185,7 @@ fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bo
     (out, false)
 }
 
-/// The skills for this person: the root first (src/skills.rs).
+/// The skills for this user: the root first (src/skills.rs).
 pub fn skills(node: &Client) -> Vec<crate::skills::Skill> {
     crate::skills::all(&node.apps().unwrap_or_default())
 }
@@ -223,7 +223,7 @@ pub fn agent_from_env() -> Option<String> {
     named.iter().find(|(k, _)| var(k).is_some()).map(|(_, n)| n.to_string())
 }
 
-/// An agent's name as people know it, from what it calls itself (an MCP client's `clientInfo.name`).
+/// An agent's name as users know it, from what it calls itself (an MCP client's `clientInfo.name`).
 fn agent_name(raw: &str) -> String {
     let known = [
         (&["claude-code", "claude code", "claude-ai", "claude"][..], "Claude Code"),

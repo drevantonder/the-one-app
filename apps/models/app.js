@@ -1,5 +1,5 @@
-// Models: the local AI models on the person's devices. Its service (service/), on each device it's switched on for, asks
-// the ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
+// Models: the local AI models on the user's devices. Its service (service/), on each device it's switched on for, asks
+// the ones on its machine, and a call goes on to the next device when a model isn't there; this app is what users,
 // agents and other apps use.
 
 const service = (ctx, fn, { device, ...input }) => ctx.services.models[fn](input, device ? { device } : undefined);
@@ -17,7 +17,7 @@ export default {
   needs: "Needs a device with a GPU",
   instructions: "Local models run on the device that has them. models_here lists this device's models; give device \"all\" for every device's, and which are loaded. models_chat asks one and returns its answer, on whichever of your devices has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast. Where an admin switched Models on for Cloudflare (Settings › Devices), Workers AI's models (named @cf/..., listed by models_here on device \"cloudflare\") answer there, at the network's Cloudflare account's per-call price.",
   uses: { services: ["models"] },
-  service: { network: ["127.0.0.1:11434"], person: false, platforms: ["linux", "mac"] },
+  service: { network: ["127.0.0.1:11434"], user: false, platforms: ["linux", "mac"] },
 
   tools: {
     here: {
@@ -35,7 +35,7 @@ export default {
         properties: {
           model: { type: "string", description: "a model's name, as models_here lists them, like gemma4:12b" },
           device: { type: "string", description: "one of your devices, by name, to ask; else whichever of yours has the model" },
-          prompt: { type: "string", description: "the question or task, as the person's message; given with messages, it comes after them" },
+          prompt: { type: "string", description: "the question or task, as the user's message; given with messages, it comes after them" },
           messages: { type: "array", items: { type: "object" }, description: "the conversation so far, oldest first, each { role: user or assistant, content: text, images }" },
           system: { type: "string", description: "instructions the model follows throughout, like \"Answer in one sentence.\"" },
           images: { type: "array", items: { type: "string" }, description: IMAGES },

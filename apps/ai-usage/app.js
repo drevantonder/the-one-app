@@ -2,7 +2,7 @@
 // providers' own numbers for every sign-in it keeps (Claude Code's and claude-swap's accounts, Codex's, OpenCode Go's);
 // this asks every machine's and merges by account, keeps snapshots, and says in the providers' own words how much is
 // left and what the pace does: deficit or reserve, what was expected, and whether it lasts.
-// Agents read it through Agent Hooks; people get a card for each provider and the meters. Its screen is React, in
+// Agents read it through Agent Hooks; users get a card for each provider and the meters. Its screen is React, in
 // screens/, built into dist/ when it's deployed (`one deploy apps/ai-usage`), which is committed because a release ships
 // the app as it is.
 
@@ -279,7 +279,7 @@ export default {
   instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes), merged from the AI Usage service on every machine that has one. Agents get the last readings with their first prompt, then a warning when a window is nearly out or outruns its reset.`,
 
   uses: { services: ["ai-usage"] },
-  service: { network: ["api.anthropic.com", "api.openai.com", "chatgpt.com", "opencode.ai"], person: true, platforms: ["linux", "mac"] },
+  service: { network: ["api.anthropic.com", "api.openai.com", "chatgpt.com", "opencode.ai"], user: true, platforms: ["linux", "mac"] },
 
   // Fresh readings for agents' prompts, from the device that runs AI Usage's schedules (one devices run_schedules ai-usage <it>).
   schedules: { refresh: { tool: "status", every: "5m", description: "Reads every plan, so agents' prompts get fresh numbers" } },

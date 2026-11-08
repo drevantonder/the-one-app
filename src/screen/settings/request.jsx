@@ -1,4 +1,4 @@
-// A request for an item an app may use: who asks and why, then the person's items that have the fields it wants, to
+// A request for an item an app may use: who asks and why, then the user's items that have the fields it wants, to
 // pick one, or a new one, whose values go to the node and nowhere else. The asker never sees a secret. It closes
 // itself with whether it was allowed, as it is when it's answered somewhere else (another device, an agent's CLI).
 //
@@ -12,7 +12,7 @@ const api = one.api
 const { scope, id } = one.params || {}
 const find = () => api("GET", `/v1/vault/requests?scope=${encodeURIComponent(scope || "")}&id=${encodeURIComponent(id || "")}`).then((l) => l[0])
 
-/// A field's name as a person reads it: "api_key" → "API key".
+/// A field's name as a user reads it: "api_key" → "API key".
 function fieldLabel(name) {
   const words = String(name).replace(/[_-]+/g, " ").trim().split(/\s+/)
   return words.map((w, i) => (/^(api|url|id|ssh|pem|aws|s3|ip)$/i.test(w) ? w.toUpperCase() : i ? w.toLowerCase() : w[0].toUpperCase() + w.slice(1).toLowerCase())).join(" ")

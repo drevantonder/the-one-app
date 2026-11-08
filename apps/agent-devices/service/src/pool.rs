@@ -1,6 +1,6 @@
 //! Borrowed devices: an agent borrows a device of its own for as long as it needs a browser, and gives it back, which
 //! deletes it. They come from a pool: one spare is kept running, so borrowing is quick. A borrowed device's browser
-//! starts with a copy of a browser profile (profiles.rs), which the person signed in to sites in once (sign_in); the
+//! starts with a copy of a browser profile (profiles.rs), which the user signed in to sites in once (sign_in); the
 //! copy is thrown away with the device, so only sign_in and save_profile change a profile.
 
 use std::collections::HashMap;
@@ -112,7 +112,7 @@ const CACHES: [&str; 12] = [
 
 /// tar's arguments that leave out the caches of the Chrome folders at `at` (a path from where tar starts, where * is
 /// any one folder) and `other`: each only there, from the start of a path, with * within one folder, never a folder of
-/// the same name elsewhere, like one in an extension or a person's.
+/// the same name elsewhere, like one in an extension or a user's.
 pub fn excludes(at: &str, other: &[&str]) -> Vec<String> {
     let mut args = vec!["--anchored".to_string(), "--no-wildcards-match-slash".to_string()];
     args.extend(CACHES.iter().map(|c| format!("--exclude={at}/{c}")));
@@ -135,7 +135,7 @@ pub fn owned(name: &str) -> String {
     format!("mkdir -p {dir} && printf '%s' '{json}' > {dir}/.cua-driver-owned-profile.json && chmod 700 {dir} && chown -R cua:cua {HOME}/.local")
 }
 
-/// Whether this device keeps a spare agent device: a Linux one with room for it. A Mac's memory is its person's; it
+/// Whether this device keeps a spare agent device: a Linux one with room for it. A Mac's memory is its user's; it
 /// makes devices only when asked.
 fn keeps_spare() -> bool {
     !cfg!(target_os = "macos") && room_for_one()
@@ -406,7 +406,7 @@ impl Devices {
         Ok(())
     }
 
-    /// Opens a page in a device on the profile, for the person to sign in to sites in, reusing one already signing in
+    /// Opens a page in a device on the profile, for the user to sign in to sites in, reusing one already signing in
     /// to it. take is held while it looks for one, so two sign-ins to a profile share one device.
     pub(super) fn sign_in(&self, p: &Profile, url: &str, minutes: i64, by: &str) -> Result<(Device, jiff::Timestamp)> {
         let until = super::now() + jiff::SignedDuration::from_mins(minutes);

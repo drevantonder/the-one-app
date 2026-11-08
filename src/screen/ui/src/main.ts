@@ -19,7 +19,7 @@ Object.assign(globalThis, {
   },
 })
 
-// Windows' shell zooms its pages to 14/17 of the person's text scale, sizing the old kit's 17px text to its own (ui.css
+// Windows' shell zooms its pages to 14/17 of the user's text scale, sizing the old kit's 17px text to its own (ui.css
 // undoes the others'); this kit is sized as it is, so it keeps only their scale.
 const webview = (globalThis as { chrome?: { webview?: unknown } }).chrome?.webview
 if (webview) {

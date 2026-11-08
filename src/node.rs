@@ -144,7 +144,7 @@ pub enum Event {
     Network,
 }
 
-/// What a machine's node is: the device its person's CLI, MCP and Mac app sign with, and compute.
+/// What a machine's node is: the device its user's CLI, MCP and Mac app sign with, and compute.
 pub const MACHINE: &[scopes::Kind] = &[scopes::Kind::Client, scopes::Kind::Compute];
 
 
@@ -201,7 +201,7 @@ pub struct Inner {
     sessions: sessions::Sessions,
     /// Apps whose deploy doesn't start here, by the bundle that didn't: left out until they're deployed again.
     broken: Mutex<BTreeMap<String, String>>,
-    /// The keys of the apps whose schedules this device runs for their people.
+    /// The keys of the apps whose schedules this device runs for their users.
     app_schedules: app_schedules::State,
     owed: Mutex<devices::Owed>,
     issuer_keys: Mutex<settings::IssuerKeys>,
@@ -475,7 +475,7 @@ impl Node {
         let _ = self.0.events.send(event);
     }
 
-    /// This device's name: as the network lists it, which another of its person's devices may have changed, when the
+    /// This device's name: as the network lists it, which another of its user's devices may have changed, when the
     /// network isn't being read (never waiting on it, so it's asked for anywhere); else as it last was.
     pub fn device_name(&self) -> String {
         let network = self.0.network.0.try_lock().ok();
@@ -540,7 +540,7 @@ fn reachable(i: &Network, app: &str, user: &str) -> Result<Vec<Scope>> {
     crate::state::reachable(i.r.db(), user, |s| i.r.holds(s).then(|| i.views.get(&s.to_string()).is_some_and(|st| st.added.contains(app))))
 }
 
-/// A person's name in the network, removed people's too; none if it never knew them.
+/// A user's name in the network, removed users' too; none if it never knew them.
 fn user_name(db: &ScopeDb, user: &str) -> Result<String> {
     Ok(db.user_ever(user)?.map(|u| u.name).unwrap_or_default())
 }

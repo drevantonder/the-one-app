@@ -11,18 +11,18 @@ use super::super::network::spawn;
 use crate::agent;
 
 /// The native app (client/native) as this checkout builds it, on this machine in a display of its own (Xvfb), signed in
-/// to the throwaway network as its first person or `person` as a person would: its Sign In pressed, the sign-in it would
+/// to the throwaway network as its first user or `user` as a user would: its Sign In pressed, the sign-in it would
 /// open in a browser approved as them, and the code it then shows approved by the throwaway network's machine. What it
 /// keeps (its folder, and its key in the Secret Service by the throwaway network's address) stays with the throwaway network, so a
 /// new build is still signed in; it's started again each time.
-pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
+pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
-    let name = person.map(|p| format!("linux-{}", p.to_lowercase().replace(' ', "-"))).unwrap_or_else(|| "linux".into());
+    let name = user.map(|p| format!("linux-{}", p.to_lowercase().replace(' ', "-"))).unwrap_or_else(|| "linux".into());
     let home = dir.join(&name);
     std::fs::create_dir_all(&home)?;
     eprintln!("Building client/native (dev profile; the first time takes minutes)…");
     crate::build::quietly(std::process::Command::new("nice").arg(crate::build::cargo()).arg("build").current_dir(checkout.join("client/native")))?;
-    // Its own display and control port, the same each time for this throwaway network and person.
+    // Its own display and control port, the same each time for this throwaway network and user.
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(home.to_string_lossy().as_bytes()).into();
     let display = format!(":{}", 200 + u16::from_le_bytes([hash[0], hash[1]]) % 600);
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
@@ -75,11 +75,11 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         }
         match said.lines().rev().find_map(|l| l.strip_prefix("Sign in: ")) {
             Some(url) if !signed => {
-                crate::sign_in::approve_on_throwaway(address, url, person)?;
+                crate::sign_in::approve_on_throwaway(address, url, user)?;
                 signed = true;
             }
             Some(_) => {}
-            // Signed out: its Sign In, pressed for the person.
+            // Signed out: its Sign In, pressed for the user.
             None => drop(eval(super::PRESS_SIGN_IN)),
         }
         if let Some(code) = said.lines().rev().find_map(|l| l.strip_prefix("Code: "))
@@ -94,7 +94,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
   See it: DISPLAY={display} import -window root shot.png
   Use it: DISPLAY={display} xdotool …, or in its page: curl -d '<js>' http://127.0.0.1:{control}/eval runs JavaScript, and /value gives an expression's value, as JSON
   What it said: {}; {CLI} throwaway stop stops it",
-        person.map(|name| format!(" as {name}")).unwrap_or_default(),
+        user.map(|name| format!(" as {name}")).unwrap_or_default(),
         dir.join(&log).display()
     );
     Ok(())

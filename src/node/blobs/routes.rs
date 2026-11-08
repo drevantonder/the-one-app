@@ -15,7 +15,7 @@ pub fn routes() -> Routes {
         .route("/v1/blobs/{hash}", Who::SignedIn, get(blob))
 }
 
-/// A file to keep, read as it comes: from elsewhere, within the room `Node::put_blob_from` gives its person.
+/// A file to keep, read as it comes: from elsewhere, within the room `Node::put_blob_from` gives its user.
 async fn put_blob(State(node): State<Node>, me: Me, req: axum::extract::Request) -> Reply {
     let (hash, size) = node.put_blob_from(&me.caller, req.into_body()).await?;
     Ok(Json(json!({ "blob": hash, "size": size })))

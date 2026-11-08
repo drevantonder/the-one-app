@@ -1,7 +1,7 @@
 // How a tab of the web client reaches its nodes: through the one client every tab of this browser shares
 // (net-worker.js), in a SharedWorker; where there's none, in the tab holding the `one.net` lock, which the others ask
 // over a BroadcastChannel. index.html loads this first, so the client's WebAssembly is on its way while the page draws,
-// and a person already signed in starts their session at once.
+// and a user already signed in starts their session at once.
 
 import { Yours } from "../shared/protocol.js";
 
@@ -64,7 +64,7 @@ function lost() {
 
 let has = false;
 
-/// A new tab leads the others, its client new, with no session: each tab starts its person's again (`starting` said
+/// A new tab leads the others, its client new, with no session: each tab starts its user's again (`starting` said
 /// the last leader's), before what it asks next.
 function again() {
   const user = starting?.user;
@@ -201,7 +201,7 @@ export const net = {
     return (await ask({ op: "waited", user, token })).said;
   },
 
-  /// As each start of a client does: this person's own things, settled by this device if they aren't.
+  /// As each start of a client does: this user's own things, settled by this device if they aren't.
   async settle() {
     if (net.has) await ask({ op: "settle" });
   },
@@ -216,7 +216,7 @@ export const net = {
     if (net.has) await ask({ op: "forget", user });
   },
 
-  /// This person's app schedules of `app`, renewed by this device as they use it.
+  /// This user's app schedules of `app`, renewed by this device as they use it.
   async renew(app) {
     if (net.has) await ask({ op: "renew", app });
   },

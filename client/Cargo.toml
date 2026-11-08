@@ -40,7 +40,7 @@ iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "
 n0-watcher = { version = "1", optional = true }
 noq-udp = { version = "1.4", optional = true }
 
-# Natively, the app is a device of its person (src/device.rs), with the node's own formats and rules (entries, members,
+# Natively, the app is a device of its user (src/device.rs), with the node's own formats and rules (entries, members,
 # logs, keys); ureq, which that crate's node uses too, to ask auth, the relay and the URL signer at the network's
 # address.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

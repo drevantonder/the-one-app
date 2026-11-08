@@ -2,7 +2,7 @@
 //! port on this machine (RFC 8252's loopback redirect), or on a phone to the app's own link (`<cli>://signed-in/`),
 //! which an iPhone's system sign-in sheet takes and an Android phone's Chrome Custom Tab opens the app on. The refresh
 //! token is kept in the OS's secret store; access tokens only in memory. It names the device it's for (`join`), so the
-//! person's devices can let it in by this sign-in.
+//! user's devices can let it in by this sign-in.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};

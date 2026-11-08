@@ -83,7 +83,7 @@ impl Session {
 }
 
 /// What a caller's session is kept by: a sign-in's by its token's id (`keys::token_id`), a client device's by its key (forgotten once
-/// that device is removed), a call passed on by the node that passed it and its person.
+/// that device is removed), a call passed on by the node that passed it and its user.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) enum Held {
     SignIn(String),
@@ -203,7 +203,7 @@ impl Node {
             tracing::debug!("keys handed for {user} had run out: left");
             return Ok(());
         }
-        // Only keys of scopes its person may use: one of another's would have this device read and write their data
+        // Only keys of scopes its user may use: one of another's would have this device read and write their data
         // with it. And only epochs an entry made: a key for one beyond is junk, or for one this device hasn't read
         // yet, which a call that needs it asks for again.
         let newest: HashMap<String, u32> = self.with(|i| {
@@ -242,7 +242,7 @@ impl Node {
     pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope], service: bool) -> Result<Credential> {
         let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
         ensure!(handoff.for_ == hex(from), "the keys handed are for another node");
-        ensure!(!service || !handoff.keys.is_empty(), "a service's call passed on comes with the keys its person handed");
+        ensure!(!service || !handoff.keys.is_empty(), "a service's call passed on comes with the keys its user handed");
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         ensure!(handoff.keys.iter().all(|k| named.contains(&k.scope)), "the keys handed are of a scope the call doesn't name");
         let credential = Credential::Passed { node: *from, user: user.to_string() };
@@ -287,7 +287,7 @@ impl Node {
         kept.get(&held).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
     }
 
-    /// The keys of a scope's database's steps that live sessions of people who may use it were handed, if they hold its
+    /// The keys of a scope's database's steps that live sessions of users who may use it were handed, if they hold its
     /// newest epoch's: what this device reads and writes the steps of a scope it runs but doesn't open with, while
     /// someone who opens it uses it here. Of each epoch, only a key that opens what the bucket holds under it, so
     /// nobody's key has this device pass over the real steps or write any it can't be read by (`opens_steps`).
@@ -373,7 +373,7 @@ impl Node {
     }
 
     /// Reads the steps of each scope a caller with handed keys uses that this device runs but doesn't open (someone else's own, or
-    /// a group its person isn't in), with the keys of its steps the caller hands, which it's asked for (428) if it
+    /// a group its user isn't in), with the keys of its steps the caller hands, which it's asked for (428) if it
     /// didn't: what their calls are checked by (which apps are there, who may do what), and written after.
     pub(super) async fn read_callers_scopes(&self, me: &Caller) -> Result<()> {
         if matches!(me.credential, Credential::Own | Credential::AppSchedules { .. }) {
@@ -453,12 +453,12 @@ impl Node {
     }
 
     /// A call's database: opened with the keys its caller was handed (app schedules: theirs), and kept open here no
-    /// longer than they (or app schedules) last; or with this device's own, for its own person alone.
+    /// longer than they (or app schedules) last; or with this device's own, for its own user alone.
     pub(super) async fn call_database(&self, me: &Caller, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
         let bucket = self.bucket()?;
         let (app_schedules, until) = match &me.credential {
             Credential::Own => {
-                ensure!(me.user == self.user()?, "{} opens only its own person's data with its own keys", self.device_name());
+                ensure!(me.user == self.user()?, "{} opens only its own user's data with its own keys", self.device_name());
                 return Ok((self.database(scope, app, database, schema, None).await?, bucket));
             }
             Credential::AppSchedules { scope, app } => (true, self.app_schedules_until(scope, app)),
@@ -496,7 +496,7 @@ impl Node {
     }
 
     /// Forgets the databases opened with handed keys that have run out, or that no live session holds any more (one
-    /// forgotten as its person lost a scope, or its device was removed): nothing opened with keys outlives them.
+    /// forgotten as its user lost a scope, or its device was removed): nothing opened with keys outlives them.
     fn forget_opened(&self) {
         let now = now_ms();
         let held: HashMap<(String, String, String), Vec<Keys>> = {
@@ -518,7 +518,7 @@ impl Node {
         opened.retain(|_, all| !all.is_empty());
     }
 
-    /// Forgets the sessions of people who may no longer use a scope they could, as soon as this device reads that they
+    /// Forgets the sessions of users who may no longer use a scope they could, as soon as this device reads that they
     /// can't: what they may still use, their next call hands it again.
     pub(super) fn forget_sessions_of(&self, users: &[String]) {
         let mut kept = self.0.sessions.kept.lock().unwrap();

@@ -51,7 +51,7 @@
     log,
     /// Who and where this is, and what this platform can do: lib.rs's `native` says each.
     about: () => invoke("native"),
-    /// What the person typed, an address or an invite link → the address.
+    /// What the user typed, an address or an invite link → the address.
     address: (typed) => invoke("address", { typed }),
     signIn: () => invoke("sign_in"),
     /// → `{ in: true }`, or `{ code, invited }` to show while `wait` waits.
@@ -68,12 +68,12 @@
     quit: () => invoke("quit"),
     /// The menu bar panel this tall (CSS pixels), its top where it is.
     fit: (height) => invoke("fit", { height }),
-    /// Something changed on the person's devices: the app's own widgets are drawn again.
+    /// Something changed on the user's devices: the app's own widgets are drawn again.
     changed: () => invoke("changed").catch(() => {}),
     signOut: () => invoke("sign_out"),
     /// What a call that only reads answered last on this device (`user` is the app's own) → `{ answer, at }`, or null.
     kept: (user, app, tool, input) => invoke("kept", { app, tool, input }),
-    /// Renews the person's app schedules of `app`, which they just used.
+    /// Renews the user's app schedules of `app`, which they just used.
     renew: (app) => invoke("renew", { app }),
     /// A phone's haptic: "selection", "medium", "success" or "error".
     haptic: (style) => invoke("haptic", { style }).catch(() => {}),
@@ -91,7 +91,7 @@
     command(name) {
       if (window.__oneNative.onCommand) window.__oneNative.onCommand(name);
     },
-    /// What waits for the person, counted on the app's icon (the taskbar's, the dock's): 0 for none.
+    /// What waits for the user, counted on the app's icon (the taskbar's, the dock's): 0 for none.
     badge: (count) => invoke("badge", { count }).catch(() => {}),
     notify: (ask) => invoke("notify", { ask }),
     copy: (text) => invoke("copy", { text }),
@@ -112,7 +112,7 @@
     },
     save: async (name, blob, preview) => invoke("save", { name, data: base64(new Uint8Array(await blob.arrayBuffer())), preview }),
 
-    /// A request to the person's nodes, as net.js's `fetch` → a Response whose body comes as the node sends it.
+    /// A request to the user's nodes, as net.js's `fetch` → a Response whose body comes as the node sends it.
     async fetch(method, path, headers, body, signal) {
       const r = await invoke("fetch", { method, path, headers: Object.entries(headers || {}), body: body ?? null });
       const stop = () => invoke("cancel", { id: r.id }).catch(() => {});

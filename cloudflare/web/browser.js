@@ -1,5 +1,5 @@
 // The web client in a browser (platform.js): it signs in as an OAuth client of the network's auth (PKCE, and the
-// person's passkey at its sign-in page), keeps its refresh token in this browser, and is its person's device
+// user's passkey at its sign-in page), keeps its refresh token in this browser, and is its user's device
 // (device.js, and one-client's keyring in the SharedWorker, net.js), let in by another of theirs, by a passkey of theirs,
 // or by whoever invited them.
 import { browserKeys, browserName, codeOf, passkeyKeysOf, signingInFor } from "./device.js";
@@ -24,7 +24,7 @@ const auth = {
   client: () => ((kept) => (kept?.redirect === back() ? kept.id : null))(JSON.parse(localStorage.getItem(CLIENT) || "null")),
 
   /// Off to auth's sign-in page, registered the first time, coming back to /callback, then to where this was. The
-  /// device it signs in for (`join`) its sign-in then names, so the person's devices can let it in by it.
+  /// device it signs in for (`join`) its sign-in then names, so the user's devices can let it in by it.
   async start() {
     const out = await net.auth({ step: "start", name: browserName(), back: back(), client: auth.client(), join: await signingInFor() });
     localStorage.setItem(CLIENT, JSON.stringify({ id: out.client, redirect: back() }));
@@ -78,10 +78,10 @@ const auth = {
 };
 
 export function browser() {
-  /// This browser as its person's device, once it's listed as one (`join`): null until then.
+  /// This browser as its user's device, once it's listed as one (`join`): null until then.
   let device = null;
 
-  /// Makes this browser a device of its person, before anything is asked of a node: one already, or let in by a passkey
+  /// Makes this browser a device of its user, before anything is asked of a node: one already, or let in by a passkey
   /// of theirs that's listed, or by one of their devices (or, for someone new, their inviter's), which it asks at
   /// auth and waits for there, showing its code (`waiting`). `api` is the request path, as a passkey's device asks.
   async function join(waiting, api) {
@@ -108,7 +108,7 @@ export function browser() {
     return (device = keys);
   }
 
-  /// Lets this browser in by a passkey its person listed, whose PRF output this tab has from signing in: it asks as that
+  /// Lets this browser in by a passkey its user listed, whose PRF output this tab has from signing in: it asks as that
   /// passkey's device, which approves this browser's request by its code. → whether it's in.
   async function byPasskey(user, keys, api) {
     const prf = sessionStorage.getItem("one.prf");
@@ -137,7 +137,7 @@ export function browser() {
   /// What was last registered for pushes here: the subscription's endpoint, the device's key and the network's VAPID
   /// key, and when.
   const PUSHED = "one.pushed";
-  /// Whether this browser can get notifications: "default" until the person says, "granted", "denied", or null where
+  /// Whether this browser can get notifications: "default" until the user says, "granted", "denied", or null where
   /// it can't.
   const notifyState = () => (device && "PushManager" in window && "Notification" in window ? Notification.permission : null);
 
@@ -168,14 +168,14 @@ export function browser() {
     reaches: (user) => net.start(user).catch(() => false),
     fetch: (...args) => net.fetch(...args),
     took: () => net.took(),
-    /// Whether the relay says this browser isn't one of its person's devices any more: its key goes then. A client
+    /// Whether the relay says this browser isn't one of its user's devices any more: its key goes then. A client
     /// with no session yet (a tab that just took over the others') doesn't know.
     async removed() {
       if ((await net.still().catch(() => null)) !== false) return false;
       await forgetDevice();
       return true;
     },
-    /// Out of its person's devices first (removing itself, which its keyring does as `leave`), so signing in again
+    /// Out of its user's devices first (removing itself, which its keyring does as `leave`), so signing in again
     /// replaces it, then its key goes. One that can't get out in a few seconds (no node answering) goes anyway, and
     /// stays listed, last seen when it signed out, until it's removed in Settings › Devices.
     async leave(api) {
@@ -196,8 +196,8 @@ export function browser() {
       nodes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
       if (nodes.length) net.nodes(state.user.id, nodes, ranks, last);
     },
-    /// Once it's in: its person's own things' first key and where they run, made by the first of their devices.
-    settle: () => net.settle().catch((err) => console.warn("making this person's own keys:", err)),
+    /// Once it's in: its user's own things' first key and where they run, made by the first of their devices.
+    settle: () => net.settle().catch((err) => console.warn("making this user's own keys:", err)),
     kept: (app, tool, input) => net.kept(auth.user(), app, tool, input),
     renew: async (app) => device && net.renew(app),
     forget: () => net.forget(auth.user()),
@@ -213,7 +213,7 @@ export function browser() {
     look: () => ({}),
     fit() {},
 
-    /// This browser gets notifications once its person allows them (`ask`, from Settings › Devices): its push
+    /// This browser gets notifications once its user allows them (`ask`, from Settings › Devices): its push
     /// subscription is registered with the push Worker as this device's, again whenever it changes and daily. → the
     /// permission, as `notifyState`.
     async notify(ask) {

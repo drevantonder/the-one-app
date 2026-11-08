@@ -1,4 +1,4 @@
-//! The network's members and settings, as people and their clients see them and change them, and finding them by name.
+//! The network's members and settings, as users and their clients see them and change them, and finding them by name.
 
 use super::*;
 use crate::state::{Answering, ClientHere, DeviceNow, InstalledService, State, Viewer};
@@ -13,7 +13,7 @@ impl Node {
         self.member_content(caller, content::setting(name, value)).await
     }
 
-    /// Gives a device (by name or key: all of its endpoints of that name and person), or the Cloudflare node
+    /// Gives a device (by name or key: all of its endpoints of that name and user), or the Cloudflare node
     /// (`cloudflare`), its run priority, for an admin: the `priority` setting, every other kept as set.
     pub async fn set_priority(&self, caller: &Caller, device: &str, priority: rank::Priority) -> Result<()> {
         let ids = if device.eq_ignore_ascii_case(rank::CLOUDFLARE) {
@@ -63,7 +63,7 @@ impl Node {
             let Some(i) = network.as_ref() else { return Ok(DeviceNow::default()) };
             let m = i.r.db();
             let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
-            // The containers on a device are its person's business.
+            // The containers on a device are its user's business.
             let mut load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) };
             if let Some(l) = &mut load
                 && m.machine(&s.key)?.is_none_or(|d| d.user != *me)
@@ -91,7 +91,7 @@ impl Node {
                 target: build.map(|r| r.target.clone()),
                 services: services.iter().map(|d| d.0.clone()).collect(),
                 installed_services: installed_services(m, s, &services, build.map(|r| r.commit.as_str()))?,
-                // What it can run, its person's and the admins' to see.
+                // What it can run, its user's and the admins' to see.
                 parts: if !m.may(me, "remove", &scopes::device(&s.key)) { None } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).and_then(|p| serde_json::from_value(p).ok()) },
                 load,
             })
@@ -144,7 +144,7 @@ impl Node {
     }
 
     /// The service endpoint offering `service` on the device called `name` (or by key prefix) that serves `user`, if
-    /// there's one: only `user`'s own (`own`), or one its person shares with everyone.
+    /// there's one: only `user`'s own (`own`), or one its user shares with everyone.
     pub(super) fn find_service(&self, service: &str, name: &str, user: &str, own: bool) -> Option<Key> {
         let found: Vec<Key> = self
             .with(|i| {

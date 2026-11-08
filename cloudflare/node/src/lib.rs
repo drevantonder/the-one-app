@@ -103,14 +103,14 @@ fn usable(keys: &str, current: u32) -> Result<one::database::stored::Keys, JsVal
     one::database::stored::handed(keys_of(keys).map_err(failed)?, current.max(1)).map_err(|m| failed(m.into()))
 }
 
-/// How many people's databases and steps one isolate keeps, the least lately used going first: each person's are
+/// How many users' databases and steps one isolate keeps, the least lately used going first: each user's are
 /// their Durable Object's, and several may share an isolate, which outlives them.
 const OWNERS_MOST: usize = 16;
 
 thread_local! {
     /// The databases calls running in this isolate have open, by handle, each with whose object opened it.
     static OPEN: RefCell<(u32, HashMap<u32, (String, Db)>)> = RefCell::new((0, HashMap::new()));
-    /// When each person's object last used what this isolate keeps for it, to forget the least lately used.
+    /// When each user's object last used what this isolate keeps for it, to forget the least lately used.
     static OWNERS: RefCell<(u64, HashMap<String, u64>)> = RefCell::new((0, HashMap::new()));
 }
 
@@ -347,7 +347,7 @@ pub fn prefix(scope: &str, app: &str, database: &str) -> Result<String, JsError>
 // Who can do what: each scope's database's steps (`src/database/steps.rs`), which every question of who's who and who
 // may is asked of.
 
-/// A scope's steps this isolate read for one person's object, with the keys they were read with: `global`'s by who's
+/// A scope's steps this isolate read for one user's object, with the keys they were read with: `global`'s by who's
 /// who's reader, as every device reads it; another scope's by its own, once `global`'s log is frozen and its start read.
 struct Held {
     keys: one::database::stored::Keys,
@@ -494,9 +494,9 @@ pub fn pin_root(root: &str) -> Result<(), JsError> {
 pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
     use one::database::steps;
     let bucket = Js(bucket);
-    let (people, epoch) = replayed(&owner, &[], |r| Ok((r.global().may(&user, "use", one::database::scopes::NETWORK), r.global().epoch(&Scope::Global)?))).map_err(failed)?;
-    if !people {
-        return Err(failed(anyhow!("you aren't one of this network's people")));
+    let (member, epoch) = replayed(&owner, &[], |r| Ok((r.global().may(&user, "use", one::database::scopes::NETWORK), r.global().epoch(&Scope::Global)?))).map_err(failed)?;
+    if !member {
+        return Err(failed(anyhow!("you aren't one of this network's users")));
     }
     let read = LOGS.with(|l| l.borrow().get(&(owner.clone(), "global".to_string())).and_then(|g| g.truth().map(|t| t.at)));
     let read = read.ok_or_else(|| failed(anyhow!("global's log isn't frozen")))?;
@@ -533,9 +533,9 @@ pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
     Ok(json!(groups).to_string())
 }
 
-/// The scopes `user` may use, as the network's log says, whether they're a person of it, whether they were removed
+/// The scopes `user` may use, as the network's log says, whether they're a user of it, whether they were removed
 /// from it, the name of `device` (hex) if it's a client device of theirs, else null, and the scopes of theirs this node
-/// runs (a person's own only as their own device chose): `{ scopes, joined, removed, device, runs }`.
+/// runs (a user's own only as their own device chose): `{ scopes, joined, removed, device, runs }`.
 #[wasm_bindgen]
 pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsError> {
     let key = one::keys::unhex(device).ok();
@@ -649,7 +649,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Result<Value> {
                 return Ok(info);
             }
             let mut reach = one::state::reachable(m, me, |s| runs(s).then(|| state_of(s).is_some_and(|st| st.added.contains(&a.name))))?;
-            // Only those this node runs, if it runs some, as a node on a machine leaves out a person's own scope that
+            // Only those this node runs, if it runs some, as a node on a machine leaves out a user's own scope that
             // no node running the rest runs (src/node/calls.rs: `reaching`): their own, until they choose this one.
             if reach.iter().any(runs) {
                 reach.retain(runs);

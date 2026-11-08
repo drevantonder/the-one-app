@@ -70,7 +70,7 @@ pub mod path {
 /// The kinds of message devices send each other over iroh, as `{ kind, body }`: a node's with another, with a service's
 /// endpoint, and what a client or the Cloudflare node asks of a node.
 pub mod message {
-    /// A call to run (`{ call }`), or a person's request to join a network (`{ join }`).
+    /// A call to run (`{ call }`), or a user's request to join a network (`{ join }`).
     pub const ASK: &str = "ask";
     /// What a device says of itself to another, which answers what it needs to know of it.
     pub const HELLO: &str = "hello";
@@ -93,7 +93,7 @@ pub const STEP_DIGITS: usize = 12;
 pub const IROH_PATHS: [(&str, &str); 3] = [("relay", "/relay"), ("ping", "/ping"), ("portal", "/generate_204")];
 
 /// What a request from a device that reads less of who's who than this build (`database::READS`) is refused with, status 426:
-/// `{yours}` is the network's name as people say it.
+/// `{yours}` is the network's name as users say it.
 pub const UPDATE_REFUSAL: &str = "Update this device: {yours}'s other devices have moved on to what this one doesn't read yet.";
 
 /// The refusal as a sentence, for `yours`.
@@ -128,7 +128,7 @@ pub mod code {
         NOT_SIGNED_IN = "not_signed_in",
         /// No device runs what was asked now: its node or service is starting, asking again in a moment answers.
         RESTARTING = "restarting",
-        /// An app that isn't added, or isn't on the person's pages.
+        /// An app that isn't added, or isn't on the user's pages.
         NOT_ADDED = "not_added",
         /// A step signed for a position of who's who that another device's step has taken: sign it again for the next.
         TAKEN = "taken",

@@ -1,4 +1,4 @@
-// Docs: the person's own Google Docs, through Google's API. Signing in is the same in every
+// Docs: the user's own Google Docs, through Google's API. Signing in is the same in every
 // Google app: see google/google.js.
 
 import settings from "./dist/settings.html" with { type: "text" };
@@ -94,7 +94,7 @@ export default {
   icon: "file-text",
   color: "#4285f4",
   description: "Your Google Docs: read them as markdown or text, make them, and add or replace text",
-  instructions: `Docs is the person's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the person asked. Documents are given as documentId, an id or address. With several accounts, each tool takes account.`,
+  instructions: `Docs is the user's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the user asked. Documents are given as documentId, an id or address. With several accounts, each tool takes account.`,
   vault,
   schema,
 
@@ -112,7 +112,7 @@ export default {
     },
     create: {
       reads: false,
-      description: "Make a document in the person's Drive (in My Drive; Docs' documents.create), with text if given. Gives { id, title, url }.",
+      description: "Make a document in the user's Drive (in My Drive; Docs' documents.create), with text if given. Gives { id, title, url }.",
       input: withAccount({ title: str("its title, like Meeting notes 2026-11-03"), text: str("its first text, as plain text: markdown stays as typed") }, ["title"]),
       async run(ctx, { account: a, title, text }) {
         const email = await account(ctx, a);
@@ -123,7 +123,7 @@ export default {
     },
     append: {
       reads: false,
-      description: "Add text at the end of a document, as a new paragraph (a batchUpdate insertText). This changes the person's document: do it only when they asked.",
+      description: "Add text at the end of a document, as a new paragraph (a batchUpdate insertText). This changes the user's document: do it only when they asked.",
       input: withAccount({ documentId: docInput, text: str("the text, as plain text: markdown stays as typed") }, ["documentId", "text"]),
       async run(ctx, { account: a, documentId: document, text }) {
         const id = encodeURIComponent(docId(document));
@@ -134,7 +134,7 @@ export default {
     replace: {
       reads: false,
       confirm: true,
-      description: "Replace every match of some text in a document (a batchUpdate replaceAllText); says how many changed. Do it only when the person asked.",
+      description: "Replace every match of some text in a document (a batchUpdate replaceAllText); says how many changed. Do it only when the user asked.",
       input: withAccount({
         documentId: docInput, find: str("the text to find, exactly as docs_read gives it as text"), replace: str("what to put instead, as plain text (empty removes it)"),
         matchCase: { type: "boolean", description: "match capitals exactly (default false)" },

@@ -1,4 +1,4 @@
-//! This computer's CLI and MCP as a client device of its person, where no node runs: signed in (`sign-in`), it asks to
+//! This computer's CLI and MCP as a client device of its user, where no node runs: signed in (`sign-in`), it asks to
 //! be let in with the code it shows, as the native apps do, and once a device of theirs approved it, every request that
 //! would go to this machine's node goes to theirs over iroh instead (`instead`), through `one_client::Device`. Its key is
 //! kept beside the sign-in, where only this user reads it.
@@ -65,7 +65,7 @@ fn forget() {
     *KEPT.lock().unwrap() = None;
 }
 
-/// Whether what this CLI asks goes to its person's nodes over iroh: it's a device of theirs, and no node runs here.
+/// Whether what this CLI asks goes to its user's nodes over iroh: it's a device of theirs, and no node runs here.
 pub fn active() -> bool {
     !node_here() && kept().is_some()
 }
@@ -84,7 +84,7 @@ fn needs_node(path: &str) -> String {
     format!("this computer is one of your devices, not one that runs {NAME} ({path} is for {NAME} running here, as {CLI}d): do it on a computer that runs it")
 }
 
-/// Makes this computer one of its person's devices, at the network at `address`, where it's signed in: at once if it
+/// Makes this computer one of its user's devices, at the network at `address`, where it's signed in: at once if it
 /// already is, else it asks, shows its code, and waits for a device of theirs to approve it.
 pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
     let address = address.trim_end_matches('/');
@@ -170,7 +170,7 @@ fn keep(dir: &std::path::Path, address: &str) -> Result<()> {
     Ok(())
 }
 
-/// Signs this computer out as a device: it takes itself out of its person's devices first, as every client's sign-out
+/// Signs this computer out as a device: it takes itself out of its user's devices first, as every client's sign-out
 /// does, then forgets its key. Whether it was one.
 pub fn sign_out() -> bool {
     let Some(device) = kept() else {
@@ -217,7 +217,7 @@ fn connected(device: &Arc<Device>) -> Result<bool, one_client::Error> {
     Ok(connected)
 }
 
-/// Closes this computer's connections to its person's nodes, if it opened any, and gives back its turn: at the end
+/// Closes this computer's connections to its user's nodes, if it opened any, and gives back its turn: at the end
 /// of each command.
 pub fn end() {
     let Some(device) = KEPT.lock().unwrap().take() else { return };
@@ -250,7 +250,7 @@ fn answer(status: u16, error: String) -> Result<ureq::http::Response<ureq::Body>
 }
 
 /// A ureq middleware, the one place where what this CLI asks of its node goes: to this machine's node, as one of its
-/// own programs (`api::as_this_machine`); or while no node runs here and this computer is one of its person's devices,
+/// own programs (`api::as_this_machine`); or while no node runs here and this computer is one of its user's devices,
 /// to their nodes over iroh instead, as this device, never with this machine's token or a sign-in. Its body is read
 /// before it's sent (to disk past `IN_MEMORY`, as a node may ask for it again with the keys it needs), and streamed
 /// from there; the answer's read as it comes.

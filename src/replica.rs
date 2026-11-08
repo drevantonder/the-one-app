@@ -28,7 +28,7 @@ pub struct Handled {
     pub dropped: Vec<String>,
     /// Whether this device now holds a scope it didn't, whose steps it should read.
     pub gained: bool,
-    /// People who may no longer use a scope they could, whose sessions this device forgets.
+    /// Users who may no longer use a scope they could, whose sessions this device forgets.
     pub lost: Vec<String>,
 }
 
@@ -133,7 +133,7 @@ impl Replica {
 }
 
 /// What changed for the device `id` from `was`, who's who before, to `db`: scopes it no longer holds; whether it holds
-/// one it didn't; and people who may no longer use a scope they could.
+/// one it didn't; and users who may no longer use a scope they could.
 fn changed_from(id: &Key, was: &ScopeDb, db: &ScopeDb, handled: &mut Handled) -> Result<()> {
     handled.members = true;
     let (had, has) = (was.run_by(id)?, db.run_by(id)?);

@@ -101,7 +101,7 @@ impl Schedule {
         (0..9).filter_map(|n| day(n).and_then(at)).find(|t| *t > now)
     }
 
-    /// When it runs, for people: "every 15 minutes", "at 09:00 (Australia/Melbourne) on Mon, Fri".
+    /// When it runs, for users: "every 15 minutes", "at 09:00 (Australia/Melbourne) on Mon, Fri".
     pub fn say(&self) -> String {
         say(&self.spec())
     }

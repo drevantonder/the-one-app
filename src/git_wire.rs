@@ -33,7 +33,7 @@ pub fn wire(address: &str) -> Result<()> {
         return Ok(());
     }
     if !on_path(&helper()) {
-        // Beside the `<CLI>` people run (a link to it, on a Mac), else beside this program.
+        // Beside the `<CLI>` users run (a link to it, on a Mac), else beside this program.
         let dir = std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).find(|d| d.join(CLI).is_file()).unwrap_or_default())
             .filter(|d| !d.as_os_str().is_empty())

@@ -1,5 +1,5 @@
-// Reminders: Reminders on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Reminders;
-// this app is what people and agents use, wherever they are.
+// Reminders: Reminders on the user's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Reminders;
+// this app is what users and agents use, wherever they are.
 
 const ID = { type: "string", description: "the reminder's id, as reminders_list gives it" };
 const PRIORITY = { type: "string", enum: ["high", "medium", "low", "none"], description: "high, medium, low or none" };
@@ -13,9 +13,9 @@ export default {
   color: "#007aff",
   description: "Reminders on your Mac, for your apps and agents",
   needs: "Needs a Mac",
-  instructions: "Reminders are the person's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.",
+  instructions: "Reminders are the user's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.",
   uses: { services: ["reminders"] },
-  service: { network: [], person: true, platforms: ["mac"] },
+  service: { network: [], user: true, platforms: ["mac"] },
 
   tools: {
     lists: {
@@ -41,7 +41,7 @@ export default {
     },
     create: {
       reads: false,
-      description: "Add a reminder to a list, which syncs to the person's other Apple devices; a due time alerts them then. Gives back the new reminder as reminders_list gives them, with its id for reminders_update or reminders_delete.",
+      description: "Add a reminder to a list, which syncs to the user's other Apple devices; a due time alerts them then. Gives back the new reminder as reminders_list gives them, with its id for reminders_update or reminders_delete.",
       input: {
         type: "object",
         required: ["title"],

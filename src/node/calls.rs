@@ -43,7 +43,7 @@ pub struct CallRequest {
     /// The agent that asked (an MCP client's name), credited on the call.
     #[serde(default)]
     pub agent: Option<String>,
-    /// How many app-to-app calls deep it is: 0 when a person, an agent or a schedule made it.
+    /// How many app-to-app calls deep it is: 0 when a user, an agent or a schedule made it.
     #[serde(default)]
     pub depth: u32,
     /// The app whose `ctx.apps` made it, if one did.
@@ -175,7 +175,7 @@ const STOPPED_FOR: u64 = 15 * 60_000;
 const LATER_LIMIT: Duration = Duration::from_secs(600);
 /// How many of an app's failures a device records an hour; the rest are only counted on the next hour's.
 const FAILURES_KEPT: u32 = 30;
-/// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
+/// How many app-to-app calls deep a call may be: a user's call of A, A's of B, B's of C, C's of D.
 pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
 pub const RATE_LIMIT: u32 = 600;
@@ -470,7 +470,7 @@ impl Node {
         let passed = passed(me);
         if let Some(device) = &req.device {
             // A service's call goes to the service offering it on that device, if one serves the caller: their own
-            // first (never for a call another node passed on), then the device itself, then one its person shares
+            // first (never for a call another node passed on), then the device itself, then one its user shares
             // with everyone.
             if req.service.is_some() {
                 let own = (!passed).then(|| self.find_service(&req.app, device, &me.user, true)).flatten();
@@ -506,7 +506,7 @@ impl Node {
         self.with(|i| {
             let m = i.r.db();
             let mut devices: Vec<Key> = if req.service.is_none() {
-                // Not one whose person switched its app service off.
+                // Not one whose user switched its app service off.
                 let mut on = Vec::new();
                 for s in m.runners(&me.user, &call_scopes(i, req, &me.user)?)? {
                     if !Self::off(m, &s.key, scopes::APPS_PART)? {
@@ -566,9 +566,9 @@ impl Node {
             _ => None,
         };
         // A node listed as the caller's own client asks as itself: always for a call it runs with its own keys (one
-        // another device of its person passed here as itself, whose key the receiving device would refuse from this
+        // another device of its user passed here as itself, whose key the receiving device would refuse from this
         // connection), and a direct client's call only for a service — never one another node passed on: forwarding
-        // another client's key, or app database keys, would make the receiving device refuse its own person's call.
+        // another client's key, or app database keys, would make the receiving device refuse its own user's call.
         let as_own_client = match &me.credential {
             Credential::Own => true,
             Credential::Client(key) => req.service.is_some() && *key == me.key,
@@ -704,7 +704,7 @@ impl Node {
             return Ok(Reply::Elsewhere(format!("{} doesn't run here", req.app)));
         }
         if !self.runs_apps() {
-            return Ok(Reply::Elsewhere(format!("{} doesn't run apps: its person switched that off", self.device_name())));
+            return Ok(Reply::Elsewhere(format!("{} doesn't run apps: its user switched that off", self.device_name())));
         }
         // Before it's read every scope it holds (just taken over from an update's node, say), what's added where reads as
         // nothing: another device runs it.
@@ -801,7 +801,7 @@ impl Node {
             }
         };
         self.record(&req.app, req, me, None);
-        // Its person using it here renews the app schedules that run it for them, as their other devices do themselves.
+        // Its user using it here renews the app schedules that run it for them, as their other devices do themselves.
         if self.this_machine(me) {
             self.renew_app_schedules(&req.app);
         }
@@ -834,13 +834,13 @@ pub(super) fn address(m: &ScopeDb) -> Result<Option<String>> {
     Ok(m.setting("address")?.map(|a| a.trim_end_matches('/').to_string()))
 }
 
-/// Whether a call is one another node passed on: it runs only on what it was handed, never as this device's own person.
+/// Whether a call is one another node passed on: it runs only on what it was handed, never as this device's own user.
 fn passed(me: &Caller) -> bool {
     matches!(me.credential, Credential::Passed { .. })
 }
 
 /// The scopes a call reaches for `user`: those it names, or every one its app reaches; a service's, those it names or
-/// its person's own.
+/// its user's own.
 fn call_scopes(i: &Network, req: &CallRequest, user: &str) -> Result<Vec<Scope>> {
     let named = |s: &String| Scope::parse_for(s, user);
     match (&req.scopes, &req.service) {

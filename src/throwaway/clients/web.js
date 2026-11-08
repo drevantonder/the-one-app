@@ -1,9 +1,9 @@
 // `one throwaway client web`'s hands (src/throwaway/clients/web.rs), in one of the throwaway network's browsers, over the DevTools protocol.
 // Bun runs it:
 //   sign-in <devtools port> <address> <picture> [invite link]: the web client is opened at the throwaway network's address
-//     and signed in, as a person would, pressing Sign In, the throwaway network's auth going straight on. With an invite
-//     link, its person first opens it and joins, pictured as <picture>-invite and -joined. Prints the code it shows to
-//     be approved (pictured as <picture>-approve), or nothing if it's a device of its person's already.
+//     and signed in, as a user would, pressing Sign In, the throwaway network's auth going straight on. With an invite
+//     link, its user first opens it and joins, pictured as <picture>-invite and -joined. Prints the code it shows to
+//     be approved (pictured as <picture>-approve), or nothing if it's a device of its user's already.
 //   picture <devtools port> <address> <picture>: once the web client's window is drawn, a picture of it.
 const [command, port, address, picture, invite] = process.argv.slice(2);
 const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();

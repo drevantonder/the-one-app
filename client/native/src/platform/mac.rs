@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 pub use super::desktop::*;
 use super::menubar;
 
-/// What a call says it came from, and the platform as people say it.
+/// What a call says it came from, and the platform as users say it.
 pub const CLIENT: &str = "mac";
 pub const LABEL: &str = "Mac";
 /// How far, in points, the tray's flyouts keep from the bar and the edges (a popover's, just under the menu bar), and whether its tray is at
@@ -23,7 +23,7 @@ pub const LABEL: &str = "Mac";
 pub const FLYOUT_GAP: f64 = 5.0;
 pub const TRAY_AT_BOTTOM: bool = false;
 
-/// What the person calls this Mac, as it's named in its settings ("Andre's MacBook Air"), as the Mac app named it.
+/// What the user calls this Mac, as it's named in its settings ("Andre's MacBook Air"), as the Mac app named it.
 pub fn name() -> Option<String> {
     let named = std::process::Command::new("/usr/sbin/scutil").args(["--get", "ComputerName"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     named.filter(|n| !n.is_empty()).or_else(super::desktop::name)
@@ -70,7 +70,7 @@ pub fn unpaired(local: Option<&Value>) -> bool {
     local.is_some_and(|s| s["network"].is_null())
 }
 
-/// Its own node approves the window by its code, as one of the Mac's own programs, if it's a device of the same person
+/// Its own node approves the window by its code, as one of the Mac's own programs, if it's a device of the same user
 /// (as the Mac app's did): else the code waits for another of theirs.
 pub fn approve_here(code: String) {
     std::thread::spawn(move || crate::local("/v1/devices/approve", Some(json!({ "code": crate::device_code(&code), "confirm": true })), 30));
@@ -140,7 +140,7 @@ pub fn set_login(on: bool) {
     if on { register(&app) } else { unregister(&app) };
 }
 
-/// Whether the person lets their agents use this Mac (Computer Use's helper reads it here).
+/// Whether the user lets their agents use this Mac (Computer Use's helper reads it here).
 pub fn computer_use() -> Option<bool> {
     Some(defaults().boolForKey(&NSString::from_str("computerUse")))
 }

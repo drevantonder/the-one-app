@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 /// A problem, shown on the thing it's about: a symbol, a short title, one sentence, and the action that fixes it. `warn`
-/// for what can wait; `quiet` for what doesn't need the person (it mends itself), in no colour; otherwise it's red.
+/// for what can wait; `quiet` for what doesn't need the user (it mends itself), in no colour; otherwise it's red.
 function Problem({ title, text, action, warn = false, quiet = false, className }: {
   title: string
   text?: string

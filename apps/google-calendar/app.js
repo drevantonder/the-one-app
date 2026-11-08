@@ -1,4 +1,4 @@
-// Google Calendar: the person's own Google calendars, through Google's API. Signing in is the same in every
+// Google Calendar: the user's own Google calendars, through Google's API. Signing in is the same in every
 // Google app: see google/google.js. (The Apple Calendar on a Mac is the `calendar` service; this is Google's own,
 // from any device.)
 
@@ -105,7 +105,7 @@ export default {
   icon: "calendar",
   color: "#4285f4",
   description: "Your Google calendars, from any of your devices: events, and adding and changing them",
-  instructions: `Google Calendar is the person's Google calendars (the Mac's Apple Calendar is the calendar app). ${APP}_events lists events in a time range (default the coming week); ${APP}_event shows one. ${APP}_create_event, ${APP}_update_event and ${APP}_delete_event change the calendar, with Calendar's own Event fields (summary, start, end, ...): do them only when the person asked. Guests are told only with sendUpdates. With several accounts, each tool takes account.`,
+  instructions: `Google Calendar is the user's Google calendars (the Mac's Apple Calendar is the calendar app). ${APP}_events lists events in a time range (default the coming week); ${APP}_event shows one. ${APP}_create_event, ${APP}_update_event and ${APP}_delete_event change the calendar, with Calendar's own Event fields (summary, start, end, ...): do them only when the user asked. Guests are told only with sendUpdates. With several accounts, each tool takes account.`,
   vault,
   schema,
 
@@ -157,7 +157,7 @@ export default {
     },
     create_event: {
       reads: false,
-      description: "Add an event to a calendar (Calendar's events.insert). This changes the person's calendar: do it only when they asked. Guests are told only with sendUpdates. Gives its id and link.",
+      description: "Add an event to a calendar (Calendar's events.insert). This changes the user's calendar: do it only when they asked. Guests are told only with sendUpdates. Gives its id and link.",
       input: withAccount(eventFields, ["summary", "start"]),
       async run(ctx, input) {
         const email = await account(ctx, input.account);
@@ -167,7 +167,7 @@ export default {
     },
     update_event: {
       reads: false,
-      description: "Change an event (Calendar's events.patch): only what's given changes; attendees and recurrence, given, replace the whole list. A repeating event's id changes every repeat; one repeat's id changes just that one. This changes the person's calendar: do it only when they asked. Guests are told only with sendUpdates.",
+      description: "Change an event (Calendar's events.patch): only what's given changes; attendees and recurrence, given, replace the whole list. A repeating event's id changes every repeat; one repeat's id changes just that one. This changes the user's calendar: do it only when they asked. Guests are told only with sendUpdates.",
       input: withAccount({ eventId, ...eventFields }, ["eventId"]),
       async run(ctx, input) {
         const email = await account(ctx, input.account);
@@ -178,7 +178,7 @@ export default {
     delete_event: {
       reads: false,
       confirm: true,
-      description: "Delete an event for good (Calendar's events.delete): a repeating event's id deletes every repeat, one repeat's id just that one. Do it only when the person asked. Guests are told only with sendUpdates.",
+      description: "Delete an event for good (Calendar's events.delete): a repeating event's id deletes every repeat, one repeat's id just that one. Do it only when the user asked. Guests are told only with sendUpdates.",
       input: withAccount({ eventId, calendarId, sendUpdates }, ["eventId"]),
       async run(ctx, { account: a, eventId, calendarId, sendUpdates }) {
         const email = await account(ctx, a);

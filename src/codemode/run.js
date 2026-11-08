@@ -1,6 +1,6 @@
 // Runs one code mode script for `one run` and MCP's execute (src/code.rs), with OpenCode's interpreter: a JavaScript
 // subset with no eval, network, files or timers, that reaches the world only through `tools`. Each tool call goes back
-// to the command that started this, which runs it as the person, as any MCP call; this side only asks.
+// to the command that started this, which runs it as the user, as any MCP call; this side only asks.
 //
 // stdin: first { code, tools: [{ app, tool, description, input }], limits }, then { reply, ok | error } for
 // each call. stdout: { call, app, tool, input } for each call, then { done: result }.

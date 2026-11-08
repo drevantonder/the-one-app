@@ -2,13 +2,13 @@
 //! open it, what's sealed under an epoch, signed requests, and the keys a caller hands a node for one call.
 //! `cloudflare/shared/crypto.js` writes the same formats, and `tests/contracts.rs` checks they agree.
 //!
-//! Every client is a device with its own key pair, never shared by a person's devices: a native app's in the Keychain,
+//! Every client is a device with its own key pair, never shared by a user's devices: a native app's in the Keychain,
 //! keystore or Credential Locker, a browser's a non-extractable WebCrypto key in IndexedDB, a local agent's its
-//! machine's. A new device gets in only when one of its person's devices approves it, from a code or QR that shows
-//! which device it is, which seals it the keys of the scopes it may open. A person who lost a device is let back in by
+//! machine's. A new device gets in only when one of its user's devices approves it, from a code or QR that shows
+//! which device it is, which seals it the keys of the scopes it may open. A user who lost a device is let back in by
 //! another, by a copy sealed under a passkey's PRF (optional for most, kept because synced passkeys make it
 //! self-service), or by the network's recovery key, kept offline by an admin, each use of it an entry in the log.
-//! A scope gets a new epoch when a person, or a device that didn't sign itself out (lost or stolen), loses the right
+//! A scope gets a new epoch when a user, or a device that didn't sign itself out (lost or stolen), loses the right
 //! to open it, never on sign-out, where the device deletes its own key: the keys are sealed to everyone who still
 //! belongs. Epochs never go down along a database's positions (`src/database/stored.rs`).
 //!
@@ -73,7 +73,7 @@ impl Endpoint {
 }
 
 /// What a native app's device seals the last answers of its screens' calls under (client/src/device.rs): its own, from
-/// its key, so no other device (another person's sign-in has its own) opens them.
+/// its key, so no other device (another user's sign-in has its own) opens them.
 pub fn answers_key(key: &SigningKey) -> [u8; 32] {
     hkdf(&key.to_bytes(), b"one/answers")
 }
@@ -481,7 +481,7 @@ pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
 
 /// What a node with no sign-in to pass on (the Cloudflare node, or a machine's passing on a call it was handed keys
 /// for) asks another node to run a call with (`src/node/net.rs`): the call, naming `scopes`, the scopes it reaches,
-/// the person it's for, and the keys of those scopes it was handed, sealed to that node's `seal` key for calls from
+/// the user it's for, and the keys of those scopes it was handed, sealed to that node's `seal` key for calls from
 /// its own endpoint (`from`), until `until`. Never a sign-in's token, which whoever runs the node could use as them;
 /// nor keys of a scope the call doesn't name. The other node runs it on those keys alone, and only if `from` may run
 /// every one of `scopes`.
@@ -562,7 +562,7 @@ impl std::fmt::Display for Route {
 /// other, the log alone.
 ///
 /// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the network
-/// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
+/// may read already: any of them may add any app, and read its code. Another scope's are its own users' files, and
 /// never go with a request.
 pub fn may_hand(route: &Route, need: &Need) -> bool {
     use crate::{database::scopes::CoreDb::{self, Blobs as BLOBS, Log as LOG, Vault as VAULT}, protocol::path};
@@ -650,7 +650,7 @@ pub fn waited(status: u16, said: &Value) -> Waited {
     }
 }
 
-/// The code a new device shows, which a device of its person types or scans to approve it: the first 8 base32
+/// The code a new device shows, which a device of its user types or scans to approve it: the first 8 base32
 /// characters of the sha256 of its key and seal key, so whoever passes on its request can swap neither.
 pub fn join_code(device: &Endpoint) -> String {
     BASE32_NOPAD.encode(&sha256(&[device.key, device.seal].concat()))[..8].to_string()
@@ -716,7 +716,7 @@ mod tests {
         assert!(may_hand(&at("/v1/steps"), &need("node", "log")) && !may_hand(&at("/v1/steps"), &need("tally", "main")) && !may_hand(&at("/v1/state"), &need("node", "vault")));
         assert!(may_hand(&at("/v1/vault"), &need("node", "vault")) && !may_hand(&at("/v1/vault"), &need("tally", "main")));
         // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
-        // blobs, its people's files, never.
+        // blobs, its users' files, never.
         let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
         assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/v1/badges"), &blobs("global")) && may_hand(&at("/v1/apps"), &blobs("global")));
         assert!(!may_hand(&at("/v1/apps"), &need("tally", "main")) && !may_hand(&at("/v1/apps"), &blobs("user:ab")));
@@ -834,7 +834,7 @@ pub fn hex(key: &Key) -> String {
     HEXLOWER.encode(key)
 }
 
-/// A short, readable form of a key for people and logs.
+/// A short, readable form of a key for users and logs.
 pub fn short(key: &Key) -> String {
     hex(key)[..8].to_string()
 }

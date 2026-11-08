@@ -1,4 +1,4 @@
-// This person's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add a Device, their
+// This user's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add a Device, their
 // browsers), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
 // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping;
 // under Devices, where this device holds its own keys (`device.keys`, the web client), which of their devices run
@@ -549,7 +549,7 @@ function DeviceRow({ icon, title, sub, children }) {
 // A device waiting to be let in: which it is, where from, what approving it records it signed in with, its code to
 // check, and the answers. Approve is the one that matters.
 function Waiting({ r, busy, answer }) {
-  const sub = [r.yours ? "" : `${r.person}’s first device`, r.place].filter(Boolean).join(" · ")
+  const sub = [r.yours ? "" : `${r.user}’s first device`, r.place].filter(Boolean).join(" · ")
   return (
     <div role="group" aria-label={`${r.device} wants to join`} className="flex w-full max-w-2xl flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground @xl:flex-row @xl:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-3 text-sm">
@@ -603,7 +603,7 @@ function Scanned({ scan, done, cancel }) {
     <div role="group" aria-label={`Approve ${r.device}?`} className="flex w-full max-w-2xl flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground">
       <div>
         <div className="font-medium">Approve {r.device}?</div>
-        <div className="text-sm text-muted-foreground">{r.new ? `${r.person}’s first device. They join ${yours}.` : "It can open everything you can."}</div>
+        <div className="text-sm text-muted-foreground">{r.new ? `${r.user}’s first device. They join ${yours}.` : "It can open everything you can."}</div>
       </div>
       {error && <Problem title={error} />}
       <div className="flex justify-end gap-2">
@@ -688,7 +688,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
             </List>
           </Section>
         )}
-        {/* This browser, or the app, gets notifications once its person says so here: asked only when they tap it. */}
+        {/* This browser, or the app, gets notifications once its user says so here: asked only when they tap it. */}
         {device.notify === "default" && (
           <Button variant="ghost" className="self-start" onClick={() => act(async () => (device.notify = await one.notify()))}>
             <Icon name="bell" />Get Notifications Here
@@ -887,8 +887,8 @@ function Services({ m, cellOpen, tap }) {
   const titles = {}
   for (const p of cols.flatMap((x) => x.parts)) titles[p.name] ||= m.partTitle(p)
   const names = Object.keys(titles).sort((a, b) => (b === "apps") - (a === "apps") || titles[a].localeCompare(titles[b]))
-  // Services whose apps declare they run as the person: said, never silently.
-  const asYou = names.filter((n) => cols.some((x) => x.parts.some((p) => p.name === n && p.on && p.person))).map((n) => titles[n])
+  // Services whose apps declare they run as the user: said, never silently.
+  const asYou = names.filter((n) => cols.some((x) => x.parts.some((p) => p.name === n && p.on && p.user))).map((n) => titles[n])
   const icon = (name) => (name === "apps" ? { name: "apps", title: "Runs apps", icon: "squares-four", color: "#007aff" } : { ...(m.appOf(name) || {}), name, title: titles[name] })
   let open = null
   const cell = (x, ci, name) => {
@@ -954,7 +954,7 @@ function Services({ m, cellOpen, tap }) {
   )
 }
 
-/// Names as a person says them: "A, B and C".
+/// Names as a user says them: "A, B and C".
 const list = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0] || "")
 
 // ---- Dialogs ----

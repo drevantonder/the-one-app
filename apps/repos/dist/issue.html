@@ -456,13 +456,13 @@ function ne(t) {
 	let _e = ge, ve;
 	n[24] === K ? ve = n[25] : (ve = () => K("reopen", "reopen_issue", le), n[24] = K, n[25] = ve);
 	let ye = ve, be;
-	n[26] !== v || n[27] !== a ? (be = async () => {
+	n[26] !== a || n[27] !== v ? (be = async () => {
 		try {
-			y(v || await one.call("_people", { repo: a })), L("assign");
+			y(v || await one.call("_users", { repo: a })), L("assign");
 		} catch (e) {
 			A(D(e).title);
 		}
-	}, n[26] = v, n[27] = a, n[28] = be) : be = n[28];
+	}, n[26] = a, n[27] = v, n[28] = be) : be = n[28];
 	let xe = be, Se;
 	n[29] === a ? Se = n[30] : (Se = async () => {
 		try {
@@ -724,7 +724,7 @@ function ne(t) {
 		done: () => L(null)
 	}), n[143] = G, n[144] = _, n[145] = I, n[146] = lt) : lt = n[146];
 	let ut;
-	n[147] !== _.assignees || n[148] !== _.number || n[149] !== I || n[150] !== f || n[151] !== v || n[152] !== a ? (ut = I === "assign" && v && /* @__PURE__ */ C(U, {
+	n[147] !== _.assignees || n[148] !== _.number || n[149] !== I || n[150] !== f || n[151] !== a || n[152] !== v ? (ut = I === "assign" && v && /* @__PURE__ */ C(U, {
 		title: "Assignees",
 		items: v.map(oe),
 		chosen: _.assignees.map(ae),
@@ -735,7 +735,7 @@ function ne(t) {
 		}),
 		empty: "No one to assign.",
 		done: () => (L(null), f.reload())
-	}), n[147] = _.assignees, n[148] = _.number, n[149] = I, n[150] = f, n[151] = v, n[152] = a, n[153] = ut) : ut = n[153];
+	}), n[147] = _.assignees, n[148] = _.number, n[149] = I, n[150] = f, n[151] = a, n[152] = v, n[153] = ut) : ut = n[153];
 	let $;
 	n[154] !== _.labels || n[155] !== _.number || n[156] !== I || n[157] !== f || n[158] !== a ? ($ = I?.labels && /* @__PURE__ */ C(U, {
 		title: "Labels",

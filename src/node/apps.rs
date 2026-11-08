@@ -1,4 +1,4 @@
-//! Apps: the network's, every one people may add, and adding, deploying, forking and retiring them.
+//! Apps: the network's, every one users may add, and adding, deploying, forking and retiring them.
 
 use super::*;
 
@@ -6,7 +6,7 @@ pub(crate) mod routes;
 pub mod cli;
 
 impl Node {
-    /// What people call `app`, for what they read: its title, or its service's, else its name.
+    /// What users call `app`, for what they read: its title, or its service's, else its name.
     pub(super) async fn title(&self, app: &str) -> String {
         match self.0.apps.title(app).await {
             Some(title) => title,
@@ -136,7 +136,7 @@ impl Node {
         url
     }
 
-    /// The picture `apps_drawn` named `name`, as its type and bytes: looked for again in this machine's person's apps
+    /// The picture `apps_drawn` named `name`, as its type and bytes: looked for again in this machine's user's apps
     /// if this node didn't name it (it's newer than the list that did, or another node made that list).
     pub async fn named_image(&self, name: &str) -> Option<(String, Vec<u8>)> {
         let found = || self.0.named_images.lock().unwrap().get(name).cloned();

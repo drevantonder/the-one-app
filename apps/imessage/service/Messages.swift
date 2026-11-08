@@ -9,7 +9,7 @@ struct MessagesApp: Service {
     let app = "imessage"
     let localApp: String? = "com.apple.MobileSMS"
 
-    /// Full Disk Access to read Messages' database, which macOS never asks for: the person turns it on. Then control of
+    /// Full Disk Access to read Messages' database, which macOS never asks for: the user turns it on. Then control of
     /// Messages, to send, which it asks for once (Messages open, hidden, if it isn't). Contacts' names are asked for
     /// too, but needn't be given: without them, a message shows its number.
     func needs() async -> String? {
@@ -291,7 +291,7 @@ func archivedText(_ b: [UInt8]) -> String? {
 }
 
 /// Whether macOS lets this helper control Messages: noErr, errAEEventNotPermitted, errAEEventWouldRequireUserConsent
-/// (not asked yet), or procNotFound (Messages isn't open, so it can't tell). Asking waits for the person's answer.
+/// (not asked yet), or procNotFound (Messages isn't open, so it can't tell). Asking waits for the user's answer.
 enum Automation {
     static let messages = "com.apple.MobileSMS"
 

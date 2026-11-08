@@ -3,7 +3,7 @@
 // (what refresh_tools said the server has), and deploys it again when the tools change.
 //
 // Servers that want OAuth (MCP's authorization: protected resource metadata, dynamic client registration, PKCE) are
-// signed in with sign_in, as many accounts as the person likes. Each account is an item in the caller's Vault: its
+// signed in with sign_in, as many accounts as the user likes. Each account is an item in the caller's Vault: its
 // tokens (and its client's secret) as secret fields, sent only to the server and its token address, and how to
 // refresh them as plain ones. The store keeps only a sign-in that's waiting, with its verifier.
 
@@ -12,7 +12,7 @@ import listed from "./tools.json";
 
 const NAME = server.name;
 const PROTOCOL = "2025-06-18";
-// Where the browser goes after consent. Nothing listens there: the person copies the address it fails to load.
+// Where the browser goes after consent. Nothing listens there: the user copies the address it fails to load.
 const REDIRECT = `http://127.0.0.1/oauth/${NAME}`;
 const MINE = new Set(["sign_in", "sign_out", "accounts", "refresh_tools"]);
 

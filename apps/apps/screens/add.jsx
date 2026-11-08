@@ -1,4 +1,4 @@
-// The Add to… sheet, from an app's row or its page: a switch for each of the person's pages, dimmed with a few words of
+// The Add to… sheet, from an app's row or its page: a switch for each of the user's pages, dimmed with a few words of
 // why where they can't use it; and for an app with a service, the node it runs on, chosen before adding it, and picked
 // again to move it there.
 import { useEffect, useState } from "react"

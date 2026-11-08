@@ -23,7 +23,7 @@ fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {
 }
 
 impl Node {
-    /// Where this device keeps the network's data, as a person sees it.
+    /// Where this device keeps the network's data, as a user sees it.
     pub fn storage(&self) -> Result<Value> {
         self.with(|i| {
             Ok(match &i.bucket {

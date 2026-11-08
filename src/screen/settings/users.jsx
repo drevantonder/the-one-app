@@ -1,6 +1,6 @@
 // Everyone in the network, each with their handle, theirs first, which opens a dialog to change it. For admins, each
 // other one's role a menu on their row, with Remove there too, and adding someone new, with an invite link (or, where
-// people sign in with Google, how they join). The last admin's role can't change.
+// users sign in with Google, how they join). The last admin's role can't change.
 //
 // A Settings screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into dist/users.html,
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.

@@ -1,4 +1,4 @@
-// Auth's screens: signing in, to the network or to a client, joining with an invite link, and a person's
+// Auth's screens: signing in, to the network or to a client, joining with an invite link, and a user's
 // passkeys. Plain HTML with a little script, served from auth at the network's address, so passkeys
 // belong to its name.
 
@@ -134,7 +134,7 @@ const page = (title, body, script) => `<!doctype html><html><head><meta charset=
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
 
 /// Signing in, to the network or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
-/// is the person, with everything they can use, so it's asked each time. With Google (\`google\`, the network's
+/// is the user, with everything they can use, so it's asked each time. With Google (\`google\`, the network's
 /// domain), it's signing in with Google, or with a passkey for an admin.
 export function signInPage(look) {
   const { name, google } = look;
@@ -151,7 +151,7 @@ export function signInPage(look) {
     if (client_id) (async () => {
       try {
         const about = await api("/sign-in/about?" + oauth_query);
-        const title = "Sign in to " + about.client + (about.person ? " as " + about.person : "");
+        const title = "Sign in to " + about.client + (about.user ? " as " + about.user : "");
         document.title = title;
         document.getElementById("title").textContent = title;
         if (!about.web) acts(about);
@@ -240,15 +240,15 @@ function googlePage(look) {
 }
 
 /// Signing in on a throwaway network (`one throwaway`), with no passkey, straight on, so a client being tested signs in with nobody
-/// there: as whoever this browser is signed in as here (its first person, or someone who joined in it), or, with
+/// there: as whoever this browser is signed in as here (its first user, or someone who joined in it), or, with
 /// `?as=<name>` and no client, as someone who joined, for a device's browser before its app signs in. The button is for
 /// a browser that won't go on to an app by itself.
 export function throwawayPage(look) {
-  const { name, person } = look;
+  const { name, user } = look;
   const body = `
     <h1 class="${TITLE}" id="title">Sign in to ${escape(name)}</h1>
     <p class="${TEXT}" id="what">For testing: no passkey needed.</p>
-    <button class="${DEFAULT}" id="go">Sign In as ${escape(person)}</button>`;
+    <button class="${DEFAULT}" id="go">Sign In as ${escape(user)}</button>`;
   const script = `
     const oauth_query = location.search.slice(1);
     const params = new URLSearchParams(oauth_query);
@@ -257,11 +257,11 @@ export function throwawayPage(look) {
       say();
       const undo = busy(button, "Signing In…");
       try {
-        const { person } = await api("/api/auth/throwaway/sign-in", params.get("as") ? { person: params.get("as") } : { join: params.get("join") || undefined });
+        const { user } = await api("/api/auth/throwaway/sign-in", params.get("as") ? { user: params.get("as") } : { join: params.get("join") || undefined });
         if (params.get("as")) {
           undo();
-          button.textContent = "Sign In as " + person;
-          return void (document.getElementById("what").textContent = "This browser is signed in here as " + person + ".");
+          button.textContent = "Sign In as " + user;
+          return void (document.getElementById("what").textContent = "This browser is signed in here as " + user + ".");
         }
         location.href = params.get("client_id") ? (await api("/sign-in/accept", { oauth_query })).url : "/";
       } catch (err) {
@@ -276,7 +276,7 @@ export function throwawayPage(look) {
 
 /// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up: making a first passkey,
 /// or signing in with Google (`google`) as the email it's for, or on a throwaway network (`throwaway`), with nothing to make. With
-/// `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the person who just joined.
+/// `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the user who just joined.
 export function invitePage(look) {
   const { name, yours, throwaway, google } = look;
   const body = `
@@ -305,14 +305,14 @@ export function invitePage(look) {
     const button = document.getElementById("go");
     // Google's answer comes back here with an error if it didn't sign them up.
     if (/(^|&)error=/.test(location.search.slice(1))) say("That Google account isn't the one this invite is for.");
-    // Whoever was signed in here before, the invite is for its person: signed out as the page opens, beside asking
+    // Whoever was signed in here before, the invite is for its user: signed out as the page opens, beside asking
     // whose invite it is, and then the passkey's options, so the prompt comes the moment Make a Passkey is tapped.
     const out = api("/api/auth/sign-out", {}).catch(() => {});
     if (!throwaway && !google) out.then(() => ready(register(secret)));
     (async () => {
       try {
         const about = await api("/invite/about", { secret });
-        document.getElementById("title").textContent = "Welcome, " + about.person;
+        document.getElementById("title").textContent = "Welcome, " + about.user;
         if (google && about.email) document.getElementById("what").textContent = "With your Google account, " + about.email + ".";
         button.disabled = false;
       } catch (err) { say(err.message); }
@@ -321,7 +321,7 @@ export function invitePage(look) {
       say();
       const undo = busy(button, throwaway ? "Joining…" : google ? "Opening Google…" : "Making a Passkey…");
       try {
-        // Kept in this tab for the web client, whose request to let in this person's first device proves it.
+        // Kept in this tab for the web client, whose request to let in this user's first device proves it.
         sessionStorage.setItem("one.invite", secret);
         await out;
         if (google) {

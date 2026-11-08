@@ -48,7 +48,7 @@ data class Kept(
     val widgets: List<KeptWidget> = emptyList(),
     /** When they were all fetched, in seconds since 1970. */
     val fetched: Double? = null,
-    /** Set once the person signs out: nothing of theirs is left. */
+    /** Set once the user signs out: nothing of theirs is left. */
     val signedOut: Boolean = false,
 ) {
     /** When they were fetched, in ms. */
@@ -168,7 +168,7 @@ object HomeWidgets {
         reload(app)
     }
 
-    /** A button or toggle's tool, run by the app's library as the person → the error, if it didn't work. */
+    /** A button or toggle's tool, run by the app's library as the user → the error, if it didn't work. */
     suspend fun run(app: String, tool: String, input: JsonElement): String? = withContext(Dispatchers.IO) {
         val said = JSONObject(Native.call("call", JSONObject().put("app", app).put("tool", tool).put("input", JSONObject(input.toString())).toString()))
         said.optString("error").ifEmpty { null }

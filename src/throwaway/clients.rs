@@ -21,19 +21,19 @@ mod windows;
 const PRESS_SIGN_IN: &str = "document.querySelector('[data-slot=welcome-action]')?.click()";
 
 /// `throwaway client <kind> [--as <name>]`: a client of this checkout's build, signed in to the throwaway network as its first
-/// person, or as someone else they invited, and how to see and use it. Again, it's the same client, with this
+/// user, or as someone else they invited, and how to see and use it. Again, it's the same client, with this
 /// checkout's build as it is now.
 pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, rest: &[String]) -> Result<()> {
     let started = Instant::now();
     // A session while it runs: a new build waits for the next command with none to start the throwaway network again.
     let _session = client_session(dir);
-    let person = match rest.iter().position(|a| a == "--as") {
-        Some(at) => Some(person_named(rest.get(at + 1).context("--as who? --as sam")?)?),
+    let user = match rest.iter().position(|a| a == "--as") {
+        Some(at) => Some(user_named(rest.get(at + 1).context("--as who? --as sam")?)?),
         None => None,
     };
-    // As its first person is as nobody else.
-    let first = settings.throwaway_person.as_ref().map(|(_, name)| name.to_lowercase());
-    let person = person.filter(|name| Some(name.to_lowercase()) != first);
+    // As its first user is as nobody else.
+    let first = settings.throwaway_user.as_ref().map(|(_, name)| name.to_lowercase());
+    let user = user.filter(|name| Some(name.to_lowercase()) != first);
     match rest.first().map(String::as_str) {
         Some("web") => {
             // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it would test the address.
@@ -41,25 +41,25 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
                 one::cloudflare::client_version().is_some(),
                 "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI} throwaway client web, which builds it"
             );
-            web::web(dir, settings, person.as_deref())?
+            web::web(dir, settings, user.as_deref())?
         }
         Some("cli") => return cli::cli(dir, settings, &rest[1..]),
         Some("linux") => {
-            if let Some(name) = &person {
+            if let Some(name) = &user {
                 web::joined(dir, settings, name)?;
             }
-            linux::linux(dir, checkout, settings, person.as_deref())?
+            linux::linux(dir, checkout, settings, user.as_deref())?
         }
         Some(kind @ ("mac" | "iphone")) => {
-            anyhow::ensure!(person.is_none(), "the {kind} client signs in only as the throwaway network's first person: use web, linux or android for someone else");
+            anyhow::ensure!(user.is_none(), "the {kind} client signs in only as the throwaway network's first user: use web, linux or android for someone else");
             apple::apple(dir, checkout, settings, kind == "iphone")?
         }
         Some(kind @ ("android" | "windows")) => {
-            if let Some(name) = &person {
+            if let Some(name) = &user {
                 // They join where anyone does, in a browser: the throwaway network's own here.
                 web::joined(dir, settings, name)?;
             }
-            device_client(dir, checkout, settings, kind, person.as_deref())?
+            device_client(dir, checkout, settings, kind, user.as_deref())?
         }
         _ => bail!("which client? {CLI} throwaway client web, linux, mac, iphone, android, windows or cli, with --as <name> for someone else"),
     }
@@ -67,17 +67,17 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
     Ok(())
 }
 
-/// Someone's name as `--as` gives it, as people write it: "sam" is Sam.
-pub(crate) fn person_named(given: &str) -> Result<String> {
+/// Someone's name as `--as` gives it, as users write it: "sam" is Sam.
+pub(crate) fn user_named(given: &str) -> Result<String> {
     let given = given.trim();
     anyhow::ensure!(!given.is_empty() && given.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '-'), "--as takes a name, like --as sam");
     let mut chars = given.chars();
     Ok(chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default())
 }
 
-/// An Android or Windows client: on a throwaway copy of the person's lasting device, borrowed for the throwaway network,
+/// An Android or Windows client: on a throwaway copy of the user's lasting device, borrowed for the throwaway network,
 /// which reaches the throwaway network's address at the same address; this checkout's build installed there, and signed in.
-fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, kind: &str, person: Option<&str>) -> Result<()> {
+fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, kind: &str, user: Option<&str>) -> Result<()> {
     let mut borrowed = devices(dir);
     let what = borrowed_for(checkout, kind);
     let listed = listed_devices;
@@ -126,8 +126,8 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settin
         })
     };
     let built = match kind {
-        "android" => android::android(dir, checkout, &device, settings, person),
-        _ => windows::windows(dir, checkout, &device, settings, person),
+        "android" => android::android(dir, checkout, &device, settings, user),
+        _ => windows::windows(dir, checkout, &device, settings, user),
     };
     building.store(false, std::sync::atomic::Ordering::Relaxed);
     let _ = keep.join();
@@ -136,7 +136,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settin
         "The {kind} client of this build is signed in to the throwaway network{}, on the device {device}, a throwaway copy borrowed for it.
   See it: {CLI} computer screen --device {device} (computer_screen), or {CLI} computer view --device {device} for a link
   Use it: computer_use with device {device} (computer_tools lists what it takes); {CLI} throwaway stop gives it back",
-        person.map(|name| format!(" as {name}")).unwrap_or_default()
+        user.map(|name| format!(" as {name}")).unwrap_or_default()
     );
     Ok(())
 }

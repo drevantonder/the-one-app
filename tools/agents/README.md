@@ -1,6 +1,6 @@
 # Agent experience
 
-Whether a fresh agent, prompted the way a person types, finds its way with the MCP server only, the CLI only, or both:
+Whether a fresh agent, prompted the way a user types, finds its way with the MCP server only, the CLI only, or both:
 
 ```sh
 python3 tools/agents/run.py                      # every prompt, all three setups, local Gemma 4 12B: about 40 minutes

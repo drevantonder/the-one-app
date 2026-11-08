@@ -56,7 +56,7 @@ async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>)
     })))
 }
 
-/// A new network, named `name`, whose first person is `user_name` (with `user`, their id).
+/// A new network, named `name`, whose first user is `user_name` (with `user`, their id).
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Create {

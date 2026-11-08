@@ -1,4 +1,4 @@
-//! Shell's service: runs a command on its device, as its person, and logs each in its folder.
+//! Shell's service: runs a command on its device, as its user, and logs each in its folder.
 
 use std::io::{Read, Write};
 use std::os::unix::process::CommandExt;

@@ -1,4 +1,4 @@
-// The person's own Windows accent colour, which a widget's `accent` tone draws in on the Widgets board.
+// The user's own Windows accent colour, which a widget's `accent` tone draws in on the Widgets board.
 using Windows.UI;
 using Windows.UI.ViewManagement;
 

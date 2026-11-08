@@ -30,7 +30,7 @@ Spiked on 2026-11-05, since today's API gives it nothing to do; it waits for the
 
 ## Open
 
-- **The default roles:** the core's are `permissions::DEFAULTS`. The network's admins keep adding people to any group
+- **The default roles:** the core's are `permissions::DEFAULTS`. The network's admins keep adding users to any group
   (their `manager` role gives a group's `member`), but make no one its admin: decide who makes a new admin of a group whose
   admins have all gone.
 - **Busy app databases** that collide often: measure before changing anything (batching, then a lease).

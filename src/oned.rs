@@ -4,9 +4,9 @@
 //! each service: each a process of oned's own (`oned <name>`, `service::run`) with its own key, which oned lists as its
 //! device's. Each is on while the device's latest `service` step for it says so; with none, the app runtime is on, the
 //! rest off; and each is started again when it stops, the rest left running.
-//! Only the device's person writes that step (its switch in Settings' Devices), and oned starts and stops the parts as
+//! Only the device's user writes that step (its switch in Settings' Devices), and oned starts and stops the parts as
 //! it changes. Each process part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
-//! person whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
+//! user whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
 //! its device lists it. Its program is its app's own (`apps/<name>/service/`), and oned runs only a build its app's
 //! latest deploy names for this platform (`bundle::SERVICES`), which `<cli> deploy` builds where it's run, or, for one
 //! whose deploy names none, as a built-in app's, the newest `<cli> update` built and published signed with the release
@@ -14,7 +14,7 @@
 //! it at `~/.local/bin/<cli>-<name>` when it's switched on and again when another is named or a newer one's published;
 //! a Mac app carries the built-in ones in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
 //! stopping, failed and why) and how it runs: in its sandbox as its app declares (`sandbox`, which oned tells each
-//! part in its folder, `declared.json`), without one and why, or as the person; which is what Settings' Devices shows. Removing a device removes its parts, and can erase
+//! part in its folder, `declared.json`), without one and why, or as the user; which is what Settings' Devices shows. Removing a device removes its parts, and can erase
 //! what it keeps, which the device does itself, so only while it's reachable. On a Mac the app is oned; a phone runs
 //! none, its app is the device.
 
@@ -126,13 +126,13 @@ pub struct Now {
     pub problem: Option<String>,
 }
 
-/// How a part runs, as its app declares: without its sandbox, saying why, or as the person.
+/// How a part runs, as its app declares: without its sandbox, saying why, or as the user.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub struct Held {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub person: bool,
+    pub user: bool,
 }
 
 /// What oned's thread for a node's parts (`keep_parts`) tells the node about them, for its hello: how each part running
@@ -287,7 +287,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                     let names = offered(&released.iter().filter(|(_, b)| **b != Build::None).map(|(n, _)| n.clone()).collect(), &on);
                     node.parts().now.lock().unwrap().1 = names.clone();
                     for name in &names {
-                        // A Mac service's helper the Mac app carries runs unless its person switched it off there; any other,
+                        // A Mac service's helper the Mac app carries runs unless its user switched it off there; any other,
                         // only where it's switched on.
                         let wanted = on.contains_key(name) || (helper(name).is_some() && node.removed_here(name).is_none());
                         // Switched on again while it runs fine (its record naming its scope), it goes on running.
@@ -382,7 +382,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                             match start(&network, name, said.as_ref()) {
                                 Ok(child) => {
                                     tracing::info!("oned started {name}");
-                                    let held = Held { sandbox: crate::services::sandbox::unsandboxed(said.as_ref(), &device), person: said.as_ref().is_some_and(|d| d.person) };
+                                    let held = Held { sandbox: crate::services::sandbox::unsandboxed(said.as_ref(), &device), user: said.as_ref().is_some_and(|d| d.user) };
                                     hold(&node, &runtime, name, Some(held));
                                     running.insert(name.clone(), (child, Instant::now()));
                                     let problem = node.parts().now.lock().unwrap().0.get(name).and_then(|n| n.problem.clone());
@@ -603,7 +603,7 @@ async fn serve(args: &[String]) -> Result<()> {
     let node = Node::start(&dir, true).await?;
     // Its parts that run as processes of their own, as its steps switch them.
     crate::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
-    // Git here reaches the network's repos at their address, as on every computer of its person's, and the harnesses
+    // Git here reaches the network's repos at their address, as on every computer of its user's, and the harnesses
     // installed here reach this node.
     let mode = crate::mode::here();
     if matches!(mode, crate::mode::Mode::Own) {

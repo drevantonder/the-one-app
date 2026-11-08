@@ -1,4 +1,4 @@
-//! What this node and each of its services say, kept in a file of its own so a person's agent can read it over the
+//! What this node and each of its services say, kept in a file of its own so a user's agent can read it over the
 //! network (`one logs <device>`), without ssh and without knowing where the machine's supervisor puts it (systemd's
 //! journal isn't readable by the node's own user). Each is `<home>/logs/<name>.log`, `node` or the service's name, each
 //! line `<ms since 1970> <text>`, and the one before it, `.log.1`, once it passes `KEPT`: so at most twice that is kept.
@@ -296,7 +296,7 @@ pub fn feature() -> crate::core_tools::Feature {
 pub(crate) fn tool() -> serde_json::Value {
     serde_json::json!({
         "name": "logs",
-        "description": "Read a device's log over the network, instead of ssh: its node's, or one of its services', or for a phone or computer app, what its app and page say went wrong (read while the app is open and connected). The newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's person and the network's admins may.",
+        "description": "Read a device's log over the network, instead of ssh: its node's, or one of its services', or for a phone or computer app, what its app and page say went wrong (read while the app is open and connected). The newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's user and the network's admins may.",
         "reads": true,
         "input": { "type": "object", "required": ["device"], "properties": {
             "device": { "type": "string", "description": "the device's name (devices_requests and groups_list name them; the status command lists them)" },

@@ -12,22 +12,22 @@ use super::super::devices::{approve_code, build, didnt_sign_in, on_device};
 /// (client/native/windows/build.sh), installed there, then started by its program's path in the package (so it runs as
 /// the package, as its badge and widgets need), at the throwaway network's address, printing its sign-in rather than
 /// opening a browser, and with a control port, as linux() starts it: its Sign In pressed, the sign-in approved as the
-/// throwaway network's first person or `person`, coming back to it on the device, and its code approved by the
+/// throwaway network's first user or `user`, coming back to it on the device, and its code approved by the
 /// throwaway network's machine. Once signed in on a device as them (a file in the throwaway network's folder says so), a
 /// new build keeps that sign-in.
-pub(crate) fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
+pub(crate) fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
     build(checkout, "client/native/windows/build.sh", &[("DEVICE", device), ("PROFILE", "dev"), ("NO_START", "1")])?;
     let file = NAME.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
     let signed_in = dir.join(format!("signed-in-{device}"));
-    let first = settings.throwaway_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
-    let who = person.unwrap_or(first);
+    let first = settings.throwaway_user.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
+    let who = user.unwrap_or(first);
     let here = format!("{address}\n{who}");
     let kept = std::fs::read_to_string(&signed_in).is_ok_and(|was| was == here);
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{device}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
     let env = |key: &str| one::config::env(key);
-    // A copy of the person's computer may have the app signed in elsewhere, or as someone else: what it kept goes (its
+    // A copy of the user's computer may have the app signed in elsewhere, or as someone else: what it kept goes (its
     // folder, the package's, and its sign-in in the Credential Manager), and it signs in again. Started on the device's
     // desktop, as a task signed in there (a window started from SSH never draws), as build.ps1 does; what it says, in a
     // log there.
@@ -40,7 +40,7 @@ if (${fresh}) {{
   Remove-Item -Recurse -Force $data -ErrorAction SilentlyContinue
   cmdkey /delete:'refresh.{CLI} sign-in' | Out-Null
 }}
-# The address, kept where the one a person types is, so what runs beside it (the widgets' helper) finds it too.
+# The address, kept where the one a user types is, so what runs beside it (the widgets' helper) finds it too.
 New-Item -ItemType Directory -Force $data | Out-Null
 Set-Content "$data\address" '{address}' -NoNewline
 $env:{print_var} = '1'
@@ -75,14 +75,14 @@ Start-ScheduledTask -TaskName one-throwaway-app"#
             break;
         }
         match said.lines().rev().find_map(|l| l.trim().strip_prefix("Sign in: ")) {
-            // Approved as the person, then back to the app at its loopback port, which only the device reaches.
+            // Approved as the user, then back to the app at its loopback port, which only the device reaches.
             Some(url) if !signed => {
-                let back = crate::sign_in::approved_on_throwaway(address, url, person)?;
+                let back = crate::sign_in::approved_on_throwaway(address, url, user)?;
                 on_device(device, &format!("Invoke-WebRequest -UseBasicParsing '{}' | Out-Null", back.replace('\'', "''")))?;
                 signed = true;
             }
             Some(_) => {}
-            // Signed out: its Sign In, pressed for the person.
+            // Signed out: its Sign In, pressed for the user.
             None => drop(eval(super::PRESS_SIGN_IN)),
         }
         if let Some(code) = said.lines().rev().find_map(|l| l.trim().strip_prefix("Code: "))

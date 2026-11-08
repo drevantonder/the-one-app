@@ -20,7 +20,7 @@ use tauri::plugin::{Builder, TauriPlugin};
 
 pub use super::mobile::*;
 
-/// What a call says it came from, and the platform as people say it.
+/// What a call says it came from, and the platform as users say it.
 pub const CLIENT: &str = "android";
 pub const LABEL: &str = "Android";
 
@@ -116,7 +116,7 @@ pub fn redraw_widgets() {
 /// An Android launcher counts what notifications it shows, not what the app says.
 pub fn badge(_: u32) {}
 
-/// Whether this build shows notifications, asking the person first if `ask`; none where it has no pushes to show (no
+/// Whether this build shows notifications, asking the user first if `ask`; none where it has no pushes to show (no
 /// Firebase project in its config.toml), so Settings has no row for it.
 pub async fn notify(ask: bool) -> Option<String> {
     ask_off("notify", json!({ "ask": ask })).await.ok().and_then(|v| v["state"].as_str().map(str::to_string))
@@ -139,7 +139,7 @@ pub fn sign_in(signing: &crate::signin::SignIn, join: &str, print: bool) -> Resu
     })
 }
 
-/// What the person calls this phone: its name in Settings, else its model.
+/// What the user calls this phone: its name in Settings, else its model.
 pub fn name() -> Option<String> {
     host("name", json!({})).ok()?.as_str().map(str::to_string).filter(|n| !n.is_empty())
 }
@@ -155,13 +155,13 @@ pub fn can_scan() -> bool {
     host("canScan", json!({})).ok().and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
-/// How much bigger than usual the person has made text in Settings (1 for usual), for screens to be zoomed by.
+/// How much bigger than usual the user has made text in Settings (1 for usual), for screens to be zoomed by.
 pub fn text_scale() -> f64 {
     host("textScale", json!({})).ok().and_then(|v| v.as_f64()).unwrap_or(1.0)
 }
 
 /// Once let in, in a build with pushes (a Firebase project in its config.toml): gives the push Worker this phone's FCM
-/// token, as it starts and whenever it changes (`register-push`); and asks the person, once, whether it may show
+/// token, as it starts and whenever it changes (`register-push`); and asks the user, once, whether it may show
 /// notifications. Notes are opened with the device's key by Kotlin's `PushService`.
 pub fn let_in(device: Arc<one_client::Device>) {
     push(device, |token| one::push::Address { via: "fcm".into(), address: token, ..Default::default() });

@@ -50,9 +50,9 @@ function describe() {
     hooks: Object.keys(app.hooks || {}),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], services: app.uses?.services || [] },
-    // Its service's wrapper: the hosts it may reach ("*" for any) and whether it runs as the node's person; and the
+    // Its service's wrapper: the hosts it may reach ("*" for any) and whether it runs as the node's user; and the
     // platforms it's built for, the nodes the App Store offers to run it.
-    ...(app.service ? { service: { network: [].concat(app.service.network || []).map(String), person: app.service.person === true, ...(app.service.platforms ? { platforms: [].concat(app.service.platforms).map(String) } : {}) } } : {}),
+    ...(app.service ? { service: { network: [].concat(app.service.network || []).map(String), user: app.service.user === true, ...(app.service.platforms ? { platforms: [].concat(app.service.platforms).map(String) } : {}) } } : {}),
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
     // Each kind of scope's schema (user, group, global), as the changes that make it, oldest first.
     schema: Object.fromEntries(Object.entries(app.schema || {}).map(([kind, sql]) => [kind, [].concat(sql)])),
@@ -101,7 +101,7 @@ async function finish(ask, later, appends) {
   await ask("done", JSON.stringify({ error })).catch(() => {});
 }
 
-/// A widget's options' defaults, as its render sees them when a person chose none.
+/// A widget's options' defaults, as its render sees them when a user chose none.
 function optionDefaults(widget) {
   return Object.fromEntries(Object.entries(widget?.options || {}).map(([name, o]) => [name, o.default ?? null]));
 }
@@ -186,14 +186,14 @@ function context(ask, body, appends, later) {
     /// The app whose ctx.apps made this call, if one did.
     from: body.from ?? null,
     /// The port this node's local API answers on at 127.0.0.1, the custom build's (config.toml) unless it was started
-    /// on another: where a sign-in sends the person's browser back. Null on a node with none (the Cloudflare node).
+    /// on another: where a sign-in sends the user's browser back. Null on a node with none (the Cloudflare node).
     port: body.port ?? null,
     /// The network's address (`https://…`, no last `/`), or null in a network with no address yet: a sign-in at
-    /// another site sends the person back to `<address>/back?state=<app>/<screen>&…`, which opens that screen of this
+    /// another site sends the user back to `<address>/back?state=<app>/<screen>&…`, which opens that screen of this
     /// app with `params.back`, that whole address.
     address: body.address ?? null,
     /// Everyone's and every group's handle in the network, what apps call them by in addresses and lists:
-    /// [{ handle, id: "user:<id>" | "group:<id>", name }], a removed person's with removed: true, a group's with its
+    /// [{ handle, id: "user:<id>" | "group:<id>", name }], a removed user's with removed: true, a group's with its
     /// members: { <user id>: "admin" | "member" }. `me.handle` is the caller's.
     handles: body.handles,
     /// Says what this call spent on AI, { model, usd, input, output }: it shows in the insights of the app that called
@@ -287,7 +287,7 @@ function context(ask, body, appends, later) {
       appends.push({ kind: "source", app: name, link: String(link ?? "") });
     },
     /// Runs an app's service on a device (by name) or stops it there, for the app added in `scope` (by default where the
-    /// caller sees it added): for the device's person, or to stop it, for who may add apps where it ran.
+    /// caller sees it added): for the device's user, or to stop it, for who may add apps where it ran.
     service: (name, device, on = false, scope) => {
       writing();
       appends.push({ kind: "service", name, device, on, ...(scope ? { scope } : {}) });

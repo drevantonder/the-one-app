@@ -1,7 +1,7 @@
 // The package's helper: what Windows starts beside the app for what only the Windows App SDK does, with no window and
 // no client or key of its own. The Widgets board starts it as the package's COM server for its widgets (Widgets.cs); a
 // toast's click or button, or a push, starts it to answer them (Notes.cs); the app starts it to register its push
-// channel (--register-push). Whatever it needs of the person's devices it asks the app's own program, which answers
+// channel (--register-push). Whatever it needs of the user's devices it asks the app's own program, which answers
 // with no window (client/native/src/headless.rs), as JSON.
 using System;
 using System.Collections.Generic;
@@ -36,7 +36,7 @@ public static class Program
     }
 }
 
-/// What the app's program says went wrong, as a sentence for the person.
+/// What the app's program says went wrong, as a sentence for the user.
 public sealed class Refused(string message) : Exception(message);
 
 /// The app's own program, beside this one in the package.
@@ -53,7 +53,7 @@ public static class App
     {
         var start = new ProcessStartInfo(Exe) { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true, ArgumentList = { "--headless", kind, input.ToJsonString() } };
         using var p = Process.Start(start) ?? throw new Refused($"{CustomBuild.Name} didn’t start.");
-        // One that can't reach the person's devices gives up, as a page's request would.
+        // One that can't reach the user's devices gives up, as a page's request would.
         using var limit = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(90));
         string said;
         try
@@ -72,7 +72,7 @@ public static class App
         return answer;
     }
 
-    /// A link of the app's (`<cli>://…`), opened in its window, which comes to the front: the person just clicked.
+    /// A link of the app's (`<cli>://…`), opened in its window, which comes to the front: the user just clicked.
     public static void Open(string link)
     {
         AllowSetForegroundWindow(-1);
@@ -81,7 +81,7 @@ public static class App
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int process);
 
-    /// What went wrong, kept where the person (or whoever helps them) can send it.
+    /// What went wrong, kept where the user (or whoever helps them) can send it.
     public static void Problem(Exception e)
     {
         try

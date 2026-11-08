@@ -1,4 +1,4 @@
-// Small parts of Repos' pages: GitHub's mark, a person, a label as GitHub draws it, an issue's state, +/− counts, and
+// Small parts of Repos' pages: GitHub's mark, a user, a label as GitHub draws it, an issue's state, +/− counts, and
 // a Markdown field to write in.
 import { useState } from "react"
 import { CopyButton, Icon, Markdown, Tabs, TabsList, TabsTrigger, Textarea, cn } from "@one/ui"

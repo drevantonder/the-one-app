@@ -1,4 +1,4 @@
-//! Push's tools: notifications to the person's own devices, for agents (apps push with `ctx.notify`).
+//! Push's tools: notifications to the user's own devices, for agents (apps push with `ctx.notify`).
 
 use serde_json::{Value, json};
 

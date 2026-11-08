@@ -133,7 +133,7 @@ pub(in crate::node) struct Prepared {
     put: Vec<String>,
 }
 
-/// Checks one of a call's appends: into a scope it named, which the caller may write. `title` is what people call
+/// Checks one of a call's appends: into a scope it named, which the caller may write. `title` is what users call
 /// the app a switch, retire or source names.
 pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, title: &str) -> Result<(Scope, Content)> {
     Ok(match append {

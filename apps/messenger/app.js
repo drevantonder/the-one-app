@@ -1,4 +1,4 @@
-// Messenger: the person's Facebook Messenger, read through messenger.com in the browser of a device borrowed from Agent
+// Messenger: the user's Facebook Messenger, read through messenger.com in the browser of a device borrowed from Agent
 // Devices. Messenger has no API for personal accounts and its chats are end-to-end encrypted, so messenger.com in a
 // browser is the way in. Each account is a browser profile signed in to it. This app borrows a device with the profile
 // (agent-devices_borrow), drives its browser through Computer Use's tools (computer_*) and reads the page as the outline
@@ -184,7 +184,7 @@ function pick(chats, want) {
 class NotSignedIn extends Error {
   code = "not_signed_in";
   constructor() {
-    super("Messenger isn't signed in on that browser profile. Ask the person to sign in again: messenger_sign_in with the profile gives them a link, where they sign in at messenger.com (with Keep me signed in), then save the profile");
+    super("Messenger isn't signed in on that browser profile. Ask the user to sign in again: messenger_sign_in with the profile gives them a link, where they sign in at messenger.com (with Keep me signed in), then save the profile");
   }
 }
 
@@ -356,7 +356,7 @@ class Browser {
         await sleep(500);
         const p = await this.snapshot("");
         if (p.signedOut()) {
-          // Its copy of the profile stays signed out: borrow afresh next time, after the person signed in.
+          // Its copy of the profile stays signed out: borrow afresh next time, after the user signed in.
           await this.giveBack();
           throw new NotSignedIn();
         }
@@ -512,7 +512,7 @@ class Browser {
   }
 }
 
-// What the app keeps, in the person's own scope: the browser profiles linked, the default first, and why one needs
+// What the app keeps, in the user's own scope: the browser profiles linked, the default first, and why one needs
 // signing in again, as its last read found; and the device each profile has borrowed, with its browser. An install that
 // linked none yet has the browser profile called default.
 const SCHEMA = `
@@ -579,7 +579,7 @@ async function browse(ctx, input, tool, run) {
   return result;
 }
 
-// Each account is a Vault item too, so the person's Vault lists it: the browser profile, plain, with no secret, since the
+// Each account is a Vault item too, so the user's Vault lists it: the browser profile, plain, with no secret, since the
 // sign-in itself stays in the profile.
 const TYPE = "Messenger account";
 const VAULT = {
@@ -606,7 +606,7 @@ export default {
   color: "#0866ff",
   description: "Your Messenger chats, for your agents: read, search and send",
   needs: "Needs Agent Devices on one of your devices",
-  instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, Work), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
+  instructions: "Messenger is the user's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, Work), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the user a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the user asked, with the exact text they approved.",
   uses: { apps: ["agent-devices", "computer"] },
   vault: VAULT,
   schema: { user: SCHEMA },
@@ -648,21 +648,21 @@ export default {
     send: {
       reads: false,
       confirm: true,
-      description: "Send a Messenger message, as the person, to a recent chat or to someone by their exact name. It sends a real message to a real person and can't be taken back: only what the person asked to send, to whom they asked. Says to whom it went.",
+      description: "Send a Messenger message, as the user, to a recent chat or to someone by their exact name. It sends a real message to a real person and can't be taken back: only what the user asked to send, to whom they asked. Says to whom it went.",
       input: {
         type: "object",
         required: ["chat", "text"],
         properties: {
           account: ACCOUNT,
           chat: { type: "string", description: `${CHAT}; or anyone else by their exact name, as Messenger shows it` },
-          text: { type: "string", description: "the message, exactly as the person approved it" },
+          text: { type: "string", description: "the message, exactly as the user approved it" },
         },
       },
       run: (ctx, input) => browse(ctx, input, "send", (b) => b.send(text(input.chat), text(input.text))),
     },
     sign_in: {
       reads: false,
-      description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, for them to sign in there themselves; never sign in for them. Signs the default profile in again when none is given.",
+      description: "For the user: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, for them to sign in there themselves; never sign in for them. Signs the default profile in again when none is given.",
       input: { type: "object", properties: { profile: { type: "string", description: "the browser profile's name, like Personal or Work; agent-devices_profiles lists them" } } },
       async run(ctx, input) {
         const s = await load(ctx);
@@ -683,7 +683,7 @@ export default {
         await keep(ctx, s.linked);
         return {
           profile, url, device: got.device, on: got.on,
-          text: `Give the person this link: ${url}\nThey sign in to Messenger there, in the ${profile} browser profile (tick Keep me signed in), then press Done on Messenger's settings, or Done Signing In on the profile in the Vault; it's saved by itself after 30 minutes otherwise.`,
+          text: `Give the user this link: ${url}\nThey sign in to Messenger there, in the ${profile} browser profile (tick Keep me signed in), then press Done on Messenger's settings, or Done Signing In on the profile in the Vault; it's saved by itself after 30 minutes otherwise.`,
         };
       },
     },

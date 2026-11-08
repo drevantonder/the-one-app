@@ -1,4 +1,4 @@
-//! Schedules: an app's schedules run on the machine its person chose for them (its app schedules, src/node/
+//! Schedules: an app's schedules run on the machine its user chose for them (its app schedules, src/node/
 //! app_schedules.rs), from its node, with their keys alone: each slot once, whichever such machine takes it first,
 //! and none while every one is off.
 

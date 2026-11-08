@@ -89,7 +89,7 @@ impl Client {
     }
 }
 
-/// This browser as a device of its person (client/src/keyring.rs): who's who as it reads it itself, the keys it opens,
+/// This browser as a device of its user (client/src/keyring.rs): who's who as it reads it itself, the keys it opens,
 /// and its requests, which hand them, through its session's `Client`. `key` and `seal` are its keys, hex; `on` is what it
 /// reaches through JavaScript (`crate::js::On`), and `shared(share)`, the X25519 secret its seal key, which WebCrypto
 /// never lets out, agrees with `share`.
@@ -102,7 +102,7 @@ pub struct Keyring {
     answers: std::cell::RefCell<Option<std::rc::Rc<crate::answers::Answers<crate::js::Shelf>>>>,
 }
 
-/// The last answer of each call screens make that only reads, kept in this browser for its person (`answers`), through
+/// The last answer of each call screens make that only reads, kept in this browser for its user (`answers`), through
 /// `shelf` (`js::Shelf`): what's kept is read at once, before the session starts; what's kept comes from its device's
 /// requests (`Keyring::keeping`).
 #[wasm_bindgen]
@@ -137,7 +137,7 @@ impl Keyring {
         Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), me, on: crate::js::On::of(on, self::key(&key)?), client: Default::default(), answers: Default::default() })
     }
 
-    /// Asks auth to let this browser in, as the person signed in with `token`, calling it `name` (and with someone
+    /// Asks auth to let this browser in, as the user signed in with `token`, calling it `name` (and with someone
     /// new's `invite` secret, its proof): `join::ask`.
     pub async fn ask(&self, token: String, name: String, invite: Option<String>) -> Result<(), Failed> {
         crate::join::ask(&self.on, &token, &crate::join::asking(&self.me, &name, None, invite.as_deref())).await.map_err(Failed::of)
@@ -191,7 +191,7 @@ impl Keyring {
         serde_json::json!({ "nodes": nodes, "ranks": ranks, "wakes": self.keyring.cloudflare_node().as_ref().map(hex) }).to_string()
     }
 
-    /// A request to its person's nodes (`Keyring::request`), with the keys its kind needed, handed until `until` (ms),
+    /// A request to its user's nodes (`Keyring::request`), with the keys its kind needed, handed until `until` (ms),
     /// learning what a node asks for: as `Client::fetch`, its trace each try's, as a JSON list. Before who's who lists
     /// this device, it's read again a few times while the relay lets it in, as its approval may not be there yet.
     pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>, until: f64, trace: bool) -> Result<Response, Failed> {
@@ -222,14 +222,14 @@ impl Keyring {
         Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace: traced, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
     }
 
-    /// As each start of a client does: its person's own things it settles if they aren't (`Keyring::settle_own`).
+    /// As each start of a client does: its user's own things it settles if they aren't (`Keyring::settle_own`).
     pub async fn settle(&self) -> Result<(), Failed> {
         self.keyring.load(&self.on).await.map_err(Failed::of)?;
         let client = self.client.borrow().clone().ok_or_else(|| Failed::of(crate::keyring::refused()))?;
         self.keyring.settle_own(&client, &self.on, None).await.map_err(Failed::of)
     }
 
-    /// Renews its person's app schedules of `app` as they use it (`Keyring::renew_app_schedules`).
+    /// Renews its user's app schedules of `app` as they use it (`Keyring::renew_app_schedules`).
     #[wasm_bindgen(js_name = renewAppSchedules)]
     pub async fn renew_app_schedules(&self, app: String) {
         let Some(client) = self.client.borrow().clone() else { return };

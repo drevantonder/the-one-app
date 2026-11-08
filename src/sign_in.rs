@@ -1,5 +1,5 @@
 //! This machine's CLI and MCP signed in at the network's address, as every other client is: an OAuth client of its auth
-//! service, registered the first time it signs in. The person approves a short code by signing in on any device
+//! service, registered the first time it signs in. The user approves a short code by signing in on any device
 //! (`cloudflare/auth`'s `/sign-in/code`), here in the browser if this machine has a screen. The refresh token is kept in a
 //! file only this machine's user reads, outside the node's data: the node is only ever sent access tokens.
 
@@ -27,7 +27,7 @@ pub struct Kept {
     pub until: u64,
 }
 
-/// Where it's kept: in the person's config, one for each node this CLI reaches (`<CLI>_ADDR`); a throwaway network's, in its
+/// Where it's kept: in the user's config, one for each node this CLI reaches (`<CLI>_ADDR`); a throwaway network's, in its
 /// folder, which stopping it deletes.
 pub fn path() -> PathBuf {
     if let one::mode::Mode::Throwaway(t) = one::mode::here() {
@@ -83,7 +83,7 @@ fn client(auth: &Auth) -> Result<String> {
     Ok(auth.register(&format!("{NAME} on {}", hostname()), &back(&auth.address), false)?)
 }
 
-/// A sign-in under way: the code the person approves, and what turns it into tokens here.
+/// A sign-in under way: the code the user approves, and what turns it into tokens here.
 pub struct Started {
     pub code: String,
     pub url: String,
@@ -93,7 +93,7 @@ pub struct Started {
 }
 
 /// Starts signing in to the network at `address`, for the device `join` names (its key ‖ seal key, hex), if it's one
-/// that then asks to be let in: → the code the person approves, and its link.
+/// that then asks to be let in: → the code the user approves, and its link.
 pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
     let auth = Auth::at(address)?;
     let client = client(&auth)?;
@@ -106,11 +106,11 @@ pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
     Ok(Started { code: code.into(), url: url.into(), client, auth, asked })
 }
 
-/// Approves a sign-in as a throwaway network's first person would in a browser, with no passkey: a code's link (the CLI's) or
+/// Approves a sign-in as a throwaway network's first user would in a browser, with no passkey: a code's link (the CLI's) or
 /// an authorization (an app's, which then comes back to it). Only a throwaway network's auth signs anyone in this way
-/// (`cloudflare/auth`'s `throwawayNetwork`). `person`, someone who joined it, signs in as them instead.
-pub fn approve_on_throwaway(address: &str, url: &str, person: Option<&str>) -> Result<()> {
-    let back = approved_on_throwaway(address, url, person)?;
+/// (`cloudflare/auth`'s `throwawayNetwork`). `user`, someone who joined it, signs in as them instead.
+pub fn approve_on_throwaway(address: &str, url: &str, user: Option<&str>) -> Result<()> {
+    let back = approved_on_throwaway(address, url, user)?;
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
     agent.get(back).call()?;
     Ok(())
@@ -118,7 +118,7 @@ pub fn approve_on_throwaway(address: &str, url: &str, person: Option<&str>) -> R
 
 /// `approve_on_throwaway`, but for an app on another machine, where it comes back to (its loopback redirect, which
 /// only that machine reaches): → that URL, for it to open there.
-pub fn approved_on_throwaway(address: &str, url: &str, person: Option<&str>) -> Result<String> {
+pub fn approved_on_throwaway(address: &str, url: &str, user: Option<&str>) -> Result<String> {
     let address = address.trim_end_matches('/');
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
     let went = |resp: &ureq::http::Response<ureq::Body>| resp.headers().get("location").and_then(|l| l.to_str().ok()).map(str::to_string);
@@ -136,8 +136,8 @@ pub fn approved_on_throwaway(address: &str, url: &str, person: Option<&str>) -> 
     let oauth_query = page.split_once('?').map(|(_, q)| q.to_string()).context("its sign-in page had no authorization")?;
     // For the device its authorization names, as a throwaway network's sign-in page signs in for it.
     let join = oauth_query.split('&').find_map(|p| p.strip_prefix("join="));
-    let who = match person {
-        Some(person) => serde_json::json!({ "person": person }),
+    let who = match user {
+        Some(user) => serde_json::json!({ "user": user }),
         None => serde_json::json!({ "join": join }),
     };
     let mut resp = agent.post(format!("{address}/api/auth/throwaway/sign-in")).header("origin", address).send_json(who)?;
@@ -245,7 +245,7 @@ pub fn hostname() -> String {
     std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "this machine".into())
 }
 
-/// Whether a browser here would be in front of the person: a Mac's own session, or a Linux desktop's, not SSH.
+/// Whether a browser here would be in front of the user: a Mac's own session, or a Linux desktop's, not SSH.
 pub fn has_screen() -> bool {
     if std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some() {
         return false;

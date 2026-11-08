@@ -561,12 +561,12 @@ fn every_renderer_of_a_widgets_tree_draws_the_same_types_and_tones() {
 fn what_the_screens_read_of_the_state_is_what_the_node_says() {
     use one::database::scopes::{Kind, Role};
     use one::state::*;
-    let part = || Part { name: "apps".into(), on: true, title: Some("Apps".into()), fixed: true, doing: Some("Starting".into()), problem: Some("It stopped".into()), sandbox: Some("why".into()), person: true };
+    let part = || Part { name: "apps".into(), on: true, title: Some("Apps".into()), fixed: true, doing: Some("Starting".into()), problem: Some("It stopped".into()), sandbox: Some("why".into()), user: true };
     let sample = State {
         config: Config { name: "The One App".into(), cli: "one".into(), store: "apps".into(), install: Some("curl".into()) },
         me: Viewer { key: "k".into(), name: "n".into(), user: "u".into() },
         device: Answering { key: "k".into(), name: "n".into(), ready: true, guide: Some("g".into()) },
-        user: Some(Person { id: "u".into(), name: "n".into(), role: Role::Admin }),
+        user: Some(User { id: "u".into(), name: "n".into(), role: Role::Admin }),
         network: Some(Network {
             name: "n".into(),
             root: Some("r".into()),

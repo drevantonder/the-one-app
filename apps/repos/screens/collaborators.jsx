@@ -7,7 +7,7 @@ import { Frame, Pending, Section, said, useCall } from "../lib/use.jsx"
 
 const P = one.params
 
-const Person = ({ p, trailing }) => (
+const User = ({ p, trailing }) => (
   <ListRow leading={<Avatar name={p.name} size={32} />} title={p.name} sub={p.handle ? `@${p.handle}` : undefined} trailing={trailing} />
 )
 
@@ -15,7 +15,7 @@ function Add({ d, done }) {
   const [query, setQuery] = useState("")
   const [error, setError] = useState("")
   const q = query.trim().toLowerCase()
-  const found = d.people.filter((p) => !q || p.name.toLowerCase().includes(q) || p.handle.includes(q))
+  const found = d.users.filter((p) => !q || p.name.toLowerCase().includes(q) || p.handle.includes(q))
   const add = async (p) => {
     setError("")
     try {
@@ -31,9 +31,9 @@ function Add({ d, done }) {
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
         <div className="relative">
           <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Find people" aria-label="Find people" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
+          <Input className="pl-8" placeholder="Find users" aria-label="Find users" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
         </div>
-        {!d.people.length ? (
+        {!d.users.length ? (
           <p className="text-sm text-muted-foreground">Everyone pushes to it already.</p>
         ) : found.length ? (
           <List>
@@ -75,10 +75,10 @@ function Collaborators() {
       <RepoTabs repo={P.repo} on="settings" info={issues.data || undefined} />
       <div className="flex max-w-2xl flex-col gap-6">
         {trouble && <Problem title={trouble} />}
-        <Section title="Owner"><List><Person p={d.owner} /></List></Section>
+        <Section title="Owner"><List><User p={d.owner} /></List></Section>
         {d.group && (
           <Section title={`Members of ${d.owner.name}`}>
-            <List>{d.members.map((m) => <Person key={m.handle} p={m} trailing={<span className="text-xs text-muted-foreground">{m.role === "admin" ? "Admin" : "Member"}</span>} />)}</List>
+            <List>{d.members.map((m) => <User key={m.handle} p={m} trailing={<span className="text-xs text-muted-foreground">{m.role === "admin" ? "Admin" : "Member"}</span>} />)}</List>
             <p className="px-1 text-xs text-muted-foreground">Its admins own it, and its members push to it.</p>
           </Section>
         )}
@@ -86,7 +86,7 @@ function Collaborators() {
           {d.collaborators.length ? (
             <List>
               {d.collaborators.map((c) => (
-                <Person key={c.handle} p={c} trailing={d.yours ? <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" aria-label={`Remove ${c.name}`} onClick={() => remove(c)}>Remove</Button> : undefined} />
+                <User key={c.handle} p={c} trailing={d.yours ? <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" aria-label={`Remove ${c.name}`} onClick={() => remove(c)}>Remove</Button> : undefined} />
               ))}
             </List>
           ) : (

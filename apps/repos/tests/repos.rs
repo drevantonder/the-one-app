@@ -1,5 +1,5 @@
 //! Repos' rules, as a node runs the app: who pushes to a repo and who deletes it, the objects a merge of packs keeps, and
-//! whose GitHub sign-in and organization a person sees. It runs with the rest of `cargo test` (tests/main.rs), and a
+//! whose GitHub sign-in and organization a user sees. It runs with the rest of `cargo test` (tests/main.rs), and a
 //! deploy leaves it out of the app (`tests/`).
 
 use serde_json::{Value, json};
@@ -213,7 +213,7 @@ async fn a_repos_merged_packs_hold_every_object_pushed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_github_sign_in_only_to_them() {
+async fn a_groups_github_organization_shows_only_to_its_members_and_a_users_github_sign_in_only_to_them() {
     use one::node::Caller;
     use std::sync::{Arc, Mutex};
     let a = start("repos-github").await;

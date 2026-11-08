@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client"
 import { AppIcon, Button, Empty, Icon, List, ListRow, Problem, Skeleton } from "@one/ui"
 import { home } from "./lib/model.js"
 
-/// Only what this screen shows: the person's pages and the apps on them, not the widgets Home draws.
+/// Only what this screen shows: the user's pages and the apps on them, not the widgets Home draws.
 async function load() {
   ;[home.data.state, home.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")])
 }
@@ -30,7 +30,7 @@ function build() {
   return { may: pages.some((p) => home.canArrange(p.scope)) && !!home.addAccountApp(), withAccounts }
 }
 
-/// Add Account: the person's accounts in the Vault this app wants and doesn't use yet, to switch it on for one; with
+/// Add Account: the user's accounts in the Vault this app wants and doesn't use yet, to switch it on for one; with
 /// none, its sign-in.
 async function addAccount(a, p, at, stale, reload) {
   const signIn = home.settings(a, p, true)

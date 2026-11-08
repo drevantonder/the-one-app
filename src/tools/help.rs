@@ -121,7 +121,7 @@ fn about(tool: &Value) -> String {
     format!("{}{mark}", first_sentence(tool["description"].as_str().unwrap_or("")))
 }
 
-/// The tools of `apps` a person may call, with their set's name.
+/// The tools of `apps` a user may call, with their set's name.
 fn callable(apps: &[Value]) -> impl Iterator<Item = (&str, &Value)> {
     apps.iter().flat_map(|a| a["tools"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).map(move |o| (a["name"].as_str().unwrap_or(""), o)))
 }

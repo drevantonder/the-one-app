@@ -137,7 +137,7 @@ export function IssueView({ repo, number, onGone }) {
   const issue = useCall("issue", { repo, number: Number(number) })
   const [room, width] = useWidth()
   const d = issue.data
-  const [people, setPeople] = useState(null)
+  const [users, setUsers] = useState(null)
   const [draft, setDraft] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState("")
@@ -145,7 +145,7 @@ export function IssueView({ repo, number, onGone }) {
   const [editing, setEditing] = useState(null)
 
   useEffect(() => {
-    setPeople(null)
+    setUsers(null)
     setDraft("")
     setError("")
     setDialog(null)
@@ -181,7 +181,7 @@ export function IssueView({ repo, number, onGone }) {
 
   const assign = async () => {
     try {
-      setPeople(people || (await one.call("_people", { repo })))
+      setUsers(users || (await one.call("_users", { repo })))
       setDialog("assign")
     } catch (err) {
       setError(said(err).title)
@@ -279,10 +279,10 @@ export function IssueView({ repo, number, onGone }) {
       </div>
 
       {dialog === "edit" && <EditDialog d={d} act={act} done={() => setDialog(null)} />}
-      {dialog === "assign" && people && (
+      {dialog === "assign" && users && (
         <Ticks
           title="Assignees"
-          items={people.map((p) => ({ key: p.handle, node: <><Avatar name={p.name} size={28} /><span className="min-w-0"><span className="block truncate font-medium">{p.name}</span><span className="block truncate text-muted-foreground">@{p.handle}</span></span></> }))}
+          items={users.map((p) => ({ key: p.handle, node: <><Avatar name={p.name} size={28} /><span className="min-w-0"><span className="block truncate font-medium">{p.name}</span><span className="block truncate text-muted-foreground">@{p.handle}</span></span></> }))}
           chosen={d.assignees.map((a) => a.handle)}
           save={(keys) => one.call("edit_issue", { repo, number: d.number, assignees: keys })}
           empty="No one to assign."

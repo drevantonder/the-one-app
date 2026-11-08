@@ -1,4 +1,4 @@
-//! `GET /v1/state`: the network as one person sees it, from `global`'s scope database, the same from a node on a
+//! `GET /v1/state`: the network as one user sees it, from `global`'s scope database, the same from a node on a
 //! machine and from the Cloudflare node. What only the node answering knows (which devices are online and how loaded,
 //! who is looking) it says in `Here`.
 
@@ -23,8 +23,8 @@ pub struct State {
     pub me: Viewer,
     /// The node answering.
     pub device: Answering,
-    /// The person looking, if the network lists them.
-    pub user: Option<Person>,
+    /// The user looking, if the network lists them.
+    pub user: Option<User>,
     /// None until a device joins one.
     pub network: Option<Network>,
     /// The pages this user can read, as every client lists them (see `pages`).
@@ -50,7 +50,7 @@ impl State {
         self.network.as_ref()?.settings.get("address").map(String::as_str)
     }
 
-    /// The person looking, by name; with none listed, who the node says is looking.
+    /// The user looking, by name; with none listed, who the node says is looking.
     pub fn looking(&self) -> &str {
         self.user.as_ref().map_or(self.me.name.as_str(), |u| u.name.as_str())
     }
@@ -73,7 +73,7 @@ pub struct Viewer {
     pub user: String,
 }
 
-/// The client looking, when it's one of the person's devices.
+/// The client looking, when it's one of the user's devices.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ClientHere {
     pub key: String,
@@ -91,7 +91,7 @@ pub struct Answering {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Person {
+pub struct User {
     pub id: String,
     pub name: String,
     pub role: Role,
@@ -151,7 +151,7 @@ pub struct Network {
     pub devices: Vec<Device>,
     pub devices_at: u64,
     pub clients: Vec<Client>,
-    /// App schedules in the scopes this person may set them in: which endpoint runs which app's schedules in which
+    /// App schedules in the scopes this user may set them in: which endpoint runs which app's schedules in which
     /// scope, until when, and who set them. Ones whose endpoint is gone, or whose setter may set them no more, are
     /// over.
     pub app_schedules: Vec<AppSchedule>,
@@ -206,7 +206,7 @@ pub struct Device {
     pub key: String,
     pub seal: String,
     pub name: String,
-    /// Its person's id.
+    /// Its user's id.
     pub user: String,
     pub roles: BTreeSet<Kind>,
     pub since: u64,
@@ -217,7 +217,7 @@ pub struct Device {
     pub order: usize,
     pub serves_me: bool,
     pub runs_for: Vec<String>,
-    /// Services its person switched off there.
+    /// Services its user switched off there.
     pub off_services: Vec<Switched>,
     /// Whether the viewer is looking from it.
     pub me: bool,
@@ -245,7 +245,7 @@ pub struct DeviceNow {
     pub services: Vec<String>,
     #[serde(default)]
     pub installed_services: Vec<InstalledService>,
-    /// What it can run, for its person and the admins to see; None where it doesn't say.
+    /// What it can run, for its user and the admins to see; None where it doesn't say.
     #[serde(default)]
     pub parts: Option<Vec<Part>>,
     #[serde(default)]
@@ -295,11 +295,11 @@ pub struct Part {
     pub doing: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
-    /// How it runs, as its app declares: without its sandbox, saying why, or as the person.
+    /// How it runs, as its app declares: without its sandbox, saying why, or as the user.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub person: bool,
+    pub user: bool,
 }
 
 /// A device that doesn't run calls: a browser or an app signed in.
@@ -316,7 +316,7 @@ pub struct Client {
     pub since: u64,
     pub place: Option<String>,
     pub me: bool,
-    /// What it signed in with, for its own person only: their Sign-ins.
+    /// What it signed in with, for its own user only: their Sign-ins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sign_in: Option<crate::sign_in_proof::Account>,
 }
@@ -355,15 +355,15 @@ pub struct Here<'a> {
     /// Whether that node is one of the network's devices.
     pub member: bool,
     pub steps: u64,
-    /// Requests for an item waiting for this person to answer.
+    /// Requests for an item waiting for this user to answer.
     pub waiting: usize,
-    /// How this person arranged each of their pages.
+    /// How this user arranged each of their pages.
     pub arrangements: BTreeMap<String, Value>,
     /// What's wrong with backups, for an admin.
     pub backups: Option<Value>,
     /// Where an agent reads how to connect itself, when the network has no address.
     pub guide: Option<String>,
-    /// Whether this is a throwaway network, whose sign-in lets its person in with no passkey. Every other network's people
+    /// Whether this is a throwaway network, whose sign-in lets its user in with no passkey. Every other network's users
     /// manage passkeys at its address, a Google one's too: its admins sign in only with one.
     pub throwaway: bool,
     /// What it knows of each device now.
@@ -383,7 +383,7 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<State> {
         config: Config { name: crate::config::NAME.into(), cli: crate::config::CLI.into(), store, install: install_line() },
         me: here.me,
         device: here.device,
-        user: me.map(|u| Person { id: u.id, name: u.name, role: u.role }),
+        user: me.map(|u| User { id: u.id, name: u.name, role: u.role }),
         network,
         pages: m.map(|m| pages(m, user, &here.arrangements)).transpose()?.unwrap_or_default(),
         vault_requests: here.waiting,
@@ -398,11 +398,11 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Result<State> {
 /// The pages `user` can read, as every client lists them, each `{ scope, title, subtitle, hidden }`: theirs, their
 /// groups' in the order they chose (Edit Pages…: any they haven't ordered after, by name), everyone's last. `hidden` is
 /// a group's page they switched off; whoever lists pages to show leaves it out. `subtitle` says who a page is for and
-/// who chooses its apps: a few people by name, more as how many; for only them, nothing.
+/// who chooses its apps: a few users by name, more as how many; for only them, nothing.
 fn pages(m: &ScopeDb, user: &str, arrangements: &BTreeMap<String, Value>) -> Result<Vec<Page>> {
     let users = m.users()?;
     let name = |id: &str| if id == user { "You".to_string() } else { users.iter().find(|u| u.id == id && !u.removed).map_or("Someone".to_string(), |u| u.name.clone()) };
-    // People by name, you last, as "you".
+    // Users by name, you last, as "you".
     let named = |ids: &[&str]| {
         let mut ids = ids.to_vec();
         ids.sort_by_cached_key(|id| (*id == user, name(id).to_lowercase()));
@@ -422,7 +422,7 @@ fn pages(m: &ScopeDb, user: &str, arrangements: &BTreeMap<String, Value>) -> Res
         if ids == [user] {
             return String::new();
         }
-        let who = if ids.len() <= 3 { and(named(ids)) } else { format!("{} people", ids.len()) };
+        let who = if ids.len() <= 3 { and(named(ids)) } else { format!("{} users", ids.len()) };
         let who = who.strip_prefix('y').map_or(who.clone(), |rest| format!("Y{rest}"));
         format!("{who} · {}", chosen_by(admins))
     };
@@ -552,7 +552,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
 impl Part {
     /// A part with only its name, switched off.
     pub fn off(name: &str) -> Part {
-        Part { name: name.into(), on: false, title: None, fixed: false, doing: None, problem: None, sandbox: None, person: false }
+        Part { name: name.into(), on: false, title: None, fixed: false, doing: None, problem: None, sandbox: None, user: false }
     }
 }
 
@@ -613,7 +613,7 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, st
 }
 
 
-// What a node tells an app and a person of the network beyond `state`, the same from a node on a machine and from the
+// What a node tells an app and a user of the network beyond `state`, the same from a node on a machine and from the
 // Cloudflare node: each gives who's who (`global`'s scope database) and what it read of each scope (`ScopeState`).
 
 /// Who a call, widget or hook runs for.
@@ -658,7 +658,7 @@ pub fn handles(m: &ScopeDb, scopes: &[Scope], user: &str) -> Result<Vec<ScopeHan
     scopes.iter().map(|s| Ok(ScopeHandle { id: s.to_string(), name: whose(m, s)?, role: m.role_in(user, s)? })).collect()
 }
 
-/// A scope's name: the network's, a group's, or a person's, removed people's too.
+/// A scope's name: the network's, a group's, or a user's, removed users' too.
 pub fn whose(m: &ScopeDb, scope: &Scope) -> Result<String> {
     Ok(match scope {
         Scope::Global => m.name()?,

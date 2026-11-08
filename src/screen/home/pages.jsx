@@ -93,7 +93,7 @@ function pendingItem(kept, p) {
   return { slot: key, key, kind: "pending", kept, size, name: home.label(home.app(kept.app)) || kept.widget, menu }
 }
 
-/// A page's items: its widgets and apps in its person's order, then its Accounts folder.
+/// A page's items: its widgets and apps in its user's order, then its Accounts folder.
 function pageView(p) {
   const arrange = home.canArrange(p.scope)
   // Empty only with nothing on it at all: Accounts' folder, on the first page, is something (Andre).
@@ -948,7 +948,7 @@ function Pages() {
     }
   }, [])
 
-  // The shell's own zoom for the person's text size: a widget keeps its own.
+  // The shell's own zoom for the user's text size: a widget keeps its own.
   useLayoutEffect(() => {
     const unzoom = () => document.documentElement.style.setProperty("--unzoom", 1 / (parseFloat(getComputedStyle(document.documentElement).zoom) || 1))
     unzoom()

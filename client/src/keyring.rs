@@ -4,7 +4,7 @@
 //!
 //! It trusts no node, nor the relay, for who's who: it reads `global`'s scope database's steps from the bucket itself,
 //! opens them with the epochs sealed to it, and applies them by the node's own rules (`steps::Reader`). It asks only
-//! endpoints those list as nodes that run its person's things, takes a 428 only from the node that answered, and only
+//! endpoints those list as nodes that run its user's things, takes a 428 only from the node that answered, and only
 //! for scopes they say it runs, databases that kind of request uses (`keys::asked_for`) and epochs from each one's
 //! newest copy (`keys::oldest_needed`); and hands what it named to the one node each request is sent to, of the scopes
 //! they say that node runs, sealed to the seal key they list for it. An epoch it's given opens only if its hash is the
@@ -88,11 +88,11 @@ impl Known {
     }
 
     /// What `reader` says, for the device whose key is `key`: fails `not_let_in` until it lists it as a client of its
-    /// person's.
+    /// user's.
     fn of(reader: Reader, steps: one::database::stored::Keys, key: &[u8; 32], at: u64) -> Result<Known, Error> {
         let who = &reader.truth().ok_or_else(|| not_let_in("This device isn't listed yet."))?.db;
         let user = who.client(key).map_err(failed)?.map(|d| d.user).ok_or_else(|| not_let_in("This device isn't listed yet."))?;
-        // The nodes that run something of its person's, and the Cloudflare node, which runs anyone's calls.
+        // The nodes that run something of its user's, and the Cloudflare node, which runs anyone's calls.
         let cloudflare_node = who.cloudflare_node().map_err(failed)?;
         let mut nodes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
         for (key, seal) in who.nodes().map_err(failed)? {
@@ -163,7 +163,7 @@ impl<O: Opens> Keyring<O> {
 
     /// Reads who's who from the bucket: the first time from the network's first freeze, or where the device that let it
     /// in had read to, after that what's new. The network's root is kept the first time, and must be the same after.
-    /// Fails `not_let_in` until it lists this device as a client of its person's, with its keys sealed to it.
+    /// Fails `not_let_in` until it lists this device as a client of its user's, with its keys sealed to it.
     pub async fn read(&self, on: &(impl Address + Keep)) -> Result<(), Error> {
         let _reading = self.reading.lock().await;
         let (bucket, now, me) = (on.bucket(), now(), hex(&self.key));
@@ -255,7 +255,7 @@ impl<O: Opens> Keyring<O> {
         self.known.lock().unwrap().as_ref()?.reader.truth()?.welcome().ok()
     }
 
-    /// Its person, as who's who lists this device.
+    /// Its user, as who's who lists this device.
     pub fn user(&self) -> Option<String> {
         self.known.lock().unwrap().as_ref().map(|k| k.user.clone())
     }
@@ -290,11 +290,11 @@ impl<O: Opens> Keyring<O> {
         }
     }
 
-    /// A request to its network's nodes as its person, with the keys its kind needed last time, sealed to the node it's
+    /// A request to its network's nodes as its user, with the keys its kind needed last time, sealed to the node it's
     /// sent to until `until` (ms). One a node needs others for (428) is sent again with them, a few times, as a node may
     /// find what it needs as it goes (the Cloudflare node, its logs' keys first, then a call's); one a node refuses as
     /// it doesn't list this device yet, again in a moment while the relay lets it in. `fetches` gets each try's trace.
-    /// One this device answers itself (`answer`: what it signs as its person) never reaches a node.
+    /// One this device answers itself (`answer`: what it signs as its user) never reaches a node.
     pub async fn request(&self, client: &Client, on: &(impl Address + Keep + Signs), request: Request, until: u64, fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
         if let Some(answer) = self.answer(client, on, &request.method, &request.path, request.body.bytes()).await {
             let (status, out) = match answer {
@@ -410,7 +410,7 @@ impl<O: Opens> Keyring<O> {
         json_of(response, path).await
     }
 
-    /// A request's JSON, handing the keys its kind needs (`request`): what a device writes as its person.
+    /// A request's JSON, handing the keys its kind needs (`request`): what a device writes as its user.
     pub(crate) async fn asked(&self, client: &Client, on: &(impl Address + Keep), method: &str, path: &str, body: Option<Value>) -> Result<Value, Error> {
         let mut headers = Vec::new();
         if body.is_some() {

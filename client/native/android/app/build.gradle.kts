@@ -25,7 +25,7 @@ fun quoted(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "
 val commit = providers.exec { commandLine("git", "-C", repo.path, "rev-parse", "--short=12", "HEAD"); isIgnoreExitValue = true }
     .standardOutput.asText.get().trim().ifEmpty { "unknown" }
 val cli = field("cli")
-// What a person calls the network where they read: a workplace's custom build, which its people join with their work
+// What a user calls the network where they read: a workplace's custom build, which its users join with their work
 // email (join_domain), is shared, "the PTC App network"; anyone else's is "your One App network".
 val yours = field("name").let { if (field("join_domain").isNotEmpty()) it.replaceFirst(Regex("^The "), "the ") else "your " + it.removePrefix("The ") } + " network"
 

@@ -1,7 +1,7 @@
-//! The Mac's menu bar items of the person's widgets, one for each widget on their pages (each kind once), as the old Mac
+//! The Mac's menu bar items of the user's widgets, one for each widget on their pages (each kind once), as the old Mac
 //! app had them: its title the widget's headline (at most 40 characters; none, and it hides), a click showing the widget
 //! under it (the panel's window, showing only that widget), a right click Open <app> and Hide from Menu Bar. Which the
-//! person hid is kept (`menubar-hidden`, one kind a line); the main item's right-click menu shows them again.
+//! user hid is kept (`menubar-hidden`, one kind a line); the main item's right-click menu shows them again.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -115,7 +115,7 @@ fn made(handle: &AppHandle, kind: &str, label: &str, app: &str) -> tauri::Result
             }
         })
         .build(handle)?;
-    // Where the person dragged it in the menu bar, kept by macOS under its name, as the old app's was.
+    // Where the user dragged it in the menu bar, kept by macOS under its name, as the old app's was.
     let name = id(&kind);
     let _ = tray.with_inner_tray_icon(move |inner| {
         if let Some(item) = inner.ns_status_item() {

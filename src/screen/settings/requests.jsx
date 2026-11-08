@@ -1,4 +1,4 @@
-// What waits for this person: items apps and agents asked them for, and group invites.
+// What waits for this user: items apps and agents asked them for, and group invites.
 //
 // A Settings screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into
 // dist/requests.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the

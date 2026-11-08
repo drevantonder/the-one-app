@@ -165,7 +165,7 @@ impl Kind for Android {
     }
 
     fn limits(&self) -> &'static str {
-        "taps, swipes, typing and keys, and shell commands; the person watches and uses it through view"
+        "taps, swipes, typing and keys, and shell commands; the user watches and uses it through view"
     }
 
     fn input(&self) -> bool {
@@ -356,7 +356,7 @@ impl Kind for Android {
             bail!("install what? an .apk file here or its URL");
         }
         if !app.contains('/') {
-            // A package: only the Play Store installs it, signed in, by the person or an agent tapping Install.
+            // A package: only the Play Store installs it, signed in, by the user or an agent tapping Install.
             adb(v, &["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", &quote(&format!("market://details?id={app}"))])?;
             return Ok("Opened its page in the Play Store: tap Install there (it needs a Google account signed in).".into());
         }

@@ -83,7 +83,7 @@ function CodeView({ text, path = "", wrap, header = true, className }: {
   const [asked, setWrap] = React.useState<boolean | null>(null)
   const wrapped = asked ?? wrap ?? (width > 0 && width < 600)
 
-  // What's typed, and what's searched for a moment after: search runs as a person pauses.
+  // What's typed, and what's searched for a moment after: search runs as a user pauses.
   const [typed, setTyped] = React.useState("")
   const [query, setQuery] = React.useState("")
   React.useEffect(() => {

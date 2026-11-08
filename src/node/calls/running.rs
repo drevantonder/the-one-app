@@ -27,7 +27,7 @@ impl Node {
     }
 
     /// Reads the log of the device a call names (this node's own, or one of its services'; or a client's, through the
-    /// connection it holds to this node, else `Elsewhere`: another node may hold it), for a person over the network
+    /// connection it holds to this node, else `Elsewhere`: another node may hold it), for a user over the network
     /// (`one logs`): the one tool of the node's own a call asks.
     pub(in crate::node) async fn read_logs(&self, req: &CallRequest, input: &Value, me: &Caller) -> Result<Reply> {
         ensure!(req.tool == "logs", "the node has no tool {}", req.tool);
@@ -36,7 +36,7 @@ impl Node {
             None => self.0.id,
         };
         let name = self.name_of(&target);
-        ensure!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s person, or an admin of {}, reads its logs", crate::config::YOURS);
+        ensure!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s user, or an admin of {}, reads its logs", crate::config::YOURS);
         if target == self.0.id {
             return Ok(Reply::Ok(crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)?));
         }
@@ -50,7 +50,7 @@ impl Node {
         }
     }
 
-    /// Whether `user` may read this device's logs: whoever may remove it from the network, its person and the network's
+    /// Whether `user` may read this device's logs: whoever may remove it from the network, its user and the network's
     /// admins (who may remove any device), since they could stop it anyway. Nothing in a log is a key or someone's data.
     pub fn may_read_logs(&self, user: &str) -> Result<bool> {
         self.may_read_logs_of(user, &self.0.id)
@@ -79,7 +79,7 @@ impl Node {
         self.0.grants.lock().unwrap().get(token).cloned()
     }
 
-    /// What every app added for this machine's person says with an agent's prompt here: each app's `prompt` hook,
+    /// What every app added for this machine's user says with an agent's prompt here: each app's `prompt` hook,
     /// asked at once, their answers joined. The node remembers, per app and session, when it last asked, and tells
     /// the app as `since` (null on a session's first prompt). An app that fails, says nothing or takes longer than
     /// `PROMPT_LIMIT` (the harness waits for this) is left out.
@@ -235,7 +235,7 @@ impl Node {
                 let hash = req["hash"].as_str().unwrap_or("");
                 let built_in = self.0.built_in.values().any(|h| h == hash);
                 // A call this machine's own programs asked may read what its local API would give them: a file put there to
-                // attach. A sign-in's asks here too, but reads only what its person may.
+                // attach. A sign-in's asks here too, but reads only what its user may.
                 let local = self.this_machine(&grant.caller) && release::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
                 ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.may_read_blob(&grant.caller.user, hash)?, "no such blob for you");
                 self.blob(hash).await?.into_response()
@@ -269,7 +269,7 @@ impl Node {
                 ok(json!({ "ok": self.push_note(&grant.caller.user, &send.note(&grant.app)?).await? }))
             }
             Ask::Devices => ok(json!(self.state_for(&grant.caller)?.network.map(|n| n.devices).unwrap_or_default())),
-            // Run priority's order, as the person the call is for: only an admin changes it.
+            // Run priority's order, as the user the call is for: only an admin changes it.
             Ask::Order => {
                 let network = self.state_for(&grant.caller)?.network;
                 let mut order: Vec<Value> = network.iter().flat_map(|n| &n.devices).map(|s| json!({ "name": s.name, "key": s.key, "kind": s.kind, "priority": s.priority, "online": s.now.online, "here": s.me })).collect();

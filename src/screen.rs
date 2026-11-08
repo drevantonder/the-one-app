@@ -1,11 +1,11 @@
 //! A screen's page, an app's as every node serves it, or a client's own as every client makes it: `@one/ui` and the bridge (`src/screen/`), what the
 //! screen is told (`window.__one`), and the screen's own HTML.
 //!
-//! The clients' own screens (the person's pages, a page's Accounts, a request for a Vault item, Settings) are drawn
-//! here once, the same on every client, and act through the bridge's `one.api` as the person looking: each client makes
+//! The clients' own screens (the user's pages, a page's Accounts, a request for a Vault item, Settings) are drawn
+//! here once, the same on every client, and act through the bridge's `one.api` as the user looking: each client makes
 //! them from what it ships and never takes them from a node (the web client's, which is the native app's window too,
 //! from its address's `screens/`), and answers `one.api` only for a screen it chose to show as its own. The page that
-//! holds them answers the bridge for whatever a person touches: menus, alerts, sheets, files, scanning and links.
+//! holds them answers the bridge for whatever a user touches: menus, alerts, sheets, files, scanning and links.
 
 /// Phosphor's icons, each name's path on a 256-point grid (vendor/phosphor), for the web pages that draw screens: the
 /// web client's, at the address, and a chat's view, by `screens_icons`.
@@ -35,7 +35,7 @@ const UI_JS: (&str, &str) = ("ui/ui.js", include_str!("screen/ui/dist/ui.js"));
 const UI_IMPORTS: &str = include_str!("screen/ui/dist/importmap.json");
 
 /// A screen's page: `context` is `{ app, screen, params, me, scope, config }` (a Settings screen has no app or scope), `body` its HTML.
-/// A client's own (`own`) acts as the person, and draws what apps say, so it runs only its own scripts: they carry this
+/// A client's own (`own`) acts as the user, and draws what apps say, so it runs only its own scripts: they carry this
 /// page's nonce, and its policy refuses every other, inline event handlers too. `linked`, `@one/ui` and the bridge are links
 /// to the address's files (`/screen/<path>?v=`, named by content as the gateway names them), which the web client
 /// already has, rather than in the page.
@@ -47,9 +47,9 @@ pub fn page(context: &serde_json::Value, body: &str, own: bool, linked: bool) ->
 fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, linked: bool) -> String {
     let body = if body.is_empty() { MISSING } else { body };
     let mut context = context.clone();
-    // What a person joins, in their words: "your One App network", or a workplace's, "the PTC App network".
+    // What a user joins, in their words: "your One App network", or a workplace's, "the PTC App network".
     context["config"]["yours"] = crate::config::YOURS.into();
-    // The domain whose people join by signing in with Google, for Users to say so.
+    // The domain whose users join by signing in with Google, for Users to say so.
     if crate::config::SIGN_IN == crate::config::SignIn::Google {
         context["config"]["join_domain"] = crate::config::JOIN_DOMAIN.into();
     }
@@ -98,8 +98,8 @@ pub fn tag(page: &str) -> String {
     format!("\"{}\"", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(content.as_bytes()))[..32])
 }
 
-/// The clients' own screens, by name, the same on every client: the person's pages, a page's Accounts, a request for a
-/// Vault item, Settings' (`settings/`), and Developer's panel (`devtools`). They act through the bridge's `one.api` as the person looking, which a
+/// The clients' own screens, by name, the same on every client: the user's pages, a page's Accounts, a request for a
+/// Vault item, Settings' (`settings/`), and Developer's panel (`devtools`). They act through the bridge's `one.api` as the user looking, which a
 /// client answers only for these.
 const CLIENT_SCREENS: &[(&str, &str)] = &[
     // Written in React (home/<name>.jsx), built by @one/ui's build into home/dist/.

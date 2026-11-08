@@ -21,7 +21,7 @@ pub fn catalog(node: &Client) -> Result<Vec<Value>> {
     Ok(catalogs(node)?.0)
 }
 
-/// What a search looks through: `catalog`'s apps, then the apps the person could add, which have no tools for
+/// What a search looks through: `catalog`'s apps, then the apps the user could add, which have no tools for
 /// them yet: those not added where they are, nor deleted.
 pub fn catalogs(node: &Client) -> Result<(Vec<Value>, Vec<Value>)> {
     let (mut apps, mut addable) = (crate::core_tools::listed(), Vec::new());
@@ -89,7 +89,7 @@ fn score(app: &Value, tool: &Value, query: &[String]) -> (u32, usize, bool) {
     (score, query.iter().filter(|w| has(&name, w) || has(&app_name, w) || has(&app_about, w) || has(&about, w)).count(), query.iter().any(|w| has(&name, w)))
 }
 
-/// How well an app the person could add matches, by its name and what it says it's for, as `score` does.
+/// How well an app the user could add matches, by its name and what it says it's for, as `score` does.
 fn score_app(app: &Value, query: &[String]) -> (u32, usize) {
     let name = words(&format!("{} {}", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or("")));
     let about = words(&format!("{} {}", app["description"].as_str().unwrap_or(""), app["tagline"].as_str().unwrap_or("")));
@@ -137,10 +137,10 @@ fn fit(described: &[&str], room: usize) -> Vec<String> {
 }
 
 /// The tools that best match `query`, best first, each with how to call it and what it does, then the guide of
-/// each app they're in; and the apps the person could add (`addable`) that match as well. A match is one whose name,
+/// each app they're in; and the apps the user could add (`addable`) that match as well. A match is one whose name,
 /// app or description has most of the query's words, and as many as the best: fewer is a guess, not an answer.
 pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how: Reader) -> String {
-    // What people call the devices their One App runs on, and keeping something.
+    // What users call the devices their One App runs on, and keeping something.
     let query: Vec<String> = words(query)
         .into_iter()
         .map(|w| match w.as_str() {
@@ -182,7 +182,7 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
             Reader::Cli => format!("{CLI} add {name}"),
             Reader::Mcp | Reader::Code => format!("add {{ app: \"{name}\", scope: \"user\" }}"),
         };
-        format!("- {} ({name}): {}. {how} adds it for the person.", app["title"].as_str().unwrap_or(name), app["description"].as_str().unwrap_or("").trim().trim_end_matches('.'))
+        format!("- {} ({name}): {}. {how} adds it for the user.", app["title"].as_str().unwrap_or(name), app["description"].as_str().unwrap_or("").trim().trim_end_matches('.'))
     };
     let adds = match could.is_empty() {
         true => String::new(),
@@ -260,7 +260,7 @@ const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
 pub fn execute_tool() -> Value {
     json!({
         "name": "execute",
-        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what {} needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", crate::core_tools::SENDS, LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
+        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the user, as any tool does: what {} needs `confirm: true` in its input, given once the user agreed. Up to {} calls, {} minutes and {} KB back.", crate::core_tools::SENDS, LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
         "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
         "annotations": crate::skills::hints(false, false),
     })
@@ -304,7 +304,7 @@ fn runner() -> Result<(PathBuf, PathBuf)> {
     Ok((bun, dir))
 }
 
-/// Runs a script: each call it makes is checked against its tool's inputs and run as the person, as an MCP call
+/// Runs a script: each call it makes is checked against its tool's inputs and run as the user, as an MCP call
 /// is, what sends or can't be undone only with confirm: true. Gives back code mode's result: `{ ok, value | error,
 /// logs, truncated, toolCalls }`.
 pub fn execute(node: &Client, script: &str, agent: Option<&str>) -> Result<Value> {

@@ -1,4 +1,4 @@
-//! Blobs: keeping them here and in the bucket, and reading the ones a person may. Each blob a scope database names is in
+//! Blobs: keeping them here and in the bucket, and reading the ones a user may. Each blob a scope database names is in
 //! the bucket too, sealed with its scope's key, where a device that lacks one reads it: a deploy's bundle and a release's
 //! binary among them.
 
@@ -14,7 +14,7 @@ const FORGOTTEN_KEPT: Duration = Duration::from_secs(600);
 pub(super) struct State {
     /// The blobs sign-ins put here (their files in an MCP answer, say), by hash: for whom, so they may read them back.
     pub(super) put_by: Mutex<HashMap<String, std::collections::HashSet<String>>>,
-    /// The files put from elsewhere this last hour, which count against their person's room (`put_blob_from`).
+    /// The files put from elsewhere this last hour, which count against their user's room (`put_blob_from`).
     remote_puts: Mutex<Vec<blobs::RemotePut>>,
     /// Held while `network/forgotten` changes.
     forgotten: Mutex<()>,
@@ -210,7 +210,7 @@ impl Node {
         }
     }
 
-    /// Keeps `bytes` as a blob a sign-in put, which its person may then read back.
+    /// Keeps `bytes` as a blob a sign-in put, which its user may then read back.
     pub fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String> {
         let hash = self.put_blob(bytes)?;
         self.0.blobs.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(caller.user.clone());
@@ -323,7 +323,7 @@ impl Node {
 const LOCAL_PUT: u64 = 1 << 30;
 /// The most one file put from elsewhere may be.
 pub const REMOTE_PUT: u64 = 512 << 20;
-/// The most of one person's files put from elsewhere that nothing names yet this machine keeps at once.
+/// The most of one user's files put from elsewhere that nothing names yet this machine keeps at once.
 pub const REMOTE_WAITING: u64 = 2 << 30;
 /// How long a file put from elsewhere that nothing names is kept.
 const REMOTE_KEPT: Duration = Duration::from_secs(3600);

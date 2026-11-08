@@ -1,14 +1,14 @@
 //! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; how a client device
-//! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in at the network's address
+//! reaches it over iroh (src/node/net.rs), as its user; and how someone signed in at the network's address
 //! (this machine's CLI and MCP, after `sign-in`) reaches it, as themselves, for what their sign-in opens.
 //!
 //! A request with an access token from auth for the network's address (never a remote MCP client's, which is for
-//! `<address>/mcp`) is its person's, and so is its call's; someone it's for who isn't a person of the network yet is
-//! let in as a member by a device whose own person is an admin, since sign-in lets in only those an admin invited
-//! or people at the network's domain. A request without one is this machine's own programs', over its loopback with the
+//! `<address>/mcp`) is its user's, and so is its call's; someone it's for who isn't a user of the network yet is
+//! let in as a member by a device whose own user is an admin, since sign-in lets in only those an admin invited
+//! or users at the network's domain. A request without one is this machine's own programs', over its loopback with the
 //! token in the node's home (`local-token`, which only its user reads), or refused, but for a picture a window's app
 //! list names by its content (`/v1/images/<name>`), anyone's who has that name. A file put from elsewhere is read back
-//! only by whoever put it or may use a scope that names it, up to 512 MiB each and 2 GiB per person that nothing keeps
+//! only by whoever put it or may use a scope that names it, up to 512 MiB each and 2 GiB per user that nothing keeps
 //! yet, deleted an hour on (or once its request is answered) unless something does.
 
 use axum::Router;
@@ -50,9 +50,9 @@ pub enum Who {
     /// Anyone who has its name: a picture named by its content.
     Anyone,
     /// Also someone signed in at the network's address, and the network's client devices over iroh, each as their
-    /// person, with what that person may do.
+    /// user, with what that user may do.
     SignedIn,
-    /// Also the network's client devices over iroh, as their person, but no sign-in from elsewhere: MCP.
+    /// Also the network's client devices over iroh, as their user, but no sign-in from elsewhere: MCP.
     Clients,
     /// Only this machine's own programs.
     ThisMachine,

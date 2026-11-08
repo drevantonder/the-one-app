@@ -69,7 +69,7 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
             return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
         }
         return match signed_in(&node, token.clone()).await {
-            // This machine's own programs, signed in as its node's own person, are this device's own client: they
+            // This machine's own programs, signed in as its node's own user, are this device's own client: they
             // use its keys, as when not signed in.
             Ok(me) if from_this_machine(&node, &req) && node.user().is_ok_and(|u| u == me.caller.user) => next.run(req).await,
             Ok(me) => {
@@ -92,7 +92,7 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
     next.run(req).await
 }
 
-/// A client device's request over iroh is its person's, as a sign-in's is, for what `Who::SignedIn` and `Who::Clients`
+/// A client device's request over iroh is its user's, as a sign-in's is, for what `Who::SignedIn` and `Who::Clients`
 /// let in: the device must still be one of the network's, and the keys it hands are for its key, kept no longer than
 /// `until`.
 async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
@@ -166,14 +166,14 @@ impl axum::extract::FromRequestParts<Node> for Me {
     }
 }
 
-/// Someone signed in who isn't a person of the network yet: they are once one of their devices, or the admin who
+/// Someone signed in who isn't a user of the network yet: they are once one of their devices, or the admin who
 /// invited them, approves one of theirs.
 #[derive(Debug)]
 pub(super) struct NotJoined;
 
 impl std::fmt::Display for NotJoined {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "you haven't joined yet: the person who invited you approves this device with the code it shows")
+        write!(f, "you haven't joined yet: the user who invited you approves this device with the code it shows")
     }
 }
 
@@ -182,7 +182,7 @@ impl std::error::Error for NotJoined {}
 /// A node's sign-ins checked lately, by their token's hash, until they expire.
 pub(crate) type SignedIns = std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>;
 
-/// Whom an access token from auth is for: one auth at the network's address signed for it, for a person of
+/// Whom an access token from auth is for: one auth at the network's address signed for it, for a user of
 /// the network.
 async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;

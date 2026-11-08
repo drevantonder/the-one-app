@@ -319,7 +319,7 @@ impl Node {
         }
     }
 
-    /// The network's Cloudflare node, which asks only for calls, each its person's, with the keys they handed it for
+    /// The network's Cloudflare node, which asks only for calls, each its user's, with the keys they handed it for
     /// them, sealed to this device: as a client device's call over iroh is taken.
     async fn take_cloudflare_node(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
@@ -344,7 +344,7 @@ impl Node {
         }
     }
 
-    /// Answers a client device's requests to the local API, as its person's (`api::FromClient`), each stream one
+    /// Answers a client device's requests to the local API, as its user's (`api::FromClient`), each stream one
     /// request and its response. A key the network lists as a client is who its connection proves; any other only as
     /// a session's endpoint its device vouches for, by the certificate each request carries (`x-one-endpoint`), and is
     /// closed at the first that doesn't.
@@ -426,7 +426,7 @@ impl Node {
                     Ok((key, until)) => {
                         req.extensions_mut().insert(crate::api::FromClient(key, until));
                         // What it sends is read in a while and up to a size, but a file's and an app's own requests',
-                        // which stream to disk within their person's room (`Node::put_blob_from`).
+                        // which stream to disk within their user's room (`Node::put_blob_from`).
                         let path = req.uri().path();
                         if !(path == "/v1/blobs" || path.starts_with("/v1/blobs/") || crate::api::app_route(path)) {
                             let (parts, body) = req.into_parts();
@@ -478,7 +478,7 @@ impl Node {
         }
     }
 
-    /// A service endpoint of the network, which asks only for calls, as its own person: a service doesn't write
+    /// A service endpoint of the network, which asks only for calls, as its own user: a service doesn't write
     /// itself, it asks a node to.
     async fn take_service(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();

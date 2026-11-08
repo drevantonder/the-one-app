@@ -1,4 +1,4 @@
-//! A native app as a device of its person (ARCHITECTURE.md, Being built: Devices), the same on every app: its own key,
+//! A native app as a device of its user (ARCHITECTURE.md, Being built: Devices), the same on every app: its own key,
 //! which the app keeps in the Keychain, the keystore or the Credential Locker and hands it at start; asking to be let in,
 //! with the code it shows; and once a device of theirs approved it, asking its nodes with the keys it opens
 //! (`crate::keyring`), keeping what outlives it in its folder. A browser runs the same keyring in its worker.
@@ -165,7 +165,7 @@ impl Device {
         format!("{} {}", &code[..4], &code[4..])
     }
 
-    /// Asks auth to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
+    /// Asks auth to let it in, as the user signed in with `token`, calling it `name` (and with someone new's invite
     /// secret, its proof).
     pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
         let on = self.on.lock().unwrap().clone();
@@ -201,7 +201,7 @@ impl Device {
     }
 
     /// Reaches its network's nodes, if it's been let in: false if not yet. Then, each time, as each start of a browser
-    /// does, it settles its person's own things (`settle_own`), if they aren't: what fails is tried again at the next.
+    /// does, it settles its user's own things (`settle_own`), if they aren't: what fails is tried again at the next.
     pub async fn connect(&self) -> Result<bool, Error> {
         if !self.reach().await? {
             return Ok(false);
@@ -209,7 +209,7 @@ impl Device {
         if let Some(client) = self.client().await {
             let on = self.on.lock().unwrap().clone();
             if let Err(err) = self.keyring.settle_own(&client, self, on.as_deref()).await {
-                eprintln!("settling this person's own things: {err}");
+                eprintln!("settling this user's own things: {err}");
             }
         }
         Ok(true)
@@ -244,7 +244,7 @@ impl Device {
         client.set_wakes(self.keyring.cloudflare_node())?;
         client.set_online(&online)?;
         *stage = Stage::In(client);
-        // Kept, with its key, so this key is known as one that was in, to its person's sign-in once the relay takes it
+        // Kept, with its key, so this key is known as one that was in, to its user's sign-in once the relay takes it
         // out, not to approve; a new key in the same folder (signed in again) is one to approve.
         if !self.was_in() {
             self.put("joined", self.key().as_bytes()).await.map_err(failed)?;
@@ -329,7 +329,7 @@ impl Device {
         }
     }
 
-    /// Signs out: this device takes itself out of its person's devices first (`leave`), reaching the network first if
+    /// Signs out: this device takes itself out of its user's devices first (`leave`), reaching the network first if
     /// its connections were closed, so signing in again makes a new one that replaces it, never a second; then it's
     /// out, and forgets it was in. A network that doesn't answer in a few seconds is left: approving the new device
     /// replaces it. The app forgets this device's key either way, as a removed key can't be let in again.
@@ -353,7 +353,7 @@ impl Device {
 
     /// Registers where a push service reaches it (`one::push::Address`) with the network's push Worker
     /// (`<address>/push/register`), signed with its key and naming its seal key, which each note pushed to it is sealed
-    /// to, and its person as who's who lists it, so auth pushes it when another device of theirs asks to join. Once
+    /// to, and its user as who's who lists it, so auth pushes it when another device of theirs asks to join. Once
     /// it's out of the network, the Worker forgets it.
     pub async fn register_push(&self, address: &one::push::Address) -> Result<(), Error> {
         self.keyring.register_push(self, address).await
@@ -374,7 +374,7 @@ impl Device {
         std::fs::read_to_string(self.dir.join("joined")).is_ok_and(|key| key.trim() == self.key())
     }
 
-    /// A request to its network's nodes as its person (`Keyring::request`), given up on once the relay says this device
+    /// A request to its network's nodes as its user (`Keyring::request`), given up on once the relay says this device
     /// is out. `/v1/state` is read for the order things run in, and a screen's calls that only read are kept.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
         let body = body.into();
@@ -459,7 +459,7 @@ impl Device {
         }
     }
 
-    /// Renews its person's app schedules of `app` as they use it (`Keyring::renew_app_schedules`).
+    /// Renews its user's app schedules of `app` as they use it (`Keyring::renew_app_schedules`).
     pub async fn renew_app_schedules(&self, app: &str) {
         if let Some(client) = self.client().await {
             self.keyring.renew_app_schedules(&client, self, app).await;

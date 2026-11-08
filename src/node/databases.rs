@@ -69,7 +69,7 @@ impl Node {
         crate::keys::seal_secret(&self.signing_key())
     }
 
-    /// `app`'s `database` in `scope`'s keys by epoch, as this device opens them for its own person's work: from the
+    /// `app`'s `database` in `scope`'s keys by epoch, as this device opens them for its own user's work: from the
     /// app's key in each epoch, sealed under the epoch's. The app's key in the newest epoch is made if it isn't yet.
     /// With `make`, a scope with no epoch yet gets its first (`epoch_keys`).
     pub(super) async fn database_keys(&self, scope: &Scope, app: &str, database: &str, make: bool) -> Result<crate::database::stored::Keys> {
@@ -90,7 +90,7 @@ impl Node {
     /// `global`'s first, the network's first freeze), from its copy in the bucket sealed to this device (`keys::epoch_name`) whose
     /// hash is the one the entry names. A copy that isn't is someone's junk, passed over; nothing in the bucket makes an
     /// epoch but its entry. The newest must be one of them. With `make`, a scope with no epoch yet gets its first here,
-    /// if this device's person may make it: an admin of the group, or the person whose scope it is.
+    /// if this device's user may make it: an admin of the group, or the user whose scope it is.
     pub(crate) async fn epoch_keys(&self, scope: &Scope, make: bool) -> Result<crate::database::stored::Keys> {
         let (keys, newest) = self.epochs_held(scope).await?;
         if newest == 0 {

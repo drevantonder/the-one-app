@@ -20,7 +20,7 @@ public sealed class WidgetCard
     const double Width = 208;
 
     readonly JsonObject data = new();
-    /// The person's Windows accent colour, which reads on the board in light and dark alike.
+    /// The user's Windows accent colour, which reads on the board in light and dark alike.
     readonly string tint = Tint.Hex(true);
     readonly string app;
     readonly string? scope;
@@ -80,7 +80,7 @@ public sealed class WidgetCard
         return (Card(body, new JsonObject { ["type"] = "Action.OpenUrl", ["url"] = $"{CustomBuild.Cli}://open" }).ToJsonString(), card.data.ToJsonString());
     }
 
-    /// Choosing which widget it shows: every widget on the person's pages, by page.
+    /// Choosing which widget it shows: every widget on the user's pages, by page.
     public static (string template, string data) Chooser(IReadOnlyList<WidgetCache.Item> items, string? chosen)
     {
         var card = new WidgetCard("", null);

@@ -1,4 +1,4 @@
-// Computer Use: a tile for each of the person's own devices agents may use, with a switch, a live picture while an agent
+// Computer Use: a tile for each of the user's own devices agents may use, with a switch, a live picture while an agent
 // uses it, and the recent sessions below. The tiles fill the room: more columns, and bigger pictures, where there's
 // more of it. Looked at again every 5 seconds while it can be seen.
 import { useEffect, useRef, useState } from "react"

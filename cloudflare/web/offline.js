@@ -1,4 +1,4 @@
-// While the person's devices don't answer, what the window shows from what it kept, as one banner across its top:
+// While the user's devices don't answer, what the window shows from what it kept, as one banner across its top:
 // every screen showing its kept page, and the window's state, each with how it's asked again (`retry`) and when what
 // it shows was kept. Asked again by itself, and at Try Now; the banner goes once all have answered. The window draws
 // it again as it changes (`whenChanged`).

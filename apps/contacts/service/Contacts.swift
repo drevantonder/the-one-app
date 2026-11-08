@@ -32,7 +32,7 @@ struct ContactsApp: Service {
             do {
                 return Self.json(try store.unifiedMeContactWithKeys(toFetch: Self.keys))
             } catch {
-                throw Refusal("this Mac has no card set as the person's own: choose one in Contacts → Card → Make This My Card")
+                throw Refusal("this Mac has no card set as the user's own: choose one in Contacts → Card → Make This My Card")
             }
         default:
             throw Refusal("contacts has no function \(function)")

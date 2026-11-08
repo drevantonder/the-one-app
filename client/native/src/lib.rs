@@ -32,12 +32,12 @@ fn identifier() -> &'static str {
     env!("IDENTIFIER")
 }
 
-/// What the person calls this device, as their other devices list it.
+/// What the user calls this device, as their other devices list it.
 fn device_name() -> String {
     platform::name().unwrap_or_else(|| platform::LABEL.into())
 }
 
-/// The platform, as people say it (in a debug build, `PLATFORM` for a test: a phone's look on a computer).
+/// The platform, as users say it (in a debug build, `PLATFORM` for a test: a phone's look on a computer).
 fn label() -> &'static str {
     #[cfg(debug_assertions)]
     if let Some(p) = env("PLATFORM") {
@@ -80,7 +80,7 @@ struct Reading {
 
 struct App {
     handle: AppHandle,
-    /// Where it keeps what isn't secret: the address, who's signed in, and the client's own folder per person.
+    /// Where it keeps what isn't secret: the address, who's signed in, and the client's own folder per user.
     data: PathBuf,
     sign_in: Mutex<Option<Arc<signin::SignIn>>>,
     device: Mutex<Option<Arc<one_client::Device>>>,
@@ -103,7 +103,7 @@ fn kept_in(data: &std::path::Path, name: &str) -> Option<String> {
     std::fs::read_to_string(data.join(name)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// The network's address: `ADDRESS` for a test, the custom build's if it has one, else as the person gave it.
+/// The network's address: `ADDRESS` for a test, the custom build's if it has one, else as the user gave it.
 fn address_in(data: &std::path::Path) -> Option<String> {
     env("ADDRESS").or_else(|| Some(one::config::ADDRESS.to_string()).filter(|a| !a.is_empty())).or_else(|| kept_in(data, "address")).map(|a| a.trim_end_matches('/').to_string())
 }
@@ -210,14 +210,14 @@ fn redraw_panel() {
     }
 }
 
-/// Something changed on the person's devices (the page's events say): the widgets kept for the platform's own again.
+/// Something changed on the user's devices (the page's events say): the widgets kept for the platform's own again.
 #[tauri::command]
 fn changed() {
     let Ok(device) = app().device() else { return };
     tauri::async_runtime::spawn(async move { widgets_changed(&device).await });
 }
 
-/// What waits for the person (every app's badge on every page, and Settings'), counted on the app's icon; none at 0.
+/// What waits for the user (every app's badge on every page, and Settings'), counted on the app's icon; none at 0.
 #[tauri::command]
 fn badge(count: u32) {
     platform::badge(count);
@@ -293,13 +293,13 @@ fn native() -> Value {
         "scan": platform::can_scan(),
         // An iPhone's touch and hold lifting what's held with its menu (`menu`).
         "lifts": cfg!(target_os = "ios"),
-        // How much bigger than usual the person has made text (a phone's: Android's font size, an iPhone's Dynamic Type),
+        // How much bigger than usual the user has made text (a phone's: Android's font size, an iPhone's Dynamic Type),
         // for the window to be zoomed by.
         "textScale": platform::text_scale(),
     })
 }
 
-/// Takes what the person typed: an address, or an invite link (`<address>/invite#…`), whose secret goes with this
+/// Takes what the user typed: an address, or an invite link (`<address>/invite#…`), whose secret goes with this
 /// device's request to be let in.
 #[tauri::command]
 fn address(typed: String) -> Result<String, String> {
@@ -325,7 +325,7 @@ fn address_of(typed: &str) -> Result<String, String> {
     Ok(origin)
 }
 
-/// Signs in, in the system's browser, which comes back to this device; naming the device it's for, so the person's
+/// Signs in, in the system's browser, which comes back to this device; naming the device it's for, so the user's
 /// devices can let it in by this sign-in.
 #[tauri::command]
 async fn sign_in() -> Result<(), Failure> {
@@ -342,7 +342,7 @@ async fn sign_in() -> Result<(), Failure> {
     Ok(())
 }
 
-/// Makes this device its person's: one already, or asking to be let in. → `{ in: true }`, or the code to approve
+/// Makes this device its user's: one already, or asking to be let in. → `{ in: true }`, or the code to approve
 /// it by (`{ code }`), after which `wait`.
 #[tauri::command]
 async fn join() -> Result<Value, Failure> {
@@ -351,7 +351,7 @@ async fn join() -> Result<Value, Failure> {
     let token = token().await?;
     let user = subject(&token)?;
     a.keep("user", Some(&user));
-    // One key for each person at each address, as the Mac and iPhone apps keep them, its folder named by it too.
+    // One key for each user at each address, as the Mac and iPhone apps keep them, its folder named by it too.
     let id = format!("{address} {user}");
     let secret = secrets::device_made(&id)?;
     let mut made = false;
@@ -410,7 +410,7 @@ async fn wait() -> Result<(), Failure> {
     }
 }
 
-/// A request to the person's nodes → its status and headers, and an id its body is read by (`read`), part by part.
+/// A request to the user's nodes → its status and headers, and an id its body is read by (`read`), part by part.
 #[tauri::command]
 async fn fetch(method: String, path: String, headers: Vec<(String, String)>, body: Option<String>) -> Result<Value, String> {
     let device = app().device()?;
@@ -450,7 +450,7 @@ async fn kept(app: String, tool: String, input: Value) -> Option<Value> {
     Some(json!({ "answer": serde_json::from_slice::<Value>(&answer).ok()?, "at": at }))
 }
 
-/// Renews its person's app schedules of `app`, which they just used (`Device::renew_app_schedules`).
+/// Renews its user's app schedules of `app`, which they just used (`Device::renew_app_schedules`).
 #[tauri::command]
 async fn renew(app: String) {
     if let Ok(device) = self::app().device() {
@@ -458,7 +458,7 @@ async fn renew(app: String) {
     }
 }
 
-/// Whether this device was taken out of its person's devices, as the relay says.
+/// Whether this device was taken out of its user's devices, as the relay says.
 #[tauri::command]
 async fn removed() -> bool {
     match app().device() {
@@ -467,7 +467,7 @@ async fn removed() -> bool {
     }
 }
 
-/// Signs out: out of its person's devices first, then its key goes (a removed key can't be let in again), and the
+/// Signs out: out of its user's devices first, then its key goes (a removed key can't be let in again), and the
 /// sign-in with it.
 #[tauri::command]
 async fn sign_out() -> Result<(), String> {
@@ -489,7 +489,7 @@ async fn sign_out() -> Result<(), String> {
     Ok(())
 }
 
-/// Whether this device shows notifications, asking the person first if `ask` → "granted", "denied" or "default"; none
+/// Whether this device shows notifications, asking the user first if `ask` → "granted", "denied" or "default"; none
 /// where a phone's build has no pushes to show (no Firebase project in its config.toml), so Settings has no row for it.
 #[tauri::command]
 async fn notify(ask: bool) -> Option<String> {
@@ -510,7 +510,7 @@ fn open(url: String) -> Result<(), String> {
     platform::open(url)
 }
 
-/// A file a screen gives (`data`, base64): saved where the person chooses, or with `preview`, opened in the app for it.
+/// A file a screen gives (`data`, base64): saved where the user chooses, or with `preview`, opened in the app for it.
 #[tauri::command]
 async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
     let data = data_encoding::BASE64.decode(data.as_bytes()).map_err(|e| e.to_string())?;
@@ -519,7 +519,7 @@ async fn save(name: String, data: String, preview: bool) -> Result<(), String> {
     platform::save(name, data, preview).await
 }
 
-/// What the page says went wrong (an error it didn't catch, a file that didn't load), for this device's log, which a person's
+/// What the page says went wrong (an error it didn't catch, a file that didn't load), for this device's log, which a user's
 /// agent reads through a node (`one logs <device>`). The log's own caps and filters keep it small and free of what's secret.
 #[tauri::command]
 fn log(text: String) {
@@ -533,7 +533,7 @@ fn haptic(style: String) {
 }
 
 /// The document camera, where there's one (an iPhone's, or Android's scanner): each page found, straightened and cropped, as a JPEG
-/// `{ name, type, size, base64 }`; none if the person cancels.
+/// `{ name, type, size, base64 }`; none if the user cancels.
 #[tauri::command]
 async fn scan() -> Result<Value, String> {
     platform::scan().await
@@ -546,7 +546,7 @@ async fn menu(items: Value) -> Value {
     platform::menu(items).await
 }
 
-/// Light, dark or automatic, as the person chose: the app starts in it from its first frame, and a phone's system bars
+/// Light, dark or automatic, as the user chose: the app starts in it from its first frame, and a phone's system bars
 /// follow it.
 #[tauri::command]
 fn appearance(value: String) {
@@ -580,7 +580,7 @@ fn login(on: bool) -> Option<bool> {
     platform::login()
 }
 
-/// This computer's own node joins a network with a pairing code another of its person's computers made (as `<cli>
+/// This computer's own node joins a network with a pairing code another of its user's computers made (as `<cli>
 /// join` does) → its address, which the app signs in to next.
 #[tauri::command]
 async fn pair(code: String) -> Result<String, String> {
@@ -605,7 +605,7 @@ async fn pair(code: String) -> Result<String, String> {
             _ => "Couldn’t join. Make a new pairing code on your other device and try again.".into(),
         });
     }
-    // Its network's address, which the person signs in to here.
+    // Its network's address, which the user signs in to here.
     let address = local_state().and_then(|s| s["network"]["settings"]["address"].as_str().map(str::to_string)).ok_or("Joined. Now type your network’s address.")?;
     address_of(&address)
 }
@@ -746,7 +746,7 @@ fn popup(handle: &AppHandle, label: &str, page: &str) -> tauri::Result<tauri::We
         .initialization_script(include_str!("native.js"))
         .use_https_scheme(true)
         .inner_size(PANEL.0, PANEL.1)
-        // Sized by its screen (`fit`), which GTK refuses a window that isn't resizable; with no edges to drag, a person
+        // Sized by its screen (`fit`), which GTK refuses a window that isn't resizable; with no edges to drag, a user
         // can't.
         .decorations(false)
         .always_on_top(true)
@@ -770,7 +770,7 @@ fn popup(handle: &AppHandle, label: &str, page: &str) -> tauri::Result<tauri::We
 /// on a Mac Let Agents Use This Mac and the widgets hidden from the menu bar, and Quit.
 #[cfg(desktop)]
 fn tray(app: &tauri::App) -> tauri::Result<()> {
-    // Open at login from the first start, as the Mac app was; the person's choice after that. Never a test's build.
+    // Open at login from the first start, as the Mac app was; the user's choice after that. Never a test's build.
     let first = app.path().app_data_dir()?.join("opened-at-login");
     if !first.exists() && !identifier().ends_with(".throwaway") {
         platform::set_login(true);
@@ -854,7 +854,7 @@ fn opened(url: &str) {
 }
 
 /// In a debug build, a loopback port an agent drives the window by (`CONTROL`): `POST /eval` runs its body in the
-/// window's page (`/eval/<label>`, another window's); `POST /value` gives an expression's value, as JSON. Never in a build people use.
+/// window's page (`/eval/<label>`, another window's); `POST /value` gives an expression's value, as JSON. Never in a build users use.
 #[cfg(debug_assertions)]
 fn control(port: u16) {
     use std::io::{BufRead, BufReader, Read, Write};

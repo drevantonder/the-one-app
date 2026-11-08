@@ -1,4 +1,4 @@
-// The groups this person is in and is invited to, and making one; and one group, open beside the list where there's
+// The groups this user is in and is invited to, and making one; and one group, open beside the list where there's
 // room, else in a sheet: its handle, members and invites, each member's role a menu on their row for its admins. The
 // last admin's role can't change. A group's handle is changed in a dialog, by its admins.
 //
@@ -28,7 +28,7 @@ function Groups() {
   const [problem, setProblem] = useState(null)
   // Opened for a group (`{ group }`, from another screen), with it open.
   const [openId, setOpenId] = useState(one.params?.group || null)
-  // Roles changed but not yet taken in, shown at once, by group and person: null for someone being removed.
+  // Roles changed but not yet taken in, shown at once, by group and user: null for someone being removed.
   const [pending, setPending] = useState({})
   // Invites sent but not yet taken in.
   const [sent, setSent] = useState([])
@@ -325,8 +325,8 @@ function Invite({ g, state, sent, open, setOpen, send }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && matches[0] && pick(matches[0].id)}
-            placeholder="Find people"
-            aria-label="Find people"
+            placeholder="Find users"
+            aria-label="Find users"
             enterKeyHint="search"
             autoComplete="off"
             {...quiet}

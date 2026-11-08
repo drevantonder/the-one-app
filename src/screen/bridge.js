@@ -53,7 +53,7 @@
   }
 
   // Every message a screen sends its host, and every host (the web client, a chat's view) answers each,
-  // or refuses it by name. Anything a person touches natively is one of these: menus,
+  // or refuses it by name. Anything a user touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
     "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer", "menubar"];
@@ -101,7 +101,7 @@
   }
 
   // What a call answered last time: the client keeps the last answer of each call that only reads (`reads: true`),
-  // sealed on its device for its person, and gives it (`kept`, with when it was answered) to a screen that asks that
+  // sealed on its device for its user, and gives it (`kept`, with when it was answered) to a screen that asks that
   // call again. The first time a screen asks a call, it's answered at once with what was kept, while the call goes out
   // as ever; if its answer differs, the screen is told its app changed, as by a node, and asking again gives it.
   // Asked again after that, a call goes out, so nothing a screen does after a write is answered from before it. A host
@@ -142,7 +142,7 @@
     el.textContent = `As of ${one.ago(Math.min(...old.values()), { long: true })}`;
   }
 
-  // Errors and statuses are written for people and agents at once: what happened and what to do, in people's words,
+  // Errors and statuses are written for users and agents at once: what happened and what to do, in users' words,
   // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
   // those is for agents only.
   const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|network's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
@@ -198,7 +198,7 @@
       if (/timed? ?out|took too long|took longer than/i.test(msg))
         return { title: app ? `${app} took too long, so it stopped.` : "That took too long, so it stopped.", safe: "Nothing was lost.", next: "" };
       if (/may already be done/i.test(msg)) return { title: "This may already be done.", safe: "", next: "Check before trying again." };
-      // The leading sentences before any colon that are for people; none if the first is for agents.
+      // The leading sentences before any colon that are for users; none if the first is for agents.
       const parts = [];
       for (const part of msg.split(/:\s/)[0].split(/(?<=[.!?])\s+|;\s+/)) {
         if (!part || forAgents.test(part)) break;
@@ -242,9 +242,9 @@
     save: (file) => host({ type: "save", file }),
     preview: (file) => host({ type: "preview", file }),
     // The document camera, where the device has one (one.can.scan): each page found, straightened and cropped, as a
-    // JPEG `{ name, type, size, base64 }`; none if the person cancels.
+    // JPEG `{ name, type, size, base64 }`; none if the user cancels.
     scan: () => host({ type: "scan" }),
-    // Asks the person for what this app's `vault` declares as `need`: they pick one of their items or make one, in a
+    // Asks the user for what this app's `vault` declares as `need`: they pick one of their items or make one, in a
     // sheet of the window's. True once it's allowed; false if they declined or closed it.
     vault: (need) => host({ type: "vault", need }),
     // What this place can do beyond the basics.
@@ -271,11 +271,11 @@
       if (!ctx.app || (e.type === "changed" && (e.apps || []).includes(ctx.app))) landed.clear(), handlers.changed.forEach((f) => f(e));
     },
     // For Settings screens only (no app's: a client answers these for its own Settings screens and refuses an app
-    // screen). `api` asks the node's /v1 API as the person looking ("POST", "/v1/group", { name }) and gives its JSON,
+    // screen). `api` asks the node's /v1 API as the user looking ("POST", "/v1/group", { name }) and gives its JSON,
     // failing with its `error`. `signOut` signs this client out. `appearance` gives this client's ("automatic",
     // "light" or "dark"), first setting it to `value` if given. `device` is this client:
     // `{ name ("mac", "Chrome on Mac"), signOut (whether it can sign out), notify? }`, `notify` a browser's notifications
-    // permission ("default", "granted" or "denied"), which `notify` asks the person for and then gets pushes with.
+    // permission ("default", "granted" or "denied"), which `notify` asks the user for and then gets pushes with.
     api: (method, path, body) => host({ type: "api", method, path, body }),
     // Opens the client's own Vault sheet for a request already made (as an agent's link does): true once it's
     // answered with an item, false if declined or closed.

@@ -1,6 +1,6 @@
 //! Who's in the network and this machine, on the command line: status, signing in and out, making or joining a
 //! network, and its settings. A command of this program, not the library's: signing in makes this computer one of its
-//! person's devices (`client_device`).
+//! user's devices (`client_device`).
 
 use anyhow::{Context, Result, bail};
 use one::api::Client;
@@ -18,7 +18,7 @@ use crate::{agent, client_device, request, update, Http};
 pub fn commands() -> Command {
     Command {
         help: vec![
-            ("status".into(), format!("this device, and the people, groups and devices in {YOURS}")),
+            ("status".into(), format!("this device, and the users, groups and devices in {YOURS}")),
             ("status --until <commit> [--device <name>[,<name>…]] [--timeout <10m>]".into(), format!("wait until every device (or those named) runs that commit, or a later build, and its services answer, or a build fails; prints as it goes (who it waits for, who is offline, each as it arrives), and fails unless all made it; --device mac waits for an offline Mac to be back on it. After {CLI} update: {CLI} status --until $(git rev-parse HEAD)")),
             ("sign-in [--address <url>]".into(), format!("sign this machine in, as you: approve its code by signing in on any of your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't run, this computer becomes one of your devices, once you approve its next code too, and asks your devices for everything")),
             ("sign-in --invite <link>".into(), "join with the invite link someone sent you, on your first computer: you make your passkey in a browser, and they approve this computer's code".into()),
@@ -44,7 +44,7 @@ pub fn commands() -> Command {
             match g.words().as_slice() {
                 ["sign-in"] => sign_in(g)?,
                 ["sign-out"] => {
-                    // A device takes itself out of its person's devices first, while its sign-in still says who it is; git
+                    // A device takes itself out of its user's devices first, while its sign-in still says who it is; git
                     // here then no longer reaches its repos, which a node here still serves.
                     let address = crate::sign_in::kept().map(|k| k.address).filter(|_| !client_device::node_here());
                     let device = client_device::sign_out();
@@ -97,7 +97,7 @@ pub fn commands() -> Command {
     }
 }
 
-/// `sign-in`: this machine signs in at the network's address, as the person who approves its code with their passkey.
+/// `sign-in`: this machine signs in at the network's address, as the user who approves its code with their passkey.
 fn sign_in(g: &Given) -> Result<()> {
     let node = g.node;
     // Someone new's invite: its link (`<address>/invite#<secret>`), or its secret with --address.
@@ -195,7 +195,7 @@ fn status(node: &Client, state: &State) {
         let serves = if s.serves_me { "" } else { ", doesn't run yours" };
         let build = s.now.build.as_ref().map(|b| format!("  {b}")).unwrap_or_default();
         println!("  {dot} {}{here}  {}'s{serves}{build}", s.name, name(&s.user));
-        // What it runs, as its own list says (its person's and the admins' to see), and the services it says run there;
+        // What it runs, as its own list says (its user's and the admins' to see), and the services it says run there;
         // the app runtime isn't one.
         let parts = s.now.parts.as_deref().unwrap_or_default();
         let off: std::collections::BTreeSet<&str> = s.off_services.iter().map(|o| o.name.as_str()).chain(parts.iter().filter(|p| !p.on).map(|p| p.name.as_str())).collect();

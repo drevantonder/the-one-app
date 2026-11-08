@@ -15,17 +15,17 @@ pub const INSTRUCTIONS_LIMIT: usize = 4000;
 
 pub fn about() -> String {
     format!(
-        "{NAME} is a person's devices, and their team's, as one place for apps and agents: their email, messages, calendar, files, notes and more, each an app.\nAgents use those apps as that person, through MCP or the `{CLI}` command, on any device in {YOURS}."
+        "{NAME} is a user's devices, and their team's, as one place for apps and agents: their email, messages, calendar, files, notes and more, each an app.\nAgents use those apps as that user, through MCP or the `{CLI}` command, on any device in {YOURS}."
     )
 }
 
 /// The rules, first in everything an agent reads.
 pub fn rules() -> String {
     [
-        "Never send a message or an email unless the person asked you to send that one. Draft it instead, show them, and let them send it.".to_string(),
-        format!("Anything that {SENDS} takes `confirm: true` (`--confirm` in the terminal), given only once the person agreed to that action. Without it, it refuses: ask them rather than guess."),
-        "Never ask for a password, key or token in the chat, and never paste one. `vault_request` gives the person a link to a sheet on their own device, where they pick or type it; `vault_fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, keep it with `vault_set` and don't repeat it.".to_string(),
-        "If something says you aren't allowed, stop and tell the person. Nothing widens access by itself.".to_string(),
+        "Never send a message or an email unless the user asked you to send that one. Draft it instead, show them, and let them send it.".to_string(),
+        format!("Anything that {SENDS} takes `confirm: true` (`--confirm` in the terminal), given only once the user agreed to that action. Without it, it refuses: ask them rather than guess."),
+        "Never ask for a password, key or token in the chat, and never paste one. `vault_request` gives the user a link to a sheet on their own device, where they pick or type it; `vault_fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, keep it with `vault_set` and don't repeat it.".to_string(),
+        "If something says you aren't allowed, stop and tell the user. Nothing widens access by itself.".to_string(),
     ]
     .iter()
     .map(|r| format!("- {r}"))
@@ -35,7 +35,7 @@ pub fn rules() -> String {
 
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the tools for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's tools and its guide; `{CLI} <app> <tool> --help` says what one takes.\n- Every MCP tool is also a command: `repos_list` is `{CLI} repos list`.\n- `{CLI} run <file>` runs a short script that calls several tools and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}. You act for the person it marks (you): write their name, never this computer's login.\n- When a call fails or is slow, `{CLI} <app> <tool> --trace` (`trace: true` in MCP) says which device ran it and where it waited, and `{CLI} logs <device>` (the `logs` tool) reads that device's log, or one of its services' with `--service`: the person's own, or an admin's.\n- Before saying you can't, search: an app the person hasn't added yet may do it, and search offers it.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
+        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the tools for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's tools and its guide; `{CLI} <app> <tool> --help` says what one takes.\n- Every MCP tool is also a command: `repos_list` is `{CLI} repos list`.\n- `{CLI} run <file>` runs a short script that calls several tools and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the users and devices in {YOURS}. You act for the user it marks (you): write their name, never this computer's login.\n- When a call fails or is slow, `{CLI} <app> <tool> --trace` (`trace: true` in MCP) says which device ran it and where it waited, and `{CLI} logs <device>` (the `logs` tool) reads that device's log, or one of its services' with `--service`: the user's own, or an admin's.\n- Before saying you can't, search: an app the user hasn't added yet may do it, and search offers it.\n- When the user asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
         server_name()
     )
 }
@@ -49,7 +49,7 @@ pub fn server_name() -> String {
 pub fn mcp_entries() -> String {
     let server = server_name();
     format!(
-        "On a device where `{CLI}` runs, MCP is a command there, one of two entries:\n\n- `{CLI} mcp`: every tool, two hundred or so, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the person in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
+        "On a device where `{CLI}` runs, MCP is a command there, one of two entries:\n\n- `{CLI} mcp`: every tool, two hundred or so, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the user in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
         crate::config::ALWAYS_ON.iter().map(|a| format!("{a}'s tools")).chain(crate::code::DIRECT.iter().map(|t| format!("`{t}`"))).collect::<Vec<_>>().join(", ")
     )
 }
@@ -61,7 +61,7 @@ fn install() -> String {
     }
 }
 
-/// Connecting for a person, at the network's `address` where it's known: a shell takes the command line, anything
+/// Connecting for a user, at the network's `address` where it's known: a shell takes the command line, anything
 /// else adds the MCP server at the address.
 pub fn connecting(address: Option<&str>) -> String {
     let mcp = match address {
@@ -84,7 +84,7 @@ fn web(address: &str) -> String {
 /// `address` (`/llms.txt`), since it says nothing of what apps a network has.
 pub fn guide(address: Option<&str>) -> String {
     format!(
-        "# {NAME}\n\n{}\n\n## Rules\n\n{}\n\n## Connecting for a person\n\n{}\n\n## Adding MCP\n\n{}\n\n## Finding your way\n\n{}\n",
+        "# {NAME}\n\n{}\n\n## Rules\n\n{}\n\n## Connecting for a user\n\n{}\n\n## Adding MCP\n\n{}\n\n## Finding your way\n\n{}\n",
         about(),
         rules(),
         connecting(address),
@@ -120,7 +120,7 @@ impl Skill {
 /// The root skill's description: short, so a harness can keep it loaded.
 fn root_description() -> String {
     format!(
-        "Use whenever the person pastes or mentions a key, token or password (keep it in the Vault, never use it raw), wants a message sent, mentions {NAME} or its apps, asks about their devices (set up a laptop or phone), their agents' instructions and skills or their AI plans, or asks you to connect to it; read it before any of its tools. {NAME} is their email, messages, calendar, files and more, as apps their agents use."
+        "Use whenever the user pastes or mentions a key, token or password (keep it in the Vault, never use it raw), wants a message sent, mentions {NAME} or its apps, asks about their devices (set up a laptop or phone), their agents' instructions and skills or their AI plans, or asks you to connect to it; read it before any of its tools. {NAME} is their email, messages, calendar, files and more, as apps their agents use."
     )
 }
 
@@ -131,7 +131,7 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
     Skill { name: server_name(), description: root_description(), body, files: vec![] }
 }
 
-/// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those added for the person having their
+/// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those added for the user having their
 /// tools): the areas of their own, then one for each of the core's features and each app with a guide.
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {
@@ -192,7 +192,7 @@ fn skill_name(area: &str) -> String {
 pub fn app_skill(app: &Value) -> Skill {
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().filter(|t| !t.is_empty()).unwrap_or(app["name"].as_str().unwrap_or("")));
     let about = app["description"].as_str().map(|d| d.trim().trim_end_matches('.')).filter(|d| !d.is_empty()).map(|d| format!(": {d}")).unwrap_or_default();
-    let description: String = format!("{title} in {NAME}{about}. Use when the person asks about {title}, and before using its tools ({name}_...).").chars().take(1024).collect();
+    let description: String = format!("{title} in {NAME}{about}. Use when the user asks about {title}, and before using its tools ({name}_...).").chars().take(1024).collect();
     let tools: Vec<&Value> = app["tools"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).collect();
     // The guide names tools as MCP does (gmail_search); a harness with only the command line reads each as its command too.
     let mut guide = app["instructions"].as_str().unwrap_or("").trim().to_string();
@@ -213,7 +213,7 @@ pub fn app_skill(app: &Value) -> Skill {
         guide = out;
     }
     let mut body = format!(
-        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What {SENDS} takes `confirm: true` (`--confirm`), given only once the person agreed to that very action.\n",
+        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the user a link. What {SENDS} takes `confirm: true` (`--confirm`), given only once the user agreed to that very action.\n",
         guide,
     );
     for tool in tools {
@@ -233,9 +233,9 @@ pub fn hints(reads: bool, confirm: bool) -> Value {
     json!({ "readOnlyHint": reads, "destructiveHint": confirm && !reads, "idempotentHint": reads })
 }
 
-/// The input that says the person agreed, on what sends or can't be undone.
+/// The input that says the user agreed, on what sends or can't be undone.
 pub fn confirm_input() -> Value {
-    json!({ "type": "boolean", "description": format!("true once the person agreed to this very action: it {SENDS}") })
+    json!({ "type": "boolean", "description": format!("true once the user agreed to this very action: it {SENDS}") })
 }
 
 /// A JSON Schema as a TypeScript type, as code mode's signatures show it.
@@ -291,16 +291,16 @@ impl Mode {
 /// The MCP server's instructions: the rules first, then how to find things in this mode, then the guides of the apps
 /// every agent needs from the start (the config's `always_on`), then a line for each of the core's features and each
 /// app, as many as fit under Claude Code's limit. Every other app's guide comes with search, or `<cli> <app>`.
-pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String {
+pub fn instructions(mode: Mode, apps: &[Value], user: Option<&str>) -> String {
     let finding = match mode {
         Mode::All => format!(
-            "Every tool is also a command (`{CLI} <app> <tool>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, to learn an app, and before saying you can't: it offers apps the person hasn't added yet."
+            "Every tool is also a command (`{CLI} <app> <tool>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, to learn an app, and before saying you can't: it offers apps the user hasn't added yet."
         ),
         Mode::Code => "`search` finds the tools for a task across every app, with exact call signatures and each app's guide. `execute` runs a short script with them: `const r = await tools.<app>.<tool>({ ... }); return r`. Scripts call several in one go; what they return comes back to you. Guides name tools <app>_<tool>: in a script, that's tools.<app>.<tool>.".to_string(),
     };
-    let person = person.filter(|p| !p.trim().is_empty()).map(|p| format!("\n\nYou act for {p}: groups_list says who else is in {YOURS}.")).unwrap_or_default();
+    let user = user.filter(|p| !p.trim().is_empty()).map(|p| format!("\n\nYou act for {p}: groups_list says who else is in {YOURS}.")).unwrap_or_default();
     let mut text = format!(
-        "{}{person}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`. When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
+        "{}{user}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`. When the user asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
         about(),
         rules(),
         server_name(),

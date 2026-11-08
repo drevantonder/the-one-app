@@ -1,5 +1,5 @@
 /* The kit's look: Tailwind, the theme (shadcn's neutral, light and dark), and what every page starts with. Dark is the
-   person's, by prefers-color-scheme, which the web client and the shells set from Settings › Appearance. */
+   user's, by prefers-color-scheme, which the web client and the shells set from Settings › Appearance. */
 @import "tailwindcss" source(".");
 @import "tw-animate-css";
 @import "./theme.css";

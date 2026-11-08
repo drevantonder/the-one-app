@@ -10,9 +10,9 @@ use super::super::devices::approve_code;
 use super::super::network::{node_in, spawn};
 use crate::agent;
 
-/// The web client's folder in the throwaway network's, for its first person or someone else.
-pub(crate) fn web_folder(dir: &Path, person: Option<&str>) -> PathBuf {
-    match person {
+/// The web client's folder in the throwaway network's, for its first user or someone else.
+pub(crate) fn web_folder(dir: &Path, user: Option<&str>) -> PathBuf {
+    match user {
         None => dir.join("web"),
         Some(name) => dir.join(format!("web-{}", name.to_lowercase().replace(' ', "-"))),
     }
@@ -20,9 +20,9 @@ pub(crate) fn web_folder(dir: &Path, person: Option<&str>) -> PathBuf {
 
 /// The web client, in a browser of the throwaway network's own on this machine, with no window: drive it over the DevTools
 /// protocol. Its profile is kept with the throwaway network, so it stays signed in. As someone else, they're invited first,
-/// by the throwaway network's first person, and join in it.
-pub(crate) fn web(dir: &Path, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
-    let (port, picture) = match person {
+/// by the throwaway network's first user, and join in it.
+pub(crate) fn web(dir: &Path, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
+    let (port, picture) = match user {
         Some(name) => joined(dir, settings, name)?,
         None => {
             let port = browser(dir, settings, None)?;
@@ -32,12 +32,12 @@ pub(crate) fn web(dir: &Path, settings: &one::cloudflare::Settings, person: Opti
             (port, picture)
         }
     };
-    let who = person.map(|name| format!(" as {name}")).unwrap_or_default();
+    let who = user.map(|name| format!(" as {name}")).unwrap_or_default();
     println!(
         "The web client of this build is signed in to the throwaway network{who}, in a browser of its own on this machine.
   See it: {}
   Use it: its DevTools are at http://127.0.0.1:{port} (Playwright's connectOverCDP, or chrome-devtools-mcp --browserUrl)
-  In its page, self.oneNet.net asks the person's nodes as this browser (never import('/net.js'): that's a second copy, which refuses)
+  In its page, self.oneNet.net asks the user's nodes as this browser (never import('/net.js'): that's a second copy, which refuses)
   In any browser here: {}",
         picture.display(),
         settings.address
@@ -67,7 +67,7 @@ pub(crate) fn joined(dir: &Path, settings: &one::cloudflare::Settings, name: &st
 }
 
 /// A web client that shows a code to be approved (`code`, else none) is approved by the throwaway network's machine, as its
-/// person's device or as the device of the admin who invited them; then its window is pictured.
+/// user's device or as the device of the admin who invited them; then its window is pictured.
 pub(crate) fn approve(dir: &Path, settings: &one::cloudflare::Settings, port: u16, picture: &Path, code: &str) -> Result<()> {
     if !code.is_empty() {
         approve_code(dir, code)?;
@@ -84,9 +84,9 @@ pub(crate) fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// The throwaway network's browser for its first person or someone else, started if it isn't running: → its DevTools port.
-pub(crate) fn browser(dir: &Path, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<u16> {
-    let web = web_folder(dir, person);
+/// The throwaway network's browser for its first user or someone else, started if it isn't running: → its DevTools port.
+pub(crate) fn browser(dir: &Path, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<u16> {
+    let web = web_folder(dir, user);
     std::fs::create_dir_all(&web)?;
     let port = std::fs::read_to_string(web.join("port")).ok().and_then(|p| p.trim().parse::<u16>().ok());
     let answers = |port: u16| agent().get(format!("http://127.0.0.1:{port}/json/version")).call().is_ok_and(|r| r.status().is_success());

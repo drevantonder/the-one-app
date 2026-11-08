@@ -202,7 +202,7 @@ run() {{
 	wait $pid
 }}
 # The paired iPhone devicectl reaches, unlocked; the kept iPhone app is installed on it, not opened: if it's in use,
-# installing replaces it all the same, so it's left for the person to open.
+# installing replaces it all the same, so it's left for the user to open.
 install() {{
 	xcrun devicectl list devices --json-output "$c/devices.json" > /dev/null 2>&1 || return 1
 	phone=$(jq -r '[.result.devices[] | select(.hardwareProperties.reality == "physical" and .hardwareProperties.deviceType == "iPhone" and .connectionProperties.pairingState == "paired")][0].identifier // empty' "$c/devices.json")

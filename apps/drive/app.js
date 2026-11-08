@@ -36,7 +36,7 @@ export default {
   icon: "google-drive-logo",
   color: "#fbbc04",
   description: "Your Google Drive: find, upload, rename and move files",
-  instructions: "Google Drive is the person's Drive accounts, through Drive's own API (v3), by its names: files_list finds files with Drive's q search (name contains 'budget' and trashed = false), files_get gives one, files_create makes a folder, files_upload uploads a file, files_update renames, moves (addParents, removeParents) or trashes one, generate_ids gives ids to make files with safely. Results give the fields asked for; fields asks for more. With several accounts, each tool takes account.",
+  instructions: "Google Drive is the user's Drive accounts, through Drive's own API (v3), by its names: files_list finds files with Drive's q search (name contains 'budget' and trashed = false), files_get gives one, files_create makes a folder, files_upload uploads a file, files_update renames, moves (addParents, removeParents) or trashes one, generate_ids gives ids to make files with safely. Results give the fields asked for; fields asks for more. With several accounts, each tool takes account.",
   vault,
   schema,
 

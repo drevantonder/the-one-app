@@ -49,7 +49,7 @@ impl Node {
         Ok(out)
     }
 
-    /// A person's own devices that might get pushes, as the network's signed steps list them: (key, seal key, name).
+    /// A user's own devices that might get pushes, as the network's signed steps list them: (key, seal key, name).
     fn devices_of(&self, user: &str) -> Result<Vec<(Key, Key, String)>> {
         self.with(|i| Ok(i.r.db().clients()?.into_iter().filter(|m| m.user == user && !m.removed && m.passkey.is_none()).map(|m| (m.key, m.seal, m.name)).collect()))
     }

@@ -107,7 +107,7 @@ fn mcp_file(node: &Client, v: &Value) -> Result<Value> {
 
 /// Gets a file an agent gave as a URL. For someone signed in elsewhere, only from the internet, each redirect too: this
 /// machine's addresses (its local API, which takes this device for its own programs), its network's and its tailnet's
-/// are its person's, not theirs.
+/// are its user's, not theirs.
 fn fetch_file(node: &Client, url: &str) -> Result<ureq::http::Response<ureq::Body>> {
     let agent = match node.elsewhere() {
         true => crate::reach::agent(ureq::Agent::config_builder().http_status_as_error(false), crate::reach::public),
@@ -158,7 +158,7 @@ pub fn within_budget(content: &mut Value, tool: Option<&Value>) {
     }
 }
 
-/// A count as a person writes it: 40,000.
+/// A count as a user writes it: 40,000.
 fn group(n: usize) -> String {
     let s = n.to_string();
     let mut out = String::new();

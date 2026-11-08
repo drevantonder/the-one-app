@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Deploys to Cloudflare, with the build being sent out (`commit`), from the one of this person's Linux devices that is the Workers' home
+/// Deploys to Cloudflare, with the build being sent out (`commit`), from the one of this user's Linux devices that is the Workers' home
 /// (`Settings::at_home`; another refuses, which says so and is passed over): only there are its secrets
 /// (`cloudflare deploy` in its home's cloudflare/). It waits for each to run that build, so it never
 /// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every network

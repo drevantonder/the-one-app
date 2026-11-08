@@ -527,7 +527,7 @@ impl Node {
         self.say(&Scope::Global, Said::BackedUp(BackupRun { place: place.into(), device: self.0.id, time: now, error, trouble, snapshots })).await
     }
 
-    /// Backups as a person sees them: each place, how its last run went, the recent snapshots, and the disks here.
+    /// Backups as a user sees them: each place, how its last run went, the recent snapshots, and the disks here.
     pub fn backups(&self) -> Result<Value> {
         self.with(|i| {
             let m = i.r.db();
@@ -633,7 +633,7 @@ impl Node {
         Ok(json!({ "tried": steps, "id": id }))
     }
 
-    /// Asks the person for an S3 place's details in a sheet on their device, so an agent never sees its key.
+    /// Asks the user for an S3 place's details in a sheet on their device, so an agent never sees its key.
     pub async fn request_place(&self, caller: &Caller, body: &Value) -> Result<Value> {
         let endpoint = body["endpoint"].as_str().map(str::trim).filter(|e| e.starts_with("https://") || e.starts_with("http://")).context("give the endpoint, like https://<account>.r2.cloudflarestorage.com")?;
         let host = endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("");
@@ -742,7 +742,7 @@ impl Node {
                         let Some(keys) = epochs.get(&r.snapshot.scope) else { continue };
                         problems.extend(b::check_databases(&place, &network, &r.snapshot, keys, bucket.as_ref()).await.into_iter().map(Value::from));
                     }
-                    // Each says whose data it's about by its scope; people read their names.
+                    // Each says whose data it's about by its scope; users read their names.
                     let named: Vec<(String, String)> = self.with(|i| epochs.keys().map(|s| Ok((s.clone(), scope_name(i, s)?))).collect())?;
                     for p in problems.iter_mut() {
                         let t = p.as_str().unwrap_or("");

@@ -1,4 +1,4 @@
-//! Widgets' routes: the person's widgets and badges, drawn by their apps.
+//! Widgets' routes: the user's widgets and badges, drawn by their apps.
 
 pub(crate) mod routes {
     use axum::Json;

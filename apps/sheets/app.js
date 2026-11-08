@@ -1,4 +1,4 @@
-// Sheets: the person's own Google Sheets, through Google's API. Signing in is the same in every
+// Sheets: the user's own Google Sheets, through Google's API. Signing in is the same in every
 // Google app: see google/google.js.
 
 import settings from "./dist/settings.html" with { type: "text" };
@@ -34,7 +34,7 @@ export default {
   icon: "table",
   color: "#34a853",
   description: "Your Google Sheets: read ranges, add rows, change cells and make spreadsheets",
-  instructions: `Sheets is the person's Google Sheets. ${APP}_spreadsheet lists a spreadsheet's sheets (tabs); ${APP}_read reads a range (A1 notation, like Budget!A1:F20; the first sheet when left out). ${APP}_append adds rows after a table, ${APP}_update writes over a range and ${APP}_create makes a spreadsheet: change only what the person asked. Spreadsheets are given as spreadsheetId, an id or address. With several accounts, each tool takes account.`,
+  instructions: `Sheets is the user's Google Sheets. ${APP}_spreadsheet lists a spreadsheet's sheets (tabs); ${APP}_read reads a range (A1 notation, like Budget!A1:F20; the first sheet when left out). ${APP}_append adds rows after a table, ${APP}_update writes over a range and ${APP}_create makes a spreadsheet: change only what the user asked. Spreadsheets are given as spreadsheetId, an id or address. With several accounts, each tool takes account.`,
   vault,
   schema,
 
@@ -71,7 +71,7 @@ export default {
     },
     append: {
       reads: false,
-      description: "Add rows after the table in a range (or the first sheet) (Sheets' values.append); says where they went. This changes the person's spreadsheet: do it only when they asked.",
+      description: "Add rows after the table in a range (or the first sheet) (Sheets' values.append); says where they went. This changes the user's spreadsheet: do it only when they asked.",
       input: withAccount({ spreadsheetId: sheetInput, range: str("the table's range or sheet, like Expenses or Expenses!A:E; the first sheet when left out"), values: valuesInput }, ["spreadsheetId", "values"]),
       async run(ctx, { account: a, spreadsheetId: spreadsheet, range, values: rows }) {
         const email = await account(ctx, a);
@@ -83,7 +83,7 @@ export default {
     update: {
       reads: false,
       confirm: true,
-      description: "Write rows over a range, from its top-left cell, replacing what was there (Sheets' values.update); says which cells changed. Do it only when the person asked.",
+      description: "Write rows over a range, from its top-left cell, replacing what was there (Sheets' values.update); says which cells changed. Do it only when the user asked.",
       input: withAccount({ spreadsheetId: sheetInput, range: str("where to write, in A1 notation, like Budget!B2 or Budget!B2:D5"), values: valuesInput }, ["spreadsheetId", "range", "values"]),
       async run(ctx, { account: a, spreadsheetId: spreadsheet, range, values: rows }) {
         const r = await api(ctx, await account(ctx, a), "PUT", `${ss(spreadsheet)}/values/${encodeURIComponent(String(range))}`,
@@ -93,7 +93,7 @@ export default {
     },
     create: {
       reads: false,
-      description: "Make a spreadsheet in the person's Drive (in My Drive; Sheets' spreadsheets.create), with sheets and first rows if given. Gives { id, title, url }.",
+      description: "Make a spreadsheet in the user's Drive (in My Drive; Sheets' spreadsheets.create), with sheets and first rows if given. Gives { id, title, url }.",
       input: withAccount({
         title: str("its title, like Budget 2026"), sheets: { type: "array", items: { type: "string" }, description: "its sheets' (tabs') titles, like [\"Income\", \"Expenses\"]; default one, Sheet1" },
         values: { ...valuesInput, description: `rows to put in the first sheet, from A1, ${valuesInput.description.slice(6)}` },

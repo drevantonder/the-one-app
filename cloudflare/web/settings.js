@@ -1,4 +1,4 @@
-// What the client's own screens (Settings, Home, the panel) ask of this page, as the person, which no app's may:
+// What the client's own screens (Settings, Home, the panel) ask of this page, as the user, which no app's may:
 // `one.api` to their nodes and to this device's own answers (one-client's `settings`, its keyring signing what changes
 // who can do what), the passkey this tab signed in with, the look, and what they keep. screens.js answers their
 // bridges with these, and with what opens over the window.
@@ -6,7 +6,7 @@ import { platform } from "./platform.js";
 import { api, developer, shared } from "./request.js";
 import { SCREENS, leave, network, refreshState, withWaiting } from "./store.js";
 
-/// `one.api` for a client's own screen: the node's /v1 at this origin, as this person; nothing else here. What
+/// `one.api` for a client's own screen: the node's /v1 at this origin, as this user; nothing else here. What
 /// changes who can do what, and letting devices in, this device answers itself, as its keyring signs it
 /// (one-client's `settings`), at the same paths. A passkey to list is this tab's: WebAuthn's PRF comes only to a page.
 async function clientApi(m) {
@@ -32,7 +32,7 @@ async function clientApi(m) {
   return out;
 }
 
-/// The devices waiting whose person said they aren't theirs (Settings › Devices' Not Mine), by code: not asked again.
+/// The devices waiting whose user said they aren't theirs (Settings › Devices' Not Mine), by code: not asked again.
 const NOT_MINE = "one.notMine";
 export const notMine = new Set(JSON.parse(localStorage.getItem(NOT_MINE) || "[]"));
 
@@ -44,12 +44,12 @@ function passkeyToList() {
 }
 
 const LOOK = "one.appearance";
-/// Light, dark or automatic, as the person chose here (Settings › Appearance).
+/// Light, dark or automatic, as the user chose here (Settings › Appearance).
 export const appearance = () => (["light", "dark"].includes(localStorage.getItem(LOOK)) ? localStorage.getItem(LOOK) : "automatic");
 /// The page's own rules, switched to a look.
 export const schemed = oneHost.scheme();
 
-/// The person's look, `value`, kept here and by the app, and this page drawn in it. → it.
+/// The user's look, `value`, kept here and by the app, and this page drawn in it. → it.
 export function setAppearance(value) {
   if (value === "automatic") localStorage.removeItem(LOOK);
   else if (["light", "dark"].includes(value)) localStorage.setItem(LOOK, value);

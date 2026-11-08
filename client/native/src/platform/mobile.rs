@@ -68,7 +68,7 @@ pub fn haptic(style: String) {
 }
 
 /// The document camera: each page found, straightened and cropped, as a JPEG `{ name, type, size, base64 }`; none if the
-/// person cancels.
+/// user cancels.
 pub async fn scan() -> Result<Value, String> {
     ask_off("scan", json!({})).await.map(|v| v["files"].clone())
 }

@@ -227,7 +227,7 @@ impl Passkey {
     }
 }
 
-/// The real Workers, as a network runs them: people reach them at its address, the gateway's.
+/// The real Workers, as a network runs them: users reach them at its address, the gateway's.
 pub(crate) struct Workers {
     _running: Running,
     pub(crate) address: String,
@@ -243,7 +243,7 @@ impl Workers {
         Workers::start_as(false, devices)
     }
 
-    /// As `for_devices`, for a network whose people sign in with Google at test.example, the stand-in sites as
+    /// As `for_devices`, for a network whose users sign in with Google at test.example, the stand-in sites as
     /// Google.
     fn google(devices: Vec<String>) -> Workers {
         Workers::start_as(true, devices)
@@ -283,7 +283,7 @@ impl Workers {
         Workers { _running: running, address: settings.address, sites: format!("http://127.0.0.1:{sites}"), relay_test: format!("http://127.0.0.1:{relay_test}") }
     }
 
-    /// Moves on the time sign-in judges how long a request has waited by (a day behind until then), so its person is
+    /// Moves on the time sign-in judges how long a request has waited by (a day behind until then), so its user is
     /// pushed "wants in" now.
     fn wait_for_a_device_to_let_it_in(&self) {
         assert_eq!(post(&format!("{}/api/auth/test", self.address), &[], json!({ "advance": 2 * 86_400_000 })).0, 200);
@@ -379,8 +379,8 @@ fn an_admin_signs_in_only_with_a_passkey() {
     assert_eq!(signed_in_as(&mut again).as_deref(), Some(andre.as_str()), "he signs in with Google again");
 
     // With no passkey yet, he isn't made an admin, or he couldn't sign in. Just signed in, he adds one.
-    let admin_route = format!("{}/api/auth/people/admin", k.address);
-    let made_admin = || post(&admin_route, &[], signed(&admin, "POST /api/auth/people/admin", json!({ "user": andre, "admin": true }))).0;
+    let admin_route = format!("{}/api/auth/users/admin", k.address);
+    let made_admin = || post(&admin_route, &[], signed(&admin, "POST /api/auth/users/admin", json!({ "user": andre, "admin": true }))).0;
     assert_eq!(made_admin(), 409);
     let passkey = k.passkey();
     let (status, options, _) = andres.get("/api/auth/passkey/generate-register-options");
@@ -398,7 +398,7 @@ fn an_admin_signs_in_only_with_a_passkey() {
 }
 
 /// A sign-in for a device names it, and auth passes what it showed on with that device's request to join, unchanged,
-/// for the person's devices to check themselves (src/sign_in_proof.rs): a passkey's assertion signs a challenge naming
+/// for the user's devices to check themselves (src/sign_in_proof.rs): a passkey's assertion signs a challenge naming
 /// the device and when, which checks; a sign-in for no device, or one for another device, lets nothing in; and with
 /// Google, the ID token asked for names the device.
 #[test]
@@ -431,7 +431,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     };
     let proof: Proof = serde_json::from_value(asked(&mut new, &device)).expect("its request carries the assertion");
     let network = sign_in_proof::Network::new(&k.address, ROOT, None);
-    let account = sign_in_proof::check(&proof, &device, &network, None, now()).expect("the person's devices check it");
+    let account = sign_in_proof::check(&proof, &device, &network, None, now()).expect("the user's devices check it");
     let Account::Passkey { public_key, .. } = &account else { panic!("{account:?}") };
     let checked = sign_in_proof::vouches(&proof, &device, &network, None, std::slice::from_ref(&account), now());
     assert!(checked.is_ok() && !public_key.is_empty(), "and let it in by it, once it's recorded: {checked:?}");
@@ -460,9 +460,9 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
 }
 
 /// A device is let in by its sign-in only when it signed in itself: one whose sign-in was finished from a link opened
-/// elsewhere (the CLI's sign-in code page, or a site that sent the person a link) could have been started by whoever
+/// elsewhere (the CLI's sign-in code page, or a site that sent the user a link) could have been started by whoever
 /// sent it, who'd hold the token it gave. Sign-in passes that one's proof on as `by_link`, which records what it signed in
-/// with when the person taps Approve but lets nothing in by itself.
+/// with when the user taps Approve but lets nothing in by itself.
 #[test]
 fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
     use one::sign_in_proof::{self, Proof};
@@ -504,7 +504,7 @@ fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
         assert_eq!(resp.status(), 200);
         let mut resp = agent.get(format!("{}/api/auth/devices/requests/{key}", k.address)).header("authorization", format!("Bearer {token}")).call().unwrap();
         let sign_in = resp.body_mut().read_json::<Value>().unwrap()["sign_in"].clone();
-        // What the person's devices then do with it, with the passkey recorded as theirs.
+        // What the user's devices then do with it, with the passkey recorded as theirs.
         let proof: Proof = serde_json::from_value(sign_in.clone()).expect("a proof");
         let account = sign_in_proof::check(&proof, &device, &network, None, now()).expect("it checks, to be recorded as it's approved by a tap");
         let vouched = sign_in_proof::vouches(&proof, &device, &network, None, &[account], now());
@@ -518,7 +518,7 @@ fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
     let linked = carried("/sign-in/code/done");
     assert_eq!(linked["lets_in"], false, "{linked}");
     assert!(linked["sign_in"]["by_link"]["passkey"].is_object(), "{linked}");
-    // As a site that sent the person a link does.
+    // As a site that sent the user a link does.
     assert_eq!(carried("/elsewhere")["lets_in"], false);
 }
 
@@ -557,13 +557,13 @@ impl Subscription {
     }
 }
 
-/// What sign-in pushes about a device asking to join is what the apps read (src/push.rs's `Note`): to its person's other
+/// What sign-in pushes about a device asking to join is what the apps read (src/push.rs's `Note`): to its user's other
 /// devices, never the one asking, "<device> wants in" with the action `{ join: <code> }` (`keys::join_code`, which the
 /// apps' Approve and Not Me send their node) once nothing let it in within a few seconds, and "<device> joined" once
 /// one did, each opening Settings › Devices. Their devices are those that asked to join as them here, and those that
 /// registered for pushes naming them, as a device that joined before sign-in kept whose devices asked does.
 #[test]
-fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
+fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
     use data_encoding::{BASE64, HEXLOWER};
     let (admin, admin_hex) = endpoint();
     let (phone, phone_hex) = endpoint();
@@ -772,7 +772,7 @@ mod relay {
 
     /// What `key` tells the relay: `fields`, signed as devices sign requests.
     /// When to sign what's told the relay: now, but each at a millisecond of its own, as the relay takes each `(by, at)`
-    /// once, and a test tells it faster than a person would.
+    /// once, and a test tells it faster than a user would.
     fn at() -> u64 {
         use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
         static LAST: AtomicU64 = AtomicU64::new(0);
@@ -825,7 +825,7 @@ mod relay {
         data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>())
     }
 
-    /// A device is taken out (its key forgotten, its person signed out) only when the relay says so: a node that doesn't
+    /// A device is taken out (its key forgotten, its user signed out) only when the relay says so: a node that doesn't
     /// list it, which may not have read its approval yet, says nothing of it, nor does an old key that was in where a
     /// new one signs in.
     #[test]
@@ -896,7 +896,7 @@ mod relay {
             let machine = SecretKey::generate();
             assert_eq!(tell(&address, &first, json!({ "add": hex(&machine), "role": "compute" })), 204);
             assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "compute" })), 204, "a compute didn't add the computer it paired");
-            assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "service" })), 204, "a compute didn't add its person's service");
+            assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "service" })), 204, "a compute didn't add its user's service");
             assert_eq!(tell(&address, &phone, json!({ "add": hex(&machine), "role": "client" })), 403, "a client changed a compute's role");
             assert_eq!(tell(&address, &machine, json!({ "add": hex(&phone), "role": "compute" })), 403, "a compute made a client a compute");
             // A device that let a key in adds it again as it is (approving it again, to finish): done, nothing changed.

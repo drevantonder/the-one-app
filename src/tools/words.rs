@@ -1,4 +1,4 @@
-//! What a tool gives back, in words for a person at the command line, whatever the tool: text as it is, a list one line
+//! What a tool gives back, in words for a user at the command line, whatever the tool: text as it is, a list one line
 //! for each, an object a line for each of what it says. `--json` gives it as it came.
 
 use serde_json::{Map, Value};

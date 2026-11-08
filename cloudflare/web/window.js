@@ -35,7 +35,7 @@ whenMoved(render);
 whenTitled((title) => windowShown && title !== barTitle && ((barTitle = title), drawWindow()));
 offline.whenChanged(() => windowShown && !platform.panel && drawWindow());
 
-/// The sidebar's open or closed on a computer's width, as the person left it.
+/// The sidebar's open or closed on a computer's width, as the user left it.
 const SIDEBAR = "one.sidebar";
 
 /// The sidebar's badges, every one, as the native app counts them on its icon: said as the window is first drawn,
@@ -85,7 +85,7 @@ function drawPanel() {
 }
 
 /// A phone's hardware Back: what's over the window (a sheet, an alert, a menu) closes first, as Escape does; then a
-/// pushed screen goes back, and so does one a person has gone deeper than the home screen. → whether it took it: if
+/// pushed screen goes back, and so does one a user has gone deeper than the home screen. → whether it took it: if
 /// not, the app leaves.
 export function hardwareBack() {
   if (overWindow()) return document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), true;
@@ -144,7 +144,7 @@ async function handle(event) {
 }
 
 /// Devices waiting that this device may let in, asked of auth every few seconds while the page shows: the first time
-/// one is seen here, Devices opens to ask about it. Those its person said aren't theirs aren't asked again.
+/// one is seen here, Devices opens to ask about it. Those its user said aren't theirs aren't asked again.
 const seen = new Set();
 let prompting = false;
 export async function watchWaiting() {

@@ -1,6 +1,6 @@
 //! `throwaway`: a throwaway network, a network of its own, made as `create` makes every new one, by a node beside this machine's own with its own
-//! home and ports, so it touches nothing of the person's (`one::mode`). There's one for each checkout it's run in, from any folder in it, so threads working in different ones each have their
-//! own. Its Workers run beside it, and its auth lets its first person in with no passkey (cloudflare::Settings::throwaway_person), so a
+//! home and ports, so it touches nothing of the user's (`one::mode`). There's one for each checkout it's run in, from any folder in it, so threads working in different ones each have their
+//! own. Its Workers run beside it, and its auth lets its first user in with no passkey (cloudflare::Settings::throwaway_user), so a
 //! client of this checkout's build, on a device borrowed for it (`throwaway client`), signs in with nobody there; others join
 //! as anyone does, by an invite link the first makes, and again with no passkey (`throwaway client <kind> --as <name>`). It
 //! keeps its data until `throwaway stop`: left alone it stops, and `throwaway` starts it again as it was, as it does when this build
@@ -115,7 +115,7 @@ fn inside(network: &Throwaway, rest: &[String]) -> Result<()> {
     }
 }
 
-/// `sign-in`, as the throwaway network's person, with no passkey: its auth asks for none.
+/// `sign-in`, as the throwaway network's user, with no passkey: its auth asks for none.
 fn sign_in() -> Result<()> {
     let address = crate::node().state()?.address().context("the throwaway network has no address")?.to_string();
     let started = crate::sign_in::start(&address, None)?;
@@ -213,12 +213,12 @@ fn commands(mcp: &str) -> one::cli::Command {
             form("throwaway", "start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is: on this machine beside yours, with only what every new one starts with, to look around and test in".into()),
             form("throwaway <command>", format!("any command, in it: {CLI} throwaway status, {CLI} throwaway apps, {CLI} throwaway repos list")),
             form("throwaway mcp", format!("its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}")),
-            form("throwaway sign-in", "sign its CLI in as its person, with no browser".into()),
+            form("throwaway sign-in", "sign its CLI in as its user, with no browser".into()),
             form("throwaway git <args>", format!("git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone")),
             form("throwaway cloudflare node deploy", "run its Cloudflare node beside its Workers, as Cloudflare would".into()),
             form("throwaway client <kind>", "a signed-in client of this checkout's build: web, linux, mac, iphone, android or windows".into()),
             form("throwaway client <kind> --as sam", "the same, as someone else, invited by you with Add Someone's link".into()),
-            form("throwaway client cli <command>", format!("a command from a computer that's only a device of its person's (no node), asking their nodes over iroh in run priority's order, as every client does: --device cloudflare asks the Cloudflare node, once deployed; --build <program> first runs another build of {CLI} (an older release's) as that device")),
+            form("throwaway client cli <command>", format!("a command from a computer that's only a device of its user's (no node), asking their nodes over iroh in run priority's order, as every client does: --device cloudflare asks the Cloudflare node, once deployed; --build <program> first runs another build of {CLI} (an older release's) as that device")),
             form("throwaway stop", format!("stop and delete it, and give back its devices; {CLI} throwaway then starts a new one")),
         ],
         run: |_| Ok(false),

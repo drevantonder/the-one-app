@@ -1,4 +1,4 @@
-//! Widgets' tool: the person's widgets as text, for an agent, or a chat that can't draw them (src/mcp/apps.rs
+//! Widgets' tool: the user's widgets as text, for an agent, or a chat that can't draw them (src/mcp/apps.rs
 //! draws them in one that can).
 
 use anyhow::Result;
@@ -22,7 +22,7 @@ fn tool() -> Value {
     json!({
         "name": "show",
         "reads": true,
-        "description": "Show the person's widgets inline, drawn as their apps draw them (or as text where a chat can't draw them): all of them, one app's, or one. Use it when they ask how things stand at a glance.",
+        "description": "Show the user's widgets inline, drawn as their apps draw them (or as text where a chat can't draw them): all of them, one app's, or one. Use it when they ask how things stand at a glance.",
         "input": { "type": "object", "properties": {
             "app": { "type": "string", "description": "only this app's widgets" },
             "widget": { "type": "string", "description": "only the widget of this name" },
@@ -104,7 +104,7 @@ fn percent(value: Option<f64>, max: f64) -> String {
     value.map(|v| format!("{}%", (v / max * 100.0).clamp(0.0, 100.0).round())).unwrap_or_default()
 }
 
-/// A number as a person writes it: 3, 2.5, not 2.4999999.
+/// A number as a user writes it: 3, 2.5, not 2.4999999.
 fn number(v: f64) -> String {
     let r = (v * 10.0).round() / 10.0;
     if r.fract() == 0.0 { format!("{}", r as i64) } else { format!("{r}") }

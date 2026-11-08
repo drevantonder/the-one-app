@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use crate::keyring::{Address, Keep, Keyring, error, now, query, refused};
 use crate::{Client, Error, not_let_in, unsent};
 
-/// How often who's who is read again to renew app schedules, so it renews what its person's other devices set too.
+/// How often who's who is read again to renew app schedules, so it renews what its user's other devices set too.
 const HOUR: u64 = 3_600_000;
 
 /// A keyring with what it asks through, as the device `one::settings` signs as.
@@ -167,7 +167,7 @@ impl<O: Opens> Keyring<O> {
         one::settings::settle_own(&self.mine(client, on), on_device).await.map_err(of_one)
     }
 
-    /// Takes this device out of its person's devices, as it signs out, so signing in again makes a new one that
+    /// Takes this device out of its user's devices, as it signs out, so signing in again makes a new one that
     /// replaces it, never a second. Nothing it writes after counts, so it goes in this order: its removal, then off the
     /// network. Its scopes keep their keys, as it forgets its own (ARCHITECTURE.md).
     pub async fn leave(&self, client: &Client, on: &(impl Address + Keep + Signs)) -> Result<(), Error> {
@@ -183,7 +183,7 @@ impl<O: Opens> Keyring<O> {
         }
     }
 
-    /// Renews this person's app schedules of `app` as they use it (`one::settings::renew_app_schedules`), reading
+    /// Renews this user's app schedules of `app` as they use it (`one::settings::renew_app_schedules`), reading
     /// who's who again first at most once an hour.
     pub async fn renew_app_schedules(&self, client: &Client, on: &(impl Address + Keep + Signs), app: &str) {
         if self.renew_checked(HOUR) {
@@ -193,7 +193,7 @@ impl<O: Opens> Keyring<O> {
     }
 
     /// Registers where a push service reaches this device (`one::push::Address`) with the network's push Worker, signed
-    /// with its key and naming its seal key, which each note pushed to it is sealed to, and its person, so auth pushes
+    /// with its key and naming its seal key, which each note pushed to it is sealed to, and its user, so auth pushes
     /// it when another device of theirs asks to join. Once it's out of the network, the Worker forgets it.
     pub async fn register_push(&self, on: &(impl Address + Signs), address: &one::push::Address) -> Result<(), Error> {
         let fields = one::push::register_fields(&self.opens().public(), address, self.user().as_deref()).map_err(unsent)?;

@@ -78,7 +78,7 @@ async fn requests(State(node): State<Node>, me: Me, Query(q): Query<HashMap<Stri
     Ok(Json(json!(node.item_requests(&me, scope.as_ref(), q.get("id").map(String::as_str)).await?)))
 }
 
-/// Asks the person for an item: what `app` declares as `need`, or with neither, one of `title`, `fields` and `hosts`.
+/// Asks the user for an item: what `app` declares as `need`, or with neither, one of `title`, `fields` and `hosts`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Ask {

@@ -1,9 +1,9 @@
 //! The core's own tools: add's and remove's, the Vault's, Backups', Groups', Devices', Widgets', Push's and logs', each defined beside its
 //! feature's others and listed here, the one list. Agents use them as they use apps' tools, by the same kind of name
 //! (`vault_list`, `logs`), on the command line and over MCP; but they're not apps, so no list of apps has them. Every
-//! client lists and runs the same ones: who may do what is the person's rules, and the device's keys. Most are one
-//! request (`Runs::Asks`), which a client asks its node as its person, or answers itself when it changes who can do
-//! what (`settings::answered`), signing that as its person's device; so the remote MCP server's devices answer those
+//! client lists and runs the same ones: who may do what is the user's rules, and the device's keys. Most are one
+//! request (`Runs::Asks`), which a client asks its node as its user, or answers itself when it changes who can do
+//! what (`settings::answered`), signing that as its user's device; so the remote MCP server's devices answer those
 //! themselves (cloudflare/node/src/clients.rs). The rest take several requests, or what's on the machine the command
 //! line runs on (`Runs::Steps`).
 
@@ -18,7 +18,7 @@ pub mod push;
 pub mod vault;
 pub mod widgets;
 
-/// What a tool that needs the person's yes does, wherever it's said.
+/// What a tool that needs the user's yes does, wherever it's said.
 pub const SENDS: &str = "sends or can't be undone";
 
 /// Who reads what a tool says, and names tools and inputs their own way: someone at the command line, an MCP client, or a
@@ -31,7 +31,7 @@ pub enum Reader {
 }
 
 impl Reader {
-    /// How this reader says the person agreed.
+    /// How this reader says the user agreed.
     pub fn confirm(self) -> &'static str {
         match self {
             Reader::Cli => "--confirm",
@@ -41,12 +41,12 @@ impl Reader {
 
     /// What a tool that sends or can't be undone takes, as this reader gives it.
     pub fn needs_confirm(self) -> String {
-        format!("It {SENDS}: give {} once the person agreed.", self.confirm())
+        format!("It {SENDS}: give {} once the user agreed.", self.confirm())
     }
 
-    /// The refusal of `tool`, which sends or can't be undone, given without the person's yes.
+    /// The refusal of `tool`, which sends or can't be undone, given without the user's yes.
     pub fn unconfirmed(self, tool: &str) -> String {
-        format!("{tool} {SENDS}, and the person hasn't agreed to it: ask them, and give {} only if they say yes to this very action", self.confirm())
+        format!("{tool} {SENDS}, and the user hasn't agreed to it: ask them, and give {} only if they say yes to this very action", self.confirm())
     }
 
     /// Its name on a call, which the node keeps with who used each app.
@@ -63,7 +63,7 @@ impl Reader {
 pub struct Asked<'a> {
     pub agent: Option<&'a str>,
     pub reader: Reader,
-    /// The person agreed to what it sends or can't undo (`confirm: true`, `--confirm`).
+    /// The user agreed to what it sends or can't undo (`confirm: true`, `--confirm`).
     pub confirmed: bool,
 }
 

@@ -1,5 +1,5 @@
 //! The command line's built-in commands, each defined by its feature (`Command`), and what they share: how one fails
-//! (`Failed`, its exit code), asking the person before what sends or can't be undone, and the help made from them.
+//! (`Failed`, its exit code), asking the user before what sends or can't be undone, and the help made from them.
 
 use std::io::IsTerminal;
 
@@ -120,7 +120,7 @@ pub fn help<'a>(forms: impl IntoIterator<Item = &'a (String, String)>) -> String
     out
 }
 
-/// Asks the person at a terminal whether to go ahead with `command`: false with no one there to ask, and refused if they
+/// Asks the user at a terminal whether to go ahead with `command`: false with no one there to ask, and refused if they
 /// say no.
 pub fn asked_yes(command: &str) -> Result<bool> {
     if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
@@ -135,7 +135,7 @@ pub fn asked_yes(command: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// How long ago `ms` (since 1970) was, for people: "just now", "5m ago", "3h ago", "2d ago".
+/// How long ago `ms` (since 1970) was, for users: "just now", "5m ago", "3h ago", "2d ago".
 pub fn ago(ms: u64) -> String {
     let s = crate::node::now_ms().saturating_sub(ms) / 1000;
     match s {

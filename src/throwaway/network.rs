@@ -100,7 +100,7 @@ pub(crate) fn start_new(dir: &Path) -> Result<String> {
 }
 
 fn create(dir: &Path) -> Result<String> {
-    // Called what the person is called in their own network, if this machine is in one.
+    // Called what the user is called in their own network, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
     let mine = quick.get(format!("http://{}/v1/state", one::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<one::state::State>().ok());
     let me = mine.map(|s| s.looking().to_string());
@@ -115,14 +115,14 @@ fn create(dir: &Path) -> Result<String> {
     let created = node.post("/v1/create", json!({ "name": "Throwaway", "user_name": me }))?;
     let recovery = created["recovery"].as_str().context("the throwaway network gave no recovery key")?;
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
-    let person = (node.state()?.user.context("the throwaway network has no person")?.id, me);
-    let settings = Settings::for_throwaway(dir, &bucket, person)?;
+    let user = (node.state()?.user.context("the throwaway network has no user")?.id, me);
+    let settings = Settings::for_throwaway(dir, &bucket, user)?;
     settings.save()?;
     // Read back as `cloudflare deploy` reads it, with its secrets.
     let settings = Settings::load_in(dir)?;
     spawn_cloudflare(dir, &settings, &addr)?;
     node.post("/v1/settings", json!({ "name": "address", "value": &settings.address }))?;
-    // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its people sign in with.
+    // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its users sign in with.
     let clients = format!("{}/api/auth one-throwaway", settings.address);
     node.post("/v1/settings", json!({ "name": one::sign_in_proof::CLIENTS, "value": clients }))?;
     // Its data moves to the throwaway bucket, which its node reaches only through its URL signer from then on.

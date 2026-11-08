@@ -2,7 +2,7 @@
 // through WNS as a raw notification, its body the sealed bytes, which starts this helper (the Windows App SDK's
 // PushNotificationManager, by the custom build's Microsoft Entra app: CustomBuild.WnsApp and WnsObject, empty for none,
 // and then nothing registers). The app opens the note with the device's key (open-note), asking nothing of the
-// network, and this shows it as a toast; clicking one opens the app screen it names. A device asking its person to
+// network, and this shows it as a toast; clicking one opens the app screen it names. A device asking its user to
 // join shows Approve and Not Me, answered by the app (join) as Settings › Devices answers them, with no window.
 using System;
 using System.Text.Json.Nodes;

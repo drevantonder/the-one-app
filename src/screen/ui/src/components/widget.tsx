@@ -1,7 +1,7 @@
 // A widget drawn from its tree (`GET /v1/widgets`): a card under its title, the same on the pages (src/screen/home)
 // and in a chat's view (src/mcp_view.html). The Apple, Android and Windows widgets draw the same trees natively. A
 // tree is the app's, so nothing in it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
-// `host` is what buttons, toggles and links act through: `run(app, tool, input, widget)` → the error's text for people if
+// `host` is what buttons, toggles and links act through: `run(app, tool, input, widget)` → the error's text for users if
 // it failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`.
 import * as React from "react"
 import { useLayoutEffect, useRef, useState } from "react"
@@ -287,7 +287,7 @@ function Fit({ children, className }: { children: React.ReactNode; className?: s
   return <span ref={box} className={cn("block min-w-0 truncate whitespace-nowrap", className)}><span ref={text} className="inline-block">{children}</span></span>
 }
 
-// A button or toggle runs the app's tool as the person, pressed with a spinner meanwhile; the host draws the
+// A button or toggle runs the app's tool as the user, pressed with a spinner meanwhile; the host draws the
 // widget again. A toggle that failed goes back to how it was.
 function useAct(w: Widget, host: WidgetHost) {
   const [busy, setBusy] = useState(false)

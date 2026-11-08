@@ -1,5 +1,5 @@
-// What the pages and Accounts screens know, the same on every client: the person's pages (theirs, their groups',
-// everyone's), the apps on each and what each offers, all read from the node as the person looking (`one.api`).
+// What the pages and Accounts screens know, the same on every client: the user's pages (theirs, their groups',
+// everyone's), the apps on each and what each offers, all read from the node as the user looking (`one.api`).
 export const home = (() => {
   // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can.
   const h = { state: null, apps: [], widgets: {}, badges: {}, failed: new Set() };
@@ -13,13 +13,13 @@ export const home = (() => {
   // The tool that lists an app's accounts, the one it says does (`accounts: true`): none for an app without.
   const accountsTool = (a) => a?.tools?.find((o) => o.accounts)?.name;
   const scopes = (a) => (a.added || []).map((s) => (s.startsWith("user:") ? "user" : s));
-  /// Every page this person can read, as the node lists them (`pages` in `/v1/state`): theirs, their groups' in the
+  /// Every page this user can read, as the node lists them (`pages` in `/v1/state`): theirs, their groups' in the
   /// order they chose, everyone's last. The ones they hid are marked, and left out of `pages`.
   const allPages = () => h.state?.pages || [];
   const pages = () => allPages().filter((p) => !p.hidden);
   const page = (scope) => allPages().find((p) => p.scope === scope);
 
-  /// Whether this person may add apps to a scope: their own, a group they admin, or everyone's as an admin.
+  /// Whether this user may add apps to a scope: their own, a group they admin, or everyone's as an admin.
   function canArrange(scope) {
     if (scope === "user") return true;
     if (scope === "global") return isAdmin();
@@ -63,7 +63,7 @@ export const home = (() => {
     return copy;
   }
 
-  /// What a page shows, in its person's order: the widgets they put there and its apps' icons, those added since
+  /// What a page shows, in its user's order: the widgets they put there and its apps' icons, those added since
   /// they last arranged it at the end, without those they took off it. A page never arranged shows its apps. A widget
   /// still to come keeps its place (`pending`), at its size, as a grey card.
   function items(p) {

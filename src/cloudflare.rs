@@ -13,7 +13,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Claims {
     pub iss: String,
-    /// The person's user id.
+    /// The user's id.
     pub sub: String,
     /// The client it was issued to.
     pub azp: String,
@@ -24,7 +24,7 @@ pub struct Claims {
     pub exp: u64,
     #[serde(default)]
     pub jti: String,
-    /// The person's name, as auth knows them.
+    /// The user's name, as auth knows them.
     #[serde(default)]
     pub name: String,
 }

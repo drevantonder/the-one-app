@@ -11,7 +11,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::app;
 
-/// What the person calls this computer: its host name (Windows names it in COMPUTERNAME).
+/// What the user calls this computer: its host name (Windows names it in COMPUTERNAME).
 pub fn name() -> Option<String> {
     std::env::var("HOSTNAME").ok().or_else(|| std::env::var("COMPUTERNAME").ok()).or_else(|| std::fs::read_to_string("/etc/hostname").ok()).map(|h| h.trim().to_string()).filter(|h| !h.is_empty())
 }
@@ -74,7 +74,7 @@ pub fn appearance(value: String) {
     app().handle.webview_windows().values().for_each(appear);
 }
 
-/// A window in the person's light or dark (the system's, for automatic): its title bar, and the colour it shows before
+/// A window in the user's light or dark (the system's, for automatic): its title bar, and the colour it shows before
 /// its page draws, so a start in dark has no white frame.
 pub fn appear(window: &tauri::WebviewWindow) {
     let theme = match app().kept("appearance").as_deref() {
@@ -117,7 +117,7 @@ pub fn computer_use() -> Option<bool> {
 
 pub fn set_computer_use(_: bool) {}
 
-/// Whether it shows notifications, asking the person first if `ask`.
+/// Whether it shows notifications, asking the user first if `ask`.
 pub async fn notify(ask: bool) -> Option<String> {
     let n = app().handle.notification();
     let state = match n.permission_state() {
@@ -136,7 +136,7 @@ pub fn open(url: String) -> Result<(), String> {
     app().handle.opener().open_url(url, None::<&str>).map_err(|_| "Couldn’t open your browser.".to_string())
 }
 
-/// A file a screen gives: saved where the person chooses, or with `preview`, opened in the app for it.
+/// A file a screen gives: saved where the user chooses, or with `preview`, opened in the app for it.
 pub async fn save(name: String, data: Vec<u8>, preview: bool) -> Result<(), String> {
     if preview {
         let dir = std::env::temp_dir().join(format!("{}-{}", one::config::CLI, app().next.fetch_add(1, Ordering::Relaxed)));

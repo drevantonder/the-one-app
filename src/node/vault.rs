@@ -1,6 +1,6 @@
 //! The Vault: its items in each scope, the node's database `vault` there (`src/vault.rs`), requests for one, which
 //! machines open each scope's (`vault grant`), and filling them into apps' and services' requests. A caller's items
-//! open as its other data does: with this device's own keys for its own person, else with the keys the caller hands
+//! open as its other data does: with this device's own keys for its own user, else with the keys the caller hands
 //! (`x-one-keys`), that database's alone; and their secrets, hosts and apps only on a machine its admins granted the
 //! scope's Vault key, which nobody hands.
 
@@ -16,7 +16,7 @@ pub(crate) mod routes;
 
 const VAULT: (&str, &str) = (scopes::APP, scopes::CoreDb::Vault.name());
 
-/// How an agent is told to ask the person for an item it may use: a request with no app is for agents, the person's own
+/// How an agent is told to ask the user for an item it may use: a request with no app is for agents, the user's own
 /// items, which they use with `vault_fetch`.
 pub const ASK_FOR_AGENTS: &str = "vault_request, leaving out app,";
 
@@ -77,7 +77,7 @@ impl Node {
     }
 
     /// Seals what's in `scope`'s Vault to its newest key, if this machine opens it and another before it: a write that
-    /// changes nothing else, done at once after this machine's own person changed which machines open it.
+    /// changes nothing else, done at once after this machine's own user changed which machines open it.
     pub(crate) async fn reseal_vault(&self, scope: &Scope) -> Result<()> {
         if self.with(|i| i.r.db().opens_vault(&self.0.id, scope))? && self.vault_secrets(scope).await?.is_some_and(|k| k.len() > 1) {
             self.write_item(&Caller::local(self)?, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await?;
@@ -86,7 +86,7 @@ impl Node {
     }
 
     /// `scopes`' items for `me`. A sign-in lacking any of their keys is told them all at once (428); this device's own
-    /// person passes over a scope it wasn't given the key of yet.
+    /// user passes over a scope it wasn't given the key of yet.
     async fn items_of(&self, me: &Caller, scopes: &[Scope]) -> Result<Vec<(Scope, Items)>> {
         let want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), VAULT.0, VAULT.1)).collect();
         self.needs(me, &want).await?;
@@ -158,7 +158,7 @@ impl Node {
     }
 
     /// Makes an HTTP request for an agent of `caller`'s (`{ url, method?, headers?, body? }`), as the built-in agents
-    /// service: the fields of the items a person lets agents use are filled in, a secret one only for its item's
+    /// service: the fields of the items a user lets agents use are filled in, a secret one only for its item's
     /// hosts, as an app's requests are. → `{ status, headers, body }`, a secret field's value blotted out wherever the
     /// site echoes it back, so the agent never sees one.
     pub async fn vault_fetch(&self, caller: &Caller, req: &Value) -> Result<Value> {
@@ -219,7 +219,7 @@ impl Node {
     /// Why an agent's placeholder `name` found nothing in the items it was filled from (`lookup`), and what to do, in
     /// a sentence.
     fn why_unfilled(lookup: &crate::vault::Lookup, name: &str) -> String {
-        let ask = format!("{ASK_FOR_AGENTS} asks the person to let you");
+        let ask = format!("{ASK_FOR_AGENTS} asks the user to let you");
         let found = name.split_once(':').map(|(id, field)| (id, field, lookup.scopes.iter().find_map(|(_, items)| items.get(id).cloned())));
         match found {
             Some((id, _, None)) => format!("no item {id} is in a Vault you may use: vault_list shows them, and {ask} use one"),
@@ -230,11 +230,11 @@ impl Node {
             }
             None => {
                 let field = name.rsplit('/').next().unwrap_or(name);
-                format!("no item agents may use has a field {field}: {ASK_FOR_AGENTS} asks the person for one")
+                format!("no item agents may use has a field {field}: {ASK_FOR_AGENTS} asks the user for one")
             }
         }
     }
-    /// The items in the scopes `viewer` manages (or `scope`), as a person sees them: never a secret field's value.
+    /// The items in the scopes `viewer` manages (or `scope`), as a user sees them: never a secret field's value.
     /// `wanted_by` is the apps added for them that ask the Vault for fields it has.
     pub async fn vault(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Value>> {
         let needs = self.vault_needs(viewer).await?;
@@ -346,7 +346,7 @@ impl Node {
         Ok(id)
     }
 
-    /// Makes (with no `id`) or changes an item in `scope`, for a person or agent (`caller`) → its id.
+    /// Makes (with no `id`) or changes an item in `scope`, for a user or agent (`caller`) → its id.
     pub async fn set_item(&self, caller: &Caller, scope: &Scope, mut data: Value) -> Result<String> {
         let id = data["id"].as_str().map(str::to_string).unwrap_or_else(new_id);
         data["id"] = json!(id);
@@ -355,9 +355,9 @@ impl Node {
         data.as_object_mut().context("an item is an object")?.remove("app");
         let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == scopes::AGENTS));
         self.write_item(caller, scope, |items| {
-            // Agents use an item (vault_fetch) only once its person lets agents use it, never by themselves.
+            // Agents use an item (vault_fetch) only once its user lets agents use it, never by themselves.
             let had = items.get(&id).is_some_and(|it| it.apps.contains(scopes::AGENTS));
-            ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with {ASK_FOR_AGENTS} and they pick or make it");
+            ensure!(caller.agent.is_none() || had || !wants, "only the user lets agents use an item: ask them with {ASK_FOR_AGENTS} and they pick or make it");
             Ok(data.clone())
         })
         .await?;
@@ -428,7 +428,7 @@ impl Node {
         Ok(self.0.apps.describe(app).await.map_err(|_| anyhow!("Not asked: {app} isn't added, so it declares nothing it needs"))?["vault"].clone())
     }
 
-    /// Asks a person for an item `app` may use, in `scope`, for `caller` (an agent, or an app's page), who never sees
+    /// Asks a user for an item `app` may use, in `scope`, for `caller` (an agent, or an app's page), who never sees
     /// its secret fields: what `app` declares as `need`, or `ask`'s `{ title, fields, hosts }`. → `{ id, link, scope }`.
     /// From a page whose Vault they can't change (a member on Everyone's), it's asked in their own, which the app's calls
     /// for them read first. A `shared` need is set once, by an admin in Everyone's Vault, for everyone: anyone else is
@@ -448,7 +448,7 @@ impl Node {
         };
         let (title, fields, hosts, said) = match need {
             Some(_) if app == scopes::AGENTS => bail!(
-                "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
+                "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the user"
             ),
             Some(need) if app != scopes::APP => {
                 let declared = self.declared_needs(app).await?;
@@ -483,7 +483,7 @@ impl Node {
         })?;
         let request = content::Request { id: &id, app, title, fields, hosts, need, why, agent: caller.agent.as_deref() };
         self.append_as(scope, &caller.user, content::vault_request(request)).await?;
-        // At the network's address (where people sign in) the web client opens it in any browser; a
+        // At the network's address (where users sign in) the web client opens it in any browser; a
         // network without one has only its apps to.
         let web = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()?).remove("address")))?;
         let link = match web.as_deref().filter(|w| w.starts_with("https://") || w.starts_with("http://")) {

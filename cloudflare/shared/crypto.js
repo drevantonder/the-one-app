@@ -4,7 +4,7 @@
 // scope's key: nonce ‖ AES-256-GCM(HKDF-SHA256(scope key, "one/app\0<app>"), nonce, app key), so erasing an app (deleting
 // its sealed key) destroys its key, and its data with it. A database's key is derived from its app's with HKDF-SHA256.
 //
-// Sealed to a public key (an X25519 key: a person's, a device's, the recovery key's twin), bytes are
+// Sealed to a public key (an X25519 key: a user's, a device's, the recovery key's twin), bytes are
 // share ‖ AES-256-GCM(key, zero nonce, plain), where share is a fresh X25519 public key and key is HKDF-SHA256 of the
 // shared secret, salted with share ‖ the recipient's public key. Each key seals once, so the zero nonce is safe.
 //

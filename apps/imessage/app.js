@@ -1,5 +1,5 @@
-// iMessage: Messages on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Messages;
-// this app is what people and agents use, wherever they are.
+// iMessage: Messages on the user's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Messages;
+// this app is what users and agents use, wherever they are.
 
 async function service(ctx, fn, input) {
   try {
@@ -15,7 +15,7 @@ async function service(ctx, fn, input) {
 const CHAT = "the chat: its name as imessage_chats gives it, a part of the name only one chat has, or its id; or a phone number with its country code (+61 400 000 000) or an email address";
 const SINCE = { type: "string", description: "only messages after this: an ISO 8601 date (2026-11-01) or date-time (2026-11-01T09:00), in the Mac's time zone without an offset" };
 const LIMIT = { type: "integer", description: "at most this many; default 30" };
-const MESSAGE = "{ time, from, text, attachments }, time ISO 8601 in the Mac's time zone, from the sender's name from Contacts (or their number), or me for the person, and attachments the files' names";
+const MESSAGE = "{ time, from, text, attachments }, time ISO 8601 in the Mac's time zone, from the sender's name from Contacts (or their number), or me for the user, and attachments the files' names";
 
 export default {
   name: "imessage",
@@ -25,9 +25,9 @@ export default {
   color: "#34c759",
   description: "Messages on your Mac, for your apps and agents",
   needs: "Needs a Mac",
-  instructions: "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; imessage_search finds messages. Each list pages back with limit and skip. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never marks a message read.",
+  instructions: "iMessage is the user's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; imessage_search finds messages. Each list pages back with limit and skip. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never marks a message read.",
   uses: { services: ["imessage"] },
-  service: { network: [], person: true, platforms: ["mac"] },
+  service: { network: [], user: true, platforms: ["mac"] },
 
   tools: {
     chats: {
@@ -77,13 +77,13 @@ export default {
     send: {
       reads: false,
       confirm: true,
-      description: "Send an iMessage from the person's account to a chat, a phone number or an email address. It sends a real message to a real person and can't be taken back: only what the person asked to send, to whom they asked. Says to whom it went.",
+      description: "Send an iMessage from the user's account to a chat, a phone number or an email address. It sends a real message to a real person and can't be taken back: only what the user asked to send, to whom they asked. Says to whom it went.",
       input: {
         type: "object",
         required: ["to", "text"],
         properties: {
           to: { type: "string", description: "a phone number with its country code (+61 400 000 000), an email address, or a chat: its name or id as imessage_chats gives it" },
-          text: { type: "string", description: "the message, exactly as the person approved it" },
+          text: { type: "string", description: "the message, exactly as the user approved it" },
         },
       },
       run: (ctx, input) => service(ctx, "send", input),

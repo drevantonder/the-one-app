@@ -42,7 +42,7 @@ class OnePlugin(private val activity: Activity) : Plugin(activity) {
         signing = invoke
         scheme = args.getString("scheme")
         if (args.optBoolean("open", true)) openInTab(activity, Uri.parse(args.getString("url")))
-        // Waiting for the person to sign in takes a while, but not forever.
+        // Waiting for the user to sign in takes a while, but not forever.
         val waiting = invoke
         android.os.Handler(activity.mainLooper).postDelayed({
             if (signing === waiting) {
@@ -115,7 +115,7 @@ class OnePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve()
     }
 
-    /** Whether this phone shows notifications: "granted", "denied" or "default" (the person hasn't been asked); none in a
+    /** Whether this phone shows notifications: "granted", "denied" or "default" (the user hasn't been asked); none in a
      *  build with no Firebase project, which gets no pushes. Asks if `ask`; with `once`, only if it never has. */
     @Command
     fun notify(invoke: Invoke) {
@@ -144,7 +144,7 @@ class OnePlugin(private val activity: Activity) : Plugin(activity) {
         }.start()
     }
 
-    /** Light, dark or automatic, as the person chose in Settings: the system bars' icons follow it, and the app starts in it. */
+    /** Light, dark or automatic, as the user chose in Settings: the system bars' icons follow it, and the app starts in it. */
     @Command
     fun appearance(invoke: Invoke) {
         val value = invoke.getArgs().optString("value")

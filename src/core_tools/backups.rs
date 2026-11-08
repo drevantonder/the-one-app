@@ -5,7 +5,7 @@ use serde_json::{Map, Value, json};
 
 use super::{Asked, Feature, Request, Tool, as_given};
 
-const GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; Once a week each place's newest backup is restored into a throwaway copy and checked (who's who, databases, blobs); a failed check shows on Backups like a failed backup. backups_check runs that check now and says what came back.";
+const GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the user the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; Once a week each place's newest backup is restored into a throwaway copy and checked (who's who, databases, blobs); a failed check shows on Backups like a failed backup. backups_check runs that check now and says what came back.";
 
 pub fn feature() -> Feature {
     Feature {
@@ -24,7 +24,7 @@ fn tools() -> Vec<Tool> {
     vec![
         Tool::asks(json!({ "name": "status", "reads": true, "description": "How backups are going: each place backed up to (a folder on a device's disk, or S3-compatible storage), when it last backed up and by which device, what's failing and since when, and the recent snapshots.", "input": none }), |_, _| Ok(Request::get("/v1/backups")), as_given),
         Tool::asks(json!({ "name": "now", "description": "Back up now, without waiting for the hour: each device backs up what it holds to each place.", "input": none }), now, now_said),
-        Tool::asks(json!({ "name": "add_place", "words": ["folder"], "description": "Add a place to back up to: S3-compatible storage (Cloudflare R2, Backblaze B2, MinIO…), or a folder on this device, like a USB disk's. For storage you give the endpoint; the person gets a link to a sheet on their own device where they type the bucket, access key ID and secret key, so you never see the key. A folder is tried before it's added. backups_status then shows its first backup, or what went wrong.", "input": { "type": "object", "properties": { "endpoint": { "type": "string", "description": "like https://<account id>.r2.cloudflarestorage.com" }, "folder": { "type": "string", "description": "instead of endpoint: a folder on this device, by its path" }, "title": { "type": "string", "description": "what the person calls it, like Cloudflare R2" } } } }), add_place, add_place_said),
+        Tool::asks(json!({ "name": "add_place", "words": ["folder"], "description": "Add a place to back up to: S3-compatible storage (Cloudflare R2, Backblaze B2, MinIO…), or a folder on this device, like a USB disk's. For storage you give the endpoint; the user gets a link to a sheet on their own device where they type the bucket, access key ID and secret key, so you never see the key. A folder is tried before it's added. backups_status then shows its first backup, or what went wrong.", "input": { "type": "object", "properties": { "endpoint": { "type": "string", "description": "like https://<account id>.r2.cloudflarestorage.com" }, "folder": { "type": "string", "description": "instead of endpoint: a folder on this device, by its path" }, "title": { "type": "string", "description": "what the user calls it, like Cloudflare R2" } } } }), add_place, add_place_said),
         Tool::steps(json!({ "name": "remove_place", "confirm": true, "description": "Stop backing up to a place. What's already there stays.", "input": { "type": "object", "required": ["place"], "properties": { "place": { "type": "string", "description": "its title or id, as backups_status lists it" } } } })),
         Tool::steps(json!({ "name": "check", "reads": true, "description": "Restore each place's newest backup into a throwaway copy now, as the weekly check does: who's who from its steps, every database to its newest step as the network has it, and every blob's hash. Says what came back, and what's wrong. With folder, any backup on a disk instead, opened with the recovery key alone, with or without a network here.", "input": { "type": "object", "properties": { "folder": { "type": "string", "description": "a backup's folder on this device, by its path" }, "recovery_key": { "type": "string", "description": "with folder: the path of a file on this machine holding the recovery key (- reads it from stdin on the command line); never the key itself" } } } })),
     ]
@@ -38,7 +38,7 @@ fn now_said(_: &Map<String, Value>, _: Value) -> Result<Value> {
     Ok(json!("Backing up now; backups_status says how it went."))
 }
 
-/// A folder on this device, or S3-compatible storage, whose key the person types on their own device.
+/// A folder on this device, or S3-compatible storage, whose key the user types on their own device.
 fn add_place(input: &Map<String, Value>, asked: &Asked) -> Result<Request> {
     let given = |k: &str| input.get(k).and_then(Value::as_str);
     Ok(match (given("folder"), given("endpoint")) {
@@ -51,7 +51,7 @@ fn add_place(input: &Map<String, Value>, asked: &Asked) -> Result<Request> {
 fn add_place_said(input: &Map<String, Value>, r: Value) -> Result<Value> {
     Ok(json!(match input.get("folder") {
         Some(_) => format!("{}{}", tried_said(&r), if r["id"].is_string() { "Added: the first backup starts now, then every hour that something changes." } else { "Not added." }),
-        None => format!("Asked. Give the person this link: {}\nThey type the bucket and its key into a sheet on their own device, and you never see it. Once they have, backups_status shows its first backup.", r["link"].as_str().unwrap_or("")),
+        None => format!("Asked. Give the user this link: {}\nThey type the bucket and its key into a sheet on their own device, and you never see it. Once they have, backups_status shows its first backup.", r["link"].as_str().unwrap_or("")),
     }))
 }
 

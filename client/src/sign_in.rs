@@ -2,15 +2,15 @@
 //! through its worker): an OAuth client of its auth, from its metadata (RFC 8414), registered the first time (RFC
 //! 7591), with an authorization code and PKCE, refreshed, and revoked. Each step is a `Request` made here and an answer
 //! read here; who sends it is the client's (natively, `ureq`, below; in a browser, its worker's `fetch`), as are where
-//! it keeps its registration and tokens, and how the person reaches the authorization and comes back.
+//! it keeps its registration and tokens, and how the user reaches the authorization and comes back.
 
 use std::collections::HashMap;
 
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
-/// Why signing in didn't work, in words a person reads; `signed_out` when auth refused this client's tokens (one used
-/// or revoked), so its person signs in again.
+/// Why signing in didn't work, in words a user reads; `signed_out` when auth refused this client's tokens (one used
+/// or revoked), so its user signs in again.
 #[derive(Debug, Clone)]
 pub struct Failed {
     pub signed_out: bool,
@@ -29,7 +29,7 @@ pub fn failed(message: impl Into<String>) -> Failed {
     Failed { signed_out: false, message: message.into() }
 }
 
-/// Signed out: nothing here signs in until its person does again.
+/// Signed out: nothing here signs in until its user does again.
 pub fn signed_out(message: impl Into<String>) -> Failed {
     Failed { signed_out: true, message: message.into() }
 }
@@ -74,7 +74,7 @@ pub struct Asked {
 }
 
 impl Asked {
-    /// As a client keeps it while its person signs in elsewhere (a browser's page goes to auth and back).
+    /// As a client keeps it while its user signs in elsewhere (a browser's page goes to auth and back).
     pub fn to_json(&self) -> Value {
         json!({ "query": self.query, "state": self.state, "verifier": self.verifier, "redirect": self.redirect, "client": self.client })
     }
@@ -129,7 +129,7 @@ impl Auth {
     }
 
     /// An authorization for `client`, coming back to `redirect`, for the device `join` names (its key ‖ seal key, hex),
-    /// which its person's devices then let in by this sign-in.
+    /// which its user's devices then let in by this sign-in.
     pub fn ask(&self, client: &str, redirect: &str, join: Option<&str>) -> Asked {
         let verifier = B64U.encode(&rand::random::<[u8; 32]>());
         let state = B64U.encode(&rand::random::<[u8; 32]>());
@@ -148,7 +148,7 @@ impl Auth {
         Asked { query: form(&fields), verifier, state: state.clone(), redirect: redirect.into(), client: client.into() }
     }
 
-    /// Where the person goes to sign in for `asked`.
+    /// Where the user goes to sign in for `asked`.
     pub fn url(&self, asked: &Asked) -> Result<String, Failed> {
         Ok(format!("{}?{}", self.endpoint("authorization_endpoint")?, asked.query))
     }
