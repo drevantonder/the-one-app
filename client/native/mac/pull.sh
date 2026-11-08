@@ -69,7 +69,7 @@ build_here() {
 	local want="$want_commit $want_config" with
 	with=$(cksum < "$0")
 	if [ "$want" = "$(cat tried 2>/dev/null)" ] && [ "$with" = "$(cat tried.job 2>/dev/null)" ]; then
-		[ ! -s failed ] || say "Failed: its build of ${want_commit:0:12} failed: $(tail -n 8 failed.log | tr '\n' ' ')"
+		[ ! -e failed ] || say "Failed: its build of ${want_commit:0:12} failed: $(tail -n 8 failed.log | tr '\n' ' ')"
 		exit 0
 	fi
 	checkout "$want_commit" "$want_config" > "$c/update.log" 2>&1; status=$?

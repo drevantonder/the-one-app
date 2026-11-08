@@ -118,4 +118,4 @@ if [ "${1:-}" = --release ]; then
 fi
 [ -z "${NO_INSTALL:-}" ] || { echo "Built $app"; exit 0; }
 
-CONFIG_NAME=$CONFIG_NAME CONFIG_CLI=$CONFIG_CLI bash "$(dirname "$0")/install-app.sh" "$app"
+CONFIG_NAME=$CONFIG_NAME CONFIG_CLI=$CONFIG_CLI bash "$native/mac/install-app.sh" "$app"
