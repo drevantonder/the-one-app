@@ -88,35 +88,6 @@ pub fn appear(window: &tauri::WebviewWindow) {
     let _ = window.set_background_color(Some(if dark { tauri::window::Color(10, 10, 10, 255) } else { tauri::window::Color(255, 255, 255, 255) }));
 }
 
-/// Only a Mac has widgets' own items in its menu bar.
-pub fn menubar(_: String, _: bool) -> Vec<String> {
-    Vec::new()
-}
-
-pub fn menubar_hidden() -> Option<Vec<String>> {
-    None
-}
-
-/// The widgets hidden from the menu bar, `(kind, title)`, which the tray's menu shows again.
-pub fn hidden_widgets() -> Vec<(String, String)> {
-    Vec::new()
-}
-
-/// The tray item's icon: the app's.
-pub fn tray_icon(app: &tauri::App, tray: tauri::tray::TrayIconBuilder<tauri::Wry>) -> tauri::Result<tauri::tray::TrayIconBuilder<tauri::Wry>> {
-    Ok(match app.default_window_icon() {
-        Some(icon) => tray.icon(icon.clone()),
-        None => tray,
-    })
-}
-
-/// Only a Mac lets agents use it.
-pub fn computer_use() -> Option<bool> {
-    None
-}
-
-pub fn set_computer_use(_: bool) {}
-
 /// Whether it shows notifications, asking the user first if `ask`.
 pub async fn notify(ask: bool) -> Option<String> {
     let n = app().handle.notification();

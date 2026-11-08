@@ -40,6 +40,7 @@ fn main() {
         assert!(!mark.is_empty(), "the custom build's config.toml names no menubar");
         println!("cargo:rerun-if-changed={mark}");
         std::fs::copy(mark, Path::new(&std::env::var("OUT_DIR").unwrap()).join("menubar.png")).unwrap_or_else(|e| panic!("{mark}: {e}"));
+        mac_swift();
     }
     // The iPhone's Swift (iphone/), a plugin of the app's own (src/platform/iphone.rs), built and linked into it as Tauri's own
     // plugins are, against Tauri's Swift, copied beside it as theirs is.
@@ -60,12 +61,12 @@ fn main() {
     let config = serde_json::json!({
         "productName": one::config::NAME,
         "identifier": tauri_identifier,
-        // The window's own page, and the menu bar panel's and a widget's (the same page), alone may ask the app's
+        // The window's own page, and the tray's panel (the same page), alone may ask the app's
         // commands. Screens are sandboxed frames in it with no origin of their own, which reach none: they ask the page,
         // which answers each as its app.
         "app": { "windows": [], "security": { "csp": null, "capabilities": [{
             "identifier": "window",
-            "windows": ["main", "panel", "widget"],
+            "windows": ["main", "panel"],
             "permissions": COMMANDS.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).collect::<Vec<_>>(),
         }] } },
         "bundle": { "icon": icons },
@@ -113,6 +114,25 @@ fn iphone_swift() {
 /// Off a Mac there is no Swift to build and no linker for the app: `cargo check` (tests/tree.rs) is all that gets here.
 #[cfg(not(target_os = "macos"))]
 fn iphone_swift() {}
+
+/// Builds the Mac's Swift package (mac/Package.swift), its menu bar, and links it in.
+#[cfg(target_os = "macos")]
+fn mac_swift() {
+    // Its APIs are macOS 26's, as the app's least.
+    // SAFETY: nothing else runs in this build script.
+    unsafe { std::env::set_var("MACOSX_DEPLOYMENT_TARGET", "26.0") };
+    tauri_utils::build::link_apple_library("one-native-mac", std::fs::canonicalize("mac").unwrap());
+    // swift-rs links Swift's system libraries by @rpath and names no path to them.
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+    println!("cargo:rerun-if-changed=mac/Sources");
+    println!("cargo:rerun-if-changed=mac/Package.swift");
+    // What it draws widgets with, the iPhone's, symlinked in.
+    println!("cargo:rerun-if-changed=iphone/Widget");
+}
+
+/// Elsewhere the Mac's Rust is only checked, which needs none of its Swift.
+#[cfg(not(target_os = "macos"))]
+fn mac_swift() {}
 
 /// A folder's files, but what Swift's build left in it.
 #[cfg(target_os = "macos")]

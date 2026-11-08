@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 pub use super::desktop::*;
+pub use super::flyout::{fit, start_tray};
 
 use crate::app;
 

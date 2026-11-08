@@ -643,35 +643,6 @@ private struct Linked<Content: View>: View {
     }
 }
 
-private struct ActionButton: View {
-    var node: WidgetNode
-    @Environment(\.widgetHost) private var host
-
-    var body: some View {
-        let label = Label {
-            Text(node.label ?? node.text ?? "")
-        } icon: {
-            if let icon = node.icon { Glyph(name: icon, size: 16) }
-        }
-        Button(intent: RunTool(app: host.app, tool: node.tool ?? "", input: node.input ?? .object([:]), scope: host.scope)) { label }
-            .buttonStyle(.bordered)
-            .tint(toneColor(node.tone))
-    }
-}
-
-private struct ActionToggle: View {
-    var node: WidgetNode
-    @Environment(\.widgetHost) private var host
-
-    var body: some View {
-        let on = node.on ?? false
-        Toggle(isOn: on, intent: ToggleTool(app: host.app, tool: node.tool ?? "", input: node.input ?? .object([:]), scope: host.scope)) {
-            Text(node.label ?? "").lineLimit(1)
-        }
-        .tint(.accentColor)
-    }
-}
-
 /// A widget's label, small and muted: its app's icon (a brand's own logo, else our glyph) and its name.
 struct WidgetLabel: View {
     var title: String

@@ -1,7 +1,7 @@
 //! What's the Mac's own, beside the window: opening at login (SMAppService's main app), this Mac's node (oned, the
 //! bundle's launch agent `app.<cli>.mac.oned`, kept running, which joins a network with a pairing code and approves
 //! the window), "Let Agents Use This Mac", which Computer Use's helper reads from this app's defaults (`computerUse`),
-//! the app's menus, and the widgets' own items in the menu bar (`menubar`).
+//! the app's menus, and the menu bar (`menubar`).
 
 use std::path::PathBuf;
 
@@ -13,16 +13,11 @@ use objc2_foundation::{NSString, NSUserDefaults};
 use serde_json::{Value, json};
 
 pub use super::desktop::*;
-use super::menubar as items;
+use super::menubar;
 
 /// What a call says it came from, and the platform as users say it.
 pub const CLIENT: &str = "mac";
 pub const LABEL: &str = "Mac";
-/// How far, in points, the tray's flyouts keep from the bar and the edges (a popover's, just under the menu bar), and whether its tray is at
-/// the screen's foot when nothing says.
-pub const FLYOUT_GAP: f64 = 5.0;
-pub const TRAY_AT_BOTTOM: bool = false;
-
 /// What the user calls this Mac, as it's named in its settings ("Andre's MacBook Air"), as the Mac app named it.
 pub fn name() -> Option<String> {
     let named = std::process::Command::new("/usr/sbin/scutil").args(["--get", "ComputerName"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
@@ -41,28 +36,13 @@ pub fn data_without_window() -> Option<PathBuf> {
 
 /// The widgets' own items in the menu bar, drawn again from what's kept.
 pub fn redraw_widgets() {
-    items::update();
+    menubar::update();
 }
 
-/// A widget's own menu bar item shown again, or hidden → the kinds hidden now.
-pub fn menubar(kind: String, show: bool) -> Vec<String> {
-    items::set_hidden(&kind, !show);
-    crate::tray_menu(&crate::app().handle);
-    items::hidden()
-}
-
-pub fn menubar_hidden() -> Option<Vec<String>> {
-    Some(items::hidden())
-}
-
-pub fn hidden_widgets() -> Vec<(String, String)> {
-    let hidden = items::hidden();
-    items::widgets().into_iter().filter(|w| hidden.contains(&w.0)).map(|(kind, title, ..)| (kind, title)).collect()
-}
-
-/// The menu bar's mark: the custom build's (build.rs), a template macOS tints for the menu bar.
-pub fn tray_icon(_: &tauri::App, tray: tauri::tray::TrayIconBuilder<tauri::Wry>) -> tauri::Result<tauri::tray::TrayIconBuilder<tauri::Wry>> {
-    Ok(tray.icon(tauri::image::Image::from_bytes(include_bytes!(concat!(env!("OUT_DIR"), "/menubar.png")))?).icon_as_template(true))
+/// The menu bar's items, AppKit's (`menubar`).
+pub fn start_tray(_: &tauri::App) -> tauri::Result<()> {
+    menubar::start();
+    Ok(())
 }
 
 /// Whether this Mac's own node is in no network yet, so joins one with a pairing code (`pair`), as the Mac app did.
@@ -93,7 +73,6 @@ pub fn start(app: &tauri::App) {
         "pair" => crate::main(Some(format!("{}://settings/devices?add=1", one::config::CLI))),
         _ => {}
     });
-    items::update();
 }
 
 /// One of the app menu's commands, to the window's page, which does it: "sidebar" (fold it or unfold it), "join".
@@ -141,8 +120,8 @@ pub fn set_login(on: bool) {
 }
 
 /// Whether the user lets their agents use this Mac (Computer Use's helper reads it here).
-pub fn computer_use() -> Option<bool> {
-    Some(defaults().boolForKey(&NSString::from_str("computerUse")))
+pub fn computer_use() -> bool {
+    defaults().boolForKey(&NSString::from_str("computerUse"))
 }
 
 pub fn set_computer_use(on: bool) {
@@ -245,10 +224,3 @@ pub fn let_in(_: std::sync::Arc<one_client::Device>) {}
 
 /// Links to the network's address open only the browser.
 pub fn claim(_: Option<String>) {}
-
-/// Its windows are all they look: none reaches past what shows, and their corners are the system's.
-pub fn unseen(_: &tauri::WebviewWindow) -> (i32, i32, i32, i32) {
-    (0, 0, 0, 0)
-}
-
-pub fn round(_: &tauri::WebviewWindow) {}

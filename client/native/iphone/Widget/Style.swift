@@ -1,5 +1,25 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+typealias PlatformImage = UIImage
+#else
+import AppKit
+typealias PlatformImage = NSImage
+
+extension NSImage {
+    var cgImage: CGImage? { self.cgImage(forProposedRect: nil, context: nil, hints: nil) }
+}
+#endif
+
+extension Image {
+    init(platform: PlatformImage) {
+        #if canImport(UIKit)
+        self.init(uiImage: platform)
+        #else
+        self.init(nsImage: platform)
+        #endif
+    }
+}
 
 /// A colour given as hex (an app's tile colour) as red, green and blue, lifted a little in dark mode so it keeps its
 /// contrast there, yet still carries white text.
@@ -13,15 +33,15 @@ func hexRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
 /// same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled.
 /// Only the ones the widgets draw, which the app leaves in its group (`icons.json`, src/widgets.rs).
 enum Icons {
-    static let paths: [String: String] = file.flatMap { try? Data(contentsOf: $0) }
-        .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: String] } ?? [:]
+    nonisolated(unsafe) private(set) static var paths: [String: String] = read()
 
-    private static var file: URL? { group?.appending(path: "icons.json") }
-
-    private static var group: URL? {
-        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
-        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    private static func read() -> [String: String] {
+        WidgetFiles.dir.flatMap { try? Data(contentsOf: $0.appending(path: "icons.json")) }
+            .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: String] } ?? [:]
     }
+
+    /// Read again: a Mac's menu bar stays running as widgets come and go.
+    static func reload() { paths = read() }
 
     static func shape(_ name: String?) -> SVGShape? {
         name.flatMap { paths[$0] }.map { SVGShape($0, box: 256) }
@@ -118,7 +138,7 @@ struct AppTile: View {
         if let picture = pictures.object(forKey: url as NSString) { return picture }
         guard let comma = url.firstIndex(of: ","), let data = Data(base64Encoded: String(url[url.index(after: comma)...])),
               let image = PlatformImage(data: data) else { return nil }
-        let picture = Picture(Image(uiImage: image), clear: image.cgImage.map(clearCorners) ?? false)
+        let picture = Picture(Image(platform: image), clear: image.cgImage.map(clearCorners) ?? false)
         pictures.setObject(picture, forKey: url as NSString)
         return picture
     }
@@ -136,8 +156,6 @@ struct AppTile: View {
         return drawn && [0, 7, 56, 63].contains { pixels[$0 * 4 + 3] < 128 }
     }
 }
-
-typealias PlatformImage = UIImage
 
 /// The old kit's colours, light then dark.
 enum Kit {
@@ -157,10 +175,17 @@ enum Kit {
 extension Color {
     init(light: UInt32, dark: UInt32) {
         func rgb(_ v: UInt32) -> (CGFloat, CGFloat, CGFloat) { (CGFloat(v >> 16 & 0xFF) / 255, CGFloat(v >> 8 & 0xFF) / 255, CGFloat(v & 0xFF) / 255) }
+        #if canImport(UIKit)
         self.init(uiColor: UIColor { traits in
             let (r, g, b) = rgb(traits.userInterfaceStyle == .dark ? dark : light)
             return UIColor(red: r, green: g, blue: b, alpha: 1)
         })
+        #else
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            let (r, g, b) = rgb(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light)
+            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+        })
+        #endif
     }
 }
 

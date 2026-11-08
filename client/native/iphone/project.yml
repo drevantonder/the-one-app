@@ -26,6 +26,7 @@ targets:
       - App
       # Its widget's buttons and toggles, which run in the app.
       - Widget/Intents.swift
+      - Widget/JSONValue.swift
       - ../target/iphone/Phone.xcassets
     dependencies:
       - target: Widgets

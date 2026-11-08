@@ -12,6 +12,8 @@ mod mobile;
 pub mod apple;
 #[cfg(target_os = "macos")]
 mod menubar;
+#[cfg(any(target_os = "linux", windows))]
+mod flyout;
 
 #[cfg(target_os = "android")]
 mod android;

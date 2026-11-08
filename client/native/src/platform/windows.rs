@@ -14,6 +14,7 @@ use windows::core::HSTRING;
 use windows_collections::IIterable;
 
 pub use super::desktop::*;
+pub use super::flyout::{fit, start_tray};
 
 /// What a call says it came from, and the platform as users say it.
 pub const CLIENT: &str = "windows";

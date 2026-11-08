@@ -2,11 +2,32 @@ import CryptoKit
 import Foundation
 import SwiftUI
 
-/// Every page's widgets, as the app last saw them, which it leaves in its app group for the home-screen widgets.
+/// Where the app leaves what widgets draw from: the iPhone's App Group; on a Mac, the folder the app says.
+enum WidgetFiles {
+    #if os(macOS)
+    nonisolated(unsafe) static var dir: URL?
+    #else
+    static var dir: URL? {
+        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    }
+    #endif
+}
+
+/// Every page's widgets, as the app last saw them, which it leaves for the platform's own (`WidgetFiles`).
 struct WidgetCache: Codable {
-    struct Item: Codable, Identifiable {
+    /// One of the user's devices, as a Mac's menu bar lists them.
+    struct Device: Codable, Equatable {
+        var key: String
+        var name: String
+        var online: Bool
+    }
+
+    struct Item: Codable, Identifiable, Equatable {
         /// What a home-screen widget's choice is found again by.
         var id: String
+        /// `<app>.<widget>`, the same on every page.
+        var kind: String?
         var app: String?
         var widget: String?
         /// The page it's on, and that page's name.
@@ -17,6 +38,8 @@ struct WidgetCache: Codable {
         /// Its app's picture, a brand's logo or app icon, as a data URL, and `icon` when it's a finished app icon.
         var image: String?
         var imageKind: String?
+        /// Whether its app has a first screen to open.
+        var opens: Bool?
         var error: String?
         /// Its most prominent text, for a one-line place.
         var headline: String?
@@ -27,18 +50,14 @@ struct WidgetCache: Codable {
         func tree(_ size: String) -> WidgetNode { sizes?[size] ?? root }
     }
     var network: String?
+    var devices: [Device]?
     var widgets: [Item]
     /// The user signed out, so the home-screen widgets say to sign in.
     var signedOut: Bool?
     /// When the app last had them from your devices.
     var fetched: Date?
 
-    private static var group: URL? {
-        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
-        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
-    }
-
-    private static var file: URL? { group?.appending(path: "widgets.json") }
+    private static var file: URL? { WidgetFiles.dir?.appending(path: "widgets.json") }
 
     static func load() -> WidgetCache? {
         let decoder = JSONDecoder()
@@ -63,8 +82,7 @@ struct WidgetCache: Codable {
 /// The images widgets show, saved by the app where its home-screen widgets can read them: they can't download.
 enum WidgetImages {
     private static var dir: URL? {
-        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
-        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?.appending(path: "images")
+        WidgetFiles.dir?.appending(path: "images")
     }
 
     private static func file(_ url: String) -> URL? {
@@ -79,11 +97,7 @@ enum WidgetImages {
     }
 
     static func load(_ url: String) -> Image? {
-        #if canImport(UIKit)
-        file(url).flatMap { UIImage(contentsOfFile: $0.path(percentEncoded: false)) }.map { Image(uiImage: $0) }
-        #else
-        nil
-        #endif
+        file(url).flatMap { PlatformImage(contentsOfFile: $0.path(percentEncoded: false)) }.map { Image(platform: $0) }
     }
 
     /// Downloads the ones not saved yet, small enough for a widget to draw.

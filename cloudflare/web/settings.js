@@ -64,7 +64,6 @@ export const ownAnswers = {
   api: clientApi,
   signOut: () => (leave(), null),
   // A Mac's widgets' own menu bar items: shown again, or hidden, from its panel.
-  menubar: (m) => platform.menubar(String(m.kind || ""), !!m.show),
   device: () => platform.device(),
   notify: () => platform.notify(true),
   cache: (m) => {

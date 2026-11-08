@@ -1,5 +1,5 @@
 //! Every page's widgets, as the app last had them from the user's devices, kept where the platform's own widgets
-//! read them (the iPhone's home screen, the Windows Widgets board, Android's home screen, the Mac's menu bar), since
+//! read them (the iPhone's home screen, the Windows Widgets board, Android's home screen, the Mac's menu bar, which lists the devices too), since
 //! those can't ask a node themselves: `widgets.json`, with what each would otherwise work out itself (its `id`, `kind`,
 //! `headline`; `fetched` in seconds since 1970), which they only draw; `icons.json` with the Phosphor icons they draw, and `images/<first 12 bytes of the URL's SHA-256,
 //! hex>` for the pictures they show, which they can't download.
@@ -25,6 +25,9 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     if state.user.is_none() {
         return Ok(());
     }
+    let me = state.user.as_ref().map(|u| u.id.clone());
+    // The user's devices, which a Mac's menu bar lists.
+    let devices: Vec<Value> = state.network.iter().flat_map(|n| &n.devices).filter(|d| d.user.is_empty() || Some(&d.user) == me.as_ref()).map(|d| json!({ "key": d.key, "name": d.name.trim_end_matches(".local"), "online": d.now.online })).collect();
     let pages: Vec<(String, String)> = state.pages.into_iter().map(|p| (p.scope, p.title)).collect();
 
     let kept: Value = std::fs::read(dir.join("widgets.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
@@ -74,7 +77,7 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or_default();
     let fetched = if answered { json!(now) } else { kept["fetched"].clone() };
-    let mut cache = json!({ "network": state.network.as_ref().map(|n| &n.name), "widgets": items, "fetched": fetched });
+    let mut cache = json!({ "network": state.network.as_ref().map(|n| &n.name), "devices": devices, "widgets": items, "fetched": fetched });
     if cache["fetched"].is_null() {
         cache.as_object_mut().unwrap().remove("fetched");
     }

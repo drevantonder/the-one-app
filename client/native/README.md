@@ -35,7 +35,8 @@ package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a de
 - Linux: `one release` builds it, install.sh puts it on a desktop. Its tray item shows only its menu (Linux's tray items
   show no other), so it has no panel.
 - Mac: `mac/build.sh` (`one update`, `one release`, through `disk.sh`), the same bundle as before: the window, the CLI,
-  the node and its launch agent, services, helpers.
+  the node and its launch agent, services, helpers. The menu bar is AppKit's: real menus (`mac/Sources`, a Swift package
+  `build.rs` links in), with no page, which draw widgets with the iPhone's SwiftUI (`iphone/Widget`, symlinked in).
 - iPhone: `iphone/build.sh` for the simulator, the paired iPhone (`one update`) or TestFlight; the Swift in `Sources/` is a
   Tauri plugin of the app's own, `Widget/` the home-screen widget, `Notifications/` the notification extension.
 - Android: `android/build.sh`, Kotlin only where it must be (`android/app/src/main/kotlin/app/client`); only throwaways
@@ -53,8 +54,8 @@ colour on what's tapped, a Mac build with push.
   app (Andre, top #87); then notification taps, Approve / Not Me with no window, the iPhone's count and banner.
 - TestFlight (`iphone/build.sh testflight`): waits on an App Store Connect app for `app.ptc.phone` (Andre, top #87);
   then Google sign-in, receipt scan and photo upload in Claims there.
-- Seen on a Mac: the window, the panel, the dock's count, the widgets' menu bar popovers and the app menu's keys (⌘\,
-  ⌘⇧I, ⌘⇧J). Built and checked by its build; the Mac's screen has been locked each time.
+- Seen on a Mac: the window, the dock's count and the app menu's keys (⌘\, ⌘⇧I, ⌘⇧J). Built and checked by its build; the
+  Mac's screen has been locked each time.
 - Felt on a real phone: touch and hold lifting on the iPhone, haptics, the iPhone's document camera and share sheet,
   the iPhone's Safari sign-in sheet.
 - The iPhone's window following Dynamic Type: WebKit's CSS zoom left screens' frames at no size (a black window) and its

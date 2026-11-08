@@ -190,7 +190,6 @@ export function browser() {
     appearance() {},
     copy: (text) => navigator.clipboard.writeText(text),
     open: (href) => window.open(href, "_blank", "noopener,noreferrer"),
-    menubar: async () => [],
     bridge: () => ({}),
     look: () => ({}),
     fit() {},

@@ -72,20 +72,16 @@ function drawWindow() {
 }
 
 /// The app's menu bar panel: the network's name, the `panel` screen (your devices, your widgets), and the app's rows
-/// under it, or with no one signed in here, Sign In… in the window; on a Mac, a widget's own (`panelWidget`), only its
-/// screen. Each row closes it, as a menu's item does.
+/// under it, or with no one signed in here, Sign In… in the window. Each row closes it, as a menu's item does.
 function drawPanel() {
   const signedIn = !!store.state && !!network();
   const screenHere = signedIn ? h("div", { className: "panel-screen", ref: (el) => el && detail.parentElement !== el && el.append(detail) }) : h("p", { className: "panel-note" }, "Signed out");
   windowShown = true;
-  if (platform.panelWidget) show(h("div", { className: "panel" }, screenHere));
-  else {
-    const row = ([label, run, checked]) => h(ui.Button, { key: label, variant: "ghost", className: "w-full justify-between px-3 font-normal", onClick: run }, label, checked ? h(ui.Icon, { name: "check", className: "size-4" }) : null);
-    show(h("div", { className: "panel" },
-      h("div", { className: "panel-head" }, h("img", { src: "/logo.png", alt: "" }), h("span", null, network()?.name || config().name)),
-      screenHere,
-      h("div", { className: "panel-rows" }, ...platform.panelRows(signedIn, config().name, drawPanel).map(row))));
-  }
+  const row = ([label, run, checked]) => h(ui.Button, { key: label, variant: "ghost", className: "w-full justify-between px-3 font-normal", onClick: run }, label, checked ? h(ui.Icon, { name: "check", className: "size-4" }) : null);
+  show(h("div", { className: "panel" },
+    h("div", { className: "panel-head" }, h("img", { src: "/logo.png", alt: "" }), h("span", null, network()?.name || config().name)),
+    screenHere,
+    h("div", { className: "panel-rows" }, ...platform.panelRows(signedIn, config().name, drawPanel).map(row))));
   if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", platform.panelScreen()));
 }
 

@@ -77,8 +77,6 @@
     /// The window in front (at a `<cli>://` link, if given), from the menu bar panel; Open at Login switched; Quit.
     main: (link) => invoke("main", { link: link ?? null }),
     login: (on) => invoke("login", { on }),
-    /// Let Agents Use This Mac, switched (a Mac's alone: `about().computerUse` is null elsewhere).
-    computerUse: (on) => invoke("computer_use", { on }),
     /// A Mac's own node joins a network with a pairing code (`about().unpaired`) → its address.
     pair: (code) => invoke("pair", { code }),
     quit: () => invoke("quit"),
@@ -100,8 +98,6 @@
     menu: (items) => invoke("menu", { items }),
     /// Light, dark or automatic, kept by the app too, so it starts in it.
     appearance: (value) => invoke("appearance", { value }).catch(() => {}),
-    /// A Mac's widget's own menu bar item shown again, or hidden → the widgets hidden now (`about().menubar`).
-    menubar: (kind, show) => invoke("menubar", { kind, show }),
     /// One of the app menu's commands ("sidebar", "join"), to `onCommand`'s function.
     onCommand: null,
     command(name) {

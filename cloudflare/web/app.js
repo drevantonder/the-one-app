@@ -146,8 +146,6 @@ export function app(native) {
   const platform = {
     ...inShell,
     panel,
-    /// On a Mac, a widget's own menu bar item opens the panel showing only that widget (`<app>.<widget>`), with no rows.
-    panelWidget: panel ? query.get("widget") : null,
     client: () => about?.client || "web",
     /// The newest version of the client needs a newer app than this one.
     behind: () => !!about?.behind,
@@ -216,7 +214,6 @@ export function app(native) {
     copy: (text) => native.copy(String(text)),
     open: (href) => native.open(href).catch(() => {}),
     notify: async (ask) => (notify = await native.notify(ask).catch(() => null)),
-    menubar: async (kind, shown) => (about.menubar ? (about.menubar = await native.menubar(kind, shown)) : []),
     /// What a screen's bridge may ask of the app beyond a page: copying, saving or previewing a file, a phone's haptic;
     /// an iPhone's document camera, and its menu for what a touch and hold lifted, shown with it.
     bridge: (frame) => ({
@@ -230,13 +227,12 @@ export function app(native) {
     /// touch and hold, which lifts what a screen marks `data-one-held` with its menu.
     look: () => ({ ...(about?.scan ? { __oneCan: { scan: true } } : {}), ...(about?.lifts ? { __oneLifts: true } : {}) }),
 
-    /// The panel's: what its screen is told (this device's node, the widget it shows, the widgets hidden from the menu
-    /// bar), and its rows under it, each `[label, run, checked]` (checked null for none).
-    panelScreen: () => ({ here: about.node || "", menubar: about.menubar, ...(platform.panelWidget ? { widget: platform.panelWidget } : {}) }),
+    /// The panel's: what its screen is told (this device's node), and its rows under it, each `[label, run, checked]`
+    /// (checked null for none).
+    panelScreen: () => ({ here: about.node || "" }),
     panelRows: (signedIn, name, redraw) => [
       [signedIn ? `Open ${name}` : "Sign In…", () => native.main(), null],
       about.login != null && ["Open at Login", async () => ((about.login = await native.login(!about.login)), redraw()), about.login],
-      about.computerUse != null && ["Let Agents Use This Mac", async () => ((about.computerUse = await native.computerUse(!about.computerUse)), redraw()), about.computerUse],
       ["Quit", () => native.quit(), null],
     ].filter(Boolean),
     /// The panel's window fits its screen, up to most of the screen.

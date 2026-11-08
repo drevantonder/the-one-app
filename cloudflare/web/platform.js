@@ -10,7 +10,7 @@
 //   device), `nodes(state)`, `settle()`, `kept(…)`, `renew(app)`, `forget()`, `device()` (what Settings › Devices says
 //   of it), `address()` (where its Approve link goes).
 // - What the app's window does beyond a page: `changed()`, `badge(n)`, `appearance(v)`, `copy(text)`, `open(href)`,
-//   `notify(ask)`, `menubar(kind, show)`, `bridge(frame)` (what screens' bridges may ask of it), `look()` (what their
+//   `notify(ask)`, `bridge(frame)` (what screens' bridges may ask of it), `look()` (what their
 //   frames are told it does), `fit(height)` and `main(route)` (the panel's).
 import { app } from "./app.js";
 import { browser } from "./browser.js";
