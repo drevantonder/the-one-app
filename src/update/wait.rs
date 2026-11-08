@@ -1,4 +1,4 @@
-//! `status --until`: waiting until devices run a commit (or a later build) and their services answer.
+//! Waiting until devices run a commit (or a later build) and their services answer: `status --until`, and the end of an update.
 
 use super::*;
 
@@ -7,50 +7,6 @@ pub(super) fn devices() -> Vec<Value> {
     let state = crate::node().get("/v1/state").unwrap_or_default();
     let me = state["network"]["user"].clone();
     state["network"]["devices"].as_array().into_iter().flatten().filter(|d| d["user"] == me).cloned().collect()
-}
-
-/// Waits for each of `wanted` to say it runs `commit` and to be online again (a node restarting onto a build is listed
-/// as on it a moment before its link is back, and what deploys through it needs the link), and reports each. True if any didn't.
-pub(super) fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit: Duration) -> bool {
-    let id = |d: &Value| d["key"].as_str().unwrap_or("").to_string();
-    let name = |d: &Value| d["name"].as_str().unwrap_or("").to_string();
-    // Only devices offline from the start count as offline: this device's own node restarting loses its sessions a moment.
-    let (online, offline): (Vec<&Value>, Vec<&Value>) = wanted.iter().partition(|d| d["online"] == true);
-    for d in offline {
-        println!("  {}: offline; it updates itself when it's back", name(d));
-    }
-    let mut waiting: Vec<(String, String, String)> = online.into_iter().map(|d| (id(d), name(d), d["build"].as_str().unwrap_or("?").into())).collect();
-    let mut seen = std::collections::HashMap::<String, String>::new();
-    let deadline = Instant::now() + limit;
-    loop {
-        let now = devices();
-        waiting.retain(|(device, name, was)| {
-            let Some(d) = now.iter().find(|d| d["key"] == device.as_str()) else { return true };
-            if d["build"] == commit {
-                if d["online"] != true {
-                    seen.insert(device.clone(), format!("runs {commit}, but its link isn't back"));
-                    return true;
-                }
-                if was == commit {
-                    println!("  {name}: already on {commit}");
-                } else {
-                    println!("  {name}: {was} → {commit} ({}s)", since.elapsed().as_secs());
-                }
-                return false;
-            }
-            true
-        });
-        if waiting.is_empty() {
-            return false;
-        }
-        if Instant::now() > deadline {
-            for (device, name, was) in &waiting {
-                println!("  {name}: {}", seen.get(device).cloned().unwrap_or_else(|| format!("still on {was}")));
-            }
-            return true;
-        }
-        std::thread::sleep(Duration::from_secs(2));
-    }
 }
 
 /// `status --until <commit> [--device <name>]… [--timeout <time>]`.
@@ -76,7 +32,6 @@ pub fn wait(g: &one::cli::Given) -> Result<()> {
 /// named and is offline at the start isn't waited for: it's named, with how far behind it is, and updates itself when
 /// it's back. Why one hasn't yet is what its own node or Mac job says (`updating`).
 pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
-    let short = &commit[..commit.len().min(12)];
     // Says so when no node answers, which later polls (a node restarting on the new build) never do.
     crate::node().get("/v1/state")?;
     let all: Vec<Value> = devices();
@@ -84,8 +39,18 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
     for n in names {
         ensure!(all.iter().any(|d| d["name"] == n.as_str()), "no device named {n}: {}", all.iter().filter_map(|d| d["name"].as_str()).collect::<Vec<_>>().join(", "));
     }
+    let wanted: Vec<Value> = all.into_iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).collect();
+    wait_for(commit, &wanted, !names.is_empty(), limit)
+}
+
+/// Waits until each of `wanted` runs `commit`, or a build with it in, with its link back and its services answering,
+/// or its update fails; says what each did, and fails unless all made it. `named` says whether one offline at the
+/// start is waited for too (it was asked for by name) or only named, with how far behind it is (it updates itself when
+/// it's back). Why one hasn't yet is what its own node says (`updating`). The one place that says a device took a build.
+pub(super) fn wait_for(commit: &str, wanted: &[Value], named: bool, limit: Duration) -> Result<()> {
+    let short = &commit[..commit.len().min(12)];
     let mut fetched = std::collections::HashSet::new();
-    let (waited, away): (Vec<&Value>, Vec<&Value>) = all.iter().partition(|d| if names.is_empty() { d["online"] == true } else { names.iter().any(|n| d["name"] == n.as_str()) });
+    let (waited, away): (Vec<&Value>, Vec<&Value>) = wanted.iter().partition(|d| named || d["online"] == true);
     // Said at once, so a caller cut off before the end still saw what it waited for and who wasn't there.
     for d in away {
         let build = d["build"].as_str().unwrap_or("?");
@@ -105,6 +70,9 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
     for d in waited.iter().filter(|d| offline.contains(d["key"].as_str().unwrap_or(""))) {
         println!("  {}: offline, on {}{}: waiting for it to come back", d["name"].as_str().unwrap_or(""), d["build"].as_str().unwrap_or("?"), behind(commit, d["build"].as_str().unwrap_or("")));
     }
+    // A node restarting onto a build is listed as on it a moment before its link is back, and what deploys through it
+    // needs the link; one offline from the start isn't held to that.
+    let linked: std::collections::HashSet<String> = waited.iter().filter(|d| d["online"] == true).map(|d| d["key"].as_str().unwrap_or("").to_string()).collect();
     let mut failed = false;
     loop {
         let now = devices();
@@ -115,6 +83,10 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
                 println!("  {name}: back online, on {build}");
             }
             let running = has(commit, build, &mut fetched);
+            if running && d["online"] != true && linked.contains(key) {
+                reasons.insert(key.clone(), format!("runs {build}, but its link isn't back"));
+                return true;
+            }
             if running {
                 let troubled: Vec<String> = d["parts"]
                     .as_array()

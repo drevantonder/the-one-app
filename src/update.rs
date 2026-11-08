@@ -156,9 +156,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let mut failed = !publish_services(&src, &parts.services, &key, &commit);
     let published = timed("published the node", || build::publish(&crate::node(), &binary, &key, &version, None))?;
     println!("{}", build::published_said(&published, None));
-    let started_at = Instant::now();
-    failed |= timed("waited for this device", || await_builds(&here, short, started_at, Duration::from_secs(180)));
-    let _ = timed("waited for the other Linux devices", || await_builds(&others, short, started_at, Duration::from_secs(120)));
+    failed |= timed("waited for this device", || wait_for(short, &here, false, Duration::from_secs(180))).is_err();
+    let _ = timed("waited for the other Linux devices", || wait_for(short, &others, false, Duration::from_secs(120)));
     if let Err(err) = timed("deployed the built-in apps", deploy_built_in) {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
@@ -173,7 +172,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     println!("Published {short}: every device takes it itself. {CLI} status --until {short} waits for the online ones, and says about the rest.");
     let Some(tag) = tag else {
         let after = finish(after);
-        ensure!(!failed, "this device didn't take {short}");
+        ensure!(!failed, "this device isn't running {short} with its services answering: what it runs, and why, is above");
         ensure!(!cloudflare_failed, "published {short}, but it isn't deployed to Cloudflare");
         std::fs::write(&done, &this)?;
         return after;
@@ -227,7 +226,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let mut gh = Command::new("gh");
     gh.current_dir(&dir).args(["release", "create", tag, "--repo", REPO, "--target", &commit, "--generate-notes"]).args(&assets);
     show(&mut gh)?;
-    ensure!(!failed, "released {tag}, but this device didn't take it");
+    ensure!(!failed, "released {tag}, but this device isn't running it with its services answering: what it runs, and why, is above");
     ensure!(!cloudflare_failed, "released {tag}, but it isn't deployed to Cloudflare");
     Ok(())
 }
