@@ -910,7 +910,7 @@ function throwawayNetwork(auth, id, name) {
         const wanted = typeof ctx.body?.user === "string" ? ctx.body.user.trim().toLowerCase() : "";
         if (wanted) {
           // Invited again, a name is two users here: the one with a device let in is who joined, else the latest to open a link.
-          const [row] = auth.ctx.storage.sql.exec("select id from user where lower(name) = ? order by exists (select 1 from requests where requests.user = user.id and approved is not null) desc, createdAt desc limit 1", user).toArray();
+          const [row] = auth.ctx.storage.sql.exec("select id from user where lower(name) = ? order by exists (select 1 from requests where requests.user = user.id and approved is not null) desc, createdAt desc limit 1", wanted).toArray();
           if (!row && wanted !== name.toLowerCase()) refuse(404, `Nobody called ${ctx.body.user} has joined.`);
           return signIn(ctx, row ? await adapter.findUserById(row.id) : await first(adapter));
         }
