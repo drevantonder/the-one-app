@@ -76,9 +76,10 @@ pub fn wait(g: &one::cli::Given) -> Result<()> {
     wait_until(&commit, &names, limit)
 }
 
-/// Waits until each of the user's devices (or those named) runs `commit`, or a build with it in, and its services
-/// answer, or a Mac's build of it fails; says what each did, and fails unless all made it. Shell on a Mac says how its
-/// builds went, which `follow` set up; a device that is off or restarting is waited for like the rest.
+/// Waits until each of the user's devices online now (or those named, online or not) runs `commit`, or a build with it
+/// in, and its services answer, or a Mac's build of it fails; says what each did, and fails unless all made it. One that
+/// isn't named and is offline at the start isn't waited for: it's named, with how far behind it is, and updates itself
+/// when it's back. Shell on a Mac says how its builds went, which `follow` set up.
 pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     let short = &commit[..commit.len().min(12)];
     // Says so when no node answers, which later polls (a node restarting on the new build) never do.
@@ -88,18 +89,26 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
     for n in names {
         ensure!(all.iter().any(|d| d["name"] == n.as_str()), "no device named {n}: {}", all.iter().filter_map(|d| d["name"].as_str()).collect::<Vec<_>>().join(", "));
     }
-    let mut open: Vec<(String, String, String)> =
-        all.iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).map(|d| (d["key"].as_str().unwrap_or("").into(), d["name"].as_str().unwrap_or("").into(), d["build"].as_str().unwrap_or("?").into())).collect();
-    let (started, deadline) = (Instant::now(), Instant::now() + limit);
-    let (mut fetched, mut reasons, mut asked, mut phones) = (std::collections::HashSet::new(), std::collections::HashMap::new(), std::collections::HashMap::<String, Instant>::new(), std::collections::HashMap::<String, String>::new());
+    let mut fetched = std::collections::HashSet::new();
+    let (waited, away): (Vec<&Value>, Vec<&Value>) = all.iter().partition(|d| if names.is_empty() { d["online"] == true } else { names.iter().any(|n| d["name"] == n.as_str()) });
     // Said at once, so a caller cut off before the end still saw what it waited for and who wasn't there.
-    println!("Waiting up to {}s for {} to run {short} or a later build.", limit.as_secs(), open.iter().map(|(_, name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
-    let mut offline = std::collections::HashSet::new();
-    for d in all.iter().filter(|d| d["online"] != true && open.iter().any(|(key, _, _)| d["key"] == key.as_str())) {
-        if !has(commit, d["build"].as_str().unwrap_or(""), &mut fetched) {
-            println!("  {}: offline, on {}: waiting for it to come back", d["name"].as_str().unwrap_or(""), d["build"].as_str().unwrap_or("?"));
-            offline.insert(d["key"].as_str().unwrap_or("").to_string());
+    for d in away {
+        let build = d["build"].as_str().unwrap_or("?");
+        if !has(commit, build, &mut fetched) {
+            println!("  {}: offline, on {build}{}: not waiting for it, it updates itself when it's back; --device {} to wait", d["name"].as_str().unwrap_or(""), behind(commit, build), d["name"].as_str().unwrap_or(""));
         }
+    }
+    let mut open: Vec<(String, String, String)> = waited.iter().map(|d| (d["key"].as_str().unwrap_or("").into(), d["name"].as_str().unwrap_or("").into(), d["build"].as_str().unwrap_or("?").into())).collect();
+    if open.is_empty() {
+        println!("No device to wait for: none is online.");
+        return Ok(());
+    }
+    let (started, deadline) = (Instant::now(), Instant::now() + limit);
+    let (mut reasons, mut asked, mut phones) = (std::collections::HashMap::new(), std::collections::HashMap::<String, Instant>::new(), std::collections::HashMap::<String, String>::new());
+    println!("Waiting up to {}s for {} to run {short} or a later build.", limit.as_secs(), open.iter().map(|(_, name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
+    let mut offline: std::collections::HashSet<String> = waited.iter().filter(|d| d["online"] != true && !has(commit, d["build"].as_str().unwrap_or(""), &mut fetched)).map(|d| d["key"].as_str().unwrap_or("").to_string()).collect();
+    for d in waited.iter().filter(|d| offline.contains(d["key"].as_str().unwrap_or(""))) {
+        println!("  {}: offline, on {}{}: waiting for it to come back", d["name"].as_str().unwrap_or(""), d["build"].as_str().unwrap_or("?"), behind(commit, d["build"].as_str().unwrap_or("")));
     }
     let mut failed = false;
     loop {
@@ -189,6 +198,16 @@ pub(super) fn wait_until(commit: &str, names: &[String], limit: Duration) -> Res
         }
         std::thread::sleep(Duration::from_secs(3));
     }
+}
+
+/// How far `build` is behind `commit`, in this folder's git, as said after its name: nothing if git can't count them
+/// (a build it hasn't got).
+fn behind(commit: &str, build: &str) -> String {
+    let Ok(out) = Command::new("git").args(["rev-list", "--count", &format!("{build}..{commit}")]).stderr(std::process::Stdio::null()).output() else { return String::new() };
+    if !out.status.success() {
+        return String::new();
+    }
+    format!(", {} commits behind", String::from_utf8_lossy(&out.stdout).trim())
 }
 
 /// Whether `build` (what a device runs) is `commit` or has it in: a later update sends main's tip, which holds it.
