@@ -28,8 +28,8 @@ record() {
 # A thing's line in the record: its six fields, one per word.
 line() { awk -v n="$1" '$1 == n && NF == 6' newest.body | head -n 1; }
 
-# Whether two commits are the same one (one's a build's short form).
-same() { case "$1" in "$2"*) return 0 ;; esac; case "$2" in "$1"*) return 0 ;; esac; return 1; }
+# Whether two commits are the same one: a build's short form is its first twelve, a custom build's followed by its config.
+same() { [ "${1:0:12}" = "${2:0:12}" ]; }
 
 # Runs a build in its own process group, stopped for a newer record; `stopped` says if it was.
 run() {

@@ -324,7 +324,7 @@ fn await_app(commit: &str, address: &str, limit: Duration) -> Result<Option<(Thi
     let deadline = Instant::now() + limit;
     while Instant::now() < deadline {
         if let Some(text) = one::latest::fetch(address)?
-            && let Some(thing) = Latest::read(RELEASE_KEY, &text)?.things.into_iter().find(|t| t.name.starts_with("app/") && t.commit == commit)
+            && let Some(thing) = Latest::read(RELEASE_KEY, &text)?.things.into_iter().find(|t| t.name.starts_with("app/") && commit.starts_with(&t.commit))
         {
             return Ok(Some((thing, address.to_string())));
         }
