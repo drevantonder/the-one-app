@@ -13,6 +13,8 @@ pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/node-release", Who::ThisMachine, post(release))
         .route("/v1/service-release", Who::ThisMachine, post(release))
+        .route("/v1/latest/put", Who::ThisMachine, post(put))
+        .route("/v1/latest", Who::ThisMachine, axum::routing::get(latest).post(replace))
 }
 
 #[derive(Deserialize)]
@@ -27,6 +29,34 @@ struct ReleaseRequest {
     #[serde(default)]
     committed: u64,
     signature: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PutRequest {
+    path: String,
+}
+
+async fn put(State(node): State<Node>, Body(req): Body<PutRequest>) -> Reply {
+    let (sha256, size) = node.publish_file(std::path::Path::new(&req.path)).await?;
+    Ok(Json(json!({ "sha256": sha256, "size": size })))
+}
+
+async fn latest(State(node): State<Node>) -> Reply {
+    let record = node.latest_record().await?;
+    Ok(Json(json!({ "text": record.as_ref().map(|(t, _)| t), "tag": record.as_ref().map(|(_, t)| t) })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplaceRequest {
+    text: String,
+    #[serde(default)]
+    tag: Option<String>,
+}
+
+async fn replace(State(node): State<Node>, Body(req): Body<ReplaceRequest>) -> Reply {
+    Ok(Json(json!({ "replaced": node.replace_latest(&req.text, req.tag.as_deref()).await? })))
 }
 
 /// A build of the node, or with `service` of a service's program (at its own path, so a node too old to know them

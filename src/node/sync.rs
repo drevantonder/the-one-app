@@ -212,7 +212,7 @@ impl Node {
         }) else {
             return;
         };
-        let hello = json!({ "load": crate::load::current(), "parts": parts });
+        let hello = json!({ "load": crate::load::current(), "parts": parts, "updating": self.updating() });
         for device in devices {
             let (node, hello) = (self.clone(), hello.clone());
             tokio::spawn(async move {
@@ -231,7 +231,7 @@ impl Node {
         let parts = hello["parts"].as_array().map(|_| hello["parts"].clone());
         let new = self.with(|i| {
             let changed = i.peers.get(from).is_none_or(|p| p.parts != parts);
-            i.peers.insert(*from, Peer { services: Vec::new(), load, parts, seen: Instant::now() });
+            i.peers.insert(*from, Peer { services: Vec::new(), load, parts, updating: hello["updating"].as_str().map(str::to_string), seen: Instant::now() });
             Ok(changed)
         })?;
         if new {
@@ -288,7 +288,7 @@ impl Node {
             if let Some(far) = far {
                 i.far.insert(key, far);
             }
-            let before = i.peers.insert(key, Peer { services: services.clone(), load: None, parts: None, seen: Instant::now() });
+            let before = i.peers.insert(key, Peer { services: services.clone(), load: None, parts: None, updating: None, seen: Instant::now() });
             Ok(before.is_none_or(|p| p.services != services || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
         });
         if changed.unwrap_or(false) {

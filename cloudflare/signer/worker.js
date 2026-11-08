@@ -26,7 +26,7 @@
 
 import { b64u, behind, checkRequest, rolesOf } from "../shared/crypto.js";
 import { Refused, refusal, refuse } from "../shared/http.js";
-import { COPY, MOST_URLS, NEWEST, STEP_DIGITS, URLS, copyName, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
+import { COPY, MOST_URLS, NEWEST, STEP_DIGITS, UPDATES, URLS, copyName, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { bucketUrls } from "../shared/s3.js";
 
 const EXPIRES = 15 * 60;
@@ -169,9 +169,20 @@ async function urls(request, env) {
   return { ...out, confirm: confirms.length ? await confirm(env, bucket, confirms) : {}, newest: hints.length ? await newest(env, bucket, hints) : {}, get: gets.length ? await got(env, bucket, gets) : {}, until };
 }
 
+// What a device updates itself from, read by anyone: `GET /updates/<name>`, where only what's signed by the release key
+// sits, unsealed (src/latest.rs). A device too old to speak anything else reads this: it must never need more than a GET.
+async function update(env, url) {
+  if (!env.BUCKET) return refusal(503, `${env.YOURS} has no bucket yet`);
+  const name = url.pathname.slice(1);
+  if (!isName(name) || !/^updates\/[A-Za-z0-9._-]+$/.test(name)) return refusal(404, "no such update");
+  const { read } = await bucketUrls(JSON.parse(env.BUCKET), { read: [name] }, 300);
+  return new Response(null, { status: 302, headers: { location: read[name], "cache-control": "no-store" } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith(`/${UPDATES}/`) && ["GET", "HEAD"].includes(request.method)) return update(env, url);
     if (url.pathname !== "/urls" || request.method !== "POST") return refusal(404, "the URL signer answers only POST /urls");
     try {
       return Response.json(await urls(request, env));

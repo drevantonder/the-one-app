@@ -83,6 +83,8 @@ pub mod message {
 /// What a database keeps in the bucket beside its steps (`<prefix>/<n>`): the newest step's hint, where its steps
 /// were deleted past (`tidied`), and the copy of its steps up to one, in a folder of its own.
 pub const NEWEST: &str = "newest";
+/// The bucket's folder of what `one update` publishes, and the path it's read at from the network's address (src/latest.rs).
+pub const UPDATES: &str = "updates";
 pub const TIDIED: &str = "tidied";
 pub const COPY: &str = "copy";
 /// The digits of a step's position in its name, so names sort in order.
@@ -224,6 +226,7 @@ pub fn javascript() -> String {
          export const IROH_PATHS = {iroh};\n\
          export const ROLES = {roles};\n\
          export const NEWEST = {newest};\n\
+         export const UPDATES = {updates};\n\
          export const TIDIED = {tidied};\n\
          export const COPY = {copy};\n\
          export const STEP_DIGITS = {digits};\n\
@@ -265,6 +268,7 @@ pub fn javascript() -> String {
         iroh = json!(IROH_PATHS.iter().copied().collect::<std::collections::BTreeMap<_, _>>()),
         roles = json!(crate::database::scopes::Kind::ALL.map(crate::database::scopes::Kind::as_str)),
         newest = json!(NEWEST),
+        updates = json!(UPDATES),
         tidied = json!(TIDIED),
         copy = json!(COPY),
         digits = STEP_DIGITS,

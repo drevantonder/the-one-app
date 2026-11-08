@@ -59,6 +59,7 @@ impl Node {
             (None, None) => None,
         };
         let me = &viewer.user;
+        let latest = self.latest();
         let device_now = |s: &scopes::Machine| -> Result<DeviceNow> {
             let Some(i) = network.as_ref() else { return Ok(DeviceNow::default()) };
             let m = i.r.db();
@@ -94,6 +95,8 @@ impl Node {
                 // What it can run, its user's and the admins' to see.
                 parts: if !m.may(me, "remove", &scopes::device(&s.key)) { None } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).and_then(|p| serde_json::from_value(p).ok()) },
                 load,
+                latest: build.and_then(|r| latest.for_target(&r.target)).map(|t| t.commit.clone()),
+                updating: if s.key == self.0.id { self.updating() } else { session.and_then(|s| s.updating.clone()) },
             })
         };
         let here = crate::state::Here {

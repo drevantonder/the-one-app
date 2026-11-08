@@ -195,6 +195,9 @@ fn status(node: &Client, state: &State) {
         let serves = if s.serves_me { "" } else { ", doesn't run yours" };
         let build = s.now.build.as_ref().map(|b| format!("  {b}")).unwrap_or_default();
         println!("  {dot} {}{here}  {}'s{serves}{build}", s.name, name(&s.user));
+        if let (Some(runs), Some(latest)) = (&s.now.build, &s.now.latest) && !latest.starts_with(runs.as_str()) && !runs.starts_with(latest.as_str()) {
+            println!("      behind: runs {runs}, latest is {latest}{}", s.now.updating.as_ref().map_or(String::new(), |why| format!(" ({why})")));
+        }
         // What it runs, as its own list says (its user's and the admins' to see), and the services it says run there;
         // the app runtime isn't one.
         let parts = s.now.parts.as_deref().unwrap_or_default();

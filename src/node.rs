@@ -98,6 +98,8 @@ struct Peer {
     load: Option<crate::load::Load>,
     /// What it can run, and each part's state (`Node::parts_here`), if it says.
     parts: Option<Value>,
+    /// Why it hasn't taken the latest update, if it says.
+    updating: Option<String>,
     seen: Instant,
 }
 
@@ -167,6 +169,9 @@ pub struct Inner {
     changed: tokio::sync::Notify,
     /// Wakes the task that updates this node to a newer release.
     released: tokio::sync::Notify,
+    /// What the record at the network's address last said (`crate::latest`), and why it couldn't take it, if so.
+    latest: Mutex<crate::latest::Latest>,
+    updating: Mutex<Option<String>>,
     bundles: Mutex<BTreeMap<String, String>>,
     /// The bundle of each app this release has built in, kept as a blob: any network may add them.
     built_in: BTreeMap<String, String>,
@@ -261,6 +266,8 @@ impl Node {
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),
             released: tokio::sync::Notify::new(),
+            latest: Mutex::new(Default::default()),
+            updating: Mutex::new(None),
             bundles: Mutex::new(BTreeMap::new()),
             built_in,
             images: Mutex::new(HashMap::new()),
@@ -322,6 +329,7 @@ impl Node {
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().update_loop());
+        tokio::spawn(node.clone().pull_loop());
         tokio::spawn(node.clone().sign_in_loop());
         let worker = node.clone();
         tokio::spawn(async move {

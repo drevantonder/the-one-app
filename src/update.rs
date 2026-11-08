@@ -138,6 +138,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         }
     };
     let moved = retire_gone(&src, &parts.renamed)?;
+    if parts.mac {
+        publish_source(&src, &commit, config_commit.as_deref().unwrap_or("-"), &release_key()?)?;
+    }
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
         add_where(&moved);
@@ -368,6 +371,13 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
     let key = ssh_key::PrivateKey::from_openssh(&out.stdout).map_err(|_| anyhow::anyhow!("`{RELEASE_SIGNER}` didn't give an OpenSSH private key"))?;
     ensure!(key.public_key().key_data() == ssh_key::PublicKey::from_openssh(RELEASE_KEY)?.key_data(), "`{RELEASE_SIGNER}` gave a key, but not the release key in config.toml");
     Ok(key)
+}
+
+/// Says in the record that this commit is the one to build: every Mac takes the app published for it, or builds it itself
+/// if none is.
+fn publish_source(src: &Path, commit: &str, config: &str, key: &ssh_key::PrivateKey) -> Result<()> {
+    let committed = git(src, &["log", "-1", "--format=%ct", commit])?.trim().parse().context("the commit's date")?;
+    build::publish_latest(&crate::node(), key, &[("source".into(), None, Version { commit: commit.into(), target: "-".into(), committed }, config.into())])
 }
 
 /// A clean clone of the repo, kept in the cache, at the tip of main on GitHub. Build output stays, so builds are quick.

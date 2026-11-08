@@ -605,6 +605,8 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
                     parts: Some(vec![part()]),
                     load: Some(Default::default()),
                     kind: None,
+                    latest: Some("l".into()),
+                    updating: Some("u".into()),
                 },
             }],
             devices_at: 1,

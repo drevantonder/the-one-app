@@ -98,6 +98,8 @@ pub mod node;
 #[cfg(feature = "node")]
 pub mod release;
 #[cfg(feature = "node")]
+pub mod latest;
+#[cfg(feature = "node")]
 pub mod schedules;
 #[cfg(feature = "node")]
 pub mod services;

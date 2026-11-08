@@ -131,7 +131,39 @@ pub fn publish(node: &crate::api::Client, path: &Path, key: &ssh_key::PrivateKey
     }
     let signature = crate::release::sign(key, &std::fs::read(path)?)?;
     let body = json!({ "path": path, "commit": version.commit, "target": version.target, "committed": version.committed, "signature": signature, "service": service });
-    node.post(if service.is_some() { "/v1/service-release" } else { "/v1/node-release" }, body)
+    let answered = node.post(if service.is_some() { "/v1/service-release" } else { "/v1/node-release" }, body)?;
+    let name = match service {
+        Some(service) => crate::latest::Thing::service_name(service, &version.target),
+        None => crate::latest::Thing::node_name(&version.target),
+    };
+    publish_latest(node, key, &[(name, Some(path.to_path_buf()), version.clone(), "-".to_string())])?;
+    Ok(answered)
+}
+
+/// Puts `things`' files where devices take them, and adds them to the record at the network's address, signed with the
+/// release key: each `(name, file, version, config commit)`, with no file for what's built, not fetched (`source`).
+pub fn publish_latest(node: &crate::api::Client, key: &ssh_key::PrivateKey, things: &[(String, Option<PathBuf>, Version, String)]) -> Result<()> {
+    use crate::latest::{Latest, Thing};
+    let mut made = Vec::new();
+    for (name, path, version, config) in things {
+        let (sha256, size) = match path {
+            None => ("-".to_string(), 0),
+            Some(path) => {
+                let put = node.post("/v1/latest/put", json!({ "path": path }))?;
+                (put["sha256"].as_str().context("no hash")?.to_string(), put["size"].as_u64().unwrap_or(0))
+            }
+        };
+        made.push(Thing { name: name.clone(), commit: version.commit.clone(), committed: version.committed, sha256, size, config: config.clone() });
+    }
+    for _ in 0..16 {
+        let now = node.get("/v1/latest")?;
+        let here = now["text"].as_str().and_then(|t| Latest::read(crate::config::RELEASE_KEY, t).ok()).unwrap_or_default();
+        let text = here.merged(made.iter().cloned()).signed(key)?;
+        if node.post("/v1/latest", json!({ "text": text, "tag": now["tag"] }))?["replaced"] == true {
+            return Ok(());
+        }
+    }
+    bail!("couldn't update the record: another publisher kept changing it")
 }
 
 pub fn published_said(published: &Value, service: Option<&str>) -> String {

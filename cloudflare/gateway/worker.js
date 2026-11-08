@@ -1,12 +1,12 @@
 // The gateway: the network's address, the one users use. It holds no keys and runs no app code; it only sends each
 // request where its path says: signing in to auth (with the gateway's host kept, since passkeys belong to it),
-// `/urls` to the URL signer, `/push/…` to the push Worker, `/mcp` and what MCP clients read to sign in to it to the
+// `/urls` and `/updates/…` (what devices update themselves from) to the URL signer, `/push/…` to the push Worker, `/mcp` and what MCP clients read to sign in to it to the
 // remote MCP server, everything under `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything
 // else to the web client's files. Devices reach the network's nodes over iroh, never through here, and so does git: a
 // git request here is git on a computer without the CLI, told how to get it.
 import { hex, sha256 } from "../shared/crypto.js";
 import { refusal } from "../shared/http.js";
-import { IROH_PATHS } from "../shared/protocol.js";
+import { IROH_PATHS, UPDATES } from "../shared/protocol.js";
 
 const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
 // The authorization server's metadata is where MCP clients look for it: RFC 8414's path for the issuer `<address>/api/auth`.
@@ -104,7 +104,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (under(url.pathname, Object.values(IROH_PATHS))) return env.IROH.fetch(request);
-    if (url.pathname === "/urls") return env.SIGNER.fetch(request);
+    if (url.pathname === "/urls" || url.pathname.startsWith(`/${UPDATES}/`)) return env.SIGNER.fetch(request);
     if (url.pathname.startsWith("/push/")) return env.PUSH.fetch(request);
     if (GIT.test(url.pathname)) return gitWithoutCli(env, url);
     switch (where(url.pathname)) {

@@ -116,8 +116,18 @@ pub fn put_blob(dir: &Path, bytes: &[u8]) -> Result<String> {
 /// Replaces the running binary with `bytes`, `r`'s signed binary, once it says it's that build and no older than this one.
 /// The service manager starts the new one when this one exits.
 pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
+    install_commit(&r.commit, bytes)
+}
+
+/// Whether this program runs from inside an app bundle, which updates as a whole, by what the Mac's job installs.
+pub fn in_app_bundle() -> bool {
+    std::env::current_exe().and_then(|e| e.canonicalize()).is_ok_and(|e| e.to_string_lossy().contains(".app/Contents/"))
+}
+
+/// Replaces the running binary with `bytes`, once it says it's `commit` and no older than this one.
+pub fn install_commit(commit: &str, bytes: &[u8]) -> Result<PathBuf> {
     let exe = std::env::current_exe()?.canonicalize()?;
-    ensure!(!exe.to_string_lossy().contains(".app/Contents/"), "this node lives in an app bundle, which updates with the app");
+    ensure!(!in_app_bundle(), "this node lives in an app bundle, which updates with the app");
     let tmp = exe.with_extension("new");
     std::fs::write(&tmp, bytes).context("write the new binary")?;
     #[cfg(unix)]
@@ -127,9 +137,9 @@ pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
     }
     // The release step's commit and date aren't signed; the binary's own are.
     let version = Version::of(&tmp);
-    if !version.as_ref().is_some_and(|v| v.commit == r.commit && v.target == crate::config::TARGET && v.committed >= crate::config::COMMITTED) {
+    if !version.as_ref().is_some_and(|v| v.commit == commit && v.target == crate::config::TARGET && v.committed >= crate::config::COMMITTED) {
         let _ = std::fs::remove_file(&tmp);
-        anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.json()), r.commit, crate::config::TARGET);
+        anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.json()), commit, crate::config::TARGET);
     }
     std::fs::rename(&tmp, &exe).context("replace the binary")?;
     Ok(exe)

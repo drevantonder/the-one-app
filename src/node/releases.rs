@@ -5,6 +5,10 @@ use super::*;
 
 pub(crate) mod routes;
 
+/// How often a device checks the record (`crate::latest`). A device that can't speak anything else reaches the network
+/// only by this, so it stays dumb: a timer, not a wake-up over anything that could stop working.
+const PULL_EVERY: Duration = Duration::from_secs(30);
+
 /// How long after asking to hand over to a build it installed a node that still runs asks again: longer than a node
 /// taking over takes to warm.
 const HAND_OVER_AGAIN: Duration = Duration::from_secs(150);
@@ -20,6 +24,103 @@ impl Node {
         let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed, signature: signature.into(), service: service.map(str::to_string) };
         self.append(&Scope::Global, release::content(&r)).await?;
         Ok(r)
+    }
+
+    /// Checks the record at the network's address now and then and, if it says there's a newer build of this node, takes it:
+    /// nothing else of the network has to work for that. A bad or missing record means staying on what it has and saying
+    /// why (`updating`). A node in an app bundle reads the record for `status` but doesn't take it: the Mac's job does.
+    pub(super) async fn pull_loop(self) {
+        if crate::config::RELEASE_KEY.is_empty() {
+            return;
+        }
+        let mut handed = Instant::now() - HAND_OVER_AGAIN;
+        loop {
+            match self.pull_once(&mut handed).await {
+                Ok(()) => self.say_updating(None),
+                Err(err) => {
+                    tracing::warn!("couldn't update: {err:#}");
+                    self.say_updating(Some(format!("{err:#}")));
+                }
+            }
+            tokio::time::sleep(PULL_EVERY).await;
+        }
+    }
+
+    async fn pull_once(&self, handed: &mut Instant) -> Result<()> {
+        let Ok(address) = self.address() else { return Ok(()) };
+        let fetched = {
+            let address = address.clone();
+            tokio::task::spawn_blocking(move || crate::latest::fetch(&address)).await??
+        };
+        let Some(text) = fetched else { return Ok(()) };
+        let latest = crate::latest::Latest::read(crate::config::RELEASE_KEY, &text).context("the latest record")?;
+        *self.0.latest.lock().unwrap() = latest.clone();
+        let Some(thing) = latest.get(&crate::latest::Thing::node_name(crate::config::TARGET)).cloned() else { return Ok(()) };
+        if release::in_app_bundle() {
+            return Ok(());
+        }
+        let file = self.0.dir.join("release");
+        let taken = std::fs::read_to_string(&file).unwrap_or_default();
+        if !crate::latest::wanted(&thing, crate::config::BUILD, crate::config::COMMITTED, taken.trim()) {
+            // Already installed: asked again now and then to hand over to it, as long as this build still runs.
+            if thing.commit != crate::config::BUILD && taken.trim() == thing.sha256 && handed.elapsed() > HAND_OVER_AGAIN {
+                *handed = Instant::now();
+                crate::handoff::restart();
+            }
+            return Ok(());
+        }
+        let bytes = {
+            let (address, thing) = (address, thing.clone());
+            tokio::task::spawn_blocking(move || crate::latest::download(&address, &thing)).await??
+        };
+        let exe = release::install_commit(&thing.commit, &bytes)?;
+        std::fs::write(&file, &thing.sha256)?;
+        tracing::info!("updated {} to {}; restarting", exe.display(), thing.commit);
+        *handed = Instant::now();
+        crate::handoff::restart();
+        Ok(())
+    }
+
+    /// Whether this device can't update, and why, as its hello says and `status` shows: on a Mac, what the job beside
+    /// the app last said, since the node's inside the thing being replaced.
+    pub fn updating(&self) -> Option<String> {
+        if release::in_app_bundle() {
+            return std::fs::read_to_string(crate::user_home().join("Library/Caches").join(crate::config::CLI).join("why")).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        }
+        self.0.updating.lock().unwrap().clone()
+    }
+
+    fn say_updating(&self, why: Option<String>) {
+        *self.0.updating.lock().unwrap() = why;
+    }
+
+    /// What the record last said, as this node read it.
+    pub fn latest(&self) -> crate::latest::Latest {
+        self.0.latest.lock().unwrap().clone()
+    }
+
+    /// Keeps the file a `one update` publishes: unsealed in the bucket's `updates/`, by its hash. → the hash.
+    pub async fn publish_file(&self, path: &Path) -> Result<(String, u64)> {
+        use crate::bucket::Bucket;
+        let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
+        let sha256 = crate::latest::sha256(&bytes);
+        let bucket = self.bucket()?;
+        Bucket::create(&bucket.place, &format!("{}/{sha256}", crate::latest::FOLDER), &bytes).await?;
+        Ok((sha256, bytes.len() as u64))
+    }
+
+    /// The record as it is in the bucket, with its tag, to replace.
+    pub async fn latest_record(&self) -> Result<Option<(String, String)>> {
+        use crate::bucket::Bucket;
+        let bucket = self.bucket()?;
+        Ok(Bucket::get(&bucket.place, &crate::latest::newest_name()).await?.map(|o| (String::from_utf8_lossy(&o.bytes).into_owned(), o.tag)))
+    }
+
+    /// Replaces the record, if it's still the one `tag` names (none: if there's none). → whether it did.
+    pub async fn replace_latest(&self, text: &str, tag: Option<&str>) -> Result<bool> {
+        use crate::bucket::Bucket;
+        let bucket = self.bucket()?;
+        Bucket::replace(&bucket.place, &crate::latest::newest_name(), text.as_bytes(), tag).await
     }
 
     /// Updates this node whenever a newer build for its platform is published, signed with the release key. A download
