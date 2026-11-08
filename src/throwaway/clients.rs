@@ -38,7 +38,7 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
         Some("web") => {
             // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it would test the address.
             anyhow::ensure!(
-                one::cloudflare::client_version().is_some(),
+                one::web::client_version().is_some(),
                 "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI} throwaway client web, which builds it"
             );
             web::web(dir, settings, user.as_deref())?

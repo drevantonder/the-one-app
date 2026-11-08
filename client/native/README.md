@@ -11,9 +11,14 @@ Its own workspace, so the repo's `cargo build` and `cargo test` never build Taur
 and runs it signed in to your throwaway network; `cargo build` here, then `ONE_ADDRESS=<address> target/debug/one-native`
 on a desktop.
 
+The window runs the client itself, as a browser does, when its bundle has the WebAssembly and the web view can (`app.js`'s `runsClient`), with
+its key in the OS's secret store and signing, opening and what its keyring keeps asked of the app (`native.js`'s `keys`, `sign`, `shared`, `keepGet`…):
+then a `READS` bump reaches it with its next bundle. Otherwise (no WebAssembly built in, an older Android WebView) the app's own Rust is the device.
+What runs with no window (widgets, notifications) always uses the app's own Rust.
+
 What the window shows comes from `src/bundle.rs`: the release-key-signed web bundle this device last kept (`<data>/web/`, fetched from
 `<address>/updates/`), newest first, or the one built in. It takes a new bundle the next time the window opens. A debug build takes
-`<CLI>_WEB_KEY` and `<CLI>_WEB_BASE` to test with other keys and places.
+`<CLI>_WEB_KEY`, to test with another key.
 
 Its log (`<data>/logs/client.log`, capped, `one::logs`) holds the page's uncaught errors and failed loads, page loads, panics
 and what the platform code says. `one logs <device>` reads it through a node the app is connected to, which asks the app on

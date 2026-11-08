@@ -174,8 +174,12 @@ async fn node(device: &one_client::Device, method: &str, path: &str, body: Optio
 
 /// The widgets kept for the platform's own again, and drawn again where the app runs.
 async fn widgets_changed(device: &one_client::Device) {
-    if let Err(e) = widgets::refresh(device, &platform::widgets_dir()).await {
+    let said = widgets::refresh(device, &platform::widgets_dir()).await;
+    if let Err(e) = &said {
         one::logs::say(&format!("widgets: {e}"));
+    }
+    if let Some(a) = APP.get() {
+        bundle::own_client_behind(&a.data, said.as_ref().err().map(String::as_str));
     }
     if APP.get().is_some() {
         platform::redraw_widgets();
@@ -300,6 +304,9 @@ fn native() -> Value {
         "textScale": platform::text_scale(),
         // The newest bundle needs a newer app than this, which stays on what it has.
         "behind": bundle::behind(&a.data),
+        // What it's called among its user's devices, and its invite: for its own client, in the page, to ask to be let in.
+        "joinName": join_name(),
+        "invite": a.kept("invite"),
     })
 }
 
@@ -389,12 +396,134 @@ async fn join() -> Result<Value, Failure> {
         Err(e) => return Err(e.to_string().into()),
     }
     let invite = a.kept("invite");
-    // A computer is "<name> on <computer>", as the Mac app's was; a phone, its own name.
-    let name = if cfg!(desktop) { format!("{} on {}", one::config::NAME, device_name()) } else { device_name() };
-    device.ask(&token, &name, invite.as_deref()).await.map_err(|e| e.to_string())?;
+    device.ask(&token, &join_name(), invite.as_deref()).await.map_err(|e| e.to_string())?;
     println!("Code: {}", device.code());
     platform::approve_here(device.code());
     Ok(json!({ "code": device.code(), "invited": invite.is_some() }))
+}
+
+/// What this device is called among its user's: a computer's "<name> on <computer>", a phone's its own name.
+fn join_name() -> String {
+    if cfg!(desktop) { format!("{} on {}", one::config::NAME, device_name()) } else { device_name() }
+}
+
+/// This device's own id here: `<address> <user>`, signed in.
+fn id_here() -> Result<String, Failure> {
+    let a = app();
+    Ok(format!("{} {}", a.address().ok_or("Enter your address first.")?, a.kept("user").ok_or("Signed out.")?))
+}
+
+/// The key of the user signed in here, made the first time.
+fn secret_here() -> Result<[u8; 32], Failure> {
+    Ok(secrets::device_made(&id_here()?)?)
+}
+
+fn unbase64(s: &str) -> Result<Vec<u8>, Failure> {
+    Ok(data_encoding::BASE64.decode(s.as_bytes()).map_err(|e| e.to_string())?)
+}
+
+/// What names this device: its key and seal key, hex. Its own client in the page signs and opens with them through the app.
+#[tauri::command]
+fn device_keys() -> Result<Value, Failure> {
+    let join = one_client::join_of(secret_here()?);
+    Ok(json!({ "key": &join[..64], "seal": &join[64..] }))
+}
+
+/// This device's signature of `bytes` (base64), for its own client in the page, which never sees the key.
+#[tauri::command]
+fn device_sign(bytes: String) -> Result<String, Failure> {
+    Ok(data_encoding::BASE64.encode(&one::keys::sign_with(&secret_here()?, &unbase64(&bytes)?)))
+}
+
+/// What this device's seal key agrees with `share` (base64) on, for its own client in the page, which never sees the key.
+#[tauri::command]
+fn device_shared(share: String) -> Result<String, Failure> {
+    let share: [u8; 32] = unbase64(&share)?.try_into().map_err(|_| "not a key")?;
+    Ok(data_encoding::BASE64.encode(&one::keys::agree_as(&secret_here()?, &share)))
+}
+
+/// The folder this device keeps what its keyring keeps (the same one its own client in Rust reads, so a sign-in carries over).
+fn keep_dir() -> Result<PathBuf, Failure> {
+    Ok(app().data.join("client").join(secrets::folder(&id_here()?)))
+}
+
+/// A name the keyring keeps something by: nothing that could reach outside its folder.
+fn keep_name(name: &str) -> Result<&str, Failure> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) || name.starts_with('.') {
+        return Err("That isn't a name to keep something by.".into());
+    }
+    Ok(name)
+}
+
+#[tauri::command]
+fn keep_get(name: String) -> Result<Option<String>, Failure> {
+    Ok(std::fs::read(keep_dir()?.join(keep_name(&name)?)).ok().map(|b| data_encoding::BASE64.encode(&b)))
+}
+
+#[tauri::command]
+fn keep_put(name: String, bytes: String) -> Result<(), Failure> {
+    let dir = keep_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let tmp = dir.join(format!("{}.part", keep_name(&name)?));
+    std::fs::write(&tmp, unbase64(&bytes)?).map_err(|e| e.to_string())?;
+    Ok(std::fs::rename(&tmp, dir.join(keep_name(&name)?)).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+fn keep_delete(name: String) -> Result<(), Failure> {
+    let _ = std::fs::remove_file(keep_dir()?.join(keep_name(&name)?));
+    Ok(())
+}
+
+/// An access token for its own client in the page, from the refresh token the app keeps.
+#[tauri::command]
+async fn access_token() -> Result<String, Failure> {
+    token().await
+}
+
+/// The code its own client in the page is waiting to be approved by, where this device can approve it itself (a Mac's node).
+#[tauri::command]
+fn waiting(code: String) {
+    println!("Code: {code}");
+    platform::approve_here(code);
+}
+
+/// The page's own client was let in: the app's own (Rust) client starts beside it, for what runs with no window (widgets,
+/// pushes). It may be behind what the network reads; the page isn't held up by it. Its invite is used, so it goes.
+#[tauri::command]
+fn joined() {
+    app().keep("invite", None);
+    tauri::async_runtime::spawn(async {
+        let a = app();
+        let (Some(address), Some(user)) = (a.address(), a.kept("user")) else { return };
+        let id = format!("{address} {user}");
+        let Ok(secret) = secrets::device_made(&id) else { return };
+        // Every page joins as it starts, the panel's own too: only the first starts the app's own client.
+        let device = {
+            let mut d = a.device.lock().unwrap();
+            if d.is_some() {
+                println!("Let in.");
+                return;
+            }
+            let new = Arc::new(client(&a.data, &address, &id, secret));
+            if let Some(on) = platform::this_device() {
+                new.on(&on);
+            }
+            *d = Some(new.clone());
+            new
+        };
+        println!("Let in.");
+        match device.connect().await {
+            Ok(_) => {
+                let_in();
+                redraw_panel();
+            }
+            Err(e) => {
+                one::logs::say(&format!("this app's own client didn't start: {e}"));
+                bundle::own_client_behind(&a.data, Some(&e.to_string()));
+            }
+        }
+    });
 }
 
 /// Waits until this device is let in, as auth says it was approved and the relay lets it on.

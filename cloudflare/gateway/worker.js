@@ -100,8 +100,30 @@ function gitWithoutCli(env, url) {
   return new Response(said.join("\n") + "\n", { status: 403, headers: { "content-type": "text/plain; charset=utf-8", "x-content-type-options": "nosniff" } });
 }
 
+// The native apps' windows, whose client (net-worker.js) reaches this address as a page at their own origin does.
+const APPS = ["tauri://localhost", "https://tauri.localhost", "http://tauri.localhost"];
+
+function letApps(request, respond) {
+  const origin = request.headers.get("origin");
+  if (!APPS.includes(origin)) return respond();
+  const headers = { "access-control-allow-origin": origin, "access-control-allow-methods": "GET, POST, HEAD, OPTIONS", "access-control-allow-headers": request.headers.get("access-control-request-headers") || "content-type", vary: "origin" };
+  if (request.method === "OPTIONS") return Promise.resolve(new Response(null, { status: 204, headers }));
+  return respond().then((resp) => {
+    if (resp.webSocket || resp.status === 101) return resp;
+    const out = new Response(resp.body, resp);
+    for (const [name, value] of Object.entries(headers)) out.headers.set(name, value);
+    return out;
+  });
+}
+
 export default {
-  async fetch(request, env) {
+  fetch(request, env) {
+    return letApps(request, () => route(request, env));
+  },
+};
+
+async function route(request, env) {
+  {
     const url = new URL(request.url);
     if (under(url.pathname, Object.values(IROH_PATHS))) return env.IROH.fetch(request);
     if (url.pathname === "/urls" || url.pathname.startsWith(`/${UPDATES}/`)) return env.SIGNER.fetch(request);
@@ -112,5 +134,5 @@ export default {
       case "auth": return env.AUTH.fetch(request);
       default: return toWeb(request, env, url);
     }
-  },
-};
+  }
+}

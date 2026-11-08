@@ -95,15 +95,7 @@ export function browser() {
     await ask();
     if (await byPasskey(user, keys, api)) return (device = keys);
     waiting(await codeOf(keys.key, keys.seal), !!invite);
-    // Auth says once it was approved; then the relay lets it in. One gone from auth (approved and cleared, refused, or
-    // waited 15 minutes) is asked again, unless it's in.
-    for (;;) {
-      await sleep(2000);
-      const said = await net.waited(user, await auth.token()).catch(() => "waiting");
-      if (said === "signedOut") throw Object.assign(new Error("Signed out."), { signedOut: true });
-      if (["gone", "approved"].includes(said) && (await net.start(user, true).catch(() => false))) break;
-      if (said === "gone") await ask().catch(() => {});
-    }
+    await net.untilLetIn(user, () => auth.token(), ask);
     sessionStorage.removeItem("one.invite");
     return (device = keys);
   }
@@ -185,18 +177,7 @@ export function browser() {
       localStorage.removeItem(PUSHED);
       await forgetDevice();
     },
-    /// The nodes this browser asks itself, in the order things run on them, the Cloudflare node by its run priority
-    /// (last, unless an admin moved it).
-    nodes(state) {
-      const nodes = (state.network?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
-      const last = state.network?.cloudflare_node?.key;
-      if (last && !nodes.includes(last)) nodes.push(last);
-      const rank = (p) => (p === "last" ? 0xffffffff : p);
-      const ranks = Object.fromEntries((state.network?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
-      if (last) ranks[last] = rank(state.network.cloudflare_node.priority ?? "last");
-      nodes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
-      if (nodes.length) net.nodes(state.user.id, nodes, ranks, last);
-    },
+    nodes: (state) => net.ordered(state),
     /// Once it's in: its user's own things' first key and where they run, made by the first of their devices.
     settle: () => net.settle().catch((err) => console.warn("making this user's own keys:", err)),
     kept: (app, tool, input) => net.kept(auth.user(), app, tool, input),

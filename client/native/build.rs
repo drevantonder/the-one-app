@@ -17,7 +17,7 @@ const COMMANDS: &[&str] = commands!(names);
 fn main() {
     let dist = Path::new("gen/web");
     let _ = std::fs::remove_dir_all(dist);
-    for (path, bytes) in one::web::files() {
+    for (path, bytes) in one::web::with_client() {
         let to = dist.join(&path);
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         std::fs::write(to, bytes).unwrap();

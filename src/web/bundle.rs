@@ -33,7 +33,7 @@ impl Bundle {
     /// This build's web client, ready to sign.
     #[cfg(feature = "node")]
     pub fn of_this_build(commit: &str, committed: u64) -> Bundle {
-        Bundle { commit: commit.to_string(), committed, shell: super::SHELL, files: super::files() }
+        Bundle { commit: commit.to_string(), committed, shell: super::SHELL, files: super::with_client() }
     }
 
     /// As gzip, to sign and send.

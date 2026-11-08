@@ -27,6 +27,8 @@
     return btoa(s);
   };
 
+  const unbase64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
   // What goes wrong in the page, for the device's log (`one logs <device>`): an error nothing caught, a promise nothing
   // handled, a file that didn't load. Not what the page prints, which may hold anyone's data. One line, once in a row.
   let last = "";
@@ -58,6 +60,20 @@
     join: () => invoke("join"),
     wait: () => invoke("wait"),
     removed: () => invoke("removed"),
+    /// This device's key, as its own client in this page asks it (`{ key, seal }`, hex), never the key itself: it signs and
+    /// agrees here, in the app. What it keeps, by name; an access token, new as needed; and it's let in (`joined`).
+    keys: () => invoke("device_keys"),
+    sign: async (bytes) => unbase64(await invoke("device_sign", { bytes: base64(bytes) })),
+    shared: async (share) => unbase64(await invoke("device_shared", { share: base64(share) })),
+    keepGet: async (name) => {
+      const v = await invoke("keep_get", { name });
+      return v == null ? null : unbase64(v);
+    },
+    keepPut: (name, bytes) => invoke("keep_put", { name, bytes: base64(bytes) }),
+    keepDelete: (name) => invoke("keep_delete", { name }),
+    token: () => invoke("access_token"),
+    waiting: (code) => invoke("waiting", { code }).catch(() => {}),
+    joined: () => invoke("joined").catch(() => {}),
     /// The window in front (at a `<cli>://` link, if given), from the menu bar panel; Open at Login switched; Quit.
     main: (link) => invoke("main", { link: link ?? null }),
     login: (on) => invoke("login", { on }),

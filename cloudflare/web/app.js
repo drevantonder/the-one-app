@@ -3,6 +3,8 @@
 // asks for its network's address first, joins a Mac's own node to one with a pairing code, opens the links the app was
 // opened with, takes a phone's hardware Back and text size, and may be the menu bar panel, a small window of its own:
 // this page showing only the client's own `panel` screen, with the app's rows under it.
+import { codeOf } from "./device.js";
+import { net } from "./net.js";
 import { $, h, show, ui } from "./view.js";
 
 export function app(native) {
@@ -80,7 +82,69 @@ export function app(native) {
     show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name: "Join with a Pairing Code", field, action: { label: "Join", run: join }, other: { label: "Cancel", run: () => welcome() }, problem: error }));
   }
 
+  /// This device as its user's, where this page has the client (`net.has`, a bundle or build with its WebAssembly): the
+  /// client's Rust runs here, as a browser's does, asking the app only to sign and open with its key.
+  let keys = null;
+  const inPage = {
+    async join(waiting) {
+      const user = about.user;
+      keys = await native.keys();
+      if (!(await net.start(user))) {
+        const ask = async () => net.ask(user, await native.token(), about.joinName, about.invite || undefined);
+        await ask();
+        const code = await codeOf(keys.key, keys.seal);
+        waiting(code, !!about.invite);
+        native.waiting(code);
+        await net.untilLetIn(user, () => native.token(), ask);
+      }
+      isIn = true;
+      native.joined();
+    },
+    reaches: (user) => net.start(user).catch(() => false),
+    fetch: (...args) => net.fetch(...args),
+    took: () => net.took(),
+    removed: async () => (await net.still().catch(() => null)) === false,
+    async leave(api) {
+      if (keys) await Promise.race([api("/v1/remove", { method: "POST", body: { key: keys.key } }), new Promise((r) => setTimeout(r, 20_000))]).catch((err) => console.warn("leaving your devices:", err));
+    },
+    nodes: (state) => net.ordered(state),
+    settle: () => net.settle().catch((err) => console.warn("making this user's own keys:", err)),
+    kept: (app, tool, input) => net.kept(about.user, app, tool, input),
+    renew: (app) => net.renew(app),
+    forget: () => net.forget(about.user),
+    device: () => ({ name: about.device, signOut: true, keys: true, notify, ...(keys ? { key: keys.key } : {}) }),
+  };
+
+  /// Where the page has no client (a shell built with no WebAssembly): the app's own Rust is this device, and answers for it.
+  const inShell = {
+    /// The app's device let in: one already, or asking and showing its code (`waiting`) until it's approved.
+    async join(waiting) {
+      const asked = await native.join();
+      if (!asked.in) {
+        waiting(asked.code, asked.invited);
+        await native.wait();
+      }
+      isIn = true;
+    },
+    reaches: async () => isIn,
+    fetch: (...args) => native.fetch(...args),
+    took: async () => undefined,
+    removed: () => native.removed().catch(() => false),
+    async leave() {},
+    nodes() {},
+    async settle() {},
+    kept: (app, tool, input) => native.kept(about.user, app, tool, input),
+    renew: (app) => native.renew(app),
+    forget: async () => {},
+    device: () => ({ name: about.device, signOut: true, keys: true, notify }),
+  };
+
+  /// The page's client needs Ed25519 in its WebCrypto for the session's own key (its endpoint's): an older Android WebView has
+  /// none, and on one the app's own Rust answers instead.
+  const runsClient = () => (net.has ? crypto.subtle.importKey("raw", new Uint8Array(32), { name: "Ed25519" }, false, ["verify"]).then(() => true, () => false) : false);
+
   const platform = {
+    ...inShell,
     panel,
     /// On a Mac, a widget's own menu bar item opens the panel showing only that widget (`<app>.<widget>`), with no rows.
     panelWidget: panel ? query.get("widget") : null,
@@ -94,6 +158,7 @@ export function app(native) {
     /// whether it took it), and `look` (light, dark or automatic).
     async start(window) {
       about = await native.about();
+      Object.assign(platform, (await runsClient()) ? inPage : inShell);
       // The app draws its next start in it from the first frame.
       native.appearance(window.look);
       native.onOpen = (link) => opened(link, window);
@@ -144,27 +209,6 @@ export function app(native) {
       const other = about.unpaired ? { label: "Join with a Pairing Code…", run: () => showPairing(() => again()) } : undefined;
       return h(ui.Welcome, { ...props, field, action: { label: "Sign In", invite: "Open Invite", run: take }, note: about.unpaired ? `This Mac isn’t part of ${about.yours} yet. Join it from another of your computers, with a pairing code.` : props.note, other });
     },
-
-    /// The app's device let in: one already, or asking and showing its code (`waiting`) until it's approved.
-    async join(waiting) {
-      const asked = await native.join();
-      if (!asked.in) {
-        waiting(asked.code, asked.invited);
-        await native.wait();
-      }
-      isIn = true;
-    },
-    reaches: async () => isIn,
-    fetch: (...args) => native.fetch(...args),
-    took: async () => undefined,
-    removed: () => native.removed().catch(() => false),
-    async leave() {},
-    nodes() {},
-    async settle() {},
-    kept: (app, tool, input) => native.kept(about.user, app, tool, input),
-    renew: (app) => native.renew(app),
-    forget: async () => {},
-    device: () => ({ name: about.device, signOut: true, keys: true, notify }),
 
     changed: () => native.changed(),
     badge: (count) => native.badge(count),

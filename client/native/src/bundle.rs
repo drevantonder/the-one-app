@@ -136,9 +136,22 @@ fn keep_behind(data: &Path, behind: Option<u32>) {
     }
 }
 
-/// Whether the newest bundle needs a newer app than this one, so this one stays on what it has.
+/// Whether this app is behind: the newest bundle needs a newer app than this one, or the network reads more of who's who than
+/// this app's own client does (`own_client_behind`). Either way it stays on what it has, and says it needs updating.
 pub fn behind(data: &Path) -> bool {
-    folder(data).join("behind").exists()
+    folder(data).join("behind").exists() || folder(data).join("reads-behind").exists()
+}
+
+/// Whether what runs with no window (widgets, and what a push asks) just learned the network reads more than this app's own
+/// client does: `refused` is what it was told, if anything. Those things keep what they last had and the page says to update.
+pub fn own_client_behind(data: &Path, refused: Option<&str>) {
+    let path = folder(data).join("reads-behind");
+    if refused.is_some_and(|e| e.contains(&one::protocol::update_refusal(one::config::YOURS))) {
+        let _ = std::fs::create_dir_all(folder(data));
+        let _ = std::fs::write(path, "");
+    } else if refused.is_none() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// What the network's address says is newest: its commit, when it was made, and the file's name there.
@@ -148,13 +161,8 @@ struct Published {
     sha256: String,
 }
 
-/// Where a bundle's published (`updates/newest`, `updates/<sha256>`): `WEB_BASE` for a test's (a debug build's), else at
-/// the network's address.
+/// Where bundles are published: the network's own address.
 fn base(address: &str) -> String {
-    #[cfg(debug_assertions)]
-    if let Some(base) = crate::env("WEB_BASE") {
-        return base;
-    }
     format!("{address}/updates")
 }
 
@@ -294,9 +302,11 @@ pub fn watch(app: tauri::AppHandle) {
     });
 }
 
-/// The page's policy, so the page may reach the app itself (Tauri's `ipc:`): a page has no other way.
+/// The page's policy, so the page may reach the app (Tauri's `ipc:`) and, for its own client, the network's address and
+/// its relay, wherever that is: which the page's own file can't say, as an address is a user's to give.
 fn policy(html: &[u8]) -> Vec<u8> {
-    String::from_utf8_lossy(html).replacen("connect-src 'self'", "connect-src 'self' ipc: http://ipc.localhost", 1).into_bytes()
+    let address = crate::APP.get().and_then(|a| a.address()).map(|a| format!(" {a} {}", a.replacen("http", "ws", 1))).unwrap_or_default();
+    String::from_utf8_lossy(html).replacen("connect-src 'self'", &format!("connect-src 'self' ipc: http://ipc.localhost{address}"), 1).into_bytes()
 }
 
 /// What Tauri asks for the window's files, in place of the built-in ones: the bundle being served, else those.

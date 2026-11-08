@@ -4,6 +4,7 @@
 // and a user already signed in starts their session at once.
 
 import { Yours } from "../shared/protocol.js";
+import { appHost } from "./net-app.js";
 
 const started = (self.oneNet ||= {});
 const url = started.url || "";
@@ -72,7 +73,8 @@ function again() {
   if (user) net.start(user).catch(() => {});
 }
 
-if (url && typeof SharedWorker === "function") {
+// The app's window can't hand a worker its commands, so its client runs in the page, as a browser with no SharedWorker's does.
+if (url && !self.__oneNative && typeof SharedWorker === "function") {
   has = true;
   const worker = started.worker || new SharedWorker(url, { type: "module", name: "one" });
   worker.port.onmessage = (e) => received(e.data);
@@ -94,7 +96,7 @@ if (url && typeof SharedWorker === "function") {
   send = (m) => (mine ? mine(tab, m) : follows ? channel.postMessage({ from: tab, m }) : queued.push(m));
   const lead = async () => {
     const { server } = await import(url);
-    const s = server(new URL(url, location.href).searchParams.get("client"));
+    const s = server(new URL(url, location.href).searchParams.get("client"), self.__oneNative ? await appHost(self.__oneNative) : undefined);
     const tabs = new Map();
     mine = (from, m) => {
       if (!tabs.has(from)) tabs.set(from, s.connect((a) => (from === tab ? received(a) : channel.postMessage({ to: from, m: a }))));
@@ -199,6 +201,32 @@ export const net = {
   /// "waiting".
   async waited(user, token) {
     return (await ask({ op: "waited", user, token })).said;
+  },
+
+  /// Asks to be let in as `user`'s device (`ask`), showing `waiting` its code, then waits until it is: auth says once it was
+  /// approved, then the relay lets it in. One gone from auth (approved and cleared, refused, or waited 15 minutes) is
+  /// asked again, unless it's in.
+  async untilLetIn(user, token, ask) {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const said = await net.waited(user, await token()).catch(() => "waiting");
+      if (said === "signedOut") throw Object.assign(new Error("Signed out."), { signedOut: true });
+      if (["gone", "approved"].includes(said) && (await net.start(user, true).catch(() => false))) return;
+      if (said === "gone") await ask().catch(() => {});
+    }
+  },
+
+  /// The nodes to ask, from what the node said (`state`), in the order things run on them, the Cloudflare node by its
+  /// run priority (last, unless an admin moved it).
+  ordered(state) {
+    const nodes = (state.network?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
+    const last = state.network?.cloudflare_node?.key;
+    if (last && !nodes.includes(last)) nodes.push(last);
+    const rank = (p) => (p === "last" ? 0xffffffff : p);
+    const ranks = Object.fromEntries((state.network?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
+    if (last) ranks[last] = rank(state.network.cloudflare_node.priority ?? "last");
+    nodes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
+    if (nodes.length) net.nodes(state.user.id, nodes, ranks, last);
   },
 
   /// As each start of a client does: this user's own things, settled by this device if they aren't.

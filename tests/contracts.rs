@@ -889,7 +889,7 @@ fn what_the_shell_gives_the_page_is_pinned_to_its_number() {
         hash.update(&std::fs::read(root.join(file)).unwrap());
     }
     let hash = hash.finalize().to_hex().to_string();
-    const PINNED: &[(u32, &str)] = &[(1, "44f63548b850ab33724d60f9da788d1885423d02901add2710901371cc37064c")];
+    const PINNED: &[(u32, &str)] = &[(2, "2f046373196f89532b94512e4e9c5f197bb76f8c418dffdc717bde2658cb5248"), (1, "44f63548b850ab33724d60f9da788d1885423d02901add2710901371cc37064c")];
     let raise = format!("what the shell gives the page (client/native/src/commands.rs, native.js) changed: raise one::web::SHELL and pin ({}, \"{hash}\")", one::web::SHELL + 1);
     assert!(PINNED.iter().any(|(n, h)| *n == one::web::SHELL && *h == hash), "{raise}");
 }

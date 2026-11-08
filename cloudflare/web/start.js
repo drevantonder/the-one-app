@@ -54,7 +54,7 @@
   // gets there, is answered by this one as it arrives, from the browser's cache (the files are named by their build).
   // Before anything else the page asks for (the icons wait: web.js), as the first answer waits for this.
   for (const file of ["one_client_bg.wasm", "one_client.js"]) fetch(`/client/${client}/${file}`, { priority: "high" }).then((r) => r.blob()).catch(() => {});
-  if (typeof SharedWorker !== "function") return;
+  if (self.__oneNative || typeof SharedWorker !== "function") return;
   const worker = (self.oneNet.worker = new SharedWorker(self.oneNet.url, { type: "module", name: "one" }));
   try {
     const access = JSON.parse(localStorage.getItem("one.signin") || "null")?.access;

@@ -37,9 +37,9 @@ self.WebSocket = function (url, protocols) {
 Object.setPrototypeOf(self.WebSocket, Socket);
 self.WebSocket.prototype = Socket.prototype;
 
-function early(token) {
+function early(address, token) {
   opened?.face.close();
-  const ws = new Socket(`${location.origin.replace(/^http/, "ws")}/relay?token=${token}`, "iroh-relay-v2");
+  const ws = new Socket(`${address.replace(/^http/, "ws")}/relay?token=${token}`, "iroh-relay-v2");
   ws.binaryType = "arraybuffer";
   const on = {};
   const queued = [];
@@ -60,13 +60,28 @@ function early(token) {
   opened = socket;
 }
 
-export function server(version) {
+/// Where this client stands (`server`'s `host`): the network's address, its device for a user (`{ key, sealKey, sign, seal }`,
+/// `sign` and `seal` a browser's WebCrypto keys, or the app's functions), and what its keyring keeps for that user.
+function browserHost(keptJs) {
+  return {
+    address: location.origin,
+    device: async (user) => (await keptJs).get(`device:${user}`),
+    keep: (user) => ({
+      get: async (name) => (await keptJs).get(`${name}:${user}`),
+      put: async (name, bytes) => (await keptJs).put(`${name}:${user}`, bytes),
+      del: async (name) => (await keptJs).del(`${name}:${user}`),
+    }),
+  };
+}
+
+export function server(version, givenHost) {
   const base = `/client/${version}/`;
   const compiled = WebAssembly.compileStreaming(fetch(`${base}one_client_bg.wasm`));
   const glue = import(`${base}one_client.js`).then(async (g) => (await g.default({ module_or_path: await compiled }), g));
   glue.catch(() => {});
   // Imported here, not above, so the WebAssembly is fetched first.
   const code = Promise.all([import("/shared/crypto.js"), import("/shared/protocol.js"), import("/kept.js")]);
+  const host = givenHost || browserHost(code.then((c) => c[2]));
   /// Of `keys`, the nodes the network's signed steps, as `device` last read them, list as running something of its
   /// user's: all of them before it's read any. A node the relay or a node names besides isn't asked.
   function theirs(device, keys) {
@@ -75,21 +90,22 @@ export function server(version) {
   }
 
   /// What `user`'s device (`me`, its keys as kept) reaches through JavaScript (one-client's `js::On`, which reads the
-  /// bucket through the URL signer with these): the network's address, and a JSON request to it; what it keeps, in IndexedDB by user, or in `memory` for one asked as for a while; whether the relay still
-  /// lets it in (`still`); its key's signature, and the secret its seal key agrees with another's, neither key read.
+  /// bucket through the URL signer with these): the network's address, and a JSON request to it; what it keeps (the host's), or in
+  /// `memory` for one asked as for a while; whether the relay still lets it in (`still`); its key's signature, and the secret
+  /// its seal key agrees with another's, neither key read.
   async function reaches(user, me, still, memory) {
-    const [{ signBytes }, , { del, get, put }] = await code;
+    const [{ signBytes }] = await code;
     const text = new TextEncoder();
-    const kept = memory ? { get: async (k) => memory.get(k), put: async (k, v) => void memory.set(k, v), del: async (k) => void memory.delete(k) } : { get, put, del };
+    const kept = memory ? { get: async (k) => memory.get(k), put: async (k, v) => void memory.set(k, v), del: async (k) => void memory.delete(k) } : host.keep(user);
     return {
       get: async (name) => {
-        const v = await kept.get(`${name}:${user}`);
+        const v = await kept.get(name);
         return v == null ? null : typeof v === "string" ? text.encode(v) : v;
       },
-      put: (name, bytes) => kept.put(`${name}:${user}`, bytes),
-      delete: (name) => kept.del(`${name}:${user}`),
+      put: (name, bytes) => kept.put(name, bytes),
+      delete: (name) => kept.del(name),
       letIn: () => still(),
-      address: location.origin,
+      address: host.address,
       async ask(method, url, name, value, body) {
         const headers = { ...(name ? { [name]: value } : {}), ...(body != null ? { "content-type": "application/json" } : {}) };
         const r = await fetch(url, { method, headers, body: body ?? undefined });
@@ -97,6 +113,7 @@ export function server(version) {
       },
       sign: (bytes) => signBytes(me.sign, bytes),
       async shared(share) {
+        if (typeof me.seal === "function") return me.seal(share);
         const theirs = await crypto.subtle.importKey("raw", share, { name: "X25519" }, false, []);
         return new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: theirs }, me.seal, 256));
       },
@@ -176,8 +193,8 @@ export function server(version) {
 
   /// `user`'s device asking to be let in, before it's one: its keyring, which reaches auth and keeps what it's told.
   async function asking(user) {
-    const [{ Keyring }, [, , { get }]] = await Promise.all([glue, code]);
-    const device = await get(`device:${user}`);
+    const { Keyring } = await glue;
+    const device = await host.device(user);
     if (!device) throw new Error("This browser has no keys yet. Sign in again.");
     return new Keyring(device.key, device.sealKey, await reaches(user, device, () => true, null));
   }
@@ -192,7 +209,7 @@ export function server(version) {
     let mark = performance.now();
     const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
     const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { getAll, put }] = await code;
-    const [mine, nodes] = await getAll([`device:${user}`, `nodes:${user}`]);
+    const [mine, [nodes]] = await Promise.all([host.device(user), getAll([`nodes:${user}`])]);
     const device = as || mine;
     if (!device) return null;
     // Its keyring, made while the session's key is: this browser's, or another device's of its user's asked as while
@@ -212,7 +229,7 @@ export function server(version) {
     // A minute short of a day, as no certificate lasts longer than a day from when the relay or a node checks it.
     const until = Date.now() + SESSION - FRESH;
     const certificate = await certify(device.sign, hex.decode(device.key), endpoint, until);
-    const socket = async (certificate) => early(`${certificate}.${await proveSocket(key, endpoint)}`);
+    const socket = async (certificate) => early(host.address, `${certificate}.${await proveSocket(key, endpoint)}`);
     await socket(certificate);
     step("key");
     // The relay takes each request once, so one refused as replayed (another process of this device signed in the same
@@ -221,7 +238,7 @@ export function server(version) {
       let answer;
       await untilTaken(async (at) => {
         const body = JSON.stringify(await signedRequest(key, endpoint, RELAY, { computes: true, certificate }, at));
-        answer = await fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body });
+        answer = await fetch(`${host.address}/relay/computes`, { method: "POST", headers: { "content-type": "application/json" }, body });
         return answer.status === 403 || answer.ok ? null : await answer.clone().json().catch(() => null);
       });
       return answer;
@@ -246,7 +263,7 @@ export function server(version) {
     if (!known.length) put(`nodes:${user}`, first).catch(() => {});
     const { Client } = await glue;
     step("code");
-    const [client, keyring] = await Promise.all([Client.start(secret, certificate, location.origin, known.length ? first : order(first)), making]);
+    const [client, keyring] = await Promise.all([Client.start(secret, certificate, host.address, known.length ? first : order(first)), making]);
     keyring.connect(client);
     step("endpoint");
     computes.then(
@@ -285,8 +302,8 @@ export function server(version) {
     const s = await session?.ready.catch(() => null);
     if (s?.client !== client) return;
     try {
-      const [{ certify, hex }, { FRESH, SESSION }, { get }] = await code;
-      const device = await get(`device:${user}`);
+      const [{ certify, hex }, { FRESH, SESSION }] = await code;
+      const device = await host.device(user);
       if (!device) return;
       const until = Date.now() + SESSION - FRESH;
       const certificate = await certify(device.sign, hex.decode(device.key), endpoint, until);
@@ -348,7 +365,7 @@ export function server(version) {
                 return { status: r.status, body: await r.text() };
               },
             };
-            const auth = await SignIn.at(location.origin, http);
+            const auth = await SignIn.at(host.address, http);
             if (m.step === "start") {
               const client = m.client || (await auth.register(m.name, m.back));
               return post({ id, client, ...JSON.parse(auth.ask(client, m.back, m.join)) });

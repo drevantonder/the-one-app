@@ -160,6 +160,8 @@ async function sign(key, domain, v) {
 
 /// `key`'s Ed25519 signature of `data` (`signingKey`'s).
 export async function signBytes(key, data) {
+  // The app's device key: signing happens there, and the key never reaches this page.
+  if (typeof key === "function") return key(data);
   return new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, await signingKey(key), data));
 }
 

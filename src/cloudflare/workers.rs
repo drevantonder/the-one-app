@@ -634,17 +634,6 @@ pub fn served_with(settings: &Settings, web: &Path, cloudflare_node: Option<Modu
     Ok(served)
 }
 
-/// The client's build, as the web client fetches it (`/client/<version>/`): what its files hash to, so a browser
-/// keeps one for good. None if this build has no client (`update` builds it, where Rust builds for WebAssembly).
-pub fn client_version() -> Option<String> {
-    let mut hash = sha2::Sha256::new();
-    for (name, bytes) in crate::config::CLIENT {
-        hash.update(name.as_bytes());
-        hash.update(bytes);
-    }
-    (!crate::config::CLIENT.is_empty()).then(|| data_encoding::HEXLOWER.encode(&hash.finalize()[..8]))
-}
-
 /// The Android app's package, as client/native/android/app/build.gradle.kts names it.
 pub fn android_package() -> String {
     format!("app.{}.android", crate::config::CLI)
@@ -655,16 +644,7 @@ impl Settings {
     /// (`.well-known/assetlinks.json`) and Windows' web links file (`.well-known/windows-app-web-link`), which let the
     /// apps open links to the address, and the guide to connecting an AI (`llms.txt`).
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
-        let mut files = crate::web::files();
-        // The client that reaches nodes over iroh, at a path named by its build, which the page says (net.js).
-        if let Some(version) = client_version() {
-            for (name, bytes) in crate::config::CLIENT {
-                files.push((format!("client/{version}/{name}"), bytes.to_vec()));
-            }
-            if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
-                *page = String::from_utf8_lossy(page).replacen(r#"<meta name="one-client" content="">"#, &format!(r#"<meta name="one-client" content="{version}">"#), 1).into_bytes();
-            }
-        }
+        let mut files = crate::web::with_client();
         if !self.android.is_empty() {
             let links = json!([{
                 "relation": ["delegate_permission/common.handle_all_urls"],

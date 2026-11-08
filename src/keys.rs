@@ -198,8 +198,23 @@ impl Opens for [u8; 32] {
     }
 
     async fn shared(&self, share: &[u8; 32]) -> Result<[u8; 32]> {
-        Ok(MontgomeryPoint(*share).mul_clamped(*self).0)
+        Ok(agree(self, share))
     }
+}
+
+/// The secret `secret` (a seal key's) and `share` agree on.
+pub fn agree(secret: &[u8; 32], share: &[u8; 32]) -> [u8; 32] {
+    MontgomeryPoint(*share).mul_clamped(*secret).0
+}
+
+/// The secret a device's seal key (of its key `secret`) and `share` agree on.
+pub fn agree_as(secret: &[u8; 32], share: &[u8; 32]) -> [u8; 32] {
+    agree(&seal_secret(&SigningKey::from_bytes(secret)), share)
+}
+
+/// `secret`'s Ed25519 signature of `bytes`.
+pub fn sign_with(secret: &[u8; 32], bytes: &[u8]) -> [u8; 64] {
+    SigningKey::from_bytes(secret).sign(bytes).to_bytes()
 }
 
 /// `open_sealed`, by what opens it.
