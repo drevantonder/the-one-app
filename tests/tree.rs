@@ -32,12 +32,16 @@ fn what_runs_in_wasm_builds() {
 }
 
 /// The native app (`client/native`, its own workspace that `cargo test` and `cargo build` never build) compiles for this
-/// machine's platform (Linux's Tauri build here) and, where the Android NDK is, for Android's arm64. Apple's targets only
-/// build on a Mac, so the iPhone's Rust and Swift are left to `iphone/build.sh`. It has its own target folder, so this
-/// neither waits on nor rebuilds the main workspace; warm, with nothing changed, it takes under a second. Android's check
-/// has a folder of its own too: `tauri`'s build script writes the Kotlin that `android/build.sh` compiles, only when it
-/// runs with `build.sh`'s environment, and doesn't run again when that changes, so a check without it first would leave
-/// the build in `target/` with no `TauriActivity`.
+/// machine's platform (Linux's Tauri build here), for the Mac's and the iPhone's arm64 and, where the Android NDK is, for
+/// Android's. Only the Rust: the C in their dependencies isn't compiled (a stand-in compiler and an SDK folder that is
+/// only a name), and the Swift (`mac/`, `iphone/`) still needs a Mac, so `mac/build.sh` and `iphone/build.sh` are what
+/// show a Swift error. Every target has a target folder of its own, so this neither waits on nor rebuilds the main
+/// workspace, and a target's check doesn't leave in `target/` what its build then finds changed: Android's matters,
+/// because `tauri`'s build script writes the Kotlin that `android/build.sh` compiles only when it runs with `build.sh`'s
+/// environment, and doesn't run again when that changes, so a check without it first would leave the build with no
+/// `TauriActivity`. Cold the two Apple checks took 2½ minutes on an idle machine and 7½ on a busy one; warm, with nothing
+/// changed, the whole test takes 2 seconds. The Apple targets' rust-std is a `rustup target add` away, so a missing one fails here, where a missing
+/// NDK, a heavy install, only skips Android.
 #[test]
 fn the_native_app_builds() {
     let native = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../client/native"));
@@ -47,6 +51,19 @@ fn the_native_app_builds() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     };
     check(&[], &[]);
+
+    // The Mac builds the app's program too (`mac/build.sh`), the iPhone only its library (`iphone/build.sh`).
+    for (target, args) in [("aarch64-apple-darwin", &[][..]), ("aarch64-apple-ios", &["--lib"][..])] {
+        let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+        let libs = std::process::Command::new(rustc).args(["--print", "target-libdir", "--target", target]).output().expect("rustc");
+        assert!(std::path::Path::new(String::from_utf8(libs.stdout).unwrap().trim()).exists(), "{target}'s rust-std isn't installed: run `rustup target add {target}`");
+        let folder = native.join("target").join(format!("check-{target}"));
+        std::fs::create_dir_all(&folder).unwrap();
+        let var = target.replace('-', "_");
+        let stand_in = std::path::PathBuf::from("/bin/true");
+        let envs = [(format!("CC_{var}"), stand_in.clone()), (format!("AR_{var}"), stand_in), ("SDKROOT".into(), folder.clone()), ("RUSTC_WRAPPER".into(), "".into()), ("CARGO_TARGET_DIR".into(), folder)];
+        check(&[&["--target", target][..], args].concat(), &envs);
+    }
 
     // The NDK's compilers, which the C in the app's dependencies is built with, as `android/build.sh` finds them.
     let sdk = std::env::var_os("ANDROID_HOME").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("HOME").unwrap()).join("Android/Sdk"));

@@ -110,10 +110,9 @@ fn iphone_swift() {
     println!("cargo:rerun-if-changed=iphone/Package.swift");
 }
 
+/// Off a Mac there is no Swift to build and no linker for the app: `cargo check` (tests/tree.rs) is all that gets here.
 #[cfg(not(target_os = "macos"))]
-fn iphone_swift() {
-    panic!("The iPhone's app builds on a Mac.");
-}
+fn iphone_swift() {}
 
 /// A folder's files, but what Swift's build left in it.
 #[cfg(target_os = "macos")]
