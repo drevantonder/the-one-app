@@ -1,8 +1,7 @@
 // Computer Use: the devices agents can use, and the tools they use them with. Agent devices are Linux devices with a
 // browser on the user's devices, which Agent Devices runs (Podman, or a Mac's containers); the user's own
 // devices are here too once they let agents use them, through the computer service, a helper app inside the Mac app (service/). Use,
-// tools and screen go to a device when one is named; this app keeps who used which device when, as `session`
-// entries in the user's own scope. Agent Devices (apps/agent-devices) is the user's page for them. Its screen is
+// tools and screen go to a device when one is named. Agent Devices (apps/agent-devices) is the user's page for them. Its screen is
 // React, in screens/, built into dist/ when it's deployed (`one deploy apps/computer`), which is committed because a
 // release ships the app as it is.
 
@@ -75,7 +74,8 @@ export default {
   },
 
   schema: {
-    user: `create table sessions (id text primary key, device text not null, title text, agent text not null, came_from text, time integer not null)`,
+    user: [`create table sessions (id text primary key, device text not null, title text, agent text not null, came_from text, time integer not null)`,
+      `drop table sessions;`],
   },
 
 
@@ -138,12 +138,7 @@ export default {
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) return act(ctx, "use", input);
-        const r = await ctx.services.computer._use({ tool: input.tool, args: input.args || {} }, { device: d });
-        if (r.started) {
-          const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
-          ctx.user.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [id, d, r.title || null, ctx.me.agent || ctx.me.name, ctx.me.name, ctx.now()]);
-        }
-        return r.result;
+        return ctx.services.computer._use({ tool: input.tool, args: input.args || {} }, { device: d });
       },
     },
     get_browser_state: {
@@ -257,11 +252,10 @@ export default {
       run: (ctx, input) => act(ctx, "browser_pointer", input),
     },
     _devices: {
-      description: "The user's devices that agents may use once they let them, each with whether they do and who is using it now, and the recent sessions.",
+      description: "The user's devices that agents may use once they let them, each with whether they do and who is using it now.",
       input: { type: "object", properties: {} },
       run: async (ctx) => ({
         devices: (await devices(ctx)).map(({ mirroring, ...d }) => (ctx.labs.mirroring ? { ...d, mirroring } : d)),
-        sessions: ctx.user ? await ctx.user.query("select * from sessions order by time desc limit 30") : [],
         mirroring: ctx.labs.mirroring,
       }),
     },
@@ -302,12 +296,7 @@ export default {
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
-        const r = await ctx.services.computer._mirror_use({ tool: input.tool, args: input.args || {} }, { device: d });
-        if (r.started) {
-          const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
-          ctx.user.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [id, d, r.title || "iPhone Mirroring", ctx.me.agent || ctx.me.name, ctx.me.name, ctx.now()]);
-        }
-        return r.result;
+        return ctx.services.computer._mirror_use({ tool: input.tool, args: input.args || {} }, { device: d });
       },
     },
     _allow: {

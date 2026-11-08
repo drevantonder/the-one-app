@@ -8,14 +8,14 @@ import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
 import { AppIcon as a, Button as o, Empty as s, Grid as c, Icon as l, List as u, ListRow as d, Problem as f, Sheet as p, SheetContent as m, SheetDescription as h, SheetHeader as g, SheetTitle as _, Skeleton as v, Switch as y } from "@one/ui";
 import { Fragment as b, jsx as x, jsxs as S } from "react/jsx-runtime";
-var C = (e) => String(e || "").split(".")[0], w = (e, t) => {
+var C = (e, t) => {
 	let { [t]: n, ...r } = e;
 	return r;
-}, T = (e) => {
+}, w = (e) => {
 	let t = (e.content || []).find((e) => e.type === "image");
 	return t ? `data:${t.mimeType};base64,${t.data}` : null;
 };
-function E(t) {
+function T(t) {
 	let n = e(9), { src: r, ratio: i, className: a, children: o } = t, s = i === void 0 ? "16 / 10" : i, c = `relative grid place-items-center overflow-hidden rounded-xl bg-muted text-muted-foreground ring-1 ring-border ring-inset ${a === void 0 ? "" : a}`, l;
 	n[0] === s ? l = n[1] : (l = { aspectRatio: s }, n[0] = s, n[1] = l);
 	let u;
@@ -31,7 +31,7 @@ function E(t) {
 		children: u
 	}), n[5] = c, n[6] = l, n[7] = u, n[8] = d) : d = n[8], d;
 }
-var D = () => {
+var E = () => {
 	let t = e(1), n;
 	return t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ S("svg", {
 		width: "48",
@@ -48,7 +48,7 @@ var D = () => {
 			rx: "1.5"
 		}), /* @__PURE__ */ x("path", { d: "M2 19h20" })]
 	}), t[0] = n) : n = t[0], n;
-}, O = () => {
+}, D = () => {
 	let t = e(1), n;
 	return t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ S("svg", {
 		width: "34",
@@ -66,7 +66,7 @@ var D = () => {
 		}), /* @__PURE__ */ x("path", { d: "M11 18.5h2" })]
 	}), t[0] = n) : n = t[0], n;
 };
-function k(e, { asking: t, note: n, fix: r }) {
+function O(e, { asking: t, note: n, fix: r }) {
 	let i = e.permissions && e.kind === "mac" && (!e.permissions.accessibility || !e.permissions.screen_recording), a = e.title || e.device, o = n ? { title: n } : i ? {
 		title: `${e.permissions.accessibility ? "Screen Recording" : "Accessibility"} is off`,
 		text: `Agents can't use ${a} until it's on.`,
@@ -84,22 +84,22 @@ function k(e, { asking: t, note: n, fix: r }) {
 		off: !!(e.why || e.missing || t || i)
 	};
 }
-function A(t) {
+function k(t) {
 	let n = e(39), { d: r, shot: i, mirror: a, mirroring: s, asking: c, note: u, allow: d, fix: p, openMirror: m } = t, h;
 	n[0] !== r.device || n[1] !== p ? (h = () => p(r.device), n[0] = r.device, n[1] = p, n[2] = h) : h = n[2];
 	let g;
-	n[3] !== c || n[4] !== r || n[5] !== u || n[6] !== h ? (g = k(r, {
+	n[3] !== c || n[4] !== r || n[5] !== u || n[6] !== h ? (g = O(r, {
 		asking: c,
 		note: u,
 		fix: h
 	}), n[3] = c, n[4] = r, n[5] = u, n[6] = h, n[7] = g) : g = n[7];
 	let _ = g, v = s && r.kind === "mac", C = r.on && r.using ? i : "", w;
-	n[8] === Symbol.for("react.memo_cache_sentinel") ? (w = /* @__PURE__ */ x(D, {}), n[8] = w) : w = n[8];
-	let T;
-	n[9] === C ? T = n[10] : (T = /* @__PURE__ */ x(E, {
+	n[8] === Symbol.for("react.memo_cache_sentinel") ? (w = /* @__PURE__ */ x(E, {}), n[8] = w) : w = n[8];
+	let k;
+	n[9] === C ? k = n[10] : (k = /* @__PURE__ */ x(T, {
 		src: C,
 		children: w
-	}), n[9] = C, n[10] = T);
+	}), n[9] = C, n[10] = k);
 	let A;
 	n[11] === _.title ? A = n[12] : (A = /* @__PURE__ */ x("div", {
 		className: "min-w-0 flex-1 truncate text-sm font-medium",
@@ -137,11 +137,11 @@ function A(t) {
 	let L;
 	n[27] !== r.device || n[28] !== r.mirroring?.running || n[29] !== v || n[30] !== a || n[31] !== m ? (L = v && /* @__PURE__ */ S("div", {
 		className: "mt-4 flex gap-4",
-		children: [/* @__PURE__ */ x(E, {
+		children: [/* @__PURE__ */ x(T, {
 			src: r.mirroring?.running ? a : "",
 			ratio: "9 / 16",
 			className: "w-24 shrink-0",
-			children: /* @__PURE__ */ x(O, {})
+			children: /* @__PURE__ */ x(D, {})
 		}), /* @__PURE__ */ S("div", {
 			className: "flex min-w-0 flex-1 flex-col items-start gap-2",
 			children: [/* @__PURE__ */ x("div", {
@@ -159,18 +159,18 @@ function A(t) {
 		})]
 	}), n[27] = r.device, n[28] = r.mirroring?.running, n[29] = v, n[30] = a, n[31] = m, n[32] = L) : L = n[32];
 	let R;
-	return n[33] !== P || n[34] !== F || n[35] !== I || n[36] !== L || n[37] !== T ? (R = /* @__PURE__ */ S("div", {
+	return n[33] !== P || n[34] !== F || n[35] !== I || n[36] !== L || n[37] !== k ? (R = /* @__PURE__ */ S("div", {
 		className: "flex min-w-0 flex-col gap-2",
 		children: [
-			T,
+			k,
 			P,
 			F,
 			I,
 			L
 		]
-	}), n[33] = P, n[34] = F, n[35] = I, n[36] = L, n[37] = T, n[38] = R) : R = n[38], R;
+	}), n[33] = P, n[34] = F, n[35] = I, n[36] = L, n[37] = k, n[38] = R) : R = n[38], R;
 }
-function j({ device: e, onClose: t }) {
+function A({ device: e, onClose: t }) {
 	let r = n(null);
 	e && (r.current = e);
 	let i = r.current, o = !!i?.permissions?.accessibility, s = !!i?.permissions?.screen_recording, c = i?.title || i?.device, l = ({ on: e }) => e ? null : /* @__PURE__ */ x("span", {
@@ -214,7 +214,7 @@ function j({ device: e, onClose: t }) {
 						children: [/* @__PURE__ */ x("h2", {
 							className: "px-1 text-sm font-medium text-muted-foreground",
 							children: "How to turn it on"
-						}), /* @__PURE__ */ S(u, { children: [/* @__PURE__ */ S(M, {
+						}), /* @__PURE__ */ S(u, { children: [/* @__PURE__ */ S(j, {
 							n: 1,
 							title: `Open System Settings on ${c}`,
 							children: [
@@ -224,7 +224,7 @@ function j({ device: e, onClose: t }) {
 								/* @__PURE__ */ x("b", { children: o ? "Screen & System Audio Recording" : "Accessibility" }),
 								"."
 							]
-						}), !(o && s) && /* @__PURE__ */ S(M, {
+						}), !(o && s) && /* @__PURE__ */ S(j, {
 							n: 2,
 							title: "Turn on The One App",
 							children: [
@@ -245,7 +245,7 @@ function j({ device: e, onClose: t }) {
 		})
 	});
 }
-function M(t) {
+function j(t) {
 	let n = e(12), { n: r, title: i, children: a } = t, o;
 	n[0] === r ? o = n[1] : (o = /* @__PURE__ */ x("span", {
 		className: "grid size-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground",
@@ -272,7 +272,7 @@ function M(t) {
 		children: [o, l]
 	}), n[9] = o, n[10] = l, n[11] = u) : u = n[11], u;
 }
-function N() {
+function M() {
 	let n = e(3), [i, a] = r(!1), o, s;
 	if (n[0] === Symbol.for("react.memo_cache_sentinel") ? (o = () => {
 		let e = setTimeout(() => a(!0), 100);
@@ -282,31 +282,31 @@ function N() {
 	return n[2] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ x(c, {
 		min: "20rem",
 		max: 4,
-		children: [0, 1].map(P)
+		children: [0, 1].map(N)
 	}), n[2] = l) : l = n[2], l;
 }
-function P(e) {
+function N(e) {
 	return /* @__PURE__ */ x(v, { className: "aspect-[16/10] rounded-xl" }, e);
 }
-function F() {
-	let [e, i] = r(null), [a, o] = r(null), [l, p] = r({}), [m, h] = r({}), [g, _] = r({}), [v, y] = r({}), [b, E] = r(null), D = n(0), O = n(!0), k = n(null);
+function P() {
+	let [e, i] = r(null), [a, o] = r(null), [l, u] = r({}), [d, p] = r({}), [m, h] = r({}), [g, _] = r({}), [v, y] = r(null), b = n(0), T = n(!0), E = n(null);
 	t(() => {
 		one.title("Computer Use");
 	}, []);
-	let M = (e, t) => {
-		y((n) => ({
+	let D = (e, t) => {
+		_((n) => ({
 			...n,
 			[e]: t
-		})), setTimeout(() => y((t) => w(t, e)), 8e3);
+		})), setTimeout(() => _((t) => C(t, e)), 8e3);
 	};
-	async function P(e) {
+	async function O(e) {
 		let t = async (e, t, n) => {
 			try {
-				let r = T(await one.call(t, {
+				let r = w(await one.call(t, {
 					device: n,
 					width: 640
 				}));
-				r && p((t) => ({
+				r && u((t) => ({
 					...t,
 					[e]: r
 				}));
@@ -314,35 +314,35 @@ function F() {
 		};
 		await Promise.all([...e.filter((e) => e.on && e.using).map((e) => t(e.device, "screen", e.device)), ...e.filter((e) => e.on && e.mirroring?.running).map((e) => t(`${e.device}:mirror`, "_mirror_screen", e.device))]);
 	}
-	async function F() {
-		let e = ++D.current, t;
+	async function j() {
+		let e = ++b.current, t;
 		try {
 			t = await one.call("_devices", {});
 		} catch (e) {
 			o(e);
 			return;
 		}
-		e === D.current && (o(null), i(t), k.current = t.devices, await P(t.devices));
+		e === b.current && (o(null), i(t), E.current = t.devices, await O(t.devices));
 	}
 	t(() => {
-		F().finally(() => O.current = !1);
+		j().finally(() => T.current = !1);
 		let e = async () => {
-			if (!(O.current || document.visibilityState === "hidden")) {
-				O.current = !0;
+			if (!(T.current || document.visibilityState === "hidden")) {
+				T.current = !0;
 				try {
-					await F();
+					await j();
 				} finally {
-					O.current = !1;
+					T.current = !1;
 				}
 			}
 		}, t = setInterval(e, 5e3);
 		return document.addEventListener("visibilitychange", e), () => (clearInterval(t), document.removeEventListener("visibilitychange", e));
 	}, []);
-	async function I(e, t) {
-		y((t) => w(t, e)), h((n) => ({
+	async function N(e, t) {
+		_((t) => C(t, e)), p((n) => ({
 			...n,
 			[e]: t
-		})), t && _((t) => ({
+		})), t && h((t) => ({
 			...t,
 			[e]: !0
 		}));
@@ -352,59 +352,46 @@ function F() {
 				on: t
 			});
 		} catch (t) {
-			M(e, one.plain(t).title);
+			D(e, one.plain(t).title);
 		} finally {
-			h((t) => w(t, e)), _((t) => w(t, e)), F();
+			p((t) => C(t, e)), h((t) => C(t, e)), j();
 		}
 	}
-	function L(e) {
-		one.call("_mirror_launch", { device: e }).then(F, (t) => M(e, one.plain(t).title));
+	function P(e) {
+		one.call("_mirror_launch", { device: e }).then(j, (t) => D(e, one.plain(t).title));
 	}
 	if (a && !e) return /* @__PURE__ */ x(f, {
 		title: one.plain(a).title,
 		text: one.plain(a).next
 	});
-	if (!e) return /* @__PURE__ */ x(N, {});
-	let R = e.devices.map((e) => e.device in m ? {
+	if (!e) return /* @__PURE__ */ x(M, {});
+	let F = e.devices.map((e) => e.device in d ? {
 		...e,
-		on: m[e.device]
-	} : e), z = e.sessions.slice(0, 10);
+		on: d[e.device]
+	} : e);
 	return /* @__PURE__ */ S("div", {
 		className: "flex flex-col gap-8",
-		children: [
-			R.length ? /* @__PURE__ */ x(c, {
-				min: "20rem",
-				max: 4,
-				gap: "1.5rem",
-				className: "items-start",
-				children: R.map((t) => /* @__PURE__ */ x(A, {
-					d: t,
-					shot: l[t.device],
-					mirror: l[`${t.device}:mirror`],
-					mirroring: e.mirroring,
-					asking: !!g[t.device],
-					note: v[t.device],
-					allow: I,
-					fix: E,
-					openMirror: L
-				}, t.device))
-			}) : /* @__PURE__ */ x(s, { children: "Agents can use your Mac once you let them, in its menu bar." }),
-			z.length > 0 && /* @__PURE__ */ S("section", {
-				className: "flex flex-col gap-2",
-				children: [/* @__PURE__ */ x("h2", {
-					className: "px-1 text-sm font-medium text-muted-foreground",
-					children: "Recent Sessions"
-				}), /* @__PURE__ */ x(u, { children: z.map((e) => /* @__PURE__ */ x(d, {
-					title: e.agent,
-					sub: `${e.title || e.device} · ${one.ago(e.time, { long: !0 })}${e.came_from ? ` · asked from ${C(e.came_from)}` : ""}`
-				}, e.id)) })]
-			}),
-			/* @__PURE__ */ x(j, {
-				device: b && R.find((e) => e.device === b),
-				onClose: () => E(null)
-			})
-		]
+		children: [F.length ? /* @__PURE__ */ x(c, {
+			min: "20rem",
+			max: 4,
+			gap: "1.5rem",
+			className: "items-start",
+			children: F.map((t) => /* @__PURE__ */ x(k, {
+				d: t,
+				shot: l[t.device],
+				mirror: l[`${t.device}:mirror`],
+				mirroring: e.mirroring,
+				asking: !!m[t.device],
+				note: g[t.device],
+				allow: N,
+				fix: y,
+				openMirror: P
+			}, t.device))
+		}) : /* @__PURE__ */ x(s, { children: "Agents can use your Mac once you let them, in its menu bar." }), /* @__PURE__ */ x(A, {
+			device: v && F.find((e) => e.device === v),
+			onClose: () => y(null)
+		})]
 	});
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ x(F, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ x(P, {}));
 </script>

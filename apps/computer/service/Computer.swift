@@ -38,9 +38,7 @@ struct ComputerApp: Service {
             try await computer.ready()
             try await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
             let args = try JSONSerialization.data(withJSONObject: input.value("args") as? [String: Any] ?? [:])
-            let result = json(try await computer.driver.call(tool, args))
-            let started = await computer.report()
-            return object(["result": result, "started": started.map(iso), "title": await computer.title])
+            return json(try await computer.driver.call(tool, args))
         case "_screen":
             try await computer.ready()
             let width = min(max(input.int("width", or: 640), 160), 1920)
@@ -61,9 +59,7 @@ struct ComputerApp: Service {
             try await computer.ready()
             try await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
             let args = try JSONSerialization.data(withJSONObject: input.value("args") as? [String: Any] ?? [:])
-            let result = json(try await computer.driver.call(tool, args))
-            let started = await computer.report()
-            return object(["result": result, "started": started.map(iso), "title": await computer.title])
+            return json(try await computer.driver.call(tool, args))
         default:
             throw Refusal("no function \(function)")
         }
@@ -86,9 +82,8 @@ final class ComputerUse {
     var on: Bool { Self.settings?.bool(forKey: "computerUse") ?? false }
     nonisolated(unsafe) private static let settings = UserDefaults(suiteName: Bundle.main.bundleIdentifier.map { $0.split(separator: ".").dropLast().joined(separator: ".") })
     private let started = Date.now
-    /// The agent using this Mac now, and since when: from its first call until two minutes after its last; and
-    /// whether a call's answer has said it started, so Computer Use logs it.
-    private(set) var session: (agent: String, since: Date, reported: Bool)?
+    /// The agent using this Mac now, and since when: from its first call until two minutes after its last.
+    private(set) var session: (agent: String, since: Date)?
     private var last = Date.distantPast
     private var asking = false
     let driver = CuaDriver()
@@ -171,14 +166,8 @@ final class ComputerUse {
         guard on else { throw Refusal("Its owner stopped agents using this Mac.") }
         last = .now
         if let session, session.agent == agent { return }
-        session = (agent, .now, false)
+        session = (agent, .now)
         indicator.show(agent: agent, since: .now, stop: { ComputerUse.shared.turnOff() })
-    }
-
-    func report() -> Date? {
-        guard let s = session, !s.reported else { return nil }
-        session?.reported = true
-        return s.since
     }
 
     private func expire() {

@@ -1,11 +1,10 @@
-// Computer Use: a tile for each of the user's own devices agents may use, with a switch, a live picture while an agent
-// uses it, and the recent sessions below. The tiles fill the room: more columns, and bigger pictures, where there's
+// Computer Use: a tile for each of the user's own devices agents may use, with a switch, and a live picture while an
+// agent uses it. The tiles fill the room: more columns, and bigger pictures, where there's
 // more of it. Looked at again every 5 seconds while it can be seen.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { AppIcon, Button, Empty, Grid, Icon, List, ListRow, Problem, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Skeleton, Switch } from "@one/ui"
 
-const host = (s) => String(s || "").split(".")[0]
 const without = (o, k) => {
   const { [k]: _, ...rest } = o
   return rest
@@ -148,7 +147,7 @@ function Waiting() {
 }
 
 function Main() {
-  const [data, setData] = useState(null) // { devices, sessions, mirroring }
+  const [data, setData] = useState(null) // { devices, mirroring }
   const [error, setError] = useState(null)
   const [pics, setPics] = useState({}) // by device: a data URL
   const [pending, setPending] = useState({}) // by device: the switch's new state, until the device has it
@@ -235,7 +234,6 @@ function Main() {
   if (error && !data) return <Problem title={one.plain(error).title} text={one.plain(error).next} />
   if (!data) return <Waiting />
   const devices = data.devices.map((d) => (d.device in pending ? { ...d, on: pending[d.device] } : d))
-  const sessions = data.sessions.slice(0, 10)
   return (
     <div className="flex flex-col gap-8">
       {devices.length ? (
@@ -257,20 +255,6 @@ function Main() {
         </Grid>
       ) : (
         <Empty>Agents can use your Mac once you let them, in its menu bar.</Empty>
-      )}
-      {sessions.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h2 className="px-1 text-sm font-medium text-muted-foreground">Recent Sessions</h2>
-          <List>
-            {sessions.map((s) => (
-              <ListRow
-                key={s.id}
-                title={s.agent}
-                sub={`${s.title || s.device} · ${one.ago(s.time, { long: true })}${s.came_from ? ` · asked from ${host(s.came_from)}` : ""}`}
-              />
-            ))}
-          </List>
-        </section>
       )}
       <Fix device={fixing && devices.find((d) => d.device === fixing)} onClose={() => setFixing(null)} />
     </div>
