@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use serde_json::Value;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::app;
 
@@ -145,11 +145,4 @@ fn toggle_widget(kind: &str, at: tauri::Rect) {
         },
     };
     crate::toggle_under(&window, Some(at));
-}
-
-/// One of the app menu's commands, to the window's page, which does it: "sidebar" (fold it or unfold it), "join".
-fn command(name: &str) {
-    if let Some(w) = app().handle.get_webview_window("main") {
-        let _ = w.eval(format!("window.__oneNative?.command({})", json!(name)));
-    }
 }

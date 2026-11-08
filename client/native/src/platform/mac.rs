@@ -13,7 +13,7 @@ use objc2_foundation::{NSString, NSUserDefaults};
 use serde_json::{Value, json};
 
 pub use super::desktop::*;
-use super::menubar;
+use super::menubar as items;
 
 /// What a call says it came from, and the platform as users say it.
 pub const CLIENT: &str = "mac";
@@ -41,23 +41,23 @@ pub fn data_without_window() -> Option<PathBuf> {
 
 /// The widgets' own items in the menu bar, drawn again from what's kept.
 pub fn redraw_widgets() {
-    menubar::update();
+    items::update();
 }
 
 /// A widget's own menu bar item shown again, or hidden → the kinds hidden now.
 pub fn menubar(kind: String, show: bool) -> Vec<String> {
-    menubar::set_hidden(&kind, !show);
+    items::set_hidden(&kind, !show);
     crate::tray_menu(&crate::app().handle);
-    menubar::hidden()
+    items::hidden()
 }
 
 pub fn menubar_hidden() -> Option<Vec<String>> {
-    Some(menubar::hidden())
+    Some(items::hidden())
 }
 
 pub fn hidden_widgets() -> Vec<(String, String)> {
-    let hidden = menubar::hidden();
-    menubar::widgets().into_iter().filter(|w| hidden.contains(&w.0)).map(|(kind, title, ..)| (kind, title)).collect()
+    let hidden = items::hidden();
+    items::widgets().into_iter().filter(|w| hidden.contains(&w.0)).map(|(kind, title, ..)| (kind, title)).collect()
 }
 
 /// The menu bar's mark: the custom build's (build.rs), a template macOS tints for the menu bar.
@@ -93,7 +93,7 @@ pub fn start(app: &tauri::App) {
         "pair" => crate::main(Some(format!("{}://settings/devices?add=1", one::config::CLI))),
         _ => {}
     });
-    menubar::update();
+    items::update();
 }
 
 /// One of the app menu's commands, to the window's page, which does it: "sidebar" (fold it or unfold it), "join".
