@@ -588,10 +588,6 @@ impl Node {
     /// Tries a place (writes, reads and deletes a test file), and if that works, keeps it as a Vault item in
     /// Everyone and backs up to it now. → each step tried, and the item's id if it was kept.
     pub async fn add_place(&self, caller: &Caller, body: &Value) -> Result<Value> {
-        self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "change-settings", scopes::NETWORK), "only admins add places to back up to");
-            Ok(())
-        })?;
         let text = |k: &str| body[k].as_str().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
         let mut fields: BTreeMap<String, String> = BTreeMap::new();
         for k in ["path", "endpoint", "bucket", "region", "key_id", "secret"] {
@@ -791,13 +787,14 @@ impl Node {
         Ok(json!(out))
     }
 
-    pub fn back_up_now_for(&self, me: &Caller) -> Result<()> {
+    /// Backups copy everyone's data to places an admin chose, so all of it is admins': what's there, running one, and places.
+    pub fn only_admins_back_up(&self, me: &Caller) -> Result<()> {
         self.with(|i| {
-            ensure!(i.r.db().may(&me.user, "use", &scopes::object(&Scope::Global)), "You aren't a member here, so you can't back up.");
+            if !i.r.db().may(&me.user, "change-settings", scopes::NETWORK) {
+                return Err(crate::protocol::Coded::refused("Only admins use Backups.").into());
+            }
             Ok(())
-        })?;
-        self.back_up_now();
-        Ok(())
+        })
     }
 }
 

@@ -23,12 +23,14 @@ fn caller(me: Me, agent: Option<String>) -> Caller {
     Caller { agent: agent.or(me.caller.agent.clone()), ..me.caller }
 }
 
-async fn status(State(node): State<Node>) -> Reply {
+async fn status(State(node): State<Node>, me: Me) -> Reply {
+    node.only_admins_back_up(&me.caller)?;
     Ok(Json(node.backups()?))
 }
 
 async fn now(State(node): State<Node>, me: Me) -> Reply {
-    node.back_up_now_for(&me.caller)?;
+    node.only_admins_back_up(&me.caller)?;
+    node.back_up_now();
     Ok(Json(json!({})))
 }
 
@@ -62,6 +64,7 @@ struct Place {
 }
 
 async fn place(State(node): State<Node>, me: Me, Body(mut body): Body<Place>) -> Reply {
+    node.only_admins_back_up(&me.caller)?;
     let me = caller(me, body.agent.take());
     if body.deleted {
         node.remove_place(&me, body.id.as_deref().unwrap_or("")).await?;
@@ -84,10 +87,12 @@ struct Request {
 }
 
 async fn request(State(node): State<Node>, me: Me, Body(mut body): Body<Request>) -> Reply {
+    node.only_admins_back_up(&me.caller)?;
     let me = caller(me, body.agent.take());
     Ok(Json(node.request_place(&me, &serde_json::to_value(body)?).await?))
 }
 
-async fn check(State(node): State<Node>) -> Reply {
+async fn check(State(node): State<Node>, me: Me) -> Reply {
+    node.only_admins_back_up(&me.caller)?;
     Ok(Json(node.check_backups().await?))
 }

@@ -482,6 +482,8 @@ async fn a_client_devices_mcp_runs_as_its_person() {
     assert!(status == 200 && vault["result"]["isError"] != true, "Sam uses his own Vault: {vault}");
     let (_, logs) = mcp(json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "logs", "arguments": { "device": a.device_name() } } })).await;
     assert!(logs["result"]["isError"] == true && logs.to_string().contains("admin"), "Sam reads no log of Andre's device: {logs}");
+    let (_, backups) = mcp(json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": "backups_status", "arguments": {} } })).await;
+    assert!(backups["result"]["isError"] == true && backups.to_string().contains("Only admins"), "Backups are admins': {backups}");
     // A node signs who can do what only as its own person's device, for its own programs: a device answers that itself.
     let (_, devices) = mcp(json!({ "jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": { "name": "devices_remove", "arguments": { "device": "mac", "confirm": true } } })).await;
     assert!(devices["result"]["isError"] == true, "{devices}");
