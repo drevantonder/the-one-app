@@ -150,13 +150,15 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     let version = Version::of(&binary).context("ask the new build what it is")?;
     let short = version.commit.as_str();
-    // This device's own node takes it too, and the built-in apps are deployed from its build.
-    let here: Vec<Value> = devices().into_iter().filter(|d| d["here"] == true).collect();
+    // This device's own node takes it too, and the built-in apps are deployed from its build; the Workers' home has to
+    // take it before it can deploy them. Another device that doesn't take it is only that device's trouble.
+    let (here, others): (Vec<Value>, Vec<Value>) = devices().into_iter().filter(|d| d["target"] == TARGET).partition(|d| d["here"] == true);
     let mut failed = !publish_services(&src, &parts.services, &key, &commit);
     let published = timed("published the node", || build::publish(&crate::node(), &binary, &key, &version, None))?;
     println!("{}", build::published_said(&published, None));
     let started_at = Instant::now();
     failed |= timed("waited for this device", || await_builds(&here, short, started_at, Duration::from_secs(180)));
+    let _ = timed("waited for the other Linux devices", || await_builds(&others, short, started_at, Duration::from_secs(120)));
     if let Err(err) = timed("deployed the built-in apps", deploy_built_in) {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
