@@ -22,7 +22,9 @@ doctest = false
 # share with it: steps, databases, who's who and keys.
 [features]
 default = ["node"]
-node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "sign-in-proof"]
+node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "sign-in-proof", "web-bundle"]
+# `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
+web-bundle = ["dep:ssh-key", "dep:flate2"]
 # `sign-in-proof`, checking a new device's sign-in (src/sign_in_proof.rs), which nodes and every client have; the
 # Cloudflare node approves no one, so it goes without.
 sign-in-proof = ["dep:ring"]

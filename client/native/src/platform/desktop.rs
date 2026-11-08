@@ -158,6 +158,10 @@ pub async fn save(name: String, data: Vec<u8>, preview: bool) -> Result<(), Stri
 /// The window, in front.
 pub fn show() {
     if let Some(w) = app().handle.get_webview_window("main") {
+        // Only when the window comes back from being closed: never under a page in use.
+        if !w.is_visible().unwrap_or(true) {
+            crate::bundle::reopened(&app().handle);
+        }
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();

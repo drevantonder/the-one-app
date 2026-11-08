@@ -46,11 +46,16 @@ function countBadges(drawn) {
   if (total !== badged) platform.badge((badged = total));
 }
 
+/// A newer version of the client needs a newer app than this one, which stays on what it has.
+const appBehind = () =>
+  platform.behind() ? h(ui.Problem, { quiet: true, title: `Update ${config().name}`, text: "This app needs an update to get the newest version.", className: "max-w-none rounded-none border-0 border-b" }) : null;
+
 function drawWindow() {
   windowShown = true;
   const drawn = sections();
   countBadges(drawn);
-  if (platform.phone()) return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: !home(route()), onBack: back, screen: detail, banner: offline.banner() }));
+  const banner = appBehind() || offline.banner();
+  if (platform.phone()) return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: !home(route()), onBack: back, screen: detail, banner }));
   show(h(ui.Shell, {
     sections: drawn,
     title: barTitle,
@@ -62,7 +67,7 @@ function drawWindow() {
     open: localStorage.getItem(SIDEBAR) !== "closed",
     onOpenChange: (open) => (open ? localStorage.removeItem(SIDEBAR) : localStorage.setItem(SIDEBAR, "closed"), drawWindow()),
     screen: detail,
-    banner: offline.banner(),
+    banner,
   }));
 }
 

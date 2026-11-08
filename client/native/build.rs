@@ -1,5 +1,4 @@
-// The window's files are the web client's (one::web), written where Tauri takes its frontend from (`gen/web`), with
-// the page's policy letting it reach the app (Tauri's `ipc:`). The app is named by the custom build (config.toml), as
+// The window's files are the web client's (one::web), written where Tauri takes its frontend from (`gen/web`). The app is named by the custom build (config.toml), as
 // Tauri's own config says it (`TAURI_CONFIG`, which tauri-build and generate_context! both read). The app's own commands
 // (src/commands.rs) are listed, so each needs a permission, which the config's one capability grants the app's own
 // windows: left unlisted, Tauri would let any page call them.
@@ -21,11 +20,6 @@ fn main() {
     for (path, bytes) in one::web::files() {
         let to = dist.join(&path);
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
-        let bytes = if path == "index.html" {
-            String::from_utf8_lossy(&bytes).replacen("connect-src 'self'", "connect-src 'self' ipc: http://ipc.localhost", 1).into_bytes()
-        } else {
-            bytes
-        };
         std::fs::write(to, bytes).unwrap();
     }
     // A test's build (`one throwaway client mac`) is another app beside the real one: its own id, so its own folder,

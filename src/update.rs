@@ -36,6 +36,7 @@ pub fn commands() -> one::cli::Command {
             ("update".into(), "build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere".into()),
             ("release <vX.Y.Z>".into(), "the same, signed off and published on GitHub for the installer".into()),
             ("publish [binary]".into(), "sign and publish a build you made; every device on its platform updates".into()),
+            ("web bundle [--out <folder>]".into(), "write this build's web client as a bundle for the native apps, ready to sign".into()),
             ("services try apps/<name> [--device <name>]".into(), "put your checkout's build of an app's service on a device of yours (here by default, else over ssh by its name) and switch it on, until a newer one is published".into()),
         ],
         run: |g| {
@@ -50,6 +51,7 @@ pub fn commands() -> one::cli::Command {
                     publish(g, &path, &release_key()?)?;
                 }
                 ["services", "try", dir] => try_service(Path::new(dir), g.flag("device"))?,
+                ["web", "bundle"] => println!("{}", web_bundle(Path::new(g.flag("out").unwrap_or(".")))?.display()),
                 _ => return Ok(false),
             }
             Ok(true)
@@ -425,6 +427,15 @@ fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
 fn blob(hash: &str) -> Result<Vec<u8>> {
     let mut resp = crate::agent().get(format!("http://{}/v1/blobs/{hash}", one::api::addr())).call()?;
     Ok(resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)
+}
+
+/// This build's web client written to `dir` as `<commit>.bundle`, not yet signed: gzip, for `update` and `release` to sign and publish.
+fn web_bundle(dir: &Path) -> Result<PathBuf> {
+    let bundle = one::web::bundle::Bundle::of_this_build(one::config::BUILD, one::config::COMMITTED);
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(format!("{}.bundle", one::config::BUILD));
+    std::fs::write(&path, bundle.packed()?)?;
+    Ok(path)
 }
 
 /// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform

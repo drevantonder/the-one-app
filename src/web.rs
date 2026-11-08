@@ -4,6 +4,14 @@
 
 use serde_json::json;
 
+#[cfg(feature = "web-bundle")]
+pub mod bundle;
+
+/// What the shell (client/native) gives the page: its commands (client/native/src/commands.rs) and `window.__oneNative`
+/// (client/native/src/native.js). A web bundle says the shell it needs by this: one more whenever those change, and
+/// tests/contracts.rs pins each number to them, so a bundle never reaches a shell that can't run it.
+pub const SHELL: u32 = 1;
+
 /// Every file of the web client, by its path, its page (`index.html`) naming the rest by their content.
 pub fn files() -> Vec<(String, Vec<u8>)> {
     let mut files: Vec<(String, Vec<u8>)> =

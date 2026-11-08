@@ -7,6 +7,7 @@
 
 #[macro_use]
 mod commands;
+mod bundle;
 mod headless;
 mod platform;
 mod secrets;
@@ -271,6 +272,7 @@ fn native() -> Value {
     let address = a.address();
     let signed_in = address.as_ref().is_some_and(|_| a.sign_in().is_ok_and(|s| s.signed_in()));
     a.page.store(true, Ordering::Relaxed);
+    bundle::started();
     let opened = a.opened.lock().unwrap().take();
     let local = local_state();
     let unpaired = platform::unpaired(local.as_ref());
@@ -296,6 +298,8 @@ fn native() -> Value {
         // How much bigger than usual the user has made text (a phone's: Android's font size, an iPhone's Dynamic Type),
         // for the window to be zoomed by.
         "textScale": platform::text_scale(),
+        // The newest bundle needs a newer app than this, which stays on what it has.
+        "behind": bundle::behind(&a.data),
     })
 }
 
@@ -942,8 +946,13 @@ pub fn run() {
                 opened: Mutex::default(),
                 page: Default::default(),
             });
+            bundle::start(&crate::app().data);
+            bundle::watch(app.handle().clone());
             platform::start(app);
             platform::claim(crate::app().address());
+            if let Some(address) = crate::app().address() {
+                bundle::update(crate::app().data.clone(), address);
+            }
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 for url in app.deep_link().get_current().ok().flatten().unwrap_or_default() {
@@ -992,6 +1001,14 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("the app");
+        .build(bundle::serving(tauri::generate_context!()))
+        .expect("the app")
+        .run(|handle, event| {
+            #[cfg(mobile)]
+            if let tauri::RunEvent::Resumed = event {
+                bundle::reopened(handle);
+            }
+            #[cfg(desktop)]
+            let _ = (handle, event);
+        });
 }

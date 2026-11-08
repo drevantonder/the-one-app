@@ -877,3 +877,19 @@ fn the_cloudflare_node_answers_the_asks_it_says_it_does() {
     let said: std::collections::BTreeSet<String> = names.iter().filter(|(_, on)| **on).map(|(n, _)| n.to_string()).collect();
     assert_eq!(answered, said, "the asks the Cloudflare node answers, and those src/call.rs says it does");
 }
+
+/// A web bundle says the shell it needs by a number (`one::web::SHELL`): what the shell gives the page, its commands and
+/// `window.__oneNative`, is pinned to each number, so changing them without raising it fails here, before a bundle that
+/// needs them reaches an app that hasn't got them.
+#[test]
+fn what_the_shell_gives_the_page_is_pinned_to_its_number() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("client/native/src");
+    let mut hash = blake3::Hasher::new();
+    for file in ["commands.rs", "native.js"] {
+        hash.update(&std::fs::read(root.join(file)).unwrap());
+    }
+    let hash = hash.finalize().to_hex().to_string();
+    const PINNED: &[(u32, &str)] = &[(1, "44f63548b850ab33724d60f9da788d1885423d02901add2710901371cc37064c")];
+    let raise = format!("what the shell gives the page (client/native/src/commands.rs, native.js) changed: raise one::web::SHELL and pin ({}, \"{hash}\")", one::web::SHELL + 1);
+    assert!(PINNED.iter().any(|(n, h)| *n == one::web::SHELL && *h == hash), "{raise}");
+}

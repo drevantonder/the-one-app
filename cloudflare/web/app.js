@@ -85,6 +85,8 @@ export function app(native) {
     /// On a Mac, a widget's own menu bar item opens the panel showing only that widget (`<app>.<widget>`), with no rows.
     panelWidget: panel ? query.get("widget") : null,
     client: () => about?.client || "web",
+    /// The newest version of the client needs a newer app than this one.
+    behind: () => !!about?.behind,
     /// The app on a phone: its home is the pages side by side, with no sidebar (`Shell`'s `phone`).
     phone: () => ["iPhone", "Android"].includes(about?.platform),
     address: () => about.address,
