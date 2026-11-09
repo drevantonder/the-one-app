@@ -60,6 +60,6 @@ html body[data-scroll-locked] {
 
 /* The window (Shell) fills the page and has no padding of its own, so there's none to keep: with it, the lock would
    push the window 16px in from every edge, under an alert's backdrop. */
-html:has([data-slot="sidebar-wrapper"]) body[data-scroll-locked] {
+html:has([data-slot="shell-screen"]) body[data-scroll-locked] {
   padding: 0;
 }
