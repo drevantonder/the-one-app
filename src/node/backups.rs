@@ -524,7 +524,15 @@ impl Node {
         let snapshots = snapshots.iter().map(|s| BackedUp { scope: s.scope.clone(), upto: s.upto, blobs: s.blobs.len() as u64, bytes: s.bytes }).collect();
         let trouble = error.as_ref().and_then(crate::bucket::Trouble::of).map(|t| t.name().to_string());
         let error = error.map(|e| format!("{e:#}").chars().take(500).collect::<String>());
-        self.say(&Scope::Global, Said::BackedUp(BackupRun { place: place.into(), device: self.0.id, time: now, error, trouble, snapshots })).await
+        self.say_to_watchers(Said::BackedUp(BackupRun { place: place.into(), device: self.0.id, time: now, error, trouble, snapshots })).await
+    }
+
+    /// Says it in `global`, and tells whoever watches (Backups on Settings) that this device's view of it changed:
+    /// `say` alone announces nothing, so they would see a run only when something else happened.
+    async fn say_to_watchers(&self, said: Said) -> Result<()> {
+        self.say(&Scope::Global, said).await?;
+        self.emit(Event::Changed { apps: Vec::new() });
+        Ok(())
     }
 
     /// Backups as a user sees them: each place, how its last run went, the recent snapshots, and the disks here.
@@ -776,7 +784,7 @@ impl Node {
             }
             let kept = json!({ "scopes": report["scopes"], "unchecked": report["unchecked"], "problems": report["problems"].as_array().map(|p| p.iter().take(20).cloned().collect::<Vec<_>>()) });
             let error500 = error.as_ref().map(|e| e.chars().take(500).collect::<String>());
-            self.say(&Scope::Global, Said::Checked(CheckRun { place: id, device: self.0.id, time: now, error: error500, report: kept })).await?;
+            self.say_to_watchers(Said::Checked(CheckRun { place: id, device: self.0.id, time: now, error: error500, report: kept })).await?;
             report["place"] = json!(title);
             report["databases"] = json!(true);
             if let Some(error) = error {
