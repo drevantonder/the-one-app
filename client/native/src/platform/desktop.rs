@@ -8,6 +8,7 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use crate::app;
 
@@ -85,6 +86,8 @@ pub fn appear(window: &tauri::WebviewWindow) {
     let _ = window.set_theme(theme);
     // @one/ui's --background.
     let dark = theme.or_else(|| window.theme().ok()) == Some(tauri::Theme::Dark);
+    #[cfg(windows)]
+    super::caption(window, dark);
     let _ = window.set_background_color(Some(if dark { tauri::window::Color(10, 10, 10, 255) } else { tauri::window::Color(255, 255, 255, 255) }));
 }
 
@@ -148,6 +151,14 @@ pub fn menus(_: bool, _: bool) {}
 
 pub fn approve_here(_: String) {}
 
+/// What's kept of a window between starts. Not whether it was visible: closing only hides it, and the app shows it at each start.
+const PLACE: StateFlags = StateFlags::all().difference(StateFlags::VISIBLE);
+
+/// Its size and place kept now, as the window closes: the app may next stop with no chance to (an update, the machine going down).
+pub fn keep_place() {
+    let _ = app().handle.save_window_state(PLACE);
+}
+
 /// One app at a time (a second start, with a link or none, shows the first), as big and where it was left; the system's
 /// notifications, file dialogs and opener.
 pub fn plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
@@ -158,7 +169,7 @@ pub fn plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry
             argv.iter().for_each(|a| crate::opened(a));
         }))
         // The panel shows only when its item is clicked.
-        .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["panel"]).build())
+        .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["panel"]).with_state_flags(PLACE).build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())

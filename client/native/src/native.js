@@ -48,6 +48,18 @@
   );
   addEventListener("unhandledrejection", (e) => log(`unhandled rejection: ${e.reason?.stack || e.reason?.message || e.reason}`));
 
+  // Tauri's `data-tauri-drag-region` always zooms a window double-clicked there; a Mac's user may have set title bars to
+  // minimise or do nothing (System Settings, AppleActionOnDoubleClick), which only the app can read.
+  addEventListener(
+    "mouseup",
+    (e) => {
+      if (e.detail !== 2 || !e.target.hasAttribute?.("data-tauri-drag-region")) return;
+      e.stopImmediatePropagation();
+      invoke("title_bar_double_clicked").catch(() => {});
+    },
+    true,
+  );
+
   window.__oneNative = {
     /// A line for this device's log (`one logs <device>`), from the page's own code.
     log,

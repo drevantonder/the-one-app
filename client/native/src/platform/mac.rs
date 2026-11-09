@@ -40,6 +40,44 @@ pub fn redraw_widgets() {
 }
 
 /// The menu bar's items, AppKit's (`menubar`).
+/// Where the window's buttons sit: points from its left, and how far tao lowers them, which centres them in the 40-point
+/// title bar `title_bar_area` gives the page.
+pub const LIGHTS_AT: (f64, f64) = (16.0, 22.5);
+
+/// What the page's told of the title bar lying over its top, by the names of the web's Window Controls Overlay
+/// (`titlebar-area-x` and the rest, which WKWebView doesn't give): where the room beside the window's buttons starts, none
+/// taken in full screen, when they're hidden; and that it's there at all (`.wco`).
+pub fn title_bar_area(full_screen: bool) -> String {
+    let x = if full_screen { 0 } else { 79 };
+    format!(
+        "(() => {{ const root = document.documentElement; root.classList.add('wco'); for (const [k, v] of Object.entries({{ x: '{x}px', y: '0px', width: 'calc(100vw - {x}px)', height: '40px' }})) root.style.setProperty(`--titlebar-area-${{k}}`, v); }})();"
+    )
+}
+
+/// A double-click on the window's empty top, as System Settings says (Desktop & Dock, "Double-click a window's title bar to").
+pub fn title_bar_double_clicked(window: &tauri::WebviewWindow) {
+    match defaults().stringForKey(&NSString::from_str("AppleActionOnDoubleClick")).map(|s| s.to_string()).as_deref() {
+        Some("Minimize") => drop(window.minimize()),
+        Some("None") => {}
+        _ if window.is_maximized().unwrap_or(false) => drop(window.unmaximize()),
+        _ => drop(window.maximize()),
+    }
+}
+
+/// Tells the page when the window goes full screen and back (`title_bar_area`).
+pub fn watch_full_screen(window: &tauri::WebviewWindow) {
+    let last = std::sync::atomic::AtomicBool::new(window.is_fullscreen().unwrap_or(false));
+    let w = window.clone();
+    window.on_window_event(move |e| {
+        if let tauri::WindowEvent::Resized(_) = e {
+            let now = w.is_fullscreen().unwrap_or(false);
+            if last.swap(now, std::sync::atomic::Ordering::Relaxed) != now {
+                let _ = w.eval(title_bar_area(now));
+            }
+        }
+    });
+}
+
 pub fn start_tray(_: &tauri::App) -> tauri::Result<()> {
     menubar::start();
     Ok(())

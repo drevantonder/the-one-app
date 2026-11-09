@@ -3,7 +3,6 @@ import { ArrowUpRightIcon, CaretLeftIcon, CodeIcon } from "@phosphor-icons/react
 import { AppIcon, type App } from "@/components/app-icon"
 import { Kept } from "@/components/kept"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarInset, SidebarMenu, SidebarMenuBadge,
   SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar,
@@ -32,7 +31,7 @@ type ShellSection = { key: string; title: string; href: string; selected?: boole
 /// click on a row or a page's name (a click with a modifier opens the link as the browser does); `back`, a Back button
 /// before the title; `end`, what the bar ends with. A `phone`'s has no sidebar: its home is the pages side by side
 /// (their own titles, no bar), and what's opened from them has a bar with Back, as the native phone apps had. `banner`,
-/// what's wrong with the whole window (being offline), once: across its top, or on a phone, at the top of what it shows.
+/// what's wrong with the whole window (being offline), once, at the top of what it shows.
 function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, open, onOpenChange, screen, children, className, phone, banner }: {
   sections: ShellSection[]
   title?: string
@@ -70,34 +69,38 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
       </div>
     )
   }
-  const window = (
-    <SidebarProvider open={open} onOpenChange={onOpenChange} className={cn(banner ? "min-h-0 flex-1" : "h-full", className)}>
+  return (
+    <SidebarProvider open={open} onOpenChange={onOpenChange} className={cn("relative h-full", className)}>
+      {/* One button, where it stays as the sidebar slides under it, clear of a title bar lying over the page (`--titlebar-area-x`). */}
+      <div className="pointer-events-none absolute top-0 left-[calc(var(--titlebar-area-x,0px)+0.75rem)] z-20 flex h-(--shell-bar) items-center">
+        <SidebarTrigger className="pointer-events-auto" />
+      </div>
       <Sidebar>
+        <div className="h-(--shell-bar) shrink-0" />
         <SidebarContent>
           {sections.map((s) => <ShellGroup key={s.key} section={s} onGo={onGo} />)}
         </SidebarContent>
       </Sidebar>
-      <SidebarInset className="min-w-0 overflow-hidden">
-        <header data-slot="shell-bar" className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-          <SidebarTrigger />
-          {(back || title) && <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />}
+      {/* Where the bar starts: past the sidebar's button while the sidebar's away, as the sidebar goes. */}
+      <SidebarInset className="min-w-0 overflow-hidden [--shell-bar-start:calc(var(--titlebar-area-x,0px)+3.25rem)] peer-data-[state=expanded]:[--shell-bar-start:0.75rem]">
+        <header data-slot="shell-bar" className="flex h-(--shell-bar) shrink-0 items-center gap-2 border-b pr-3 pl-(--shell-bar-start) transition-[padding] duration-200 ease-linear wco:border-b-0">
           {back && (
-            <Button variant="ghost" size="icon" className="size-7" onClick={onBack} aria-label="Back">
+            <Button variant="ghost" size="icon" className="relative z-20 size-7" onClick={onBack} aria-label="Back">
               <CaretLeftIcon />
             </Button>
           )}
           <h1 className="min-w-0 truncate text-sm font-semibold">{title}</h1>
           {developer && (
-            <Button variant="ghost" size="icon" className="ml-auto size-7" onClick={onDeveloper} aria-label="Developer" title="Developer">
+            <Button variant="ghost" size="icon" className="relative z-20 ml-auto size-7" onClick={onDeveloper} aria-label="Developer">
               <CodeIcon />
             </Button>
           )}
         </header>
+        {banner}
         {body}
       </SidebarInset>
     </SidebarProvider>
   )
-  return banner ? <div className="flex h-full flex-col">{banner}{window}</div> : window
 }
 
 function ShellGroup({ section, onGo }: { section: ShellSection; onGo?: (href: string) => void }) {

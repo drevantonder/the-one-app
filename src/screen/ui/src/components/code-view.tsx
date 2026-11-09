@@ -175,7 +175,7 @@ function CodeView({ text, path = "", wrap, header = true, className }: {
               </div>
             )}
           </div>
-          <Button type="button" variant="ghost" size="sm" aria-pressed={wrapped} className="aria-pressed:bg-accent aria-pressed:text-accent-foreground" aria-label="Wrap lines" title="Wrap lines" onClick={() => setWrap(!wrapped)}>
+          <Button type="button" variant="ghost" size="sm" aria-pressed={wrapped} className="aria-pressed:bg-accent aria-pressed:text-accent-foreground" aria-label="Wrap lines" onClick={() => setWrap(!wrapped)}>
             <ArrowUDownLeftIcon />
             <span className="hidden @md:inline">Wrap</span>
           </Button>

@@ -69,6 +69,17 @@ fn claim_now(address: Option<&str>) {
     }
 }
 
+/// The title bar in the page's own background (@one/ui's --background), so it reads as the window's top, not a strip across it.
+/// Windows 11 draws it; Windows 10 has no such attribute and says no. The bar stays the system's: its caption buttons and
+/// Snap Layouts on Maximize can't be had from a page, which sits in a child window over them.
+pub fn caption(window: &tauri::WebviewWindow, dark: bool) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_CAPTION_COLOR, DwmSetWindowAttribute};
+    let Ok(hwnd) = window.hwnd() else { return };
+    let colour: u32 = if dark { 0x000a_0a0a } else { 0x00ff_ffff };
+    // SAFETY: the window's own handle, and a value of the attribute's type and size.
+    let _ = unsafe { DwmSetWindowAttribute(windows::Win32::Foundation::HWND(hwnd.0), DWMWA_CAPTION_COLOR, (&raw const colour).cast(), size_of_val(&colour) as u32) };
+}
+
 /// A flyout (the panel) with rounded corners, as Windows 11 draws its own; Windows 10 has none, and says no.
 pub fn round(window: &tauri::WebviewWindow) {
     use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};

@@ -62,18 +62,38 @@ window.oneHost = (() => {
     };
   }
 
+  /// What a page in the app's window has that a browser's doesn't: no browser menu but on text being worked with, no
+  /// reloading, nothing dragged out but what asks to be. Its source also runs in screens' frames (`look`), so it keeps to
+  /// itself.
+  function appBehaviour() {
+    addEventListener("contextmenu", (e) => {
+      const editing = e.target.closest?.("input, textarea, select, [contenteditable]");
+      if (!editing && !String(getSelection())) e.preventDefault();
+    }, true);
+    addEventListener("keydown", (e) => {
+      if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r")) e.preventDefault();
+    }, true);
+    addEventListener("dragstart", (e) => {
+      if (e.target.closest?.("a, img") && !e.target.closest("[draggable=true]")) e.preventDefault();
+    }, true);
+  }
+
+  /// `appBehaviour`'s rules: the page stays where it is and the size it is, and a long press on a phone is the screen's.
+  const APP_RULES = `html, body { overscroll-behavior: none; touch-action: pan-x pan-y; } a, img { -webkit-touch-callout: none; }`;
+
   /// What makes a screen's page sit in this one as its own: this page's background shows through, and on a computer
   /// the Mac app's size of text. It's light or dark as `appearance` says ("automatic", "light" or "dark"), and as a
   /// `{ oneScheme }` posted to its frame says after. In a sheet (`raised`), its cards are a step lighter, as on a phone's.
-  /// `shell` is what the page that holds it does beyond a browser, as its globals (`__oneCan`, `__oneLifts`).
+  /// `shell` is what the page that holds it does beyond a browser, as its globals (`__oneApp`, `__oneCan`, `__oneLifts`).
   function look(html, appearance, raised = false, shell = {}) {
     // With the nonce of a page that runs only its own scripts (the client's own screens), as one of them.
     const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
-    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { Object.assign(window, ${JSON.stringify(shell).replace(/</g, "\\u003c")}); ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance)}; const apply = () => scheme(document, now);
+    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { Object.assign(window, ${JSON.stringify(shell).replace(/</g, "\\u003c")}); ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} ${shell.__oneApp ? `(${appBehaviour})();` : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance)}; const apply = () => scheme(document, now);
       addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
       addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()<\/script>`;
     const style = `<style>html, body { background: transparent !important; }
-      @media (pointer: fine) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; } }</style>`;
+      @media (pointer: fine) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; } }
+      ${shell.__oneApp ? APP_RULES : ""}</style>`;
     return html.includes("</head>") ? html.replace("</head>", `${style}${looks}</head>`) : style + looks + html;
   }
 
@@ -115,5 +135,5 @@ window.oneHost = (() => {
     }
   }
 
-  return { answer, menu, alert, file, scheme, look };
+  return { answer, menu, alert, file, scheme, look, appBehaviour, APP_RULES };
 })();

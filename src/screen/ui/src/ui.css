@@ -5,6 +5,12 @@
 @import "./theme.css";
 @import "./tokens.css";
 
+/* A title bar lying over the page's top (the shell's `--titlebar-area-*`, named as the web's Window Controls Overlay's). */
+@custom-variant wco (&:is(.wco, .wco *));
+
+:root { --shell-bar: 3rem; }
+.wco { --shell-bar: var(--titlebar-area-height); }
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -15,6 +21,11 @@
     padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+  }
+  /* What's the app's own, not what it shows: read and pressed, not selected, with an arrow over it. */
+  button, label, summary, [role=button], [role=tab], [role=menuitem], [role=option], [role=switch], [role=checkbox], [data-slot=sidebar], [data-slot=shell-bar] {
+    -webkit-user-select: none;
+    user-select: none;
   }
 }
 

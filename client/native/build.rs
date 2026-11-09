@@ -67,7 +67,8 @@ fn main() {
         "app": { "windows": [], "security": { "csp": null, "capabilities": [{
             "identifier": "window",
             "windows": ["main", "panel"],
-            "permissions": COMMANDS.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).collect::<Vec<_>>(),
+            // And Tauri's own: what `data-tauri-drag-region` moves the window by.
+            "permissions": COMMANDS.iter().map(|c| format!("allow-{}", c.replace('_', "-"))).chain(["core:window:allow-start-dragging".to_string()]).collect::<Vec<_>>(),
         }] } },
         "bundle": { "icon": icons },
         // `<cli>://open?app=&screen=&params=&scope=`, as the address's /back passes a sign-in elsewhere on to the app; on

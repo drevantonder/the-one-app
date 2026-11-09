@@ -163,6 +163,8 @@ export function app(native) {
       native.onBack = window.back;
       native.onScale = (scale) => ((about.textScale = scale), zoomed());
       zoomed();
+      oneHost.appBehaviour();
+      document.head.append(Object.assign(document.createElement("style"), { textContent: oneHost.APP_RULES }));
       // The app menu's commands (a Mac's), which work wherever the focus is: the sidebar folded or unfolded, as its
       // own key does here; joining a network with a pairing code, while this Mac's node is in none.
       native.onCommand = (name) => {
@@ -225,7 +227,7 @@ export function app(native) {
     }),
     /// What a screen's frame is told the app does beyond a browser's (oneHost.look): an iPhone's document camera, and its
     /// touch and hold, which lifts what a screen marks `data-one-held` with its menu.
-    look: () => ({ ...(about?.scan ? { __oneCan: { scan: true } } : {}), ...(about?.lifts ? { __oneLifts: true } : {}) }),
+    look: () => ({ __oneApp: true, ...(about?.scan ? { __oneCan: { scan: true } } : {}), ...(about?.lifts ? { __oneLifts: true } : {}) }),
 
     /// The panel's: what its screen is told (this device's node), and its rows under it, each `[label, run, checked]`
     /// (checked null for none).

@@ -739,6 +739,15 @@ async fn pair(code: String) -> Result<String, String> {
     address_of(&address)
 }
 
+/// The window's empty top double-clicked (a Mac's): what System Settings says that does.
+#[tauri::command]
+fn title_bar_double_clicked(window: tauri::WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    platform::title_bar_double_clicked(&window);
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
+
 /// The panel this tall, as its screen is (a Mac's menu bar is AppKit's, with no page to fit).
 #[tauri::command]
 fn fit(window: tauri::WebviewWindow, height: f64) {
@@ -886,10 +895,22 @@ pub fn run() {
                 }
                 app.deep_link().on_open_url(|e| e.urls().iter().for_each(|u| opened(u.as_str())));
             }
+            #[cfg(desktop)]
+            let shown = std::sync::atomic::AtomicBool::new(false);
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .initialization_script(include_str!("native.js"))
                 .use_https_scheme(true)
-                .on_page_load(|_, load| {
+                .on_page_load(move |#[cfg_attr(mobile, allow(unused_variables))] window, load| {
+                    #[cfg(target_os = "macos")]
+                    if let tauri::webview::PageLoadEvent::Finished = load.event() {
+                        let _ = window.eval(platform::title_bar_area(window.is_fullscreen().unwrap_or(false)));
+                    }
+                    // Once, as its page starts: where it was left, which the window-state plugin has moved it to by now.
+                    #[cfg(desktop)]
+                    if matches!(load.event(), tauri::webview::PageLoadEvent::Started) && !shown.swap(true, Ordering::Relaxed) {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
                     let event = match load.event() {
                         tauri::webview::PageLoadEvent::Started => "started",
                         tauri::webview::PageLoadEvent::Finished => "finished",
@@ -905,9 +926,19 @@ pub fn run() {
                     own
                 });
             #[cfg(desktop)]
-            let window = window.title(one::config::NAME).inner_size(1000.0, 700.0).min_inner_size(360.0, 480.0);
+            let window = window.title(one::config::NAME).inner_size(1000.0, 700.0).min_inner_size(360.0, 480.0).visible(false);
+            // The page runs up to the window's top, under its buttons, as the Mac's own apps do.
+            #[cfg(target_os = "macos")]
+            let window = window
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true)
+                .traffic_light_position(tauri::LogicalPosition::new(platform::LIGHTS_AT.0, platform::LIGHTS_AT.1))
+                .initialization_script(platform::title_bar_area(false))
+                .allow_link_preview(false);
             #[cfg_attr(mobile, allow(unused_variables))]
             let window = window.build()?;
+            #[cfg(target_os = "macos")]
+            platform::watch_full_screen(&window);
             #[cfg(desktop)]
             platform::appear(&window);
             // On a computer, closing the window leaves the app running, in the tray or menu bar, where Open shows it
@@ -915,11 +946,15 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 let hide = window.clone();
-                window.on_window_event(move |e| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+                window.on_window_event(move |e| match e {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
+                        platform::keep_place();
                         let _ = hide.hide();
                     }
+                    // Automatic follows the system: its title bar and first colour too, as it changes while the app runs.
+                    tauri::WindowEvent::ThemeChanged(_) => platform::appear(&hide),
+                    _ => {}
                 });
                 open_at_login_once(app)?;
                 platform::start_tray(app)?;
