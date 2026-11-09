@@ -24,7 +24,7 @@ function redirect(ctx) {
 const vault = {
   client: {
     title: "Google sign-in", type: "Google sign-in", domain: "google.com", hosts: [OAUTH],
-    why: "Make one in Google Cloud Console: APIs & Services › Credentials › Create OAuth client ID, type Web application. It's set once, for everyone's Google apps. Its authorized redirect URI: {address}/back",
+    why: "Make a Web application OAuth client in Google Cloud Console, with this redirect URI: {address}/back",
     // Set once, by an admin in Everyone's Vault, for every app that declares a shared Google sign-in: anyone else is
     // told which admin to ask.
     shared: true,

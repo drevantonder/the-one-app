@@ -10,7 +10,7 @@ import { offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { api, retryWait, sleep } from "./request.js";
 import { go, href, own, route } from "./routes.js";
-import { ask, iconPaths, openSheet } from "./screens.js";
+import { ask, iconPaths, openRequest } from "./screens.js";
 import { appearance, schemed } from "./settings.js";
 import { forgetScreens, joined, lastAt, lastWindow, me, network, refreshApps, refreshState, setJoining } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
@@ -25,7 +25,7 @@ async function start() {
     look: appearance(),
     route,
     go: (to) => joined.then(() => go(to)),
-    request: (scope, id) => joined.then(() => openSheet(own("request", { scope, id }))),
+    request: (scope, id) => joined.then(() => openRequest(scope, id)),
     signedOut: showSignedOut,
     back: hardwareBack,
   });
@@ -94,7 +94,7 @@ async function start() {
   setJoining(false);
   joined.done();
   await refreshApps().catch((err) => windowShowing() || (console.warn("starting:", err.message), showUnreachable()));
-  if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
+  if (request?.id && request.scope) openRequest(request.scope, request.id);
   listen();
   if (platform.panel) return;
   watchWaiting();

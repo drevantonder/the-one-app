@@ -388,6 +388,14 @@ export function openSheet(r) {
   });
 }
 
+/// A request for an item, in a sheet → whether it was allowed. Closed without an answer, it's declined; if that can't
+/// reach a node the request just waits in Requests until it expires.
+export async function openRequest(scope, id) {
+  const answer = await openSheet(own("request", { scope, id }));
+  if (answer === null) await api("/v1/vault/answer", { method: "POST", body: { scope, id, declined: true } }).catch(() => {});
+  return answer === true;
+}
+
 /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
 /// the client's own screens', as the user, which no app's may.
 addEventListener("message", async (e) => {
@@ -459,7 +467,7 @@ addEventListener("message", async (e) => {
         if (mine) throw new Error("Settings has no app to ask for.");
         const out = await api("/v1/vault/request", { method: "POST", body: { scope: r.scope || "user", app: r.app, need } });
         if (!out?.id) throw new Error("The Vault didn’t take the request");
-        return (await openSheet(own("request", { scope: out.scope, id: out.id }))) === true;
+        return openRequest(out.scope, out.id);
       },
       link: (to) => {
         const url = new URL(to, location.href);
@@ -475,7 +483,7 @@ addEventListener("message", async (e) => {
       own: mine && {
         ...ownAnswers,
         appearance: (m) => (m.value == null ? appearance() : new Promise((done) => ui.transition(() => (tell({ oneScheme: setAppearance(String(m.value)) }), done(appearance()))))),
-        request: async (m) => (await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true,
+        request: (m) => openRequest(String(m.scope || ""), String(m.id || "")),
       },
     }));
   } catch (err) {

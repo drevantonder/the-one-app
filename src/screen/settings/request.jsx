@@ -1,12 +1,14 @@
-// A request for an item an app may use: who asks and why, then the user's items that have the fields it wants, to
-// pick one, or a new one, whose values go to the node and nowhere else. The asker never sees a secret. It closes
-// itself with whether it was allowed, as it is when it's answered somewhere else (another device, an agent's CLI).
+// A request for an item an app or an agent may use: who asks, in the title; what they'd get and where it goes, in one
+// grey line; then the user's items that have the fields it wants, to pick one, or new values, which go to the node and
+// nowhere else. Allow is the only way to say yes, and the sheet's Cancel declines (screens.js). The asker never sees a
+// secret. It closes itself with whether it was allowed, as it is when it's answered somewhere else (another device, an
+// agent's CLI).
 //
 // A client's own screen written in React (see vault.jsx): built by @one/ui's build into dist/request.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, CopyButton, Icon, Input, List, ListRow, ListSkeleton, Problem, Spinner } from "@one/ui"
-import { appNamed } from "./agents.js"
+import { Button, CopyButton, Input, Label, ListSkeleton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner } from "@one/ui"
+import { AGENTS, appNamed } from "./agents.js"
 
 const api = one.api
 const { scope, id } = one.params || {}
@@ -27,16 +29,15 @@ const Why = ({ why }) =>
     </span>
   ) : part))
 
-const Footer = ({ children }) => <p className="-mt-3 px-3 text-xs text-muted-foreground">{children}</p>
+const NEW = "new"
 
 function Request() {
   const [request, setRequest] = useState(null)
   const [apps, setApps] = useState([])
   const [problem, setProblem] = useState(null)
-  const [picked, setPicked] = useState(null)
+  const [picked, setPicked] = useState(NEW)
   const [values, setValues] = useState({})
   const [error, setError] = useState("")
-  // "allow" or "decline", from the tap until the answer is in.
   const [busy, setBusy] = useState(false)
   const now = useRef({ busy, request })
   now.current = { busy, request }
@@ -47,8 +48,9 @@ function Request() {
       if (!r) throw new Error("Can’t find this request: it may be for someone else.")
       setRequest(r)
       setApps(a)
-      setPicked(r.matches?.[0]?.id ?? null)
+      setPicked(r.matches?.[0]?.id ?? NEW)
       setProblem(null)
+      one.title(`${asking(r, a)} needs a key`)
     } catch (e) {
       setProblem(one.plain(e))
     }
@@ -67,23 +69,19 @@ function Request() {
     return () => clearInterval(t)
   }, [])
 
-  async function answer(declined) {
-    if (busy) return
-    setBusy(declined ? "decline" : "allow")
+  async function allow(e) {
+    e.preventDefault()
+    if (busy || !ready) return
+    setBusy(true)
     setError("")
     const body = { scope: request.scope, id: request.id }
-    if (declined) body.declined = true
-    else if (picked) body.item = picked
-    else {
-      const { _title, ...fields } = values
-      if (_title?.trim()) body.title = _title.trim()
-      body.fields = fields
-    }
+    if (picked !== NEW) body.item = picked
+    else body.fields = values
     try {
       await api("POST", "/v1/vault/answer", body)
       setValues({})
-      one.tap(declined ? "selection" : "success")
-      one.close(!declined)
+      one.tap("success")
+      one.close(true)
     } catch (err) {
       setError(one.plain(err).title)
       setBusy(false)
@@ -94,91 +92,62 @@ function Request() {
     return problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => (one.tap(), setProblem(null), load()) }} /> : <ListSkeleton rows={3} />
   }
 
-  const a = appNamed(apps, request.app)
+  const matches = request.matches || []
   const wanted = request.fields || []
-  const what = request.title || ""
-  const asker = request.agent || request.by
-  const ready = !busy && (picked !== null || wanted.every((f) => values[f.name]))
+  const ready = !busy && (picked !== NEW || wanted.every((f) => values[f.name]))
   const set = (name, value) => setValues((v) => ({ ...v, [name]: value }))
 
+  if (request.state !== "waiting") {
+    return <p className="text-sm text-muted-foreground">{request.state === "set" ? "Allowed." : request.state === "declined" ? "Declined." : `This request expired. Ask ${request.agent || request.by} to ask again.`}</p>
+  }
+
   return (
-    <div className="flex max-w-2xl flex-col gap-5">
-      <List>
-        <div className="flex items-start gap-3 px-3 py-3 text-sm">
-          <AppIcon app={a || { name: request.app }} size={44} />
-          <div className="min-w-0 flex-1">
-            <div className="break-words font-semibold">{a ? `${a.title || a.name} wants ${what}` : what}</div>
-            {request.why && <div className="break-words text-muted-foreground"><Why why={request.why} /></div>}
-          </div>
-        </div>
-      </List>
-      <Footer>{request.agent ? `${asker} · ${request.scope_name}` : request.scope_name}</Footer>
-      {request.state === "waiting" ? (
-        <>
-          <List>
-            {(request.matches || []).map((m) => (
-              <Pick key={m.id} on={picked === m.id} run={() => setPicked(m.id)} leading={<AppIcon app={{ name: m.title, title: m.title }} />} title={m.title} sub={m.type} />
-            ))}
-            <Pick on={picked === null} run={() => setPicked(null)} leading={<span className="grid size-9 shrink-0 place-items-center"><Icon name="plus" className="size-5" /></span>} title="New Item" />
-          </List>
-          {picked === null && (
-            <>
-              <List>
-                <Field label="Title" value={values._title ?? what} onChange={(v) => set("_title", v)} />
-                {wanted.map((f) => <Field key={f.name} label={fieldLabel(f.name)} secret={f.secret} value={values[f.name] || ""} onChange={(v) => set(f.name, v)} />)}
-              </List>
-              {!!request.hosts?.length && <Footer>Sent only to {request.hosts.join(", ")}</Footer>}
-            </>
-          )}
-          <List>
-            <button type="button" className="flex w-full items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-destructive outline-none hover:bg-accent/50 focus-visible:bg-accent/50 disabled:opacity-50" disabled={!!busy} onClick={() => answer(true)}>
-              {busy === "decline" ? <><Spinner />Declining…</> : "Decline"}
-            </button>
-          </List>
-          {error && <Problem title={error} />}
-          <div className="flex justify-end">
-            <Button size="lg" className="min-w-30" disabled={!ready} onClick={() => answer(false)}>
-              {busy === "allow" ? <><Spinner />Allowing…</> : "Allow"}
-            </Button>
-          </div>
-        </>
-      ) : (
-        <List>
-          <ListRow title={<span className="font-normal text-muted-foreground">{request.state === "set" ? "Allowed." : request.state === "declined" ? "Declined." : `This request expired. Ask ${asker} to ask again.`}</span>} wrap />
-        </List>
+    <form className="flex max-w-lg flex-col gap-4" onSubmit={allow}>
+      <p className="text-sm text-muted-foreground">{request.why && <><Why why={request.why} />{" "}</>}{granted(request, apps, matches.find((m) => m.id === picked))}</p>
+      {matches.length > 0 && (
+        <Select value={picked} onValueChange={setPicked}>
+          <SelectTrigger className="w-full" aria-label="Which item"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {matches.map((m) => <SelectItem key={m.id} value={m.id}>{m.title}</SelectItem>)}
+            <SelectItem value={NEW}>New</SelectItem>
+          </SelectContent>
+        </Select>
       )}
-    </div>
+      {picked === NEW && wanted.map((f, i) => <Field key={f.name} first={i === 0} label={fieldLabel(f.name)} secret={f.secret} value={values[f.name] || ""} onChange={(v) => set(f.name, v)} />)}
+      {error && <Problem title={error} />}
+      <Button type="submit" size="lg" className="w-full" disabled={!ready}>{busy ? <><Spinner />Allowing…</> : "Allow"}</Button>
+    </form>
   )
 }
 
-/// A row that picks what it's for, with a check on the one picked, and no chevron: it opens nothing.
-function Pick({ on, run, leading, title, sub }) {
-  return (
-    <button type="button" aria-pressed={on} onClick={run} className="flex w-full min-w-0 cursor-pointer items-center gap-3 px-3 py-2.5 text-left text-sm outline-none hover:bg-accent/50 focus-visible:bg-accent/50">
-      {leading}
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{title}</span>
-        {sub && <span className="block truncate text-muted-foreground">{sub}</span>}
-      </span>
-      {on && <Icon name="check" className="size-4 shrink-0" />}
-    </button>
-  )
+/// Who a request is for, as its title says: the app, or the agent that asked for an item of its own.
+const asking = (r, apps) => (r.app !== AGENTS.name && appNamed(apps, r.app)?.title) || r.agent || r.by
+
+/// What Allow gives, to what, in a sentence: the item, for its page if that isn't the user's own, and for a new one the
+/// only sites it can go to.
+function granted(r, apps, item) {
+  const to = r.app === AGENTS.name ? "Your agents" : appNamed(apps, r.app)?.title || r.app
+  const page = r.scope.startsWith("user:") ? "" : ` for ${r.scope_name}`
+  const sites = !item && r.hosts?.length ? `, sent only to ${r.hosts.join(", ")}` : ""
+  return `${to} can use ${item?.title || r.title}${page}${sites}.`
 }
 
-/// A field to type a value in, its name beside it.
-function Field({ label, value, onChange, secret }) {
+/// A value to type, its name over it.
+function Field({ label, value, onChange, secret, first }) {
+  const name = `field-${label}`
   return (
-    <label className="flex items-center gap-3 px-3 py-1.5 text-sm">
-      <span className="w-28 shrink-0 text-muted-foreground">{label}</span>
+    <div className="flex flex-col gap-2">
+      <Label htmlFor={name}>{label}</Label>
       <Input
-        className="border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0 md:text-sm dark:bg-transparent"
+        id={name}
         type={secret ? "password" : "text"}
         autoComplete={secret ? "new-password" : "off"}
         spellCheck={false}
+        autoFocus={first}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-    </label>
+    </div>
   )
 }
 
