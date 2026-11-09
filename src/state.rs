@@ -587,9 +587,13 @@ pub fn install_line() -> Option<String> {
 /// What to paste into an AI so it connects itself, for Connect Your AI: the guide at the network's address, where it
 /// has one; else the one a device serves on its tailnet (`guide`), or, where it serves none, the command line's guide.
 pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
-    let (yours, cli) = (crate::config::YOURS, crate::config::CLI);
+    // Said by the user to their AI, so "my", where the screens' words are "your".
+    let (yours, cli) = (crate::config::YOURS.replacen("your ", "my ", 1), crate::config::CLI);
     match (address.filter(|a| !a.is_empty()), guide) {
-        (Some(address), _) => format!("Read {}/llms.txt and connect yourself to {yours}.", address.trim_end_matches('/')),
+        (Some(address), _) => {
+            let address = address.trim_end_matches('/');
+            format!("Read {address}/llms.txt and connect yourself to {yours}. If you can't open that link, show me, one step at a time, how to add {address}/mcp as a connector here.")
+        }
         (None, Some(guide)) => format!("Read {guide} and connect yourself to {yours}."),
         (None, None) => format!("Run \"{cli} help\" in a terminal, do what it says, and connect yourself to {yours}."),
     }
@@ -610,11 +614,11 @@ fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, st
         out.push(SettingsItem { app: Some(store.into()), ..item("store", "App Store", "squares-four", "#007aff") });
     }
     out.extend([
+        item("connect-ai", "Connect Your AI", "plugs-connected", "#ff2d55"),
+        item("vault", "Vault", "lock", "#5856d6"),
         item("users", "Users", "user-gear", "#30b0c7"),
         item("groups", "Groups", "users-three", "#34c759"),
         item("devices", "Devices", "devices", "#8e8e93"),
-        item("connect-ai", "Connect Your AI", "plugs-connected", "#ff2d55"),
-        item("vault", "Vault", "lock", "#5856d6"),
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
     if m.may(&me.id, "change-settings", NETWORK) {

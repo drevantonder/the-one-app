@@ -25,19 +25,16 @@ function ConnectAI() {
   return (
     <div className="flex max-w-2xl flex-col gap-4">
       <h1 className="large-title text-3xl font-bold tracking-tight">Connect Your AI</h1>
-      <p className="text-sm text-muted-foreground">Paste this into Claude, ChatGPT or another AI, and it can use your apps as you.</p>
-      {text !== null ? (
-        <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground">
-          <p className="font-mono text-[13px] leading-relaxed break-words select-text [overflow-wrap:anywhere]">{text}</p>
-          <CopyButton text={text} variant="default" className="self-start" />
-        </div>
-      ) : problem ? (
+      <p className="text-sm text-muted-foreground">Copy this and send it to Claude, ChatGPT or any other AI. It’ll walk you through the rest.</p>
+      {problem && text === null ? (
         <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
       ) : (
-        <div className="flex flex-col gap-3 rounded-xl border p-4" aria-busy="true" aria-label="Loading">
-          <Skeleton className="h-3.5 w-full" />
-          <Skeleton className="h-3.5 w-2/3" />
-        </div>
+        <>
+          <div aria-busy={text === null || undefined} className="min-h-[4.25rem] rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed select-text [overflow-wrap:anywhere]">
+            {text ?? <><Skeleton className="my-1 h-3.5 w-full" /><Skeleton className="my-1 h-3.5 w-2/3" /></>}
+          </div>
+          {text === null ? <Skeleton className="h-9 w-20" /> : <CopyButton text={text} variant="default" size="default" className="min-w-24 self-start" />}
+        </>
       )}
     </div>
   )

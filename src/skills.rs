@@ -69,7 +69,7 @@ pub fn connecting(address: Option<&str>) -> String {
         None => format!("the web address of {YOURS} followed by `/mcp`, like `https://{CLI}.example.com/mcp`"),
     };
     format!(
-        "When someone asks you to connect to {NAME}, do it yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can run commands (Claude Code, Codex, OpenCode, Cursor): run `{CLI} status`. If it answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.\n- If you can't (ChatGPT, Claude and other chat apps): add {mcp} as a connector, a custom MCP server. They sign in when it asks, and you act as them.",
+        "When someone asks you to connect to {NAME}, do it yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can run commands (Claude Code, Codex, OpenCode, Cursor): run `{CLI} status`. If it answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.\n- If you can't (ChatGPT, Claude and other chat apps): you can't add it yourself, so show them where this app adds a connector (a custom MCP server) and have them add {mcp}. They sign in when it asks, and then you act as them.",
         install()
     )
 }
