@@ -62,6 +62,10 @@ impl Parts {
                     if !parts.services.contains(&app) {
                         parts.services.push(app);
                     }
+                    // One in Swift isn't published: the Mac app builds it into its helpers (service/mac-helpers.sh).
+                    if [".swift", "Info.plist", ".entitlements"].iter().any(|end| file.ends_with(end)) {
+                        parts.mac = true;
+                    }
                 }
                 // An app's tests aren't in its deploy.
                 Some("apps") if file.split('/').nth(2) == Some("tests") => {}
@@ -71,6 +75,8 @@ impl Parts {
                         parts.apps.push(app);
                     }
                 }
+                // What the Mac's services in Swift are built on, which the Mac app builds (service/mac-helpers.sh).
+                Some("service") if file.starts_with("service/swift/") || file == "service/mac-helpers.sh" => parts.mac = true,
                 Some("service") => parts.service = true,
                 // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
@@ -103,6 +109,11 @@ mod tests {
         assert_eq!(of(&["apps/board/app.js", "apps/board/screen.js"]), Parts { apps: vec!["board".into()], ..Default::default() });
         assert_eq!(of(&["apps/shell/service/main.go"]), Parts { services: vec!["shell".into()], ..Default::default() });
         assert!(of(&["service/src/lib.rs"]).service);
+        let swift = of(&["apps/computer/service/Computer.swift"]);
+        assert!(swift.mac && !swift.node, "a service in Swift is built into the Mac app");
+        assert!(!of(&["apps/shell/service/main.go"]).mac);
+        let helpers = of(&["service/swift/Helper.swift"]);
+        assert!(helpers.mac && !helpers.service, "what the Swift services are built on is the Mac app's to build");
         assert!(of(&["src/node.rs"]).node && of(&["src/node.rs"]).mac);
         let workers = of(&["cloudflare/relay/worker.js"]);
         assert!(workers.node && !workers.mac, "the Workers are deployed by the node, not built by a Mac");
