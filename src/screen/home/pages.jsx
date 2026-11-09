@@ -464,7 +464,7 @@ function contextMenu(e) {
   const found = itemAt(e.target)
   if (found?.item.menu) {
     one.tap("medium")
-    return found.item.menu(e)
+    return found.item.menu(found.el)
   }
   const scope = e.target.closest("[data-page]")?.dataset.page
   if (scope && scope !== SETTINGS && home.page(scope)) home.menu([...addActions(home.page(scope)), ...(home.canArrange(scope) ? [editHomePage] : [])], e)

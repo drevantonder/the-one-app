@@ -27,15 +27,6 @@ export const home = (() => {
     return g?.members.some((m) => m.user === me()?.id && m.role === "admin") || false;
   }
 
-  function owns(a) {
-    const owner = a.owner, u = me();
-    if (!owner || !u) return false;
-    if (owner === "admins") return isAdmin();
-    if (owner === `user:${u.id}`) return true;
-    const g = owner.startsWith("group:") && network()?.groups.find((g) => g.id === owner.slice(6));
-    return !!g && g.members.some((m) => m.user === u.id && m.role === "admin");
-  }
-
   const appsOn = (p) => h.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
   const accountsOn = (p) => h.apps.filter((a) => accountsTool(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const badge = (name, p) => Math.max(0, h.badges[p.scope]?.[name] || 0);
@@ -134,18 +125,6 @@ export const home = (() => {
     if (canArrange(p.scope) && (a.deploys || 0) > 0) {
       out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/remove/remove", { app: a.name, scope: p.scope }),
         (apps) => apps.map((x) => (x.name === a.name ? { ...x, added: (x.added || []).filter((s) => (s.startsWith("user:") ? "user" : s) !== p.scope) } : x))) });
-    }
-    if (owns(a) && (a.deploys || 0) > 0) {
-      out.push({
-        title: "Delete App…", icon: "trash", danger: true,
-        run: async () => {
-          const sure = await one.alert({
-            title: `Delete ${label(a)}?`, action: "Delete App", danger: true,
-            text: `${label(a)} leaves every page, for everyone. Restore it from Recently Deleted in the App Store.`,
-          });
-          if (sure) change(() => one.api("POST", "/v1/retire", { app: a.name, how: "deleted" }), (apps) => apps.filter((x) => x.name !== a.name));
-        },
-      });
     }
     return out;
   }

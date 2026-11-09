@@ -18,44 +18,36 @@ var c = (() => {
 	function p(e) {
 		return e === "user" ? !0 : e === "global" ? r() : (n()?.groups.find((t) => `group:${t.id}` === e))?.members.some((e) => e.user === t()?.id && e.role === "admin") || !1;
 	}
-	function m(e) {
-		let i = e.owner, a = t();
-		if (!i || !a) return !1;
-		if (i === "admins") return r();
-		if (i === `user:${a.id}`) return !0;
-		let o = i.startsWith("group:") && n()?.groups.find((e) => e.id === i.slice(6));
-		return !!o && o.members.some((e) => e.user === a.id && e.role === "admin");
-	}
-	let h = (t) => e.apps.filter((e) => s(e) && l(e).includes(t.scope)), g = (t) => e.apps.filter((e) => c(e) && l(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), _ = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
-	function v(t) {
+	let m = (t) => e.apps.filter((e) => s(e) && l(e).includes(t.scope)), h = (t) => e.apps.filter((e) => c(e) && l(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), g = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
+	function _(t) {
 		let n = new Set(e.apps.filter((e) => l(e).includes(t.scope)).map((e) => e.name));
 		return (e.widgets[t.scope] || []).filter((e) => n.has(e.app));
 	}
-	let y = (t) => !e.widgets[t.scope] || e.failed.has(t.scope), b = [
+	let v = (t) => !e.widgets[t.scope] || e.failed.has(t.scope), y = [
 		"small",
 		"medium",
 		"large",
 		"xl"
-	], x = (e) => b.filter((t) => !e.sizes || e.sizes[t]), S = (e, t) => e.sizes?.[t] || e.root;
-	function C(e, t) {
+	], b = (e) => y.filter((t) => !e.sizes || e.sizes[t]), x = (e, t) => e.sizes?.[t] || e.root;
+	function S(e, t) {
 		let n = {
 			...e,
 			instance: t.id,
 			sizes: { ...e.sizes || {} }
 		};
-		t.size && x(e).includes(t.size) && (n.size = t.size);
+		t.size && b(e).includes(t.size) && (n.size = t.size);
 		let r = t.id && e.placed?.[t.id];
 		return r?.sizes && Object.assign(n.sizes, r.sizes), r?.error && (n.error = r.error), n;
 	}
-	function w(t) {
-		let n = h(t), r = v(t), i = e.state?.arrangements?.[t.scope];
+	function C(t) {
+		let n = m(t), r = _(t), i = e.state?.arrangements?.[t.scope];
 		if (!i) return n.map((e) => ({ app: e }));
 		let a = [], o = /* @__PURE__ */ new Set();
 		for (let s of i.items || []) if (s.widget) {
 			let n = r.find((e) => e.app === s.app && e.widget === s.widget);
-			if (!s.id || o.has(`widget:${s.id}`) || !n && !(y(t) && e.apps.some((e) => e.name === s.app && l(e).includes(t.scope)))) continue;
+			if (!s.id || o.has(`widget:${s.id}`) || !n && !(v(t) && e.apps.some((e) => e.name === s.app && l(e).includes(t.scope)))) continue;
 			o.add(`widget:${s.id}`), a.push(n ? {
-				widget: C(n, s),
+				widget: S(n, s),
 				kept: s
 			} : {
 				pending: !0,
@@ -68,71 +60,56 @@ var c = (() => {
 		let s = new Set(i.hidden || []);
 		return a.concat(n.filter((e) => !o.has(`app:${e.name}`) && !s.has(e.name)).map((e) => ({ app: e })));
 	}
-	function T() {
+	function w() {
 		let t = a(e.state?.config?.store);
 		return t && s(t) && d().some((e) => l(t).includes(e.scope)) ? t : null;
 	}
-	let E = (e, t, n = "main", r = {}) => () => one.open(n, r, e.name, t ? { scope: t.scope } : {}), D = (e, t, n) => o(e, "settings") ? E(e, t, "settings", n ? { add: !0 } : {}) : null, O = (e) => T() && o(T(), "app") && (e.deploys || 0) > 0 ? E(T(), null, "app", { app: e.name }) : null, k = () => T() ? E(T(), null, "main", { accounts: !0 }) : null, A = () => T() && E(T(), null)();
-	async function j(e, t, n = {}) {
+	let T = (e, t, n = "main", r = {}) => () => one.open(n, r, e.name, t ? { scope: t.scope } : {}), E = (e, t, n) => o(e, "settings") ? T(e, t, "settings", n ? { add: !0 } : {}) : null, D = (e) => w() && o(w(), "app") && (e.deploys || 0) > 0 ? T(w(), null, "app", { app: e.name }) : null, O = () => w() ? T(w(), null, "main", { accounts: !0 }) : null, k = () => w() && T(w(), null)();
+	async function A(e, t, n = {}) {
 		return (await one.api("POST", "/v1/call", {
 			app: e,
 			tool: t,
 			input: n
 		})).ok;
 	}
-	let M = (e) => one.alert({
+	let j = (e) => one.alert({
 		title: "Couldn’t Do That",
 		text: one.plain(e).title
 	});
-	async function N(t, n) {
+	async function M(t, n) {
 		let r = e.apps;
 		n && (e.apps = n(e.apps), e.redraw?.());
 		try {
-			await t(), await I(e.redraw);
+			await t(), await F(e.redraw);
 		} catch (t) {
-			n && (e.apps = r, e.redraw?.()), M(t);
+			n && (e.apps = r, e.redraw?.()), j(t);
 		}
 	}
-	function P(e, t) {
+	function N(e, t) {
 		let n = [];
-		return D(e, t) && n.push({
+		return E(e, t) && n.push({
 			title: "Settings",
 			icon: "gear-six",
-			run: D(e, t)
-		}), O(e) && n.push({
+			run: E(e, t)
+		}), D(e) && n.push({
 			title: "Open in App Store",
 			icon: "bag",
-			run: O(e)
+			run: D(e)
 		}), p(t.scope) && (e.deploys || 0) > 0 && n.push({
 			title: `Remove from ${t.title}`,
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => N(() => one.api("POST", "/v1/remove/remove", {
+			run: () => M(() => one.api("POST", "/v1/remove/remove", {
 				app: e.name,
 				scope: t.scope
 			}), (n) => n.map((n) => n.name === e.name ? {
 				...n,
 				added: (n.added || []).filter((e) => (e.startsWith("user:") ? "user" : e) !== t.scope)
 			} : n))
-		}), m(e) && (e.deploys || 0) > 0 && n.push({
-			title: "Delete App…",
-			icon: "trash",
-			danger: !0,
-			run: async () => {
-				await one.alert({
-					title: `Delete ${i(e)}?`,
-					action: "Delete App",
-					danger: !0,
-					text: `${i(e)} leaves every page, for everyone. Restore it from Recently Deleted in the App Store.`
-				}) && N(() => one.api("POST", "/v1/retire", {
-					app: e.name,
-					how: "deleted"
-				}), (t) => t.filter((t) => t.name !== e.name));
-			}
 		}), n;
 	}
-	async function F(e, t) {
+	async function P(e, t) {
 		if (!e.length) return;
 		t instanceof Event && (t = {
 			x: t.clientX,
@@ -141,10 +118,10 @@ var c = (() => {
 		let n = await one.menu(e, t).catch(() => null);
 		n != null && e[n]?.run();
 	}
-	async function I(t) {
-		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await L(null, t);
+	async function F(t) {
+		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await I(null, t);
 	}
-	async function L(t, n) {
+	async function I(t, n) {
 		let r = (e) => `scope=${encodeURIComponent(e.scope)}`;
 		await Promise.all(u().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((n) => {
 			e.widgets[t.scope] = n, e.failed.delete(t.scope);
@@ -152,13 +129,13 @@ var c = (() => {
 			e.badges[t.scope] = n;
 		}, () => {}).then(() => n?.())]));
 	}
-	let R = (t) => u().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
-	function z(t) {
+	let L = (t) => u().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
+	function R(t) {
 		let n, r, i = !1, a = /* @__PURE__ */ new Set(), o = (r) => {
 			r ? r.forEach((e) => a.add(e)) : i = !0, clearTimeout(n), n = setTimeout(() => {
-				let n = i ? I(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
+				let n = i ? F(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
 					e.apps = t;
-				}), L([...a], t)]);
+				}), I([...a], t)]);
 				i = !1, a.clear(), n.then(() => {
 					t(), l(), c();
 				}).catch(() => {});
@@ -173,7 +150,7 @@ var c = (() => {
 			Object.values(e.widgets).flat().forEach((e) => Object.values(e.sizes || { root: e.root }).forEach(n)), t.length && (r = setTimeout(() => o(u().map((e) => e.scope)), Math.min(9e5, Math.max(6e4, Math.min(...t) - Date.now()))));
 		};
 		one.on("changed", (e) => {
-			e.type === "changed" && e.apps?.length ? o(R(e.apps)) : [
+			e.type === "changed" && e.apps?.length ? o(L(e.apps)) : [
 				"changed",
 				"devices",
 				"network"
@@ -192,29 +169,29 @@ var c = (() => {
 		pages: d,
 		page: f,
 		canArrange: p,
-		appsOn: h,
-		accountsOn: g,
+		appsOn: m,
+		accountsOn: h,
 		accountsTool: c,
-		badge: _,
-		widgetsOn: v,
-		waiting: y,
-		items: w,
-		supported: x,
-		tree: S,
-		store: T,
-		open: E,
-		settings: D,
-		inStore: O,
-		addAccountApp: k,
-		openStore: A,
-		call: j,
-		failed: M,
-		change: N,
-		actions: P,
-		menu: F,
-		load: I,
-		loadWidgets: L,
-		watch: z
+		badge: g,
+		widgetsOn: _,
+		waiting: v,
+		items: C,
+		supported: b,
+		tree: x,
+		store: w,
+		open: T,
+		settings: E,
+		inStore: D,
+		addAccountApp: O,
+		openStore: k,
+		call: A,
+		failed: j,
+		change: M,
+		actions: N,
+		menu: P,
+		load: F,
+		loadWidgets: I,
+		watch: R
 	};
 })();
 function l() {
