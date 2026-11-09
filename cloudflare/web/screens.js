@@ -489,7 +489,9 @@ addEventListener("message", async (e) => {
         // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,
         // Backups in Settings) opens as if picked there, with no Back; only what's deeper than it is pushed.
         f.sheet?.close(null);
-        go(to, { pushed: !listed(to) }, Array.isArray(m.rect) && m.rect.length === 4 && m.rect.every(Number.isFinite) ? m.rect : undefined);
+        // Where it was opened from, in the window: a screen says where in its own frame.
+        const at = f.frame.getBoundingClientRect();
+        go(to, { pushed: !listed(to) }, Array.isArray(m.rect) && m.rect.length === 4 && m.rect.every(Number.isFinite) ? [m.rect[0] + at.left, m.rect[1] + at.top, m.rect[2], m.rect[3]] : undefined);
         return null;
       },
       close: (value) => {
