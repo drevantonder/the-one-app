@@ -59,13 +59,15 @@ async function advertise(g, r) {
 async function receive(ctx, g, api, owner, name, found, hash) {
   const bytes = hash ? await ctx.blob.get(hash) : new Uint8Array();
   const commands = [];
+  let shallow = false;
   let at = 0;
   while (at + 4 <= bytes.length) {
     const len = parseInt(utf8.decode(bytes.subarray(at, at + 4)), 16);
     if (!len) { at += 4; break; }
     const [line] = utf8.decode(bytes.subarray(at + 4, at + len)).split("\0");
     const [old, head, ref] = line.trim().split(" ");
-    commands.push({ old, head, ref });
+    if (old === "shallow") shallow = true;
+    else commands.push({ old, head, ref });
     at += len;
   }
   // git checks it may push by sending nothing first.
@@ -77,6 +79,8 @@ async function receive(ctx, g, api, owner, name, found, hash) {
   if (found.why) return refuse(found.why);
   if (r?.deleted) return refuse(`${r.path} was deleted: its owners restore it from Recently Deleted`);
   if (r && !(await g.may("push", api.object(r)))) return refuse(`only ${api.ownerName(ctx, r.owner)} and its collaborators push to ${r.path}: fork it (repos fork ${r.path}), push to your fork, and tell them`);
+  // Nothing here checks that a push's commits have their parents, so a shallow clone's, cut short, would leave a branch that can't be cloned.
+  if (shallow) return refuse("this clone is shallow, so its history is cut short: git fetch --unshallow, then push again");
   if (!r) {
     const made = api.newRepo(ctx, g, owner, name);
     if (made.why) return refuse(made.why);
