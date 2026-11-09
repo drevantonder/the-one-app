@@ -13,7 +13,7 @@ use crate::node::Node;
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/blobs", Who::SignedIn, post(put_blob))
-        .says(Op::post("Keep a file, read as it comes").takes_file())
+        .says(Op::post("Keep a file, read as it comes").takes_file().answers_as(json!({ "type": "object", "required": ["blob", "size"], "properties": { "blob": { "type": "string", "description": "its hash" }, "size": { "type": "integer", "description": "bytes" } } })))
         .route("/v1/blobs/{hash}", Who::SignedIn, get(blob))
         .says(Op::get("Read back a kept file").file())
 }

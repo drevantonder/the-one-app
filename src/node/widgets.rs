@@ -14,9 +14,9 @@ pub(crate) mod routes {
     pub fn routes() -> Routes {
         Routes::default()
             .route("/v1/widgets", Who::SignedIn, get(widgets))
-            .says(Op::get("The caller's widgets, drawn by their apps").query::<WidgetsQuery>())
+            .says(Op::get("The caller's widgets, drawn by their apps").query::<WidgetsQuery>().answers_as(json!({ "type": "array", "items": { "type": "object", "required": ["app", "widget"], "properties": { "app": { "type": "string" }, "widget": { "type": "string" } }, "additionalProperties": true } })))
             .route("/v1/badges", Who::SignedIn, get(badges))
-            .says(Op::get("The caller's badges").query::<WidgetsQuery>())
+            .says(Op::get("The caller's badges").query::<WidgetsQuery>().answers_as(json!({ "type": "object", "description": "each app's name → its badge, a number above 0; an app with none is left out", "additionalProperties": { "type": "number" } })))
     }
 
     #[derive(Deserialize, schemars::JsonSchema)]

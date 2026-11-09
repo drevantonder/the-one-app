@@ -14,14 +14,51 @@ use crate::node::{Caller, Node};
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/apps", Who::SignedIn, get(apps))
-        .says(Op::get("Every app the caller can see, with its tools where it's added for them"))
+        .says(Op::get("Every app the caller can see, with its tools where it's added for them").answers_as(json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name", "owner", "deploys", "added"],
+                "properties": {
+                    "name": { "type": "string" },
+                    "title": { "type": "string" },
+                    "owner": { "type": "string", "description": "user:<id>, group:<id> or admins" },
+                    "from": { "type": ["string", "null"], "description": "the app it was forked from" },
+                    "forks": { "type": "array", "items": { "type": "string" } },
+                    "deploys": { "type": "integer" },
+                    "bundle": { "type": ["string", "null"], "description": "its latest deploy" },
+                    "added": { "type": "array", "items": { "type": "string" }, "description": "the scopes the caller sees it added in" },
+                    "deleted": { "type": "object", "description": "{ time, by, yours }, once deleted", "additionalProperties": true },
+                    "tools": { "type": "array", "items": crate::api::openapi::tool_spec(), "description": "where it's added for the caller" },
+                    "widgets": { "type": "array", "items": { "type": "object" } },
+                    "screens": { "type": "array", "items": { "type": "object" } },
+                    "schedules": { "type": "array", "items": { "type": "object" } }
+                },
+                "additionalProperties": true
+            }
+        })))
         .route("/v1/labs", Who::SignedIn, get(labs))
-        .says(Op::get("Every lab, for an admin"))
+        .says(Op::get("Every lab, for an admin").answers_as(json!({
+            "type": "array",
+            "items": { "type": "object", "required": ["title", "description", "on", "setting"], "properties": { "title": { "type": "string" }, "description": { "type": "string" }, "on": { "type": "boolean" }, "setting": { "type": "string" } }, "additionalProperties": true }
+        })))
         .route("/v1/deploy", Who::SignedIn, post(deploy))
-        .says(Op::post("Deploy an app, making it first if there's none by that name").body::<Deploy>())
+        .says(Op::post("Deploy an app, making it first if there's none by that name").body::<Deploy>().answers_as(json!({
+            "type": "object",
+            "required": ["bundle", "made", "here"],
+            "properties": {
+                "bundle": { "type": "string", "description": "the deploy's hash" },
+                "made": { "type": "boolean", "description": "whether the app is new" },
+                "before": { "type": ["string", "null"], "description": "the deploy it replaced" },
+                "here": { "type": "boolean", "description": "whether this device runs it yet" },
+                "tools": { "type": "array", "items": { "type": "string" }, "description": "its tools, once this device runs it" },
+                "lacking": { "type": "array", "items": { "type": "string" }, "description": "those that give no title or no output" },
+                "failed": { "type": "string", "description": "why it doesn't start" }
+            }
+        })))
         .route("/v1/schedule", Who::ThisMachine, post(schedule))
         .route("/v1/arrange", Who::SignedIn, post(arrange))
-        .says(Op::post("Arrange one of the caller's pages").body::<Arrange>())
+        .says(Op::post("Arrange one of the caller's pages").body::<Arrange>().done())
         .route("/v1/fork", Who::ThisMachine, post(fork))
         .route("/v1/source/{app}", Who::ThisMachine, get(source))
 }

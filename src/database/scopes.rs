@@ -906,7 +906,7 @@ pub struct User {
 
 /// What an endpoint does: a client is what a user and their agents use, and signs for them; compute runs apps'
 /// calls; a service offers a device's abilities.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     Client,

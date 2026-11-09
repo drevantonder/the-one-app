@@ -5,13 +5,22 @@ use axum::Json;
 use axum::extract::State;
 use axum::routing::post;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::api::openapi::Op;
 use crate::api::{Body, Me, Reply, Routes, Who};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
-    Routes::default().route("/v1/backups/place", Who::SignedIn, post(place)).says(Op::post("Add a place backups go, after trying it").body::<Place>())
+    Routes::default().route("/v1/backups/place", Who::SignedIn, post(place)).says(Op::post("Add a place backups go, after trying it").body::<Place>().answers_as(json!({
+        "type": "object",
+        "required": ["tried"],
+        "properties": {
+            "tried": { "type": "array", "items": { "type": "object", "required": ["step"], "properties": { "step": { "type": "string" }, "error": { "type": ["string", "null"] } } }, "description": "what trying it did, each step and why it failed, if it did" },
+            "id": { "type": "string", "description": "the place's, once added" }
+        },
+        "additionalProperties": true
+    })))
 }
 
 /// A place to add, a folder (`path`) or S3-compatible storage (`endpoint…`), after trying it (only trying it, with

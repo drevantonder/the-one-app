@@ -565,3 +565,46 @@ async fn every_built_in_apps_tools_say_what_they_answer() {
     assert!(seen > 150, "the built-in apps' tools were found: {seen}");
     assert!(lacking.is_empty(), "these tools give no title or no output: {}", lacking.join(", "));
 }
+
+/// What the OpenAPI document says a route answers is what it answers: each JSON answer is held to its schema, as a tool's
+/// is to its output.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_routes_answer_is_what_the_document_says() {
+    use one::api::client::{InProcess, Via};
+    let a = start("route-answers").await;
+    create(&a, "Home", "Andre").await;
+    add_notes(&a).await;
+    eventually("notes to run", &a, async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let document = one::api::openapi::document(&a.apps(&me).await.unwrap(), true);
+    // As this machine's own programs ask: over its loopback, with the token in the node's home.
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(one::protocol::header::LOCAL_TOKEN, one::api::local_token(a.dir()).unwrap().parse().unwrap());
+    let from = std::sync::Arc::new(InProcess::new(a.clone(), None, Some(axum::extract::ConnectInfo("127.0.0.1:1".parse().unwrap())), &headers));
+    let mut asked = 0;
+    for (method, path, body) in [
+        ("GET", "/v1/state", None),
+        ("GET", "/v1/apps", None),
+        ("GET", "/v1/labs", None),
+        ("GET", "/v1/widgets", None),
+        ("GET", "/v1/badges", None),
+        ("GET", "/v1/vault", None),
+        ("GET", "/v1/vault/requests", None),
+        ("POST", "/v1/call", Some(json!({ "app": "notes", "tool": "read", "input": {} }))),
+    ] {
+        let schema = document["paths"][path][method.to_lowercase()]["responses"]["200"]["content"]["application/json"]["schema"].clone();
+        assert!(schema.is_object(), "{method} {path} says what it answers");
+        let from = from.clone();
+        let answer = tokio::task::spawn_blocking(move || {
+            let body = body.map(|b: Value| b.to_string().into_bytes());
+            let answer = from.send(method, path, &[("content-type", "application/json")], body, None).unwrap();
+            (answer.status, serde_json::from_reader::<_, Value>(answer.body).unwrap())
+        })
+        .await
+        .unwrap();
+        assert_eq!(answer.0, 200, "{method} {path}: {}", answer.1);
+        one::tools::check(&schema, &answer.1).unwrap_or_else(|err| panic!("{method} {path} answered what the document doesn't say: {err:#}\n{}", answer.1));
+        asked += 1;
+    }
+    assert_eq!(asked, 8);
+}

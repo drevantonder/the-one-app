@@ -14,10 +14,14 @@ use crate::node::Node;
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/pair", Who::SignedIn, post(pair))
-        .says(Op::post("A pairing code for a new device or someone new").body::<Pair>())
+        .says(Op::post("A pairing code for a new device or someone new").body::<Pair>().answers_as(json!({
+            "type": "object",
+            "required": ["code", "user"],
+            "properties": { "code": { "type": "string", "description": "to give the new device" }, "user": { "type": "string", "description": "whose it will be" } }
+        })))
         .route("/v1/name", Who::ThisMachine, post(name))
         .route("/v1/erase", Who::SignedIn, post(erase))
-        .says(Op::post("Erase what a device keeps").body::<Device>())
+        .says(Op::post("Erase what a device keeps").body::<Device>().answers_as(json!({ "type": "object", "required": ["erasing"], "properties": { "erasing": { "type": "string", "description": "the device's name" } } })))
         .route("/v1/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
 }
 

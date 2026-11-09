@@ -17,11 +17,11 @@ pub(super) fn routes() -> Routes {
     use Who::*;
     Routes::default()
         .route("/v1/state", SignedIn, get(state))
-        .says(Op::get("Who's who and what this device reads of the network"))
+        .says(Op::get("Who's who and what this device reads of the network").answers::<crate::state::State>())
         .route("/v1/keys", SignedIn, get(keys_get).post(keys_post))
         .route("/v1/create", ThisMachine, post(create))
         .route("/v1/join", ThisMachine, post(join))
-        .says(Op::post("Join a network with a pairing code").body::<Join>())
+        .says(Op::post("Join a network with a pairing code").body::<Join>().done())
         .route("/v1/steps", SignedIn, post(steps))
         .route("/v1/steps/global", SignedIn, get(global_steps))
 }

@@ -41,6 +41,16 @@ impl Priority {
     }
 }
 
+impl schemars::JsonSchema for Priority {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Priority".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "oneOf": [{ "type": "integer", "minimum": 1 }, { "const": "last" }] })
+    }
+}
+
 impl serde::Serialize for Priority {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.to_value().serialize(serializer)

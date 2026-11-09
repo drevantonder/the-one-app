@@ -16,12 +16,12 @@ use crate::node::{Caller, Node};
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/vault", Who::SignedIn, get(list).post(set))
-        .says(Op::get("The items the caller may change, in one scope or all").query::<Items>())
-        .says(Op::post("Change an item").body::<Change>())
+        .says(Op::get("The items the caller may change, in one scope or all").query::<Items>().answers_as(json!({ "type": "array", "items": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } }, "additionalProperties": true } })))
+        .says(Op::post("Change an item").body::<Change>().answers_as(json!({ "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the item's" } } })))
         .route("/v1/vault/requests", Who::SignedIn, get(requests))
-        .says(Op::get("The requests for items the caller may answer, or one").query::<Asked>())
+        .says(Op::get("The requests for items the caller may answer, or one").query::<Asked>().answers_as(json!({ "type": "array", "items": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } }, "additionalProperties": true } })))
         .route("/v1/vault/answer", Who::SignedIn, post(answer))
-        .says(Op::post("Answer a request for an item").body::<Answer>())
+        .says(Op::post("Answer a request for an item").body::<Answer>().done())
 }
 
 /// Who asked, crediting the `agent` the body (or query) names, if any.

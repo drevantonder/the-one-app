@@ -42,7 +42,12 @@ pub struct Op {
 
 impl Op {
     fn new(method: &'static str, summary: &'static str) -> Op {
-        Op { method, summary, query: None, body: None, answer: json!({ "application/json": {} }) }
+        Op { method, summary, query: None, body: None, answer: Op::unsaid() }
+    }
+
+    /// What an answer is until its route says: anything.
+    fn unsaid() -> Value {
+        json!({ "application/json": {} })
     }
 
     pub fn get(summary: &'static str) -> Op {
@@ -63,6 +68,23 @@ impl Op {
     pub fn query<T: JsonSchema>(mut self) -> Op {
         self.query = Some(schema_of::<T>());
         self
+    }
+
+    /// Its JSON answer, the struct its handler gives.
+    pub fn answers<T: JsonSchema>(mut self) -> Op {
+        self.answer = json!({ "application/json": { "schema": schema_of::<T>() } });
+        self
+    }
+
+    /// Its JSON answer, as JSON Schema, for one its handler makes of JSON. `tests/e2e.rs` holds what it answers to it.
+    pub fn answers_as(mut self, schema: Value) -> Op {
+        self.answer = json!({ "application/json": { "schema": schema } });
+        self
+    }
+
+    /// It answers `{}`: that it's done.
+    pub fn done(self) -> Op {
+        self.answers_as(json!({ "type": "object", "additionalProperties": false }))
     }
 
     /// It takes a file's bytes.
@@ -161,6 +183,26 @@ pub fn document(apps: &[Value], this_machine: bool) -> Value {
         "tags": tags,
         "paths": paths,
         "components": { "responses": error_responses() },
+    })
+}
+
+/// A tool as an app lists it (`GET /v1/apps`), and the core's as `core_tools` do.
+pub fn tool_spec() -> Value {
+    json!({
+        "type": "object",
+        "required": ["name", "description", "input"],
+        "properties": {
+            "name": { "type": "string" },
+            "title": { "type": "string", "description": "a few words for what it does" },
+            "description": { "type": "string" },
+            "input": { "type": "object", "description": "JSON Schema of what it takes" },
+            "output": { "description": "JSON Schema of what it answers" },
+            "reads": { "type": "boolean" },
+            "confirm": { "type": "boolean" },
+            "accounts": { "type": "boolean" },
+            "words": { "type": "array", "items": { "type": "string" } },
+            "lab": { "type": "string" }
+        }
     })
 }
 
@@ -264,6 +306,14 @@ mod tests {
         assert!(paths.contains_key("/v1/call/notes/add") && !paths.contains_key("/v1/call/notes/_http"), "their app's tools, not its own");
         assert!(!paths.keys().any(|p| p.starts_with("/v1/call/gone/")), "a deleted app's");
         assert!(!paths.contains_key("/v1/join") && super::document(&apps, true)["paths"].get("/v1/join").is_some(), "only this machine's programs join");
+    }
+
+    /// A route in the document says what it answers: one left to say anything is one a client can't read the shape of.
+    #[test]
+    fn each_route_says_what_it_answers() {
+        for (path, _, op) in crate::api::routes().listed {
+            assert!(op.answer != super::Op::unsaid(), "{} {path} says what it answers (src/api/openapi.rs: `answers`, `answers_as`, `done`)", op.method);
+        }
     }
 
     /// The last word of a type's path: `Body<body::Role>` and `.body::<Role>()` name the same struct.

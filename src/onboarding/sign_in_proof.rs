@@ -86,7 +86,7 @@ impl Network {
 }
 
 /// What a user signs in with, as the `device` entry that listed one of their devices records it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Account {
     /// An account at an OIDC provider: who it is (`subject`) at `issuer`, signed in for `audience`, the network's

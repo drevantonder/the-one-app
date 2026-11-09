@@ -28,7 +28,7 @@ pub fn app_route(path: &str) -> bool {
 pub(super) fn routes() -> Routes {
     Routes::default()
         .route("/v1/call", Who::SignedIn, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
-        .says(Op::post("Run one call of an app's tool or a service's function").body::<CallRequest>())
+        .says(Op::post("Run one call of an app's tool or a service's function").body::<CallRequest>().answers_as(json!({ "type": "object", "required": ["ok"], "properties": { "ok": { "description": "the tool's or function's answer, as its output schema says" } } })))
         // An app's own requests, run as its tool `_http` for its user, whose checks are the app's: git's, to Repos.
         .route(APP_ROUTE, Who::SignedIn, any(app_http))
 }

@@ -16,7 +16,7 @@ use crate::rank::{self, Priority};
 
 /// `GET /v1/state`'s answer, as every reader (the screens, the web client, widgets, the CLI, the Cloudflare node's
 /// Worker) reads it: the field names are the wire's.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct State {
     pub config: Config,
     /// Who is looking.
@@ -57,7 +57,7 @@ impl State {
 }
 
 /// The custom build the network runs.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Config {
     pub name: String,
     pub cli: String,
@@ -66,7 +66,7 @@ pub struct Config {
 }
 
 /// Who is looking, and as which device or sign-in (`key` empty for a sign-in, which is no device).
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Viewer {
     pub key: String,
     pub name: String,
@@ -74,14 +74,14 @@ pub struct Viewer {
 }
 
 /// The client looking, when it's one of the user's devices.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ClientHere {
     pub key: String,
     pub name: String,
 }
 
 /// The node answering.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Answering {
     pub key: String,
     pub name: String,
@@ -90,7 +90,7 @@ pub struct Answering {
     pub guide: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct User {
     pub id: String,
     pub name: String,
@@ -98,7 +98,7 @@ pub struct User {
 }
 
 /// One of a user's pages: theirs, a group's or everyone's.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Page {
     /// `user`, `group:<id>` or `global`.
     pub scope: String,
@@ -110,7 +110,7 @@ pub struct Page {
 }
 
 /// One entry of Settings' menu.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SettingsItem {
     pub name: String,
     pub title: String,
@@ -128,7 +128,7 @@ pub struct SettingsItem {
 }
 
 /// The network as its scope database says it, and what the node answering adds to it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Network {
     pub name: String,
     pub root: Option<String>,
@@ -162,19 +162,19 @@ pub struct Network {
     pub cloudflare_node: Option<CloudflareNode>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Epoch {
     pub n: u32,
     pub hashes: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RecoveryUsed {
     pub time: u64,
     pub user: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NetworkUser {
     pub id: String,
     pub name: String,
@@ -183,7 +183,7 @@ pub struct NetworkUser {
     pub me: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Group {
     pub id: String,
     pub name: String,
@@ -194,14 +194,14 @@ pub struct Group {
     pub invited: Vec<Member>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Member {
     pub user: String,
     pub role: Role,
 }
 
 /// A device that runs calls.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Device {
     pub key: String,
     pub seal: String,
@@ -227,7 +227,7 @@ pub struct Device {
 }
 
 /// What the node answering knows of a device that the scope database doesn't: nothing, for the Cloudflare node.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeviceNow {
     /// The node answering.
     #[serde(default)]
@@ -261,7 +261,7 @@ pub struct DeviceNow {
     pub updating: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Switched {
     pub name: String,
     pub time: u64,
@@ -269,7 +269,7 @@ pub struct Switched {
 
 /// What a device says of a service serving there: what it is, its version (a service's own), whom it serves, and who
 /// installed it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InstalledService {
     pub name: String,
     pub title: String,
@@ -288,7 +288,7 @@ pub struct InstalledService {
 
 /// A part of a device's oned: `apps`, the app service, or a service, with whether it's switched on and, while it isn't
 /// simply on or off, what it's doing or what went wrong.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Part {
     pub name: String,
     pub on: bool,
@@ -309,7 +309,7 @@ pub struct Part {
 }
 
 /// A device that doesn't run calls: a browser or an app signed in.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Client {
     pub key: String,
     pub seal: String,
@@ -329,7 +329,7 @@ pub struct Client {
     pub sign_in: Option<crate::onboarding::sign_in_proof::Account>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AppSchedule {
     pub endpoint: String,
     pub scope: String,
@@ -340,7 +340,7 @@ pub struct AppSchedule {
     pub keys: BTreeMap<u32, String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CloudflareNode {
     pub priority: Priority,
     pub key: String,
