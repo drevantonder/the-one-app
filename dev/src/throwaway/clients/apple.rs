@@ -49,10 +49,11 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     }
     let tunnel = spawn(dir, std::process::Command::new("ssh").args(&forward), "mac-forward.log", true)?;
     std::fs::write(dir.join("mac-forward.pid"), tunnel.to_string())?;
-    let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{host}", dir.display()).as_bytes()).into();
+    // Its own control port: the Mac app and the iPhone app's simulator share the Mac's loopback, and run together.
+    let script = if iphone { "iphone" } else { "mac" };
+    let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{host}\n{script}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
     eprintln!("Building client/native on {host} (dev profile; the first time takes minutes)…");
-    let script = if iphone { "iphone" } else { "mac" };
     let said = ssh(&format!("cd {there} && PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH client/native/{script}/throwaway.sh '{address}' {control}"))?;
     // The iPhone's says its simulator too.
     let (sim, log) = match said.lines().last().unwrap_or_default().rsplit_once(' ') {
