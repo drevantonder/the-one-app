@@ -395,7 +395,9 @@ export function openSheet(r) {
   return new Promise((done) => {
     let value = null;
     const sheet = ui.showSheet({ title: titleOf(r), done: r.name === "request" ? "Cancel" : "Done" });
-    const f = frameFor(r, sheet.body, { sheet: { close: (v) => ((value = v ?? null), sheet.close()), title: sheet.setTitle } });
+    // Its screen draws in a frame that fills the body, so until it says how tall it is the body is a short wait.
+    sheet.fit(128);
+    const f = frameFor(r, sheet.body, { sheet: { close: (v) => ((value = v ?? null), sheet.close()), title: sheet.setTitle, fit: sheet.fit } });
     sheet.closed.then(() => ((frames = frames.filter((x) => x !== f)), done(value)));
   });
 }
@@ -418,8 +420,8 @@ addEventListener("message", async (e) => {
   if (!f) return;
   const r = f.route, mine = r.kind === "own";
   if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
-  // The panel's window fits its screen.
-  if (typeof e.data?.oneHeight === "number") return void (f.sheet || platform.fit(e.data.oneHeight));
+  // The panel's window, and a sheet, fit their screen.
+  if (typeof e.data?.oneHeight === "number") return void (f.sheet ? f.sheet.fit(e.data.oneHeight) : platform.fit(e.data.oneHeight));
   if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill, f.frame.clientWidth));
   if (e.data?.oneDrawn) return void screenDrew(f);
   const { one: m, id } = e.data || {};

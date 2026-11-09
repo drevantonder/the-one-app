@@ -5,14 +5,12 @@ import { cn } from "@/lib/utils"
 
 /// shadcn's responsive dialog: a dialog in the middle of the window where it has room, else a sheet up from its bottom.
 /// Its head is its `title` and `action`, its buttons (the one that keeps what's in it, say Save, or Cancel where nothing
-/// is); it closes by Escape or a click outside it too, telling `onOpenChange(false)`. `tall` is for something that
-/// fills it whatever its height, like a screen.
-function ResponsiveDialog({ open, onOpenChange, title, action, tall = false, className, children }: {
+/// is); it closes by Escape or a click outside it too, telling `onOpenChange(false)`.
+function ResponsiveDialog({ open, onOpenChange, title, action, className, children }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
   action?: React.ReactNode
-  tall?: boolean
   className?: string
   children: React.ReactNode
 }) {
@@ -29,7 +27,7 @@ function ResponsiveDialog({ open, onOpenChange, title, action, tall = false, cla
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className={cn("flex flex-col gap-0 overflow-hidden p-0 sm:max-w-[480px]", tall ? "h-[min(620px,88vh)]" : "max-h-[88vh]", className)}
+        className={cn("flex flex-col gap-0 overflow-hidden p-0 sm:max-w-[480px]", "max-h-[88vh]", className)}
       >
         {head}
         {children}
@@ -37,7 +35,7 @@ function ResponsiveDialog({ open, onOpenChange, title, action, tall = false, cla
     </Dialog>
   ) : (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" showCloseButton={false} className={cn("gap-0 overflow-hidden rounded-t-xl", tall ? "h-[92svh]" : "max-h-[92svh]", className)}>
+      <SheetContent side="bottom" showCloseButton={false} className={cn("gap-0 overflow-hidden rounded-t-xl", "max-h-[92svh]", className)}>
         {head}
         {children}
       </SheetContent>

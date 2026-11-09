@@ -115,20 +115,21 @@ function showAlert({ title = "", text = "", action, danger = false }: { title?: 
   ))
 }
 
-/// A sheet over the page, for a screen opened in one: `body`, where its caller puts the screen; `title`, its title,
-/// which `setTitle` changes; `done`, its one button's name (Done, or Cancel where nothing's kept unless the screen
-/// says). Centred where the window has room, else up from its bottom. `closed` settles once it's gone, by `close`, its
-/// button, Escape or a click outside it.
+/// A sheet over the page, for a screen opened in one: `body`, where its caller puts the screen, as tall as `fit` was
+/// last told (the screen's own height, as its bridge reports it) up to what the window has, else as its content;
+/// `title`, its title, which `setTitle` changes; `done`, its one button's name (Done, or Cancel where nothing's kept
+/// unless the screen says). Centred where the window has room, else up from its bottom. `closed` settles once it's
+/// gone, by `close`, its button, Escape or a click outside it.
 function showSheet({ title = "", done = "Done" }: { title?: string; done?: string } = {}) {
   const body = document.createElement("div")
-  body.className = "relative min-h-0 flex-1"
+  body.className = "relative min-h-0 shrink"
   let setTitle: (title: string) => void = () => {}
   let close = () => {}
   const closed = over<void>((closeWith, open) => {
     close = () => closeWith()
     return <ScreenSheet open={open} body={body} title={title} done={done} close={close} titled={(f) => (setTitle = f)} />
   })
-  return { body, closed, close: () => close(), setTitle: (t: string) => setTitle(t) }
+  return { body, closed, close: () => close(), setTitle: (t: string) => setTitle(t), fit: (px: number) => (body.style.height = `${px}px`) }
 }
 
 function ScreenSheet({ open, body, title: first, done, close, titled }: {
@@ -142,7 +143,7 @@ function ScreenSheet({ open, body, title: first, done, close, titled }: {
   const [title, setTitle] = React.useState(first)
   React.useLayoutEffect(() => titled(setTitle), [titled])
   return (
-    <ResponsiveDialog open={open} onOpenChange={(o) => !o && close()} title={title} tall action={<Button variant="secondary" size="sm" onClick={close}>{done}</Button>}>
+    <ResponsiveDialog open={open} onOpenChange={(o) => !o && close()} title={title} action={<Button variant="secondary" size="sm" onClick={close}>{done}</Button>}>
       <Kept element={body} className="flex min-h-0 flex-1 flex-col" />
     </ResponsiveDialog>
   )
