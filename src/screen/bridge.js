@@ -16,6 +16,7 @@
       const m = e.source === window.parent && e.data;
       if (!m) return;
       if (m.oneEvent) one.__event(m.oneEvent);
+      if (m.oneBar !== undefined) ((barStart = m.oneBar), placeLargeTitle("margin-inline-start 200ms linear"));
       const w = waiting[m.oneReply];
       if (!w) return;
       delete waiting[m.oneReply];
@@ -164,6 +165,22 @@
 
   // Whether a screen has asked for a large title (`largeTitle`): it sets up the bar's title once.
   let titled = false;
+  // The large title, and how far the window's own buttons reach along its row, in the window's pixels.
+  let largeTitle = null, barStart = 0;
+  /// The large title starts past the window's buttons, where it needs to. `zoom` makes this page's pixels the window's
+  /// differently by engine, so one is measured.
+  function placeLargeTitle(transition = "") {
+    if (!largeTitle) return;
+    const unit = Object.assign(document.createElement("div"), { style: "position:fixed;width:100px;visibility:hidden" });
+    document.documentElement.append(unit);
+    const scale = unit.getBoundingClientRect().width / 100;
+    unit.remove();
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    const margin = parseFloat(largeTitle.style.marginInlineStart) || 0;
+    const left = largeTitle.getBoundingClientRect().left / scale - margin;
+    largeTitle.style.transition = transition;
+    largeTitle.style.marginInlineStart = barStart / zoom > left ? `${barStart / zoom - left}px` : "";
+  }
 
   window.one = {
     app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
@@ -204,8 +221,8 @@
     // Opens a web page's address in the browser.
     link: (url) => host({ type: "link", url: String(url) }),
     // The bar's title; empty while the screen shows its own heading, when `name` is still what the screen is called,
-    // for the window's path, Back and window name.
-    title: (text, name) => host({ type: "title", text, ...(name ? { name: String(name) } : {}) }),
+    // for the window's path, Back and window name. `large` is for `largeTitle`.
+    title: (text, name, large) => host({ type: "title", text, ...(name ? { name: String(name) } : {}), ...(large ? { large: true } : {}) }),
     // What a failure means for someone: what happened, in plain words, whether anything was lost, and what to do next.
     // `app` is the title of the app that failed, where a screen knows it.
     plain: (err, { app } = {}) => {
@@ -236,18 +253,17 @@
       const follows = !!window.IntersectionObserver;
       if (!titled) {
         titled = true;
-        one.title(follows ? "" : text, text);
+        one.title(follows ? "" : text, text, true);
         if (follows) {
-          let el = null;
           const seen = new IntersectionObserver((all) => {
-            const e = all.filter((x) => x.target === el).pop();
-            if (e) one.title(e.isIntersecting ? "" : el.textContent, el.textContent);
+            const e = all.filter((x) => x.target === largeTitle).pop();
+            if (e) one.title(e.isIntersecting ? "" : largeTitle.textContent, largeTitle.textContent, true);
           });
           const follow = () => {
             const now = document.querySelector(".large-title");
-            if (now === el) return;
-            if (el) seen.unobserve(el);
-            if ((el = now)) seen.observe(el);
+            if (now === largeTitle) return;
+            if (largeTitle) seen.unobserve(largeTitle);
+            if ((largeTitle = now)) seen.observe(largeTitle), placeLargeTitle();
           };
           setTimeout(follow);
           new MutationObserver(follow).observe(document.documentElement, { childList: true, subtree: true });

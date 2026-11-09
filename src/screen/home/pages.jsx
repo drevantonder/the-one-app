@@ -647,7 +647,7 @@ function Page({ page, editing, refreshing, bottom }) {
   return (
     <section
       data-page={scope}
-      className="h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-5 pt-[calc(1.25rem+env(safe-area-inset-top))] [scroll-snap-stop:always]"
+      className={cn("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-5 [scroll-snap-stop:always]", swipe ? "pt-[calc(1.25rem+env(safe-area-inset-top))]" : "pt-4")}
       style={{ paddingBottom: bottom }}
     >
       <div className="flex items-start gap-3 px-1 pb-5">

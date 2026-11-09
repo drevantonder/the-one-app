@@ -1,9 +1,10 @@
 // The URL is the place: `/` (You), `/page/<scope>`, `/accounts` (every page's), `/settings`, `/settings/<screen>?params=`
 // (a Settings screen), `/app/<app>/<screen>?params=&scope=`; and `/vault?id=&scope=`, a request for an item, as a sheet
-// over You. Each is a screen: the client's own (`own`, by name), or an app's. The sidebar lists the user's pages,
-// their apps and Settings' items (`sections`). The window goes to each as the URL changes (`whenMoved`).
+// over You. Each is a screen: the client's own (`own`, by name), or an app's. The sidebar lists the user's pages, the
+// current one's apps, and Settings (`sidebar`). The window goes to each as the URL changes (`whenMoved`).
 import { platform } from "./platform.js";
-import { accountsOn, appBadge, appsOn, here, label, pages, settingsItems } from "./store.js";
+import { accountsOn, appBadge, appsOn, label, pages, settingsItems, store } from "./store.js";
+import { ui } from "./view.js";
 
 export function route(at = location) {
   const r = routeAt(at);
@@ -74,26 +75,31 @@ export const listed = (to) => links.has(href(to));
 /// The route the sidebar's link `to` goes to, if it lists one.
 export const linked = (to) => links.get(to);
 
-/// The sidebar: one section per page, listing its apps and its Accounts; then Settings', listing its items. An app
-/// Settings lists (the App Store) shows there only.
-export function sections() {
-  const at = selection();
+/// The page a place in the window is on: a page itself, or the one its screen is under.
+function pageOf(at) {
+  const r = routeAt(new URL(at, location.href));
+  return JSON.parse((home(r) ? r : under(r)).params).scope;
+}
+
+/// The sidebar: a row for each page the home shows, the current page's apps and Accounts under it as its home has them,
+/// and Settings. Every page's badges are counted, as its apps aren't all listed.
+export function sidebar() {
+  const at = selection(), now = pageOf(at);
   links.clear();
   const link = (to) => (links.set(href(to), to), href(to));
-  const item = (to, key, title, more) => ({ key, title, href: link(to), selected: href(to) === at, ...more });
-  const section = (to, key, title, items) => ({ key, title, href: link(to), selected: href(to) === at, items });
-  const inSettings = (a) => settingsItems().some((i) => i.app === a.name);
+  const row = (to, key, title, more) => ({ key, title, href: link(to), selected: href(to) === at, ...more });
+  const counted = (items) => items.reduce((n, i) => n + (i.badge || 0), 0);
+  const shown = pages().filter((p) => !p.hidden);
   // Accounts once, under You: every page's, listed together.
-  const accounts = [...new Map(pages().flatMap(accountsOn).map((a) => [a.name, a])).values()];
-  const out = pages().map((p, i) => section(own("pages", { scope: p.scope }), p.scope, p.title, [
-    ...appsOn(p).filter((a) => !inSettings(a)).map((a) => item({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, a.name, label(a), { app: a, badge: appBadge(a.name, p) })),
-    ...(i === 0 ? [item(own("accounts"), "accounts", "Accounts", { folder: accounts })] : []),
-  ]));
-  // One with another site's url opens it in a new tab; one here (Passkeys) shows beside the sidebar.
-  const items = settingsItems().map((i) => {
-    const app = { name: i.name, title: i.title, icon: i.icon, color: i.color };
-    if (i.url && !here(i.url)) return { key: i.name, title: i.title, href: i.url, external: true, app };
-    return item(i.app ? { kind: "screen", app: i.app, screen: "main", params: "{}" } : { kind: "own", name: i.name, params: "{}" }, i.name, i.title, { app, badge: i.badge });
-  });
-  return [...out, section(own("pages", { scope: "settings" }), "settings", "Settings", items)];
+  const accounts = [...new Map(shown.flatMap(accountsOn).map((a) => [a.name, a])).values()];
+  return {
+    pages: shown.map((p, i) => {
+      const items = [
+        ...ui.arranged(appsOn(p), store.state.arrangements?.[p.scope]).map(({ app: a }) => row({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, a.name, label(a), { app: a, badge: appBadge(a.name, p) })),
+        ...(i === 0 ? [row(own("accounts"), "accounts", "Accounts", { folder: accounts })] : []),
+      ];
+      return row(own("pages", { scope: p.scope }), p.scope, p.title, { badge: counted(items), items: p.scope === now ? items : [] });
+    }),
+    settings: { ...row(own("pages", { scope: "settings" }), "settings", "Settings", { badge: counted(settingsItems()), items: [] }), selected: now === "settings" },
+  };
 }

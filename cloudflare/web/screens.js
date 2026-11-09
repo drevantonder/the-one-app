@@ -198,6 +198,14 @@ function frameFor(r, into, { sheet } = {}) {
   return f;
 }
 
+/// How far along the row of a screen's large title the window's own buttons reach, which the title starts past.
+let barStart = 0;
+export function setBarStart(px) {
+  if (px === barStart) return;
+  barStart = px;
+  frames.filter((f) => !f.sheet && !f.dock).forEach((f) => f.frame.contentWindow?.postMessage({ oneBar: px }, "*"));
+}
+
 /// A screen's still, in a frame of its own as sandboxed as the screen's, answering nothing but its frame's ask for it.
 function showStill(f, html) {
   if (!f.into.isConnected) return;
@@ -208,6 +216,7 @@ function showStill(f, html) {
   f.still = { frame, html: oneHost.look(html.replace("</head>", `${scrolled}</head>`), appearance(), false, platform.look()) };
   $(".screen-status", f.into)?.remove();
   f.into.prepend(frame);
+  if (html.includes("large-title")) f.into.dataset.large = "";
   // One that never says it has drawn shows anyway, whatever it's waiting on.
   setTimeout(() => f.still?.frame === frame && screenDrew(f), 4000);
 }
@@ -462,6 +471,11 @@ addEventListener("message", async (e) => {
         else if (!f.dock && f.into.isConnected && !f.leaving) {
           f.said = title;
           f.name = m.name;
+          // A large title lies in the bar's row.
+          if (m.large && !("large" in f.into.dataset)) {
+            f.into.dataset.large = "";
+            f.frame.contentWindow?.postMessage({ oneBar: barStart }, "*");
+          }
           if (f.begun) saying(f);
         }
         return null;

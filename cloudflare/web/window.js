@@ -1,4 +1,4 @@
-// The window: the sidebar (routes.js's `sections`), the screen beside it (screens.js), and what stands before it
+// The window: the sidebar (routes.js's `sidebar`), the screen beside it (screens.js), and what stands before it
 // (signing in, waiting to be let in, a problem), drawn again as what it shows changes. It draws at once what it showed
 // last (the sidebar, and a still of the screen) and then what the node says now; and it keeps up with the node's events
 // and the devices waiting to be let in.
@@ -6,8 +6,8 @@ import { offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { qrSvg } from "./qr.js";
 import { api, developer, fresh, retryWait, sleep } from "./request.js";
-import { back, go, home, linked, own, route, sections, whenMoved } from "./routes.js";
-import { detail, devtools, hasScreen, openSheet, overWindow, screen, tell, whenTitled } from "./screens.js";
+import { back, go, home, linked, own, route, sidebar, whenMoved } from "./routes.js";
+import { detail, devtools, hasScreen, openSheet, overWindow, screen, setBarStart, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, store, titleOf, whenChanged, whenSignedOut } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
@@ -44,7 +44,7 @@ const SIDEBAR = "one.sidebar";
 /// then only when it changes.
 let badged = -1;
 function countBadges(drawn) {
-  const total = drawn.flatMap((s) => s.items).reduce((n, i) => n + Math.max(0, i.badge || 0), 0);
+  const total = [...drawn.pages, drawn.settings].reduce((n, p) => n + Math.max(0, p.badge || 0), 0);
   if (total !== badged) platform.badge((badged = total));
 }
 
@@ -56,16 +56,17 @@ const appBehind = () =>
 
 function drawWindow() {
   windowShown = true;
-  const drawn = sections();
+  const drawn = sidebar();
   countBadges(drawn);
   const banner = appBehind() || offline.banner();
-  if (platform.phone()) return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: barBack, onBack: back, screen: detail, banner }));
+  if (platform.phone()) return void show(h(ui.Shell, { phone: true, title: barTitle, back: barBack, onBack: back, screen: detail, banner }));
   show(h(ui.Shell, {
-    sections: drawn,
+    ...drawn,
     title: barTitle,
     back: barBack,
     onBack: back,
     onGo: (to) => linked(to) && go(linked(to)),
+    onBarStart: setBarStart,
     developer: developer.on(),
     onDeveloper: () => devtools.toggle(),
     open: localStorage.getItem(SIDEBAR) !== "closed",

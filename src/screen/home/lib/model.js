@@ -1,5 +1,7 @@
 // What the pages and Accounts screens know, the same on every client: the user's pages (theirs, their groups',
 // everyone's), the apps on each and what each offers, all read from the node as the user looking (`one.api`).
+import { arranged } from "@one/ui";
+
 export const home = (() => {
   // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can.
   const h = { state: null, apps: [], widgets: {}, badges: {}, failed: new Set() };
@@ -58,27 +60,14 @@ export const home = (() => {
   /// they last arranged it at the end, without those they took off it. A page never arranged shows its apps. A widget
   /// still to come keeps its place (`pending`), at its size, as a grey card.
   function items(p) {
-    const apps = appsOn(p), widgets = widgetsOn(p);
-    const arrangement = h.state?.arrangements?.[p.scope];
-    if (!arrangement) return apps.map((a) => ({ app: a }));
-    const out = [], seen = new Set();
-    for (const item of arrangement.items || []) {
-      if (item.widget) {
-        const w = widgets.find((w) => w.app === item.app && w.widget === item.widget);
-        if (!item.id || seen.has(`widget:${item.id}`)) continue;
-        if (!w && !(waiting(p) && h.apps.some((a) => a.name === item.app && scopes(a).includes(p.scope)))) continue;
-        seen.add(`widget:${item.id}`);
-        out.push(w ? { widget: placed(w, item), kept: item } : { pending: true, kept: item });
-      } else {
-        const a = apps.find((a) => a.name === item.app);
-        if (a && !seen.has(`app:${a.name}`)) {
-          seen.add(`app:${a.name}`);
-          out.push({ app: a });
-        }
-      }
-    }
-    const hidden = new Set(arrangement.hidden || []);
-    return out.concat(apps.filter((a) => !seen.has(`app:${a.name}`) && !hidden.has(a.name)).map((a) => ({ app: a })));
+    const widgets = widgetsOn(p), seen = new Set();
+    return arranged(appsOn(p), h.state?.arrangements?.[p.scope], (item) => {
+      const w = widgets.find((w) => w.app === item.app && w.widget === item.widget);
+      if (!item.id || seen.has(item.id)) return null;
+      if (!w && !(waiting(p) && h.apps.some((a) => a.name === item.app && scopes(a).includes(p.scope)))) return null;
+      seen.add(item.id);
+      return w ? { widget: placed(w, item), kept: item } : { pending: true, kept: item };
+    });
   }
 
   // MARK: Where things open
