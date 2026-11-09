@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
-  AppIcon, Button, Empty, Grid, GridRow, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, LoadFailure, Problem, ResponsiveDialog, SearchInput, Split, Switch,
+  AppIcon, Button, Empty, Grid, GridRow, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, LoadFailure, LoadingButton, Problem, ResponsiveDialog, SearchInput, Split, Switch,
   Tabs, TabsList, TabsTrigger, LargeTitle, Section,
 } from "@one/ui"
 import { appNamed } from "./agents.js"
@@ -467,7 +467,7 @@ function NewField({ save, done }) {
       <Input ref={value} type={secret ? "password" : "text"} placeholder="Value" aria-label="Value" autoComplete="off" onKeyDown={(e) => e.key === "Enter" && put()} />
       <Label className="justify-between py-1 font-normal">Secret<Switch checked={secret} onCheckedChange={setSecret} /></Label>
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={put}>Save</Button>
+        <LoadingButton size="sm" run={put}>Save</LoadingButton>
         <Button size="sm" variant="ghost" onClick={done}>Cancel</Button>
       </div>
     </div>

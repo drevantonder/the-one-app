@@ -2,7 +2,7 @@
 // room, the app opened beside them.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, LargeTitle, Pending, Problem, SearchInput, Section, Split, useWidth } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, LargeTitle, LoadingButton, Pending, Problem, SearchInput, Section, Split, useWidth } from "@one/ui"
 import { AppPage } from "../lib/app-page.jsx"
 import { addAccount, onAPage, openApp, said, useApps } from "../lib/store.jsx"
 
@@ -18,7 +18,7 @@ function Tile({ a, list, selected, open, add, restore }) {
   useEffect(() => {
     if (selected) me.current.scrollIntoView({ block: "nearest" })
   }, [selected])
-  const small = (label, run) => <Button size="sm" variant="secondary" onClick={run}>{label}</Button>
+  const small = (label, run) => <LoadingButton size="sm" variant="secondary" run={run}>{label}</LoadingButton>
   const action = a.deleted
     ? a.mine && small("Restore", () => restore(a))
     : onAPage(a, places)
