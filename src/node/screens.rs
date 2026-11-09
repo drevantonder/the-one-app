@@ -140,7 +140,11 @@ impl Node {
     /// An app screen as a whole page: the app's HTML with the design kit, the bridge, and who's looking.
     /// `scope` is the page a shell opened it from, a hint the app may follow or not.
     pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>, linked: bool) -> Result<String> {
-        let deployed = self.with(|i| Ok(i.r.db().app(app)?.is_some_and(|a| a.bundle.is_some())))?;
+        let row = self.with(|i| i.r.db().app(app))?;
+        if row.as_ref().is_some_and(|a| a.deleted.is_some() && !a.erased) {
+            bail!(crate::protocol::Coded::new(crate::protocol::code::APP_DELETED, format!("{app} was deleted: its owners can restore it from Recently Deleted in the App Store")));
+        }
+        let deployed = row.is_some_and(|a| a.bundle.is_some() && !a.erased);
         // A screen the app doesn't have (an old or mistyped link), or an app not deployed here, is a page that says so.
         let body = if deployed { self.0.apps.screen(app, name).await?.unwrap_or_default() } else { String::new() };
         self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, false, linked)

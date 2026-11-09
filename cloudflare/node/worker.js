@@ -975,6 +975,7 @@ async function route(p, request) {
   if (request.method === "GET" && screenAt) {
     const who = p.whom(request);
     const view = await p.networkFor(who);
+    if (view.apps.some((a) => a.name === screenAt[1] && a.deleted)) refuse(410, `${screenAt[1]} was deleted: its owners can restore it from Recently Deleted in the App Store`, { code: CODES.appDeleted });
     const app = deployed(view, screenAt[1]);
     const d = app && (await p.describe(who, app));
     if (!d || !servedHere(view, d)) refuse(503, needsDevice(d, screenAt[1]));

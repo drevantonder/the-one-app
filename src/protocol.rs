@@ -135,6 +135,8 @@ pub mod code {
         RESTARTING = "restarting",
         /// An app that isn't added, or isn't on the user's pages.
         NOT_ADDED = "not_added",
+        /// An app in Recently Deleted: a client says so where its screen would be, and offers Restore.
+        APP_DELETED = "app_deleted",
         /// A step signed for a position of who's who that another device's step has taken: sign it again for the next.
         TAKEN = "taken",
         /// A signed request the relay already took once (it takes each `(by, at)` once): sign it again with a new `at`.

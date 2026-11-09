@@ -4,10 +4,11 @@
 import { move, settle } from "./moves.js";
 import { offline } from "./offline.js";
 import { platform } from "./platform.js";
+import { CODES } from "../shared/protocol.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
 import { back, go, home, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
-import { KEPT_SCREENS, app, here, joined, reads, settingAt, settingsItems, titleOf } from "./store.js";
+import { KEPT_SCREENS, app, config, here, joined, reads, settingAt, settingsItems, titleOf } from "./store.js";
 import { $, h, reveal, ui } from "./view.js";
 
 let frames = [];
@@ -123,6 +124,33 @@ async function linkedIn(page) {
 /// A screen that couldn't open: the problem, where it would be.
 const failed = (into, text) => OneUI["react-dom/client"].createRoot(into).render(h(ui.Unavailable, { title: "Can’t Open This", text }));
 
+/// A screen of an app in Recently Deleted: one problem where it would be, with Restore for those who may, as the App
+/// Store says (`_list`'s `mine`); restored, the screen opens.
+async function deleted(f, r) {
+  const { frame, into } = f;
+  frame.remove();
+  $(".screen-status", into)?.remove();
+  into.innerHTML = "";
+  screenDrew(f);
+  const store = config().store;
+  const mine = await call(store, "_list", {}, true).then((l) => l.apps?.some((a) => a.name === r.app && a.mine), () => false);
+  if (!into.isConnected) return;
+  const root = OneUI["react-dom/client"].createRoot(into);
+  const box = (props) => root.render(h("div", { style: { padding: 24, maxWidth: 560 } }, h(ui.Problem, props)));
+  const restore = async () => {
+    try {
+      await call(store, "restore", { app: r.app });
+      root.unmount();
+      frames = frames.filter((x) => x !== f);
+      const again = frameFor(r, into, { sheet: f.sheet });
+      if (showing === f) announced(again, () => {});
+    } catch (err) {
+      box({ title: "Couldn’t Restore It", text: one.plain(err).title, action: { label: "Try Again", run: restore } });
+    }
+  };
+  box({ warn: true, title: `${titleOf(r)} Was Deleted`, ...(mine ? { action: { label: "Restore", run: restore } } : { text: "Its owner can restore it." }) });
+}
+
 /// What a frame loads, told the window's appearance so its empty page is the window's colour (frame.html).
 const framePage = () => `${asset("frame.html")}#${appearance()}`;
 
@@ -191,6 +219,7 @@ function frameFor(r, into, { sheet } = {}) {
   setTimeout(() => came || tried.then(() => !came && f.page && f.into.isConnected && away()), 5000);
   fresh.then((page) => ((came = true), offline.done(f.key), update(page)), async (err) => {
     await tried;
+    if (err.code === CODES.appDeleted) return (came = true), offline.done(f.key), deleted(f, r);
     if (f.page) return away();
     screenDrew(f);
     failed(into, one.plain(err).title);
