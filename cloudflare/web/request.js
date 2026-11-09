@@ -6,6 +6,8 @@ import { platform } from "./platform.js";
 
 export class NodeError extends Error {}
 export const UNANSWERED = "Your devices aren’t answering. Check that one is on and online.";
+/// How long a request is asked again after no node answered. It doesn't limit one a node is working on.
+const ASKED_AGAIN_FOR = 20_000;
 
 /// How long to wait before asking again the `n`th time running (from 0) after the node didn't answer: at once, then
 /// a quarter second, doubling, up to five. A node restarting for an update is back within a moment.
@@ -48,6 +50,7 @@ async function sending(url, method, body, raw, signal, trace) {
       if (f.client) trace.keys++;
     }
   };
+  const began = performance.now();
   for (let misses = 0; ; ) {
     const headers = {};
     if (trace) headers[HEADER.trace] = "1";
@@ -64,9 +67,11 @@ async function sending(url, method, body, raw, signal, trace) {
         if (await takenOut()) throw gone();
         throw Object.assign(new NodeError(err.message), { status: 403 });
       }
-      if (err.removed || signal?.aborted || misses >= 5) throw err;
+      if (err.removed || signal?.aborted) throw err;
       // A request that fails may be one a device taken out of its user's devices can't make.
       if (await takenOut()) throw gone();
+      // A failure with a code is the keyring's own, said in its words; any other is the connection.
+      if (misses >= 5 || performance.now() - began > ASKED_AGAIN_FOR) throw err.code ? err : Object.assign(new NodeError(UNANSWERED), { unanswered: true });
       await sleep(retryWait(misses++));
       continue;
     } finally {
@@ -177,12 +182,16 @@ export const fresh = () => {
 
 /// An app's tool, as its screen calls it: the same call asked again while one runs is that one, if it only `reads`.
 export async function call(app, tool, input = {}, reads = false) {
-  const same = reads ? JSON.stringify([app, tool, input]) : null;
-  if (same && reading.has(same)) return reading.get(same);
-  const asked = api("/v1/call", { method: "POST", body: { app, tool, input, client: platform.client() } }).then((r) => r.ok);
-  if (same) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
+  const same = JSON.stringify([app, tool, input]);
+  if (reads && reading.has(same)) return reading.get(same);
+  // A write no node answered may have run: asked again, it's the same call, so it runs once.
+  const id = reads ? callId() : unanswered.get(same) || callId();
+  const asked = api("/v1/call", { method: "POST", body: { id, app, tool, input, client: platform.client() } }).then((r) => r.ok);
+  if (reads) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
+  else asked.then(() => unanswered.delete(same), (err) => (err.unanswered ? unanswered.set(same, id) : unanswered.delete(same)));
   const out = await asked;
   platform.renew(app).catch((err) => console.warn(`renewing ${app}'s schedules:`, err));
   return out;
 }
 const reading = new Map();
+const unanswered = new Map();
