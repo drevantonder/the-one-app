@@ -8,13 +8,33 @@ import * as ReactDOMClient from "react-dom/client"
 import * as ui from "./index"
 import "./ui.css"
 
+// A screen that throws while it draws would be blank for good (React takes down its whole tree): its root shows one problem
+// instead, with Try Again, which draws what it last drew.
+const guarded = {
+  ...ReactDOMClient,
+  createRoot(container: Element | DocumentFragment, options?: ReactDOMClient.RootOptions) {
+    let last: React.ReactNode = null
+    const root: ReactDOMClient.Root = ReactDOMClient.createRoot(container, {
+      onUncaughtError: (error, info) => {
+        console.error(error, info.componentStack)
+        const retry = () => render(last)
+        queueMicrotask(() => render(React.createElement("div", { className: "p-5" }, React.createElement(ui.Problem, { title: "This screen stopped working.", text: "Something in it broke.", action: { label: "Try Again", run: retry } }))))
+      },
+      ...options,
+    })
+    const render = root.render.bind(root)
+    root.render = (node) => render((last = node))
+    return root
+  },
+}
+
 Object.assign(globalThis, {
   OneUI: {
     react: React,
     "react/jsx-runtime": jsxRuntime,
     "react/compiler-runtime": compilerRuntime,
     "react-dom": ReactDOM,
-    "react-dom/client": ReactDOMClient,
+    "react-dom/client": guarded,
     "@one/ui": ui,
   },
 })
