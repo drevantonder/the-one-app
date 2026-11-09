@@ -8,7 +8,7 @@ use crate::config::{CLI, NAME, YOURS};
 use crate::core_tools::{Feature, Tool, serves};
 
 pub fn feature() -> Feature {
-    let guide = format!("A new device signs in, then shows a code of 8 letters and digits. devices_approve with that code, run on one of the user's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, on the device that made the link. devices_remove takes a device out, or a user with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in on a computer running {NAME}, by the command {CLI} devices approve <code> --recovery-key <file>, with a file holding {YOURS}'s recovery key, never the key in the chat. If an admin already let that device in, someone holding the recovery key gives it its keys with {CLI} devices restore <code>, from the code on its own screen (This Device's Code in its menu, or {CLI} devices code). An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys alone, and devices_stop_schedules stops them.");
+    let guide = format!("A new device signs in, then shows a code of 16 letters and digits. devices_approve with that code, run on one of the user's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, on the device that made the link. devices_remove takes a device out, or a user with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in on a computer running {NAME}, by the command {CLI} devices approve <code> --recovery-key <file>, with a file holding {YOURS}'s recovery key, never the key in the chat. If an admin already let that device in, someone holding the recovery key gives it its keys with {CLI} devices restore <code>, from the code on its own screen (This Device's Code in its menu, or {CLI} devices code). An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys alone, and devices_stop_schedules stops them.");
     Feature {
         name: "devices",
         title: "Devices",
@@ -31,7 +31,7 @@ fn tools() -> Vec<Tool> {
                 "description": "Devices waiting to join that you may approve: your own new devices, the first device of someone you invited or an admin may let in, and someone with no device left.",
                 "input": { "type": "object", "properties": {} },
                 "output": { "type": "array", "items": { "type": "object", "required": ["device", "user", "code"], "properties": {
-                    "device": { "type": "string" }, "user": { "type": "string" }, "code": { "type": "string", "description": "the 8 letters and digits it shows" },
+                    "device": { "type": "string" }, "user": { "type": "string" }, "code": { "type": "string", "description": "the 16 letters and digits it shows" },
                     "yours": { "type": "boolean", "description": "one of your own" }, "new": { "type": "boolean", "description": "the first of someone you invited" },
                 } } },
             }),
@@ -42,7 +42,7 @@ fn tools() -> Vec<Tool> {
                 "name": "approve", "title": "Approve a new device",
                 "description": "Approve the new device showing this code. Without confirm, says whose device it is; with confirm: true, lets it in.",
                 "input": { "type": "object", "required": ["code"], "properties": {
-                    "code": { "type": "string", "description": "the 8 letters and digits the new device shows" },
+                    "code": { "type": "string", "description": "the 16 letters and digits the new device shows" },
                     "confirm": { "type": "boolean", "description": "true once the user has said yes to this very device" },
                 } },
                 "output": said("whose device it is, or that it's in"),
