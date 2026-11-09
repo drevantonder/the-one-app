@@ -20,33 +20,33 @@ var l = (() => {
 	function m(e) {
 		return e === "user" ? !0 : e === "global" ? r() : (n()?.groups.find((t) => `group:${t.id}` === e))?.members.some((e) => e.user === t()?.id && e.role === "admin") || !1;
 	}
-	let h = (t) => e.apps.filter((e) => c(e) && u(e).includes(t.scope)), g = (t) => e.apps.filter((e) => l(e) && u(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), _ = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
-	function v(t) {
+	let h = (t) => e.apps.filter((e) => c(e) && u(e).includes(t.scope)), g = (t) => e.apps.filter((e) => !c(e) && u(e).includes(t.scope)), _ = (t) => e.apps.filter((e) => l(e) && u(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), v = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
+	function y(t) {
 		let n = new Set(e.apps.filter((e) => u(e).includes(t.scope)).map((e) => e.name));
 		return (e.widgets[t.scope] || []).filter((e) => n.has(e.app));
 	}
-	let y = (t) => !e.widgets[t.scope] || e.failed.has(t.scope), b = [
+	let b = (t) => !e.widgets[t.scope] || e.failed.has(t.scope), x = [
 		"small",
 		"medium",
 		"large",
 		"xl"
-	], x = (e) => b.filter((t) => !e.sizes || e.sizes[t]), S = (e, t) => e.sizes?.[t] || e.root, C = (e, t) => `${e}/${t.app}.${t.widget}`;
-	function w(t, n, r) {
+	], S = (e) => x.filter((t) => !e.sizes || e.sizes[t]), C = (e, t) => e.sizes?.[t] || e.root, w = (e, t) => `${e}/${t.app}.${t.widget}`;
+	function T(t, n, r) {
 		let i = {
 			...t,
 			instance: n.id,
 			sizes: { ...t.sizes || {} }
 		};
-		e.read.has(r) && !e.late.has(C(r, t)) && t.fetched && Date.now() - t.fetched > 36e5 && (i.old = t.fetched), n.size && x(t).includes(n.size) && (i.size = n.size);
+		e.read.has(r) && !e.late.has(w(r, t)) && t.fetched && Date.now() - t.fetched > 36e5 && (i.old = t.fetched), n.size && S(t).includes(n.size) && (i.size = n.size);
 		let a = n.id && t.placed?.[n.id];
 		return a?.sizes && Object.assign(i.sizes, a.sizes), a?.error && (i.error = a.error), i;
 	}
-	function T(t) {
-		let n = v(t), r = /* @__PURE__ */ new Set();
+	function E(t) {
+		let n = y(t), r = /* @__PURE__ */ new Set();
 		return a(h(t), e.state?.arrangements?.[t.scope], (i) => {
 			let a = n.find((e) => e.app === i.app && e.widget === i.widget);
-			return !i.id || r.has(i.id) || !a && !((y(t) || e.late.has(C(t.scope, i))) && e.apps.some((e) => e.name === i.app && u(e).includes(t.scope))) ? null : (r.add(i.id), a ? {
-				widget: w(a, i, t.scope),
+			return !i.id || r.has(i.id) || !a && !((b(t) || e.late.has(w(t.scope, i))) && e.apps.some((e) => e.name === i.app && u(e).includes(t.scope))) ? null : (r.add(i.id), a ? {
+				widget: T(a, i, t.scope),
 				kept: i
 			} : {
 				pending: !0,
@@ -54,50 +54,50 @@ var l = (() => {
 			});
 		});
 	}
-	function E() {
+	function D() {
 		let t = o(e.state?.config?.store);
 		return t && c(t) && f().some((e) => u(t).includes(e.scope)) ? t : null;
 	}
-	let D = (e, t, n, r = {}) => Object.assign((i) => one.open(e, t, n, {
+	let O = (e, t, n, r = {}) => Object.assign((i) => one.open(e, t, n, {
 		...r,
 		from: i
-	}), { press: () => one.opening(e, t, n, r) }), O = (e, t, n = "main", r = {}) => D(n, r, e.name, t ? { scope: t.scope } : {}), k = (e, t, n) => s(e, "settings") ? O(e, t, "settings", n ? { add: !0 } : {}) : null, A = (e) => E() && s(E(), "app") && (e.deploys || 0) > 0 ? O(E(), null, "app", { app: e.name }) : null, j = () => E() ? O(E(), null, "main", { accounts: !0 }) : null, M = () => E() && O(E(), null)();
-	async function N(e, t, n = {}) {
+	}), { press: () => one.opening(e, t, n, r) }), k = (e, t, n = "main", r = {}) => O(n, r, e.name, t ? { scope: t.scope } : {}), A = (e, t, n) => s(e, "settings") ? k(e, t, "settings", n ? { add: !0 } : {}) : null, j = (e) => D() && s(D(), "app") && (e.deploys || 0) > 0 ? k(D(), null, "app", { app: e.name }) : null, M = () => D() ? k(D(), null, "main", { accounts: !0 }) : null, N = () => D() && k(D(), null)();
+	async function P(e, t, n = {}) {
 		return (await one.api("POST", "/v1/call", {
 			app: e,
 			tool: t,
 			input: n
 		})).ok;
 	}
-	let P = (e) => one.alert({
+	let F = (e) => one.alert({
 		title: "Couldn’t Do That",
 		text: one.plain(e).title
 	});
-	async function F(t, n) {
+	async function I(t, n) {
 		let r = e.apps;
 		n && (e.apps = n(e.apps), e.redraw?.());
 		try {
-			await t(), await R(e.redraw);
+			await t(), await z(e.redraw);
 		} catch (t) {
-			n && (e.apps = r, e.redraw?.()), P(t);
+			n && (e.apps = r, e.redraw?.()), F(t);
 		}
 	}
-	function I(e, t) {
+	function L(e, t) {
 		let n = [];
-		return k(e, t) && n.push({
+		return A(e, t) && n.push({
 			title: "Settings",
 			icon: "gear-six",
-			run: k(e, t)
-		}), A(e) && n.push({
+			run: A(e, t)
+		}), j(e) && n.push({
 			title: "Open in App Store",
 			icon: "bag",
-			run: A(e)
+			run: j(e)
 		}), m(t.scope) && (e.deploys || 0) > 0 && n.push({
 			title: `Remove from ${t.title}`,
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => F(() => one.api("POST", "/v1/remove/remove", {
+			run: () => I(() => one.api("POST", "/v1/remove/remove", {
 				app: e.name,
 				scope: t.scope
 			}), (n) => n.map((n) => n.name === e.name ? {
@@ -106,7 +106,7 @@ var l = (() => {
 			} : n))
 		}), n;
 	}
-	async function L(e, t) {
+	async function R(e, t) {
 		if (!e.length) return;
 		t instanceof Event && (t = {
 			x: t.clientX,
@@ -115,17 +115,17 @@ var l = (() => {
 		let n = await one.menu(e, t).catch(() => null);
 		n != null && e[n]?.run();
 	}
-	async function R(t) {
-		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await B(null, t);
+	async function z(t) {
+		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await V(null, t);
 	}
-	function z(t, n, r) {
+	function B(t, n, r) {
 		let i = e.widgets[t] || [], a = Date.now(), o = (e) => (t) => t.app === e.app && t.widget === e.widget;
 		e.widgets[t] = n.flatMap((e) => e.late ? i.filter(o(e)) : [{
 			...e,
 			fetched: a
 		}]);
-		for (let i of n.filter((n) => n.late && !e.late.has(C(t, n)))) {
-			let n = C(t, i);
+		for (let i of n.filter((n) => n.late && !e.late.has(w(t, n)))) {
+			let n = w(t, i);
 			e.late.add(n), one.api("GET", `/v1/widgets?scope=${encodeURIComponent(t)}&kind=${encodeURIComponent(`${i.app}.${i.widget}`)}`).then(([n]) => {
 				n && (e.widgets[t] = [...(e.widgets[t] || []).filter((e) => !o(n)(e)), {
 					...n,
@@ -136,23 +136,23 @@ var l = (() => {
 			});
 		}
 	}
-	async function B(t, n) {
+	async function V(t, n) {
 		let r = (e) => `scope=${encodeURIComponent(e.scope)}`;
 		await Promise.all(d().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((r) => {
-			z(t.scope, r, n), e.failed.delete(t.scope);
+			B(t.scope, r, n), e.failed.delete(t.scope);
 		}, () => void e.failed.add(t.scope)).then(() => {
 			e.read.add(t.scope), n?.();
 		}), one.api("GET", `/v1/badges?${r(t)}`).then((n) => {
 			e.badges[t.scope] = n;
 		}, () => {}).then(() => n?.())]));
 	}
-	let V = (t) => d().filter((n) => e.apps.some((e) => t.includes(e.name) && u(e).includes(n.scope))).map((e) => e.scope);
-	function H(t) {
+	let H = (t) => d().filter((n) => e.apps.some((e) => t.includes(e.name) && u(e).includes(n.scope))).map((e) => e.scope);
+	function U(t) {
 		let n, r, i = !1, a = /* @__PURE__ */ new Set(), o = (r) => {
 			r ? r.forEach((e) => a.add(e)) : i = !0, clearTimeout(n), n = setTimeout(() => {
-				let n = i ? R(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
+				let n = i ? z(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
 					e.apps = t;
-				}), B([...a], t)]);
+				}), V([...a], t)]);
 				i = !1, a.clear(), n.then(() => {
 					t(), l(), c();
 				}).catch(() => {});
@@ -167,7 +167,7 @@ var l = (() => {
 			Object.values(e.widgets).flat().forEach((e) => Object.values(e.sizes || { root: e.root }).forEach(n)), t.length && (r = setTimeout(() => o(d().map((e) => e.scope)), Math.min(9e5, Math.max(6e4, Math.min(...t) - Date.now()))));
 		};
 		one.on("changed", (e) => {
-			e.type === "changed" && e.apps?.length ? o(V(e.apps)) : [
+			e.type === "changed" && e.apps?.length ? o(H(e.apps)) : [
 				"changed",
 				"devices",
 				"network"
@@ -187,29 +187,30 @@ var l = (() => {
 		page: p,
 		canArrange: m,
 		appsOn: h,
-		accountsOn: g,
+		forAiOn: g,
+		accountsOn: _,
 		accountsTool: l,
-		badge: _,
-		widgetsOn: v,
-		waiting: y,
-		items: T,
-		supported: x,
-		tree: S,
-		store: E,
-		open: O,
-		opens: D,
-		settings: k,
-		inStore: A,
-		addAccountApp: j,
-		openStore: M,
-		call: N,
-		failed: P,
-		change: F,
-		actions: I,
-		menu: L,
-		load: R,
-		loadWidgets: B,
-		watch: H
+		badge: v,
+		widgetsOn: y,
+		waiting: b,
+		items: E,
+		supported: S,
+		tree: C,
+		store: D,
+		open: k,
+		opens: O,
+		settings: A,
+		inStore: j,
+		addAccountApp: M,
+		openStore: N,
+		call: P,
+		failed: F,
+		change: I,
+		actions: L,
+		menu: R,
+		load: z,
+		loadWidgets: V,
+		watch: U
 	};
 })();
 function u() {
