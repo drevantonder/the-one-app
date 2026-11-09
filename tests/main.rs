@@ -7,6 +7,7 @@ mod map;
 #[path = "../apps/repos/tests/repos.rs"]
 mod repos;
 mod sandbox;
+mod sealed;
 mod sim;
 mod tree;
 

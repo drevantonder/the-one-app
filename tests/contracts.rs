@@ -67,6 +67,22 @@ fn the_workers_and_nodes_seal_keys_for_each_other() {
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
 }
 
+/// What an earlier build sealed (`tests/sealed/`), which the Workers read: copies under a token, and notes.
+#[test]
+fn the_workers_open_what_an_earlier_build_sealed() {
+    let formats = Formats::start();
+    for w in crate::sealed::fixtures() {
+        for s in w["seal_under"].as_array().unwrap() {
+            let opened = formats.js(json!({ "op": "openUnder", "secret": s["secret"], "sealed": s["sealed"] }));
+            assert_eq!(opened["plain"], s["plain"], "{}", s["what"]);
+        }
+        let n = &w["note"];
+        let hex = |v: &Value| B64U.encode(&data_encoding::HEXLOWER.decode(v.as_str().unwrap().as_bytes()).unwrap());
+        let opened = formats.js(json!({ "op": "openNote", "secret": hex(&n["secret"]), "public": hex(&n["public"]), "sealed": n["sealed"] }));
+        assert_eq!(opened["note"], n["note"], "a note");
+    }
+}
+
 /// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, join codes,
 /// passkeys' device keys and a session endpoint's certificate.
 #[test]
