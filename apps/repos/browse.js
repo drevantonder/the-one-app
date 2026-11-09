@@ -141,7 +141,8 @@ export async function latest(ctx, g, { repo, ref, path = "" }) {
         wanted.delete(e.name);
       }
     }
-    if (!wanted.size || ++n > 300) break;
+    // A folder of thousands of entries is read afresh from each commit, so it's given fewer commits to look back through.
+    if (!wanted.size || (n += 1 + (mine?.type === "tree" ? o.tree(mine.sha).length : 0) / 1000) > 300) break;
   }
   return out;
 }

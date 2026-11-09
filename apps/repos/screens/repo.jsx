@@ -21,7 +21,7 @@ function Entry({ d, e, last }) {
     <Row
       type={open ? "button" : undefined}
       onClick={open}
-      className={`grid w-full min-w-0 items-center gap-3 px-3 py-2 text-left text-sm ${open ? "cursor-pointer outline-none hover:bg-accent/50 focus-visible:bg-accent/50" : ""}`}
+      className={`grid w-full min-w-0 [contain-intrinsic-size:auto_2.25rem] [content-visibility:auto] items-center gap-3 px-3 py-2 text-left text-sm ${open ? "cursor-pointer outline-none hover:bg-accent/50 focus-visible:bg-accent/50" : ""}`}
       style={{ gridTemplateColumns: wide ? "minmax(0, 16rem) minmax(0, 1fr) 6rem" : "minmax(0, 1fr)" }}
     >
       <span className="flex min-w-0 items-center gap-2.5">
