@@ -41,23 +41,29 @@ window.oneHost = (() => {
   }
 
   /// Light or dark whatever the system says: a document's rules for the other are switched off and its own on, and
-  /// "automatic" puts them back. Its source also runs in screens' frames (`look`), so it keeps to itself.
+  /// "automatic" puts them back. The browser's theme colours are the same rules, by their `media`. Its source also runs in
+  /// screens' frames (`look`), so it keeps to itself.
   function scheme() {
     const kept = new Map();
+    const chosen = (media, value) => value === "automatic" ? media
+      : media.replace(/\(\s*prefers-color-scheme\s*:\s*(light|dark)\s*\)/g, (_, s) => (s === value ? "(min-width: 0px)" : "(max-width: 0px) and (min-width: 1px)"));
     return (doc, value) => {
       doc.documentElement.style.colorScheme = value === "automatic" ? "" : value;
       const walk = (rules) => {
         for (const rule of rules) {
           if (rule.media && /prefers-color-scheme/.test(kept.get(rule) ?? rule.media.mediaText)) {
             if (!kept.has(rule)) kept.set(rule, rule.media.mediaText);
-            rule.media.mediaText = value === "automatic" ? kept.get(rule)
-              : kept.get(rule).replace(/\(\s*prefers-color-scheme\s*:\s*(light|dark)\s*\)/g, (_, s) => (s === value ? "(min-width: 0px)" : "(max-width: 0px) and (min-width: 1px)"));
+            rule.media.mediaText = chosen(kept.get(rule), value);
           }
           if (rule.cssRules) walk(rule.cssRules);
         }
       };
       for (const sheet of doc.styleSheets) {
         try { walk(sheet.cssRules); } catch {}
+      }
+      for (const meta of doc.querySelectorAll("meta[name=theme-color][media]")) {
+        if (!kept.has(meta)) kept.set(meta, meta.media);
+        meta.media = chosen(kept.get(meta), value);
       }
     };
   }
