@@ -13,7 +13,8 @@ pub mod stored;
 /// What this build reads of who's who: the scope database's tables, types, roles and rules of this number. A device
 /// that reads less is told to update, by nodes (`protocol::header::READS`), the relay, auth and the URL signer (`reads` in what it
 /// asks them, `cloudflare/shared/protocol.js`'s `READS`, which `protocol::javascript` writes from this). A release that changes
-/// `scope::SCHEMA`, `permissions::SCHEMA` or `permissions::DEFAULTS`, or takes away a route older devices use, reads one more.
+/// `scope::SCHEMA`, `permissions::SCHEMA` or `permissions::DEFAULTS`, or takes away a route older devices use, or writes a
+/// sealed format older devices can't open (`keys::FORMAT`), reads one more.
 pub const READS: u32 = 11;
 
 /// What a client said it reads, in `protocol::header::READS`' value: its first number, 0 for nothing.

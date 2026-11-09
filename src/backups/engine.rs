@@ -68,7 +68,7 @@ fn name_of(key: &[u8; 32], bytes: &[u8]) -> String {
 
 /// Encrypts an object under a key derived from its name: each key encrypts one content, so a fixed nonce is safe.
 fn lock_object(key: &[u8; 32], name: &str, bytes: &[u8]) -> Vec<u8> {
-    cipher(&blake3::derive_key(OBJECT, &[&key[..], name.as_bytes()].concat())).encrypt(&zero(), bytes).expect("encrypting in memory")
+    [crate::keys::NUMBERED, &cipher(&blake3::derive_key(OBJECT_NUMBERED, &[&key[..], name.as_bytes()].concat())).encrypt(&zero(), bytes).expect("encrypting in memory")].concat()
 }
 
 fn open_object(key: &[u8; 32], name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
@@ -95,12 +95,13 @@ pub struct Snapshot {
     pub databases: BTreeMap<String, (u64, u64)>,
 }
 
-/// A snapshot as a place keeps it: its key's id, a random nonce, and the snapshot, encrypted.
+/// A snapshot as a place keeps it: `keys::FORMAT`, its key's id, a random nonce, and the snapshot, encrypted.
 fn lock_snapshot(key: &[u8; 32], s: &Snapshot) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
-    let mut out = key_id(key).into_bytes();
+    let mut out = crate::keys::NUMBERED.to_vec();
+    out.extend(key_id(key).into_bytes());
     out.extend(nonce);
-    out.extend(cipher(&blake3::derive_key(SNAPSHOT, key)).encrypt(&nonce.into(), serde_json::to_vec(s).expect("json").as_slice()).expect("encrypting in memory"));
+    out.extend(cipher(&blake3::derive_key(SNAPSHOT, key)).encrypt(&nonce.into(), Payload { msg: &serde_json::to_vec(s).expect("json"), aad: crate::keys::NUMBERED }).expect("encrypting in memory"));
     out
 }
 
@@ -684,12 +685,14 @@ mod tests {
         let numbered = [crate::keys::NUMBERED, &cipher(&derive(OBJECT_NUMBERED)).encrypt(&zero(), plain.as_slice()).unwrap()].concat();
         assert_eq!(open_object(&key, &name, &numbered).unwrap(), plain);
         assert!(open_object(&key, &name, &numbered[1..]).is_err(), "not with its version taken off");
-        assert_eq!(open_object(&key, &name, &lock_object(&key, &name, &plain)).unwrap(), plain, "as written before");
+        assert_eq!(open_object(&key, &name, &lock_object(&key, &name, &plain)).unwrap(), plain, "as it's written now");
+        let before = |name: &str, plain: &[u8]| cipher(&blake3::derive_key(OBJECT, &[&key[..], name.as_bytes()].concat())).encrypt(&zero(), plain).unwrap();
+        assert_eq!(open_object(&key, &name, &before(&name, &plain)).unwrap(), plain, "as written before");
         // Written before, and starting with the version by chance: the same format, tried next.
         let unlucky = (0..u32::MAX).find_map(|n| {
             let plain = n.to_be_bytes().to_vec();
             let name = name_of(&key, &plain);
-            let sealed = lock_object(&key, &name, &plain);
+            let sealed = before(&name, &plain);
             (sealed[0] == crate::keys::FORMAT).then_some((name, sealed, plain))
         });
         let (name, sealed, plain) = unlucky.unwrap();
@@ -702,7 +705,9 @@ mod tests {
         let numbered = [crate::keys::NUMBERED, key_id(&key).as_bytes(), &nonce, &sealed].concat();
         assert_eq!(open_snapshot(&[key], &numbered).unwrap().unwrap().0, snapshot);
         assert!(open_snapshot(&[key], &numbered[1..]).is_err(), "not with its version taken off");
-        assert_eq!(open_snapshot(&[key], &lock_snapshot(&key, &snapshot)).unwrap().unwrap().0, snapshot, "as written before");
+        assert_eq!(open_snapshot(&[key], &lock_snapshot(&key, &snapshot)).unwrap().unwrap().0, snapshot, "as it's written now");
+        let before = cipher(&blake3::derive_key(SNAPSHOT, &key)).encrypt(&nonce.into(), json.as_slice()).unwrap();
+        assert_eq!(open_snapshot(&[key], &[key_id(&key).as_bytes(), &nonce, &before].concat()).unwrap().unwrap().0, snapshot, "as written before");
     }
 
     #[tokio::test]

@@ -1,12 +1,13 @@
 // The Workers' formats, which nodes read too (src/cloudflare.rs; tests/contracts.rs checks they agree).
 //
 // Keys are a tree per scope. A scope's key is 32 random bytes, and so is each app's key in it, kept sealed under the
-// scope's key: nonce ‖ AES-256-GCM(HKDF-SHA256(scope key, "one/app\0<app>"), nonce, app key), so erasing an app (deleting
+// scope's key: 1 ‖ nonce ‖ AES-256-GCM(HKDF-SHA256(scope key, "one/app\0<app>"), nonce, app key), so erasing an app (deleting
 // its sealed key) destroys its key, and its data with it. A database's key is derived from its app's with HKDF-SHA256.
 //
 // Sealed to a public key (an X25519 key: a user's, a device's, the recovery key's twin), bytes are
 // share ‖ AES-256-GCM(key, zero nonce, plain), where share is a fresh X25519 public key and key is HKDF-SHA256 of the
-// shared secret, salted with share ‖ the recipient's public key. Each key seals once, so the zero nonce is safe.
+// shared secret, salted with share ‖ the recipient's public key. Each key seals once, so the zero nonce is safe. What's
+// kept starts with 1, which is authenticated too; what a push carries doesn't (`sealTo`).
 //
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
 // 1 ‖ nonce ‖ AES-256-GCM(key, nonce, plain, authenticating that 1), with key and the copy's id both derived from the
@@ -61,6 +62,8 @@ async function aes(key, use) {
 const ZERO = new Uint8Array(12);
 const NUMBERED = new Uint8Array([1]);
 
+/// Sealed with no version: what the push Worker sends, for a phone's shell, which changes only with a new build from the
+/// App Store or TestFlight (`seal_unnumbered_to` in src/keys.rs).
 export async function sealTo(to, plain) {
   to = bytes(to);
   const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
@@ -77,12 +80,20 @@ export async function sealTo(to, plain) {
 async function openSealed(pair, sealed) {
   sealed = bytes(sealed);
   if (sealed.length < 48) throw new Error("not sealed");
-  const share = sealed.slice(0, 32);
   const me = pair.secret instanceof CryptoKey ? pair.secret : await crypto.subtle.importKey("jwk", { kty: "OKP", crv: "X25519", d: b64u.encode(pair.secret), x: b64u.encode(pair.public) }, { name: "X25519" }, false, ["deriveBits"]);
-  const them = await crypto.subtle.importKey("raw", share, { name: "X25519" }, false, []);
-  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: them }, me, 256));
-  const key = await hkdf(shared, "one/sealed-to", concat(share, bytes(pair.public)));
-  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: ZERO }, await aes(key, "decrypt"), sealed.slice(32)));
+  const open = async (body, additionalData) => {
+    const share = body.slice(0, 32);
+    const them = await crypto.subtle.importKey("raw", share, { name: "X25519" }, false, []);
+    const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: them }, me, 256));
+    const key = await hkdf(shared, "one/sealed-to", concat(share, bytes(pair.public)));
+    return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: ZERO, additionalData }, await aes(key, "decrypt"), body.slice(32)));
+  };
+  if (sealed[0] === NUMBERED[0] && sealed.length >= 49) {
+    try {
+      return await open(sealed.slice(1), NUMBERED);
+    } catch {}
+  }
+  return open(sealed, new Uint8Array());
 }
 
 /// Opens a note sealed to the key pair `pair` (`open_note` in src/push.rs): → the note, signed by a device of the network

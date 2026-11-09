@@ -12,7 +12,7 @@ use one::keys;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-const WRITTEN: [&str; 1] = [include_str!("sealed/0.json")];
+const WRITTEN: [&str; 2] = [include_str!("sealed/0.json"), include_str!("sealed/1.json")];
 
 fn written() -> Vec<Value> {
     WRITTEN.iter().map(|text| serde_json::from_str(text).unwrap()).collect()

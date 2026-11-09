@@ -83,7 +83,7 @@ pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result
     let mut note = note.clone();
     loop {
         let signed = crate::keys::signed_request(by, SIGNED_NOTE, serde_json::to_value(&note)?, at);
-        let sealed = crate::keys::seal_to(to, &serde_json::to_vec(&signed)?)?;
+        let sealed = crate::keys::seal_unnumbered_to(to, &serde_json::to_vec(&signed)?)?;
         if sealed.len() <= NOTE_BYTES {
             return Ok(sealed);
         }

@@ -99,13 +99,14 @@ pub fn seal_secret(key: &SigningKey) -> [u8; 32] {
     twin(&key.to_bytes()).0
 }
 
-/// An app's key in a scope's epoch is random, kept sealed under the epoch's key (`keys::app_key_name`): nonce ‖
-/// AES-256-GCM(HKDF(epoch key, "one/app\0<app>"), nonce, app key). Erasing the app deletes it, which destroys the key
+/// An app's key in a scope's epoch is random, kept sealed under the epoch's key (`keys::app_key_name`): `FORMAT` ‖ nonce
+/// ‖ AES-256-GCM(HKDF(epoch key, "one/app\0<app>"), nonce, app key). Erasing the app deletes it, which destroys the key
 /// and so the app's data.
 pub fn seal_app_key(epoch_key: &[u8; 32], app: &str, app_key: &[u8; 32]) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
-    let mut out = nonce.to_vec();
-    out.extend(cipher(&hkdf(epoch_key, &app_key_info(app))).encrypt(&nonce.into(), &app_key[..]).expect("encrypting in memory"));
+    let mut out = NUMBERED.to_vec();
+    out.extend(nonce);
+    out.extend(cipher(&hkdf(epoch_key, &app_key_info(app))).encrypt(&nonce.into(), Payload { msg: &app_key[..], aad: NUMBERED }).expect("encrypting in memory"));
     out
 }
 
@@ -226,15 +227,26 @@ pub fn twin_public(public: &[u8; 32]) -> Result<[u8; 32]> {
     Ok(CompressedEdwardsY(*public).decompress().context("not an Ed25519 key")?.to_montgomery().0)
 }
 
-/// Seals `plain` to an X25519 public key: share ‖ AES-256-GCM(HKDF(shared, share ‖ to), zero nonce, plain).
+/// Seals `plain` to an X25519 public key: `FORMAT` ‖ share ‖ AES-256-GCM(HKDF(shared, share ‖ to), zero nonce, plain).
 pub fn seal_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
+    sealed_to(NUMBERED, to, plain)
+}
+
+/// `seal_to` with no version: what a push carries, since a phone's shell, which opens it with no window, changes only
+/// when the App Store or TestFlight brings a new build. Nothing keeps these.
+pub fn seal_unnumbered_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
+    sealed_to(UNNUMBERED, to, plain)
+}
+
+fn sealed_to(format: &'static [u8], to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
     let ephemeral: [u8; 32] = rand::random();
     let share = public_of(&ephemeral);
     let shared = MontgomeryPoint(*to).mul_clamped(ephemeral).0;
     ensure!(shared != [0; 32], "not a public key");
     let key = hkdf_salted(&shared, &[&share[..], to].concat(), b"one/sealed-to");
-    let mut out = share.to_vec();
-    out.extend(cipher(&key).encrypt(&Default::default(), plain).map_err(|_| anyhow!("sealing failed"))?);
+    let mut out = format.to_vec();
+    out.extend(share);
+    out.extend(cipher(&key).encrypt(&Default::default(), Payload { msg: plain, aad: format }).map_err(|_| anyhow!("sealing failed"))?);
     Ok(out)
 }
 
@@ -510,14 +522,15 @@ pub fn vault_keys_folder(scope: &str) -> String {
     format!("{}/_vault", crate::bucket::folder(scope))
 }
 
-/// Seals an object under an epoch's key (or a key from it) and its name: epoch (u32, big-endian) ‖ nonce ‖
-/// AES-256-GCM(key, nonce, bytes, aad = name), so it can't be read, changed or passed off as another object, and a
-/// reader knows which epoch's key opens it before trying.
+/// Seals an object under an epoch's key (or a key from it) and its name: `FORMAT` ‖ epoch (u32, big-endian) ‖ nonce ‖
+/// AES-256-GCM(key, nonce, bytes, aad = `FORMAT` ‖ name), so it can't be read, changed or passed off as another object,
+/// and a reader knows which epoch's key opens it before trying.
 pub fn seal(epoch: u32, key: &[u8; 32], name: &str, bytes: &[u8]) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
-    let mut out = epoch.to_be_bytes().to_vec();
+    let mut out = NUMBERED.to_vec();
+    out.extend(epoch.to_be_bytes());
     out.extend(nonce);
-    out.extend(Aes256Gcm::new(key.into()).encrypt(&nonce.into(), Payload { msg: bytes, aad: name.as_bytes() }).expect("encrypts"));
+    out.extend(Aes256Gcm::new(key.into()).encrypt(&nonce.into(), Payload { msg: bytes, aad: &[NUMBERED, name.as_bytes()].concat() }).expect("encrypts"));
     out
 }
 
@@ -914,7 +927,7 @@ mod tests {
     }
 
     /// Sealed to `to` by hand, in `format`, from a share whose first byte is `first`, if any.
-    fn sealed_to(to: &[u8; 32], format: &[u8], first: Option<u8>, plain: &[u8]) -> Vec<u8> {
+    fn by_hand_to(to: &[u8; 32], format: &[u8], first: Option<u8>, plain: &[u8]) -> Vec<u8> {
         loop {
             let ephemeral: [u8; 32] = rand::random();
             let share = public_of(&ephemeral);
@@ -942,12 +955,12 @@ mod tests {
         assert!(open(&key, "a/b/1", &[NUMBERED, &before[..]].concat()).is_err(), "nor with one put on");
 
         let (secret, public) = twin(&rand::random());
-        let numbered = sealed_to(&public, NUMBERED, None, b"an epoch");
+        let numbered = by_hand_to(&public, NUMBERED, None, b"an epoch");
         assert_eq!(open_sealed(&secret, &numbered).unwrap(), b"an epoch");
         assert!(open_sealed(&secret, &numbered[1..]).is_err(), "not with its version taken off");
-        let unlucky = sealed_to(&public, UNNUMBERED, Some(FORMAT), b"an epoch");
+        let unlucky = by_hand_to(&public, UNNUMBERED, Some(FORMAT), b"an epoch");
         assert_eq!(open_sealed(&secret, &unlucky).unwrap(), b"an epoch", "sealed before, and starting with the version by chance");
-        assert!(open_sealed(&secret, &[NUMBERED, &sealed_to(&public, UNNUMBERED, None, b"x")[..]].concat()).is_err(), "not with a version put on");
+        assert!(open_sealed(&secret, &[NUMBERED, &by_hand_to(&public, UNNUMBERED, None, b"x")[..]].concat()).is_err(), "not with a version put on");
 
         let under = hkdf(b"a token", b"one/sealed-under");
         let unlucky_nonce = [FORMAT, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
