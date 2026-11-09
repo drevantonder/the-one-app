@@ -28,7 +28,7 @@ function Diff({ f, split, load, loading }) {
     )
   }
   if (!f.hunks.length) {
-    return <p className="px-4 py-3 text-sm text-muted-foreground">{f.status === "renamed" ? "File renamed without changes." : f.old_mode !== f.new_mode ? "Only the file's mode changed." : "No changes to show."}</p>
+    return <p className="px-4 py-3 text-sm text-muted-foreground">{f.status === "renamed" ? "File renamed without changes." : f.old_mode !== f.new_mode ? "Only the file’s mode changed." : "No changes to show."}</p>
   }
   return <DiffView hunks={f.hunks} path={f.path} split={split} />
 }
@@ -55,7 +55,7 @@ function DiffFile({ d, f, k, split, load, loading }) {
         {BADGE[f.status] && <Badge variant="secondary">{BADGE[f.status]}</Badge>}
         {mode && <span className="text-xs text-muted-foreground">{mode}</span>}
         <Counts add={f.additions} del={f.deletions} className="text-xs" />
-        {at && <Button variant="ghost" size="sm" onClick={() => go("file", { repo: d.repo, ref: at, path: f.path })}>View file</Button>}
+        {at && <Button variant="ghost" size="sm" onClick={() => go("file", { repo: d.repo, ref: at, path: f.path })}>View File</Button>}
       </div>
       {!folded && <div className="border-t"><Diff f={f} split={split} load={load} loading={loading} /></div>}
     </Card>
@@ -108,7 +108,7 @@ function Commit({ d, repo, sha, files }) {
               <span key={p}>{i > 0 && " + "}<button type="button" className="underline underline-offset-4 hover:text-foreground" onClick={() => go("commit", { repo: d.repo, sha: p })}><code>{short(p)}</code></button></span>
             ))}
           </span>
-          <Button variant="outline" size="sm" onClick={() => go("repo", { repo: d.repo, ref: d.sha })}><Icon name="code" />Browse files</Button>
+          <Button variant="outline" size="sm" onClick={() => go("repo", { repo: d.repo, ref: d.sha })}><Icon name="code" />Browse Files</Button>
         </div>
       </div>
 

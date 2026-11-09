@@ -67,7 +67,7 @@ function h() {
 			let t = E.current;
 			try {
 				let n = ((await one.call("_list", {})).devices || []).find(g);
-				if (!n) return t.shown && O("It's been given back.");
+				if (!n) return t.shown && O("It’s been given back.");
 				t.shown = n, _(n), one.title(f(n)), t.framed || await e();
 			} catch (e) {
 				let t = e;
@@ -79,7 +79,7 @@ function h() {
 	i[4] === Symbol.for("react.memo_cache_sentinel") ? (j = async function() {
 		let e = E.current;
 		try {
-			await one.call("save_profile", { item: e.shown.borrowed.item }), w(!0), O(`Saved: the ${e.shown.borrowed.profile || "browser"} profile has your sign-ins now.`), e.shown = null, clearInterval(e.timer);
+			await one.call("save_profile", { item: e.shown.borrowed.item }), w(!0), O(`Saved to the ${e.shown.borrowed.profile || "browser"} profile.`), e.shown = null, clearInterval(e.timer);
 		} catch (e) {
 			let t = e;
 			O(one.plain(t).title, !0);

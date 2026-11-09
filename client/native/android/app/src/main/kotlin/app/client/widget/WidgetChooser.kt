@@ -75,8 +75,6 @@ private fun Chooser(shown: HomeWidgets.Shown, widgetId: Int, choose: (KeptWidget
     Column(Modifier.fillMaxSize().background(p.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)) {
             Text("Choose a Widget", style = Type.largeTitle, color = p.label)
-            Spacer(Modifier.height(4.dp))
-            Text("Pick which of your pages’ widgets this shows.", style = Type.subheadline, color = p.secondary)
         }
         if (!shown.signedIn) return@Column Unavailable("Not Signed In", "Sign in to ${BuildConfig.NAME} to see your pages.")
         if (widgets.isEmpty()) return@Column Unavailable("No Widgets Yet", "Open ${BuildConfig.NAME} to see your pages, and their widgets show up here.")

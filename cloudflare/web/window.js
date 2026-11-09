@@ -52,7 +52,7 @@ function countBadges(drawn) {
 const barBackAt = (r) => (platform.phone() ? !home(r) : !!history.state?.back);
 
 const appBehind = () =>
-  platform.behind() ? h(ui.Problem, { quiet: true, title: `Update ${config().name}`, text: "This app needs an update to get the newest version.", className: "max-w-none rounded-none border-0 border-b" }) : null;
+  platform.behind() ? h(ui.Problem, { quiet: true, title: `Update ${config().name}`, className: "max-w-none rounded-none border-0 border-b" }) : null;
 
 function drawWindow() {
   windowShown = true;

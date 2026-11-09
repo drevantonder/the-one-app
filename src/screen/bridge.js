@@ -162,7 +162,7 @@
   // Errors and statuses are written for users and agents at once: what happened and what to do, in users' words,
   // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
   // those is for agents only.
-  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|network's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
+  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|network’s|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
 
   // Whether a screen has asked for a large title (`largeTitle`): it sets up the bar's title once.
   let titled = false;
@@ -230,7 +230,7 @@
       let msg = String(err?.message ?? err ?? "").replace(/^(Uncaught )?\w*Error:\s*/, "").trim();
       while (/\([^()]*\)/.test(msg)) msg = msg.replace(/\s*\([^()]*\)/g, "");
       if (/failed to fetch|load failed|networkerror|not connected|offline|unreachable|no route|connection (refused|reset|lost)/i.test(msg))
-        return { title: "Couldn't reach your devices.", safe: "Nothing was lost.", next: "Check your connection." };
+        return { title: "Couldn’t reach your devices.", safe: "Nothing was lost.", next: "Check your connection." };
       if (/timed? ?out|took too long|took longer than/i.test(msg))
         return { title: app ? `${app} took too long, so it stopped.` : "That took too long, so it stopped.", safe: "Nothing was lost.", next: "" };
       if (/may already be done/i.test(msg)) return { title: "This may already be done.", safe: "", next: "Check before trying again." };
@@ -240,9 +240,9 @@
         if (!part || forAgents.test(part)) break;
         parts.push(part);
       }
-      const said = parts.map((s) => (/^\S*@/.test(s) ? s : s[0].toUpperCase() + s.slice(1)).replace(/([^.!?])$/, "$1.")).join(" ");
+      const said = parts.map((s) => (/^\S*@/.test(s) ? s : s[0].toUpperCase() + s.slice(1)).replace(/([^.!?])$/, "$1.").replace(/\b'\b/g, "’")).join(" ");
       if (!said || said.length > 200 || /something went wrong|internal (server )?error|unexpected|undefined|null|is not a function|\[object/i.test(said))
-        return { title: "That didn't work.", safe: "Nothing was lost.", next: "" };
+        return { title: "That didn’t work.", safe: "Nothing was lost.", next: "" };
       // Something that isn't there won't be there on a second try,
       // and neither will what isn't allowed, or needs signing in first: `final` says trying again can't work.
       const final = err?.code === "refused" || err?.code === "not_signed_in" || /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b|^no \w+ [\w./-]+\.?$/i.test(msg);

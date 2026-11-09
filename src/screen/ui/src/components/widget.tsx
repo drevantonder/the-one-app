@@ -69,7 +69,7 @@ function WidgetCard({ w, host, tree = w.root, className, style, ...props }: { w:
       {w.error ? (
         <div className="flex min-h-0 flex-col gap-1">
           <div className="flex items-center gap-1.5 font-medium text-warning"><Icon name="warning-fill" className="size-4 shrink-0" />Not working</div>
-          {why && why !== "That didn't work." && <div className="line-clamp-4 select-text break-words text-[13px] text-muted-foreground">{why}</div>}
+          {why && why !== "That didn’t work." && <div className="line-clamp-4 select-text break-words text-[13px] text-muted-foreground">{why}</div>}
         </div>
       ) : (
         <div className={cn("flex min-h-0 flex-1 flex-col [&>[data-w=col]]:flex-1 [&>.contents>[data-w=col]]:flex-1", w.old && "opacity-50")}>

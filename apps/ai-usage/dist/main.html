@@ -45,7 +45,7 @@ var m = (e) => (e.devices || []).length ? `on ${e.devices.join(", ")}` : "";
 function h(t) {
 	let n = e(29), { p: r, several: i } = t, a = r.account || "", o;
 	n[0] === a ? o = n[1] : (o = a.split(" · "), n[0] = a, n[1] = o);
-	let [s, l] = o, u = r.active && i ? "In use" : r.disabled ? "Not in rotation" : "", h;
+	let [s, l] = o, u = r.active && i ? "In use" : r.disabled ? "Not used" : "", h;
 	n[2] !== l || n[3] !== r || n[4] !== u || n[5] !== s ? (h = r.account && /* @__PURE__ */ f("div", { children: [/* @__PURE__ */ f("div", {
 		className: "flex items-baseline justify-between gap-2",
 		children: [/* @__PURE__ */ d("span", {
@@ -176,7 +176,7 @@ function _(t) {
 	let k;
 	n[31] !== s.title || n[32] !== p ? (k = p.length > 0 && /* @__PURE__ */ d(c, {
 		warn: !0,
-		title: `Can't read ${s.title} now`,
+		title: `Can’t read ${s.title} now`,
 		text: p.join("; ")
 	}), n[31] = s.title, n[32] = p, n[33] = k) : k = n[33];
 	let A;
@@ -235,13 +235,13 @@ function x() {
 	if (p.problem) {
 		let e;
 		return r[11] === p.problem ? e = r[12] : (e = /* @__PURE__ */ d(c, {
-			title: "Can't read your AI plans",
+			title: "Can’t read your AI plans",
 			text: p.problem
 		}), r[11] = p.problem, r[12] = e), e;
 	}
 	if (!p.providers || !p.providers.length) {
 		let e;
-		return r[13] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(o, { children: "No AI sign-ins on your machines." }), r[13] = e) : e = r[13], e;
+		return r[13] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(o, { children: "No AI sign-ins on your devices." }), r[13] = e) : e = r[13], e;
 	}
 	let h;
 	r[14] === p.providers ? h = r[15] : (h = new Set(p.providers.map(S)), r[14] = p.providers, r[15] = h);

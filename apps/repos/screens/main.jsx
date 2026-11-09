@@ -56,7 +56,7 @@ function Main() {
   const find = (
     <div className="relative max-w-md">
       <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-      <Input className="pl-8" placeholder="Find a repo" aria-label="Find a repo" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <Input className="pl-8" placeholder="Search" aria-label="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
     </div>
   )
   if (!own.data) return <Frame><div className="flex flex-col gap-6">{find}<Pending call={own} rows={6} tiles="22rem" /></div></Frame>

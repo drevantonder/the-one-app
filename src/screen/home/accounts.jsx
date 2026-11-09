@@ -51,7 +51,7 @@ async function addAccount(a, p, at, stale, reload) {
       }
     },
   }))
-  home.menu([...pick, { title: "Sign In to Another Account", run: signIn }], at)
+  home.menu([...pick, { title: "Add Account", run: signIn }], at)
 }
 
 /// An app's accounts: a row each, one that needs signing in again saying so, with its Sign In.
@@ -163,7 +163,7 @@ function Accounts() {
         )
       })}
       </Grid>
-      {!withAccounts.length && <Empty className="mr-auto max-w-md px-0 py-0 text-left items-start" action={may ? { label: "Add Account", run: () => home.addAccountApp()?.() } : undefined}>The accounts your apps sign in to, like your email and chats, show here.</Empty>}
+      {!withAccounts.length && <Empty className="mr-auto max-w-md px-0 py-0 text-left items-start" action={may ? { label: "Add Account", run: () => home.addAccountApp()?.() } : undefined}>No accounts yet.</Empty>}
       {may && withAccounts.length > 0 && <Button variant="outline" className="self-start" onClick={() => home.addAccountApp()?.()}>Add Account for Another App</Button>}
     </div>
   )

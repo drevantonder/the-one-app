@@ -95,9 +95,9 @@ function L() {
 			label: "New Group",
 			run: () => M()
 		},
-		children: "A group shares its apps and data, on a page of its own."
+		children: "A group shares its apps and data."
 	}) : /* @__PURE__ */ k(D, { children: [
-		c && c === one.params?.group && !X && /* @__PURE__ */ O(b, { title: "You're not in this group." }),
+		c && c === one.params?.group && !X && /* @__PURE__ */ O(b, { title: "You’re not in this group." }),
 		!!J.length && /* @__PURE__ */ O(R, {
 			title: "Invited",
 			children: /* @__PURE__ */ O(_, { children: J.map((t) => /* @__PURE__ */ O(v, {
@@ -496,8 +496,8 @@ function ee(t) {
 					value: y,
 					onChange: (e) => b(e.target.value),
 					onKeyDown: (e) => e.key === "Enter" && M[0] && F(M[0].id),
-					placeholder: "Find users",
-					"aria-label": "Find users",
+					placeholder: "Search",
+					"aria-label": "Search",
 					enterKeyHint: "search",
 					autoComplete: "off",
 					...N,
@@ -547,7 +547,7 @@ function W(e, t) {
 	return e.name.localeCompare(t.name);
 }
 function te(t) {
-	let r = e(33), { g: i, open: a, setOpen: s, saved: c } = t, [l, u] = n(i.handle), [d, f] = n(""), [p, m] = n(!1), h;
+	let r = e(31), { g: i, open: a, setOpen: s, saved: c } = t, [l, u] = n(i.handle), [d, f] = n(""), [p, m] = n(!1), h;
 	r[0] !== i.handle || r[1] !== l ? (h = /^[a-z0-9]+(-[a-z0-9]+)*$/.test(l) && l.length <= 39 && l !== i.handle, r[0] = i.handle, r[1] = l, r[2] = h) : h = r[2];
 	let _ = h, v;
 	r[3] !== p || r[4] !== i.id || r[5] !== _ || r[6] !== c || r[7] !== s || r[8] !== l ? (v = async function() {
@@ -593,18 +593,14 @@ function te(t) {
 		})]
 	}), r[17] = l, r[18] = D);
 	let M;
-	r[19] === i.name ? M = r[20] : (M = /* @__PURE__ */ k("p", {
+	r[19] === Symbol.for("react.memo_cache_sentinel") ? (M = /* @__PURE__ */ O("p", {
 		className: "text-sm text-muted-foreground",
-		children: [
-			"What apps call ",
-			i.name,
-			" by, like Repos' addresses, which move with it. Lowercase letters, digits and hyphens."
-		]
-	}), r[19] = i.name, r[20] = M);
+		children: "Lowercase letters, numbers and hyphens. Its Repos addresses change with it."
+	}), r[19] = M) : M = r[19];
 	let P;
-	r[21] === d ? P = r[22] : (P = d && /* @__PURE__ */ O(b, { title: d }), r[21] = d, r[22] = P);
+	r[20] === d ? P = r[21] : (P = d && /* @__PURE__ */ O(b, { title: d }), r[20] = d, r[21] = P);
 	let F;
-	r[23] !== P || r[24] !== w || r[25] !== D || r[26] !== M ? (F = /* @__PURE__ */ k("form", {
+	r[22] !== P || r[23] !== w || r[24] !== D ? (F = /* @__PURE__ */ k("form", {
 		className: "flex flex-col gap-4 p-4",
 		onSubmit: w,
 		children: [
@@ -612,15 +608,15 @@ function te(t) {
 			M,
 			P
 		]
-	}), r[23] = P, r[24] = w, r[25] = D, r[26] = M, r[27] = F) : F = r[27];
+	}), r[22] = P, r[23] = w, r[24] = D, r[25] = F) : F = r[25];
 	let I;
-	return r[28] !== a || r[29] !== s || r[30] !== F || r[31] !== C ? (I = /* @__PURE__ */ O(x, {
+	return r[26] !== a || r[27] !== s || r[28] !== F || r[29] !== C ? (I = /* @__PURE__ */ O(x, {
 		open: a,
 		onOpenChange: s,
 		title: "Handle",
 		action: C,
 		children: F
-	}), r[28] = a, r[29] = s, r[30] = F, r[31] = C, r[32] = I) : I = r[32], I;
+	}), r[26] = a, r[27] = s, r[28] = F, r[29] = C, r[30] = I) : I = r[30], I;
 }
 r(document.getElementById("root")).render(/* @__PURE__ */ O(L, {}));
 </script>

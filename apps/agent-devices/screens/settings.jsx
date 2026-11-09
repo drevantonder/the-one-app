@@ -74,7 +74,7 @@ function Settings() {
           <ChromeLogo />
           Google Chrome
         </h2>
-        <Hint>Chrome runs without a container. This is fine if you trust the workload.</Hint>
+        <Hint>Chrome isn’t kept apart from the device it runs on. Turn it on only for agents you trust.</Hint>
       </div>
       {body}
     </div>

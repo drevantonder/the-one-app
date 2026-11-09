@@ -35,10 +35,8 @@ function Settings() {
           <ListRow leading={<Icon name="users" className="size-5 text-muted-foreground" />} title="Collaborators" onClick={() => go("collaborators", { repo: P.repo })} />
           <ListRow leading={<Icon name="tag" className="size-5 text-muted-foreground" />} title="Labels" onClick={() => go("labels", { repo: P.repo })} />
         </List>
-        <Section title="Danger Zone">
-          {error && <Problem title={error} />}
-          <Button variant="destructive" className="self-start" onClick={retire}>Delete Repository</Button>
-        </Section>
+        {error && <Problem title={error} />}
+        <Button variant="destructive" className="self-start" onClick={retire}>Delete Repository</Button>
       </div>
     </>
   )

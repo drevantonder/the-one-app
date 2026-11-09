@@ -152,7 +152,7 @@ function Issues() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1">
           <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Find an issue" aria-label="Find an issue" value={typed} onChange={(e) => setTyped(e.target.value)} />
+          <Input className="pl-8" placeholder="Search" aria-label="Search" value={typed} onChange={(e) => setTyped(e.target.value)} />
         </div>
         <Filter title="Author" value={f.author} choices={names} set={(v) => set("author", v)} />
         <Filter title="Label" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} also={{ title: "Edit Labels…", run: () => go("labels", { repo: P.repo }) }} />

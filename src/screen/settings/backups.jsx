@@ -134,7 +134,7 @@ function Backups() {
                 text={[!trouble.check && missed && `Last backed up ${one.ago(failing.last.time, { long: true })}.`, trouble.fix].filter(Boolean).join(" ")}
                 action={trouble.check ? { label: "Check Again", run: checkAgain } : waiting ? undefined : { label: "Back Up Now", run: backUpNow }}
               />
-            ) : !places.length && <Empty action={admin ? { label: "Add Place…", run: () => setAdding(true) } : undefined}>Nothing is backed up yet.</Empty>}
+            ) : !places.length && <Empty action={admin ? { label: "Add Place", run: () => setAdding(true) } : undefined}>Nothing is backed up yet.</Empty>}
             {error && <Problem title={error} />}
 
             {!!places.length && (
@@ -152,7 +152,7 @@ function Backups() {
                       onClick={() => setOpen({ place: p.id })}
                     />
                   ))}
-                  {admin && <ListAdd onClick={() => setAdding(true)}>Add Place…</ListAdd>}
+                  {admin && <ListAdd onClick={() => setAdding(true)}>Add Place</ListAdd>}
                 </List>
               </Section>
             )}

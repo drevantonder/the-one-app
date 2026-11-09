@@ -25,7 +25,7 @@ function D(t) {
 	let A = k, j;
 	i[4] === Symbol.for("react.memo_cache_sentinel") ? (j = /* @__PURE__ */ S("h2", {
 		className: "text-sm font-medium text-muted-foreground",
-		children: "Browser profile"
+		children: "Browser Profile"
 	}), i[4] = j) : j = i[4];
 	let M;
 	i[5] === Symbol.for("react.memo_cache_sentinel") ? (M = /* @__PURE__ */ S(y, {
@@ -38,7 +38,7 @@ function D(t) {
 	let P;
 	i[8] === Symbol.for("react.memo_cache_sentinel") ? (P = /* @__PURE__ */ S(v, {
 		value: T,
-		children: "New profile…"
+		children: "New Profile…"
 	}), i[8] = P) : P = i[8];
 	let F;
 	i[9] === N ? F = i[10] : (F = /* @__PURE__ */ C(_, {
@@ -71,7 +71,7 @@ function D(t) {
 	let R;
 	i[17] !== I || i[18] !== L ? (R = /* @__PURE__ */ C(l, { children: [I, L] }), i[17] = I, i[18] = L, i[19] = R) : R = i[19];
 	let z;
-	i[20] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ S(s, { children: "Each has its own sign-ins, like Personal or Work." }), i[20] = z) : z = i[20];
+	i[20] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ S(s, { children: "Each has its own sign-ins." }), i[20] = z) : z = i[20];
 	let B;
 	i[21] !== A || i[22] !== w ? (B = w && /* @__PURE__ */ S(h, {
 		title: w,
@@ -105,64 +105,55 @@ function O(e) {
 	}, e);
 }
 function k(t) {
-	let n = e(22), { link: i, onDone: a } = t, [o, c] = r(null), f;
-	n[0] !== i.profile || n[1] !== a ? (f = async () => {
-		c(null);
+	let n = e(20), { link: i, onDone: a } = t, [o, s] = r(null), c;
+	n[0] !== i.profile || n[1] !== a ? (c = async () => {
+		s(null);
 		try {
 			await one.call("_save", { profile: i.profile });
 		} catch (e) {
 			let t = e;
-			return c(one.plain(t).title);
+			return s(one.plain(t).title);
 		}
 		a();
-	}, n[0] = i.profile, n[1] = a, n[2] = f) : f = n[2];
-	let p = f, g;
-	n[3] === Symbol.for("react.memo_cache_sentinel") ? (g = /* @__PURE__ */ S("h2", {
+	}, n[0] = i.profile, n[1] = a, n[2] = c) : c = n[2];
+	let f = c, p;
+	n[3] === Symbol.for("react.memo_cache_sentinel") ? (p = /* @__PURE__ */ S("h2", {
 		className: "text-sm font-medium text-muted-foreground",
 		children: "Sign In"
-	}), n[3] = g) : g = n[3];
-	let _;
-	n[4] === i.url ? _ = n[5] : (_ = /* @__PURE__ */ S(d, {
+	}), n[3] = p) : p = n[3];
+	let g;
+	n[4] === i.url ? g = n[5] : (g = /* @__PURE__ */ S(d, {
 		title: "Open the device",
 		onClick: () => one.link(i.url)
-	}), n[4] = i.url, n[5] = _);
-	let v = `Its browser is on messenger.com, in the ${i.profile} profile.`, y;
-	n[6] === v ? y = n[7] : (y = /* @__PURE__ */ S(u, { children: v }), n[6] = v, n[7] = y);
+	}), n[4] = i.url, n[5] = g);
+	let _ = `Sign in to messenger.com in the ${i.profile} profile, and tick Keep me signed in.`, v;
+	n[6] === _ ? v = n[7] : (v = /* @__PURE__ */ S(u, { children: _ }), n[6] = _, n[7] = v);
+	let y;
+	n[8] !== g || n[9] !== v ? (y = /* @__PURE__ */ C(l, { children: [g, v] }), n[8] = g, n[9] = v, n[10] = y) : y = n[10];
 	let b;
-	n[8] === Symbol.for("react.memo_cache_sentinel") ? (b = /* @__PURE__ */ S(u, { children: "Sign in there, and tick Keep me signed in." }), n[8] = b) : b = n[8];
-	let x;
-	n[9] !== _ || n[10] !== y ? (x = /* @__PURE__ */ C(l, { children: [
-		_,
-		y,
-		b
-	] }), n[9] = _, n[10] = y, n[11] = x) : x = n[11];
-	let w;
-	n[12] === Symbol.for("react.memo_cache_sentinel") ? (w = /* @__PURE__ */ S(s, { children: "Come back and press Done." }), n[12] = w) : w = n[12];
-	let T;
-	n[13] !== p || n[14] !== o ? (T = o && /* @__PURE__ */ S(h, {
+	n[11] !== f || n[12] !== o ? (b = o && /* @__PURE__ */ S(h, {
 		title: o,
 		action: {
 			label: "Try Again",
-			run: p
+			run: f
 		}
-	}), n[13] = p, n[14] = o, n[15] = T) : T = n[15];
-	let E;
-	n[16] === p ? E = n[17] : (E = /* @__PURE__ */ S(m, {
+	}), n[11] = f, n[12] = o, n[13] = b) : b = n[13];
+	let x;
+	n[14] === f ? x = n[15] : (x = /* @__PURE__ */ S(m, {
 		className: "self-start",
-		run: p,
+		run: f,
 		children: "Done"
-	}), n[16] = p, n[17] = E);
-	let D;
-	return n[18] !== E || n[19] !== x || n[20] !== T ? (D = /* @__PURE__ */ C("section", {
+	}), n[14] = f, n[15] = x);
+	let w;
+	return n[16] !== y || n[17] !== b || n[18] !== x ? (w = /* @__PURE__ */ C("section", {
 		className: "flex flex-col gap-2",
 		children: [
-			g,
-			x,
-			w,
-			T,
-			E
+			p,
+			y,
+			b,
+			x
 		]
-	}), n[18] = E, n[19] = x, n[20] = T, n[21] = D) : D = n[21], D;
+	}), n[16] = y, n[17] = b, n[18] = x, n[19] = w) : w = n[19], w;
 }
 function A() {
 	let { accounts: e, problem: i, retry: s, failed: c, signOut: l, reload: u } = x(), [d, g] = r(null), _ = n(null);
@@ -196,7 +187,7 @@ function A() {
 				text: "Sign it out, then add it again."
 			}, e.account)),
 			e.length > 0 && /* @__PURE__ */ S(a, {
-				title: "Browser profiles",
+				title: "Browser Profiles",
 				accounts: e,
 				failed: c,
 				signOut: l,

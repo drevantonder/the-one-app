@@ -355,12 +355,12 @@ function V(t) {
 		number: o
 	}, n[0] = r, n[1] = o, n[2] = s) : s = n[2];
 	let c = b("issue", s), l;
-	n[3] !== c || n[4] !== a || n[5] !== r ? (l = (e) => /* @__PURE__ */ C(H, {
+	n[3] !== c.reload || n[4] !== a || n[5] !== r ? (l = (e) => /* @__PURE__ */ C(H, {
 		d: e,
 		repo: r,
 		reload: c.reload,
 		onGone: a
-	}), n[3] = c, n[4] = a, n[5] = r, n[6] = l) : l = n[6];
+	}), n[3] = c.reload, n[4] = a, n[5] = r, n[6] = l) : l = n[6];
 	let u;
 	return n[7] !== c || n[8] !== l ? (u = /* @__PURE__ */ C(m, {
 		call: c,
@@ -393,10 +393,10 @@ function H(t) {
 	let ue = le, de;
 	n[10] === U ? de = n[11] : (de = async (e) => {
 		let t = await one.menu([{
-			title: "Close as completed",
+			title: "Close as Completed",
 			icon: "check-circle"
 		}, {
-			title: "Close as not planned",
+			title: "Close as Not Planned",
 			icon: "prohibit"
 		}], e.currentTarget);
 		t != null && await U("close", "close_issue", (e) => ({
@@ -436,7 +436,7 @@ function H(t) {
 			if (n[r].title === "Edit") return N(e.id);
 			if (await one.alert({
 				title: "Delete this comment?",
-				text: "It can't be brought back.",
+				text: "It can’t be brought back.",
 				action: "Delete",
 				danger: !0
 			})) try {

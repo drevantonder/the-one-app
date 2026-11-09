@@ -234,7 +234,7 @@ function Handle({ was, open, setOpen, saved }) {
             {...quiet}
           />
         </div>
-        <p className="text-sm text-muted-foreground">Lowercase letters, digits and hyphens. Your Repos addresses change with it.</p>
+        <p className="text-sm text-muted-foreground">Lowercase letters, numbers and hyphens. Your Repos addresses change with it.</p>
         {error && <Problem title={error} />}
       </form>
     </ResponsiveDialog>

@@ -361,7 +361,7 @@ function ue(e) {
 		list: i,
 		addable: !!k.store() || k.widgetsOn(e).length > 0 || he(e).length > 0,
 		groups: k.allPages().some((e) => e.scope.startsWith("group:")),
-		said: r ? t ? e.scope === "user" ? "No apps yet." : `No apps on ${e.title} yet.` : `When its admins add apps to ${e.title}, they show up here.` : ""
+		said: r ? "No apps yet." : ""
 	};
 }
 var de = () => ({
@@ -948,7 +948,7 @@ function Je({ page: e, editing: t, leaving: i, undone: a, refreshing: o, bottom:
 					children: /* @__PURE__ */ D(d, { name: B.icon })
 				})]
 			})]
-		}), e.missing ? /* @__PURE__ */ D(u, { children: "This device can't open this page. Sign out and in again to choose it." }) : /* @__PURE__ */ O(E, { children: [
+		}), e.missing ? /* @__PURE__ */ D(u, { children: "This device can’t open this page. Sign out and in again to choose it." }) : /* @__PURE__ */ O(E, { children: [
 			/* @__PURE__ */ D(qe, {
 				page: e,
 				editing: t && !!m,
@@ -958,7 +958,7 @@ function Je({ page: e, editing: t, leaving: i, undone: a, refreshing: o, bottom:
 			e.empty && /* @__PURE__ */ D(u, {
 				className: w("items-start px-0 pb-6 text-left", e.list.length ? "pt-6" : "pt-0"),
 				action: e.arrange && e.store ? {
-					label: "Open the App Store",
+					label: "Open App Store",
 					run: k.openStore
 				} : void 0,
 				children: e.said

@@ -54,7 +54,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   }, [bar, a?.title])
 
   if (!a) {
-    return <Empty action={{ label: "Back to the App Store", run: () => one.open("main") }}>This app isn't here. It may have been erased, or the link is old.</Empty>
+    return <Empty action={{ label: "Back to the App Store", run: () => one.open("main") }}>This app isn’t here.</Empty>
   }
 
   const editSource = () => one.open("source", { app: name }, undefined, { sheet: true }).then(refresh)
@@ -63,7 +63,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
     const erase = tool === "erase"
     const ok = await one.alert({
       title: erase ? `Erase ${a.title} for good?` : `Delete ${a.title}?`,
-      text: erase ? "Its name can't be used again." : "You can restore it from Recently Deleted.",
+      text: erase ? "Its name can’t be used again." : "You can restore it from Recently Deleted.",
       action: erase ? "Erase" : "Delete",
       danger: true,
     })
@@ -87,7 +87,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
     if (s.on && s.runs_as) {
       return cap(s.when) + (manyPlaces ? " · " + s.scope_name : "") + (s.next ? " · next " + soon(s.next) : "") + ((s.run_by || []).length ? " · on " + s.run_by.join(", ") : "")
     }
-    if (s.on) return "Off. Switch it on to run it as you."
+    if (s.on) return "Off. Turn it on to run it as you."
     return cap(s.when) + (s.switched ? " · off since " + ago(s.switched.time) : "")
   }
   const switchIt = (s, on) => {
@@ -160,7 +160,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
             {w.runs_on.map((r) => (
               <ListRow
                 key={r.node + r.scope}
-                title={r.name || "A removed node"}
+                title={r.name || "A removed device"}
                 sub={r.name && (!r.online ? "Off" : r.problem)}
                 trailing={w.nodes.length > 0 && <Button size="sm" variant="outline" onClick={(e) => move(e.currentTarget)}>Move</Button>}
               />
@@ -175,7 +175,6 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
             <Problem
               warn
               title={`${a.title || name} needs a device to run its schedules`}
-              text="Its schedules run on a device you choose, while it’s on."
               action={{ label: "Choose a Device", run: () => chooseDevice(unrun.scope) }}
             />
           )}

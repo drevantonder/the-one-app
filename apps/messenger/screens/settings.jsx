@@ -27,7 +27,7 @@ function Pick({ free, onSigningIn }) {
   }
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium text-muted-foreground">Browser profile</h2>
+      <h2 className="text-sm font-medium text-muted-foreground">Browser Profile</h2>
       <List>
         <ListRow
           title="Profile"
@@ -36,7 +36,7 @@ function Pick({ free, onSigningIn }) {
               <SelectTrigger size="sm" aria-label="Browser profile"><SelectValue /></SelectTrigger>
               <SelectContent align="end" position="popper">
                 {free.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                <SelectItem value={NEW}>New profile…</SelectItem>
+                <SelectItem value={NEW}>New Profile…</SelectItem>
               </SelectContent>
             </Select>
           }
@@ -47,7 +47,7 @@ function Pick({ free, onSigningIn }) {
           </div>
         )}
       </List>
-      <Hint>Each has its own sign-ins, like Personal or Work.</Hint>
+      <Hint>Each has its own sign-ins.</Hint>
       {why && <Problem title={why} action={{ label: "Try Again", run: go }} />}
       <LoadingButton className="self-start" run={go}>Sign In to Messenger</LoadingButton>
     </section>
@@ -70,10 +70,8 @@ function SigningIn({ link, onDone }) {
       <h2 className="text-sm font-medium text-muted-foreground">Sign In</h2>
       <List>
         <ListRow title="Open the device" onClick={() => one.link(link.url)} />
-        <ListNote>{`Its browser is on messenger.com, in the ${link.profile} profile.`}</ListNote>
-        <ListNote>Sign in there, and tick Keep me signed in.</ListNote>
+        <ListNote>{`Sign in to messenger.com in the ${link.profile} profile, and tick Keep me signed in.`}</ListNote>
       </List>
-      <Hint>Come back and press Done.</Hint>
       {why && <Problem title={why} action={{ label: "Try Again", run: done }} />}
       <LoadingButton className="self-start" run={done}>Done</LoadingButton>
     </section>
@@ -109,7 +107,7 @@ function Settings() {
       {needs.map((a) => <Problem key={a.account} warn title={a.account + " needs signing in"} text="Sign it out, then add it again." />)}
       {accounts.length > 0 && (
         <AccountList
-          title="Browser profiles"
+          title="Browser Profiles"
           accounts={accounts}
           failed={failed}
           signOut={signOut}

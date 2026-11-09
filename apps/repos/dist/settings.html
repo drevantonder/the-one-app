@@ -41,45 +41,25 @@ var T = "<address>/repos/", E = "<you>";
 one.call("_address").then((e) => (T = e?.base || T, E = e?.handle || E), () => {}), `${one.config?.cli || "one"}`;
 var D = one.params;
 function O(t) {
-	let n = e(11), { offer: r } = t, i;
-	n[0] === r.sub ? i = n[1] : (i = /* @__PURE__ */ b("p", {
-		className: "text-sm text-muted-foreground",
-		children: [
-			"Continue to GitHub ",
-			r.sub,
-			"."
-		]
-	}), n[0] = r.sub, n[1] = i);
-	let a;
-	n[2] === r.url ? a = n[3] : (a = /* @__PURE__ */ y(o, {
-		asChild: !0,
-		children: /* @__PURE__ */ y("a", {
-			href: r.url,
-			children: "Continue to GitHub"
-		})
-	}), n[2] = r.url, n[3] = a);
-	let l;
-	n[4] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ y("p", {
-		className: "text-xs text-muted-foreground",
-		children: "GitHub brings you back here when you're done."
-	}), n[4] = l) : l = n[4];
-	let u;
-	n[5] !== i || n[6] !== a ? (u = /* @__PURE__ */ y(s, {
+	let n = e(5), { offer: r } = t, i;
+	n[0] === r.url ? i = n[1] : (i = /* @__PURE__ */ y(s, {
 		className: "max-w-2xl gap-3",
-		children: /* @__PURE__ */ b(c, {
+		children: /* @__PURE__ */ y(c, {
 			className: "flex flex-col items-start gap-3",
-			children: [
-				i,
-				a,
-				l
-			]
+			children: /* @__PURE__ */ y(o, {
+				asChild: !0,
+				children: /* @__PURE__ */ y("a", {
+					href: r.url,
+					children: "Continue to GitHub"
+				})
+			})
 		})
-	}), n[5] = i, n[6] = a, n[7] = u) : u = n[7];
-	let d;
-	return n[8] !== r.title || n[9] !== u ? (d = /* @__PURE__ */ y(S, {
+	}), n[0] = r.url, n[1] = i);
+	let a;
+	return n[2] !== r.title || n[3] !== i ? (a = /* @__PURE__ */ y(S, {
 		title: r.title,
-		children: u
-	}), n[8] = r.title, n[9] = u, n[10] = d) : d = n[10], d;
+		children: i
+	}), n[2] = r.title, n[3] = i, n[4] = a) : a = n[4], a;
 }
 function k() {
 	let e = g("github", {}), t = g("accounts", {}), [a, s] = i(""), [c, _] = i(null), [C, T] = i(!1), [E, k] = i(""), A = e.data, j = () => (e.reload(), t.reload()), M = (e) => s(x(e).title), N = r(!1);
@@ -90,8 +70,7 @@ function k() {
 		try {
 			_({
 				url: (await one.call("create_github_app")).url,
-				title: "Create GitHub App",
-				sub: "and create the network's App"
+				title: "Create GitHub App"
 			});
 		} catch (e) {
 			M(e);
@@ -100,8 +79,7 @@ function k() {
 		try {
 			_({
 				url: (await one.call("sign_in", e ? { account: e } : {})).url,
-				title: "Connect GitHub",
-				sub: "and let it in"
+				title: "Connect GitHub"
 			});
 		} catch (e) {
 			M(e);
@@ -111,8 +89,7 @@ function k() {
 		if (t !== null) try {
 			_({
 				url: (await one.call("connect_org", { group: A.groups[t].handle })).url,
-				title: `Connect an Organization for ${A.groups[t].name}`,
-				sub: "and install the App on the organization"
+				title: `Connect an Organization for ${A.groups[t].name}`
 			});
 		} catch (e) {
 			M(e);
@@ -121,7 +98,7 @@ function k() {
 		T(!0);
 		try {
 			let t = new URL(e).searchParams;
-			if (t.get("error")) throw Error(`GitHub didn't finish (${t.get("error_description") || t.get("error")}). Try again.`);
+			if (t.get("error")) throw Error(`GitHub didn’t finish (${t.get("error_description") || t.get("error")}). Try again.`);
 			if (one.screen === "github_app") await one.call("finish_github_app", { code: e });
 			else if (t.get("installation_id")) await one.call("finish_connect_org", { back: e });
 			else if (t.get("code")) {
@@ -170,8 +147,8 @@ function k() {
 			label: "Create GitHub App",
 			run: P
 		},
-		children: "Connect GitHub, and everyone's GitHub repos show here beside your own."
-	}) : /* @__PURE__ */ y(l, { children: "GitHub isn't connected yet. Your admin connects it once, for everyone." });
+		children: "Connect GitHub, and everyone’s GitHub repos show here beside your own."
+	}) : /* @__PURE__ */ y(l, { children: "An admin connects GitHub once, for everyone." });
 	else {
 		let e = t.data.filter((e) => !e.ok);
 		B = /* @__PURE__ */ b(v, { children: [
@@ -184,9 +161,9 @@ function k() {
 					run: () => F(e.account)
 				}
 			}, e.account)),
-			/* @__PURE__ */ b(S, {
+			/* @__PURE__ */ y(S, {
 				title: "GitHub Accounts",
-				children: [/* @__PURE__ */ b(d, { children: [t.data.map((e, t) => /* @__PURE__ */ y(f, {
+				children: /* @__PURE__ */ b(d, { children: [t.data.map((e, t) => /* @__PURE__ */ y(f, {
 					title: e.account,
 					sub: e.ok ? t ? void 0 : "Used first" : "Sign in again",
 					trailing: /* @__PURE__ */ b(o, {
@@ -198,12 +175,9 @@ function k() {
 					})
 				}, e.account)), /* @__PURE__ */ y(f, {
 					leading: /* @__PURE__ */ y(u, { name: "plus" }),
-					title: t.data.length ? "Add Account…" : "Connect GitHub…",
+					title: t.data.length ? "Add Account" : "Connect GitHub",
 					onClick: () => F()
-				})] }), /* @__PURE__ */ y("p", {
-					className: "px-1 text-xs text-muted-foreground",
-					children: "The repos your GitHub accounts see show in Repos."
-				})]
+				})] })
 			}),
 			(A.orgs.length > 0 || A.groups.length > 0) && /* @__PURE__ */ b(S, {
 				title: "Organizations",
@@ -218,11 +192,11 @@ function k() {
 					}) : void 0
 				}, e.org)), A.groups.length > 0 && /* @__PURE__ */ y(f, {
 					leading: /* @__PURE__ */ y(u, { name: "plus" }),
-					title: "Connect an Organization…",
+					title: "Connect an Organization",
 					onClick: (e) => I(e.currentTarget)
 				})] }), /* @__PURE__ */ y("p", {
 					className: "px-1 text-xs text-muted-foreground",
-					children: "An organization's repos show for everyone in its group."
+					children: "An organization’s repos show for everyone in its group."
 				})]
 			}),
 			A.admin && /* @__PURE__ */ b("p", {

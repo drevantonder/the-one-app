@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { AccountList, Hint, Input, List, ListNote, ListRow, ListSkeleton, LoadFailure, LoadingButton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useAccounts } from "@one/ui"
 
-const NOTE = "The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes."
+const NOTE = "Recent chats take a few minutes to arrive."
 
 function Pairing({ phone, device, had, done }) {
   const [codes, setCodes] = useState({})
@@ -88,8 +88,7 @@ function Settings() {
     return (
       <Problem
         warn
-        title="WhatsApp isn't on any of your devices yet."
-        text="Add it to one in the App Store, then link your phone here."
+        title="WhatsApp isn’t on any of your devices yet."
         action={{ label: "Open App Store", run: () => one.open("app", { app: "whatsapp" }, "apps") }}
       />
     )
@@ -143,7 +142,7 @@ function Settings() {
               />
             )}
             <div className="px-3 py-2.5">
-              <Input ref={field} type="tel" placeholder="Its number, for a code to type instead (optional)" aria-label="Its number" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <Input ref={field} type="tel" placeholder="Phone number (optional)" aria-label="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>
           </List>
           {step?.why && <Problem title={step.why} action={{ label: "Try Again", run: step.retry }} />}

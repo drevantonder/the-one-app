@@ -27,7 +27,7 @@ function look(d, { asking, note, fix }) {
   const missing = gate && (!d.permissions.accessibility || !d.permissions.screen_recording)
   const title = d.title || d.device
   const box = note ? { title: note }
-    : missing ? { title: `${!d.permissions.accessibility ? "Accessibility" : "Screen Recording"} is off`, text: `Agents can't use ${title} until it's on.`, warn: true, fix }
+    : missing ? { title: `${!d.permissions.accessibility ? "Accessibility" : "Screen Recording"} is off`, text: `Agents can’t use ${title} until it’s on.`, warn: true, fix }
     : d.why ? { title: "Not answering", text: `Check that ${title} is on and online.`, warn: true }
     : null
   const line = box ? "" : asking || d.asking ? "Asking on the device…" : !d.on ? d.missing || "" : d.using ? `${d.using.agent} is using it` : ""
@@ -42,7 +42,7 @@ function Mirror({ d, src, open }) {
       <Icon name="device-mobile" className="size-5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <div className="font-medium">iPhone Mirroring</div>
-        <div className="text-muted-foreground">Pair it in your iPhone's Settings › General.</div>
+        <div className="text-muted-foreground">Pair it in your iPhone’s Settings › General.</div>
       </div>
       <Button size="sm" variant="secondary" onClick={() => open(d.device)}>Open</Button>
     </div>
@@ -96,27 +96,26 @@ function Fix({ device, onClose }) {
       <SheetContent side="bottom" className="max-h-[90svh] overflow-y-auto rounded-t-xl">
         <SheetHeader>
           <SheetTitle>{name}</SheetTitle>
-          <SheetDescription>macOS requires two permissions before agents can view or control this Mac.</SheetDescription>
+          <SheetDescription>Agents need both to use this Mac.</SheetDescription>
         </SheetHeader>
         <div className="flex flex-col gap-6 p-4 pt-0">
           <List>
-            <ListRow leading={<AppIcon app={{ name: "accessibility", icon: "cursor-click" }} size={32} />} title="Accessibility" sub="Clicks, typing and window control" trailing={<Off on={a11y} />} />
-            <ListRow leading={<AppIcon app={{ name: "screen", icon: "desktop" }} size={32} />} title="Screen Recording" sub="Lets agents see what's on screen" trailing={<Off on={sr} />} />
+            <ListRow leading={<AppIcon app={{ name: "accessibility", icon: "cursor-click" }} size={32} />} title="Accessibility" sub="Clicks, typing and windows" trailing={<Off on={a11y} />} />
+            <ListRow leading={<AppIcon app={{ name: "screen", icon: "desktop" }} size={32} />} title="Screen Recording" sub="What’s on screen" trailing={<Off on={sr} />} />
           </List>
           <section className="flex flex-col gap-2">
-            <h2 className="px-1 text-sm font-medium text-muted-foreground">How to turn it on</h2>
+            <h2 className="px-1 text-sm font-medium text-muted-foreground">Turn Them On</h2>
             <List>
               <Step n={1} title={`Open System Settings on ${name}`}>
                 Go to <b>Privacy &amp; Security</b> → <b>{a11y ? "Screen & System Audio Recording" : "Accessibility"}</b>.
               </Step>
               {!(a11y && sr) && (
-                <Step n={2} title="Turn on The One App">
-                  Enable the switch next to <b>The One App</b> and approve with Touch ID{a11y ? <>, then choose <b>Quit &amp; Reopen</b></> : ""}.
+                <Step n={2} title={`Turn On ${one.config.name}`}>
+                  Approve with Touch ID{a11y ? <>, then choose <b>Quit &amp; Reopen</b></> : ""}.
                 </Step>
               )}
             </List>
           </section>
-          <p className="text-center text-sm text-muted-foreground">This page updates automatically once permission is granted.</p>
         </div>
       </SheetContent>
     </Sheet>

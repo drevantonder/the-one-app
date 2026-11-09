@@ -10,7 +10,7 @@ function File() {
   useEffect(() => {
     one.title((path || "").split("/").pop() || "Code")
   }, [])
-  if (!app || !path) return <Empty>This page isn't here. The link may be old or mistyped.</Empty>
+  if (!app || !path) return <Empty>This page isn’t here.</Empty>
   if (!file.data) return <div className="p-4"><Pending call={file} rows={1} /></div>
   return (
     <div className="p-4">

@@ -182,7 +182,7 @@ function frameFor(r, into, { sheet } = {}) {
     $(".screen-status", into)?.remove();
     const status = Object.assign(document.createElement("div"), { className: "screen-status" });
     into.prepend(status);
-    OneUI["react-dom/client"].createRoot(status).render(h(ui.Problem, { quiet: true, title: "Not Opening Yet", text: UNANSWERED, className: "m-6" }));
+    OneUI["react-dom/client"].createRoot(status).render(h(ui.Problem, { quiet: true, title: "Not opening yet", text: UNANSWERED, className: "m-6" }));
   }, 5000);
   const written = (page) => linkedIn(page).catch(() => page).then((html) => oneHost.look(html, appearance(), !!sheet, platform.look()));
   const draw = async (page) => {

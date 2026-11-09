@@ -65,7 +65,7 @@ function Device() {
     try {
       const all = (await one.call("_list", {})).devices || []
       const c = all.find((c) => c.name === at.device && (!at.on || c.on === at.on))
-      if (!c) return m.shown && say("It's been given back.")
+      if (!c) return m.shown && say("It’s been given back.")
       m.shown = c
       setDevice(c)
       one.title(nameOf(c))
@@ -80,7 +80,7 @@ function Device() {
     try {
       await one.call("save_profile", { item: m.shown.borrowed.item })
       setSignedIn(true)
-      say(`Saved: the ${m.shown.borrowed.profile || "browser"} profile has your sign-ins now.`)
+      say(`Saved to the ${m.shown.borrowed.profile || "browser"} profile.`)
       m.shown = null
       clearInterval(m.timer)
     } catch (e) {

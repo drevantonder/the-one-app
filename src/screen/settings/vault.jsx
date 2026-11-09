@@ -193,7 +193,7 @@ function Vault() {
       </List>
     )
   } else {
-    body = <Empty className={switching ? "opacity-50" : ""}>{query.trim() ? `Nothing matches “${query.trim()}”.` : "Keys, sign-ins and accounts, for your apps and agents to use without seeing them."}</Empty>
+    body = <Empty className={switching ? "opacity-50" : ""}>{query.trim() ? `Nothing matches “${query.trim()}”.` : "Keys and sign-ins your apps and agents use without seeing them."}</Empty>
   }
 
   return (

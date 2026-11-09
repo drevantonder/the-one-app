@@ -137,12 +137,12 @@ function ne(e, t) {
 			run: t(i, e, n)
 		});
 		return n.failed ? {
-			title: `Couldn’t switch ${r} ${n.wanted ? "on" : "off"}`,
+			title: `Couldn’t turn ${r} ${n.wanted ? "on" : "off"}`,
 			text: n.failed,
 			action: a(n.wanted)
 		} : n.late ? {
-			title: `${e.name} hasn’t switched ${r} ${n.on ? "on" : "off"} yet`,
-			text: "It does once it hears, so it may be offline.",
+			title: `${e.name} hasn’t turned ${r} ${n.on ? "on" : "off"} yet`,
+			text: "It may be offline.",
 			action: a(n.on)
 		} : n.on && n.problem ? {
 			title: `${r} isn’t running on ${e.name}`,
@@ -380,7 +380,7 @@ function W() {
 			icon: "pencil-simple"
 		}], i = (t ? [e] : e.clients).filter((e) => e.sign_in || e.linked?.length);
 		(i.length || e.me) && r.push({
-			title: "Sign-ins…",
+			title: "Sign-Ins…",
 			icon: "key"
 		}), r.push(e.me ? {
 			title: "Sign Out",
@@ -392,7 +392,7 @@ function W() {
 			danger: !0
 		});
 		let a = await one.menu(r, n).catch(() => null);
-		a != null && (r[a].title === "Rename" ? N({ rename: e }) : r[a].title === "Sign-ins…" ? N({
+		a != null && (r[a].title === "Rename" ? N({ rename: e }) : r[a].title === "Sign-Ins…" ? N({
 			signIns: i,
 			me: e.me
 		}) : e.me ? ue() : ce(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
@@ -524,7 +524,7 @@ function W() {
 					variant: e?.waiting.length ? "outline" : "default",
 					disabled: !e,
 					onClick: () => N({ add: !0 }),
-					children: [/* @__PURE__ */ w(c, { name: "plus" }), "Add a Device"]
+					children: [/* @__PURE__ */ w(c, { name: "plus" }), "Add Device"]
 				})]
 			}),
 			Q,
@@ -973,8 +973,8 @@ function se(t) {
 						}), /* @__PURE__ */ w(q, {
 							icon: "arrows-clockwise",
 							onClick: p,
-							children: "Run an App’s Schedules…"
-						})] }), !!C.length && /* @__PURE__ */ w(K, { children: "When one stops or runs out, that device can’t open the app’s things any more." })]
+							children: "Run an App’s Schedules"
+						})] }), !!C.length && /* @__PURE__ */ w(K, { children: "Once one stops, that device can’t open the app’s data." })]
 					}),
 					h.keys && _ && /* @__PURE__ */ w(d, { children: /* @__PURE__ */ w(q, {
 						icon: "key",
@@ -1603,7 +1603,7 @@ function De(n) {
 	return i[17] !== s || i[18] !== c || i[19] !== x || i[20] !== A ? (j = /* @__PURE__ */ w(h, {
 		open: s,
 		onOpenChange: c,
-		title: "Add a Device",
+		title: "Add Device",
 		action: x,
 		children: A
 	}), i[17] = s, i[18] = c, i[19] = x, i[20] = A, i[21] = j) : j = i[21], j;
@@ -1639,7 +1639,7 @@ function ke(t) {
 				className: "py-6",
 				children: "None yet"
 			}),
-			/* @__PURE__ */ w(K, { children: t }),
+			t && /* @__PURE__ */ w(K, { children: t }),
 			_ && /* @__PURE__ */ w(m, { title: _ })
 		]
 	}), n[0] = _, n[1] = y);
@@ -1664,10 +1664,10 @@ function ke(t) {
 	n[11] !== p || n[12] !== S || n[13] !== i || n[14] !== b || n[15] !== u ? (A = p ? b(i.runners(u).map((e) => /* @__PURE__ */ w(f, {
 		title: k(e.name),
 		onClick: () => S(e)
-	}, e.key)), "They run on the device you choose, while that device is on.") : b(i.scheduled(u).map((e) => /* @__PURE__ */ w(f, {
+	}, e.key)), "Choose one that stays on.") : b(i.scheduled(u).map((e) => /* @__PURE__ */ w(f, {
 		title: e.title || e.name,
 		onClick: () => g(e.name)
-	}, e.name)), "Apps that run on their own, every so often."), n[11] = p, n[12] = S, n[13] = i, n[14] = b, n[15] = u, n[16] = A) : A = n[16];
+	}, e.name))), n[11] = p, n[12] = S, n[13] = i, n[14] = b, n[15] = u, n[16] = A) : A = n[16];
 	let j;
 	return n[17] !== o || n[18] !== c || n[19] !== C || n[20] !== O || n[21] !== A ? (j = /* @__PURE__ */ w(h, {
 		open: o,

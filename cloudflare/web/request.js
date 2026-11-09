@@ -5,7 +5,7 @@ import { HEADER } from "../shared/protocol.js";
 import { platform } from "./platform.js";
 
 export class NodeError extends Error {}
-export const UNANSWERED = "Your devices aren’t answering. Make sure one of them is on and online.";
+export const UNANSWERED = "Your devices aren’t answering. Check that one is on and online.";
 
 /// How long to wait before asking again the `n`th time running (from 0) after the node didn't answer: at once, then
 /// a quarter second, doubling, up to five. A node restarting for an update is back within a moment.
@@ -38,7 +38,7 @@ export async function api(path, { method = "GET", body, query, raw, signal, sinc
 async function sending(url, method, body, raw, signal, trace) {
   const user = platform.user();
   const joining = performance.now();
-  if (!user || !(await platform.reaches(user))) throw Object.assign(new NodeError("This device hasn't been approved yet."), { status: 403 });
+  if (!user || !(await platform.reaches(user))) throw Object.assign(new NodeError("This device hasn’t been approved yet."), { status: 403 });
   if (trace && performance.now() - joining >= 1) trace.network = Math.round(performance.now() - joining);
   if (trace && (trace.network || trace.first)) trace.joined = await platform.took();
   const traced = (json) => {

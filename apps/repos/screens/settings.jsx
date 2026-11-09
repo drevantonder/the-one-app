@@ -14,9 +14,7 @@ function Offer({ offer }) {
     <Section title={offer.title}>
       <Card className="max-w-2xl gap-3">
         <CardContent className="flex flex-col items-start gap-3">
-          <p className="text-sm text-muted-foreground">Continue to GitHub {offer.sub}.</p>
           <Button asChild><a href={offer.url}>Continue to GitHub</a></Button>
-          <p className="text-xs text-muted-foreground">GitHub brings you back here when you're done.</p>
         </CardContent>
       </Card>
     </Section>
@@ -41,14 +39,14 @@ function Settings() {
 
   const createApp = async () => {
     try {
-      setOffer({ url: (await one.call("create_github_app")).url, title: "Create GitHub App", sub: "and create the network's App" })
+      setOffer({ url: (await one.call("create_github_app")).url, title: "Create GitHub App" })
     } catch (err) {
       fail(err)
     }
   }
   const start = async (account) => {
     try {
-      setOffer({ url: (await one.call("sign_in", account ? { account } : {})).url, title: "Connect GitHub", sub: "and let it in" })
+      setOffer({ url: (await one.call("sign_in", account ? { account } : {})).url, title: "Connect GitHub" })
     } catch (err) {
       fail(err)
     }
@@ -57,7 +55,7 @@ function Settings() {
     const pick = d.groups.length === 1 ? 0 : await one.menu(d.groups.map((g) => ({ title: g.name })), button)
     if (pick === null) return
     try {
-      setOffer({ url: (await one.call("connect_org", { group: d.groups[pick].handle })).url, title: `Connect an Organization for ${d.groups[pick].name}`, sub: "and install the App on the organization" })
+      setOffer({ url: (await one.call("connect_org", { group: d.groups[pick].handle })).url, title: `Connect an Organization for ${d.groups[pick].name}` })
     } catch (err) {
       fail(err)
     }
@@ -66,7 +64,7 @@ function Settings() {
     setFinishing(true)
     try {
       const q = new URL(back).searchParams
-      if (q.get("error")) throw new Error(`GitHub didn't finish (${q.get("error_description") || q.get("error")}). Try again.`)
+      if (q.get("error")) throw new Error(`GitHub didn’t finish (${q.get("error_description") || q.get("error")}). Try again.`)
       if (one.screen === "github_app") {
         await one.call("finish_github_app", { code: back })
       } else if (q.get("installation_id")) {
@@ -115,8 +113,8 @@ function Settings() {
   let body
   if (!d.app) {
     body = d.admin
-      ? <Empty action={{ label: "Create GitHub App", run: createApp }}>Connect GitHub, and everyone's GitHub repos show here beside your own.</Empty>
-      : <Empty>GitHub isn't connected yet. Your admin connects it once, for everyone.</Empty>
+      ? <Empty action={{ label: "Create GitHub App", run: createApp }}>Connect GitHub, and everyone’s GitHub repos show here beside your own.</Empty>
+      : <Empty>An admin connects GitHub once, for everyone.</Empty>
   } else {
     const needs = accounts.data.filter((a) => !a.ok)
     body = (
@@ -134,9 +132,8 @@ function Settings() {
                 trailing={<Button variant="ghost" size="sm" disabled={out === a.account} onClick={() => signOut(a.account)}>{out === a.account && <Spinner />}Sign Out</Button>}
               />
             ))}
-            <ListRow leading={<Icon name="plus" />} title={accounts.data.length ? "Add Account…" : "Connect GitHub…"} onClick={() => start()} />
+            <ListRow leading={<Icon name="plus" />} title={accounts.data.length ? "Add Account" : "Connect GitHub"} onClick={() => start()} />
           </List>
-          <p className="px-1 text-xs text-muted-foreground">The repos your GitHub accounts see show in Repos.</p>
         </Section>
         {(d.orgs.length > 0 || d.groups.length > 0) && (
           <Section title="Organizations">
@@ -149,9 +146,9 @@ function Settings() {
                   trailing={o.yours ? <Button variant="ghost" size="sm" onClick={() => disconnect(o.org)}>Disconnect</Button> : undefined}
                 />
               ))}
-              {d.groups.length > 0 && <ListRow leading={<Icon name="plus" />} title="Connect an Organization…" onClick={(e) => connectOrg(e.currentTarget)} />}
+              {d.groups.length > 0 && <ListRow leading={<Icon name="plus" />} title="Connect an Organization" onClick={(e) => connectOrg(e.currentTarget)} />}
             </List>
-            <p className="px-1 text-xs text-muted-foreground">An organization's repos show for everyone in its group.</p>
+            <p className="px-1 text-xs text-muted-foreground">An organization’s repos show for everyone in its group.</p>
           </Section>
         )}
         {d.admin && (

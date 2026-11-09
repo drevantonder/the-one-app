@@ -34,7 +34,7 @@ function names(rs) {
   return out;
 }
 
-const SAID = { "no connection": "couldn't connect", "not taking requests": "took no requests", "no answer": "didn't answer", unreachable: "unreachable", lost: "lost the connection", failed: "failed", elsewhere: "said elsewhere" };
+const SAID = { "no connection": "couldn’t connect", "not taking requests": "took no requests", "no answer": "didn’t answer", unreachable: "unreachable", lost: "lost the connection", failed: "failed", elsewhere: "said elsewhere" };
 
 // One request as marks on lanes, times from its start: `hop` (from, to, a, b, kind) a line between lanes, `block`
 // (lane, a, b, kind, label) time spent on one, and `parts` its steps as lines for the list.
@@ -51,7 +51,7 @@ function route(r, known) {
   }
   if (r.source === "kept") {
     marks.push({ block: me, a: 0, b: Math.max(r.ms || 0, 2), kind: "code" });
-    parts.push(["Shown from this device's copy", r.ms || 0]);
+    parts.push(["Shown from this device’s copy", r.ms || 0]);
     return { marks, parts, end: r.ms || 0 };
   }
   // What a node did, from `at` on its lane: the devices it passed the call to, the other apps and services the app
@@ -89,7 +89,7 @@ function route(r, known) {
         parts.push([s.step === "bucket" ? `${lane} fetched ${s.found} of ${s.asks} from the bucket` : `${lane} asked the bucket first: ${s.result}`, s.ms || 0, s.step === "behind" && s.result !== "caught up"]);
       } else if (s.step === "data" || s.step === "open" || (s.step === "logs" && s.ms >= 5)) {
         marks.push({ block: lane, a, b, kind: "data" });
-        parts.push([s.step === "open" ? `Opened ${s.app}'s data on ${lane}` : s.step === "logs" ? `Read who's who on ${lane}` : `Read ${lane}'s copy${s.new ? `, ${s.new} new steps` : ""}`, s.ms || 0]);
+        parts.push([s.step === "open" ? `Opened ${s.app}'s data on ${lane}` : s.step === "logs" ? `Read who’s who on ${lane}` : `Read ${lane}'s copy${s.new ? `, ${s.new} new steps` : ""}`, s.ms || 0]);
       } else if (s.step === "run") {
         marks.push({ block: lane, a, b, kind: "app" });
         parts.push([`${s.app} ran on ${lane}`, s.ms || 0]);
@@ -198,7 +198,7 @@ function Timing() {
 /// The requests in `scope`: what to say about them, the routes of the burst picked, and its requests, then the others'.
 function Drawn({ all, scope, picked, pick, width }) {
   const rs = all.filter((r) => scope === "all" || mine(r)).sort((a, b) => a.at - b.at)
-  if (!rs.length) return <Empty>{scope === "all" ? "Nothing asked yet." : "This screen hasn't asked for anything since it opened."}</Empty>
+  if (!rs.length) return <Empty>{scope === "all" ? "Nothing asked yet." : "This screen hasn’t asked for anything since it opened."}</Empty>
   const known = names(all)
   const routes = new Map(rs.map((r) => [r, route(r, known)]))
   const warned = (r) => routes.get(r).parts.some(([, , w]) => w)
@@ -217,7 +217,7 @@ function Drawn({ all, scope, picked, pick, width }) {
 
   const row = (r) => {
     const on = r === sel, kind = r.what === "page" ? "code" : "net"
-    const from = r.source === "kept" ? "from this device's copy" : r.fetches?.at(-1)?.node?.device ? `${r.what === "page" ? "from" : "on"} ${r.fetches.at(-1).node.device}` : ""
+    const from = r.source === "kept" ? "from this device’s copy" : r.fetches?.at(-1)?.node?.device ? `${r.what === "page" ? "from" : "on"} ${r.fetches.at(-1).node.device}` : ""
     const warn = warned(r)
     return (
       <div key={`${r.at} ${title(r)}`}>

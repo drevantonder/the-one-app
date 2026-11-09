@@ -3,7 +3,7 @@
 // Google, which sends the browser back here with { back: the address it came back to } to finish. Opened with
 // { add: true } (a shell's Add Account), it starts signing in at once.
 import { useEffect, useRef, useState } from "react"
-import { AccountList, Empty, Hint, List, ListRow, ListSkeleton, LoadFailure, Loading, LoadingButton, Problem, failureSentence, useAccounts } from "@one/ui"
+import { AccountList, Empty, List, ListRow, ListSkeleton, LoadFailure, Loading, LoadingButton, Problem, failureSentence, useAccounts } from "@one/ui"
 
 export function GoogleSettings({ title, blurb }) {
   const { accounts, problem, retry, failed, signOut, reload } = useAccounts()
@@ -28,7 +28,7 @@ export function GoogleSettings({ title, blurb }) {
         }
       }
       const ask = /Ask (.+?) to set up (.+?)(?::|$)/.exec(e.message)
-      if (ask) return setBlocked({ title: ask[2] + " isn't set up", text: "Ask " + ask[1] + " to set it up. It's done once for everyone." })
+      if (ask) return setBlocked({ title: ask[2] + " isn’t set up", text: "Ask " + ask[1] + " to set it up." })
       return setStep({ why: failureSentence(e), retry: () => start(account) })
     }
     setSigning(true)
@@ -95,7 +95,6 @@ export function GoogleSettings({ title, blurb }) {
         <section className="flex flex-col gap-2">
           <h2 className="text-sm font-medium text-muted-foreground">Sign In</h2>
           <List><ListRow title="Sign in to Google" sub={`and allow ${title}`} onClick={() => one.link(step.link)} /></List>
-          <Hint>Google brings you back here when you're done.</Hint>
         </section>
       )}
       {step?.finishing && <Loading>Signing In</Loading>}

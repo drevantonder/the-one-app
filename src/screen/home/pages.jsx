@@ -130,7 +130,7 @@ function pageView(p) {
     scope: p.scope, p, title: p.title, subtitle: p.subtitle, arrange, empty, store: !!home.store(), list,
     addable: !!home.store() || home.widgetsOn(p).length > 0 || hiddenApps(p).length > 0,
     groups: home.allPages().some((x) => x.scope.startsWith("group:")),
-    said: empty ? (arrange ? (p.scope === "user" ? "No apps yet." : `No apps on ${p.title} yet.`) : `When its admins add apps to ${p.title}, they show up here.`) : "",
+    said: empty ? "No apps yet." : "",
   }
 }
 
@@ -741,11 +741,11 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
         )}
       </div>
       {page.missing ? (
-        <Empty>This device can't open this page. Sign out and in again to choose it.</Empty>
+        <Empty>This device can’t open this page. Sign out and in again to choose it.</Empty>
       ) : (
         <>
           <Grid page={page} editing={editing && !!arrange} leaving={leaving && !!arrange} refreshing={refreshing} />
-          {page.empty && <Empty className={cn("items-start px-0 pb-6 text-left", page.list.length ? "pt-6" : "pt-0")} action={page.arrange && page.store ? { label: "Open the App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
+          {page.empty && <Empty className={cn("items-start px-0 pb-6 text-left", page.list.length ? "pt-6" : "pt-0")} action={page.arrange && page.store ? { label: "Open App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
           {changing && page.groups && (
             <div data-ctl className="pt-8">
               <Button variant="ghost" size="sm" className={cn("-ml-3", editing ? COMES : GOES)} onClick={editPages}>Edit Pages</Button>

@@ -249,7 +249,7 @@ export function server(version, givenHost) {
     const computes = ask(certificate).then(async (asked) => {
       // Not let in: this browser isn't one of its user's devices (yet, or any more).
       if (asked.status === 403) return null;
-      if (!asked.ok) throw new Error(`${Yours} isn't answering.`);
+      if (!asked.ok) throw new Error(`${Yours} isn’t answering.`);
       const said = await asked.json();
       return { all: theirs(await making, said.computes), online: said.online };
     });
@@ -409,7 +409,7 @@ export function server(version, givenHost) {
           // This browser's push subscription, registered with the network's push Worker.
           case "push": {
             const s = await session?.ready;
-            if (!s) throw new Error("This browser isn't one of your devices yet.");
+            if (!s) throw new Error("This browser isn’t one of your devices yet.");
             await s.keyring.registerPush(JSON.stringify(m.subscription));
             return post({ id });
           }
@@ -423,7 +423,7 @@ export function server(version, givenHost) {
             return reading.get(id)?.cancel();
           case "fetch": {
             const s = await session?.ready;
-            if (!s) throw new Error("This browser isn't one of your devices yet.");
+            if (!s) throw new Error("This browser isn’t one of your devices yet.");
             const body = new Uint8Array(m.body || []);
             const r = await s.keyring.fetch(m.method, m.path, m.headers, body, m.until, !!m.trace);
             reading.set(id, r);

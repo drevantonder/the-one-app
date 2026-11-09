@@ -24,9 +24,9 @@ function b(e) {
 	return t;
 }
 var x = {
-	"no connection": "couldn't connect",
+	"no connection": "couldn’t connect",
 	"not taking requests": "took no requests",
-	"no answer": "didn't answer",
+	"no answer": "didn’t answer",
 	unreachable: "unreachable",
 	lost: "lost the connection",
 	failed: "failed",
@@ -44,7 +44,7 @@ function S(e, t) {
 		a: 0,
 		b: Math.max(e.ms || 0, 2),
 		kind: "code"
-	}), r.push(["Shown from this device's copy", e.ms || 0]), {
+	}), r.push(["Shown from this device’s copy", e.ms || 0]), {
 		marks: n,
 		parts: r,
 		end: e.ms || 0
@@ -122,7 +122,7 @@ function S(e, t) {
 				a: c,
 				b: u,
 				kind: "data"
-			}), r.push([s.step === "open" ? `Opened ${s.app}'s data on ${i}` : s.step === "logs" ? `Read who's who on ${i}` : `Read ${i}'s copy${s.new ? `, ${s.new} new steps` : ""}`, s.ms || 0])) : s.step === "run" && (n.push({
+			}), r.push([s.step === "open" ? `Opened ${s.app}'s data on ${i}` : s.step === "logs" ? `Read who’s who on ${i}` : `Read ${i}'s copy${s.new ? `, ${s.new} new steps` : ""}`, s.ms || 0])) : s.step === "run" && (n.push({
 				block: i,
 				a: c,
 				b: u,
@@ -306,12 +306,12 @@ function D(t) {
 			n[8] === i ? e = n[9] : (e = (e) => i === "all" || y(e), n[8] = i, n[9] = e);
 			let t = r.filter(e).sort(F);
 			if (!t.length) {
-				let e = i === "all" ? "Nothing asked yet." : "This screen hasn't asked for anything since it opened.", t;
+				let e = i === "all" ? "Nothing asked yet." : "This screen hasn’t asked for anything since it opened.", t;
 				n[10] === e ? t = n[11] : (t = /* @__PURE__ */ p(a, { children: e }), n[10] = e, n[11] = t), d = t;
 				break bb0;
 			}
 			let _ = b(r), x = new Map(t.map((e) => [e, S(e, _)])), T = (e) => x.get(e).parts.some(P), E = C(t), D = t.find((e) => e.at === o?.at && v(e) === o?.title) || E.at(-1).rs.reduce(N), L = E.find((e) => e.rs.includes(D)), R = i === "screen" && L === E[0] && h.title, z = L.end - L.start, B = L.rs.reduce(M), V = x.get(B).parts.reduce(j, ["", 0]), H = L.rs.find(T), U = (e) => {
-				let t = e === D, n = e.what === "page" ? "code" : "net", r = e.source === "kept" ? "from this device's copy" : e.fetches?.at(-1)?.node?.device ? `${e.what === "page" ? "from" : "on"} ${e.fetches.at(-1).node.device}` : "", i = T(e);
+				let t = e === D, n = e.what === "page" ? "code" : "net", r = e.source === "kept" ? "from this device’s copy" : e.fetches?.at(-1)?.node?.device ? `${e.what === "page" ? "from" : "on"} ${e.fetches.at(-1).node.device}` : "", i = T(e);
 				return /* @__PURE__ */ m("div", { children: [/* @__PURE__ */ m("button", {
 					type: "button",
 					"aria-pressed": t,

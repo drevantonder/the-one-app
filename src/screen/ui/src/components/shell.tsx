@@ -76,7 +76,7 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onBarStart, de
   }
   return (
     <SidebarProvider open={open} onOpenChange={onOpenChange} className={cn("relative h-full", className)}>
-      {/* The window's buttons, where they stay as the sidebar slides under them, clear of a title bar lying over the page (`--titlebar-area-x`). */}
+      {/* The window’s buttons, where they stay as the sidebar slides under them, clear of a title bar lying over the page (`--titlebar-area-x`). */}
       <div className="pointer-events-none absolute top-0 left-[calc(var(--titlebar-area-x,0px)+0.75rem)] z-20 flex h-(--shell-bar) items-center gap-1">
         <SidebarTrigger className="pointer-events-auto" />
         {developer && (
@@ -114,11 +114,11 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onBarStart, de
           )}
         </SidebarContent>
       </Sidebar>
-      {/* Where the bar starts: past the window's buttons while the sidebar's away, as the sidebar goes. */}
+      {/* Where the bar starts: past the window’s buttons while the sidebar’s away, as the sidebar goes. */}
       <SidebarInset data-banner={banner ? "" : undefined} className={cn("min-w-0 overflow-hidden peer-data-[state=expanded]:[--shell-bar-start:0.75rem]", developer ? "[--shell-bar-start:calc(var(--titlebar-area-x,0px)+5.25rem)]" : "[--shell-bar-start:calc(var(--titlebar-area-x,0px)+3.25rem)]")}>
         <BarStart back={back} onChange={onBarStart} />
         {/* Over the screen, whose large title lies in this row until it scrolls away and the title here takes over. Above the
-            title bar's drag region only for its buttons: the rest lets the drag through. */}
+            title bar’s drag region only for its buttons: the rest lets the drag through. */}
         <header data-slot="shell-bar" className={cn("pointer-events-none relative z-12 flex h-(--shell-bar) shrink-0 items-center gap-2 pr-3 pl-(--shell-bar-start) transition-[padding] duration-200 ease-linear [&>button]:pointer-events-auto", title && "pointer-events-auto border-b bg-background wco:pointer-events-none wco:border-b-0")}>
           {back && (
             <Button variant="ghost" size="icon" className="size-7" onClick={onBack} aria-label="Back">

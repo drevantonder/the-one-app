@@ -14,6 +14,5 @@ if (to?.protocol !== "https:" && to?.hostname !== "127.0.0.1") {
     form.append(Object.assign(document.createElement("input"), { type: "hidden", name, value }));
   }
   document.getElementById("title").textContent = `Continue to ${to.hostname}`;
-  document.getElementById("where").textContent = `You'll finish there, then come back here.`;
   document.getElementById("go").hidden = false;
 }

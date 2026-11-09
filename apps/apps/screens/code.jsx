@@ -23,7 +23,7 @@ function Code() {
   useEffect(() => {
     one.title(dir.replace(/\/$/, "").split("/").pop() || "Code")
   }, [])
-  if (!app) return <Empty>This page isn't here. The link may be old or mistyped.</Empty>
+  if (!app) return <Empty>This page isn’t here.</Empty>
   if (!code.data) return <div className="p-4"><Pending call={code} rows={4} /></div>
   return (
     <div className="p-4">

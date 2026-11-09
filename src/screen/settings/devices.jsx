@@ -1,4 +1,4 @@
-// This user's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add a Device, their
+// This user's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add Device, their
 // passkeys), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
 // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping;
 // under Devices, where this device holds its own keys (`device.keys`, the web client), which of their devices run
@@ -166,8 +166,8 @@ function model(x, again) {
   function problemOf(c, p) {
     const title = partTitle(p), part = p.part
     const retry = (on, retried) => ({ label: "Try Again", run: again(part, on, retried) })
-    if (p.failed) return { title: `Couldn’t switch ${title} ${p.wanted ? "on" : "off"}`, text: p.failed, action: retry(p.wanted) }
-    if (p.late) return { title: `${c.name} hasn’t switched ${title} ${p.on ? "on" : "off"} yet`, text: "It does once it hears, so it may be offline.", action: retry(p.on) }
+    if (p.failed) return { title: `Couldn’t turn ${title} ${p.wanted ? "on" : "off"}`, text: p.failed, action: retry(p.wanted) }
+    if (p.late) return { title: `${c.name} hasn’t turned ${title} ${p.on ? "on" : "off"} yet`, text: "It may be offline.", action: retry(p.on) }
     if (p.on && p.problem) return { title: `${title} isn’t running on ${c.name}`, text: p.problem, action: retry(true, p.problem) }
     if (p.on && p.sandbox) return { title: `${title} runs without its sandbox on ${c.name}`, text: p.sandbox }
     return null
@@ -387,12 +387,12 @@ function Devices() {
     const items = passkey ? [] : [{ title: "Rename", icon: "pencil-simple" }]
     // What its sign-ins were let in with, which a new device's sign-in is checked against.
     const signedIn = (passkey ? [item] : item.clients).filter((c) => c.sign_in || c.linked?.length)
-    if (signedIn.length || item.me) items.push({ title: "Sign-ins…", icon: "key" })
+    if (signedIn.length || item.me) items.push({ title: "Sign-Ins…", icon: "key" })
     items.push(item.me ? { title: "Sign Out", icon: "sign-out", danger: true } : { title: "Remove…", icon: "minus-circle", danger: true })
     const i = await one.menu(items, at).catch(() => null)
     if (i == null) return
     if (items[i].title === "Rename") show({ rename: item })
-    else if (items[i].title === "Sign-ins…") show({ signIns: signedIn, me: item.me })
+    else if (items[i].title === "Sign-Ins…") show({ signIns: signedIn, me: item.me })
     else if (item.me) signOut()
     else remove(item.name, passkey ? [item.key] : item.keys, !passkey && item.node && item.online ? item.node.key : null)
   }
@@ -490,7 +490,7 @@ function Devices() {
     <div className="@container flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="large-title text-3xl font-bold tracking-tight">Devices</h1>
-        <Button variant={data?.waiting.length ? "outline" : "default"} disabled={!data} onClick={() => show({ add: true })}><Icon name="plus" />Add a Device</Button>
+        <Button variant={data?.waiting.length ? "outline" : "default"} disabled={!data} onClick={() => show({ add: true })}><Icon name="plus" />Add Device</Button>
       </div>
       {body}
       {data && dialog.for?.rename && <Rename key={dialog.n} card={dialog.for.rename} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
@@ -678,7 +678,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
           </List>
         )}
         {!!stale.length && <List><OldSignIns c={{ old: stale }} remove={() => removeOld({ old: stale })} /></List>}
-        {/* A device that isn't listed yet still signs out. */}
+        {/* A device that isn’t listed yet still signs out. */}
         {device.signOut && !cards.some((c) => c.me) && (
           <Button variant="ghost" className="self-start text-destructive" onClick={signOut}>Sign Out</Button>
         )}
@@ -707,9 +707,9 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
                     </div>
                   )
                 })}
-                <ActionRow icon="arrows-clockwise" onClick={schedule}>Run an App’s Schedules…</ActionRow>
+                <ActionRow icon="arrows-clockwise" onClick={schedule}>Run an App’s Schedules</ActionRow>
               </List>
-              {!!appSchedules.length && <Note>When one stops or runs out, that device can’t open the app’s things any more.</Note>}
+              {!!appSchedules.length && <Note>Once one stops, that device can’t open the app’s data.</Note>}
             </Section>
           )}
           {device.keys && passkey && (
@@ -1130,7 +1130,7 @@ function AddDevice({ data, open, setOpen }) {
     </div>
   )
   return (
-    <ResponsiveDialog open={open} onOpenChange={setOpen} title="Add a Device" action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>}>
+    <ResponsiveDialog open={open} onOpenChange={setOpen} title="Add Device" action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>}>
       <div className="overflow-y-auto p-4">
         <List>
           {way("device-mobile", "Phone, tablet or computer", `Install ${state.config?.name || "the app"} and sign in. It shows up here to approve.`)}
@@ -1153,7 +1153,7 @@ function AppSchedules({ m, asked, open, setOpen, done }) {
   const rows = (items, footer) => (
     <div className="flex flex-col gap-4 overflow-y-auto p-4">
       {items.length ? <List>{items}</List> : <Empty className="py-6">None yet</Empty>}
-      <Note>{footer}</Note>
+      {footer && <Note>{footer}</Note>}
       {error && <Problem title={error} />}
     </div>
   )
@@ -1169,8 +1169,8 @@ function AppSchedules({ m, asked, open, setOpen, done }) {
   return (
     <ResponsiveDialog open={open} onOpenChange={setOpen} title={app ? `Run ${m.appTitle(app)}’s Schedules On…` : "Run an App’s Schedules"} action={<Cancel setOpen={setOpen} />}>
       {app
-        ? rows(m.runners(scope).map((d) => <ListRow key={d.key} title={shown(d.name)} onClick={() => choose(d)} />), "They run on the device you choose, while that device is on.")
-        : rows(m.scheduled(scope).map((a) => <ListRow key={a.name} title={a.title || a.name} onClick={() => setApp(a.name)} />), "Apps that run on their own, every so often.")}
+        ? rows(m.runners(scope).map((d) => <ListRow key={d.key} title={shown(d.name)} onClick={() => choose(d)} />), "Choose one that stays on.")
+        : rows(m.scheduled(scope).map((a) => <ListRow key={a.name} title={a.title || a.name} onClick={() => setApp(a.name)} />))}
     </ResponsiveDialog>
   )
 }

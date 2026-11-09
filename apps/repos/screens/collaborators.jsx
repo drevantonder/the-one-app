@@ -31,7 +31,7 @@ function Add({ d, done }) {
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
         <div className="relative">
           <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Find users" aria-label="Find users" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
+          <Input className="pl-8" placeholder="Search" aria-label="Search" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
         </div>
         {!d.users.length ? (
           <p className="text-sm text-muted-foreground">Everyone pushes to it already.</p>
@@ -92,7 +92,7 @@ function Collaborators() {
           ) : (
             <p className="px-1 text-sm text-muted-foreground">No one else pushes to it.</p>
           )}
-          {d.yours && <Button variant="outline" className="self-start" onClick={() => setAdding(true)}><Icon name="plus" />Add Collaborator…</Button>}
+          {d.yours && <Button variant="outline" className="self-start" onClick={() => setAdding(true)}><Icon name="plus" />Add Collaborator</Button>}
         </Section>
       </div>
       {adding && <Add d={d} done={(did) => (setAdding(false), did && (setTrouble(""), call.reload()))} />}

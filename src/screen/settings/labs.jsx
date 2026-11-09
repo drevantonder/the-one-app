@@ -85,7 +85,7 @@ function Labs() {
     <div className="flex max-w-2xl flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="large-title text-3xl font-bold tracking-tight">Labs</h1>
-        <p className="text-sm text-muted-foreground">Features still being built. What you turn on here is on for everyone.</p>
+        <p className="text-sm text-muted-foreground">What you turn on here is on for everyone.</p>
       </div>
       {body}
     </div>

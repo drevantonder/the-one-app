@@ -5,124 +5,120 @@
 <div id="root"></div>
 <script type="module">import { createRoot as e } from "react-dom/client";
 import { useEffect as t, useRef as n, useState as r } from "react";
-import { AccountList as i, Empty as a, Hint as o, List as s, ListRow as c, ListSkeleton as l, LoadFailure as u, Loading as d, LoadingButton as f, Problem as p, failureSentence as m, useAccounts as h } from "@one/ui";
-import { jsx as g, jsxs as _ } from "react/jsx-runtime";
-function v({ title: e, blurb: v }) {
-	let { accounts: y, problem: b, retry: x, failed: S, signOut: C, reload: w } = h(), [T, E] = r(null), [D, O] = r(!1), [k, A] = r(null), j = () => (O(!1), E(null));
-	async function M(e) {
+import { AccountList as i, Empty as a, List as o, ListRow as s, ListSkeleton as c, LoadFailure as l, Loading as u, LoadingButton as d, Problem as f, failureSentence as p, useAccounts as m } from "@one/ui";
+import { jsx as h, jsxs as g } from "react/jsx-runtime";
+function _({ title: e, blurb: _ }) {
+	let { accounts: v, problem: y, retry: b, failed: x, signOut: S, reload: C } = m(), [w, T] = r(null), [E, D] = r(!1), [O, k] = r(null), A = () => (D(!1), T(null));
+	async function j(e) {
 		let t;
 		try {
 			t = (await one.call("sign_in", e ? { account: e } : {})).url;
 		} catch (t) {
 			if (t.code === "no_client" && one.vault) try {
-				if (await one.vault("client")) return M(e);
+				if (await one.vault("client")) return j(e);
 			} catch (e) {
 				t = e;
 			}
 			let n = /Ask (.+?) to set up (.+?)(?::|$)/.exec(t.message);
-			return n ? A({
-				title: n[2] + " isn't set up",
-				text: "Ask " + n[1] + " to set it up. It's done once for everyone."
-			}) : E({
-				why: m(t),
-				retry: () => M(e)
+			return n ? k({
+				title: n[2] + " isn’t set up",
+				text: "Ask " + n[1] + " to set it up."
+			}) : T({
+				why: p(t),
+				retry: () => j(e)
 			});
 		}
-		O(!0), E({ link: t });
+		D(!0), T({ link: t });
 	}
-	async function N(e) {
-		O(!0), E({ finishing: !0 });
+	async function M(e) {
+		D(!0), T({ finishing: !0 });
 		try {
 			let t = await one.call("finish_sign_in", { code: e });
 			if (t?.signed_in === !1) throw Error(t.why);
 		} catch (e) {
-			return e.code === "not_waiting" ? (j(), w()) : E({
-				why: m(e),
-				retry: () => M()
+			return e.code === "not_waiting" ? (A(), C()) : T({
+				why: p(e),
+				retry: () => j()
 			});
 		}
-		j(), w();
+		A(), C();
 	}
 	t(() => {
-		one.params.back ? N(one.params.back) : one.params.add && M();
+		one.params.back ? M(one.params.back) : one.params.add && j();
 	}, []);
-	let P = n(null), F = y && JSON.stringify(y);
+	let N = n(null), P = v && JSON.stringify(v);
 	if (t(() => {
-		P.current !== null && F !== P.current && T?.link && j(), F !== null && (P.current = F);
-	}, [F]), b && !y) return /* @__PURE__ */ g(u, {
-		problem: b,
-		retry: x
+		N.current !== null && P !== N.current && w?.link && A(), P !== null && (N.current = P);
+	}, [P]), y && !v) return /* @__PURE__ */ h(l, {
+		problem: y,
+		retry: b
 	});
-	if (!y) return /* @__PURE__ */ g(l, {});
-	let I = k ? [] : y.filter((e) => !e.ok);
-	return /* @__PURE__ */ _("div", {
+	if (!v) return /* @__PURE__ */ h(c, {});
+	let F = O ? [] : v.filter((e) => !e.ok);
+	return /* @__PURE__ */ g("div", {
 		className: "flex flex-col gap-6",
 		children: [
-			k && /* @__PURE__ */ g(p, {
+			O && /* @__PURE__ */ h(f, {
 				warn: !0,
-				title: k.title,
-				text: k.text
+				title: O.title,
+				text: O.text
 			}),
-			!y.length && !k && !D && /* @__PURE__ */ g(a, {
+			!v.length && !O && !E && /* @__PURE__ */ h(a, {
 				className: "mx-auto max-w-md",
 				action: {
 					label: "Sign In to Google",
-					run: () => M()
+					run: () => j()
 				},
-				children: v
+				children: _
 			}),
-			I.map((t) => /* @__PURE__ */ g(p, {
+			F.map((t) => /* @__PURE__ */ h(f, {
 				warn: !0,
 				title: t.account + " needs signing in",
 				text: one.plain(t.why || "Needs signing in again").title.replace(/^Needs signing in again\.$/, `Sign in to Google again to let ${e} in.`),
 				action: {
 					label: "Sign In",
-					run: () => M(t.account)
+					run: () => j(t.account)
 				}
 			}, t.account)),
-			y.length > 0 && /* @__PURE__ */ g(i, {
+			v.length > 0 && /* @__PURE__ */ h(i, {
 				title: "Accounts",
-				accounts: y,
-				failed: S,
-				signOut: C,
+				accounts: v,
+				failed: x,
+				signOut: S,
 				line: (e, t) => e.ok ? t ? null : { text: "Used first" } : {
 					text: "Sign in again",
 					warn: !0
 				},
-				children: !k && /* @__PURE__ */ g(f, {
+				children: !O && /* @__PURE__ */ h(d, {
 					variant: "secondary",
 					className: "self-start",
-					run: () => M(),
+					run: () => j(),
 					children: "Add Account"
 				})
 			}),
-			T?.link && /* @__PURE__ */ _("section", {
+			w?.link && /* @__PURE__ */ g("section", {
 				className: "flex flex-col gap-2",
-				children: [
-					/* @__PURE__ */ g("h2", {
-						className: "text-sm font-medium text-muted-foreground",
-						children: "Sign In"
-					}),
-					/* @__PURE__ */ g(s, { children: /* @__PURE__ */ g(c, {
-						title: "Sign in to Google",
-						sub: `and allow ${e}`,
-						onClick: () => one.link(T.link)
-					}) }),
-					/* @__PURE__ */ g(o, { children: "Google brings you back here when you're done." })
-				]
+				children: [/* @__PURE__ */ h("h2", {
+					className: "text-sm font-medium text-muted-foreground",
+					children: "Sign In"
+				}), /* @__PURE__ */ h(o, { children: /* @__PURE__ */ h(s, {
+					title: "Sign in to Google",
+					sub: `and allow ${e}`,
+					onClick: () => one.link(w.link)
+				}) })]
 			}),
-			T?.finishing && /* @__PURE__ */ g(d, { children: "Signing In" }),
-			T?.why && /* @__PURE__ */ g(p, {
-				title: T.why,
+			w?.finishing && /* @__PURE__ */ h(u, { children: "Signing In" }),
+			w?.why && /* @__PURE__ */ h(f, {
+				title: w.why,
 				action: {
 					label: "Try Again",
-					run: T.retry
+					run: w.retry
 				}
 			})
 		]
 	});
 }
-e(document.getElementById("root")).render(/* @__PURE__ */ g(v, {
+e(document.getElementById("root")).render(/* @__PURE__ */ h(_, {
 	title: "Google Sheets",
 	blurb: "Sign in to Google, and your agents can read your spreadsheets and, when you ask, add rows and change cells."
 }));

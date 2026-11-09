@@ -119,11 +119,11 @@ function Groups() {
     body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
       : <ListSkeleton rows={3} />
   } else if (empty) {
-    body = <Empty action={{ label: "New Group", run: () => startCreate() }}>A group shares its apps and data, on a page of its own.</Empty>
+    body = <Empty action={{ label: "New Group", run: () => startCreate() }}>A group shares its apps and data.</Empty>
   } else {
     body = (
       <>
-        {openId && openId === one.params?.group && !selected && <Problem title="You're not in this group." />}
+        {openId && openId === one.params?.group && !selected && <Problem title="You’re not in this group." />}
         {!!invited.length && (
           <Section title="Invited">
             <List>
@@ -352,8 +352,8 @@ function Invite({ g, state, sent, open, setOpen, send }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && matches[0] && pick(matches[0].id)}
-                placeholder="Find users"
-                aria-label="Find users"
+                placeholder="Search"
+                aria-label="Search"
                 enterKeyHint="search"
                 autoComplete="off"
                 {...quiet}
@@ -417,7 +417,7 @@ function Handle({ g, open, setOpen, saved }) {
             {...quiet}
           />
         </div>
-        <p className="text-sm text-muted-foreground">What apps call {g.name} by, like Repos' addresses, which move with it. Lowercase letters, digits and hyphens.</p>
+        <p className="text-sm text-muted-foreground">Lowercase letters, numbers and hyphens. Its Repos addresses change with it.</p>
         {error && <Problem title={error} />}
       </form>
     </ResponsiveDialog>

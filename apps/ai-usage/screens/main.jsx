@@ -22,7 +22,7 @@ const on = (p) => ((p.devices || []).length ? `on ${p.devices.join(", ")}` : "")
 
 function Account({ p, several }) {
   const [team, email] = (p.account || "").split(" · ")
-  const state = p.active && several ? "In use" : p.disabled ? "Not in rotation" : ""
+  const state = p.active && several ? "In use" : p.disabled ? "Not used" : ""
   return (
     <div className="flex flex-col gap-2 border-t pt-4 first:border-t-0 first:pt-0">
       {p.account && (
@@ -64,7 +64,7 @@ function Provider({ reads, mark }) {
         </div>
       </div>
       {reads.map((r) => <Account key={r.account || r.id} p={r} several={reads.length > 1} />)}
-      {stale.length > 0 && <Problem warn title={`Can't read ${p.title} now`} text={stale.join("; ")} />}
+      {stale.length > 0 && <Problem warn title={`Can’t read ${p.title} now`} text={stale.join("; ")} />}
     </Card>
   )
 }
@@ -98,8 +98,8 @@ function Main() {
   const { data, error } = state
   if (error) return <Problem title={one.plain(error).title} text={one.plain(error).next} />
   if (!data) return <Waiting />
-  if (data.problem) return <Problem title="Can't read your AI plans" text={data.problem} />
-  if (!data.providers || !data.providers.length) return <Empty>No AI sign-ins on your machines.</Empty>
+  if (data.problem) return <Problem title="Can’t read your AI plans" text={data.problem} />
+  if (!data.providers || !data.providers.length) return <Empty>No AI sign-ins on your devices.</Empty>
   const ids = [...new Set(data.providers.map((p) => p.id))]
   return (
     <Grid min="22rem" max={4} className="items-start">

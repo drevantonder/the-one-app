@@ -14,7 +14,7 @@ function Activity() {
   useEffect(() => {
     one.title("Activity")
   }, [])
-  if (!app) return <Empty>This page isn't here. The link may be old or mistyped.</Empty>
+  if (!app) return <Empty>This page isn’t here.</Empty>
   if (!health.data) return <div className="p-4"><Pending call={health} rows={4} /></div>
 
   const { insights, activity } = health.data

@@ -21,7 +21,7 @@ function Source() {
   }, [a, link])
 
   if (!list.data) return <div className="p-4"><Pending call={list} rows={1} /></div>
-  if (!a) return <Empty>This app isn't here. It may have been erased, or the link is old.</Empty>
+  if (!a) return <Empty>This app isn’t here.</Empty>
 
   const save = async (to) => {
     setSaving(true)

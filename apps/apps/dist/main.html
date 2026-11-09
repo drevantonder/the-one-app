@@ -108,7 +108,7 @@ function E(i) {
 				label: "Back to the App Store",
 				run: k
 			},
-			children: "This app isn't here. It may have been erased, or the link is old."
+			children: "This app isn’t here."
 		}), c[25] = e) : e = c[25], e;
 	}
 	let X;
@@ -122,7 +122,7 @@ function E(i) {
 		let t = e === "erase";
 		await one.alert({
 			title: t ? `Erase ${M.title} for good?` : `Delete ${M.title}?`,
-			text: t ? "Its name can't be used again." : "You can restore it from Recently Deleted.",
+			text: t ? "Its name can’t be used again." : "You can restore it from Recently Deleted.",
 			action: t ? "Erase" : "Delete",
 			danger: !0
 		}) && (await J(e, () => one.call(e, {
@@ -156,7 +156,7 @@ function E(i) {
 				": ",
 				re(e.last.error).title
 			]
-		}) : e.on && e.runs_as ? C(e.when) + (n ? " · " + e.scope_name : "") + (e.next ? " · next " + T(e.next) : "") + ((e.run_by || []).length ? " · on " + e.run_by.join(", ") : "") : e.on ? "Off. Switch it on to run it as you." : C(e.when) + (e.switched ? " · off since " + w(e.switched.time) : ""), c[60] = n, c[61] = r);
+		}) : e.on && e.runs_as ? C(e.when) + (n ? " · " + e.scope_name : "") + (e.next ? " · next " + T(e.next) : "") + ((e.run_by || []).length ? " · on " + e.run_by.join(", ") : "") : e.on ? "Off. Turn it on to run it as you." : C(e.when) + (e.switched ? " · off since " + w(e.switched.time) : ""), c[60] = n, c[61] = r);
 		let i = r, s;
 		c[62] !== u || c[63] !== J ? (s = (e, t) => {
 			let n = e.name + "|" + e.scope;
@@ -276,12 +276,12 @@ function E(i) {
 			children: "Ask an admin to add it first"
 		}), c[114] = M, c[115] = X, c[116] = B, c[117] = I, c[118] = j, c[119] = Z, c[120] = J, c[121] = p, c[122] = Te) : Te = c[122];
 		let Ee;
-		c[123] !== M.deleted || c[124] !== G || c[125] !== X || c[126] !== V ? (Ee = !M.deleted && X && V.length > 0 && /* @__PURE__ */ v(o, {
+		c[123] !== M.deleted || c[124] !== G || c[125] !== X || c[126] !== V.length ? (Ee = !M.deleted && X && V.length > 0 && /* @__PURE__ */ v(o, {
 			variant: "secondary",
 			size: "sm",
 			onClick: G,
 			children: "Add to…"
-		}), c[123] = M.deleted, c[124] = G, c[125] = X, c[126] = V, c[127] = Ee) : Ee = c[127];
+		}), c[123] = M.deleted, c[124] = G, c[125] = X, c[126] = V.length, c[127] = Ee) : Ee = c[127];
 		let De;
 		c[128] !== Y.length || c[129] !== ge ? (De = Y.length > 0 && /* @__PURE__ */ v(o, {
 			variant: "ghost",
@@ -345,7 +345,7 @@ function E(i) {
 					_ && _.runs_on.length > 0 && /* @__PURE__ */ v(S, {
 						title: "Runs On",
 						children: /* @__PURE__ */ v(d, { children: _.runs_on.map((e) => /* @__PURE__ */ v(f, {
-							title: e.name || "A removed node",
+							title: e.name || "A removed device",
 							sub: e.name && (e.online ? e.problem : "Off"),
 							trailing: _.nodes.length > 0 && /* @__PURE__ */ v(o, {
 								size: "sm",
@@ -360,7 +360,6 @@ function E(i) {
 						children: [t && /* @__PURE__ */ v(te, {
 							warn: !0,
 							title: `${M.title || u} needs a device to run its schedules`,
-							text: "Its schedules run on a device you choose, while it’s on.",
 							action: {
 								label: "Choose a Device",
 								run: () => ye(t.scope)

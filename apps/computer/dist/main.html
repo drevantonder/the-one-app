@@ -34,7 +34,7 @@ function T(t) {
 function E(e, { asking: t, note: n, fix: r }) {
 	let i = e.permissions && e.kind === "mac" && (!e.permissions.accessibility || !e.permissions.screen_recording), a = e.title || e.device, o = n ? { title: n } : i ? {
 		title: `${e.permissions.accessibility ? "Screen Recording" : "Accessibility"} is off`,
-		text: `Agents can't use ${a} until it's on.`,
+		text: `Agents can’t use ${a} until it’s on.`,
 		warn: !0,
 		fix: r
 	} : e.why ? {
@@ -72,7 +72,7 @@ function D(t) {
 			children: "iPhone Mirroring"
 		}), /* @__PURE__ */ x("div", {
 			className: "text-muted-foreground",
-			children: "Pair it in your iPhone's Settings › General."
+			children: "Pair it in your iPhone’s Settings › General."
 		})]
 	}), n[3] = c) : c = n[3];
 	let u;
@@ -231,64 +231,55 @@ function A({ device: e, onClose: t }) {
 		children: /* @__PURE__ */ S(m, {
 			side: "bottom",
 			className: "max-h-[90svh] overflow-y-auto rounded-t-xl",
-			children: [/* @__PURE__ */ S(g, { children: [/* @__PURE__ */ x(_, { children: c }), /* @__PURE__ */ x(h, { children: "macOS requires two permissions before agents can view or control this Mac." })] }), /* @__PURE__ */ S("div", {
+			children: [/* @__PURE__ */ S(g, { children: [/* @__PURE__ */ x(_, { children: c }), /* @__PURE__ */ x(h, { children: "Agents need both to use this Mac." })] }), /* @__PURE__ */ S("div", {
 				className: "flex flex-col gap-6 p-4 pt-0",
-				children: [
-					/* @__PURE__ */ S(u, { children: [/* @__PURE__ */ x(d, {
-						leading: /* @__PURE__ */ x(a, {
-							app: {
-								name: "accessibility",
-								icon: "cursor-click"
-							},
-							size: 32
-						}),
-						title: "Accessibility",
-						sub: "Clicks, typing and window control",
-						trailing: /* @__PURE__ */ x(l, { on: o })
-					}), /* @__PURE__ */ x(d, {
-						leading: /* @__PURE__ */ x(a, {
-							app: {
-								name: "screen",
-								icon: "desktop"
-							},
-							size: 32
-						}),
-						title: "Screen Recording",
-						sub: "Lets agents see what's on screen",
-						trailing: /* @__PURE__ */ x(l, { on: s })
-					})] }),
-					/* @__PURE__ */ S("section", {
-						className: "flex flex-col gap-2",
-						children: [/* @__PURE__ */ x("h2", {
-							className: "px-1 text-sm font-medium text-muted-foreground",
-							children: "How to turn it on"
-						}), /* @__PURE__ */ S(u, { children: [/* @__PURE__ */ S(j, {
-							n: 1,
-							title: `Open System Settings on ${c}`,
-							children: [
-								"Go to ",
-								/* @__PURE__ */ x("b", { children: "Privacy & Security" }),
-								" → ",
-								/* @__PURE__ */ x("b", { children: o ? "Screen & System Audio Recording" : "Accessibility" }),
-								"."
-							]
-						}), !(o && s) && /* @__PURE__ */ S(j, {
-							n: 2,
-							title: "Turn on The One App",
-							children: [
-								"Enable the switch next to ",
-								/* @__PURE__ */ x("b", { children: "The One App" }),
-								" and approve with Touch ID",
-								o ? /* @__PURE__ */ S(b, { children: [", then choose ", /* @__PURE__ */ x("b", { children: "Quit & Reopen" })] }) : "",
-								"."
-							]
-						})] })]
+				children: [/* @__PURE__ */ S(u, { children: [/* @__PURE__ */ x(d, {
+					leading: /* @__PURE__ */ x(a, {
+						app: {
+							name: "accessibility",
+							icon: "cursor-click"
+						},
+						size: 32
 					}),
-					/* @__PURE__ */ x("p", {
-						className: "text-center text-sm text-muted-foreground",
-						children: "This page updates automatically once permission is granted."
-					})
-				]
+					title: "Accessibility",
+					sub: "Clicks, typing and windows",
+					trailing: /* @__PURE__ */ x(l, { on: o })
+				}), /* @__PURE__ */ x(d, {
+					leading: /* @__PURE__ */ x(a, {
+						app: {
+							name: "screen",
+							icon: "desktop"
+						},
+						size: 32
+					}),
+					title: "Screen Recording",
+					sub: "What’s on screen",
+					trailing: /* @__PURE__ */ x(l, { on: s })
+				})] }), /* @__PURE__ */ S("section", {
+					className: "flex flex-col gap-2",
+					children: [/* @__PURE__ */ x("h2", {
+						className: "px-1 text-sm font-medium text-muted-foreground",
+						children: "Turn Them On"
+					}), /* @__PURE__ */ S(u, { children: [/* @__PURE__ */ S(j, {
+						n: 1,
+						title: `Open System Settings on ${c}`,
+						children: [
+							"Go to ",
+							/* @__PURE__ */ x("b", { children: "Privacy & Security" }),
+							" → ",
+							/* @__PURE__ */ x("b", { children: o ? "Screen & System Audio Recording" : "Accessibility" }),
+							"."
+						]
+					}), !(o && s) && /* @__PURE__ */ S(j, {
+						n: 2,
+						title: `Turn On ${one.config.name}`,
+						children: [
+							"Approve with Touch ID",
+							o ? /* @__PURE__ */ S(b, { children: [", then choose ", /* @__PURE__ */ x("b", { children: "Quit & Reopen" })] }) : "",
+							"."
+						]
+					})] })]
+				})]
 			})]
 		})
 	});

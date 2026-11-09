@@ -165,7 +165,7 @@ function Issue({ d, repo, reload, onGone }) {
   }
   const comment = () => draft.trim() && sending("comment", "comment", (text) => ({ body: text }))
   const close = async (e) => {
-    const i = await one.menu([{ title: "Close as completed", icon: "check-circle" }, { title: "Close as not planned", icon: "prohibit" }], e.currentTarget)
+    const i = await one.menu([{ title: "Close as Completed", icon: "check-circle" }, { title: "Close as Not Planned", icon: "prohibit" }], e.currentTarget)
     if (i != null) await sending("close", "close_issue", (text) => ({ state_reason: i ? "not_planned" : "completed", ...(text.trim() ? { comment: text } : {}) }))
   }
   const reopen = () => sending("reopen", "reopen_issue", (text) => (text.trim() ? { comment: text } : {}))
@@ -191,7 +191,7 @@ function Issue({ d, repo, reload, onGone }) {
     const i = await one.menu(items, button)
     if (i == null) return
     if (items[i].title === "Edit") return setEditing(c.id)
-    if (!(await one.alert({ title: "Delete this comment?", text: "It can't be brought back.", action: "Delete", danger: true }))) return
+    if (!(await one.alert({ title: "Delete this comment?", text: "It can’t be brought back.", action: "Delete", danger: true }))) return
     try {
       await one.call("delete_comment", { repo, id: c.id, confirm: true })
       await reload()

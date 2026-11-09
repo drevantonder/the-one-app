@@ -203,10 +203,10 @@ function H(t) {
 		d
 	] }), n[8] = u, n[9] = d, n[10] = p) : p = n[10];
 	let m = p, h = `overflow-hidden rounded-xl border bg-card text-card-foreground ${a ? "flex items-stretch divide-x" : "divide-y"}`, g;
-	n[11] !== r.sha || n[12] !== i ? (g = () => F("commit", {
+	n[11] !== r.sha || n[12] !== i.repo ? (g = () => F("commit", {
 		repo: i.repo,
 		sha: r.sha
-	}), n[11] = r.sha, n[12] = i, n[13] = g) : g = n[13];
+	}), n[11] = r.sha, n[12] = i.repo, n[13] = g) : g = n[13];
 	let _ = `flex cursor-pointer items-center gap-3 px-3 py-2.5 text-left text-sm outline-none hover:bg-accent/50 focus-visible:bg-accent/50 min-w-0 ${a ? "flex-1" : "w-full"}`, v;
 	n[14] === r.author ? v = n[15] : (v = /* @__PURE__ */ w(o, {
 		name: r.author,
@@ -297,7 +297,7 @@ function K(t) {
 		return n[6] === e ? t = n[7] : (t = /* @__PURE__ */ T(d, { children: [
 			"This binary file (",
 			e,
-			") can't be previewed."
+			") can’t be previewed."
 		] }), n[6] = e, n[7] = t), t;
 	}
 	if (r.too_big) {

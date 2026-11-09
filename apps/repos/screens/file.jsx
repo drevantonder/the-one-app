@@ -13,7 +13,7 @@ const isMarkdown = (path) => /\.(md|mdx|markdown)$/i.test(path)
 function Body({ d, path }) {
   const [view, setView] = useState(isMarkdown(path) ? "preview" : "code")
   if (d.submodule) return <Empty>This is a submodule of commit <code>{short(d.submodule)}</code> of another repo.</Empty>
-  if (d.binary) return <Empty>This binary file ({fileSize(d.size)}) can't be previewed.</Empty>
+  if (d.binary) return <Empty>This binary file ({fileSize(d.size)}) can’t be previewed.</Empty>
   if (d.too_big) return <Empty>This file is too big to preview ({fileSize(d.size)}). Clone the repo to read it.</Empty>
   const markdown = isMarkdown(path)
   const text = d.text.split("\n").filter((l) => !/\.mdx$/i.test(path) || (!/^\s*(import|export)\s/.test(l) && !/^\s*<\/?[A-Z][\w.]*[^>]*\/?>\s*$/.test(l))).join("\n")

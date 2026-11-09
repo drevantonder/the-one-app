@@ -42,8 +42,8 @@
     box.innerHTML =
       '<div style="max-width:28rem;display:grid;grid-template-columns:1.25rem 1fr;gap:.25rem .75rem;padding:1rem;border:1px solid color-mix(in srgb,CanvasText 15%,transparent);border-radius:.5rem;color:#dc2626">' +
       '<svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg>' +
-      '<div style="font-weight:500">This screen didn\u2019t draw</div><div></div>' +
-      '<div style="color:color-mix(in srgb,CanvasText 60%,transparent)">Nothing showed after it started. Reloading usually fixes it.<br><button style="margin-top:.5rem;padding:.25rem .75rem;font:inherit;color:CanvasText;background:transparent;border:1px solid color-mix(in srgb,CanvasText 25%,transparent);border-radius:.375rem" onclick="location.reload()">Reload</button></div></div>';
+      '<div style="font-weight:500">This screen didn\u2019t load</div><div></div>' +
+      '<div style="color:color-mix(in srgb,CanvasText 60%,transparent)"><button style="margin-top:.5rem;padding:.25rem .75rem;font:inherit;color:CanvasText;background:transparent;border:1px solid color-mix(in srgb,CanvasText 25%,transparent);border-radius:.375rem" onclick="location.reload()">Reload</button></div></div>';
     document.body.append(box);
     const note = `blank: nothing drawn ${Math.round(performance.now() / 1000)} s after it started (${innerWidth}x${innerHeight}, ${devicePixelRatio}x, ${document.body.querySelectorAll("*").length} elements, zoom ${getComputedStyle(root).zoom})`;
     if (self.__oneNative?.log) self.__oneNative.log(note);
