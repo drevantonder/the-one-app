@@ -95,7 +95,8 @@ export function browser() {
     let keys = await browserKeys(user);
     const invite = sessionStorage.getItem("one.invite");
     const isIn = async () => (await put(`joined:${user}`, keys.key), sessionStorage.removeItem("one.invite"), (device = keys));
-    const started = await net.start(user).catch((err) => (err.unreachable ? Promise.reject(err) : false));
+    // Just signed in, the worker may still hold the last session as this user, if another tab kept it alive.
+    const started = await net.start(user, signedInNow).catch((err) => (err.unreachable ? Promise.reject(err) : false));
     if (signedInNow && (await get(`joined:${user}`)) === keys.key && (await net.still().catch(() => null)) === false) {
       await forgetDevice();
       keys = await browserKeys(user);
