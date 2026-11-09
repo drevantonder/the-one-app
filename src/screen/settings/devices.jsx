@@ -474,7 +474,6 @@ function Devices() {
             menu={menu}
             removeOld={removeOld}
             signOut={signOut}
-            add={() => show({ add: true })}
             schedule={() => show({ schedules: {} })}
             act={act}
           />
@@ -486,7 +485,10 @@ function Devices() {
 
   return (
     <div className="@container flex flex-col gap-6">
-      <h1 className="large-title text-3xl font-bold tracking-tight">Devices</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="large-title text-3xl font-bold tracking-tight">Devices</h1>
+        {data && <Button variant={data.waiting.length ? "outline" : "default"} onClick={() => show({ add: true })}><Icon name="plus" />Add a Device</Button>}
+      </div>
       {body}
       {data && dialog.for?.rename && <Rename key={dialog.n} card={dialog.for.rename} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.remove && <RemoveDevice key={dialog.n} {...dialog.for.remove} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
@@ -622,7 +624,7 @@ function Scanned({ scan, done, cancel }) {
 
 // ---- Devices ----
 
-function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, schedule, act }) {
+function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule, act }) {
   const { device, state, passkey } = data
   const { cards, passkeys, stale } = m.drawn
   const mine = cards.filter((c) => c.user === m.me)
@@ -631,7 +633,6 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
   const appSchedules = device.keys ? (state.network?.app_schedules || []).filter((g) => g.until > Date.now()) : []
   const scheduling = !!device.keys && (appSchedules.length > 0 || m.scheduled().length > 0)
   const recovery = []
-  if (m.admin && state.network?.recovery_set) recovery.push(`Recovery key set ${day(state.network.recovery_set)}.`)
   if (state.network?.recovery_used && (m.admin || state.network.recovery_used.user === m.me)) {
     const r = state.network.recovery_used
     recovery.push(`The recovery key last let in a device of ${r.user === m.me ? "yours" : `${m.userName(r.user)}’s`}, ${day(r.time)}.`)
@@ -643,7 +644,8 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
         {!!mine.length && (
           <List>
             {mine.map((c) => {
-              const sub = c.me ? "This device" : c.seen && Date.now() - c.seen > 3_600_000 ? ago(c.seen) : ""
+              const twin = mine.some((o) => o !== c && o.name === c.name)
+              const sub = c.me ? "This device" : c.seen && Date.now() - c.seen > 3_600_000 ? ago(c.seen) : twin && c.signIn?.since ? `Joined ${ago(c.signIn.since)}` : ""
               const problems = m.problemsOf(c), open = problems.length > 0 && opened[c.id]
               return (
                 <div
@@ -677,7 +679,6 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
         {device.signOut && !cards.some((c) => c.me) && (
           <Button variant="ghost" className="self-start text-destructive" onClick={signOut}>Sign Out</Button>
         )}
-        <Button variant="outline" className="self-start" onClick={add}><Icon name="plus" />Add a Device</Button>
         {/* This browser, or the app, gets notifications once its user says so here: asked only when they tap it. */}
         {device.notify === "default" && (
           <Button variant="ghost" className="self-start" onClick={() => act(async () => (device.notify = await one.notify()))}>
@@ -1020,7 +1021,7 @@ function RemoveDevice({ name, keys, erasable, open, setOpen, done }) {
     <ResponsiveDialog open={open} onOpenChange={setOpen} title={`Remove ${name}?`} action={<><Cancel setOpen={setOpen} /><Go variant="destructive" busy={busy} onClick={go}>Remove</Go></>}>
       <div className="flex flex-col gap-4 p-4">
         <List>
-          <Label className="justify-between px-3 py-3 font-normal">Also erase the data<Switch checked={erase} onCheckedChange={setErase} /></Label>
+          <Label className="justify-between px-3 py-3 font-normal">Also erase its data<Switch checked={erase} onCheckedChange={setErase} /></Label>
         </List>
         {error && <Problem title={error} />}
       </div>
