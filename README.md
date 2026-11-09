@@ -19,3 +19,17 @@ curl -fsSL theoneapp.drevan.me | sh
 The vision for this project is simple: make using AI to its full potential easy.
 
 To learn more, point your agent at this repo and ask it to explain.
+
+## Building it
+
+A Linux machine that builds what `one-dev update` sends (the node, the Cloudflare node, the web client and its WebAssembly, the apps' screens and services) needs a C compiler, a clang that can build for WebAssembly, curl and git from its package manager, then rustup and mise to install the rest, as `rust-toolchain.toml` and `mise.toml` say:
+
+```sh
+sudo apt install ca-certificates curl git gcc clang    # Ubuntu 26.04
+curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+curl -fsSL https://mise.run | sh
+git clone https://github.com/drevantonder/the-one-app && cd the-one-app
+mise install                  # Bun, Node, Go, sccache, wasm-bindgen and binaryen
+eval "$(mise activate bash)"  # in your shell's profile, too: mise's shims don't find them from the folders cargo runs sccache in
+cargo build                   # the first cargo here has rustup install the Rust and targets rust-toolchain.toml names
+```

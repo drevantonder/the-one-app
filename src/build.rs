@@ -273,6 +273,19 @@ fn said(cmd: &Command) -> String {
 mod tests {
     use super::*;
 
+    /// mise.toml installs what the build shells out to, and three of its versions are the repo's already: a machine set up from
+    /// it must build with the Bun deploys download, the wasm-bindgen the client's WebAssembly links, and the Go the service asks for.
+    #[test]
+    fn mise_installs_the_versions_the_repo_asks_for() {
+        let mise = include_str!("../mise.toml");
+        let pinned = |tool: &str| mise.lines().find_map(|l| l.strip_prefix(&format!("{tool} = \""))?.strip_suffix('"')).unwrap_or_else(|| panic!("mise.toml pins no {tool}"));
+        assert_eq!(pinned("bun"), BUN);
+        let locked = include_str!("../Cargo.lock").split_once("name = \"wasm-bindgen\"\nversion = \"").expect("wasm-bindgen is locked").1.split('"').next().unwrap();
+        assert_eq!(pinned("\"github:wasm-bindgen/wasm-bindgen\""), locked, "wasm-bindgen-cli must be the version Cargo.lock locks");
+        let go = include_str!("../apps/whatsapp/service/go.mod").lines().find_map(|l| l.strip_prefix("go ")).unwrap();
+        assert_eq!(pinned("go"), go);
+    }
+
     /// install.sh is shell, so it can't read the table: it must say what the table does.
     #[test]
     fn the_installer_is_for_the_platforms_here() {
