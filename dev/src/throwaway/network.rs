@@ -12,6 +12,28 @@ use serde_json::json;
 
 use crate::agent;
 
+const BUILD: &str = "build";
+
+/// Says which program the throwaway network in `dir` runs, and which folder its UI is read from, where they're given.
+pub(crate) fn choose(dir: &Path, build: Option<&Path>, ui: Option<&Path>) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    if let Some(build) = build {
+        std::fs::write(dir.join(BUILD), build.to_string_lossy().as_bytes())?;
+    }
+    if let Some(ui) = ui {
+        Throwaway::set_ui(dir, ui)?;
+    }
+    Ok(())
+}
+
+/// The program the throwaway network in `dir` runs: the one it was given, else the one beside this.
+pub(crate) fn program(dir: &Path) -> Result<PathBuf> {
+    match std::fs::read_to_string(dir.join(BUILD)) {
+        Ok(build) => Ok(build.trim().into()),
+        Err(_) => crate::program(),
+    }
+}
+
 /// The throwaway network's node's address, while its node runs and answers: an answer from the address alone could be
 /// another checkout's throwaway network, which took the port while this one was stopped.
 pub(crate) fn running(dir: &Path) -> Option<String> {
@@ -25,7 +47,7 @@ pub(crate) fn running(dir: &Path) -> Option<String> {
 /// included, so a new build (`cargo build`) is picked up by starting it again, which keeps its data.
 pub(crate) fn older_build(dir: &Path) -> bool {
     let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
-    match (crate::program().ok().and_then(|exe| modified(&exe)), modified(&dir.join("pid"))) {
+    match (program(dir).ok().and_then(|exe| modified(&exe)), modified(&dir.join("pid"))) {
         (Some(built), Some(started)) => built > started,
         _ => false,
     }
@@ -93,7 +115,9 @@ pub(crate) fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
 /// so the next `throwaway` makes another where this one stopped, as its error says why.
 pub(crate) fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new throwaway network for this checkout…");
+    let (build, ui) = (std::fs::read_to_string(dir.join(BUILD)).ok(), std::fs::read_to_string(dir.join("ui-folder")).ok());
     stop(dir, true)?;
+    choose(dir, build.as_deref().map(Path::new), ui.as_deref().map(Path::new))?;
     create(dir).inspect_err(|_| {
         let _ = stop(dir, true);
     })
@@ -159,7 +183,7 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
         Some(addr) => addr.to_string(),
         None => std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string(),
     };
-    let mut command = std::process::Command::new(crate::program()?);
+    let mut command = std::process::Command::new(program(dir)?);
     std::os::unix::process::CommandExt::arg0(&mut command, one::oned::name());
     Throwaway::tell(&mut command, dir, &addr);
     let node_program = spawn(dir, &mut command, "node.log", false)?;
@@ -207,7 +231,7 @@ pub(crate) fn spawn_cloudflare(dir: &Path, settings: &Settings, node: &str) -> R
         anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} was taken by another program while it was stopped: {CLI}-dev throwaway stop, then {CLI}-dev throwaway for a new one on free ports");
     }
     // Beside its node, which it asks for the network's devices, for its relay to take only them.
-    let mut workers = std::process::Command::new(crate::program()?);
+    let mut workers = std::process::Command::new(program(dir)?);
     Throwaway::tell(workers.args(["cloudflare", "serve"]), dir, node);
     let program = spawn(dir, &mut workers, "cloudflare.log", false)?;
     let url = format!("{}/.well-known/oauth-authorization-server", settings.address);

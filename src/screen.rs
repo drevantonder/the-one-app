@@ -7,14 +7,20 @@
 //! from its address's `screens/`), and answers `one.api` only for a screen it chose to show as its own. The page that
 //! holds them answers the bridge for whatever a user touches: menus, alerts, sheets, files, scanning and links.
 
+use std::borrow::Cow;
+
+use crate::ui_folder;
+
 /// Phosphor's icons, each name's path on a 256-point grid (vendor/phosphor), for the web pages that draw screens: the
 /// web client's, at the address, and a chat's view, by `screens_icons`.
 pub const ICONS: &[u8] = include_bytes!("../vendor/phosphor/icons.json");
 
-const BRIDGE: (&str, &str) = ("bridge.js", include_str!("screen/bridge.js"));
+fn bridge() -> Cow<'static, str> {
+    ui_folder::text("src/screen/bridge.js", include_str!("screen/bridge.js"))
+}
 
 /// What a screen's HTML has in it to use `@one/ui` (`src/screen/ui/`: React, and shadcn's components): its page then
-/// has an import map giving `react`, `react-dom/client`, `@one/ui` and the rest (`UI_IMPORTS`), and ui.js, which they
+/// has an import map giving `react`, `react-dom/client`, `@one/ui` and the rest (`ui_imports`), and ui.js, which they
 /// come from. Every page has ui.css, `@one/ui`'s theme (shadcn's neutral, light and dark) and what a page starts with,
 /// so a plain screen, of HTML and JS alone, looks as the rest do.
 pub const UI: &str = r#"<meta name="@one/ui">"#;
@@ -30,9 +36,17 @@ createRoot(document.getElementById("root")).render(h(Empty, { action: { label: "
 </script>"#;
 
 /// `@one/ui` as `bun run build` in `src/screen/ui/` made it, whose sources `cargo test` checks it was made from.
-const UI_CSS: (&str, &str) = ("ui/ui.css", include_str!("screen/ui/dist/ui.css"));
-const UI_JS: (&str, &str) = ("ui/ui.js", include_str!("screen/ui/dist/ui.js"));
-const UI_IMPORTS: &str = include_str!("screen/ui/dist/importmap.json");
+fn ui_css() -> Cow<'static, str> {
+    ui_folder::text("src/screen/ui/dist/ui.css", include_str!("screen/ui/dist/ui.css"))
+}
+
+fn ui_js() -> Cow<'static, str> {
+    ui_folder::text("src/screen/ui/dist/ui.js", include_str!("screen/ui/dist/ui.js"))
+}
+
+fn ui_imports() -> Cow<'static, str> {
+    ui_folder::text("src/screen/ui/dist/importmap.json", include_str!("screen/ui/dist/importmap.json"))
+}
 
 /// A screen's page: `context` is `{ app, screen, params, me, scope, config }` (a Settings screen has no app or scope), `body` its HTML.
 /// A client's own (`own`) acts as the user, and draws what apps say, so it runs only its own scripts: they carry this
@@ -66,17 +80,18 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
         (String::new(), "<script>".into(), body.to_string())
     };
     let ui = body.contains(UI);
+    let (ui_css, ui_js, ui_imports, bridge) = (ui_css(), ui_js(), ui_imports(), bridge());
     let tag = &script[..script.len() - 1];
     let head = if linked {
-        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{tag} src=\"{}\"></script>", named(UI_CSS.0, UI_CSS.1), named(BRIDGE.0, BRIDGE.1))
+        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{tag} src=\"{}\"></script>", named("ui/ui.css", &ui_css), named("bridge.js", &bridge))
     } else {
-        format!("<style>{}</style>{script}window.__one={context};{}</script>", UI_CSS.1, BRIDGE.1)
+        format!("<style>{ui_css}</style>{script}window.__one={context};{bridge}</script>")
     };
     // The import map before the screen's own modules, and ui.js, which runs before them, as they're modules.
     let head = match (ui, linked) {
         (false, _) => head,
-        (true, true) => format!("{head}{tag} type=\"importmap\">{UI_IMPORTS}</script>{tag} src=\"{}\"></script>", named(UI_JS.0, UI_JS.1)),
-        (true, false) => format!("{head}{tag} type=\"importmap\">{UI_IMPORTS}</script>{script}{}</script>", UI_JS.1),
+        (true, true) => format!("{head}{tag} type=\"importmap\">{ui_imports}</script>{tag} src=\"{}\"></script>", named("ui/ui.js", &ui_js)),
+        (true, false) => format!("{head}{tag} type=\"importmap\">{ui_imports}</script>{script}{ui_js}</script>"),
     };
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">{policy}<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\
@@ -101,29 +116,29 @@ pub fn tag(page: &str) -> String {
 /// The clients' own screens, by name, the same on every client: the user's pages, a page's Accounts, a request for a
 /// Vault item, Settings' (`settings/`), and Developer's panel (`devtools`). They act through the bridge's `one.api` as the user looking, which a
 /// client answers only for these.
-const CLIENT_SCREENS: &[(&str, &str)] = &[
+const CLIENT_SCREENS: &[(&str, &str, &str)] = &[
     // Written in React (home/<name>.jsx), built by @one/ui's build into home/dist/.
-    ("pages", include_str!("screen/home/dist/pages.html")),
-    ("accounts", include_str!("screen/home/dist/accounts.html")),
-    ("panel", include_str!("screen/home/dist/panel.html")),
-    ("request", include_str!("screen/settings/dist/request.html")),
-    ("appearance", include_str!("screen/settings/dist/appearance.html")),
+    ("pages", "src/screen/home/dist/pages.html", include_str!("screen/home/dist/pages.html")),
+    ("accounts", "src/screen/home/dist/accounts.html", include_str!("screen/home/dist/accounts.html")),
+    ("panel", "src/screen/home/dist/panel.html", include_str!("screen/home/dist/panel.html")),
+    ("request", "src/screen/settings/dist/request.html", include_str!("screen/settings/dist/request.html")),
+    ("appearance", "src/screen/settings/dist/appearance.html", include_str!("screen/settings/dist/appearance.html")),
     // Written in React (settings/<name>.jsx), built by @one/ui's build into settings/dist/.
-    ("vault", include_str!("screen/settings/dist/vault.html")),
-    ("requests", include_str!("screen/settings/dist/requests.html")),
-    ("groups", include_str!("screen/settings/dist/groups.html")),
-    ("users", include_str!("screen/settings/dist/users.html")),
-    ("backups", include_str!("screen/settings/dist/backups.html")),
-    ("labs", include_str!("screen/settings/dist/labs.html")),
-    ("devices", include_str!("screen/settings/dist/devices.html")),
-    ("connect-ai", include_str!("screen/settings/dist/connect-ai.html")),
-    ("developer", include_str!("screen/settings/dist/developer.html")),
-    ("devtools", include_str!("screen/settings/dist/devtools.html")),
+    ("vault", "src/screen/settings/dist/vault.html", include_str!("screen/settings/dist/vault.html")),
+    ("requests", "src/screen/settings/dist/requests.html", include_str!("screen/settings/dist/requests.html")),
+    ("groups", "src/screen/settings/dist/groups.html", include_str!("screen/settings/dist/groups.html")),
+    ("users", "src/screen/settings/dist/users.html", include_str!("screen/settings/dist/users.html")),
+    ("backups", "src/screen/settings/dist/backups.html", include_str!("screen/settings/dist/backups.html")),
+    ("labs", "src/screen/settings/dist/labs.html", include_str!("screen/settings/dist/labs.html")),
+    ("devices", "src/screen/settings/dist/devices.html", include_str!("screen/settings/dist/devices.html")),
+    ("connect-ai", "src/screen/settings/dist/connect-ai.html", include_str!("screen/settings/dist/connect-ai.html")),
+    ("developer", "src/screen/settings/dist/developer.html", include_str!("screen/settings/dist/developer.html")),
+    ("devtools", "src/screen/settings/dist/devtools.html", include_str!("screen/settings/dist/devtools.html")),
 ];
 
 /// A client's own screen's HTML, or none for a name that's none of them, which a page shows as not there (`MISSING`).
-pub fn client_screen(name: &str) -> &'static str {
-    CLIENT_SCREENS.iter().find(|(n, _)| *n == name).map_or("", |(_, html)| html)
+pub fn client_screen(name: &str) -> Cow<'static, str> {
+    CLIENT_SCREENS.iter().find(|(n, ..)| *n == name).map_or(Cow::Borrowed(""), |(_, path, html)| ui_folder::text(path, html))
 }
 
 fn client_context(name: &str, params: &serde_json::Value) -> serde_json::Value {
@@ -131,7 +146,7 @@ fn client_context(name: &str, params: &serde_json::Value) -> serde_json::Value {
 }
 
 pub fn client_screens() -> impl Iterator<Item = &'static str> {
-    CLIENT_SCREENS.iter().map(|(name, _)| *name).chain(["missing"])
+    CLIENT_SCREENS.iter().map(|(name, ..)| *name).chain(["missing"])
 }
 
 /// What the web client fills in a template: its page's own nonce, and its params' JSON.
@@ -141,7 +156,7 @@ pub const TEMPLATE_PARAMS: &str = "\"__params__\"";
 /// A client's own screen's page for the web client, which its address serves as `screens/<name>.html` (src/cloudflare/
 /// services.rs), with `TEMPLATE_NONCE` and `TEMPLATE_PARAMS` for the web client to fill in, and linking the bridge and `@one/ui`, which it writes in from its own (cloudflare/web/screens.js).
 pub fn client_template(name: &str) -> String {
-    page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), true)
+    page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), &client_screen(name), Some(TEMPLATE_NONCE.into()), true)
 }
 
 #[cfg(test)]
@@ -207,7 +222,7 @@ mod tests {
         let built = std::fs::read_to_string(root.join("dist/sources.txt")).unwrap();
         assert_eq!(data_encoding::HEXLOWER.encode(&hash.finalize()), built.trim(), "src/screen/ui or a Settings screen in React changed since it was built: run `bun run build` in src/screen/ui");
         // ui.js goes into pages as it is, inside a script.
-        assert!(!super::UI_JS.1.to_ascii_lowercase().contains("</script"), "ui.js can't be put in a page's script");
+        assert!(!super::ui_js().to_ascii_lowercase().contains("</script"), "ui.js can't be put in a page's script");
     }
 
     /// A screen that opts in gets React and `@one/ui`'s components, and its import map; a plain one gets only the
@@ -215,7 +230,7 @@ mod tests {
     #[test]
     fn ui_only_for_screens_that_opt_in() {
         let context = serde_json::json!({ "app": "a", "screen": "main" });
-        let theme = |page: &str, linked: bool| if linked { page.contains("/screen/ui/ui.css?v=") } else { page.contains(super::UI_CSS.1) };
+        let theme = |page: &str, linked: bool| if linked { page.contains("/screen/ui/ui.css?v=") } else { page.contains(&*super::ui_css()) };
         for linked in [false, true] {
             let plain = super::page(&context, "<p>hi</p>", false, linked);
             assert!(theme(&plain, linked) && !plain.contains("importmap") && !plain.contains("OneUI"));

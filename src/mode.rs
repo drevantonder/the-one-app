@@ -26,6 +26,8 @@ pub struct Throwaway {
     home: PathBuf,
 }
 
+const UI: &str = "ui-folder";
+
 fn var() -> String {
     crate::config::env("THROWAWAY")
 }
@@ -39,7 +41,7 @@ pub fn here() -> &'static Mode {
 }
 
 impl Mode {
-    /// Where the programs of services are put that a node fetches or `services try` sends: `~/.local/bin`, but a throwaway
+    /// Where the programs of services are put that a node fetches: `~/.local/bin`, but a throwaway
     /// network's in its home, so what it puts there never replaces the real network's program.
     pub fn bin(&self) -> PathBuf {
         match self {
@@ -58,6 +60,17 @@ impl Throwaway {
 
     pub fn home(&self) -> &Path {
         &self.home
+    }
+
+    /// The folder its pages and Workers are read from instead of what its build holds: a checkout's root.
+    pub fn ui(&self) -> Option<PathBuf> {
+        Some(std::fs::read_to_string(self.home.join(UI)).ok()?.trim().into())
+    }
+
+    /// Says which folder that is for the throwaway network in `home`, read by its programs.
+    pub fn set_ui(home: &Path, folder: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(home)?;
+        std::fs::write(home.join(UI), folder.to_string_lossy().as_bytes())
     }
 
     /// Serves what only a throwaway network's node does, from where it serves: its bucket, and stopping it when it's left

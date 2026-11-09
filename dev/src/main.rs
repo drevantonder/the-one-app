@@ -1,4 +1,4 @@
-//! `one-dev`, for whoever builds this repo: its updates and releases (`update`), and a throwaway network of their
+//! `one-dev`, for whoever builds this repo: sending out its builds (`ship`), and a throwaway network of their
 //! checkout's build (`throwaway`). It asks this machine's node as one of its programs, and runs the `one` program Cargo
 //! builds beside it for what that does: a node, the Workers, and any command in a throwaway network.
 
@@ -9,8 +9,8 @@ use one::api::Client;
 use one::config::{CLI, NAME};
 use one::tools;
 
+mod ship;
 mod throwaway;
-mod update;
 
 /// What this program is called, beside the custom build's own: `one-dev` beside `one`.
 pub fn dev() -> String {
@@ -36,7 +36,7 @@ pub fn agent() -> ureq::Agent {
 }
 
 fn commands() -> Vec<one::cli::Command> {
-    vec![update::commands(), throwaway::command()]
+    vec![ship::commands(), throwaway::command()]
 }
 
 fn main() {

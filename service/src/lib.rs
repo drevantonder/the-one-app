@@ -12,7 +12,7 @@ use anyhow::{Result, anyhow, bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// The commit it was built from, as `one-dev update` and the Mac's build give it.
+/// The commit it was built from, as `one-dev build` and the Mac's build give it.
 pub const BUILD: &str = match option_env!("ONE_BUILD") {
     Some(b) => b,
     None => "dev",

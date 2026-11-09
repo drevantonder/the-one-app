@@ -30,12 +30,12 @@ pub fn read(uri: &str) -> Result<Value, Value> {
     // @one/ui, the bridge and what web pages draw for screens, as the web client has them (src/screen/).
     let mut view = include_str!("view.html").to_string();
     for (name, text) in [
-        ("ui.css", include_str!("../screen/ui/dist/ui.css")),
-        ("bridge.js", include_str!("../screen/bridge.js")),
-        ("host.js", include_str!("../screen/host.js")),
-        ("ui.js", include_str!("../screen/ui/dist/ui.js")),
+        ("ui.css", crate::ui_folder::text("src/screen/ui/dist/ui.css", include_str!("../screen/ui/dist/ui.css"))),
+        ("bridge.js", crate::ui_folder::text("src/screen/bridge.js", include_str!("../screen/bridge.js"))),
+        ("host.js", crate::ui_folder::text("src/screen/host.js", include_str!("../screen/host.js"))),
+        ("ui.js", crate::ui_folder::text("src/screen/ui/dist/ui.js", include_str!("../screen/ui/dist/ui.js"))),
     ] {
-        view = view.replacen(&format!("/*{name}*/"), text, 1);
+        view = view.replacen(&format!("/*{name}*/"), &text, 1);
     }
     // A screen's `one.copy` writes to the clipboard, which the chat's frame lets it only if asked.
     Ok(json!({ "contents": [{ "uri": uri, "mimeType": MIME, "text": view, "_meta": { "ui": { "prefersBorder": true, "permissions": { "clipboardWrite": {} } } } }] }))

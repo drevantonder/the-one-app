@@ -31,7 +31,7 @@ fn devices_here(node: &Client, settings: crate::cloudflare::Settings, needed: bo
 }
 
 
-/// Makes this device the Workers' home, or refuses (exit 3, which `one-dev update` passes over) where it isn't.
+/// Makes this device the Workers' home, or refuses (exit 3, which `one-dev deploy workers` passes over) where it isn't.
 fn at_home(settings: &mut crate::cloudflare::Settings) -> Result<()> {
     settings.at_home().map_err(|err| match err.downcast::<crate::cloudflare::NotHome>() {
         Ok(not) => Failed::Refused(not.0).into(),

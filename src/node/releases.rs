@@ -87,7 +87,7 @@ impl Node {
         self.0.latest.lock().unwrap().clone()
     }
 
-    /// Keeps the file a `one-dev update` publishes: unsealed in the bucket's `updates/`, by its hash. → the hash.
+    /// Keeps the file `one-dev publish` publishes: unsealed in the bucket's `updates/`, by its hash. → the hash.
     pub async fn publish_file(&self, path: &Path) -> Result<(String, u64)> {
         use crate::bucket::Bucket;
         let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;

@@ -37,10 +37,8 @@ pub(crate) fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Se
     match rest.first().map(String::as_str) {
         Some("web") => {
             // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it would test the address.
-            anyhow::ensure!(
-                one::web::client_version().is_some(),
-                "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI}-dev throwaway client web, which builds it"
-            );
+            let page = crate::agent().get(&settings.address).call()?.body_mut().read_to_string()?;
+            anyhow::ensure!(!page.contains(r#"<meta name="one-client" content="">"#), "this build has no web client's WebAssembly: {CLI}-dev build --dev builds it");
             web::web(dir, settings, user.as_deref())?
         }
         Some("cli") => return cli::cli(dir, settings, &rest[1..]),

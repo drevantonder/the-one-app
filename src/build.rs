@@ -1,5 +1,5 @@
 //! Building and publishing: the platforms a release is for, a service built for them, the WebAssembly the node carries, and
-//! the one way commands are run. `update`, `deploy`, `services try`, `publish` and `throwaway` all build through here.
+//! the one way commands are run. `build`, `deploy`, `publish` and `throwaway` all build through here.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -27,17 +27,6 @@ pub static PLATFORMS: [Platform; 3] = [
 ];
 
 impl Platform {
-    /// The platform of a device that says `uname -sm` (`Linux x86_64`).
-    pub fn of_uname(uname: &str) -> Option<&'static Platform> {
-        let (os, arch) = uname.split_once(' ')?;
-        let arch = match arch.trim() {
-            "x86_64" | "amd64" => "amd64",
-            "aarch64" | "arm64" => "arm64",
-            _ => return None,
-        };
-        PLATFORMS.iter().find(|p| p.os == os.to_lowercase() && p.arch == arch)
-    }
-
     pub fn is_mac(target: &str) -> bool {
         target.ends_with("-apple-darwin")
     }
@@ -57,10 +46,6 @@ fn is_rust(source: &Path) -> Option<bool> {
     }
 }
 
-pub fn has_service(dir: &Path) -> bool {
-    is_rust(&dir.join("service")).is_some()
-}
-
 /// What install.sh sets as `name` (`repo`, `cli`, `key`): it is shell, which can't read config.toml, so it says it again.
 fn installer_says(name: &str) -> Option<&'static str> {
     include_str!("../install.sh").lines().find_map(|l| l.strip_prefix(&format!("{name}="))).map(|v| v.trim_matches('"'))
@@ -77,12 +62,9 @@ pub struct Built {
     pub missed: Vec<&'static Platform>,
 }
 
-/// The commit of the checkout `dir` is in, as services say what they were built from; `+dirty` after it if `dirty` and it
-/// has changes.
-pub fn built_from(dir: &Path, dirty: bool) -> Result<String> {
-    let commit = git(dir, &["rev-parse", "--short=12", "HEAD"])?;
-    let changed = dirty && !succeeds(Command::new("git").current_dir(dir).args(["diff", "--quiet", "HEAD", "--", "."]));
-    Ok(if changed { format!("{commit}+dirty") } else { commit })
+/// The commit of the checkout `dir` is in, as services say what they were built from.
+pub fn built_from(dir: &Path) -> Result<String> {
+    git(dir, &["rev-parse", "--short=12", "HEAD"])
 }
 
 /// Builds the service of the app in `app` (its `service/`), saying it was built from `built`, at `out`/<target> for each
@@ -308,14 +290,6 @@ mod tests {
             assert!(installer.contains(&format!("arch={arch}")), "install.sh knows the processor {arch}");
         }
     }
-
-    #[test]
-    fn a_device_is_a_platform_by_what_it_says() {
-        assert_eq!(Platform::of_uname("Linux x86_64").unwrap().target, "x86_64-unknown-linux-gnu");
-        assert_eq!(Platform::of_uname("Darwin arm64").unwrap().target, "aarch64-apple-darwin");
-        assert_eq!(Platform::of_uname("Linux aarch64").unwrap().target, "aarch64-unknown-linux-gnu");
-        assert!(Platform::of_uname("Linux riscv64").is_none());
-    }
 }
 
 /// The app in `dir` built into a bundle, as a blob of `node`'s, with its service built here for each platform this
@@ -324,7 +298,7 @@ pub fn built_with_service(node: &crate::api::Client, dir: &Path) -> Result<(Stri
     let mut builds = std::collections::BTreeMap::new();
     let mut service = String::new();
     let out = std::env::temp_dir().join(format!("{CLI}-service-{}", std::process::id()));
-    let built = build_service(dir, &built_from(&dir.join("service"), false).unwrap_or_default(), PLATFORMS.iter(), &out).and_then(|built| {
+    let built = build_service(dir, &built_from(&dir.join("service")).unwrap_or_default(), PLATFORMS.iter(), &out).and_then(|built| {
         if let Some(built) = &built {
             for (platform, program) in &built.made {
                 builds.insert(platform.target.to_string(), node.put_blob(&std::fs::read(program)?)?);

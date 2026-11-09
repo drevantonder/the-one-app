@@ -34,10 +34,10 @@ package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a de
 
 - Linux: `one-dev release` builds it, install.sh puts it on a desktop. Its tray item shows only its menu (Linux's tray items
   show no other), so it has no panel.
-- Mac: `mac/build.sh` (`one-dev update`, `one-dev release`, through `disk.sh`), the same bundle as before: the window, the CLI,
+- Mac: `mac/build.sh` (each Mac's job, through `disk.sh`), the same bundle as before: the window, the CLI,
   the node and its launch agent, services, helpers. The menu bar is AppKit's: real menus (`mac/Sources`, a Swift package
   `build.rs` links in), with no page, which draw widgets with the iPhone's SwiftUI (`iphone/Widget`, symlinked in).
-- iPhone: `iphone/build.sh` for the simulator, the paired iPhone (`one-dev update`) or TestFlight; the Swift in `Sources/` is a
+- iPhone: `iphone/build.sh` for the simulator, the paired iPhone or TestFlight; the Swift in `Sources/` is a
   Tauri plugin of the app's own, `Widget/` the home-screen widget, `Notifications/` the notification extension.
 - Android: `android/build.sh`, Kotlin only where it must be (`android/app/src/main/kotlin/app/client`); only throwaways
   build it, as nothing built the old one. Android gives screens' frames Tauri's `ipc`, so each command carries a token

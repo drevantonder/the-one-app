@@ -1,5 +1,5 @@
-# `one-dev`: for whoever builds The One App from this repo, its own or a custom build: building and sending out updates
-# and releases (src/update.rs), and a throwaway network of their checkout's build (src/throwaway.rs). It never ships: the
+# `one-dev`: for whoever builds The One App from this repo, its own or a custom build: building and sending out
+# its builds (src/ship.rs), and a throwaway network of their checkout's build (src/throwaway.rs). It never ships: the
 # people a network serves, and their agents, have the `one` program (cli/), with nothing in it for building it.
 [package]
 name = "one-dev"

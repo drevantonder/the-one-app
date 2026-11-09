@@ -797,7 +797,7 @@ pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
 /// A Worker's module, built from the sources this release was signed with by the pinned Bun, once per
 /// version of them.
 pub fn module(entry: &str) -> Result<Vec<u8>> {
-    module_from(crate::config::CLOUDFLARE.iter().map(|(p, b)| (p.to_string(), b.to_vec())).collect(), entry)
+    module_from(crate::ui_folder::cloudflare(), entry)
 }
 
 /// The module of what the Workers and the web client share with the Rust (`protocol::javascript`), in `cloudflare/`.

@@ -8,14 +8,14 @@ made_here = "Made here"
 # A custom build that serves one network (a workplace's) gives its address, so its native app never asks where;
 # empty, the user types it.
 address = ""
-# Where `one-dev update` and `one-dev release` get the code, and the installer the releases.
+# Where `one-dev build` and `one-dev release` get the code, and the installer the releases.
 repo = "drevantonder/the-one-app"
 # Nodes and the installer take only releases signed by this key (OpenSSH, Ed25519). Its private half stays with the
-# publisher: `one-dev update` and `one-dev release` run release_signer to get it, and keep it only in memory.
+# publisher: `one-dev publish` and `one-dev release` run release_signer to get it, and keep it only in memory.
 release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"
 release_signer = "op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'"
 # Every folder in apps/ ships built into each release, and a new network has them all, for anyone to add to their own
-# page. These are the ones it also adds to global; each `one-dev update` deploys the release's version of every one a network has.
+# page. These are the ones it also adds to global; each `one-dev deploy apps` deploys the release's version of every one a network has.
 apps = ["repos", "apps"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.

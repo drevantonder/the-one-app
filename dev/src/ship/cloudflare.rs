@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Deploys to Cloudflare, with the build being sent out (`commit`), from the one of this user's Linux devices that is the Workers' home
+/// Deploys to Cloudflare, with the build `commit`, from the one of this user's Linux devices that is the Workers' home
 /// (`Settings::at_home`; another refuses, which says so and is passed over): only there are its secrets
 /// (`cloudflare deploy` in its home's cloudflare/). It waits for each to run that build, so it never
 /// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every network
@@ -72,14 +72,14 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             }
             Err(err) => {
                 failed = true;
-                let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_ADDED) { " (add Shell in the App Store, or run one-dev update on the device with the Cloudflare settings)" } else { "" };
+                let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_ADDED) { " (add Shell in the App Store, or run this on the device with the Cloudflare settings)" } else { "" };
                 println!("  {name}: couldn't deploy to Cloudflare: {err:#}{hint}");
             }
         }
     }
     if !deployed && !failed {
         let away: Vec<&str> = offline.iter().filter_map(|d| d["name"].as_str()).collect();
-        let away = if away.is_empty() { String::new() } else { format!(" ({} offline: run {CLI}-dev update again when it's back)", away.join(", ")) };
+        let away = if away.is_empty() { String::new() } else { format!(" ({} offline: deploy again when it's back)", away.join(", ")) };
         println!("  no device deployed to Cloudflare: none of the online ones has the settings{away}");
     }
     failed || !deployed

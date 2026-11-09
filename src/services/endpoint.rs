@@ -922,7 +922,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
             if service.services().has(name) && before.exists() {
                 let _ = std::fs::remove_dir_all(&before);
             }
-            // Stopped for good, or for its new build, put in its place (`<cli> services try`).
+            // Stopped for good, or for its new build, put in its place by hand (the try-a-service skill).
             let renewed = built() != started;
             if stop() || renewed {
                 running.end();

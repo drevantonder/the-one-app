@@ -15,7 +15,7 @@ pub const SHELL: u32 = 4;
 /// Every file of the web client, by its path, its page (`index.html`) naming the rest by their content.
 pub fn files() -> Vec<(String, Vec<u8>)> {
     let mut files: Vec<(String, Vec<u8>)> =
-        crate::config::CLOUDFLARE.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
+        crate::ui_folder::cloudflare().into_iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes))).collect();
     // What the client says that Rust says too, imported by the formats it holds keys in (`protocol`).
     files.push(("shared/protocol.js".into(), crate::protocol::javascript().into_bytes()));
     // The page says whose it is before anyone signs in: the custom build's name.

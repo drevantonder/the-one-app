@@ -1,6 +1,6 @@
 //! A CLI that's only a device of the throwaway network's user, as on a computer where no node runs.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use one::config::CLI;
@@ -10,17 +10,10 @@ use super::super::devices::{approve_code, is_code};
 /// `command`, run by this build's CLI as on a computer where no node runs: a client device of the throwaway network's
 /// user, with a home of its own beside it (`cli/`), which asks their nodes over iroh as every client does, in run
 /// priority's order (`client_device`). The first time it signs in with no passkey, and the throwaway network's machine
-/// approves the code it shows. `--build <program>` runs another build of the CLI (an older release's, say) as that
-/// device, with a home of its own (`cli-<its name>/`).
+/// approves the code it shows.
 pub(crate) fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[String]) -> Result<()> {
-    let (program, command) = match command {
-        [flag, program, rest @ ..] if flag == "--build" => (PathBuf::from(program).canonicalize().with_context(|| format!("no program {program}"))?, rest),
-        _ => (crate::program()?, command),
-    };
-    let home = match program == crate::program()? {
-        true => dir.join("cli"),
-        false => dir.join(format!("cli-{}", program.file_name().unwrap_or_default().to_string_lossy())),
-    };
+    let program = super::super::network::program(dir)?;
+    let home = dir.join("cli");
     std::fs::create_dir_all(&home)?;
     // No node is taken as here, nor anything of this machine's in its home, git's own config included (sign-in tells it where repos are).
     let as_device = |args: &[String]| {

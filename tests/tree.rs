@@ -1,6 +1,6 @@
 //! What no commit should have.
 
-/// A merge's markers, left in a tracked file, which `one-dev update` finds only when it ships that file.
+/// A merge's markers, left in a tracked file, which `one-dev build` finds only when it ships that file.
 #[test]
 fn no_file_has_a_conflict_marker_left() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
@@ -17,7 +17,7 @@ fn no_file_has_a_conflict_marker_left() {
     assert!(left.is_empty(), "a merge's conflict markers are left in: {}", left.join(", "));
 }
 
-/// The Cloudflare node and the web client build for wasm, without the node feature, which only `one-dev update` and
+/// The Cloudflare node and the web client build for wasm, without the node feature, which only `one-dev build` and
 /// `one-dev throwaway` build otherwise: a `#[cfg]` that hides what they use shows here, not when an update fails.
 #[test]
 fn what_runs_in_wasm_builds() {

@@ -83,7 +83,7 @@ fn main() {
         println!("cargo:rerun-if-changed={}", dir.display());
         let mut files = Vec::new();
         collect(dir, dir, &mut files);
-        // Its service's source is built apart (`one-dev update`), and its tests run with ours: neither ships in its bundle.
+        // Its service's source is built apart (`one-dev publish services`), and its tests run with ours: neither ships in its bundle.
         files.retain(|(rel, _)| !rel.starts_with("service/") && !rel.starts_with("tests/"));
         files.sort();
         let name = dir.file_name().unwrap().to_string_lossy().to_string();
@@ -142,6 +142,9 @@ fn main() {
     println!("cargo:rerun-if-changed={}", icon.display());
     files.push(("web/icon.png".into(), std::fs::canonicalize(&icon).unwrap_or_else(|e| panic!("{}: {e}", icon.display())).to_string_lossy().into()));
     files.sort();
+    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let sources: Vec<String> = files.iter().filter_map(|(rel, abs)| Some(format!("({rel:?}, {:?})", abs.strip_prefix(&root)?.trim_start_matches('/')))).collect();
+    let out = format!("{out}pub const CLOUDFLARE_SOURCES: &[(&str, &str)] = &[{}];\n", sources.join(", "));
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     // The Cloudflare node's WebAssembly (cloudflare/node/) and the client's, for browsers (client/src/wasm.rs), which `update`

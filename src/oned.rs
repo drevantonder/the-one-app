@@ -48,7 +48,7 @@ pub fn program(name: &str) -> PathBuf {
     carried(name).unwrap_or_else(|| fetched(name))
 }
 
-/// Where oned puts a service's program it fetched, and `<cli> services try` puts yours (`Mode::bin`).
+/// Where oned puts a service's program it fetched (`Mode::bin`).
 pub fn fetched(name: &str) -> PathBuf {
     crate::mode::here().bin().join(format!("{CLI}-{name}"))
 }

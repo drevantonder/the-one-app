@@ -3,7 +3,7 @@
 # address (src/latest.rs, whose format is the one thing that must never break) and brings this Mac up to it, by the app
 # one Mac published, or, if none has, by building it here. It lives outside the app, so nothing it installs can replace it
 # while it runs, and needs nothing of the network but a GET: it's what gets a Mac out of being too old to speak the rest.
-# Installed by the Mac's oned at its start, or once by `@CLI@-dev update mac-job | ssh <mac> sh` for a Mac too old to have it (src/latest.rs).
+# Installed by the Mac's oned at its start, or once by `@CLI@-dev mac-job | ssh <mac> sh` for a Mac too old to have it (src/latest.rs).
 # Bad or missing record, or a failed download or build: it stays on what it has, and says why in `why`.
 [ -n "${BASH_VERSION:-}" ] || exec /bin/bash "$0" "$@"
 set -u

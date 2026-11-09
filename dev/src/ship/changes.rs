@@ -1,4 +1,4 @@
-//! What an update sends out: the parts a change since the last update is made of (`Parts::since`).
+//! What a change has to send out: the parts it's made of (`Parts::since`).
 
 use super::*;
 
@@ -17,7 +17,7 @@ pub(super) struct Parts {
     pub(super) services: Vec<String>,
     /// The `service` crate, which every service in Rust is built on, so each is published again.
     pub(super) service: bool,
-    /// This program (dev/), which no device takes: only the one running the update is built again.
+    /// This program (dev/), which no device takes.
     pub(super) dev: bool,
 }
 
@@ -80,6 +80,7 @@ impl Parts {
                 // What the Mac's services in Swift are built on, which the Mac app builds (service/mac-helpers.sh).
                 Some("service") if file.starts_with("service/swift/") || file == "service/mac-helpers.sh" => parts.mac = true,
                 Some("service") => parts.service = true,
+                Some("dev") if file.starts_with("dev/skills/") => {}
                 Some("dev") => parts.dev = true,
                 // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
@@ -126,6 +127,6 @@ mod tests {
         assert_eq!(of(&["client/native/windows/build.sh"]), Parts::default());
         let client = of(&["client/src/lib.rs"]);
         assert!(client.node && client.mac, "the client's WebAssembly is in the node");
-        assert_eq!(of(&["dev/src/update.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
+        assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
     }
 }

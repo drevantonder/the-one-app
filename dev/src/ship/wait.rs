@@ -1,4 +1,4 @@
-//! Waiting until devices run a commit (or a later build) and their services answer: `status --until`, and the end of an update.
+//! Waiting until devices run a commit (or a later build) and their services answer: `status --until`.
 
 use super::*;
 
