@@ -147,7 +147,7 @@ function frameFor(r, into, { sheet } = {}) {
   frames.push(f);
   // A spinner only for a wait that's long enough to notice.
   into.innerHTML = "";
-  setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status"><span class="spinner"></span></div>`), 400);
+  setTimeout(() => f.loaded || f.shown || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status"><span class="spinner"></span></div>`), 400);
   // A screen that's nothing yet after 5 seconds: the spinner gives way to one problem, which goes as the screen loads.
   setTimeout(() => {
     if (f.loaded || f.page || f.still || !into.isConnected) return;
@@ -426,6 +426,7 @@ addEventListener("message", async (e) => {
   // The panel's window, and a sheet, fit their screen.
   if (typeof e.data?.oneHeight === "number") return void (f.sheet ? f.sheet.fit(e.data.oneHeight) : platform.fit(e.data.oneHeight));
   if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill, f.frame.clientWidth));
+  if (e.data?.oneShown) return void ((f.shown = true), $(".screen-status", f.into)?.remove());
   if (e.data?.oneDrawn) return void screenDrew(f);
   const { one: m, id } = e.data || {};
   if (!m || typeof m !== "object") return;

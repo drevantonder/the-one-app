@@ -40,6 +40,7 @@
     };
     addEventListener("load", () => {
       loaded = true;
+      window.parent.postMessage({ oneShown: true }, "*");
       settled();
       if (window.ResizeObserver && document.body) new ResizeObserver(measure).observe(document.body);
       new MutationObserver(later).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
