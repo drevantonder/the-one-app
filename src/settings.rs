@@ -345,8 +345,6 @@ mod body {
         pub code: String,
         #[serde(default)]
         pub confirm: bool,
-        /// A file with the network's recovery key, on a machine with a node, which lets in someone who lost every device.
-        pub recovery_key: Option<String>,
     }
 
     /// The passkey's PRF output (base64url), which only the page it signed in on has, and its credential's id.
@@ -478,7 +476,6 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
         }
         Route::Approve => {
             let body: body::Approve = read(path, raw)?;
-            ensure!(body.recovery_key.is_none(), "Letting someone back in with the recovery key is done on a computer with the key's file, by its command line.");
             let mut approved = approve_code(m, &body.code, body.confirm).await?;
             approved["said"] = json!(said_approved(&approved));
             approved

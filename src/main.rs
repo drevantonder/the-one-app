@@ -21,6 +21,8 @@ fn commands() -> Vec<Command> {
     vec![
         network::commands(),
         one::groups::cli::commands(),
+        one::backups::cli::commands(),
+        one::devices::cli::commands(),
         apps::cli::commands(),
         vault::cli::commands(),
         one::cloudflare::cli::commands(),

@@ -11,6 +11,7 @@ mod scopes;
 mod words;
 
 pub use check::{check, nearest};
+pub use words::said;
 pub use files::{FILE_LIMIT, as_file, mime, read_file};
 pub use help::{forms, list, optional, usage};
 pub use mcp::{BUDGET, MCP_FILE_LIMIT, mcp_content, mcp_files, mcp_schema, mcp_tool, within_budget};
@@ -85,9 +86,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
     let places = places(o);
     let mut input = input(&schema, &places, words, flags, &files).map_err(typed)?;
     let missing = missing(&schema, &input);
-    // An input given as - reads stdin itself (a key from a file, say), so it's left for it.
-    let dash = input.values().any(|v| v == "-");
-    if !dash && (!missing.is_empty() || asked) {
+    if !missing.is_empty() || asked {
         from_stdin(&schema, &missing, &mut input).map_err(typed)?;
         let missing = self::missing(&schema, &input);
         if !missing.is_empty() {

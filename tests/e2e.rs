@@ -81,6 +81,31 @@ async fn add_notes(a: &Node) {
     a.add(&me, "notes", &one::database::scopes::Scope::Global, true, None).await.unwrap();
 }
 
+/// The command that opens a backup, on a machine with only the disk and the recovery key: nothing running or joined
+/// here, and whatever it asked a node at would refuse the connection. The key comes from a file or stdin, and is never
+/// printed.
+fn the_command_checks_it_with_no_node(backup: &std::path::Path, recovery: &str) {
+    use std::io::Write;
+    let nothing = temp("no-node");
+    let file = nothing.join("recovery.key");
+    std::fs::write(&file, format!("{recovery}\n")).unwrap();
+    for (key, stdin) in [(file.to_str().unwrap(), None), ("-", Some(recovery))] {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_one"));
+        command.args(["backups", "check", "--json", "--folder", backup.to_str().unwrap(), "--recovery-key", key]);
+        command.env(one::config::env("HOME"), &nothing).env(one::config::env("ADDR"), "127.0.0.1:1").env("HOME", &nothing);
+        let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+        let mut sent = child.stdin.take().unwrap();
+        sent.write_all(stdin.unwrap_or("").as_bytes()).unwrap();
+        drop(sent);
+        let done = child.wait_with_output().unwrap();
+        let (out, err) = (String::from_utf8_lossy(&done.stdout), String::from_utf8_lossy(&done.stderr));
+        assert!(done.status.success(), "the check needs only the disk and the key: {err}");
+        assert!(!out.contains(recovery) && !err.contains(recovery), "the key is never printed");
+        let said: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!((&said[0]["network"], &said[0]["problems"]), (&json!("Home"), &json!([])), "{said}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alone() {
     let a = start("backup-a").await;
@@ -125,6 +150,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let mine = format!("user:{}", me.user);
     let items = backed_up(&dir, &network, &one::keys::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
     assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
+    the_command_checks_it_with_no_node(&dir, &recovery);
     let restored = one::backups::restore(&place, &network, "global", &keys["global"]).unwrap();
     assert_eq!(backed_up_posts(&dir, &network, &one::keys::unhex(&recovery).unwrap()).await, ["before the backup"]);
     let steps_then = restored.snapshot.databases["notes/main"].0;
@@ -487,6 +513,10 @@ async fn a_client_devices_mcp_runs_as_its_user() {
     // A node signs who can do what only as its own user's device, for its own programs: a device answers that itself.
     let (_, devices) = mcp(json!({ "jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": { "name": "devices_remove", "arguments": { "device": "mac", "confirm": true } } })).await;
     assert!(devices["result"]["isError"] == true, "{devices}");
+    // The recovery key is used only by this machine's own programs: no device hands it to a node.
+    let asked = from.clone();
+    let recovered = tokio::task::spawn_blocking(move || asked.send("POST", "/v1/devices/approve-with-recovery", &[("content-type", "application/json")], Some(json!({ "code": "ABCDEFGH", "recovery": "00".repeat(32) }).to_string().into_bytes()), None).unwrap().status).await.unwrap();
+    assert_eq!(recovered, 403);
     let (status, needs) = mcp(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "notes_post", "arguments": { "text": "from Sam" } } })).await;
     assert_eq!(status, 428, "{needs}");
     assert!(needs["need"].as_array().is_some_and(|n| !n.is_empty()), "{needs}");

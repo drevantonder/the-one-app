@@ -4,6 +4,7 @@
 
 use serde_json::json;
 
+use crate::config::CLI;
 use crate::core_tools::{Feature, Tool, serves};
 
 const GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the user the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; Once a week each place's newest backup is restored into a throwaway copy and checked (who's who, databases, blobs); a failed check shows on Backups like a failed backup. backups_check runs that check now and says what came back.";
@@ -73,12 +74,9 @@ fn tools() -> Vec<Tool> {
         Tool::route(
             json!({
                 "name": "check", "title": "Restore a backup to check it", "reads": true,
-                "description": "Restore each place's newest backup into a throwaway copy now, as the weekly check does: who's who from its steps, every database to its newest step as the network has it, and every blob's hash. Says what came back, and what's wrong. With folder, any backup on a disk instead, opened with the recovery key alone, with or without a network here.",
-                "input": { "type": "object", "properties": {
-                    "folder": { "type": "string", "description": "a backup's folder on this device, by its absolute path" },
-                    "recovery_key": { "type": "string", "description": "with folder: the absolute path of a file on this machine holding the recovery key; never the key itself" },
-                } },
-                "output": { "type": "array", "items": { "type": "object" }, "description": "each place's report, or with folder, each network the backup holds" },
+                "description": format!("Restore each place's newest backup into a throwaway copy now, as the weekly check does: who's who from its steps, every database to its newest step as the network has it, and every blob's hash. Says what came back, and what's wrong. Any backup on a disk is opened with the recovery key alone, with or without a network here, by the command {CLI} backups check --folder <path> --recovery-key <file>."),
+                "input": { "type": "object", "properties": {} },
+                "output": { "type": "array", "items": { "type": "object" }, "description": "each place's report" },
             }),
             serves!(serve::check),
         ),
@@ -145,35 +143,8 @@ mod serve {
         Ok(json!({ "said": format!("No longer backing up to {}. What's there stays.", p["title"].as_str().unwrap_or(place)) }))
     }
 
-    /// Restores each place's newest backup and checks it; or, with `folder`, a backup on a disk of this machine, opened
-    /// with the recovery key in the file `recovery_key` names, which only this machine's own programs may ask.
-    pub async fn check(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
+    pub async fn check(node: Node, me: Caller, _: Map<String, Value>) -> Result<Value> {
         node.only_admins_back_up(&me)?;
-        let given = |k: &str| input.get(k).and_then(Value::as_str);
-        let Some(folder) = given("folder") else { return node.check_backups().await };
-        ensure!(node.this_machine(&me), "a folder is on a machine: check it from that machine's own command line");
-        ensure!(std::path::Path::new(folder).is_absolute(), "give folder as an absolute path: {folder} isn't one");
-        let key = given("recovery_key").context("give recovery_key: the file the recovery key is in")?;
-        let key = crate::keys::recovery_key_in(key)?;
-        tokio::task::spawn_blocking({
-            let folder = folder.to_string();
-            move || check_folder(&folder, &key)
-        })
-        .await?
-    }
-
-    /// Checks a backup on a disk with the recovery key alone, without a network: every network it holds.
-    fn check_folder(folder: &str, recovery_key: &str) -> Result<Value> {
-        let secret = crate::keys::unhex(recovery_key).context("a recovery key is 64 hex characters")?;
-        let place = crate::bucket::Place::Folder(folder.into());
-        let mut out = Vec::new();
-        for network in crate::backups::networks(&place)? {
-            let keys = crate::backups::open_keys(&place, &network, &secret)?;
-            let mut r = crate::backups::check(&crate::backups::Check { place: &place, network: &network, keys: &keys, root: None })?.0;
-            r["place"] = json!(folder);
-            out.push(r);
-        }
-        ensure!(!out.is_empty(), "no backup in {folder}");
-        Ok(json!(out))
+        node.check_backups().await
     }
 }

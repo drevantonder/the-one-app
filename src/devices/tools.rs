@@ -4,11 +4,11 @@
 
 use serde_json::json;
 
-use crate::config::YOURS;
+use crate::config::{CLI, NAME, YOURS};
 use crate::core_tools::{Feature, Tool, serves};
 
 pub fn feature() -> Feature {
-    let guide = format!("A new device signs in, then shows a code of 8 letters and digits. devices_approve with that code, run on one of the user's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, on the device that made the link. devices_remove takes a device out, or a user with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in with devices_approve's recovery_key: a file holding {YOURS}'s recovery key, never the key in the chat. An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys alone, and devices_stop_schedules stops them.");
+    let guide = format!("A new device signs in, then shows a code of 8 letters and digits. devices_approve with that code, run on one of the user's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, on the device that made the link. devices_remove takes a device out, or a user with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in on a computer running {NAME}, by the command {CLI} devices approve <code> --recovery-key <file>, with a file holding {YOURS}'s recovery key, never the key in the chat. An app's schedules run only on a device chosen for them: devices_run_schedules picks one, which then holds that app's keys alone, and devices_stop_schedules stops them.");
     Feature {
         name: "devices",
         title: "Devices",
@@ -40,11 +40,10 @@ fn tools() -> Vec<Tool> {
         Tool::route(
             json!({
                 "name": "approve", "title": "Approve a new device",
-                "description": "Approve the new device showing this code. Without confirm, says whose device it is; with confirm: true, lets it in. With recovery_key, lets back in someone who lost all their devices.",
+                "description": "Approve the new device showing this code. Without confirm, says whose device it is; with confirm: true, lets it in.",
                 "input": { "type": "object", "required": ["code"], "properties": {
                     "code": { "type": "string", "description": "the 8 letters and digits the new device shows" },
                     "confirm": { "type": "boolean", "description": "true once the user has said yes to this very device" },
-                    "recovery_key": { "type": "string", "description": format!("the absolute path of a file on this machine holding {YOURS}'s recovery key; never the key itself") },
                 } },
                 "output": said("whose device it is, or that it's in"),
             }),
@@ -108,7 +107,6 @@ mod serve {
     use anyhow::Result;
     use serde_json::{Map, Value};
 
-    use crate::core_tools::text;
     use crate::node::{Caller, Node};
 
     /// This machine's node answers as its own device (`settings`), signing what changes who can do what.
@@ -120,14 +118,9 @@ mod serve {
         as_mine(&node, "/v1/devices/requests", &input).await
     }
 
-    /// Lets in the device showing `code`, once the user agreed; or with the recovery key in a file here, someone who
-    /// lost every device, which only this machine's node does, and never one asked over the network.
+    /// Lets in the device showing `code`, once the user agreed.
     pub async fn approve(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
-        let Some(file) = input.get("recovery_key").and_then(Value::as_str) else { return as_mine(&node, "/v1/devices/approve", &input).await };
-        let secret = crate::keys::unhex(&crate::keys::recovery_key_in(file)?)?;
-        let mut approved = node.approve_with_recovery(text(&input, "code")?, &ed25519_dalek::SigningKey::from_bytes(&secret), input.get("confirm") == Some(&Value::Bool(true))).await?;
-        approved["said"] = Value::String(crate::settings::said_approved(&approved));
-        Ok(approved)
+        as_mine(&node, "/v1/devices/approve", &input).await
     }
 
     pub async fn remove(node: Node, _: Caller, input: Map<String, Value>) -> Result<Value> {
