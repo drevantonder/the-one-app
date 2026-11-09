@@ -488,7 +488,7 @@ function Devices() {
 
   return (
     <div className="@container flex flex-col gap-6">
-      <LargeTitle action={<Button variant={data?.waiting.length ? "outline" : "default"} disabled={!data} onClick={() => show({ add: true })}>Add Device</Button>}>Devices</LargeTitle>
+      <div className="max-w-5xl"><LargeTitle action={<Button variant={data?.waiting.length ? "outline" : "default"} disabled={!data} onClick={() => show({ add: true })}>Add Device</Button>}>Devices</LargeTitle></div>
       {body}
       {data && dialog.for?.rename && <Rename key={dialog.n} card={dialog.for.rename} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.remove && <RemoveDevice key={dialog.n} {...dialog.for.remove} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}

@@ -1,7 +1,7 @@
 // A commit: who made it and what it says, the files it changed, and each file's diff, loaded as it comes near the
 // screen. It's the Commit screen, and what History shows beside its list where there's room.
 import { useEffect, useRef, useState } from "react"
-import { Avatar, Badge, Button, Card, DiffView, Empty, Icon, List, ListRow, Problem, Spinner, Tabs, TabsList, TabsTrigger, Swap, useCall, useWidth } from "@one/ui"
+import { Avatar, Badge, Button, Card, DiffView, Empty, Grid, GridRow, Icon, Problem, Spinner, Tabs, TabsList, TabsTrigger, Swap, useCall, useWidth } from "@one/ui"
 import { Counts, SmallCopy } from "./parts.jsx"
 import { ago, go, plural, said, short } from "./use.jsx"
 
@@ -73,6 +73,7 @@ function Commit({ d, repo, sha, files }) {
   const split = asked ?? width >= 720
   const [more, setMore] = useState({})
   const [asking, setAsking] = useState({})
+  const [whole, setWhole] = useState(false)
 
   const load = async (k, loud) => {
     const patch = (p) => setMore((m) => ({ ...m, [k]: { ...m[k], ...p } }))
@@ -95,7 +96,12 @@ function Commit({ d, repo, sha, files }) {
     <div ref={room} className="flex min-w-0 flex-col gap-4">
       <div className="flex max-w-3xl flex-col gap-3">
         <h1 className="text-xl font-semibold break-words">{d.subject}</h1>
-        {d.body && <pre className="font-sans text-sm break-words whitespace-pre-wrap text-muted-foreground">{d.body}</pre>}
+        {d.body && (
+          <div className="flex flex-col items-start gap-1">
+            <pre className={`font-sans text-sm break-words whitespace-pre-wrap text-muted-foreground ${whole ? "" : "line-clamp-3"}`}>{d.body}</pre>
+            {!whole && d.body.split("\n").length > 3 && <Button variant="ghost" size="xs" className="-mx-2 text-muted-foreground" onClick={() => setWhole(true)}>Show All</Button>}
+          </div>
+        )}
         <div className="flex items-center gap-2 text-sm">
           <Avatar name={d.author} size={20} />
           <span><strong className="font-semibold">{d.author}</strong> committed {ago(d.time)}</span>
@@ -127,9 +133,9 @@ function Commit({ d, repo, sha, files }) {
       ) : (
         <>
           {files && (
-            <List className="max-w-3xl">
+            <Grid min="24rem" max={4} gap="0">
               {d.files.map((f, k) => (
-                <ListRow
+                <GridRow
                   key={k}
                   leading={<Icon name={f.status === "added" ? "file" : f.status === "deleted" ? "x" : "git-diff"} className="size-4 text-muted-foreground" />}
                   title={<span className="font-mono text-xs">{f.path}</span>}
@@ -137,7 +143,7 @@ function Commit({ d, repo, sha, files }) {
                   onClick={() => scroll(k)}
                 />
               ))}
-            </List>
+            </Grid>
           )}
           {shown.map((f, k) => <DiffFile key={k} d={d} f={f} k={k} split={split} load={(loud) => load(k, loud)} loading={!!asking[k]} />)}
         </>

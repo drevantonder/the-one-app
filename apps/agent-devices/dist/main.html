@@ -126,7 +126,8 @@ function w() {
 		asked: {},
 		retried: {},
 		listed: "",
-		busy: !1
+		busy: !1,
+		failed: 0
 	}), y = (e) => {
 		let t = [...document.querySelectorAll("[data-k]")].find((t) => t.dataset.k === e);
 		if (!t) return !1;
@@ -155,9 +156,9 @@ function w() {
 		let e = v.current;
 		try {
 			let t = await one.call("_list", { have: e.listed });
-			t.same || (e.devices = (t.devices || []).filter((e) => !e.spare || e.borrowed), e.listed = t.hash || "", i(e.devices)), d(null);
+			t.same || (e.devices = (t.devices || []).filter((e) => !e.spare || e.borrowed), e.listed = t.hash || "", i(e.devices)), e.failed = 0, d(null);
 		} catch (t) {
-			e.listed = "", d(one.plain(t));
+			e.listed = "", ++e.failed >= 3 && d(one.plain(t));
 			return;
 		}
 		requestAnimationFrame(b);

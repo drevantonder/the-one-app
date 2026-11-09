@@ -1,8 +1,7 @@
-// AI Usage: a card for each provider, with each of its accounts' windows metered. The cards fill the room: more columns
-// where there's more of it.
+// AI Usage: each provider and its accounts' windows, metered. The accounts fill the room: more columns where there's more of it.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Card, Empty, Grid, Hint, LargeTitle, Problem, Progress, Skeleton } from "@one/ui"
+import { AppIcon, Empty, Grid, Hint, LargeTitle, Problem, Progress, Skeleton } from "@one/ui"
 
 function Meter({ label, w }) {
   if (!w || w.used == null) return null
@@ -24,7 +23,7 @@ function Account({ p, several }) {
   const [team, email] = (p.account || "").split(" · ")
   const state = p.active && several ? "In use" : p.disabled ? "Not used" : ""
   return (
-    <div className="flex flex-col gap-2 border-t pt-4 first:border-t-0 first:pt-0">
+    <div className="@container flex min-w-0 flex-col gap-2">
       {p.account && (
         <div>
           <div className="flex items-baseline justify-between gap-2">
@@ -55,7 +54,7 @@ function Provider({ reads, mark }) {
   const sub = [p.plan, p.account ? "" : on(p), p.updatedAgo ? `updated ${p.updatedAgo}` : ""].filter(Boolean).join(" · ")
   const drawn = mark && /^data:image\/svg\+xml,/.test(mark.image)
   return (
-    <Card className="@container min-w-0 gap-4 p-4">
+    <section className="flex min-w-0 flex-col gap-4">
       <div className="flex items-center gap-3">
         {drawn && <AppIcon app={{ name: p.id, title: p.title, image: mark.image, image_kind: mark.kind }} size={32} />}
         <div className="min-w-0 flex-1">
@@ -63,9 +62,11 @@ function Provider({ reads, mark }) {
           {sub && <Hint>{sub}</Hint>}
         </div>
       </div>
-      {reads.map((r) => <Account key={r.account || r.id} p={r} several={reads.length > 1} />)}
+      <Grid min="20rem" max={4} gap="1.5rem" className="items-start">
+        {reads.map((r) => <Account key={r.account || r.id} p={r} several={reads.length > 1} />)}
+      </Grid>
       {stale.length > 0 && <Problem warn title={`Can’t read ${p.title} now`} text={stale.join("; ")} />}
-    </Card>
+    </section>
   )
 }
 
@@ -102,9 +103,9 @@ function Body() {
   if (!data.providers || !data.providers.length) return <Empty>No AI sign-ins on your devices.</Empty>
   const ids = [...new Set(data.providers.map((p) => p.id))]
   return (
-    <Grid min="22rem" max={4} className="items-start">
+    <div className="flex flex-col gap-8">
       {ids.map((id) => <Provider key={id} reads={data.providers.filter((p) => p.id === id)} mark={(data.marks || {})[id]} />)}
-    </Grid>
+    </div>
   )
 }
 

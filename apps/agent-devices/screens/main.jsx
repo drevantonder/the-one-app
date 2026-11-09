@@ -70,7 +70,7 @@ function Body() {
   const [devices, setDevices] = useState(null)
   const [problem, setProblem] = useState(null)
   const [pics, setPics] = useState({}) // by the device it's on/name: a data URL
-  const mem = useRef({ devices: null, hashes: {}, asked: {}, retried: {}, listed: "", busy: false })
+  const mem = useRef({ devices: null, hashes: {}, asked: {}, retried: {}, listed: "", busy: false, failed: 0 })
 
   const seen = (k) => {
     const el = [...document.querySelectorAll("[data-k]")].find((t) => t.dataset.k === k)
@@ -104,10 +104,12 @@ function Body() {
         m.listed = r.hash || ""
         setDevices(m.devices)
       }
+      m.failed = 0
       setProblem(null)
     } catch (e) {
       m.listed = ""
-      setProblem(one.plain(e))
+      // Its service starting says so for a few seconds; only what lasts is a problem.
+      if (++m.failed >= 3) setProblem(one.plain(e))
       return
     }
     requestAnimationFrame(pictures)

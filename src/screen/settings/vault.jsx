@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
-  AppIcon, Button, Empty, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Split, Switch,
+  AppIcon, Button, Empty, Grid, GridRow, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Split, Switch,
   Tabs, TabsList, TabsTrigger, LargeTitle, Section,
 } from "@one/ui"
 import { appNamed } from "./agents.js"
@@ -47,6 +47,8 @@ function know(apps) {
     names,
     // An item's icon: the logo of the site it's for, else the icon of the app that made or uses it, else a key.
     icon: (item) => (item.image ? { name: item.title, image: item.image, image_kind: item.image_kind } : app(item.app || item.apps[0]) || { ...KEY, name: item.title }),
+    // Whether it's a plain key: no site's logo and no app's icon to tell it from the others.
+    plain: (item) => !item.image && !app(item.app || item.apps[0]),
     // The items the apps added for this user make, as their `vault` says.
     makers: () => apps.filter((a) => a.added?.length).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.make && n.type).map((n) => ({ app: a.name, tool: n.make, type: n.type }))).sort((x, y) => x.type.localeCompare(y.type)),
     // What the apps switched on for an item do with items of its type.
@@ -171,25 +173,25 @@ function Vault() {
 
   // Gone elsewhere (deleted on another device): its page goes too.
   const selected = items?.find((i) => i.id === openId)
-  const found = items?.filter((i) => k.matches(i, query.trim().toLowerCase())) || []
+  const found = (items?.filter((i) => k.matches(i, query.trim().toLowerCase())) || []).sort((a, b) => a.title.localeCompare(b.title))
   let body
   if (!items) {
     body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => load() }} />
       : <ListSkeleton rows={4} />
   } else if (found.length) {
     body = (
-      <List className={switching ? "opacity-50 transition-opacity" : ""}>
+      <Grid min="18rem" max={5} gap="0.25rem" className={switching ? "opacity-50 transition-opacity" : ""}>
         {found.map((item) => (
-          <ListRow
+          <GridRow
             key={item.id}
-            leading={<AppIcon app={k.icon(item)} size={36} />}
+            leading={k.plain(item) ? <Icon name="key" className="size-5 text-muted-foreground" /> : <AppIcon app={k.icon(item)} size={28} />}
             title={item.title}
             sub={k.rowLine(item) || undefined}
             selected={item.id === openId}
             onClick={() => setOpenId(item.id)}
           />
         ))}
-      </List>
+      </Grid>
     )
   } else {
     body = <Empty className={switching ? "opacity-50" : ""}>{query.trim() ? `Nothing matches “${query.trim()}”.` : "Keys and sign-ins your apps and agents use without seeing them."}</Empty>
@@ -201,10 +203,10 @@ function Vault() {
         title={selected?.title}
         onClose={() => setOpenId(null)}
         list={
-          <div className="flex max-w-2xl flex-col gap-4">
+          <div className="flex flex-col gap-4">
             <LargeTitle action={<Button onClick={startNew}>New Item</Button>}>Vault</LargeTitle>
             {pages.length > 1 && <Pages pages={pages} value={scope} onChange={show} />}
-            {!!items?.length && <Search value={query} onChange={setQuery} />}
+            {!!items?.length && <div className="max-w-md"><Search value={query} onChange={setQuery} /></div>}
             {body}
           </div>
         }
@@ -501,6 +503,7 @@ function NewField({ save, done }) {
 function Hosts({ hosts, save }) {
   return (
     <Input
+      className="max-w-2xl"
       defaultValue={hosts.join(", ")}
       placeholder="api.example.com"
       aria-label="Sent only to"

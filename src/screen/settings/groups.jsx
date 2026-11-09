@@ -6,7 +6,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Empty, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Split, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
+import { AppIcon, Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Empty, Grid, GridRow, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Split, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
 
 const api = one.api
 const said = (err) => one.plain(err).title
@@ -141,9 +141,9 @@ function Groups() {
         )}
         {!!mine.length && (
           <Section title={invited.length ? "Yours" : undefined}>
-            <List>
+            <Grid min="22rem" max={4} gap="0.25rem">
               {mine.map((g) => (
-                <ListRow
+                <GridRow
                   key={g.id}
                   leading={<AppIcon app={GROUPS} size={36} />}
                   title={g.name}
@@ -153,7 +153,7 @@ function Groups() {
                   onClick={() => setOpenId(g.id)}
                 />
               ))}
-            </List>
+            </Grid>
           </Section>
         )}
         {error && !selected && <Problem title={error} />}
@@ -167,7 +167,7 @@ function Groups() {
         title={selected?.name}
         onClose={() => setOpenId(null)}
         list={
-          <div className="flex max-w-2xl flex-col gap-4">
+          <div className="flex flex-col gap-4">
             <LargeTitle action={state && !empty && <Button onClick={() => startCreate()}>New Group</Button>}>Groups</LargeTitle>
             {body}
           </div>

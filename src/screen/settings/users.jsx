@@ -6,7 +6,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, useDialog } from "@one/ui"
+import { Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Grid, GridRow, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, useDialog } from "@one/ui"
 
 const api = one.api
 const yours = one.config.yours
@@ -79,7 +79,7 @@ function Users() {
   } else {
     body = (
       <>
-        <List>
+        <Grid min="22rem" max={4} gap="0.25rem">
           {users.filter((u) => pending[u.id] !== null).map((u) => {
             const role = pending[u.id] || u.role
             const fixed = !admin || u.id === me || (role === "admin" && admins === 1)
@@ -87,7 +87,7 @@ function Users() {
               ? <span className="text-sm text-muted-foreground">{roleName(role)}</span>
               : <Role user={u} role={role} change={(r) => r !== role && change(u, r)} />
             return (
-              <ListRow
+              <GridRow
                 key={u.id}
                 leading={<Avatar id={u.id} name={u.name} size={36} />}
                 title={`${u.name}${u.id === me ? " (you)" : ""}`}
@@ -97,7 +97,7 @@ function Users() {
               />
             )
           })}
-        </List>
+        </Grid>
         {!!state.network?.email_invites?.length && (
           <Section title="Invited">
             <List>
@@ -115,7 +115,7 @@ function Users() {
 
   return (
     <>
-      <div className="flex max-w-2xl flex-col gap-4">
+      <div className="flex flex-col gap-4">
         <LargeTitle action={state && admin && <Button onClick={() => startAdd()}>Add Someone</Button>}>Users</LargeTitle>
         {body}
       </div>
