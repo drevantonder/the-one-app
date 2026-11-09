@@ -7,7 +7,7 @@ import { UNANSWERED, api, call, developer } from "./request.js";
 import { back, go, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
 import { KEPT_SCREENS, here, joined, reads, settingAt, settingsItems, titleOf } from "./store.js";
-import { $, message, ui } from "./view.js";
+import { $, h, ui } from "./view.js";
 
 let frames = [];
 
@@ -113,7 +113,7 @@ async function linkedIn(page) {
 }
 
 /// A screen that couldn't open: the problem, where it would be.
-const failed = (into, text) => OneUI["react-dom/client"].createRoot(into).render(message("Can’t Open This", text));
+const failed = (into, text) => OneUI["react-dom/client"].createRoot(into).render(h(ui.Unavailable, { title: "Can’t Open This", text }));
 
 /// A sandboxed frame for a page this window writes in (frame.html takes it).
 function sandboxed(r) {

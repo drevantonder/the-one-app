@@ -25,8 +25,8 @@ export const pages = {
     </Welcome>
   ),
   "code": <Welcome logo={logo} title="Enter your code" field={{ label: "Code", placeholder: "BCDF-GHJK" }} action={{ label: "Continue" }} />,
-  "code-signed-in": <Welcome logo={logo} title="You're signed in" text="Go back to where you got the code: it carries on by itself." />,
-  "code-not-signed-in": <Welcome logo={logo} title="That didn't sign in" text="Start signing in again where you got the code." />,
+  "code-signed-in": <Welcome logo={logo} title="You're signed in" text="Go back to where you got the code." />,
+  "code-not-signed-in": <Welcome logo={logo} title="That didn't sign in" text="Start again where you got the code." />,
 }
 
 // What the pages' scripts draw in them: a problem, a button's spinner, a passkey's row.

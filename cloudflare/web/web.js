@@ -8,12 +8,12 @@
 // The bridge (src/screen/), loaded after this, gives `one`; this page answers it for its own use (`__one.host`).
 import { offline } from "./offline.js";
 import { platform } from "./platform.js";
-import { NodeError, UNANSWERED, api, retryWait, sleep } from "./request.js";
+import { api, retryWait, sleep } from "./request.js";
 import { go, href, own, route } from "./routes.js";
 import { ask, iconPaths, openSheet } from "./screens.js";
 import { appearance, schemed } from "./settings.js";
 import { forgetScreens, joined, lastAt, lastWindow, me, network, refreshApps, refreshState, setJoining } from "./store.js";
-import { h, message, show, ui } from "./view.js";
+import { h, logo, message, show, ui } from "./view.js";
 import { hardwareBack, listen, render, showBack, showJoin, showSignedOut, showUnreachable, watchWaiting, windowShowing } from "./window.js";
 
 window.__one = { host: async (m) => (m.type === "copy" ? platform.copy(m.text) : m.type === "icons" ? iconPaths(m.names) : null) };
@@ -55,13 +55,13 @@ async function start() {
   // window as it was last. Its screens' asks wait until this is its user's device (`joined`).
   ask(route());
   if (lastWindow()) render();
-  else show(h(ui.Starting));
+  else show(h(ui.Starting, { logo }));
   setJoining(true);
   try {
     // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
     let waited = false;
     await platform.join((code, invited) => ((waited = true), showJoin(code, invited)), api);
-    if (waited) show(h(ui.Starting));
+    if (waited) show(h(ui.Starting, { logo }));
   } catch (err) {
     if (!err.signedOut) return void show(message("Can’t Let This Device In", err.message));
     if (err.removed) return;
@@ -69,7 +69,7 @@ async function start() {
     return showSignedOut();
   }
   // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
-  const away = setTimeout(() => windowShowing() || showUnreachable(UNANSWERED), 15000);
+  const away = setTimeout(() => windowShowing() || showUnreachable(), 15000);
   for (let misses = 1; ; misses++) {
     try {
       await refreshState();
@@ -78,7 +78,7 @@ async function start() {
     } catch (err) {
       if (err.signedOut) return clearTimeout(away), err.removed ? undefined : showSignedOut();
       // What it showed last stays, as a screen whose node is restarting does, saying so.
-      if (!windowShowing()) showUnreachable(err instanceof NodeError ? err.message : UNANSWERED);
+      if (!windowShowing()) (console.warn("starting:", err.message), showUnreachable());
       else offline.add("state", () => refreshState(), lastAt());
       await sleep(retryWait(misses));
     }
@@ -90,7 +90,7 @@ async function start() {
   }
   setJoining(false);
   joined.done();
-  await refreshApps().catch((err) => windowShowing() || showUnreachable(err instanceof NodeError ? err.message : UNANSWERED));
+  await refreshApps().catch((err) => windowShowing() || (console.warn("starting:", err.message), showUnreachable()));
   if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
   listen();
   if (platform.panel) return;

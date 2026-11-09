@@ -1,4 +1,4 @@
-// Every one of auth's pages (pages.tsx's), as the auth Worker serves them (pages.js) but with no script, in a custom
+// Every one of auth's pages (pages.tsx's), as the auth Worker serves them (pages.js) but with no script of their own (only what moves them), in a custom
 // build's look (its config.toml's name and logo), each an HTML file that opens as it is in a browser, to look at:
 //
 //   bun src/onboarding/render.js [config.toml] [folder]

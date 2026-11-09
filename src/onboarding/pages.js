@@ -30,6 +30,7 @@ const webauthn = `
     if (rest.length) problem.querySelector("[data-slot=alert-description] p").textContent = rest.join(" ");
     else problem.querySelector("[data-slot=alert-description]").remove();
     slot("problem").append(problem);
+    appear(problem);
   };
   const quietly = (err) => say(err.name === "NotAllowedError" || err.name === "AbortError" ? "" : err.message);
   async function api(path, body) {
@@ -109,7 +110,7 @@ const json = (value) => JSON.stringify(value).replaceAll("<", "\\u003c");
 
 /// Auth's pages, from what @one/ui's build drew (`drawn`).
 export function pages(drawn) {
-  const { css, pages, parts } = drawn;
+  const { css, pages, parts, motion } = drawn;
 
   /// The page `name` draws, filled in with `look` (the network's `name`, `yours` and `logo`, the domain of `google`, a
   /// throwaway's `user`), and `script`, with the parts it copies in (pages.tsx's `parts`, and the pages named in `more`).
@@ -123,7 +124,8 @@ export function pages(drawn) {
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141414"><title>${title}</title><link rel="icon" href="${escape(look.logo)}"><style>${css}</style></head>
-<body>${body}${templates}${script ? `<script>${webauthn}${script}</script>` : ""}</body></html>`;
+<body>${body}${templates}<script>${motion}const { rise, appear, transition } = onboardingMotion;${script ? webauthn + script : ""}
+rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html>`;
   };
 
   /// Signing in, to the network or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
@@ -295,7 +297,11 @@ export function pages(drawn) {
           else await newPasskey(secret);
           if (code) return void (location.href = "/sign-in/code?c=" + encodeURIComponent(code));
           history.replaceState(null, "", "/invite");
-          document.querySelector("[data-slot=welcome]").replaceWith(part("joined"));
+          transition(() => {
+            const joined = part("joined");
+            document.querySelector("[data-slot=welcome]").replaceWith(joined);
+            rise(joined.querySelector("[data-slot=welcome-stack]"));
+          });
         } catch (err) {
           undo();
           if (!throwaway && !google) ready(register(secret));

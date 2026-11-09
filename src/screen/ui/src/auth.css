@@ -8,6 +8,7 @@
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 @import "./theme.css";
 @import "./tokens.css";
+@import "../../../onboarding/onboarding.css";
 
 /* The passkeys page, in the web client's frame, has no logo or title (the frame's bar says Passkeys): its script gives
    the page this class. */

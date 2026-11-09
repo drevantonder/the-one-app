@@ -51,16 +51,27 @@ export default { pages: draw(pages), parts: draw(parts) }
     logLevel: "warn",
     plugins: [react()],
     // pages.tsx and Welcome (../../onboarding) are outside this folder: React is this folder's.
-    resolve: { alias: { "@": path.join(here, "src") }, dedupe: ["react", "react-dom"] },
+    resolve: { alias: { "@": path.join(here, "src") }, dedupe: ["react", "react-dom", "motion"] },
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
     ssr: { noExternal: true },
     build: { ssr: draw, outDir: scratch, emptyOutDir: false, reportCompressedSize: false, rolldownOptions: { output: { entryFileNames: "drawn.mjs" } } },
   })
   const drawn = (await import(path.join(scratch, "drawn.mjs"))).default
+  // What moves on those pages, Motion's small animate and onboarding's use of it, for pages.js to put in each, inline.
+  const moved = await build({
+    configFile: false,
+    root: here,
+    publicDir: false,
+    logLevel: "warn",
+    resolve: { dedupe: ["motion"] },
+    define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    build: { write: false, reportCompressedSize: false, minify: true, lib: { entry: path.join(here, "..", "..", "onboarding", "motion.ts"), formats: ["iife"], name: "onboardingMotion", fileName: () => "motion.js" } },
+  })
+  drawn.motion = (Array.isArray(moved) ? moved : [moved]).flatMap((o) => o.output).find((f) => f.type === "chunk").code
   writeFileSync(dist("auth.json"), JSON.stringify(drawn, null, 1) + "\n")
   // Their class names, as the browser reads them, for Tailwind to find.
   const unescape = (s) => s.replace(/&(amp|quot|#x27|lt|gt);/g, (_, e) => ({ amp: "&", quot: '"', "#x27": "'", lt: "<", gt: ">" })[e])
-  const html = Object.values(drawn).flatMap(Object.values).join("")
+  const html = [drawn.pages, drawn.parts].flatMap(Object.values).join("")
   writeFileSync(path.join(scratch, "classes.txt"), [...html.matchAll(/class="([^"]*)"/g)].map((m) => unescape(m[1])).join("\n"))
   writeFileSync(path.join(scratch, "auth.css"), `@import ${JSON.stringify(path.join(here, "src", "auth.css"))};\n@source "./classes.txt";\n`)
   const entry = path.join(scratch, "auth.js")
@@ -98,9 +109,9 @@ const walk = (dir, root = here, prefix = "") => {
 }
 walk(here)
 walk(home, home, "../home/")
-// Onboarding's screens, which auth.json is drawn from and Welcome is @one/ui's.
+// Onboarding's screens, how they move and their stylesheet, which auth.json and auth.css are made from and Welcome is @one/ui's.
 const onboarding = path.join(here, "..", "..", "onboarding")
-sources.push(...readdirSync(onboarding).filter((f) => f.endsWith(".tsx")).map((f) => `../../onboarding/${f}`))
+sources.push(...readdirSync(onboarding).filter((f) => /\.(tsx|ts|css)$/.test(f)).map((f) => `../../onboarding/${f}`))
 const hash = createHash("sha256")
 for (const file of sources.sort()) hash.update(file).update("\0").update(readFileSync(path.join(here, file))).update("\0")
 writeFileSync(dist("sources.txt"), hash.digest("hex") + "\n")

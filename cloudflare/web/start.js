@@ -14,10 +14,16 @@
   // A page that draws nothing is a problem, not a black or white screen: if no text, image or control is on it a few seconds
   // after it starts (web.js never ran, or a frame was laid out at no size), it says so, with the way out, and the app's log
   // (`one logs`) gets a line. This is the page's first script and needs nothing else of it.
+  // Arriving from another of a network's own pages with its logo (a View Transition, onboarding.css): the logo stays where
+  // it was until web.js draws what's under it. In single quotes, as Settings::web renames the page's ="/file"s after hashing this.
+  addEventListener("pagereveal", (e) => {
+    const root = document.getElementById("root");
+    if (e.viewTransition && root && !root.children.length) root.innerHTML = "<div id='one-arriving' data-slot='welcome'><img data-slot='welcome-logo' src='/logo.png' alt=''></div>";
+  });
   const drawn = () => {
     for (const el of document.body.querySelectorAll("*")) {
       const r = el.getBoundingClientRect();
-      if (r.width < 1 || r.height < 1 || el.closest("#one-blank") || getComputedStyle(el).visibility === "hidden") continue;
+      if (r.width < 1 || r.height < 1 || el.closest("#one-blank, #one-arriving") || getComputedStyle(el).visibility === "hidden") continue;
       if (el.matches("img, svg, canvas, video, iframe, input, button, textarea, select") || [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) return true;
     }
     return false;

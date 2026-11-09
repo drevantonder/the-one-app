@@ -10,7 +10,7 @@ import { back, go, home, linked, own, route, sections, whenMoved } from "./route
 import { detail, devtools, hasScreen, openSheet, overWindow, screen, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, store, titleOf, whenChanged, whenSignedOut } from "./store.js";
-import { h, message, show, ui } from "./view.js";
+import { h, logo, message, show, ui } from "./view.js";
 
 /// The bar's title over the screen, as the screen in it last said.
 let barTitle = "";
@@ -79,7 +79,7 @@ function drawPanel() {
   windowShown = true;
   const row = ([label, run, checked]) => h(ui.Button, { key: label, variant: "ghost", className: "w-full justify-between px-3 font-normal", onClick: run }, label, checked ? h(ui.Icon, { name: "check", className: "size-4" }) : null);
   show(h("div", { className: "panel" },
-    h("div", { className: "panel-head" }, h("img", { src: "/logo.png", alt: "" }), h("span", null, network()?.name || config().name)),
+    h("div", { className: "panel-head" }, h("img", { src: logo, alt: "" }), h("span", null, network()?.name || config().name)),
     screenHere,
     h("div", { className: "panel-rows" }, ...platform.panelRows(signedIn, config().name, drawPanel).map(row))));
   if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", platform.panelScreen()));
@@ -172,7 +172,7 @@ export function showSignedOut(error, note) {
   document.title = config().name;
   windowShown = false;
   const signIn = () => platform.signIn().catch((err) => showSignedOut(err.message));
-  show(platform.welcome({ key: Math.random(), logo: "/logo.png", title: config().name, action: { label: "Sign In", run: signIn }, note, problem: error }));
+  show(platform.welcome({ logo, title: config().name, action: { label: "Sign In", run: signIn }, note, problem: error }));
 }
 // Taken out, or signed out with why: its events stop, and the sign-in says why.
 whenSignedOut((why) => (events?.abort(), showSignedOut(why)));
@@ -184,10 +184,10 @@ export function showJoin(code, invited) {
   const link = `${platform.address()}/approve#${code.replace(" ", "")}`;
   windowShown = false;
   show(h(ui.Join, {
+    logo,
     code,
     qr: qrSvg(link),
-    text: invited ? "Whoever invited you approves it. Show them this code." : "Your other devices ask you to approve it. It shows this code there too.",
-    note: invited ? "Or they scan this with their phone." : "Or scan this with your phone, to approve it in its browser.",
+    text: invited ? "Show whoever invited you this code, or have them scan it." : "Approve it on your other device, or scan this.",
     onSignOut: () => leave(),
   }));
 }
@@ -197,11 +197,11 @@ export function showBack(app, screen, params) {
   const { name, cli } = config();
   const link = `${cli}://open?${new URLSearchParams({ app, screen, params, scope: "user" })}`;
   document.title = name;
-  show(h(ui.Welcome, { logo: "/logo.png", title: name, action: { label: `Open ${name}`, href: link } }));
+  show(h(ui.Welcome, { logo, title: name, action: { label: `Open ${name}`, href: link } }));
   location.href = link;
 }
 
-export function showUnreachable(text) {
+export function showUnreachable() {
   windowShown = false;
-  show(message("Can’t Reach Your Devices", text, "Trying again…"));
+  show(message("Can’t Reach Your Devices", "Trying again…"));
 }

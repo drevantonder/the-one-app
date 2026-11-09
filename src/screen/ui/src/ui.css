@@ -4,6 +4,7 @@
 @import "tw-animate-css";
 @import "./theme.css";
 @import "./tokens.css";
+@import "../../../onboarding/onboarding.css";
 @source "../../../onboarding/welcome.tsx";
 
 /* A title bar lying over the page's top (the shell's `--titlebar-area-*`, named as the web's Window Controls Overlay's). */
