@@ -31,6 +31,8 @@ export const home = (() => {
   }
 
   const appsOn = (p) => h.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
+  /// The apps added to a page that have no screen to open: only an AI uses them.
+  const forAiOn = (p) => h.apps.filter((a) => !hasScreens(a) && scopes(a).includes(p.scope));
   const accountsOn = (p) => h.apps.filter((a) => accountsTool(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const badge = (name, p) => Math.max(0, h.badges[p.scope]?.[name] || 0);
 
@@ -216,7 +218,7 @@ export const home = (() => {
   }
 
   return {
-    data: h, me, network, label, app, has, hasScreens, allPages, pages, page, canArrange, appsOn, accountsOn, accountsTool, badge, widgetsOn, waiting, items,
+    data: h, me, network, label, app, has, hasScreens, allPages, pages, page, canArrange, appsOn, forAiOn, accountsOn, accountsTool, badge, widgetsOn, waiting, items,
     supported, tree, store, open, opens, settings, inStore, addAccountApp, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
   };
 })();

@@ -110,6 +110,7 @@ function pageView(p) {
   const arrange = home.canArrange(p.scope)
   const first = p.scope === home.pages()[0]?.scope
   const empty = !home.appsOn(p).length && !home.widgetsOn(p).length && !home.waiting(p)
+  const forAi = home.forAiOn(p)
   let list = home.items(p).map((item) => {
     if (item.pending) return pendingItem(item.kept, p)
     if (item.widget) return widgetItem(item.widget, item.kept, p)
@@ -130,7 +131,7 @@ function pageView(p) {
     scope: p.scope, p, title: p.title, subtitle: p.subtitle, arrange, empty, store: !!home.store(), list,
     addable: !!home.store() || home.widgetsOn(p).length > 0 || hiddenApps(p).length > 0,
     groups: home.allPages().some((x) => x.scope.startsWith("group:")),
-    said: empty ? "No apps yet." : "",
+    said: !empty ? "" : forAi.length ? `Your AI can use ${new Intl.ListFormat("en").format(forAi.map(home.label))}.` : "No apps yet.",
   }
 }
 
