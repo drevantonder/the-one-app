@@ -24,6 +24,7 @@ mod local;
 mod network;
 mod reply;
 mod serve;
+mod tools;
 
 pub use agents::serve_guide;
 pub use calls::app_route;
@@ -59,13 +60,13 @@ pub enum Who {
 #[derive(Default)]
 pub struct Routes {
     router: Router<Node>,
-    who: Vec<(&'static str, Who)>,
+    who: Vec<(String, Who)>,
 }
 
 impl Routes {
-    pub fn route(mut self, path: &'static str, who: Who, handler: axum::routing::MethodRouter<Node>) -> Routes {
+    pub fn route(mut self, path: &str, who: Who, handler: axum::routing::MethodRouter<Node>) -> Routes {
         self.router = self.router.route(path, handler);
-        self.who.push((path, who));
+        self.who.push((path.to_string(), who));
         self
     }
 
@@ -76,7 +77,7 @@ impl Routes {
     }
 
     /// Every route's path, with who may ask it.
-    pub fn who(&self) -> &[(&'static str, Who)] {
+    pub fn who(&self) -> &[(String, Who)] {
         &self.who
     }
 }
@@ -89,6 +90,7 @@ pub fn routes() -> Routes {
         .merge(agents::routes())
         .merge(network::routes())
         .merge(calls::routes())
+        .merge(tools::routes())
         .merge(crate::node::vault::routes::routes())
         .merge(crate::node::backups::routes::routes())
         .merge(crate::node::storage::routes::routes())
@@ -107,7 +109,7 @@ pub fn routes() -> Routes {
 pub fn clients_may(path: &str) -> bool {
     let asked: Vec<&str> = path.split('/').collect();
     calls::app_route(path)
-        || routes().who().iter().filter(|(r, w)| *r != calls::APP_ROUTE && matches!(w, Who::SignedIn | Who::Clients)).any(|(route, _)| {
+        || routes().who().iter().filter(|(r, w)| r != calls::APP_ROUTE && matches!(w, Who::SignedIn | Who::Clients)).any(|(route, _)| {
             let route: Vec<&str> = route.split('/').collect();
             route.len() == asked.len() && route.iter().zip(&asked).all(|(r, a)| r == a || (r.starts_with('{') && !a.is_empty()))
         })
@@ -140,7 +142,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("one-routes-{}", rand::random::<u64>()));
         let node = crate::node::Node::start(&dir, false).await.unwrap();
         let routes = super::routes();
-        let who: Vec<(&str, Who)> = routes.who().to_vec();
+        let who: Vec<(String, Who)> = routes.who().to_vec();
         // Only a client device's requests over iroh carry `FromClient`, which the node puts on them: here, a header.
         let router = super::guarded(routes, node.clone()).layer(axum::middleware::from_fn(|mut req: axum::extract::Request, next: axum::middleware::Next| async move {
             if req.headers().contains_key("x-test-client") {
@@ -175,7 +177,7 @@ mod tests {
                         })
                         .collect();
                     assert!(!said.is_empty(), "{route} takes neither GET nor POST");
-                    asked.extend(said.into_iter().map(|(status, body)| (route, who, asker, status, body)));
+                    asked.extend(said.into_iter().map(|(status, body)| (route.clone(), who, asker, status, body)));
                 }
             }
             asked

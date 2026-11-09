@@ -56,7 +56,11 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
 
 /// A tool of `app` (as `GET /v1/apps` lists them) as MCP lists it, by `name`.
 pub fn mcp_tool(app: &Value, tool: &Value, name: String) -> Value {
-    json!({ "name": name, "description": tool["description"], "inputSchema": mcp_schema(app, tool), "annotations": crate::skills::hints(tool["reads"] == true, tool["confirm"] == true) })
+    let mut listed = json!({ "name": name, "description": tool["description"], "inputSchema": mcp_schema(app, tool), "annotations": crate::skills::hints(tool["reads"] == true, tool["confirm"] == true) });
+    if tool["title"].is_string() {
+        listed["title"] = tool["title"].clone();
+    }
+    listed
 }
 
 /// Brings an agent's file inputs to what apps take, `{ name, type, size, base64 }`: from base64, a file id (a blob

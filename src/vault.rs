@@ -7,6 +7,8 @@
 //! field goes, and a granted machine fills it in on the way out: into a web request to one of its hosts, or into the
 //! input of a call to a service whose name is one of them.
 
+pub mod tools;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail, ensure};

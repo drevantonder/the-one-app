@@ -1,4 +1,5 @@
-//! The Vault's routes, `/v1/vault…`, each with who may ask it.
+//! The Vault's routes for its Settings screens, each with who may ask it. Its tools are routes of their own
+//! (`crate::vault::tools`).
 
 use std::collections::HashMap;
 
@@ -16,10 +17,7 @@ pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/vault", Who::SignedIn, get(list).post(set))
         .route("/v1/vault/requests", Who::SignedIn, get(requests))
-        .route("/v1/vault/request", Who::SignedIn, post(request))
         .route("/v1/vault/answer", Who::SignedIn, post(answer))
-        .route("/v1/vault/fetch", Who::SignedIn, post(fetch))
-        .route("/v1/vault/grant", Who::ThisMachine, post(grant))
 }
 
 /// Who asked, crediting the `agent` the body (or query) names, if any.
@@ -78,27 +76,6 @@ async fn requests(State(node): State<Node>, me: Me, Query(q): Query<HashMap<Stri
     Ok(Json(json!(node.item_requests(&me, scope.as_ref(), q.get("id").map(String::as_str)).await?)))
 }
 
-/// Asks the user for an item: what `app` declares as `need`, or with neither, one of `title`, `fields` and `hosts`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Ask {
-    scope: Option<String>,
-    agent: Option<String>,
-    app: Option<String>,
-    need: Option<String>,
-    title: Option<String>,
-    fields: Option<serde_json::Map<String, Value>>,
-    hosts: Option<Vec<String>>,
-    why: Option<String>,
-}
-
-async fn request(State(node): State<Node>, me: Me, Body(body): Body<Ask>) -> Reply {
-    let me = caller(me, body.agent.as_deref());
-    let scope = scope(&node, &me, body.scope.as_deref())?;
-    let ask = json!({ "title": body.title, "fields": body.fields, "hosts": body.hosts });
-    Ok(Json(node.request_item(&me, &scope, body.app.as_deref().unwrap_or(""), body.need.as_deref(), &ask, body.why.as_deref().unwrap_or("")).await?))
-}
-
 /// Answers request `id`: with one of the caller's items, the `fields` (and `title`) of a new one, or `declined`.
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -120,33 +97,4 @@ async fn answer(State(node): State<Node>, me: Me, Body(body): Body<Answer>) -> R
     let scope = scope(&node, &me, body.scope.as_deref())?;
     node.answer_request(&me, &scope, &body.id, &serde_json::to_value(&body)?).await?;
     Ok(Json(json!({})))
-}
-
-/// A request with the items agents may use filled in.
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Fetch {
-    #[serde(skip_serializing)]
-    agent: Option<String>,
-    url: String,
-    method: Option<String>,
-    headers: Option<serde_json::Map<String, Value>>,
-    body: Option<Value>,
-}
-
-async fn fetch(State(node): State<Node>, me: Me, Body(body): Body<Fetch>) -> Reply {
-    let me = caller(me, body.agent.as_deref());
-    Ok(Json(node.vault_fetch(&me, &serde_json::to_value(body)?).await?))
-}
-
-/// Which machines open a Vault, said by this machine as its own device (`settings`), which then seals what's in it to
-/// the new key if it opens it.
-async fn grant(State(node): State<Node>, body: axum::body::Bytes) -> Reply {
-    let said = node.answer_as_mine("POST", "/v1/vault/grant", &body).await?;
-    let given = serde_json::from_slice::<Value>(&body).ok().and_then(|b| b["scope"].as_str().map(str::to_string));
-    let scope = scope(&node, &Caller::local(&node)?, given.as_deref())?;
-    if let Err(err) = node.reseal_vault(&scope).await {
-        tracing::warn!("sealing {scope}'s Vault to its new key: {err:#}");
-    }
-    Ok(said)
 }

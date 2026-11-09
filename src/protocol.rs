@@ -40,6 +40,8 @@ pub mod header {
     pub const REQUEST: &str = "x-one-request";
     /// How much of who's who a client says it reads (`database::READS`).
     pub const READS: &str = "x-one-reads";
+    /// The agent a client's tool call is for, base64url of its name (names aren't all ASCII): credit, which proves nothing.
+    pub const AGENT: &str = "x-one-agent";
     /// What a machine's own programs send a node of theirs to say they're its own.
     pub const LOCAL_TOKEN: &str = "x-one-local-token";
     /// The code (`code`) of an error the node answers a running call's ask with, which the app's error then carries.

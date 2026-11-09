@@ -158,21 +158,19 @@ fn answered(node: Key, status: u16, headers: Vec<(String, String)>, body: &[u8])
 /// `one::settings::answered`): one that changes who can do what, which it signs as its user's, as any device does.
 /// None for any other MCP message, which goes to a node, as its user.
 async fn tool_here(keyring: &Keyring, client: &one_client::Client, on: &On, body: &[u8], until: u64) -> Option<Result<Vec<u8>, one_client::Error>> {
-    use one::core_tools::{Asked, Reader, Runs};
+    use one::core_tools::{Asked, Reader};
     let msg: Value = serde_json::from_slice(body).ok()?;
     if msg["method"] != "tools/call" {
         return None;
     }
     let name = msg["params"]["name"].as_str()?;
     let (feature, at) = one::core_tools::find(name)?;
-    let tool = &feature.tools[at];
-    let Runs::Asks { request, said } = tool.runs else { return None };
     let mut input = msg["params"]["arguments"].as_object().cloned().unwrap_or_default();
     let confirmed = input.remove("confirm") == Some(json!(true));
     let asked = Asked { agent: None, reader: Reader::Mcp, confirmed };
     // One it can't make here, from what's on a machine (a file's path), a node makes.
-    let asks = request(&input, &asked).ok().filter(|r| one::settings::answered(r.path.split('?').next().unwrap_or("")))?;
-    if tool.spec["confirm"] == true && !confirmed {
+    let asks = feature.request(at, &input, &asked)?.ok().filter(|r| one::settings::answered(r.path.split('?').next().unwrap_or("")))?;
+    if feature.tools[at].spec["confirm"] == true && !confirmed {
         return Some(Ok(result(&msg, Err(Reader::Mcp.unconfirmed(name)))));
     }
     let request = one_client::Request {
@@ -188,7 +186,7 @@ async fn tool_here(keyring: &Keyring, client: &one_client::Client, on: &On, body
     let status = response.status;
     let answer: Value = response.body.bytes().await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let said = match status {
-        200 => said(&input, answer).map_err(|e| format!("{e:#}")),
+        200 => feature.said(at, &input, answer).map_err(|e| format!("{e:#}")),
         _ => Err(answer["error"].as_str().map_or_else(|| format!("That wasn't done ({status})."), str::to_string)),
     };
     Some(Ok(result(&msg, said)))

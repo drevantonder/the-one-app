@@ -23,7 +23,7 @@ pub struct FromClient(pub crate::keys::Key, pub u64);
 
 /// `routes` as `Who` says each may be asked, with this machine's own programs asking any.
 pub fn guarded(routes: Routes, node: Node) -> Router {
-    let who: std::sync::Arc<std::collections::HashMap<&'static str, Who>> = std::sync::Arc::new(routes.who.into_iter().collect());
+    let who: std::sync::Arc<std::collections::HashMap<String, Who>> = std::sync::Arc::new(routes.who.into_iter().collect());
     routes
         .router
         .route_layer(axum::middleware::from_fn_with_state((node.clone(), who), only_this_machine))
@@ -53,7 +53,7 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
 /// Only this machine's own programs (`from_this_machine`) drive its node: no web page, an app's screen this node served
 /// included, and no program in a VM or emulator here. A request with an access token from auth, or from a client
 /// device, is someone's instead, for what its route's `Who` lets them ask.
-async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<std::collections::HashMap<&'static str, Who>>)>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<std::collections::HashMap<String, Who>>)>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
     let who = routes.get(path.as_str()).copied().unwrap_or(Who::ThisMachine);
     if let Some(FromClient(key, until)) = req.extensions().get::<FromClient>().copied() {

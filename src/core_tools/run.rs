@@ -3,7 +3,7 @@
 use anyhow::{Result, bail};
 use serde_json::{Map, Value};
 
-use super::{Asked, Feature, Runs, all};
+use super::{Asked, Feature, all};
 use crate::api::Client;
 
 impl Feature {
@@ -15,17 +15,16 @@ impl Feature {
 
     /// Runs its tool at `at` (`super::find`) as the user, asking `node`.
     pub fn run(&self, at: usize, input: &Map<String, Value>, asked: &Asked, node: &Client) -> Result<Value> {
-        let tool = &self.tools[at];
-        match tool.runs {
-            Runs::Asks { request, said } => {
-                let r = request(input, asked)?;
+        match self.request(at, input, asked) {
+            Some(request) => {
+                let r = request?;
                 let answer = match r.body {
                     None => node.get(&r.path)?,
-                    Some(body) => node.post(&r.path, body)?,
+                    Some(body) => node.post_for(asked.agent, &r.path, body)?,
                 };
-                said(input, answer)
+                self.said(at, input, answer)
             }
-            Runs::Steps => (self.steps)(tool.spec["name"].as_str().unwrap_or(""), input, asked, node),
+            None => (self.steps)(self.tools[at].spec["name"].as_str().unwrap_or(""), input, asked, node),
         }
     }
 }

@@ -83,6 +83,14 @@ impl Client {
         self.json(self.via.send("POST", path, &[("content-type", "application/json")], Some(serde_json::to_vec(&body)?), None)?)
     }
 
+    /// `post`, crediting `agent` (`header::AGENT`).
+    pub fn post_for(&self, agent: Option<&str>, path: &str, body: Value) -> Result<Value> {
+        let named = agent.map(|a| data_encoding::BASE64URL_NOPAD.encode(a.as_bytes()));
+        let mut headers = vec![("content-type", "application/json")];
+        headers.extend(named.as_deref().map(|n| (crate::protocol::header::AGENT, n)));
+        self.json(self.via.send("POST", path, &headers, Some(serde_json::to_vec(&body)?), None)?)
+    }
+
     /// Keeps `bytes` as a blob on the node: → its hash.
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
         Ok(self.json(self.via.send("POST", "/v1/blobs", &[], Some(bytes.to_vec()), None)?)?["blob"].as_str().unwrap_or("").to_string())

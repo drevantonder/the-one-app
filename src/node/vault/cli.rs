@@ -1,6 +1,6 @@
 //! The Vault's commands besides its tools: `vault requests` and `vault answer`.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use crate::cli::{Command, Given};
@@ -31,8 +31,8 @@ fn run(g: &Given) -> Result<bool> {
             } else if let Some(item) = g.flag("item") {
                 body["item"] = json!(item);
             } else {
-                let asking = crate::core_tools::vault::asking_for(id);
-                let r = crate::core_tools::vault::the_request(id, g.node.get(&asking.path)?)?;
+                let asked = g.node.get(&format!("/v1/vault/requests?id={id}"))?;
+                let r = asked.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?;
                 let mut text = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
                 let text = text.trim_end_matches(['\n', '\r']);
