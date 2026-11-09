@@ -7,7 +7,7 @@ import { platform } from "./platform.js";
 import { qrSvg } from "./qr.js";
 import { api, developer, fresh, retryWait, sleep } from "./request.js";
 import { back, go, home, linked, own, route, sidebar, whenMoved } from "./routes.js";
-import { detail, devtools, hasScreen, openSheet, overWindow, replacing, screen, setBarStart, tell, whenTitled } from "./screens.js";
+import { detail, devtools, hasScreen, openSheet, overWindow, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, signOut, store, titleOf, whenChanged } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
@@ -49,7 +49,9 @@ const SIDEBAR = "one.sidebar";
 let badged = -1;
 function countBadges(drawn) {
   const total = [...drawn.pages, drawn.settings].reduce((n, p) => n + Math.max(0, p.badge || 0), 0);
-  if (total !== badged) platform.badge((badged = total));
+  if (total === badged) return;
+  platform.badge((badged = total));
+  tabWaiting(total);
 }
 
 /// A newer version of the client needs a newer app than this one, which stays on what it has.

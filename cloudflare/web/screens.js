@@ -373,8 +373,17 @@ function announced(f, begin) {
 const dimmed = () => document.body.toggleAttribute("data-dimmed", !!showing?.dimmed);
 function saying(f) {
   titled.forEach((fn) => fn(f.said));
-  document.title = tabTitle(f.said || String(f.name || "") || titleOf(f.route));
+  tabTitled(f.said || String(f.name || "") || titleOf(f.route));
 }
+
+/// What the browser's tab says: the screen's title, after how many things wait for the user.
+let tab = { title: "", waiting: 0 };
+function tabSays(said) {
+  tab = { ...tab, ...said };
+  document.title = `${tab.waiting ? `(${ui.badgeCount(tab.waiting)}) ` : ""}${tabTitle(tab.title)}`;
+}
+const tabTitled = (title) => tabSays({ title });
+export const tabWaiting = (waiting) => tabSays({ waiting });
 
 /// A layer for `r`'s screen in `box`, hidden while `from` still shows.
 function layerFor(box, r, from) {
@@ -403,7 +412,7 @@ export const screen = {
   /// Shows `r` where the window shows screens. What shows stays until `r`'s next has drawn; a nav away from it goes the
   /// same way. `begin` puts the window's bar on it, when it starts to show (as a phone's goes back, when it's left).
   show(detail, r, begin = () => {}, opened) {
-    document.title = tabTitle(titleOf(r));
+    tabTitled(titleOf(r));
     devtools.since = Date.now();
     devtools.draw();
     settle();

@@ -23,6 +23,9 @@ type ShellItem = {
 
 /// A page's row (You, a group's, Everyone), and under it `items`, the apps of the page the window is on; with none under
 /// it, `badge` is what its apps count. Settings is one too, at the sidebar's foot.
+/// A count as a badge says it.
+export const badgeCount = (n: number) => (n > 99 ? "99+" : String(n))
+
 type ShellPage = { key: string; title: string; href: string; selected?: boolean; badge?: number; items: ShellItem[] }
 
 /// The window every client shows screens in: the sidebar of pages, the current one's apps under it and Settings at its
@@ -193,7 +196,7 @@ function ShellRow({ row, onGo, onPress, className, children }: { row: ShellItem;
           <span className="truncate">{row.title}</span>
         </a>
       </SidebarMenuButton>
-      {!!row.badge && <SidebarMenuBadge className="rounded-full bg-destructive text-white peer-data-[active=true]/menu-button:text-white">{row.badge}</SidebarMenuBadge>}
+      {!!row.badge && <SidebarMenuBadge className="rounded-full bg-destructive text-white peer-data-[active=true]/menu-button:text-white">{badgeCount(row.badge)}</SidebarMenuBadge>}
     </SidebarMenuItem>
   )
 }

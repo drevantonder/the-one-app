@@ -11,7 +11,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Badge, Button, Empty, Hint, Icon, Label, LoadFailure, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, WidgetCard, cn, useWidth } from "@one/ui"
+import { AppIcon, Badge, badgeCount, Button, Empty, Hint, Icon, Label, LoadFailure, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, WidgetCard, cn, useWidth } from "@one/ui"
 import { home } from "./lib/model.js"
 
 const { scope: chosen, swipe } = one.params || {}
@@ -557,7 +557,7 @@ function Tile({ name, icon, size, badge, onClick, onPointerDown, children }) {
     <button type="button" onClick={onClick} onPointerDown={onPointerDown} className="flex min-w-0 flex-col items-center gap-1.5 pt-0.5 text-foreground outline-none [-webkit-tap-highlight-color:transparent] focus-visible:[&>span:first-child]:ring-[3px] focus-visible:[&>span:first-child]:ring-ring/50 active:[&>span:first-child]:opacity-70">
       <span className="relative block rounded-[22%] leading-[0]">
         {children || <AppIcon app={icon} size={size} />}
-        {badge > 0 && <Badge variant="destructive" className="absolute -right-2 -top-2 h-6 min-w-6 px-1.5 text-sm font-semibold tabular-nums dark:bg-destructive">{badge > 99 ? "99+" : badge}</Badge>}
+        {badge > 0 && <Badge variant="destructive" className="absolute -right-2 -top-2 h-6 min-w-6 px-1.5 text-sm font-semibold tabular-nums dark:bg-destructive">{badgeCount(badge)}</Badge>}
       </span>
       <span className="line-clamp-2 w-[calc(100%+0.75rem)] text-center text-[13px] leading-tight [overflow-wrap:anywhere]">{name}</span>
     </button>

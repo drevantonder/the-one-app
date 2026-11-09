@@ -153,7 +153,7 @@ export function browser() {
     user: () => auth.user(),
     until: () => auth.kept()?.until || Date.now() + 60_000,
     signIn: () => auth.start(),
-    signOut: () => auth.signOut(),
+    signOut: () => (navigator.clearAppBadge?.().catch(() => {}), auth.signOut()),
     welcome: (props) => h(ui.Welcome, props),
 
     join,
@@ -185,7 +185,8 @@ export function browser() {
     device: () => ({ name: browserName(), signOut: true, keys: !!device, notify: notifyState(), ...(device ? { key: device.key } : {}) }),
 
     changed() {},
-    badge() {},
+    /// On the icon of this site installed as an app; 0 takes it off.
+    badge: (count) => navigator.setAppBadge?.(count).catch(() => {}),
     appearance() {},
     copy: (text) => navigator.clipboard.writeText(text),
     open: (href) => window.open(href, "_blank", "noopener,noreferrer"),
