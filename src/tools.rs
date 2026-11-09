@@ -240,7 +240,7 @@ pub fn own_device(tool: &Value) -> bool {
 
 /// Whether an app's calls run on a device of the user's choosing: it runs on every device, or uses a service (Shell
 /// on a named device, iMessage on the Mac), so MCP and search offer `device` as the CLI's `--device` does.
-fn runs_on_devices(app: &Value) -> bool {
+pub(crate) fn runs_on_devices(app: &Value) -> bool {
     app["runs"] == "here" || app["uses"]["services"].as_array().is_some_and(|s| !s.is_empty())
 }
 

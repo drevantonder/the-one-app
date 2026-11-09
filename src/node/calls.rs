@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::*;
 
 /// A call to run: an app's tool, or a service's function.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CallRequest {
     /// Names this call wherever it's tried, so a call that writes runs on one device only: the first to take its lease.
@@ -45,9 +45,11 @@ pub struct CallRequest {
     pub agent: Option<String>,
     /// How many app-to-app calls deep it is: 0 when a user, an agent or a schedule made it.
     #[serde(default)]
+    #[schemars(skip)]
     pub depth: u32,
     /// The app whose `ctx.apps` made it, if one did.
     #[serde(default)]
+    #[schemars(skip)]
     pub from: Option<String>,
     /// What made it, for its app's insights: `cli`, `mcp`, `mac`, `phone`, `browser`, `schedule` or `app`.
     #[serde(default)]

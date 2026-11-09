@@ -12,16 +12,19 @@ use serde_json::{Value, json};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
+use crate::api::openapi::Op;
 use crate::api::{Error, Me, Routes, Who, tagged};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/events", Who::SignedIn, get(events))
+        .says(Op::get("What changed, as it happens").events::<crate::node::Event>())
         .route("/v1/screens/{app}/{screen}", Who::SignedIn, get(screen))
+        .says(Op::get("An app's screen, as a page").query::<ScreenQuery>().html())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 struct ScreenQuery {
     params: Option<String>,
     scope: Option<String>,

@@ -9,6 +9,7 @@ use serde_json::json;
 use crate::node::Node;
 
 use super::guard::Me;
+use super::openapi::Op;
 use super::{Routes, Who};
 use super::reply::{Body, Reply, done, given};
 
@@ -16,9 +17,11 @@ pub(super) fn routes() -> Routes {
     use Who::*;
     Routes::default()
         .route("/v1/state", SignedIn, get(state))
+        .says(Op::get("Who's who and what this device reads of the network"))
         .route("/v1/keys", SignedIn, get(keys_get).post(keys_post))
         .route("/v1/create", ThisMachine, post(create))
         .route("/v1/join", ThisMachine, post(join))
+        .says(Op::post("Join a network with a pairing code").body::<Join>())
         .route("/v1/steps", SignedIn, post(steps))
         .route("/v1/steps/global", SignedIn, get(global_steps))
 }
@@ -70,7 +73,7 @@ async fn create(State(node): State<Node>, Body(body): Body<Create>) -> Reply {
     Ok(Json(json!({ "recovery": recovery })))
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Join {
     code: String,

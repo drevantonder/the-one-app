@@ -701,18 +701,26 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
 
 /// Every path of the node's API that the Workers, the screens, the web client and the native apps ask is one of its routes
 /// (`api::routes`) or one a device answers itself (`one::settings::answered`): a path misspelled or dropped from one
-/// fails as a 404, which no one sees until it's used.
+/// fails as a 404, which no one sees until it's used. Each is in the OpenAPI document too, but a client's keys and signed
+/// steps, which it asks as itself, and what the document lists is what the node serves.
 #[test]
 fn every_path_asked_of_a_node_is_one_it_serves() {
     // Not an app's own requests (`/{app}/{*path}`), which take any path that isn't the API's.
     let routes: Vec<Vec<String>> = one::api::routes().who().iter().map(|(path, _)| path.trim_start_matches('/').split('/').map(str::to_string).collect::<Vec<_>>()).filter(|route| !route[0].starts_with('{')).collect();
     // `{app}` and `{*path}` take what's there; so does what a page or format fills in (`${id}`, `{}`).
-    let matches = |asked: &[&str]| {
+    let matches = |routes: &[Vec<String>], asked: &[&str]| {
         routes.iter().any(|route| {
             let tail = route.last().is_some_and(|s| s.starts_with("{*"));
             (route.len() == asked.len() || (tail && asked.len() >= route.len() - 1)) && route.iter().zip(asked).all(|(r, a)| r.starts_with('{') || r == a || a.contains("${") || a.contains('{'))
         })
     };
+    const UNLISTED: [&str; 3] = ["/v1/keys", "/v1/steps", "/v1/steps/global"];
+    let document = one::api::openapi::document(&[], true);
+    let listed: Vec<Vec<String>> = document["paths"].as_object().unwrap().keys().map(|path| path.trim_start_matches('/').split('/').map(str::to_string).collect()).collect();
+    for path in document["paths"].as_object().unwrap().keys() {
+        let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+        assert!(matches(&routes, &segments) || one::settings::answered(path), "the OpenAPI document lists {path}, which the node doesn't serve");
+    }
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut files = Vec::new();
     for dir in ["cloudflare", "src/screen", "client/src", "client/native/src", "apps"] {
@@ -732,7 +740,7 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
             }
         }
     }
-    let mut unserved = Vec::new();
+    let (mut unserved, mut unlisted) = (Vec::new(), Vec::new());
     for path in &files {
         let source = std::fs::read_to_string(path).unwrap();
         for (n, line) in source.lines().enumerate() {
@@ -749,13 +757,18 @@ fn every_path_asked_of_a_node_is_one_it_serves() {
                 let literal = &line[at..end];
                 let asked: Vec<&str> = literal.trim_start_matches('/').split('/').collect();
                 // A start of a path, which more is added to.
-                if !literal.ends_with('/') && !matches(&asked) && !one::settings::answered(literal) {
-                    unserved.push(format!("{}:{}: {}", path.strip_prefix(root).unwrap().display(), n + 1, &line[at..end]));
+                let place = format!("{}:{}: {}", path.strip_prefix(root).unwrap().display(), n + 1, &line[at..end]);
+                if !literal.ends_with('/') && !matches(&routes, &asked) && !one::settings::answered(literal) {
+                    unserved.push(place.clone());
+                }
+                if !literal.ends_with('/') && !UNLISTED.contains(&literal) && !matches(&listed, &asked) {
+                    unlisted.push(place);
                 }
             }
         }
     }
     assert!(unserved.is_empty(), "these paths aren't routes of the node (src/api.rs):\n{}", unserved.join("\n"));
+    assert!(unlisted.is_empty(), "these paths aren't in the OpenAPI document (src/api/openapi.rs): add `says` to their route:\n{}", unlisted.join("\n"));
 }
 
 /// What isn't an app's own request (`protocol::path::ROOTS`) is every first segment the API's routes have: a route under

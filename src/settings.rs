@@ -122,6 +122,43 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/vault/grant", Route::VaultGrant, false),
 ];
 
+/// What the OpenAPI document says of a route: a line for whoever reads it (`Tool`'s own, for a tool's route), and the body
+/// `answered_by` reads of it.
+fn about(route: Route) -> (&'static str, Value) {
+    use crate::protocol::schema_of as of;
+    match route {
+        Route::Role => ("Change a user's role", of::<body::Role>()),
+        Route::Remove => ("", of::<body::Remove>()),
+        Route::Settings => ("Change one of the network's settings", of::<body::Setting>()),
+        Route::Group => ("Make a group", of::<body::Named>()),
+        Route::Invite => ("Invite a user to a group", of::<body::Invite>()),
+        Route::Accept => ("Accept a group's invite", of::<body::Group>()),
+        Route::Member => ("Change a user's place in a group", of::<body::Member>()),
+        Route::Handle => ("", of::<body::Handle>()),
+        Route::Name => ("Rename a device", of::<body::Name>()),
+        Route::Service => ("Switch a service on or off on a device", of::<body::Service>()),
+        Route::Retire => ("Delete, restore or erase an app", of::<body::Retire>()),
+        Route::ForgetSignIn => ("Forget a device's sign-in", of::<body::Key>()),
+        Route::InviteLink => ("", of::<body::InviteLink>()),
+        Route::RunSchedules => ("", of::<body::RunSchedules>()),
+        Route::StopSchedules => ("", of::<body::StopSchedules>()),
+        Route::Requests => ("", of::<body::Nothing>()),
+        Route::Approve => ("", of::<body::Approve>()),
+        Route::Refuse => ("Turn down a device waiting to join", of::<body::Code>()),
+        Route::Passkey => ("List a passkey as this user's", of::<body::Passkey>()),
+        Route::Seen => ("Say the waiting devices were seen", of::<body::Nothing>()),
+        Route::VaultGrant => ("", of::<body::VaultGrant>()),
+    }
+}
+
+/// Each route a device answers itself, as the OpenAPI document lists it: its method and path, then `about`.
+pub fn answered_routes() -> impl Iterator<Item = (&'static str, &'static str, &'static str, Value)> {
+    ROUTES.iter().map(|(method, path, route, _)| {
+        let (summary, body) = about(*route);
+        (*method, *path, summary, body)
+    })
+}
+
 /// Whether a device answers the node's route of this path itself, whatever the method.
 pub fn answered(path: &str) -> bool {
     ROUTES.iter().any(|(_, p, _, _)| *p == path)
@@ -212,7 +249,7 @@ mod body {
 
     use crate::database::scopes;
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Role {
         pub user: String,
@@ -220,7 +257,7 @@ mod body {
     }
 
     /// A device by its name or key, or a user by their id or name, with all their devices.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Remove {
         pub device: Option<String>,
@@ -228,20 +265,20 @@ mod body {
     }
 
     /// `value` none sets it back to what it is by default.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Setting {
         pub name: String,
         pub value: Option<String>,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Named {
         pub name: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Invite {
         pub group: String,
@@ -249,14 +286,14 @@ mod body {
         pub role: scopes::Role,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Group {
         pub group: String,
     }
 
     /// `role` none takes them out of the group.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Member {
         pub group: String,
@@ -265,7 +302,7 @@ mod body {
     }
 
     /// A group's handle, or with no `group`, this user's.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Handle {
         pub handle: String,
@@ -273,14 +310,14 @@ mod body {
     }
 
     /// Another device's name, or with no `key`, this one's.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Name {
         pub key: Option<String>,
         pub name: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Service {
         pub device: String,
@@ -289,21 +326,21 @@ mod body {
     }
 
     /// `how`: deleted, restored or erased.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Retire {
         pub app: String,
         pub how: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Key {
         pub key: String,
     }
 
     /// `user` invites someone in the network already; `email` is the Google account a newcomer signs up with.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct InviteLink {
         pub name: String,
@@ -315,7 +352,7 @@ mod body {
 
     /// `device` by its name or key; `scope` user (theirs, the default), global, or a group by its name or id; `days`, 30
     /// at most.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct RunSchedules {
         pub app: String,
@@ -324,7 +361,7 @@ mod body {
         pub days: Option<u64>,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct StopSchedules {
         pub app: String,
@@ -332,14 +369,14 @@ mod body {
         pub scope: Option<String>,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Code {
         pub code: String,
     }
 
     /// Without `confirm`, whose the device showing `code` is.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Approve {
         pub code: String,
@@ -348,7 +385,7 @@ mod body {
     }
 
     /// The passkey's PRF output (base64url), which only the page it signed in on has, and its credential's id.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Passkey {
         pub prf: Option<String>,
@@ -357,7 +394,7 @@ mod body {
 
     /// `device` added to the machines that open `scope`'s Vault (user, the default; global; or a group by its name or
     /// id), or with `on: false`, taken off them.
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct VaultGrant {
         pub scope: Option<String>,
@@ -370,7 +407,7 @@ mod body {
         true
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct Nothing {}
 }
@@ -491,7 +528,7 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             read::<body::Nothing>(path, raw)?;
             seen(m).await?
         }
-        Route::VaultGrant => vault_grant(m, read(path, raw)?).await?,
+        Route::VaultGrant => vault_grant(m, read::<body::VaultGrant>(path, raw)?).await?,
     })
 }
 

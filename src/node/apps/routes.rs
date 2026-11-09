@@ -7,16 +7,21 @@ use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::api::openapi::Op;
 use crate::api::{Body, Error, Me, Reply, Routes, Who, done, given, tagged};
 use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/apps", Who::SignedIn, get(apps))
+        .says(Op::get("Every app the caller can see, with its tools where it's added for them"))
         .route("/v1/labs", Who::SignedIn, get(labs))
+        .says(Op::get("Every lab, for an admin"))
         .route("/v1/deploy", Who::SignedIn, post(deploy))
+        .says(Op::post("Deploy an app, making it first if there's none by that name").body::<Deploy>())
         .route("/v1/schedule", Who::ThisMachine, post(schedule))
         .route("/v1/arrange", Who::SignedIn, post(arrange))
+        .says(Op::post("Arrange one of the caller's pages").body::<Arrange>())
         .route("/v1/fork", Who::ThisMachine, post(fork))
         .route("/v1/source/{app}", Who::ThisMachine, get(source))
 }
@@ -40,7 +45,7 @@ async fn labs(State(node): State<Node>, me: Me) -> Reply {
 
 /// An app's `bundle`, or its `files` (each file's path → its text, built here as `one deploy` builds a folder), to
 /// deploy, making the app first if there's none by that name, owned by `owner` (as `owner` reads it) or the caller.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Deploy {
     app: String,
@@ -97,7 +102,7 @@ async fn schedule(State(node): State<Node>, me: Me, Body(body): Body<Schedule>) 
 
 /// How the local user arranges one of their pages (`pages` with their own: the order of their groups' pages,
 /// `{ order, hidden }`).
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Arrange {
     page: String,

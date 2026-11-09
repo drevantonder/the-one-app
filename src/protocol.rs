@@ -58,9 +58,10 @@ pub mod path {
     pub const BADGES: &str = "/v1/badges";
     pub const APPS: &str = "/v1/apps";
     pub const VAULT: &str = "/v1/vault";
+    pub const OPENAPI: &str = "/api/openapi.json";
     pub const HOOKS_PROMPT: &str = "/hooks/prompt";
     /// The first segments of the API's own routes with more under them (`routes()` holds to it: `api::tests`).
-    pub const ROOTS: [&str; 4] = ["v1", "mcp", "hooks", "skills"];
+    pub const ROOTS: [&str; 5] = ["v1", "api", "mcp", "hooks", "skills"];
 
     /// The app an app's own request (`/<app>/…`, with something after) is for: none for the API's own.
     pub fn app_request(path: &str) -> Option<&str> {
@@ -285,4 +286,15 @@ pub fn javascript() -> String {
         update = json!(UPDATE_REFUSAL),
         call = crate::call::javascript(),
     )
+}
+
+/// `T`'s JSON Schema as the OpenAPI document (src/api/openapi.rs) says it, its description at the top: a whole object, with
+/// no `$defs` to resolve.
+pub fn schema_of<T: schemars::JsonSchema>() -> serde_json::Value {
+    let mut settings = schemars::generate::SchemaSettings::draft2020_12();
+    settings.inline_subschemas = true;
+    let mut schema = settings.into_generator().into_root_schema_for::<T>();
+    schema.remove("$schema");
+    schema.remove("title");
+    schema.to_value()
 }

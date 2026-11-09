@@ -22,6 +22,7 @@ mod calls;
 mod guard;
 mod local;
 mod network;
+pub mod openapi;
 mod reply;
 mod serve;
 mod tools;
@@ -61,6 +62,7 @@ pub enum Who {
 pub struct Routes {
     router: Router<Node>,
     who: Vec<(String, Who)>,
+    listed: Vec<(String, Who, openapi::Op)>,
 }
 
 impl Routes {
@@ -70,9 +72,17 @@ impl Routes {
         self
     }
 
+    /// What the route before says of itself in the OpenAPI document, one for each method it answers.
+    pub fn says(mut self, op: openapi::Op) -> Routes {
+        let (path, who) = self.who.last().expect("a route to say it of").clone();
+        self.listed.push((path, who, op));
+        self
+    }
+
     pub fn merge(mut self, other: Routes) -> Routes {
         self.router = self.router.merge(other.router);
         self.who.extend(other.who);
+        self.listed.extend(other.listed);
         self
     }
 
@@ -91,6 +101,7 @@ pub fn routes() -> Routes {
         .merge(network::routes())
         .merge(calls::routes())
         .merge(tools::routes())
+        .merge(openapi::routes())
         .merge(crate::node::vault::routes::routes())
         .merge(crate::node::backups::routes::routes())
         .merge(crate::node::storage::routes::routes())

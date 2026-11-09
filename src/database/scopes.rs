@@ -849,7 +849,7 @@ pub const APPS_PART: &str = "apps";
 /// Who agents act as when the Vault fills their requests (`vault_fetch`), in an item's apps: no app's name.
 pub const AGENTS: &str = "ai-agents";
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     Admin,

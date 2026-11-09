@@ -6,16 +6,17 @@ use axum::extract::State;
 use axum::routing::post;
 use serde::{Deserialize, Serialize};
 
+use crate::api::openapi::Op;
 use crate::api::{Body, Me, Reply, Routes, Who};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
-    Routes::default().route("/v1/backups/place", Who::SignedIn, post(place))
+    Routes::default().route("/v1/backups/place", Who::SignedIn, post(place)).says(Op::post("Add a place backups go, after trying it").body::<Place>())
 }
 
 /// A place to add, a folder (`path`) or S3-compatible storage (`endpoint…`), after trying it (only trying it, with
 /// `test`).
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Place {
     #[serde(skip_serializing_if = "Option::is_none")]

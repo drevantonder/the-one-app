@@ -46,7 +46,7 @@ pub(super) struct Opened {
 
 /// Keys a call needs that it wasn't handed: the API answers 428 with them, and with this device's key and the key to
 /// seal them to.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, schemars::JsonSchema)]
 pub struct Needs {
     pub need: Vec<Need>,
     pub to: String,

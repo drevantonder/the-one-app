@@ -7,18 +7,21 @@ use axum::routing::post;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::api::openapi::Op;
 use crate::api::{Body, Me, Reply, Routes, Who, done, given};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/pair", Who::SignedIn, post(pair))
+        .says(Op::post("A pairing code for a new device or someone new").body::<Pair>())
         .route("/v1/name", Who::ThisMachine, post(name))
         .route("/v1/erase", Who::SignedIn, post(erase))
+        .says(Op::post("Erase what a device keeps").body::<Device>())
         .route("/v1/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Pair {
     user: Option<String>,
@@ -43,7 +46,7 @@ async fn name(State(node): State<Node>, Body(body): Body<Name>) -> Reply {
 }
 
 /// A device, by its key.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Device {
     key: String,

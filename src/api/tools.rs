@@ -56,4 +56,50 @@ mod tests {
             }
         }
     }
+
+    /// A tool's input schema is all its handler can get (`serve` refuses anything else), so an input it reads and the
+    /// schema leaves out is one that never reaches it, the same as a misspelled one.
+    #[test]
+    fn a_tool_reads_only_the_inputs_its_schema_takes() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut served: std::collections::HashMap<&str, (String, std::collections::VecDeque<String>)> = Default::default();
+        for feature in all() {
+            let folder = if matches!(feature.name, "add" | "remove") { "app" } else { feature.name };
+            let (source, queue) = served.entry(folder).or_insert_with(|| {
+                let source = std::fs::read_to_string(root.join(folder).join("tools.rs")).unwrap();
+                let queue = source.split("serves!(serve::").skip(1).map(|s| s.split(')').next().unwrap().to_string()).collect();
+                (source, queue)
+            });
+            for tool in &feature.tools {
+                let name = feature.mcp_name(&tool.spec);
+                let f = queue.pop_front().unwrap_or_else(|| panic!("{name}: a tool for each serves! in {folder}/tools.rs"));
+                let (mut reads, mut seen) = (Default::default(), Default::default());
+                inputs_read(source, &f, &mut reads, &mut seen);
+                for input in reads {
+                    assert!(crate::tools::takes(&tool.spec["input"], &input), "{name}'s handler reads {input}, which its input schema doesn't take");
+                }
+            }
+        }
+        assert!(served.values().all(|(_, queue)| queue.is_empty()), "a tool for each serves!");
+    }
+
+    /// The inputs `f` reads in `source`, and the functions of `source` it hands its input to read.
+    fn inputs_read(source: &str, f: &str, reads: &mut std::collections::BTreeSet<String>, seen: &mut std::collections::BTreeSet<String>) {
+        let Some(at) = source.find(&format!("fn {f}(")) else { return };
+        if !seen.insert(f.to_string()) {
+            return;
+        }
+        let body = source[at..].split("\n    }\n").next().unwrap();
+        for form in ["input.get(\"", "input[\"", "text(&input, \"", "text(input, \""] {
+            reads.extend(body.match_indices(form).map(|(i, _)| body[i + form.len()..].split('"').next().unwrap().to_string()));
+        }
+        for line in body.lines().filter(|l| l.contains("input")) {
+            for (i, _) in line.match_indices('(') {
+                let word = line[..i].rsplit(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap();
+                if !word.is_empty() {
+                    inputs_read(source, word, reads, seen);
+                }
+            }
+        }
+    }
 }

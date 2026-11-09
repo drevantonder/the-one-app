@@ -513,7 +513,7 @@ pub fn forwarded(call: &Value, user: &str, client: &str, from: &[u8; 32], seal: 
 }
 
 /// A key a call lacked, which its caller hands it when it sends the call again: what a node answers with 428.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Need {
     pub scope: String,
     pub epoch: u32,
@@ -587,10 +587,19 @@ pub fn may_hand(route: &Route, need: &Need) -> bool {
     match (route.app(), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,
         (None, Route::Path(p)) if matches!(p.as_str(), path::MCP | path::BADGES) || p == path::WIDGETS || p.starts_with(&format!("{}/", path::WIDGETS)) => apps || node(&[VAULT, LOG]) || code,
-        (None, Route::Path(p)) if p == path::APPS => node(&[LOG]) || code,
+        (None, Route::Path(p)) if p == path::APPS || p == path::OPENAPI => node(&[LOG]) || code,
         (None, Route::Path(p)) if p == path::VAULT || p.starts_with(&format!("{}/", path::VAULT)) => node(&[VAULT, LOG]),
         (None, _) => node(&[LOG]),
     }
+}
+
+/// What `may_hand` lets a client hand with `route`, as the OpenAPI document says it: an app's own database (`app`, any
+/// app's on what draws several), the Vault's, the log's, and the code apps run from, in `global`'s blobs.
+pub fn hands(route: &Route) -> Vec<&'static str> {
+    use crate::database::scopes::{APP, APP_DATABASE, CoreDb};
+    let need = |scope: &str, app: &str, database: &str| Need { scope: scope.into(), epoch: 1, app: app.into(), database: database.into() };
+    let kinds = [("app", need("user:x", route.app().unwrap_or("x"), APP_DATABASE)), ("vault", need("user:x", APP, CoreDb::Vault.name())), ("log", need("user:x", APP, CoreDb::Log.name())), ("code", need("global", APP, CoreDb::Blobs.name()))];
+    kinds.into_iter().filter(|(_, need)| may_hand(route, need)).map(|(kind, _)| kind).collect()
 }
 
 /// The oldest epoch of `database`'s key a reader needs, of a scope whose newest epoch is `newest`: the one its newest
@@ -747,7 +756,7 @@ mod tests {
         // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
         // blobs, its users' files, never.
         let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
-        assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/v1/badges"), &blobs("global")) && may_hand(&at("/v1/widgets/show"), &blobs("global")) && may_hand(&at("/v1/apps"), &blobs("global")));
+        assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/v1/badges"), &blobs("global")) && may_hand(&at("/v1/widgets/show"), &blobs("global")) && may_hand(&at("/v1/apps"), &blobs("global")) && may_hand(&at(crate::protocol::path::OPENAPI), &blobs("global")));
         assert!(!may_hand(&at("/v1/apps"), &need("tally", "main")) && !may_hand(&at("/v1/apps"), &blobs("user:ab")));
         assert!(!may_hand(&call("tally"), &blobs("user:ab")) && !may_hand(&at("/mcp"), &blobs("group:cd")) && !may_hand(&at("/v1/state"), &blobs("global")));
         assert_eq!(oldest_needed("main", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");

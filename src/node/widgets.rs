@@ -6,6 +6,7 @@ pub(crate) mod routes {
     use axum::routing::get;
     use serde_json::json;
 
+    use crate::api::openapi::Op;
     use crate::api::{Me, Reply, Routes, Who};
     use crate::node::Node;
     use serde::Deserialize;
@@ -13,10 +14,12 @@ pub(crate) mod routes {
     pub fn routes() -> Routes {
         Routes::default()
             .route("/v1/widgets", Who::SignedIn, get(widgets))
+            .says(Op::get("The caller's widgets, drawn by their apps").query::<WidgetsQuery>())
             .route("/v1/badges", Who::SignedIn, get(badges))
+            .says(Op::get("The caller's badges").query::<WidgetsQuery>())
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     struct WidgetsQuery {
         scope: Option<String>,
     }
