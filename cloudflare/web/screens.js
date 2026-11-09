@@ -44,8 +44,9 @@ export const tell = (m) => {
   for (const f of frames) f.frame.contentWindow?.postMessage(m, "*");
 };
 
-/// What this device keeps of the screens it showed, until it signs out: each route's page as the node last gave it
-/// (`page`), and its still (`still`), the page as it last looked here without its scripts, which bridge.js sends.
+/// What this device keeps of the screens it showed, until it signs out, for the user who saw them: each route's page as
+/// the node last gave it (`page`), and its still (`still`), the page as it last looked here without its scripts, which
+/// bridge.js sends.
 const kept = {
   // An https URL of its own, which the cache takes on any page's origin (the app's tauri:// one too, where it
   // takes only http and https).
@@ -191,6 +192,8 @@ function screenIn(box, r, from) {
   if (!ready) return frameFor(r, layerFor(box, r, from));
   spare = null;
   const { into, frame } = ready;
+  // The look may have changed since it was made.
+  frame.contentWindow?.postMessage({ oneLook: appearance() }, "*");
   into.className = from ? "screen-layer coming" : "screen-layer";
   if (platform.phone() && !home(r)) into.dataset.bar = "";
   frame.removeAttribute("aria-hidden");
@@ -246,6 +249,8 @@ function frameFor(r, into, { sheet, kitted } = {}) {
     const html = await written(page);
     if (f.page !== page) return;
     f.html = html;
+    f.dimmed = false;
+    if (showing === f) dimmed();
     frame.src = framePage();
   };
   // A kept page whose fresh one is slow to come (its devices gone quiet, not refusing) is the window's being offline too.
@@ -351,6 +356,8 @@ function retire(layer) {
   layer.dataset.parked = "";
   parked.delete(parkKey(f.route));
   parked.set(parkKey(f.route), f);
+  // Left, as if it had gone: whatever it was in the middle of (arranging, a sheet of its own) ends.
+  f.frame.contentWindow?.postMessage({ oneLeft: true }, "*");
   for (const old of [...parked.keys()].slice(0, -PARKED)) (drop(parked.get(old).into), parked.delete(old));
 }
 
@@ -360,7 +367,10 @@ function announced(f, begin) {
   f.begun = true;
   begin();
   if ("said" in f) saying(f);
+  dimmed();
 }
+/// While the screen showing has a dialog of its own open, which dims only its frame, the window dims around it.
+const dimmed = () => document.body.toggleAttribute("data-dimmed", !!showing?.dimmed);
 function saying(f) {
   titled.forEach((fn) => fn(f.said));
   document.title = f.said || String(f.name || "") || titleOf(f.route);
@@ -384,7 +394,7 @@ export const screen = {
   ready(detail, r) {
     const key = JSON.stringify(r);
     const box = $(".screen", detail);
-    if (!box || readied?.key === key || showing?.key === key || !showing?.into.isConnected || parked.has(parkKey(r))) return;
+    if (!box || readied?.key === key || showing?.key === key || coming?.key === key || !showing?.into.isConnected || parked.has(parkKey(r))) return;
     if (r.kind === "own" && settingsItems().some((i) => i.name === r.name && i.url && here(i.url))) return;
     if (readied) drop(readied.into);
     readied = screenIn(box, r, showing.into);
@@ -402,7 +412,7 @@ export const screen = {
     const early = readied?.key === key ? readied : null;
     if (readied && readied !== early) drop(readied.into);
     readied = null;
-    if (showing?.key === key && showing.into.isConnected) return void announced(showing, begin);
+    if (showing?.key === key && showing.into.isConnected) return (showing.leaving = false), void announced(showing, begin);
     const box = $(".screen", detail) || detail.insertAdjacentElement("afterbegin", Object.assign(document.createElement("div"), { className: "screen" }));
     const from = showing?.into.isConnected ? showing.into : null;
     if (!from && showing) drop(showing.into);
@@ -557,7 +567,8 @@ addEventListener("message", async (e) => {
   // The panel's window, and a sheet, fit their screen.
   if (typeof e.data?.oneHeight === "number") return void (f.sheet ? f.sheet.fit(e.data.oneHeight) : platform.fit(e.data.oneHeight));
   if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill, f.frame.clientWidth));
-  if (e.data?.oneShown) return void ((f.shown = true), $(".screen-status", f.into)?.remove());
+  if (e.data?.oneShown) return void ((f.shown = true), $(".screen-status", f.into)?.remove(), f.frame.contentWindow?.postMessage({ oneOffline: !!offline.banner() }, "*"));
+  if (e.data?.oneDimmed !== undefined) return void (f.sheet || ((f.dimmed = !!e.data.oneDimmed), showing === f && dimmed()));
   if (e.data?.oneDrawn) return void screenDrew(f);
   const { one: m, id } = e.data || {};
   if (!m || typeof m !== "object") return;

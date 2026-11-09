@@ -14,6 +14,9 @@ html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
 .screen-layer.coming { opacity: 0; pointer-events: none; }
 .screen-layer[data-parked] { visibility: hidden; pointer-events: none; }
 .screen-layer[data-bar] { top: 2.75rem; }
+/* A dialog in a screen's frame darkens only that frame, by the overlay's black at 50%; these match it around the frame. */
+[data-slot=sidebar-container], [data-slot=shell-bar], [data-slot=banner] { transition: filter 150ms linear; }
+body[data-dimmed] :is([data-slot=sidebar-container], [data-slot=shell-bar], [data-slot=banner]) { filter: brightness(0.5); pointer-events: none; }
 /* A screen with a large title reaches up behind the bar, that title's middle (--title-middle, by its top padding and
    text size) on the bar's. */
 :root { --title-middle: 2.125rem; }

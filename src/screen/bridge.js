@@ -36,6 +36,8 @@
       if (m.oneEvent) one.__event(m.oneEvent);
       if (m.oneFocus && lastFocus?.isConnected) lastFocus.focus({ preventScroll: true });
       if (m.oneBar !== undefined) ((barStart = m.oneBar), placeLargeTitle("margin-inline-start 200ms linear"));
+      if (m.oneLeft) (handlers.left || []).forEach((f) => f());
+      if (m.oneOffline !== undefined) ((windowSays = m.oneOffline), note());
       const w = waiting[m.oneReply];
       if (!w) return;
       delete waiting[m.oneReply];
@@ -57,13 +59,19 @@
       const now = Math.ceil(document.body?.scrollHeight || 0);
       if (now !== tall) window.parent.postMessage({ oneHeight: (tall = now) }, "*");
     };
+    // A dialog of this screen's own over it, for the page holding the frame to dim what's around it to match.
+    let dialog = false;
+    const dimming = () => {
+      const now = !!document.querySelector("[data-slot=dialog-overlay], [data-slot=sheet-overlay], [data-slot=alert-dialog-overlay]");
+      if (now !== dialog) window.parent.postMessage({ oneDimmed: (dialog = now) }, "*");
+    };
     addEventListener("load", () => {
       loaded = true;
       window.parent.postMessage({ oneShown: true }, "*");
       settled();
       setTimeout(() => ((patient = false), settled()), 120);
       if (window.ResizeObserver && document.body) new ResizeObserver(measure).observe(document.body);
-      new MutationObserver(() => (later(), settled())).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
+      new MutationObserver(() => (later(), settled(), dimming())).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
       addEventListener("scroll", later, { passive: true });
       later();
     });
@@ -150,6 +158,8 @@
   const landed = new Map();
   // Calls answered from what was kept a while ago, by their key, while their answer is still out: what the note says.
   const old = new Map();
+  // Whether the page holding the frame already says this for the whole window (its offline banner).
+  let windowSays = false;
   async function call(tool, input) {
     const m = { type: "call", app: ctx.app, tool, input };
     const key = JSON.stringify([tool, input]);
@@ -176,7 +186,7 @@
   // How old what shows is, while its fresh answer is late: one grey line at its foot, gone once it's in.
   function note() {
     let el = document.getElementById("one-kept");
-    if (!old.size) return el?.remove();
+    if (!old.size || windowSays) return el?.remove();
     if (!document.body) return;
     if (!el) document.body.prepend((el = Object.assign(document.createElement("div"), { id: "one-kept", className: "kept-note" })));
     el.textContent = `As of ${one.ago(Math.min(...old.values()), { long: true })}`;
@@ -271,8 +281,9 @@
         return { title: "That didn’t work.", safe: "Nothing was lost.", next: "" };
       // Something that isn't there won't be there on a second try,
       // and neither will what isn't allowed, or needs signing in first: `final` says trying again can't work.
-      const final = err?.code === "refused" || err?.code === "not_signed_in" || /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b|^no \w+ [\w./-]+\.?$/i.test(msg);
-      return { title: said, safe: "Nothing was lost.", next: "", final };
+      const final = err?.code === "refused" || err?.code === "not_signed_in" || err?.code === "not_added" || /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b|^no \w+ [\w./-]+\.?$/i.test(msg);
+      // What is on its way needs nobody: it's said in no colour (Problem's `quiet`).
+      return { title: said, safe: "Nothing was lost.", next: "", final, mends: err?.code === "restarting" && /\bstarting\b/i.test(msg) };
     },
     // A large title at the top of a screen, as iOS draws one: the window's own title stays empty while it shows, and is
     // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so

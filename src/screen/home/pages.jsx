@@ -11,7 +11,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Badge, Button, cn, Empty, Hint, Icon, Label, Problem, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, useWidth, WidgetCard } from "@one/ui"
+import { AppIcon, Badge, Button, Empty, Hint, Icon, Label, LoadFailure, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, WidgetCard, cn, useWidth } from "@one/ui"
 import { home } from "./lib/model.js"
 
 const { scope: chosen, swipe } = one.params || {}
@@ -314,6 +314,14 @@ function edit(on) {
   if (S.leaving) dying = setTimeout(() => { S.leaving = false; S.render() }, LEAVING)
   S.render()
 }
+
+// The window keeps this page alive behind what it opens: leaving it ends what it was doing, as if it had gone.
+one.on("left", () => {
+  S.editing = S.leaving = false
+  S.undo = []
+  S.dialog = null
+  S.render()
+})
 
 /// Swiping, the page shown is `scope`: arranging ends where the page it was on is left, as it does in a window.
 function arrive(scope) {
@@ -1088,7 +1096,7 @@ function Pages() {
     strip.current.scrollLeft = scopes.indexOf(S.at) * strip.current.clientWidth
   }, [key])
 
-  if (phase === "error") return <div className="p-5"><Problem title={snap.problem.title} text={snap.problem.next} action={{ label: "Try Again", run: S.retry }} /></div>
+  if (phase === "error") return <div className="p-5"><LoadFailure problem={snap.problem} retry={S.retry} /></div>
   if (phase !== "ready") return slow ? <Waiting /> : null
   return (
     <div className="fixed inset-0 select-none overflow-hidden [-webkit-touch-callout:none] [-webkit-user-select:none]">

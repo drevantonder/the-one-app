@@ -6,7 +6,8 @@
      say) it has this origin, and does nothing. -->
 <script>
   // A frame of a colour scheme its window isn't has an opaque canvas, the wrong colour until the screen is written in.
-  document.documentElement.style.colorScheme = location.hash === "#automatic" ? "light dark" : location.hash.slice(1);
+  const look = (l) => (document.documentElement.style.colorScheme = l === "automatic" ? "light dark" : l);
+  look(location.hash.slice(1));
   if (self.origin === "null") {
     addEventListener("message", function take(e) {
       if (e.source !== parent) return;
@@ -16,10 +17,12 @@
         document.head.append(Object.assign(document.createElement("script"), { textContent: e.data.oneKit }));
         document.open();
         document.close();
+        look(location.hash.slice(1));
         addEventListener("message", take);
         parent.postMessage({ oneKitted: typeof OneUI === "object" }, "*");
         return;
       }
+      if (typeof e.data?.oneLook === "string") return void look(e.data.oneLook);
       if (typeof e.data?.oneScreen !== "string") return;
       removeEventListener("message", take);
       document.open();

@@ -48,6 +48,8 @@ function under(r) {
 /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens deeper than the sidebar is pushed
 /// on top, so Back returns to it.
 export function go(r, { pushed = false } = {}, opened) {
+  // Already there (a double tap): one Back still leaves it.
+  if (href(r) === location.pathname + location.search) return moved(opened);
   // Pushed on a screen, the sidebar keeps what it had selected, and the bar offers Back.
   const state = pushed ? { back: true, selection: history.state?.selection || location.pathname + location.search } : null;
   history.pushState(state, "", href(r));

@@ -35,7 +35,11 @@ export function render(opened) {
 whenChanged(render);
 whenMoved(render);
 whenTitled((title) => windowShown && title !== barTitle && ((barTitle = title), drawWindow()));
-offline.whenChanged(() => windowShown && !platform.panel && drawWindow());
+offline.whenChanged(() => {
+  // The banner says it for every screen: none needs its own "As of" under it.
+  tell({ oneOffline: !!offline.banner() });
+  if (windowShown && !platform.panel) drawWindow();
+});
 
 /// The sidebar's open or closed on a computer's width, as the user left it.
 const SIDEBAR = "one.sidebar";
