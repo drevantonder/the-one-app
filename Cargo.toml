@@ -103,8 +103,114 @@ hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true
 [build-dependencies]
 toml = "0.9"
 
-# Crypto, CBOR and SQLite are unbearably slow unoptimized, even while developing.
-[profile.dev.package."*"]
+# Crypto, CBOR and SQLite are unbearably slow unoptimized, even while developing. Named, not `"*"`: that would optimize every
+# proc macro and build script too (cargo gives a package override precedence over build-override), most of a cold build.
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+
+[profile.dev.package.rusqlite]
+opt-level = 3
+
+[profile.dev.package.aes]
+opt-level = 3
+
+[profile.dev.package.aes-gcm]
+opt-level = 3
+
+[profile.dev.package.ghash]
+opt-level = 3
+
+[profile.dev.package.polyval]
+opt-level = 3
+
+[profile.dev.package.cipher]
+opt-level = 3
+
+[profile.dev.package.ctr]
+opt-level = 3
+
+[profile.dev.package.universal-hash]
+opt-level = 3
+
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+
+[profile.dev.package.fiat-crypto]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.sha1_smol]
+opt-level = 3
+
+[profile.dev.package.md-5]
+opt-level = 3
+
+[profile.dev.package.blake3]
+opt-level = 3
+
+[profile.dev.package.digest]
+opt-level = 3
+
+[profile.dev.package.hmac]
+opt-level = 3
+
+[profile.dev.package.hkdf]
+opt-level = 3
+
+[profile.dev.package.chacha20]
+opt-level = 3
+
+[profile.dev.package.rand_chacha]
+opt-level = 3
+
+[profile.dev.package.ring]
+opt-level = 3
+
+[profile.dev.package.p256]
+opt-level = 3
+
+[profile.dev.package.ecdsa]
+opt-level = 3
+
+[profile.dev.package.crypto-bigint]
+opt-level = 3
+
+[profile.dev.package.ciborium]
+opt-level = 3
+
+[profile.dev.package.ciborium-ll]
+opt-level = 3
+
+[profile.dev.package.flate2]
+opt-level = 3
+
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
+[profile.dev.package.zlib-rs]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package.crc32fast]
+opt-level = 3
+
+[profile.dev.package.simd-adler32]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.jpeg-decoder]
+opt-level = 3
+
+[profile.dev.package.image]
 opt-level = 3
 
 # Line numbers are all a failing test needs, and full debug info is most of what linking the tests takes.
