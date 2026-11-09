@@ -58,8 +58,16 @@ function received(m) {
 
 let send = () => {};
 
+// A desktop app's window and its menu bar panel share one client, led by one page: the panel's redraw as its device is
+// let in hands it to the other, mid-ask. What only says who this is, or asks to be let in, is asked of the new one.
+const ASKED_AGAIN = new Set(["start", "ask", "waited"]);
+
 function lost() {
   for (const [id, w] of waiting) {
+    if (w.again) {
+      send(w.again);
+      continue;
+    }
     waiting.delete(id);
     const err = new Error(`${Yours} restarted. Try again.`);
     if (w.body) w.body.error(err);
@@ -123,7 +131,7 @@ if (url && !self.__oneNative && typeof SharedWorker === "function") {
 function ask(m, transfer) {
   const id = `${tab}:${++n}`;
   return new Promise((resolve, reject) => {
-    waiting.set(id, { resolve, reject });
+    waiting.set(id, { resolve, reject, again: ASKED_AGAIN.has(m.op) ? { ...m, id } : null });
     send({ ...m, id }, transfer);
   });
 }
