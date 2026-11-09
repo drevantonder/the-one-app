@@ -570,7 +570,7 @@ impl std::fmt::Display for Route {
 
 /// Whether a client hands a node the key of `need`'s database with a kind of request (`route`), when the node asks (428):
 /// only what that kind of request can use. One that runs an app, that app's databases; an
-/// MCP request (`/mcp`), which may run any, or widgets and badges, which run every app's, apps' own databases; and each
+/// MCP request (`/mcp`), which may run any, or widgets (and the tool that shows them) and badges, which run every app's, apps' own databases; and each
 /// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
 /// blobs, where apps' deployed code is (a node that keeps nothing, the Cloudflare node, reads it there). The list of
 /// apps, which says what each does from its code, the log and that code. The Vault's routes, its Vault and log; any
@@ -586,7 +586,7 @@ pub fn may_hand(route: &Route, need: &Need) -> bool {
     let code = need.scope == "global" && node(&[BLOBS]);
     match (route.app(), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,
-        (None, Route::Path(p)) if matches!(p.as_str(), path::MCP | path::WIDGETS | path::BADGES) => apps || node(&[VAULT, LOG]) || code,
+        (None, Route::Path(p)) if matches!(p.as_str(), path::MCP | path::BADGES) || p == path::WIDGETS || p.starts_with(&format!("{}/", path::WIDGETS)) => apps || node(&[VAULT, LOG]) || code,
         (None, Route::Path(p)) if p == path::APPS => node(&[LOG]) || code,
         (None, Route::Path(p)) if p == path::VAULT || p.starts_with(&format!("{}/", path::VAULT)) => node(&[VAULT, LOG]),
         (None, _) => node(&[LOG]),
@@ -733,7 +733,7 @@ mod tests {
         // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
         // blobs, its users' files, never.
         let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
-        assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/v1/badges"), &blobs("global")) && may_hand(&at("/v1/apps"), &blobs("global")));
+        assert!(may_hand(&call("tally"), &blobs("global")) && may_hand(&Route::Screens("tally".into()), &blobs("global")) && may_hand(&at("/v1/badges"), &blobs("global")) && may_hand(&at("/v1/widgets/show"), &blobs("global")) && may_hand(&at("/v1/apps"), &blobs("global")));
         assert!(!may_hand(&at("/v1/apps"), &need("tally", "main")) && !may_hand(&at("/v1/apps"), &blobs("user:ab")));
         assert!(!may_hand(&call("tally"), &blobs("user:ab")) && !may_hand(&at("/mcp"), &blobs("group:cd")) && !may_hand(&at("/v1/state"), &blobs("global")));
         assert_eq!(oldest_needed("main", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");

@@ -14,7 +14,6 @@ use serde_json::{Map, Value, json};
 
 pub mod backups;
 pub mod devices;
-pub mod widgets;
 
 /// What a tool that needs the user's yes does, wherever it's said.
 pub const SENDS: &str = "sends or can't be undone";
@@ -211,7 +210,7 @@ impl Feature {
 
 /// Every feature's, in the order they're listed.
 pub fn all() -> Vec<Feature> {
-    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), crate::vault::tools::feature(), backups::feature(), crate::groups::tools::feature(), devices::feature(), widgets::feature(), crate::push::tools::feature(), crate::logs::feature()]
+    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), crate::vault::tools::feature(), backups::feature(), crate::groups::tools::feature(), devices::feature(), crate::widgets::tools::feature(), crate::push::tools::feature(), crate::logs::feature()]
 }
 
 /// The feature with the tool `name` (as MCP names it), and the tool's place in it.
