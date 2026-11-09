@@ -37,7 +37,13 @@
       if (m.oneFocus && lastFocus?.isConnected) lastFocus.focus({ preventScroll: true });
       if (m.oneBar !== undefined) ((barStart = m.oneBar), placeLargeTitle("margin-inline-start 200ms linear"));
       if (m.oneLeft) (handlers.left || []).forEach((f) => f());
-      if (m.oneOffline !== undefined) ((windowSays = m.oneOffline), note());
+      if (m.oneOffline !== undefined) {
+        const back = windowSays && !m.oneOffline;
+        windowSays = m.oneOffline;
+        note();
+        // What the screen shows may have changed while the window couldn't hear of it, and what failed can work now.
+        if (back) (landed.clear(), handlers.changed.forEach((f) => f({ type: "changed", apps: [ctx.app] })));
+      }
       const w = waiting[m.oneReply];
       if (!w) return;
       delete waiting[m.oneReply];
@@ -106,17 +112,20 @@
 
   // The screen has drawn, for the page holding the frame to show it in place of what shows there: it's loaded and has
   // what it asked for, a moment after its last call came back; or, once that's kept the user waiting (`patient` is over),
-  // it has something to show for now: its title, or grey shapes. It says so once.
-  let loaded = false, out = 0, told = false, quiet = 0, patient = true;
+  // it has something to show for now: its title, or grey shapes.
+  let loaded = false, out = 0, told = "", quiet = 0, patient = true;
   const showsSomething = () => !!document.body && (!!document.body.innerText.trim() || !!document.querySelector("[data-slot=skeleton], img, svg, canvas, input, button"));
-  const drawnEnough = () => !out || (!patient && showsSomething());
+  // Done: what it asked has come. Early: it's kept the user waiting, and has only its title or grey shapes to show, which
+  // a page holding a still of the screen won't swap it for.
+  const stage = () => (!out ? "done" : !patient && showsSomething() ? "early" : "");
   function settled() {
-    if (told || !loaded || !framed || !drawnEnough()) return;
+    if (told === "done" || !loaded || !framed || !stage() || stage() === told) return;
     clearTimeout(quiet);
     quiet = setTimeout(() => {
-      if (told || !drawnEnough()) return;
-      told = true;
-      window.parent.postMessage({ oneDrawn: true }, "*");
+      const now = stage();
+      if (!now || now === told) return;
+      told = now;
+      window.parent.postMessage({ oneDrawn: true, early: now === "early" }, "*");
     }, out ? 0 : 50);
   }
 

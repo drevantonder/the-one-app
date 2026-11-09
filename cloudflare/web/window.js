@@ -115,6 +115,9 @@ export async function listen() {
     const started = Date.now();
     try {
       const r = await api("/v1/events", { raw: true, signal: mine.signal });
+      // Heard from a node again: whatever else is waiting on one is asked now, not when its turn comes.
+      offline.done("events");
+      if (offline.waiting.size) offline.now();
       if (r.status === 204) {
         await sleep(60_000);
         continue;
@@ -137,6 +140,8 @@ export async function listen() {
       if (err.signedOut) return err.removed ? undefined : void signOut();
     }
     if (Date.now() - started > 10_000) misses = 0;
+    // What shows may be out of date from here on, with nothing to say so until it's asked for again.
+    if (!mine.signal.aborted) offline.add("events", () => api("/v1/state"));
     if (!mine.signal.aborted) await sleep(retryWait(misses++));
   }
 }
