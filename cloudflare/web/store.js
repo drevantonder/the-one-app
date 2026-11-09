@@ -64,6 +64,9 @@ export function titleOf(r) {
   return a?.screens?.find((s) => s.name === r.screen)?.title || label(a) || r.app;
 }
 
+/// What the tab, a bookmark and the history call a screen: its title, and the network's name after it.
+export const tabTitle = (title) => (title ? `${title} – ${config().name}` : config().name);
+
 /// The window as it was last (and when), drawn before the node answers, its user's alone.
 const LAST = "one.last.window";
 const lastKey = () => `${LAST}.${platform.user()}`;

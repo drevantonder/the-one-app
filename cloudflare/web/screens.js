@@ -8,7 +8,7 @@ import { CODES } from "../shared/protocol.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
 import { back, go, home, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
-import { KEPT_SCREENS, app, config, here, joined, keeping, reads, settingAt, settingsItems, titleOf } from "./store.js";
+import { KEPT_SCREENS, app, config, here, joined, keeping, reads, settingAt, settingsItems, tabTitle, titleOf } from "./store.js";
 import { $, h, reveal, ui } from "./view.js";
 
 let frames = [];
@@ -373,7 +373,7 @@ function announced(f, begin) {
 const dimmed = () => document.body.toggleAttribute("data-dimmed", !!showing?.dimmed);
 function saying(f) {
   titled.forEach((fn) => fn(f.said));
-  document.title = f.said || String(f.name || "") || titleOf(f.route);
+  document.title = tabTitle(f.said || String(f.name || "") || titleOf(f.route));
 }
 
 /// A layer for `r`'s screen in `box`, hidden while `from` still shows.
@@ -403,7 +403,7 @@ export const screen = {
   /// Shows `r` where the window shows screens. What shows stays until `r`'s next has drawn; a nav away from it goes the
   /// same way. `begin` puts the window's bar on it, when it starts to show (as a phone's goes back, when it's left).
   show(detail, r, begin = () => {}, opened) {
-    document.title = titleOf(r);
+    document.title = tabTitle(titleOf(r));
     devtools.since = Date.now();
     devtools.draw();
     settle();
