@@ -500,7 +500,7 @@ fn only_its_users_own_device_or_an_admins_answers_a_request() {
         let asked = B64U.encode(signed(by, &format!("DELETE /api/auth/devices/requests/{key}"), json!({})).to_string().as_bytes());
         agent.delete(format!("{}/api/auth/devices/requests/{key}{query}", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16()
     };
-    let theirs = |by: &ed25519_dalek::SigningKey, key: &str, user: &str| post(&format!("{}/api/auth/devices/theirs", k.address), &[], signed(by, "POST /api/auth/devices/theirs", json!({ "key": key, "user": user }))).0;
+    let theirs = |by: &ed25519_dalek::SigningKey, key: &str, user: &str| post(&format!("{}/api/auth/devices/theirs", k.address), &[], signed(by, "POST /api/auth/devices/theirs", json!({ "key": key, "user": user, "name": "A computer" }))).0;
 
     assert_eq!(answer(&sams_box, "?approved"), 403, "a device auth knows no user of answered someone's request");
     assert_eq!(answer(&stranger, ""), 403, "and forgot it");
@@ -509,7 +509,10 @@ fn only_its_users_own_device_or_an_admins_answers_a_request() {
     assert_eq!(answer(&stranger, "?approved"), 403, "another user's device answered it");
     assert_eq!(theirs(&admin, &sams_box_hex, &sam), 200);
     assert_eq!(answer(&sams_box, "?approved"), 200, "their own device answers it");
-    assert_eq!(theirs(&sams_box, &stranger_hex, &sam), 200, "and says what else is theirs, as it pairs a computer");
+    let computer = HEXLOWER.encode(&rand::random::<[u8; 32]>());
+    assert_eq!(theirs(&sams_box, &computer, &sam), 200, "and says what else is theirs, as it pairs a computer");
+    assert_eq!(theirs(&sams_box, &stranger_hex, &sam), 409, "a member took over another user's device");
+    assert_eq!(theirs(&admin, &stranger_hex, &sam), 200, "an admin's device says whose it is");
 
     // Whoever signed in can name any key: it doesn't change whose one already is.
     let mut lees = k.browser();
@@ -702,7 +705,7 @@ fn a_sign_in_finished_from_a_link_says_so() {
         let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
         let (key, join) = (data_encoding::HEXLOWER.encode(&device.key), format!("{}{}", data_encoding::HEXLOWER.encode(&device.key), data_encoding::HEXLOWER.encode(&device.seal)));
         let mut b = k.browser();
-        let redirect = format!("{}{back}", k.address);
+        let redirect = if back.starts_with('/') { format!("{}{back}", k.address) } else { back.to_string() };
         let (status, client) = b.post("/api/auth/oauth2/register", json!({ "client_name": "A client", "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
         assert_eq!(status, 201, "{client}");
         let client = client["client_id"].as_str().unwrap().to_string();
@@ -744,6 +747,16 @@ fn a_sign_in_finished_from_a_link_says_so() {
     assert!(linked["sign_in"]["by_link"]["passkey"].is_object(), "{linked}");
     // As a site that sent the user a link does.
     assert_eq!(carried("/elsewhere")["goes_straight_in"], false);
+    // Only loopback and the apps' own link count as on the device: another scheme can open any site.
+    assert_eq!(carried("intent://attacker.example/cb")["goes_straight_in"], false);
+    assert_eq!(carried(&format!("{}://signed-in/", one::config::CLI))["goes_straight_in"], true, "the native apps' own link");
+    assert_eq!(carried("http://127.0.0.1:49152/callback")["goes_straight_in"], true, "a computer's loopback");
+    // Where a client's sign-ins go can't be changed once it's registered, nor a client made any other way.
+    let registered = first.post("/api/auth/oauth2/register", json!({ "client_name": "Theirs", "redirect_uris": ["https://attacker.example/cb"], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
+    assert_eq!(registered.0, 201, "{}", registered.1);
+    let update = json!({ "client_id": registered.1["client_id"], "update": { "redirect_uris": ["http://127.0.0.1:1/cb"] } });
+    assert!(first.post("/api/auth/oauth2/update-client", update).0 >= 400, "its owner changed where its sign-ins go");
+    assert!(first.post("/api/auth/oauth2/create-client", json!({ "redirect_uris": ["http://127.0.0.1:1/cb"] })).0 >= 400);
 }
 
 /// A browser's push subscription, as its push service hands it to the push Worker and decrypts what's pushed to it
@@ -853,6 +866,12 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
     assert_eq!(approved(&HEXLOWER.encode(&mac.key)), 200);
     let notes = pushed(sub);
     assert_eq!(notes.iter().map(|n| (n.title.as_str(), n.screen.as_str(), n.action.is_none())).collect::<Vec<_>>(), [("MacBook Pro joined", "devices", true)]);
+    // A computer paired by one of their devices joined too.
+    let sub = Subscription::new();
+    register(&sub);
+    let computer = HEXLOWER.encode(&rand::random::<[u8; 32]>());
+    assert_eq!(post(&format!("{}/api/auth/devices/theirs", k.address), &[], signed(&admin, "POST /api/auth/devices/theirs", json!({ "key": computer, "user": user, "name": "The Office Mac" }))).0, 200);
+    assert_eq!(pushed(sub).iter().map(|n| (n.title.as_str(), n.screen.as_str())).collect::<Vec<_>>(), [("The Office Mac joined", "devices")]);
 }
 
 /// The network the tests' Workers are for: its root, as the device deploying them holds it.
@@ -1073,7 +1092,9 @@ mod relay {
             assert!(!device.removed().await, "a device the relay lets in was taken for one taken out");
             assert!(!signed_in_again.removed().await, "a new key where an old one was in was taken for one taken out");
             assert_eq!(tell(&address, &first, json!({ "remove": hex(&phone) })), 204);
+            std::fs::write(dir.join("root"), "kept").unwrap();
             assert!(device.removed().await, "a device the relay took out wasn't taken out");
+            assert!(dir.join("root").exists() && dir.join("joined").exists(), "the relay's word alone took what a device kept");
             assert!(!signed_in_again.removed().await, "a new key was taken out with the old one");
         });
     }
@@ -1090,6 +1111,29 @@ mod relay {
         let phone = SecretKey::generate();
         assert_eq!(tell(&address, &recovery, json!({ "add": hex(&phone), "role": "client", "admin": true })), 204, "the recovery key didn't let an admin back in");
         assert_eq!(tell(&address, &phone, json!({ "add": hex(&SecretKey::generate()), "role": "client", "admin": true })), 204, "that device isn't an admin's");
+    }
+
+    /// What only an admin's device may tell the relay follows who's who: someone made an admin can, someone no longer one
+    /// can't, and the last admin stays.
+    #[test]
+    fn the_relay_follows_who_is_an_admin() {
+        let (first, member) = (SecretKey::generate(), SecretKey::generate());
+        let k = super::Workers::for_devices(vec![hex(&first)]);
+        let address = k.address.replace("localhost", "127.0.0.1");
+        assert_eq!(tell(&address, &first, json!({ "add": hex(&member), "role": "client" })), 204);
+        // Changing a key another device let in is what only an admin's device may do.
+        let (firsts, members) = (SecretKey::generate(), SecretKey::generate());
+        assert_eq!(tell(&address, &first, json!({ "add": hex(&firsts), "role": "client" })), 204);
+        assert_eq!(tell(&address, &member, json!({ "add": hex(&members), "role": "client" })), 204);
+        let changes = |by: &SecretKey, key: &SecretKey| tell(&address, by, json!({ "add": hex(key), "role": "client" }));
+        assert_eq!(changes(&member, &firsts), 403);
+        assert_eq!(tell(&address, &member, json!({ "admins": { hex(&member): true } })), 403, "a member's device made itself an admin's");
+        assert_eq!(tell(&address, &first, json!({ "admins": { hex(&member): true } })), 204);
+        assert_eq!(changes(&member, &firsts), 204, "someone made an admin isn't one at the relay");
+        assert_eq!(tell(&address, &member, json!({ "admins": { hex(&first): false } })), 204);
+        assert_eq!(changes(&first, &members), 403, "someone no longer an admin still is at the relay");
+        assert_eq!(tell(&address, &member, json!({ "admins": { hex(&member): false } })), 204);
+        assert_eq!(changes(&member, &firsts), 204, "the last admin was made a member at the relay");
     }
 
     #[test]
@@ -1160,12 +1204,12 @@ mod relay {
             assert!(cut_off(&k, &c).await, "an ended pairing code's computer still reached the relay");
             c.close().await;
             assert_eq!(upgrade_status(&address, &code), 403, "an ended pairing code let its computer in again");
-            // Taking a device out takes out the devices it let in.
+            // Taking a device out leaves the devices it let in: only a tell naming one takes it out.
             let laptop = SecretKey::generate();
             assert_eq!(tell(&address, &phone, json!({ "add": hex(&laptop), "role": "client" })), 204);
             assert_eq!(tell(&address, &first, json!({ "remove": hex(&phone) })), 204);
-            assert!(shut_out(&k, &laptop, None).await, "a key a removed device let in still reached the relay");
             assert!(cut_off(&k, &b).await, "a removed device's socket still reached the relay");
+            online(&address, &laptop, None).await.expect("taking a device out took out a device it let in").close().await;
             for ep in [a, b] {
                 ep.close().await;
             }

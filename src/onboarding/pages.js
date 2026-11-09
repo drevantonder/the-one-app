@@ -7,16 +7,12 @@
 
 const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-// WebAuthn's binary fields, to and from the base64url its JSON uses; and asking a passkey for its PRF output, where it
-// has PRF, under the salt sha256("one/passkey-device"), from which the web client derives the passkey's device keys
-// (keys::passkey_keys). The output is kept only in this tab's sessionStorage (`one.prf`, with the passkey's credential id
-// as `one.prf.credential`), which the web client at the same address reads: it's never sent anywhere.
+// WebAuthn's binary fields, to and from the base64url its JSON uses.
 const webauthn = `
   const b64u = {
     decode: (s) => Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)),
     encode: (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""),
   };
-  const PRF_SALT = crypto.subtle.digest("SHA-256", new TextEncoder().encode("one/passkey-device")).then((h) => new Uint8Array(h));
   // The page's parts (pages.tsx's): Welcome's, and those drawn for this script to copy in.
   const slot = (name) => document.querySelector("[data-slot=welcome-" + name + "]");
   const part = (name) => document.querySelector("template[data-part=" + name + "]").content.firstElementChild.cloneNode(true);
@@ -45,12 +41,6 @@ const webauthn = `
     if (r.attestationObject) Object.assign(response, { attestationObject: b64u.encode(r.attestationObject), transports: r.getTransports?.() || [] });
     if (r.authenticatorData) Object.assign(response, { authenticatorData: b64u.encode(r.authenticatorData), signature: b64u.encode(r.signature), userHandle: r.userHandle && b64u.encode(r.userHandle) });
     return { id: c.id, rawId: b64u.encode(c.rawId), type: c.type, response, clientExtensionResults: {}, authenticatorAttachment: c.authenticatorAttachment };
-  }
-  function keepPrf(c) {
-    const first = c.getClientExtensionResults().prf?.results?.first;
-    if (!first) return;
-    sessionStorage.setItem("one.prf", b64u.encode(first));
-    sessionStorage.setItem("one.prf.credential", c.id);
   }
   function busy(b, label) {
     const was = [...b.childNodes];
@@ -93,19 +83,16 @@ const webauthn = `
   async function newPasskey(context) {
     const o = await options(register(context));
     const publicKey = { ...o, challenge: b64u.decode(o.challenge), user: { ...o.user, id: b64u.decode(o.user.id) },
-      excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })), extensions: { prf: { eval: { first: await PRF_SALT } } } };
+      excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })) };
     const c = await navigator.credentials.create({ publicKey });
     const made = await api("/api/auth/passkey/verify-registration", { response: credentialJSON(c), ...(context ? { createSession: true } : {}) });
-    keepPrf(c);
     return { credential: c.id, id: made.id };
   }
   async function withPasskey(only) {
     const o = await options(ASK.in);
-    const publicKey = { ...o, challenge: b64u.decode(o.challenge), allowCredentials: only ? [{ type: "public-key", id: b64u.decode(only) }] : (o.allowCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })),
-      extensions: { prf: { eval: { first: await PRF_SALT } } } };
+    const publicKey = { ...o, challenge: b64u.decode(o.challenge), allowCredentials: only ? [{ type: "public-key", id: b64u.decode(only) }] : (o.allowCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })) };
     const c = await navigator.credentials.get({ publicKey });
     await api("/api/auth/passkey/verify-authentication", { response: credentialJSON(c) });
-    keepPrf(c);
     return { credential: c.id };
   }
 `;

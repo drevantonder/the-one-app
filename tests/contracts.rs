@@ -84,7 +84,7 @@ fn the_workers_open_what_an_earlier_build_sealed() {
 }
 
 /// Devices' keys (`src/keys.rs`): canonical JSON, signed requests both ways, join codes,
-/// passkeys' device keys and a session endpoint's certificate.
+/// and a session endpoint's certificate.
 #[test]
 fn a_device_signs_and_proves_as_the_nodes_read_it() {
     let formats = Formats::start();
@@ -98,12 +98,10 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     let to = keys::Endpoint::of(&node).seal;
     let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
     let device_seal: [u8; 32] = rand::random();
-    let prf: [u8; 32] = rand::random();
     let out = js(json!({
         "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
         "request": request, "now": 1_000_000 + keys::FRESH,
         "pair": { "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
-        "prf": B64U.encode(&prf),
     }));
     assert_eq!(out["canonical"].as_str().unwrap().as_bytes(), keys::canonical(&fields), "canonical JSON");
     assert_eq!(out["signed"], request, "the same request signed the same, Ed25519 being deterministic");
@@ -113,10 +111,6 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     let asking = keys::Endpoint { key: device, seal: device_seal };
     assert_eq!(out["nonce"], one::onboarding::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
     assert_eq!(b(&out["challenge"]), one::onboarding::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
-    let (passkey, seal_secret) = keys::passkey_keys(&prf);
-    assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
-    assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
-    assert_eq!(out["passkey"]["sealPublic"], data_encoding::HEXLOWER.encode(&keys::public_of(&seal_secret)), "and its public half");
     assert_eq!(to, keys::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
 
     // A session endpoint's certificate: made the same, and each takes and refuses the same ones.

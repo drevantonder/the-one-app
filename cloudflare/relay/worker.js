@@ -39,9 +39,10 @@
 //   or a service only by an admin's or a compute's (nodes add the computers they pair and their users' services), and an
 //   admin only by an admin's or the recovery key (`by` is "recovery"; a new one is named so by an admin's, `recovery`);
 //   one already in is changed only by those, keeping who let it in.
-// - `{ remove }`: a key to take out, by an admin, the key that let it in, or itself, with the keys it let in that aren't
-//   admins', and theirs, and the pairing codes they made; never the last admin. A pairing code's computer is taken out
-//   the same way, by its code's maker too.
+// - `{ remove }`: a key to take out, by an admin, the key that let it in, or itself, with the pairing codes it made; never
+//   the last admin, and never a key it let in, which only a tell naming that key takes out. A pairing code's computer is
+//   taken out the same way, by its code's maker too.
+// - `{ admins: { <key>: bool } }`: whether each key is an admin's now, by an admin's device, as who's who says (`Node::tell_roles`).
 // - `{ pairing: { hash, until } }`: the SHA-256 (hex) of a pairing code's ticket and until when it works (ms).
 // - `{ unpair }`: a pairing code's hash, to end it, by its maker or an admin.
 //
@@ -694,7 +695,7 @@ export class Relay extends DurableObject {
         if (!trusted) return { error: "that key is in already: only an admin's device changes it", code: CODES.already };
         if (it.admin === 1 && !wants && this.admins() === 1) return "that's the last admin's key";
         this.sql.exec("UPDATE keys SET admin = ?, role = ? WHERE key = ?", wants ? 1 : 0, told.role, told.add);
-        if (told.role !== "client") this.endSessionsOf(told.add);
+        if (told.role !== "client" && (it.role !== told.role || it.admin !== (wants ? 1 : 0))) this.endSessionsOf(told.add);
       } else if (!it) {
         if (told.role !== "client" && !admin && !is(by, "compute")) return "only an admin's device or a compute adds a compute or a service";
         this.sql.exec("INSERT INTO keys VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
@@ -704,6 +705,16 @@ export class Relay extends DurableObject {
       this.sql.exec("DELETE FROM pairings WHERE key = ?", told.add);
       const ws = this.sockets.get(told.add);
       if (ws?.deserializeAttachment()?.pairing) ws.serializeAttachment({ id: told.add });
+      return null;
+    }
+    if (told.admins !== undefined) {
+      if (!admin) return "only an admin's device says who's an admin";
+      const roles = told.admins && typeof told.admins === "object" ? Object.entries(told.admins) : [];
+      if (!roles.length || !roles.every(([key, is]) => isKey(key) && typeof is === "boolean")) return "admins maps each key, in hex, to whether it's an admin's";
+      for (const [key, is] of roles) {
+        const it = this.key(key);
+        if (it && (it.admin === 1) !== is && (is || this.admins() > 1)) this.sql.exec("UPDATE keys SET admin = ? WHERE key = ?", is ? 1 : 0, key);
+      }
       return null;
     }
     if (told.remove !== undefined) {
@@ -742,23 +753,15 @@ export class Relay extends DurableObject {
     return "a tell adds or removes a key, or makes or ends a pairing code";
   }
 
-  /// Takes `key` out, with the keys it let in that aren't admins' (theirs too, as far as they go) and the pairing codes
-  /// they made, closing their sockets. Admins it let in stay: only a tell naming one takes it out.
+  /// Takes `key` out, with the pairing codes it made, closing its sockets. Only a tell naming a key takes it out: an admin's
+  /// node names each device the signed steps removed (`Node::tell_removed`), so the devices it let in stay.
   remove(key) {
-    const gone = [key];
-    for (let i = 0; i < gone.length; i++) {
-      for (const { key: next } of this.sql.exec("SELECT key FROM keys WHERE by = ? AND admin = 0", gone[i]).toArray()) {
-        if (!gone.includes(next)) gone.push(next);
-      }
-    }
-    for (const k of gone) {
-      this.sql.exec("DELETE FROM keys WHERE key = ?", k);
-      this.unbind(k);
-      for (const { key: joined } of this.sql.exec("SELECT key FROM pairings WHERE by = ? AND key IS NOT NULL", k).toArray()) this.end(joined, "taken out");
-      this.sql.exec("DELETE FROM pairings WHERE by = ?", k);
-      this.end(k, "taken out");
-      this.endSessionsOf(k);
-    }
+    this.sql.exec("DELETE FROM keys WHERE key = ?", key);
+    this.unbind(key);
+    for (const { key: joined } of this.sql.exec("SELECT key FROM pairings WHERE by = ? AND key IS NOT NULL", key).toArray()) this.end(joined, "taken out");
+    this.sql.exec("DELETE FROM pairings WHERE by = ?", key);
+    this.end(key, "taken out");
+    this.endSessionsOf(key);
   }
 
   endSessionsOf(key) {

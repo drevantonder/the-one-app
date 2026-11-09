@@ -114,13 +114,12 @@ export function server(version, givenHost) {
   }
 
   /// What `user`'s device (`me`, its keys as kept) reaches through JavaScript (one-client's `js::On`, which reads the
-  /// bucket through the URL signer with these): the network's address, and a JSON request to it; what it keeps (the host's), or in
-  /// `memory` for one asked as for a while; whether the relay still lets it in (`still`); its key's signature, and the secret
+  /// bucket through the URL signer with these): the network's address, and a JSON request to it; what it keeps (the host's); whether the relay still lets it in (`still`); its key's signature, and the secret
   /// its seal key agrees with another's, neither key read.
-  async function reaches(user, me, still, memory) {
+  async function reaches(user, me, still) {
     const [{ signBytes }] = await code();
     const text = new TextEncoder();
-    const kept = memory ? { get: async (k) => memory.get(k), put: async (k, v) => void memory.set(k, v), del: async (k) => void memory.delete(k) } : host.keep(user);
+    const kept = host.keep(user);
     return {
       get: async (name) => {
         const v = await kept.get(name);
@@ -228,20 +227,18 @@ export function server(version, givenHost) {
   let session = null;
   let renewal = null;
 
-  async function begin(user, as) {
+  async function begin(user) {
     const took = {};
     let mark = performance.now();
     const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
     const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { getAll, put }] = await code();
-    const [mine, [nodes]] = await Promise.all([host.device(user), getAll([`nodes:${user}`])]);
-    const device = as || mine;
+    const [device, [nodes]] = await Promise.all([host.device(user), getAll([`nodes:${user}`])]);
     if (!device) return null;
-    // Its keyring, made while the session's key is: this browser's, or another device's of its user's asked as while
-    // it lets this one in (a passkey's), which keeps nothing.
+    // Its keyring, made while the session's key is.
     let made = null;
     const making = glue().then(async ({ Keyring }) => {
-      const k = new Keyring(device.key, device.sealKey, await reaches(user, device, () => made?.still() ?? true, as ? new Map() : null));
-      if (!as) k.keeping(await answersOf(user));
+      const k = new Keyring(device.key, device.sealKey, await reaches(user, device, () => made?.still() ?? true));
+      k.keeping(await answersOf(user));
       await k.restore();
       return k;
     });
@@ -297,10 +294,9 @@ export function server(version, givenHost) {
           if (Array.isArray(c.online)) client.online(c.online);
           return;
         }
-        // Taken out: it forgets its nodes, and the session says it isn't a device. A session started since is that
-        // one's.
+        // Taken out: it forgets its nodes, and the session says it isn't a device, keeping what it kept for if the relay
+        // lets it in again. A session started since is that one's.
         put(`nodes:${user}`, []);
-        keyring.forget();
         client.close();
         const was = session;
         was?.ready.then((s) => s?.client === client && session === was && (session = { user, ready: Promise.resolve(null) }), () => {});
@@ -309,7 +305,7 @@ export function server(version, givenHost) {
     );
     secret.fill(0);
     clearTimeout(renewal);
-    if (!as) renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
+    renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
     made = { client, keyring, endpoint, socket, certificate, took };
     made.still = async () => {
       const asked = await ask(made.certificate);
@@ -341,10 +337,10 @@ export function server(version, givenHost) {
     }
   }
 
-  function started(user, again, as) {
+  function started(user, again) {
     if (!session || session.user !== user || again) {
       const old = session;
-      const mine = (session = { user, ready: begin(user, as) });
+      const mine = (session = { user, ready: begin(user) });
       old?.ready.then((s) => s?.client.close()).catch(() => {});
       mine.ready.catch(() => session === mine && (session = null));
     }
@@ -360,7 +356,7 @@ export function server(version, givenHost) {
       try {
         switch (m.op) {
           case "start": {
-            const s = await started(m.user, m.again, m.as);
+            const s = await started(m.user, m.again);
             return post({ id, device: !!s, took: s?.took });
           }
           // Whether the relay still lets this browser in: null, unknown, while it has no session, as it hasn't started

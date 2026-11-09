@@ -2,7 +2,7 @@
 // passkeys), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
 // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping;
 // under Devices, where this device holds its own keys (`device.keys`, the web client), which of their devices run
-// which apps' schedules, and a passkey to get back in with.
+// which apps' schedules.
 //
 // A Settings screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into dist/devices.html,
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
@@ -239,21 +239,18 @@ function Devices() {
     try {
       const [state, device] = await Promise.all([api("GET", "/v1/state"), one.device()])
       // Who waits, from a node or the web client itself; one with no code to compare is an older node's, not shown.
-      let waiting = [], passkey = false, seen = null
+      let waiting = [], seen = null
       const asks = [
         !apps.current.length ? api("GET", "/v1/apps").then((a) => (apps.current = a), () => {}) : null,
         api("POST", "/v1/devices/requests", {}).then((w) => (waiting = w.filter((r) => r.code)), () => {}),
       ]
       if (device.keys) {
-        asks.push(
-          api("GET", "/v1/devices/passkey").then((p) => (passkey = p.passkey === true), () => {}),
-          api("GET", "/v1/devices/seen").then((s) => (seen = s || {}), () => {}),
-        )
+        asks.push(api("GET", "/v1/devices/seen").then((s) => (seen = s || {}), () => {}))
       }
       await Promise.all(asks)
       // Not while they're dragging.
       if (dragging.current) return
-      setData({ state, device, apps: apps.current, waiting, passkey, seen: seen || {}, seenRead: seen !== null })
+      setData({ state, device, apps: apps.current, waiting, seen: seen || {}, seenRead: seen !== null })
       setProblem(null)
       return { device, waiting }
     } catch (e) {
@@ -618,7 +615,7 @@ function Scanned({ scan, done, cancel }) {
 // ---- Devices ----
 
 function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule, restore, act }) {
-  const { device, state, passkey } = data
+  const { device, state } = data
   const { cards, passkeys, stale } = m.drawn
   const mine = cards.filter((c) => c.user === m.me)
   // App schedules, only for someone with some running, or an app that runs on its own: an app's screen asks for the
@@ -631,7 +628,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
     recovery.push(`The recovery key last let in a device of ${r.user === m.me ? "yours" : `${m.userName(r.user)}’s`}, ${day(r.time)}.`)
   }
   const holder = !!device.keys && !!state.network?.users?.find((u) => u.me)?.recovery_holder
-  const side = scheduling || (!!device.keys && passkey) || passkeys.length > 0 || recovery.length > 0 || holder
+  const side = scheduling || passkeys.length > 0 || recovery.length > 0 || holder
   return (
     <div className={cn("grid max-w-5xl items-start gap-x-8 gap-y-8", side && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]")}>
       <div className="flex min-w-0 flex-col gap-4">
@@ -702,11 +699,6 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
               </List>
               {!!appSchedules.length && <Note>Once one stops, that device can’t open the app’s data.</Note>}
             </Section>
-          )}
-          {device.keys && passkey && (
-            <List>
-              <ListAdd icon={<Icon name="key" />} onClick={() => act(() => api("POST", "/v1/devices/passkey", {}))}>Use this passkey to get back in if you lose your devices</ListAdd>
-            </List>
           )}
           {!!passkeys.length && (
             <Section title="Passkeys">

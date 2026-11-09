@@ -1,5 +1,5 @@
 //! What's Android's own, beside the window, in Kotlin (android/app/src/main/kotlin/app/client): signing in in a Chrome
-//! Custom Tab (where a passkey's PRF works), the Keystore this device's keys are sealed by, pushes (FCM) and what a tapped
+//! Custom Tab, the Keystore this device's keys are sealed by, pushes (FCM) and what a tapped
 //! one opens or answers, the document scanner, the share sheet, haptics, the system bars, and the home-screen widgets.
 //!
 //! Two ways across, both JNI into this library, which the app's process loads whether or not its window is open:

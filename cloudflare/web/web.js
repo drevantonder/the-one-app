@@ -68,7 +68,7 @@ async function start() {
     try {
       // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
       let waited = false;
-      await platform.join((code, invited) => ((waited = true), showJoin(code, invited)), api);
+      await platform.join((code, invited) => ((waited = true), showJoin(code, invited)));
       if (waited) show(h(ui.Starting, { logo }));
       break;
     } catch (err) {

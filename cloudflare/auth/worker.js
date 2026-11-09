@@ -3,8 +3,7 @@
 // has one (`JOIN_DOMAIN`, read from the provider's signed token); and an OAuth server (per
 // MCP's authorization spec) that every client signs in through: the iPhone and Mac apps, and MCP clients like Claude
 // Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at /api/auth/jwks, so nodes check them
-// offline. It opens nothing: keys are only on users' devices, so faking a sign-in opens nothing either. A passkey's
-// PRF output stays in the browser (pages.js).
+// offline. It opens nothing: keys are only on users' devices, so faking a sign-in opens nothing either.
 //
 // Signing in only lets you ask: someone already in the network says yes. Nobody signs up uninvited, the network's first
 // user too: an admin's device makes a secret, and tells auth its hash, who it's for and until when, signed with its
@@ -80,12 +79,14 @@ const hex16 = () => hex.encode(random(8));
 /// theirs is this, at a domain no one can receive mail at. It's never shown, never matched and never counts as verified.
 const noEmail = (id) => `${id}@people.invalid`;
 const isNoEmail = (email) => String(email || "").endsWith("@people.invalid");
-/// Where a client's sign-in goes, in words: the site it goes back to, or an app on the user's device (one listening on
-/// it, or its own link scheme), or the device that showed them a code.
-function goesTo(uri, origin) {
+/// Where a client's sign-in goes, in words: an app on the user's device (one listening on loopback, or the network's own
+/// apps' `<cli>://signed-in/`, which anyone else's link can't be), the device that showed them a code, or the site or
+/// other scheme it really goes to.
+function goesTo(uri, origin, cli) {
   let url;
-  try { url = new URL(uri); } catch { return ON_DEVICE; }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return ON_DEVICE;
+  try { url = new URL(uri); } catch { return String(uri); }
+  if (uri === `${cli}://signed-in/`) return ON_DEVICE;
+  if (url.protocol !== "https:" && url.protocol !== "http:") return `${url.protocol}//${url.host}`;
   if (url.origin === origin && url.pathname === "/sign-in/code/done") return BY_CODE;
   if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return ON_DEVICE;
   return url.host;
@@ -300,6 +301,8 @@ export class Auth extends DurableObject {
           // An ID token only ever comes from the provider, by its own redirect: these routes would otherwise take one
           // from anyone holding it and sign them in as its account.
           if ((ctx.path === "/sign-in/social" || ctx.path === "/link-social") && ctx.body?.idToken) refuse(403, "Sign in at the provider.");
+          // Clients register at /oauth2/register alone, as nothing else here says what they may do.
+          if (ctx.path === "/oauth2/create-client") refuse(404, "Register at /oauth2/register.");
           if (ctx.path === "/oauth2/token" && ctx.body) ctx.body.resource = await self.audience(ctx.body.client_id || basicClient(ctx.headers));
         }),
       },
@@ -342,6 +345,9 @@ export class Auth extends DurableObject {
           scopes: ["openid", "profile", "offline_access"],
           allowDynamicClientRegistration: true,
           allowUnauthenticatedClientRegistration: true,
+          // Where a client's sign-ins come back says whether they're on the device asking (`signsInHere`), so a client can
+          // be registered and never changed.
+          clientPrivileges: ({ action }) => action === "create",
           // Claude Code and other local MCP clients register http://localhost redirects without saying they're native.
           clientRegistrationDefaultApplicationType: "infer",
           resources,
@@ -721,13 +727,17 @@ export class Auth extends DurableObject {
   }
 
   /// A computer let in with a pairing code, as the device that paired it says, which asks nothing here itself:
-  /// `{ key, user }`, from an admin's device or one of that user's own.
+  /// `{ key, user, name }`, from an admin's device or one of that user's own. Its user's other devices are told it joined.
   async pairedAs(request) {
     const signed = (await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")))) || refuse(401, "Sign in first.");
-    const { key, user } = signed.fields;
+    const { key, user, name } = signed.fields;
     if (!isKey(key) || !USER.test(user || "")) refuse(400, "a key is 64 hex characters and a user 16");
+    if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the computer's name, up to 64 characters");
     if (!signed.admin && this.ownerOf(signed.by) !== user) refuse(403, "Only their own device, or an admin's, says a computer is theirs.");
+    const had = this.ownerOf(key);
+    if (had && had !== user && !signed.admin) refuse(409, "That key is someone else's device.");
     this.theirs(key, user);
+    await this.push({ key, user }, { title: `${name.trim()} joined` });
     return {};
   }
 
@@ -769,7 +779,7 @@ export class Auth extends DurableObject {
       const user_name = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
       const [signed] = entitled(r) ? sql.exec("select proof from proofs where key = ? and user = ?", r.key, r.user).toArray() : [];
       const signIn = signed && (r.by_link ? { by_link: JSON.parse(signed.proof) } : JSON.parse(signed.proof));
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, user_name, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.root ? { root: r.root } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), ...(r.platform ? { platform: r.platform } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, user_name, by_link: !!r.by_link, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.root ? { root: r.root } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), ...(r.platform ? { platform: r.platform } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
     });
   }
 
@@ -858,8 +868,13 @@ export class Auth extends DurableObject {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const origin = new URL(this.env.ADDRESS).origin;
     // The network's own address is on loopback too where it's tried (`one-dev throwaway`), so its pages are told apart first.
-    const here = (u) => (URL.canParse(u) && new URL(u).origin === origin ? u === `${origin}/callback` : goesTo(u, origin) === ON_DEVICE);
+    const here = (u) => (URL.canParse(u) && new URL(u).origin === origin ? u === `${origin}/callback` : this.goes(u) === ON_DEVICE);
     return uris.length > 0 && uris.every(here);
+  }
+
+  /// Where `uri` goes, in words (`goesTo`).
+  goes(uri) {
+    return goesTo(uri, new URL(this.env.ADDRESS).origin, this.env.CLI || "one");
   }
 
   /// Whether a client is one of the network's own apps, by where its sign-ins come back: the web client's page, the
@@ -882,8 +897,7 @@ export class Auth extends DurableObject {
   notNamedAsUs(body) {
     const plain = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/^the/, "");
     const [name, ours] = [plain(body.client_name), plain(this.auth.options.appName)];
-    const origin = new URL(this.env.ADDRESS).origin;
-    const toSites = [].concat(body.redirect_uris || []).some((u) => ![ON_DEVICE, BY_CODE].includes(goesTo(u, origin)));
+    const toSites = [].concat(body.redirect_uris || []).some((u) => ![ON_DEVICE, BY_CODE].includes(this.goes(u)));
     if (name === ours || (name.startsWith(ours) && toSites)) refuse(400, `a client can't be called ${body.client_name}: that's the name of what it signs in to`);
   }
 
@@ -898,7 +912,7 @@ export class Auth extends DurableObject {
     const origin = new URL(this.env.ADDRESS).origin;
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
-    const goes = web ? null : goesTo(uris.includes(redirect) ? redirect : uris[0], origin);
+    const goes = web ? null : this.goes(uris.includes(redirect) ? redirect : uris[0]);
     return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!session && query.has("ba_iat") && new Date(session.session.createdAt).getTime() >= Number(query.get("ba_iat")) };
   }
 

@@ -6,8 +6,7 @@
 //! keystore or Credential Locker, a browser's a non-extractable WebCrypto key in IndexedDB, a local agent's its
 //! machine's. A new device gets in only when one of its user's devices approves it, from a code or QR that shows
 //! which device it is, which seals it the keys of the scopes it may open. A user who lost a device is let back in by
-//! another, by a copy sealed under a passkey's PRF (optional for most, kept because synced passkeys make it
-//! self-service), or by the network's recovery key, kept offline by an admin, each use of it an entry in the log.
+//! another, or by the network's recovery key, kept offline by an admin, each use of it an entry in the log.
 //! A scope gets a new epoch when a user, or a device that didn't sign itself out (lost or stolen), loses the right
 //! to open it, never on sign-out, where the device deletes its own key: the keys are sealed to everyone who still
 //! belongs. Epochs never go down along a database's positions (`src/database/stored.rs`).
@@ -323,7 +322,7 @@ pub fn id_of(secret: &[u8]) -> String {
     B64U.encode(&hkdf(secret, b"one/id"))
 }
 
-/// Seals `plain` under a secret (a passkey's PRF output, a refresh token): `FORMAT` ‖ nonce ‖ AES-256-GCM.
+/// Seals `plain` under a secret (a refresh token): `FORMAT` ‖ nonce ‖ AES-256-GCM.
 pub fn seal_under(secret: &[u8], plain: &[u8]) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
     let mut out = NUMBERED.to_vec();
@@ -843,7 +842,9 @@ pub fn same_secret(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
-/// A passkey's device keys, from its PRF output: (the Ed25519 seed it signs with, the X25519 secret sealed to).
+/// A passkey's device keys, from its PRF output: (the Ed25519 seed it signs with, the X25519 secret sealed to). No build
+/// reads a passkey's PRF output now, so nothing here is one's device; this stays because copies already sealed to a
+/// passkey listed before that must still open (`tests/sealed.rs`).
 pub fn passkey_keys(prf: &[u8]) -> (SigningKey, [u8; 32]) {
     let seed = hkdf(prf, b"one/passkey-device/sign");
     (SigningKey::from_bytes(&seed), hkdf(prf, b"one/passkey-device/seal"))

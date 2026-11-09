@@ -21,8 +21,8 @@
 //!
 //! What it signs in with (`Account`) is recorded in the `device` entry that lists the device (`sign_in`), when someone
 //! taps Approve on a card showing it, or links a further one the same way. A passkey's public key then comes from auth,
-//! which keeps it, so it never counts by itself: it stands only beside a person's approval. Email links and passwords
-//! make no proof: only auth can check those.
+//! which keeps it, so it never counts as proof by itself: only an ID token does, and a device with only a passkey to
+//! show is approved by its whole code. Email links and passwords make no proof: only auth can check those.
 
 use anyhow::{Context, Result, bail, ensure};
 use data_encoding::BASE64URL_NOPAD as B64U;

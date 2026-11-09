@@ -914,7 +914,9 @@ mod tests {
         for (d, name, platform, kinds) in [(&phone, "iphone", Some("iphone"), &[Kind::Client][..]), (&browser, "chrome", Some("browser"), &[Kind::Client]), (&mcp, "claude", Some("cloudflare"), &[Kind::Client]), (&laptop, "cli", Some("linux"), &[Kind::Client]), (&unsaid, "old", None, &[Kind::Client]), (&node, "box", Some("linux"), BOTH)] {
             assert!(net.step(&mac, ANDRE, with(d, ANDRE, name, platform, kinds, None)));
         }
-        let mut passkey = passkey(&Dev::new(12).endpoint(), ANDRE, "Passkey", "cred");
+        // A passkey listed before they stopped being listed, still read from the steps that hold it.
+        let mut passkey = device(&Dev::new(12).endpoint(), ANDRE, "Passkey", &[Kind::Client], None);
+        passkey.data["passkey"] = json!("cred");
         passkey.data["platform"] = json!("iphone");
         assert!(net.step(&mac, ANDRE, passkey));
         assert!(net.step(&mac, ANDRE, with(&bobs, BOB, "bob", Some("android"), &[Kind::Client], Some(("Bob", Role::Member)))));

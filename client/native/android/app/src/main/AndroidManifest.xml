@@ -5,7 +5,7 @@
     <!-- Notifications: a push's note, shown (Push.kt). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Chrome, for the Custom Tab sign-in opens: passkeys with PRF work there. -->
+    <!-- Chrome, for the Custom Tab sign-in opens. -->
     <queries>
         <intent>
             <action android:name="android.support.customtabs.action.CustomTabsService" />

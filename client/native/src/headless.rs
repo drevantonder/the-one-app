@@ -153,15 +153,16 @@ async fn run(kind: &str, input: &Value, mine: Option<Arc<one_client::Device>>) -
         }
         "join" => {
             // A note's code is auth's to write and nobody compares it here: only the short one is taken, which lets in only
-            // a device whose sign-in names it, and never one that would take another device out with no card to say so.
+            // one of this user's own devices whose sign-in names it, and never someone else's or one that would take
+            // another device out, each of which has a card to read first.
             let code = crate::device_code(&text("code")?);
             let code = code.get(..one::keys::JOIN_CODE_SHORT).unwrap_or(&code).to_string();
             let device = device(mine).await?;
             match input["approve"] == true {
                 true => {
                     let about = crate::node(&device, "POST", "/v1/devices/approve", Some(json!({ "code": code }))).await?;
-                    if about["replaces"].as_array().is_some_and(|r| !r.is_empty()) {
-                        return Err("Open Settings › Devices to answer it: it would replace another device.".to_string());
+                    if about["yours"] != true || about["replaces"].as_array().is_some_and(|r| !r.is_empty()) {
+                        return Err("Open Settings › Devices to answer it.".to_string());
                     }
                     crate::node(&device, "POST", "/v1/devices/approve", Some(json!({ "code": code, "confirm": true }))).await?
                 }

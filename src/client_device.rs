@@ -153,7 +153,14 @@ pub fn signing_in_for(address: &str) -> Result<String> {
     if std::fs::read_to_string(dir().join("address")).ok().as_deref().map(str::trim) != Some(address) {
         forget();
     }
-    Ok(kept_or_new(address)?.join())
+    let device = kept_or_new(address)?;
+    let d = device.clone();
+    // One taken out starts over as its user signs in again, so this sign-in names the new key.
+    if run(move || async move { d.removed().await }) {
+        forget();
+        return Ok(kept_or_new(address)?.join());
+    }
+    Ok(device.join())
 }
 
 /// This computer's device for the network at `address`, made with a new key if it has none: signed in or not yet, as its
@@ -246,10 +253,7 @@ pub fn end() {
 fn not_let_in() -> String {
     let removed = kept().is_some_and(|d| run(move || async move { d.removed().await }));
     match removed {
-        true => {
-            forget();
-            format!("this computer was taken out of your devices: {CLI} sign-in lets it in again")
-        }
+        true => format!("this computer was taken out of your devices: {CLI} sign-in lets it in again"),
         false => format!("this computer hasn't been approved as one of your devices yet: {CLI} sign-in asks again"),
     }
 }

@@ -66,6 +66,8 @@ pub(super) struct Net {
     joining: std::sync::atomic::AtomicUsize,
     /// The removed devices this device told the relay to take out.
     removed: Mutex<std::collections::HashSet<Key>>,
+    /// Whose keys this device last told the relay are admins', as who's who says (`tell_roles`).
+    admins: Mutex<HashMap<Key, bool>>,
     /// The connections each client device has open to this one's local API, oldest first, each with how many of its
     /// requests are still being answered.
     clients: Mutex<HashMap<Key, Vec<(Connection, Arc<std::sync::atomic::AtomicUsize>)>>>,
@@ -139,6 +141,7 @@ impl Node {
             return;
         }
         self.tell_removed();
+        self.tell_roles();
         let wanted = self.with_or(None, |i| Ok(i.r.db().compute(&self.0.id)?.and(i.r.db().setting("address")?)));
         let mut task = self.0.net.task.lock().unwrap();
         if task.as_ref().map(|(a, _)| a) == wanted.as_ref() {
@@ -843,6 +846,24 @@ impl Node {
                 self.tell_relay(json!({ "remove": hex(&key) }));
             }
         }
+    }
+
+    /// Tells the relay whose keys are admins' now, if this device is an admin's: it decides by that who may change its
+    /// list, and can't read who's who. What it hasn't been told since this device started, and each change after that.
+    fn tell_roles(&self) {
+        let Ok(wanted) = self.with(|i| {
+            let m = i.r.db();
+            let mine = m.machine(&self.0.id)?.is_some_and(|me| m.may(&me.user, "invite", scopes::NETWORK));
+            Ok(if mine { m.machines()?.into_iter().filter(|d| !d.removed && d.service.is_none()).map(|d| (d.key, m.may(&d.user, "invite", scopes::NETWORK))).collect() } else { HashMap::new() })
+        }) else {
+            return;
+        };
+        let mut told = self.0.net.admins.lock().unwrap();
+        let changed: serde_json::Map<String, Value> = wanted.iter().filter(|(key, admin)| told.get(*key) != Some(*admin)).map(|(key, admin)| (hex(key), json!(admin))).collect();
+        if !changed.is_empty() {
+            self.tell_relay(json!({ "admins": changed }));
+        }
+        *told = wanted;
     }
 
     /// Reads which of the network's devices are connected to the relay. What it last said stands until it answers.

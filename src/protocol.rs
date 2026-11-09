@@ -15,7 +15,7 @@ pub use crate::push::DOMAIN as PUSH;
 /// What a device signs its requests to auth under.
 pub const AUTH_DOMAIN: &str = "one/auth";
 /// How long a pairing code works (ms): what a node tells the relay it lasts, which the relay holds it to.
-pub const PAIRING_LIFE: u64 = 7 * 86_400_000;
+pub const PAIRING_LIFE: u64 = 3_600_000;
 /// What a session's endpoint signs to open its relay socket.
 pub const SOCKET: &str = "one/socket";
 /// How old a session's proof for its relay socket may be, either way: a socket is opened as soon as it's made.

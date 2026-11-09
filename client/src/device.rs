@@ -53,7 +53,8 @@ enum Stage {
     /// or a program ending).
     Off { asked: Option<Value> },
     In(Client),
-    /// Taken out, as the relay said, or signed out: nothing more is asked as it, and its app forgets its key.
+    /// Taken out, as the relay said, or signed out: nothing more is asked as it. Taken out, its key stays until its
+    /// user signs in again and the relay still refuses it, as the relay's word alone takes nothing from it.
     Out,
 }
 
@@ -408,14 +409,18 @@ impl Device {
         }
     }
 
-    /// Out: as the relay said, or signed out. Its connections close, and what it kept as this device goes with them,
-    /// as a browser's does (browser.js `forgetDevice` and `leave`): what each kind of request needed, its calls' answers
-    /// and the network it was let into, which the next approval names again. Whether this key was in stays, for
-    /// `removed` to say.
-    async fn out(&self) {
+    /// Nothing more is asked as this device, and its connections close. What it kept stays, for if the relay lets it in again.
+    async fn stop(&self) {
         if let Stage::In(client) = std::mem::replace(&mut *self.stage.lock().await, Stage::Out) {
             client.close().await;
         }
+    }
+
+    /// Out: signed out, or starting over. It stops, and what it kept as this device goes,
+    /// as a browser's does (browser.js `forgetDevice` and `leave`): what each kind of request needed, its calls' answers
+    /// and the network it was let into, which the next approval names again.
+    async fn out(&self) {
+        self.stop().await;
         self.keyring.forget(self).await;
         if let Some(answers) = &self.answers {
             answers.forget().await;
@@ -454,13 +459,21 @@ impl Device {
 
     /// Whether the network took this device out: this key was in, and the relay, which alone says who's on the
     /// network, lets it in no more. Never a node's word, which may only not have read its approval yet, nor a
-    /// relay that didn't answer: a key taken for out is forgotten, and can't be let in again. Once out, it's `out`.
+    /// relay that didn't answer. It stops, keeping its key and what it kept: the app says so, and only its user
+    /// signing in again, with the relay still refusing it, starts over (`start_over`).
     pub async fn removed(&self) -> bool {
         let removed = self.was_in() && matches!(self.computes().await, Ok(None));
         if removed {
-            self.out().await;
+            self.stop().await;
         }
         removed
+    }
+
+    /// Taken out and signed in again: what it kept as this device goes, and that this key was in, so the new key the app
+    /// then makes starts clean.
+    pub async fn start_over(&self) {
+        self.delete("joined").await;
+        self.out().await;
     }
 
     fn was_in(&self) -> bool {
@@ -502,7 +515,7 @@ impl Device {
         // asked, whatever a node said. Out, this device starts over at joining, where nothing but its approval or sign-in
         // is shown.
         if !self.let_in().await {
-            self.out().await;
+            self.stop().await;
             return Err(refused());
         }
         Err(err)

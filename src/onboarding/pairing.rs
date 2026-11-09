@@ -193,7 +193,7 @@ impl Node {
             // Auth learns whose it is only here, as it never signs in to ask: without this it just can't answer that
             // user's requests yet, so a refusal (a pairing device auth doesn't know either) doesn't stop the join.
             if user == pairing.user
-                && let Err(err) = crate::settings::ask_auth(self, "POST", "/api/auth/devices/theirs", json!({ "key": hex(&key), "user": user })).await
+                && let Err(err) = crate::settings::ask_auth(self, "POST", "/api/auth/devices/theirs", json!({ "key": hex(&key), "user": user, "name": request.name })).await
             {
                 tracing::warn!("telling auth whose computer this is: {err:#}");
             }

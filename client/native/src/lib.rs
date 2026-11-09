@@ -350,10 +350,26 @@ async fn sign_in() -> Result<(), Failure> {
     let print = env("SIGN_IN_PRINT").is_some();
     tauri::async_runtime::spawn_blocking(move || platform::sign_in(&signing, &join, print)).await.map_err(|e| e.to_string())??;
     let token = token().await?;
-    a.keep("user", Some(&subject(&token)?));
+    let user = subject(&token)?;
+    a.keep("user", Some(&user));
+    if let Some(address) = a.address() {
+        start_over_if_taken_out(&address, &user).await;
+    }
     // Back in front of the browser it signed in with.
     platform::show();
     Ok(())
+}
+
+/// Signed in again with a key the relay let in once and refuses now, which can't be let in again: it goes, with what it
+/// kept as that device, so the next is the new one this sign-in named (`secrets::device_made`).
+async fn start_over_if_taken_out(address: &str, user: &str) {
+    let id = format!("{address} {user}");
+    let Some(secret) = secrets::device(&id) else { return };
+    let device = client(&app().data, address, &id, secret);
+    if device.removed().await {
+        device.start_over().await;
+        secrets::forget_device(&id);
+    }
 }
 
 /// Makes this device its user's: one already, or asking to be let in. → `{ in: true }`, or the code to approve
@@ -604,18 +620,38 @@ async fn removed() -> bool {
 }
 
 /// Signs out: out of its user's devices first, then its key goes (a removed key can't be let in again), and the
-/// sign-in with it.
+/// sign-in with it. Taken out, as the relay says, only the sign-in goes: the relay's word takes no key, and signing in
+/// again, where it still refuses this one, starts over (`start_over_if_taken_out`).
 #[tauri::command]
 async fn sign_out() -> Result<(), String> {
     let a = app();
     let device = a.device.lock().unwrap().take();
+    let taken_out = tokio::time::timeout(Duration::from_secs(10), async {
+        match &device {
+            Some(d) => d.removed().await,
+            None => {
+                let (Some(address), Some(user)) = (a.address(), a.kept("user")) else { return false };
+                let id = format!("{address} {user}");
+                match secrets::device(&id) {
+                    Some(secret) => client(&a.data, &address, &id, secret).removed().await,
+                    None => false,
+                }
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
     if let Some(d) = device {
-        let _ = tokio::time::timeout(Duration::from_secs(20), d.sign_out()).await;
+        if taken_out {
+            d.disconnect().await;
+        } else {
+            let _ = tokio::time::timeout(Duration::from_secs(20), d.sign_out()).await;
+        }
     }
     if let Ok(signing) = a.sign_in() {
         let _ = tauri::async_runtime::spawn_blocking(move || signing.sign_out()).await;
     }
-    if let (Some(address), Some(user)) = (a.address(), a.kept("user")) {
+    if !taken_out && let (Some(address), Some(user)) = (a.address(), a.kept("user")) {
         secrets::forget_device(&format!("{address} {user}"));
     }
     a.keep("user", None);

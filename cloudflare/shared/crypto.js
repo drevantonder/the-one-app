@@ -9,7 +9,7 @@
 // shared secret, salted with share ‖ the recipient's public key. Each key seals once, so the zero nonce is safe. What's
 // kept starts with 1, which is authenticated too; what a push carries doesn't (`sealTo`).
 //
-// Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
+// Sealed under a secret (a refresh token, an access token), bytes are
 // 1 ‖ nonce ‖ AES-256-GCM(key, nonce, plain, authenticating that 1), with key and the copy's id both derived from the
 // secret. What was sealed before that format has no version and opens forever (tests/sealed/, src/keys.rs's FORMAT).
 
@@ -290,11 +290,6 @@ export function joinChallenge(root, key, seal, at) {
   const time = new Uint8Array(8);
   new DataView(time.buffer).setBigUint64(0, BigInt(at));
   return concat(text.encode("one/join\0"), bytes(root), bytes(key), bytes(seal), time);
-}
-
-/// A passkey's device keys from its PRF output: `{ sign: Ed25519 seed, seal: X25519 secret }`.
-export async function passkeyKeys(prf) {
-  return { sign: await hkdf(prf, "one/passkey-device/sign"), seal: await hkdf(prf, "one/passkey-device/seal") };
 }
 
 

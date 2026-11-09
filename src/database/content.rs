@@ -163,14 +163,6 @@ pub fn device(endpoint: &crate::keys::Endpoint, user: &str, name: &str, roles: &
     node(Change::Device, data)
 }
 
-/// Lists a passkey as `user`'s device, by the credential it is: what's sealed to its keys (from its PRF) lets them back
-/// in on a new device.
-pub fn passkey(endpoint: &crate::keys::Endpoint, user: &str, name: &str, credential: &str) -> Content {
-    let mut content = device(endpoint, user, name, &[Kind::Client], None);
-    content.data["passkey"] = json!(credential);
-    content
-}
-
 
 pub fn role(user: &str, role: Role) -> Content {
     node(Change::Role, json!({ "user": user, "role": role }))
@@ -394,7 +386,6 @@ mod tests {
         let built = [
             ("device", device(&endpoint, user, "mac", &[Kind::Client], None)),
             ("device, new user", device(&endpoint, other, "phone", &[Kind::Client, Kind::Compute], Some(("Bob", Role::Member)))),
-            ("passkey", passkey(&endpoint, user, "Passkey", "cred")),
             ("service endpoint", service_endpoint(&endpoint, user, "whatsapp", "whatsapp", &[4; 32])),
             ("role", role(other, Role::Admin)),
             ("remove user", remove_user(other)),
@@ -454,7 +445,6 @@ mod tests {
     const GOLDEN: &str = r#"first: {"device":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"mac","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202"},"epoch":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Home","recovery":"0303030303030303030303030303030303030303030303030303030303030303","user":"a000000000000001","user_name":"Andre"}
 device: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"mac","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"a000000000000001"}}
 device, new user: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"phone","role":"member","roles":["client","compute"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"b000000000000002","user_name":"Bob"}}
-passkey: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"Passkey","passkey":"cred","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"a000000000000001"}}
 service endpoint: {"app":"node","kind":"device","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","key":"0101010101010101010101010101010101010101010101010101010101010101","name":"whatsapp","roles":["service"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","service":"whatsapp","user":"a000000000000001"}}
 role: {"app":"node","kind":"role","data":{"role":"admin","user":"b000000000000002"}}
 remove user: {"app":"node","kind":"remove","data":{"user":"b000000000000002"}}

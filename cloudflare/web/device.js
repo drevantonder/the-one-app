@@ -4,7 +4,7 @@
 // worker that reaches the nodes (net-worker.js), which signs with these keys without reading them. The epoch, app and
 // database keys it opens live in that worker's WebAssembly memory.
 
-import { b64u, ed25519Public, hex, joinCode, passkeyKeys, x25519Public } from "../shared/crypto.js";
+import { hex, joinCode } from "../shared/crypto.js";
 import { del, get, put } from "./kept.js";
 
 
@@ -34,16 +34,6 @@ export async function signingInFor() {
   let d = await get("device:");
   if (!d) await put("device:", (d = await newKeys()));
   return d.key + d.sealKey;
-}
-
-/// A passkey as a device, from its PRF output (`keys::passkey_keys`): its seal key's secret as a key that can't be
-/// read back, as a browser's is.
-export async function passkeyKeysOf(prf) {
-  const pk = await passkeyKeys(prf);
-  const seal = await x25519Public(pk.seal);
-  const secret = await crypto.subtle.importKey("jwk", { kty: "OKP", crv: "X25519", d: b64u.encode(pk.seal), x: b64u.encode(seal) }, { name: "X25519" }, false, ["deriveBits"]);
-  pk.seal.fill(0);
-  return { key: hex.encode(await ed25519Public(pk.sign)), seal: hex.encode(seal), sign: pk.sign, opens: { secret, public: seal } };
 }
 
 /// The code this browser shows to be approved: its key's, as 4 and 4.

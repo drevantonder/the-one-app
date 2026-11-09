@@ -97,7 +97,6 @@ enum Route {
     Requests,
     Approve,
     Refuse,
-    Passkey,
     Seen,
     VaultGrant,
     RecoveryHolder,
@@ -131,7 +130,6 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/devices/requests", Route::Requests, false),
     ("POST", "/v1/devices/approve", Route::Approve, false),
     ("POST", "/v1/devices/refuse", Route::Refuse, true),
-    ("POST", "/v1/devices/passkey", Route::Passkey, true),
     ("GET", "/v1/devices/seen", Route::Seen, true),
     // A machine with a node that opens the Vault seals what's in it to the new key at once.
     ("POST", "/v1/vault/grant", Route::VaultGrant, false),
@@ -166,7 +164,6 @@ fn about(route: Route) -> (&'static str, Value) {
         Route::Requests => ("", of::<body::Nothing>()),
         Route::Approve => ("", of::<body::Approve>()),
         Route::Refuse => ("Turn down a device waiting to join", of::<body::Code>()),
-        Route::Passkey => ("List a passkey as this user's", of::<body::Passkey>()),
         Route::Seen => ("Say the waiting devices were seen", of::<body::Nothing>()),
         Route::VaultGrant => ("", of::<body::VaultGrant>()),
         Route::RecoveryHolder => ("Name someone as holding the recovery key, or take them off", of::<body::RecoveryHolder>()),
@@ -430,14 +427,6 @@ mod body {
         pub confirm: bool,
     }
 
-    /// The passkey's PRF output (base64url), which only the page it signed in on has, and its credential's id.
-    #[derive(Deserialize, schemars::JsonSchema)]
-    #[serde(deny_unknown_fields)]
-    pub struct Passkey {
-        pub prf: Option<String>,
-        pub credential: String,
-    }
-
     /// `device` added to the machines that open `scope`'s Vault (user, the default; global; or a group by its name or
     /// id), or with `on: false`, taken off them.
     #[derive(Deserialize, schemars::JsonSchema)]
@@ -574,12 +563,6 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             approved
         }
         Route::Refuse => refuse(m, &read::<body::Code>(path, raw)?.code).await?,
-        Route::Passkey => {
-            let body: body::Passkey = read(path, raw)?;
-            let prf = body.prf.and_then(|p| B64U.decode(p.trim_end_matches('=').as_bytes()).ok()).filter(|p| !p.is_empty()).ok_or_else(|| anyhow!("Sign in with your passkey first."))?;
-            list_passkey(m, &prf, &body.credential).await?;
-            done
-        }
         Route::Seen => {
             read::<body::Nothing>(path, raw)?;
             seen(m).await?
@@ -1004,9 +987,13 @@ async fn waiting(m: &impl Me) -> Result<Vec<(Asked, Joining)>> {
     Ok(out)
 }
 
-/// Whether `r`'s sign-in, checked here, is one of `accounts` and names its key.
+/// Whether `r`'s sign-in, checked here, is one of `accounts` and names its key: a provider's alone, as a passkey's public
+/// key is auth's word, so a device showing only that is approved by its whole code.
 async fn vouched(m: &impl Me, r: &Asked, accounts: &[Account]) -> bool {
     let Ok(proof) = serde_json::from_value::<Proof>(r.said["sign_in"].clone()) else { return false };
+    if proof.id_token().is_none() {
+        return false;
+    }
     let Some((network, jwks)) = checked_against(m, &proof).await else { return false };
     sign_in_proof::vouches(&proof, &r.endpoint, &network, jwks.as_ref(), accounts).is_ok()
 }
@@ -1014,29 +1001,35 @@ async fn vouched(m: &impl Me, r: &Asked, accounts: &[Account]) -> bool {
 /// Who `r` is to an admin, if their sign-in, checked here, shows they may ask at all: anyone else is no one's to answer.
 async fn to_admin(m: &impl Me, r: &Asked) -> Option<Joining> {
     let proof: Proof = serde_json::from_value(r.said["sign_in"].clone()).ok()?;
-    let (ever, invite, none_left, accounts) = m
+    let (ever, invite, none_left, accounts, listed) = m
         .who(|who| {
-            let none_left = !who.clients()?.iter().any(|c| c.user == r.user && c.passkey.is_none());
-            Ok((who.user_ever(&r.user)?.is_some(), who.email_invite(&r.user)?, who.user(&r.user)?.is_some() && none_left, who.sign_ins_ever(&r.user)?))
+            let none_left = !who.clients()?.iter().any(|c| c.user == r.user && c.key != r.endpoint.key && c.passkey.is_none());
+            let listed = who.client(&r.endpoint.key)?.is_some_and(|c| c.user == r.user && c.seal == r.endpoint.seal);
+            Ok((who.user_ever(&r.user)?.is_some(), who.email_invite(&r.user)?, who.user(&r.user)?.is_some() && none_left, who.sign_ins_ever(&r.user)?, listed))
         })
         .ok()?;
     let (network, jwks) = checked_against(m, &proof).await?;
-    if ever {
+    if ever && !listed {
         sign_in_proof::vouches(&proof, &r.endpoint, &network, jwks.as_ref(), &accounts).ok()?;
         return none_left.then_some(Joining::Lost);
     }
-    let token = proof.id_token()?;
+    // Listed already: an admin's approval that the relay didn't hear of, so it's the same answer, for approving again to
+    // finish it.
+    let Some(token) = proof.id_token() else { return listed.then_some(Joining::Lost) };
     let jwk = sign_in_proof::signing_key(token, jwks.as_ref()?).ok()?;
     let shown = sign_in_proof::id_token(token, &r.endpoint, &network, &jwk).ok()?;
-    let sign_in_proof::Account::Provider { email: Some(email), .. } = &shown.account else { return None };
+    let sign_in_proof::Account::Provider { email: Some(email), .. } = &shown.account else { return listed.then_some(Joining::Lost) };
     let email = email.to_lowercase();
-    if let Some(invite) = invite.filter(|i| shown.email_verified && i.email == email && !i.used && shown.issued <= i.until) {
+    if let Some(invite) = invite.filter(|i| shown.email_verified && i.email == email && (listed || !i.used) && shown.issued <= i.until) {
         // A sign-in finished from a link could be anyone's who sent it, so it waits for a tap.
         let here = matches!(proof, Proof::IdToken(_));
         return Some(Joining::New { name: invite.name, role: invite.role, invite: here.then(|| InviteProof { token: token.to_string(), jwk }) });
     }
     let domain = crate::config::JOIN_DOMAIN;
-    (!domain.is_empty() && shown.email_verified && email.ends_with(&format!("@{domain}"))).then(|| Joining::New { name: text(&r.said, "user_name"), role: Role::Member, invite: None })
+    if !domain.is_empty() && shown.email_verified && email.ends_with(&format!("@{domain}")) {
+        return Some(Joining::New { name: text(&r.said, "user_name"), role: Role::Member, invite: None });
+    }
+    listed.then_some(Joining::Lost)
 }
 
 /// Every request to join auth lists to this device.
@@ -1058,7 +1051,7 @@ fn short_code(whole: &str) -> &str {
 /// What of a waiting device's code has to match to let it in.
 fn code_needed<'a>(r: &'a Asked, joining: &Joining) -> &'a str {
     match joining {
-        Joining::Own { proved: false } => &r.code,
+        Joining::Own { proved: false } | Joining::Lost => &r.code,
         _ => short_code(&r.code),
     }
 }
@@ -1078,7 +1071,7 @@ fn the_one<T>(found: impl IntoIterator<Item = T>, whole: impl Fn(&T) -> &str, ne
 /// The one waiting with `code` that this device may let in.
 async fn waiting_with(m: &impl Me, code: &str) -> Result<(Asked, Joining)> {
     let found = waiting(m).await?;
-    ensure!(!found.iter().any(|(r, j)| matches!(j, Joining::Own { proved: false }) && short_code(&r.code) == typed(code)), "That device's sign-in doesn't show it's yours, so it needs every letter of the code it shows.");
+    ensure!(!found.iter().any(|(r, j)| code_needed(r, j) == r.code && short_code(&r.code) == typed(code)), "That device needs every letter of the code it shows.");
     the_one(found, |(r, _)| &r.code, |(r, j)| code_needed(r, j), code)
 }
 
@@ -1109,12 +1102,7 @@ fn who_joins(r: &Asked, joining: &Joining) -> Value {
 pub async fn requests(m: &impl Me) -> Result<Value> {
     let mut out = Vec::new();
     for (r, joining) in waiting(m).await? {
-        let said_yes = match &joining {
-            Joining::New { invite, .. } => invite.is_some(),
-            Joining::Link(_) => r.said["sign_in"]["by_link"].is_null(),
-            _ => false,
-        };
-        if said_yes {
+        if said_yes(&r, &joining) {
             match approve(m, &r, &joining).await {
                 Ok(_) => continue,
                 Err(err) => tracing::warn!("letting {} in by their invite: {err:#}", r.name),
@@ -1136,6 +1124,15 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
         out.push(shown);
     }
     Ok(json!(out))
+}
+
+/// Whether an invite already said yes to `r`, so nobody is asked: only auth saying its sign-in wasn't finished from a link.
+fn said_yes(r: &Asked, joining: &Joining) -> bool {
+    match joining {
+        Joining::New { invite, .. } => invite.is_some(),
+        Joining::Link(_) => r.said["by_link"] == false,
+        _ => false,
+    }
 }
 
 /// The sign-ins letting `r` in takes out: its user's others on the device it says it's on. Auth passes that on unchecked,
@@ -1232,7 +1229,7 @@ async fn approve_code(m: &impl Me, code: &str, confirm: bool) -> Result<Value> {
     if !confirm {
         let sign_in = signed_in_with(m, &r).await;
         let replaces: Vec<String> = replaced(m.who(|who| who.clients())?, &r).into_iter().map(|c| c.name).collect();
-        return Ok(json!({ "device": r.name, "user": who_joins(&r, &joining), "new": matches!(joining, Joining::Link(_) | Joining::New { .. }), "sign_in": sign_in, "replaces": replaces }));
+        return Ok(json!({ "device": r.name, "user": who_joins(&r, &joining), "yours": matches!(joining, Joining::Own { .. }), "new": matches!(joining, Joining::Link(_) | Joining::New { .. }), "sign_in": sign_in, "replaces": replaces }));
     }
     approve(m, &r, &joining).await
 }
@@ -1414,21 +1411,6 @@ async fn refuse(m: &impl Me, code: &str) -> Result<Value> {
     Ok(json!({ "device": r.name }))
 }
 
-/// Lists a passkey (its PRF output, `keys::passkey_keys`) as a way back in: it's sealed what this device opens, and
-/// for an admin's, is an admin's device at the relay too, so the devices it lets in are let in as theirs.
-async fn list_passkey(m: &impl Me, prf: &[u8], credential: &str) -> Result<()> {
-    let (sign, seal) = keys::passkey_keys(prf);
-    let pk = Endpoint { key: sign.public(), seal: keys::public_of(&seal) };
-    let user = m.user()?;
-    m.write(content::passkey(&pk, &user, "Passkey", credential)).await?;
-    m.read().await?;
-    let (scopes, admin) = m.who(|who| Ok((who.scopes()?.into_iter().filter(|s| who.may(&user, "use", &scopes::object(s))).collect::<Vec<_>>(), who.may(&user, "invite", scopes::NETWORK))))?;
-    for scope in &scopes {
-        seal_held(m, scope, &pk).await?;
-    }
-    tell(m, m, json!({ "add": hex(&pk.key), "role": "client", "admin": admin })).await
-}
-
 /// Runs an app's schedules on a device for `days`, or with 0, stops them.
 async fn app_schedules_asked(m: &impl Me, app: String, device: &str, scope: Option<&str>, days: u64) -> Result<Value> {
     let user = m.user()?;
@@ -1573,7 +1555,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{Asked, Joining, code_needed, replaced, short_code, the_one};
+    use super::{Asked, Joining, code_needed, replaced, said_yes, short_code, the_one};
     use crate::database::scopes::{Kind, Machine};
     use crate::keys::{self, hex};
 
@@ -1602,7 +1584,19 @@ mod tests {
         assert!(one(Joining::Own { proved: true }, &whole));
         assert!(!one(Joining::Own { proved: false }, &short), "a short code is no check on one that shows nothing");
         assert!(one(Joining::Own { proved: false }, &whole));
-        assert!(one(Joining::Lost, &short), "someone with no device left is checked by their sign-in");
+        assert!(!one(Joining::Lost, &short), "someone with no device left shows no device of theirs to compare");
+        assert!(one(Joining::Lost, &whole));
+    }
+
+    /// An invite link lets a device in with no tap only when auth says its sign-in wasn't finished from a link: not when it
+    /// says nothing.
+    #[test]
+    fn an_invite_link_goes_straight_in_only_if_auth_says_it_wasnt_by_link() {
+        let invite = || Joining::Link(serde_json::from_value(json!({ "secret": "s", "name": "Sam", "role": "member", "until": u64::MAX })).unwrap());
+        let told = |by_link: serde_json::Value| Asked::of(&json!({ "key": hex(&[1; 32]), "seal": hex(&[2; 32]), "user": "a", "name": "n", "by_link": by_link })).unwrap();
+        assert!(said_yes(&told(json!(false)), &invite()));
+        assert!(!said_yes(&told(json!(true)), &invite()));
+        assert!(!said_yes(&asked(1, "a", None), &invite()), "a request that doesn't say goes through a tap");
     }
 
     /// Letting a device in takes out only its user's other sign-ins on the device it says it's on, each named on its card.

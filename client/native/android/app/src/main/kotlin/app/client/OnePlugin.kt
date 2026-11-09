@@ -154,7 +154,7 @@ class OnePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     companion object {
-        /** A Custom Tab, in Chrome where it can (a passkey's PRF works there), else whatever the phone has. */
+        /** A Custom Tab, in Chrome where it can, else whatever the phone has. */
         fun openInTab(context: Context, url: Uri) {
             val tab = CustomTabsIntent.Builder().setShowTitle(true).setShareState(CustomTabsIntent.SHARE_STATE_OFF).build()
             CustomTabsClient.getPackageName(context, listOf("com.android.chrome"), true)?.let { tab.intent.setPackage(it) }

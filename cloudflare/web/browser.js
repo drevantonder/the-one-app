@@ -1,12 +1,15 @@
 // The web client in a browser (platform.js): it signs in as an OAuth client of the network's auth (PKCE, and the
 // user's passkey at its sign-in page), keeps its refresh token in this browser, and is its user's device
 // (device.js, and one-client's keyring in the SharedWorker, net.js), let in by someone already in the network saying yes.
-import { browserKeys, browserName, codeOf, passkeyKeysOf, signingInFor } from "./device.js";
-import { del } from "./kept.js";
+import { browserKeys, browserName, codeOf, signingInFor } from "./device.js";
+import { del, get, put } from "./kept.js";
 import { net } from "./net.js";
 import { h, ui } from "./view.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/// Whether this page was just signed in (`auth.finish`): only then does a key the relay refuses go.
+let signedInNow = false;
 
 const KEPT = "one.signin";
 const CLIENT = "one.client";
@@ -37,6 +40,7 @@ const auth = {
     sessionStorage.removeItem("one.pkce");
     if (!pkce) throw new Error("That sign-in didn’t start here. Sign in again.");
     auth.keep((await net.auth({ step: "finish", asked: pkce.asked, got: Object.fromEntries(new URLSearchParams(location.search)) })).tokens);
+    signedInNow = true;
     return pkce.back && pkce.back !== "/callback" ? pkce.back : "/";
   },
 
@@ -80,49 +84,39 @@ export function browser() {
   /// This browser as its user's device, once it's listed as one (`join`): null until then.
   let device = null;
 
-  /// Makes this browser a device of its user, before anything is asked of a node: one already, or let in by a passkey
-  /// of theirs that's listed, or by one of their devices (or, for someone new, their inviter's), which it asks at
-  /// auth and waits for there, showing its code (`waiting`). `api` is the request path, as a passkey's device asks.
-  async function join(waiting, api) {
+  /// Makes this browser a device of its user, before anything is asked of a node: one already, or let in by one of their
+  /// devices (or, for someone new, their inviter's), which it asks at auth and waits for there, showing its code
+  /// (`waiting`). Just signed in, with a key the relay let in once and refuses now, it starts over with a new one: a
+  /// removed key can't be let in again.
+  async function join(waiting) {
     // The service worker, which keeps this page and shows its notes, once someone's signed in.
     navigator.serviceWorker?.register("/sw.js", { type: "module" }).catch(() => {});
     const user = auth.user();
-    const keys = await browserKeys(user);
+    let keys = await browserKeys(user);
     const invite = sessionStorage.getItem("one.invite");
-    if (await net.start(user).catch((err) => (err.unreachable ? Promise.reject(err) : false))) return sessionStorage.removeItem("one.invite"), (device = keys);
+    const isIn = async () => (await put(`joined:${user}`, keys.key), sessionStorage.removeItem("one.invite"), (device = keys));
+    const started = await net.start(user).catch((err) => (err.unreachable ? Promise.reject(err) : false));
+    if (signedInNow && (await get(`joined:${user}`)) === keys.key && (await net.still().catch(() => null)) === false) {
+      await forgetDevice();
+      keys = await browserKeys(user);
+    } else if (started) {
+      return isIn();
+    }
+    signedInNow = false;
     const ask = async () => net.ask(user, await auth.token(), browserName(), "browser", invite);
     const invited = await ask();
-    if (await byPasskey(user, keys, api)) return (device = keys);
     waiting(await codeOf(keys.key, keys.seal), invited);
     await net.untilLetIn(user, () => auth.token(), ask);
-    sessionStorage.removeItem("one.invite");
-    return (device = keys);
+    return isIn();
   }
 
-  /// Lets this browser in by a passkey its user listed, whose PRF output this tab has from signing in: it asks as that
-  /// passkey's device, which approves this browser's request by its code. → whether it's in.
-  async function byPasskey(user, keys, api) {
-    const prf = sessionStorage.getItem("one.prf");
-    if (!prf) return false;
-    const bytes = Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
-    try {
-      const pk = await passkeyKeysOf(bytes);
-      if (!(await net.start(user, true, { key: pk.key, sign: pk.sign, seal: pk.opens.secret, sealKey: pk.seal }))) return false;
-      await api("/v1/devices/approve", { method: "POST", body: { code: await codeOf(keys.key, keys.seal), confirm: true } });
-      return await net.start(user, true);
-    } catch (err) {
-      console.warn("the passkey didn't let this browser in:", err);
-      return false;
-    }
-  }
-
-  /// This browser's key goes: a removed key can't be let in again, so signing in makes a new one. With it, what it kept
-  /// as that device: the nodes it asks, and what its keyring kept (one-client's `keyring::Keep`: the network it was let
-  /// into, who's who and what each kind of request needed), which the next approval names again. As a native app's
-  /// device forgets (one-client's `Device::sign_out`).
+  /// This browser's key goes, signing out or starting over: a removed key can't be let in again, so signing in makes a
+  /// new one. With it, what it kept as that device: the nodes it asks, and what its keyring kept (one-client's
+  /// `keyring::Keep`: the network it was let into, who's who and what each kind of request needed), which the next
+  /// approval names again. As a native app's device forgets (one-client's `Device::sign_out`).
   async function forgetDevice() {
     const user = auth.user();
-    if (user) await Promise.all(["device", "nodes", "root", "welcome", "who.json", "needs.json", "invites.json"].map((k) => del(`${k}:${user}`))).catch(() => {});
+    if (user) await Promise.all(["device", "joined", "nodes", "root", "welcome", "who.json", "needs.json", "invites.json"].map((k) => del(`${k}:${user}`))).catch(() => {});
   }
 
   /// What was last registered for pushes here: the subscription's endpoint, the device's key and the network's VAPID
@@ -160,13 +154,9 @@ export function browser() {
     reaches: (user) => net.start(user).catch(() => false),
     fetch: (...args) => net.fetch(...args),
     took: () => net.took(),
-    /// Whether the relay says this browser isn't one of its user's devices any more: its key goes then. A client
-    /// with no session yet (a tab that just took over the others') doesn't know.
-    async removed() {
-      if ((await net.still().catch(() => null)) !== false) return false;
-      await forgetDevice();
-      return true;
-    },
+    /// Whether the relay says this browser isn't one of its user's devices any more: it stops then, and keeps its key
+    /// until signing in again (`join`). A client with no session yet (a tab that just took over the others') doesn't know.
+    removed: async () => (await net.still().catch(() => null)) === false,
     /// Out of its user's devices first (removing itself, which its keyring does as `leave`), so signing in again
     /// replaces it, then its key goes. One that can't get out in a few seconds (no node answering) goes anyway, and
     /// stays listed, last seen when it signed out, until it's removed in Settings › Devices.
