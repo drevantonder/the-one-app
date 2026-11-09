@@ -229,7 +229,7 @@ fn commands(mcp: &str) -> one::cli::Command {
     let form = |usage: &str, about: String| (usage.to_string(), about);
     one::cli::Command {
         help: vec![
-            form("throwaway [--build <program>] [--ui <folder>]", "start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is: on this machine beside yours, with only what every new one starts with, to look around and test in. --build runs that program of a network (by default the one beside this), and --ui reads its pages and Workers from a checkout, as they are there, instead of what the build holds: only the files the build has".into()),
+            form("throwaway [--build <program>] [--ui <folder>]", "start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is: on this machine beside yours, with only what every new one starts with, to look around and test in. --build runs that program of a network (by default the one beside this), and --ui reads its pages and Workers from a checkout, as they are there, instead of what the build holds".into()),
             form("throwaway restart", "start it again, keeping its data, to pick up a changed UI folder".into()),
             form("throwaway <command>", format!("any command, in it: {CLI}-dev throwaway status, {CLI}-dev throwaway apps, {CLI}-dev throwaway repos list")),
             form("throwaway mcp", format!("its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}")),

@@ -101,7 +101,7 @@ pub(crate) fn post(url: &str, headers: &[(&str, &str)], body: Value) -> (u16, Va
 }
 
 /// What the address serves as the web client is parsed before anything deploys, so a script that doesn't (a merge's
-/// markers left in it) fails here, not `one-dev deploy workers`.
+/// markers left in it) fails here, not `one-dev update workers`.
 #[test]
 fn the_web_clients_scripts_parse() {
     one::cloudflare::parses(&one::web::files()).unwrap();

@@ -2,29 +2,30 @@
 
 use super::*;
 
-/// Deploys to Cloudflare, with the build `commit`, from the one of this user's Linux devices that is the Workers' home
-/// (`Settings::at_home`; another refuses, which says so and is passed over): only there are its secrets
-/// (`cloudflare deploy` in its home's cloudflare/). It waits for each to run that build, so it never
-/// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every network
-/// has its Workers on Cloudflare, so it fails if no device deployed them. True if it failed.
-pub(super) fn deploy_cloudflare(commit: &str) -> bool {
+/// Deploys to Cloudflare from the one of this user's Linux devices that is the Workers' home (`Settings::at_home`;
+/// another refuses, which says so and is passed over): only there are its secrets (`cloudflare deploy` in its home's
+/// cloudflare/), and it reads the Workers and the web client from the signed record, or its own build where that's newer.
+/// With `build`, the full name of a build (`<commit>` or a custom build's `<commit>-<config>`, as its folder is named), it
+/// first waits for that device to run it: a change to Rust needs the program deploying to be that build. It tries again
+/// what may pass (a link dropping as nodes restart, Cloudflare). Every network has its Workers on Cloudflare, so it fails
+/// if no device deployed them.
+pub(super) fn deploy_cloudflare(build: Option<&str>) -> Result<()> {
     // As they are now, not before the nodes restarted onto this build: a device that was away then may be back, and the
     // Workers' home must not be left out because the list is old.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
     let home = format!("${{{}:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", one::config::env("HOME"));
-    // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent out:
-    // `exit::NOT_YET` says it isn't yet, `exit::NO_SETTINGS` that this device has none to deploy. Shell's program, which runs this on another
-    // device, has its own folder in services/ as its home, so its home is two up, and its address (`_ADDR`) is the services' registry's, not
-    // the node's. It runs as a login would: its profile is where 1Password's sign-in, which the Cloudflare secrets are read with, usually is,
-    // and ~/.local/bin where op may be.
+    // `exit::NOT_YET` says it isn't on that build yet, `exit::NO_SETTINGS` that this device has none to deploy. Shell's
+    // program, which runs this on another device, has its own folder in services/ as its home, so its home is two up, and
+    // its address (`_ADDR`) is the services' registry's, not the node's. It runs as a login would: its profile is where
+    // 1Password's sign-in, which the Cloudflare secrets are read with, usually is, and ~/.local/bin where op may be.
+    let wait = build.map_or(String::new(), |build| format!(r#"case "$("$node" version --json)" in *'"commit":"{build}"'*) ;; *) echo "still on $("$node" version --json)"; exit {} ;; esac"#, one::cli::exit::NOT_YET));
     let deploy = format!(
         r#"h="{home}"; [ -f "$h/pid" ] || h=$(cd "$h/../.." && pwd); [ -f "$h/cloudflare/settings.json" ] || exit {no_settings}; node=/proc/$(cat "$h/pid")/exe
-case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit {not_yet} ;; esac
+{wait}
 . "$HOME/.profile" >/dev/null 2>&1; unset {addr}; {home_var}="$h" PATH="$HOME/.local/bin:$PATH" "$node" cloudflare deploy"#,
         addr = one::config::env("ADDR"),
         home_var = one::config::env("HOME"),
         no_settings = one::cli::exit::NO_SETTINGS,
-        not_yet = one::cli::exit::NOT_YET,
     );
     let (online, offline): (Vec<&Value>, Vec<&Value>) = linux.iter().partition(|d| d["online"] == true);
     let (here, others): (Vec<&Value>, Vec<&Value>) = online.into_iter().partition(|d| d["here"] == true);
@@ -64,7 +65,7 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             }
             Ok(r) if r["exit"] == 0 => {
                 deployed = true;
-                println!("  {name}: deployed to Cloudflare at {commit}");
+                println!("  {name}: {}", r["stdout"].as_str().unwrap_or("").lines().find(|l| l.contains(" from ")).unwrap_or("deployed to Cloudflare"));
             }
             Ok(r) => {
                 failed = true;
@@ -82,5 +83,6 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
         let away = if away.is_empty() { String::new() } else { format!(" ({} offline: deploy again when it's back)", away.join(", ")) };
         println!("  no device deployed to Cloudflare: none of the online ones has the settings{away}");
     }
-    failed || !deployed
+    ensure!(deployed && !failed, "it isn't deployed to Cloudflare");
+    Ok(())
 }

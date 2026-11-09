@@ -5,9 +5,9 @@ description: Seeing a change to screens, @one/ui, the web client or the auth pag
 
 # See a UI change
 
-Did you change Rust, or add a file the build doesn't know yet? Then build first, and use `target/debug/one-dev throwaway` as AGENTS.md says.
+Did you change Rust? Then build first, and use `target/debug/one-dev throwaway` as AGENTS.md says.
 
-Only existing UI files changed? No Rust build:
+Only UI files changed? No Rust build:
 
 1. `bun run build` in `src/screen/ui` if you changed what it builds.
 2. From your checkout: `one-dev throwaway --ui .` runs the installed build with your checkout's UI.

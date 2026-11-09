@@ -1,5 +1,5 @@
 //! Building and publishing: the platforms a release is for, a service built for them, the WebAssembly the node carries, and
-//! the one way commands are run. `build`, `deploy`, `publish` and `throwaway` all build through here.
+//! the one way commands are run. `update`, `deploy` and `throwaway` all build through here.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

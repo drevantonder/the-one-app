@@ -8,21 +8,9 @@ description: Getting a change you made to The One App out to every device. Use o
 `one-dev <command> --help` says what each takes. This says when.
 
 1. Test and push as AGENTS.md says.
-2. On personal, which has the toolchain and the release key: `one-dev changes`. Send only what it lists. Other threads ship too, so it may be nothing: then stop.
-3. In this order, skipping what it doesn't list:
-   - Renamed or removed apps: `one-dev retire`, before the build without them goes out. It says where to `one add` a renamed one afterwards.
-   - The Mac app: `one-dev publish source`.
-   - Services: `one-dev publish services`.
-   - Apps, with no node to send: `one-dev deploy apps ~/.cache/one/src`, which `changes` left at main's tip.
-   - The node or `one-dev`: `one-dev build`, which prints a folder named by the commit. Then, for the node:
-     1. `one-dev publish <folder>/one`
-     2. `one-dev status --until <commit> --device personal`: the next two need it running here.
-     3. `one-dev deploy apps`
-     4. `one-dev deploy workers <commit>`
-     5. `one-dev publish web <folder>`
-   - `one-dev` itself, which no device takes: `install <folder>/one-dev "$(command -v one-dev)"`, then `scp` it to `.local/bin/` on `drevan@100.76.107.116` (ptc) and `linux`, for their throwaways.
-4. `one-dev changes --sent`, only once all of it went out: what you leave unmarked goes out next time.
-5. The ptc-update skill, at the same time if you like: it's built on its own machine.
-6. `one-dev status --until <commit>`, for the devices online. A Mac that's behind: the mac-behind skill.
-
-A Worker change that nodes need first: deploy it before publishing the node, with your build (`target/debug/one cloudflare deploy` on the Workers' home).
+2. On personal, which has the toolchain and the release key: `one-dev update`. It runs each part that changed, in order: apps, mac, services, node, workers, web, dev. Each part sends main's tip and keeps the commit it sent, so a part with nothing new does nothing, and a push that lands meanwhile goes out next time. `one-dev changes` says what's due, part by part.
+3. A part on its own: `one-dev update workers|web|apps|services|mac|node|dev`. Renamed or removed apps are retired by `update apps`, which says where to `one add` a renamed one afterwards.
+4. A change to Workers or the web client alone needs no node build, and isn't waited for by any device. Any change to Rust, or to anything not known to be outside the node, sends everything.
+5. A Worker change that nodes need first: `one-dev update workers` before `one-dev update node`. If Rust is in the same change, deploy it first with your build (`target/debug/one cloudflare deploy` on the Workers' home).
+6. PTC follows main by itself on ptc's timer: the ptc-update skill, only to send it sooner.
+7. `one-dev status --until <commit>`, only when a change must be seen live. A Mac that's behind: the mac-behind skill.

@@ -5,9 +5,9 @@ description: Sending main out to The PTC App's network, a custom build of The On
 
 # PTC's update
 
-The ship skill's steps, on ptc, with `ptc-dev` for `one-dev`, in this environment:
+A timer on ptc runs `ptc-dev update` every 15 minutes, with its own markers and its own release key: each run takes main's tip and does nothing if nothing changed. To send it sooner, or one part alone, the ship skill's commands, on ptc, with `ptc-dev` for `one-dev`, in this environment:
 
     ssh drevan@100.76.107.116
     . ~/.profile; export PTC_HOME=~/.local/share/the-ptc-app; alias ptc-dev="nice ~/.local/lib/the-ptc-app/ptc-dev"
 
-Its build folder is under `$PTC_HOME/cache/builds`, its clean checkout `$PTC_HOME/cache/src`, and the device to wait for is `ptc`. The config comes from its own repo: `ptc-dev build` takes its latest. Its builds are named `<commit>-<config>`, as the folder is: `deploy workers` takes all of that, `status --until` only the commit before the `-`. `ptc-dev` itself is `~/.local/lib/the-ptc-app/ptc-dev`, and it has no other machine to copy to. It has no GitHub releases.
+Its build folders are under `$PTC_HOME/cache/builds`, its clean checkout `$PTC_HOME/cache/src`, and the device to wait for is `ptc`. The config comes from its own repo, its latest each time: a change to it sends everything. Builds are named `<commit>-<config>`, which `status --until` also takes. `ptc-dev` itself is `~/.local/lib/the-ptc-app/ptc-dev`. It has no GitHub releases. What the timer did: `journalctl --user -u ptc-update`.

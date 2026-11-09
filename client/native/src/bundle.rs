@@ -1,7 +1,7 @@
 //! What the window shows: the web client the release key signed and this device last kept, newest first, or the one
 //! built in. Both reach the window through the app's own origin, so a bundle changes nothing about what the window's
 //! page may ask of the app. A bundle is checked (signature, not older than this has, shell new enough) before it's
-//! kept and again every time the app starts, and only ever comes from `one-dev publish web`: the place it travels through
+//! kept and again every time the app starts, and only ever comes from `one-dev update web`: the place it travels through
 //! (the network's address) is a carrier. The page finding a problem with what it got falls back, not to nothing, but
 //! to what came before.
 
