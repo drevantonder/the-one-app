@@ -1,6 +1,5 @@
-// Computer Use: a tile for each of the user's own devices agents may use, with a switch, and a live picture while an
-// agent uses it. The tiles fill the room: more columns, and bigger pictures, where there's
-// more of it. Looked at again every 5 seconds while it can be seen.
+// Computer Use: the user's own devices agents may use, each with a switch: a live picture, filling the room, while an
+// agent uses one, and a row otherwise. Looked at again every 5 seconds while it can be seen.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { AppIcon, Button, Empty, Grid, Icon, List, ListRow, Problem, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Skeleton, Switch } from "@one/ui"
@@ -22,19 +21,6 @@ function Pic({ src, ratio = "16 / 10", className = "", children }) {
   )
 }
 
-const Laptop = () => (
-  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
-    <rect x="4" y="5" width="16" height="11" rx="1.5" />
-    <path d="M2 19h20" />
-  </svg>
-)
-const Phone = () => (
-  <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
-    <rect x="7" y="2.5" width="10" height="19" rx="2" />
-    <path d="M11 18.5h2" />
-  </svg>
-)
-
 // macOS can't capture the screen without Screen Recording, so a device missing it doesn't answer capture calls.
 function look(d, { asking, note, fix }) {
   const gate = d.permissions && d.kind === "mac"
@@ -48,34 +34,51 @@ function look(d, { asking, note, fix }) {
   return { title, line, box, off: !!(d.why || d.missing || asking || missing) }
 }
 
-function Tile({ d, shot, mirror, mirroring, asking, note, allow, fix, openMirror }) {
+// A Mac's iPhone Mirroring: the picture while it's open, and how to open it when it isn't.
+function Mirror({ d, src, open }) {
+  if (d.mirroring?.running) return <Pic src={src} ratio="9 / 16" className="w-24" />
+  return (
+    <div className="flex items-center gap-3 text-sm">
+      <Icon name="device-mobile" className="size-5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">iPhone Mirroring</div>
+        <div className="text-muted-foreground">Pair it in your iPhone's Settings › General.</div>
+      </div>
+      <Button size="sm" variant="secondary" onClick={() => open(d.device)}>Open</Button>
+    </div>
+  )
+}
+
+// A device in use is its live picture; the rest are rows, since a picture of nothing says nothing.
+function Tile({ d, shot, mirror, mirroring, note, allow, fix, asking, openMirror }) {
   const v = look(d, { asking, note, fix: () => fix(d.device) })
-  const lab = mirroring && d.kind === "mac"
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <Pic src={d.on && d.using ? shot : ""}><Laptop /></Pic>
+      <Pic src={shot} />
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1 truncate text-sm font-medium">{v.title}</div>
         <Switch checked={!!d.on} disabled={v.off} onCheckedChange={(on) => allow(d.device, on)} aria-label="Let agents use it" />
       </div>
       {v.line && <div className="-mt-1 text-sm text-muted-foreground">{v.line}</div>}
-      {v.box && <Problem warn={v.box.warn} title={v.box.title} text={v.box.text} action={v.box.fix && { label: "Fix", run: v.box.fix }} />}
-      {lab && (
-        <div className="mt-4 flex gap-4">
-          <Pic src={d.mirroring?.running ? mirror : ""} ratio="9 / 16" className="w-24 shrink-0"><Phone /></Pic>
-          <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
-            <div className="text-sm font-medium">iPhone Mirroring</div>
-            {!d.mirroring?.running && (
-              <>
-                <div className="text-sm text-muted-foreground">Pair on your iPhone's Settings → General → iPhone Mirroring. Capture stays inside the Mirroring window only.</div>
-                <Button size="sm" variant="secondary" onClick={() => openMirror(d.device)}>
-                  <Icon name="play" /> Open
-                </Button>
-              </>
-            )}
-          </div>
+      {mirroring && d.kind === "mac" && <div className="mt-2"><Mirror d={d} src={mirror} open={openMirror} /></div>}
+    </div>
+  )
+}
+
+function Row({ d, mirror, mirroring, note, allow, fix, asking, openMirror }) {
+  const v = look(d, { asking, note, fix: () => fix(d.device) })
+  return (
+    <div className="flex flex-col gap-2 px-3 py-2.5">
+      <div className="flex items-center gap-3 text-sm">
+        <Icon name={d.kind === "mac" ? "laptop" : "desktop"} className="size-5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium">{v.title}</div>
+          {v.line && <div className="truncate text-muted-foreground">{v.line}</div>}
         </div>
-      )}
+        <Switch checked={!!d.on} disabled={v.off} onCheckedChange={(on) => allow(d.device, on)} aria-label="Let agents use it" />
+      </div>
+      {v.box && <Problem warn={v.box.warn} title={v.box.title} text={v.box.text} action={v.box.fix && { label: "Fix", run: v.box.fix }} />}
+      {mirroring && d.kind === "mac" && <Mirror d={d} src={mirror} open={openMirror} />}
     </div>
   )
 }
@@ -234,28 +237,18 @@ function Main() {
   if (error && !data) return <Problem title={one.plain(error).title} text={one.plain(error).next} />
   if (!data) return <Waiting />
   const devices = data.devices.map((d) => (d.device in pending ? { ...d, on: pending[d.device] } : d))
+  const inUse = devices.filter((d) => d.on && d.using)
+  const rest = devices.filter((d) => !inUse.includes(d))
+  const part = (d) => ({ d, mirror: pics[`${d.device}:mirror`], mirroring: data.mirroring, asking: !!asking[d.device], note: notes[d.device], allow, fix: setFixing, openMirror })
+  if (!devices.length) return <Empty>Agents can use your Mac once you let them, in its menu bar.</Empty>
   return (
-    <div className="flex flex-col gap-8">
-      {devices.length ? (
+    <div className="flex flex-col gap-6">
+      {inUse.length > 0 && (
         <Grid min="20rem" max={4} gap="1.5rem" className="items-start">
-          {devices.map((d) => (
-            <Tile
-              key={d.device}
-              d={d}
-              shot={pics[d.device]}
-              mirror={pics[`${d.device}:mirror`]}
-              mirroring={data.mirroring}
-              asking={!!asking[d.device]}
-              note={notes[d.device]}
-              allow={allow}
-              fix={setFixing}
-              openMirror={openMirror}
-            />
-          ))}
+          {inUse.map((d) => <Tile key={d.device} shot={pics[d.device]} {...part(d)} />)}
         </Grid>
-      ) : (
-        <Empty>Agents can use your Mac once you let them, in its menu bar.</Empty>
       )}
+      {rest.length > 0 && <List>{rest.map((d) => <Row key={d.device} {...part(d)} />)}</List>}
       <Fix device={fixing && devices.find((d) => d.device === fixing)} onClose={() => setFixing(null)} />
     </div>
   )
