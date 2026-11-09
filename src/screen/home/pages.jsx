@@ -757,7 +757,7 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
         )}
       </div>
       {page.missing ? (
-        <Empty>This device can’t open this page. Sign out and in again to choose it.</Empty>
+        <Empty action={{ label: "Go to Home", run: () => one.open("pages", { scope: "user" }) }}>This page isn’t here. The link may be old or mistyped.</Empty>
       ) : (
         <>
           <Grid page={page} editing={editing && !!arrange} leaving={leaving && !!arrange} refreshing={refreshing} />

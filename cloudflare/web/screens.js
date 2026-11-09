@@ -618,7 +618,7 @@ addEventListener("message", async (e) => {
       close: (value) => {
         if (f.dock) return (localStorage.removeItem(devtools.KEY), devtools.draw(), null);
         if (f.sheet) f.sheet.close(value);
-        else if (history.state?.back) back();
+        else back();
         return null;
       },
       title: (title, m) => {

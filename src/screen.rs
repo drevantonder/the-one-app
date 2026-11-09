@@ -32,7 +32,7 @@ const MISSING: &str = r#"<meta name="@one/ui">
 import { createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { Empty } from "@one/ui";
-createRoot(document.getElementById("root")).render(h(Empty, { action: { label: "Go to Home", run: () => one.open("main") } }, "This page isn't here. The link may be old or mistyped."));
+createRoot(document.getElementById("root")).render(h(Empty, { action: { label: "Go to Home", run: () => one.close() } }, "This page isn’t here. The link may be old or mistyped."));
 </script>"#;
 
 /// `@one/ui` as `bun run build` in `src/screen/ui/` made it, whose sources `cargo test` checks it was made from.

@@ -956,7 +956,13 @@ function Ye({ page: e, editing: i, leaving: a, undone: o, refreshing: s, bottom:
 					children: /* @__PURE__ */ O(f, { name: V.icon })
 				})]
 			})]
-		}), e.missing ? /* @__PURE__ */ O(u, { children: "This device can’t open this page. Sign out and in again to choose it." }) : /* @__PURE__ */ k(D, { children: [
+		}), e.missing ? /* @__PURE__ */ O(u, {
+			action: {
+				label: "Go to Home",
+				run: () => one.open("pages", { scope: "user" })
+			},
+			children: "This page isn’t here. The link may be old or mistyped."
+		}) : /* @__PURE__ */ k(D, { children: [
 			/* @__PURE__ */ O(Je, {
 				page: e,
 				editing: i && !!g,
