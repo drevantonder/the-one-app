@@ -11,5 +11,5 @@
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"], "@one/ui": ["./src/index.ts"] }
   },
-  "include": ["src", "gallery"]
+  "include": ["src"]
 }
