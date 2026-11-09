@@ -74,6 +74,10 @@ import { DurableObjectDialect } from "./sql.js";
 const { codePage, invitePage, passkeysPage, signInPage, throwawayPage } = pages({ css, ...drawn });
 
 const hex16 = () => hex.encode(random(8));
+/// Better Auth's users all have an email, unique and never empty, and a user whose only identity is a passkey has none:
+/// theirs is this, at a domain no one can receive mail at. It's never shown, never matched and never counts as verified.
+const noEmail = (id) => `${id}@people.invalid`;
+const isNoEmail = (email) => String(email || "").endsWith("@people.invalid");
 /// Where a client's sign-in goes, in words: the site it goes back to, or an app on the user's device (one listening on
 /// it, or its own link scheme), or the device that showed them a code.
 function goesTo(uri, origin) {
@@ -306,10 +310,13 @@ export class Auth extends DurableObject {
             },
           },
           registration: {
-            // Someone signed in adds a passkey; someone with an invite link (its secret as the context) makes their first.
+            // Someone signed in adds a passkey to their account; someone with an invite link (its secret as the context)
+            // makes their first, as their account is made. An invite that names a provider's account is for that account,
+            // which a passkey made by whoever holds the link couldn't prove.
             requireSession: false,
             async resolveUser({ context }) {
               const invite = await self.openInvite(context);
+              if (invite.email && providers.length) refuse(403, "This invite is for signing in with your account, not a new passkey.");
               return { id: invite.user, name: invite.name, displayName: invite.name };
             },
             // Someone signed in adds one only just after signing in, so a session taken from them adds none.
@@ -354,6 +361,7 @@ export class Auth extends DurableObject {
       const ours = await this.route(request, url);
       if (ours) return ours;
       if (path === "/api/auth/oauth2/register" && request.method === "POST") await this.notNamedAsUs(await request.clone().json().catch(() => ({})));
+      if (path === "/api/auth/passkey/generate-register-options") return await this.namedAsUser(request, await this.auth.handler(request));
       if (path === "/api/auth/passkey/generate-authenticate-options") return await this.namingDevice(await this.auth.handler(request), url.searchParams.get("join"));
       if (path === "/api/auth/sign-in/social" && request.method === "POST") return await this.withNonce(request, await this.auth.handler(request));
       if (path.startsWith("/api/auth/")) return await this.auth.handler(request);
@@ -503,6 +511,20 @@ export class Auth extends DurableObject {
       return resp;
     }
     out.challenge = ours;
+    const headers = new Headers(resp.headers);
+    headers.delete("content-length");
+    return new Response(JSON.stringify(out), { status: resp.status, headers });
+  }
+
+  /// A new passkey's options, whose `user` Better Auth names by the account's email, for the device's list of them: by
+  /// the user's name, for someone who has no email.
+  async namedAsUser(request, resp) {
+    if (!resp.ok) return resp;
+    const out = await resp.clone().json();
+    if (!isNoEmail(out.user?.name)) return resp;
+    const session = await this.auth.api.getSession({ headers: request.headers });
+    if (!session) return resp;
+    out.user.name = out.user.displayName = session.user.name;
     const headers = new Headers(resp.headers);
     headers.delete("content-length");
     return new Response(JSON.stringify(out), { status: resp.status, headers });
@@ -858,7 +880,7 @@ export class Auth extends DurableObject {
     if (!(await context.internalAdapter.findUserById(invite.user))) {
       this.admitting = invite.user;
       try {
-        await context.internalAdapter.createUser({ id: invite.user, name: invite.name, email: `${invite.user}@people.invalid`, emailVerified: false });
+        await context.internalAdapter.createUser({ id: invite.user, name: invite.name, email: noEmail(invite.user), emailVerified: false });
       } finally {
         this.admitting = null;
       }
@@ -930,7 +952,7 @@ function throwawayNetwork(auth, id, name) {
     const { token } = await auth.auth.api.signJWT({ body: { payload } });
     auth.keepProof(join, user.id, { id_token: token });
   };
-  const first = async (adapter) => (await adapter.findUserById(id)) || (await adapter.createUser({ id, name, email: `${id}@people.invalid`, emailVerified: false }));
+  const first = async (adapter) => (await adapter.findUserById(id)) || (await adapter.createUser({ id, name, email: noEmail(id), emailVerified: false }));
   return {
     id: "throwaway",
     endpoints: {

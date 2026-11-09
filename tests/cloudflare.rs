@@ -253,16 +253,21 @@ pub(crate) struct Workers {
 impl Workers {
     /// The Workers, their relay taking only `devices` (public keys, hex) and those they admit.
     pub(crate) fn for_devices(devices: Vec<String>) -> Workers {
-        Workers::start_as(false, devices)
+        Workers::start_as(None, false, devices)
     }
 
     /// As `for_devices`, for a network whose users sign in with Google at test.example, the stand-in sites as
     /// Google.
     fn google(devices: Vec<String>) -> Workers {
-        Workers::start_as(true, devices)
+        Workers::start_as(Some("test.example"), true, devices)
     }
 
-    fn start_as(google: bool, devices: Vec<String>) -> Workers {
+    /// As `google`, for a network with a provider and no domain.
+    fn provider(devices: Vec<String>) -> Workers {
+        Workers::start_as(None, true, devices)
+    }
+
+    fn start_as(domain: Option<&str>, google: bool, devices: Vec<String>) -> Workers {
         let gateway = port();
         let mut settings = cloudflare::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
@@ -290,7 +295,8 @@ impl Workers {
             let sign_in = served.iter_mut().find(|s| s.name == "auth").unwrap();
             sign_in.outbound = Some("sites".into());
             let providers = json!([{ "id": "google", "name": "Google", "issuer": "https://accounts.google.com", "domain_claim": "hd", "domain_hint": "hd", "client_id": "a client id", "client_secret": "a client secret" }]);
-            sign_in.bindings.extend([("JOIN_DOMAIN".to_string(), "test.example".to_string()), ("PROVIDERS".to_string(), providers.to_string())]);
+            sign_in.bindings.push(("PROVIDERS".to_string(), providers.to_string()));
+            sign_in.bindings.extend(domain.map(|d| ("JOIN_DOMAIN".to_string(), d.to_string())));
         }
         served.push(Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
@@ -426,6 +432,35 @@ fn an_admin_signs_in_like_anyone_else() {
     let mut elsewhere = k.browser();
     assert_eq!(signs_in_with_passkey(&mut elsewhere, &passkey), 200);
     assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(andre.as_str()));
+}
+
+/// A passkey belongs to an account. An invite that names a provider's account can't be taken up by making a passkey, and
+/// someone with no email is never matched by one a provider says.
+#[test]
+fn a_passkey_belongs_to_an_account_and_no_email_is_matched() {
+    let (admin, admin_hex) = endpoint();
+    let domain = Workers::google(vec![admin_hex.clone()]);
+    let (secret, _) = invited(&domain, &admin, "Lee", Some("lee@test.example"));
+    let mut lees = domain.browser();
+    assert_eq!(lees.get(&format!("/api/auth/passkey/generate-register-options?context={secret}")).0, 403, "a passkey took up an invite for a provider's account");
+
+    let k = Workers::provider(vec![admin_hex]);
+    let (secret, sam) = invited(&k, &admin, "Sam", None);
+    let (mut sams, passkey) = (k.browser(), k.passkey());
+    let (status, options, _) = sams.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
+    assert_eq!(status, 200, "{options}");
+    assert_eq!(options["user"]["name"], "Sam");
+    assert_eq!(sams.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
+    assert_eq!(signed_in_as(&mut sams).as_deref(), Some(sam.as_str()));
+    let (_, options, _) = sams.get("/api/auth/passkey/generate-register-options");
+    assert_eq!(options["user"]["name"], "Sam", "a passkey added later is named for its user, not a stand-in email");
+    // A provider's account saying it has that stand-in signs in as no one.
+    let mut other = k.browser();
+    let email = format!("{sam}@people.invalid");
+    provider_callback(&mut other, "/", "/", json!({ "sub": "stranger", "email": email, "email_verified": true, "name": "Stranger" }));
+    assert_eq!(signed_in_as(&mut other), None, "a provider's account took over someone with no email");
+    assert_eq!(signs_in_with_passkey(&mut other, &passkey), 200);
+    assert_eq!(signed_in_as(&mut other).as_deref(), Some(sam.as_str()), "the passkey still signs them in");
 }
 
 /// A sign-in for a device names it, and auth passes what it showed on with that device's request to join, unchanged,
