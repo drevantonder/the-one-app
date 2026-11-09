@@ -164,15 +164,14 @@ function AddSomeone({ open, setOpen }) {
     <ResponsiveDialog
       open={open}
       onOpenChange={setOpen}
-      title="Add Someone"
+      title={made ? `Send ${made.who} This Link` : "Add Someone"}
       action={made
         ? <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>
         : <Button size="sm" disabled={!name.trim() || busy} onClick={make}>Make Link</Button>}
     >
-      {made ? <Link who={made.who} link={made.link} days={made.days} /> : (
+      {made ? <Link link={made.link} days={made.days} /> : (
         <form className="flex flex-col gap-4 p-4" onSubmit={(e) => (e.preventDefault(), make())}>
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="Name" autoComplete="off" enterKeyHint="done" />
-          <p className="text-sm text-muted-foreground">You'll get a link to send them.</p>
           {error && <Problem title={error} />}
         </form>
       )}
@@ -180,8 +179,8 @@ function AddSomeone({ open, setOpen }) {
   )
 }
 
-// The link made, to send them, with a button to copy it.
-function Link({ who, link, days }) {
+// The link made, to send them: copying it is what's left to do.
+function Link({ link, days }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
     await one.copy(link)
@@ -190,12 +189,12 @@ function Link({ who, link, days }) {
     setTimeout(() => setCopied(false), 1500)
   }
   return (
-    <div className="flex flex-col items-center gap-4 p-4 text-center">
-      <p className="text-sm text-muted-foreground">Send {who} this link. It works once, for {days} days.</p>
-      <div className="flex max-w-full items-center gap-2 rounded-full bg-muted py-1 pr-1 pl-3">
-        <span className="min-w-0 truncate font-mono text-sm text-muted-foreground select-all">{link}</span>
-        <Button variant="ghost" size="icon-sm" aria-label={copied ? "Copied" : "Copy link"} onClick={copy}><Icon name={copied ? "check" : "copy"} /></Button>
+    <div className="flex flex-col gap-4 p-4">
+      <div className="min-w-0">
+        <p className="truncate font-mono text-sm select-all">{link}</p>
+        <p className="text-sm text-muted-foreground">It works once, for {days} day{days > 1 ? "s" : ""}.</p>
       </div>
+      <Button onClick={copy}><Icon name={copied ? "check" : "copy"} />{copied ? "Copied" : "Copy Link"}</Button>
     </div>
   )
 }
@@ -235,7 +234,7 @@ function Handle({ was, open, setOpen, saved }) {
             {...quiet}
           />
         </div>
-        <p className="text-sm text-muted-foreground">What apps call you by, like Repos' addresses, which move with it. Lowercase letters, digits and hyphens.</p>
+        <p className="text-sm text-muted-foreground">Lowercase letters, digits and hyphens. Your Repos addresses change with it.</p>
         {error && <Problem title={error} />}
       </form>
     </ResponsiveDialog>

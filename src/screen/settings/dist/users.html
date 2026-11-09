@@ -174,7 +174,7 @@ function A(t) {
 	return n[20] !== O || n[21] !== v ? (k = /* @__PURE__ */ C(o, { children: [v, O] }), n[20] = O, n[21] = v, n[22] = k) : k = n[22], k;
 }
 function j(t) {
-	let r = e(19), { open: i, setOpen: o } = t, [s, c] = n(""), [l, u] = n(null), [d, f] = n(""), [p, h] = n(!1), g;
+	let r = e(20), { open: i, setOpen: o } = t, [s, c] = n(""), [l, u] = n(null), [d, f] = n(""), [p, h] = n(!1), g;
 	r[0] !== p || r[1] !== s ? (g = async function() {
 		let e = s.trim();
 		if (e && !p) {
@@ -192,8 +192,8 @@ function j(t) {
 			h(!1);
 		}
 	}, r[0] = p, r[1] = s, r[2] = g) : g = r[2];
-	let _ = g, b;
-	r[3] !== p || r[4] !== l || r[5] !== _ || r[6] !== s || r[7] !== o ? (b = l ? /* @__PURE__ */ S(a, {
+	let _ = g, b = l ? `Send ${l.who} This Link` : "Add Someone", x;
+	r[3] !== p || r[4] !== l || r[5] !== _ || r[6] !== s || r[7] !== o ? (x = l ? /* @__PURE__ */ S(a, {
 		variant: "secondary",
 		size: "sm",
 		onClick: () => o(!1),
@@ -203,82 +203,71 @@ function j(t) {
 		disabled: !s.trim() || p,
 		onClick: _,
 		children: "Make Link"
-	}), r[3] = p, r[4] = l, r[5] = _, r[6] = s, r[7] = o, r[8] = b) : b = r[8];
-	let x;
-	r[9] !== d || r[10] !== l || r[11] !== _ || r[12] !== s ? (x = l ? /* @__PURE__ */ S(M, {
-		who: l.who,
+	}), r[3] = p, r[4] = l, r[5] = _, r[6] = s, r[7] = o, r[8] = x) : x = r[8];
+	let T;
+	r[9] !== d || r[10] !== l || r[11] !== _ || r[12] !== s ? (T = l ? /* @__PURE__ */ S(M, {
 		link: l.link,
 		days: l.days
 	}) : /* @__PURE__ */ C("form", {
 		className: "flex flex-col gap-4 p-4",
 		onSubmit: (e) => (e.preventDefault(), _()),
-		children: [
-			/* @__PURE__ */ S(m, {
-				autoFocus: !0,
-				value: s,
-				onChange: (e) => c(e.target.value),
-				placeholder: "Name",
-				"aria-label": "Name",
-				autoComplete: "off",
-				enterKeyHint: "done"
-			}),
-			/* @__PURE__ */ S("p", {
-				className: "text-sm text-muted-foreground",
-				children: "You'll get a link to send them."
-			}),
-			d && /* @__PURE__ */ S(v, { title: d })
-		]
-	}), r[9] = d, r[10] = l, r[11] = _, r[12] = s, r[13] = x) : x = r[13];
-	let T;
-	return r[14] !== i || r[15] !== o || r[16] !== b || r[17] !== x ? (T = /* @__PURE__ */ S(y, {
+		children: [/* @__PURE__ */ S(m, {
+			autoFocus: !0,
+			value: s,
+			onChange: (e) => c(e.target.value),
+			placeholder: "Name",
+			"aria-label": "Name",
+			autoComplete: "off",
+			enterKeyHint: "done"
+		}), d && /* @__PURE__ */ S(v, { title: d })]
+	}), r[9] = d, r[10] = l, r[11] = _, r[12] = s, r[13] = T) : T = r[13];
+	let D;
+	return r[14] !== i || r[15] !== o || r[16] !== b || r[17] !== x || r[18] !== T ? (D = /* @__PURE__ */ S(y, {
 		open: i,
 		onOpenChange: o,
-		title: "Add Someone",
-		action: b,
-		children: x
-	}), r[14] = i, r[15] = o, r[16] = b, r[17] = x, r[18] = T) : T = r[18], T;
+		title: b,
+		action: x,
+		children: T
+	}), r[14] = i, r[15] = o, r[16] = b, r[17] = x, r[18] = T, r[19] = D) : D = r[19], D;
 }
 function M(t) {
-	let r = e(19), { who: i, link: o, days: s } = t, [c, l] = n(!1), u;
-	r[0] === o ? u = r[1] : (u = async function() {
-		await one.copy(o), one.tap("success"), l(!0), setTimeout(() => l(!1), 1500);
-	}, r[0] = o, r[1] = u);
-	let d = u, f;
-	r[2] !== s || r[3] !== i ? (f = /* @__PURE__ */ C("p", {
+	let r = e(19), { link: i, days: o } = t, [s, c] = n(!1), l;
+	r[0] === i ? l = r[1] : (l = async function() {
+		await one.copy(i), one.tap("success"), c(!0), setTimeout(() => c(!1), 1500);
+	}, r[0] = i, r[1] = l);
+	let u = l, d;
+	r[2] === i ? d = r[3] : (d = /* @__PURE__ */ S("p", {
+		className: "truncate font-mono text-sm select-all",
+		children: i
+	}), r[2] = i, r[3] = d);
+	let f = o > 1 ? "s" : "", m;
+	r[4] !== o || r[5] !== f ? (m = /* @__PURE__ */ C("p", {
 		className: "text-sm text-muted-foreground",
 		children: [
-			"Send ",
-			i,
-			" this link. It works once, for ",
-			s,
-			" days."
+			"It works once, for ",
+			o,
+			" day",
+			f,
+			"."
 		]
-	}), r[2] = s, r[3] = i, r[4] = f) : f = r[4];
-	let m;
-	r[5] === o ? m = r[6] : (m = /* @__PURE__ */ S("span", {
-		className: "min-w-0 truncate font-mono text-sm text-muted-foreground select-all",
-		children: o
-	}), r[5] = o, r[6] = m);
-	let h = c ? "Copied" : "Copy link", g = c ? "check" : "copy", _;
-	r[7] === g ? _ = r[8] : (_ = /* @__PURE__ */ S(p, { name: g }), r[7] = g, r[8] = _);
-	let v;
-	r[9] !== d || r[10] !== h || r[11] !== _ ? (v = /* @__PURE__ */ S(a, {
-		variant: "ghost",
-		size: "icon-sm",
-		"aria-label": h,
-		onClick: d,
-		children: _
-	}), r[9] = d, r[10] = h, r[11] = _, r[12] = v) : v = r[12];
-	let y;
-	r[13] !== m || r[14] !== v ? (y = /* @__PURE__ */ C("div", {
-		className: "flex max-w-full items-center gap-2 rounded-full bg-muted py-1 pr-1 pl-3",
-		children: [m, v]
-	}), r[13] = m, r[14] = v, r[15] = y) : y = r[15];
+	}), r[4] = o, r[5] = f, r[6] = m) : m = r[6];
+	let h;
+	r[7] !== d || r[8] !== m ? (h = /* @__PURE__ */ C("div", {
+		className: "min-w-0",
+		children: [d, m]
+	}), r[7] = d, r[8] = m, r[9] = h) : h = r[9];
+	let g = s ? "check" : "copy", _;
+	r[10] === g ? _ = r[11] : (_ = /* @__PURE__ */ S(p, { name: g }), r[10] = g, r[11] = _);
+	let v = s ? "Copied" : "Copy Link", y;
+	r[12] !== u || r[13] !== _ || r[14] !== v ? (y = /* @__PURE__ */ C(a, {
+		onClick: u,
+		children: [_, v]
+	}), r[12] = u, r[13] = _, r[14] = v, r[15] = y) : y = r[15];
 	let b;
-	return r[16] !== f || r[17] !== y ? (b = /* @__PURE__ */ C("div", {
-		className: "flex flex-col items-center gap-4 p-4 text-center",
-		children: [f, y]
-	}), r[16] = f, r[17] = y, r[18] = b) : b = r[18], b;
+	return r[16] !== h || r[17] !== y ? (b = /* @__PURE__ */ C("div", {
+		className: "flex flex-col gap-4 p-4",
+		children: [h, y]
+	}), r[16] = h, r[17] = y, r[18] = b) : b = r[18], b;
 }
 function N(t) {
 	let r = e(30), { was: i, open: o, setOpen: s, saved: c } = t, [l, u] = n(i), [d, f] = n(""), [p, h] = n(!1), g;
@@ -326,7 +315,7 @@ function N(t) {
 	let N;
 	r[18] === Symbol.for("react.memo_cache_sentinel") ? (N = /* @__PURE__ */ S("p", {
 		className: "text-sm text-muted-foreground",
-		children: "What apps call you by, like Repos' addresses, which move with it. Lowercase letters, digits and hyphens."
+		children: "Lowercase letters, digits and hyphens. Your Repos addresses change with it."
 	}), r[18] = N) : N = r[18];
 	let P;
 	r[19] === d ? P = r[20] : (P = d && /* @__PURE__ */ S(v, { title: d }), r[19] = d, r[20] = P);
