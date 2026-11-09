@@ -26,6 +26,14 @@ pub(crate) fn choose(dir: &Path, build: Option<&Path>, ui: Option<&Path>) -> Res
     Ok(())
 }
 
+/// Has the running throwaway network's Workers serve the web client's files from its UI folder as they are now, if it has
+/// one: they're read as they start, and so a change since needs no restart (the Workers' own code does).
+pub(crate) fn read_pages_again(dir: &Path) -> Result<()> {
+    let Some(ui) = Throwaway::ui_in(dir) else { return Ok(()) };
+    one::ui_folder::read_from(&ui);
+    one::cloudflare::write_web(&Settings::load_in(dir)?)
+}
+
 /// The program the throwaway network in `dir` runs: the one it was given, else the one beside this.
 pub(crate) fn program(dir: &Path) -> Result<PathBuf> {
     match std::fs::read_to_string(dir.join(BUILD)) {
@@ -115,9 +123,9 @@ pub(crate) fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
 /// so the next `throwaway` makes another where this one stopped, as its error says why.
 pub(crate) fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new throwaway network for this checkout…");
-    let (build, ui) = (std::fs::read_to_string(dir.join(BUILD)).ok(), std::fs::read_to_string(dir.join("ui-folder")).ok());
+    let (build, ui) = (std::fs::read_to_string(dir.join(BUILD)).ok(), Throwaway::ui_in(dir));
     stop(dir, true)?;
-    choose(dir, build.as_deref().map(Path::new), ui.as_deref().map(Path::new))?;
+    choose(dir, build.as_deref().map(Path::new), ui.as_deref())?;
     create(dir).inspect_err(|_| {
         let _ = stop(dir, true);
     })

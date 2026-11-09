@@ -737,23 +737,39 @@ fn windows_links() -> Vec<u8> {
 /// release, the web client's files in `<home>/cloudflare/web`, and their storage in `<home>/cloudflare/data`.
 pub fn serve(settings: &Settings) -> Result<()> {
     let dir = Settings::path_in(&settings.dir).parent().unwrap().to_path_buf();
-    let web = dir.join("web");
+    let web = web_dir(settings);
     let served = served(settings, &web)?;
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
     ensure!(settings.throwaway_user.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
-    let mut files = settings.web();
-    parses(&files)?;
-    files.extend(precompressed(&files)?);
-    for (file, bytes) in files {
-        let path = web.join(file);
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        std::fs::write(path, bytes)?;
-    }
+    write_web(settings)?;
     let config = write_config(&dir, &served)?;
     let mut child = start(&config, Vec::new())?;
     let status = child.wait()?;
     bail!("the Workers' workerd stopped: {status}")
+}
+
+/// Where the network's Workers read the web client's files from on this machine.
+fn web_dir(settings: &Settings) -> PathBuf {
+    Settings::path_in(&settings.dir).parent().unwrap().join("web")
+}
+
+/// Writes the web client's files as this program has them (`Settings::web`) where the Workers read them (`serve`'s
+/// workerd reads each file as it's asked for, so a file written while they run is what the next request gets): each one
+/// whole or not at all, so a request never gets half of one.
+pub fn write_web(settings: &Settings) -> Result<()> {
+    let web = web_dir(settings);
+    let mut files = settings.web();
+    parses(&files)?;
+    files.extend(precompressed(&files)?);
+    for (file, bytes) in files {
+        let path = web.join(&file);
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        let part = path.with_extension(format!("{}.part", path.extension().map(|e| e.to_string_lossy()).unwrap_or_default()));
+        std::fs::write(&part, bytes)?;
+        std::fs::rename(part, path)?;
+    }
+    Ok(())
 }
 
 /// What makes each file in `in/` brotli at its best in `out/`: quality 11 with the largest window.

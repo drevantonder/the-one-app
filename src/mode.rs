@@ -64,7 +64,12 @@ impl Throwaway {
 
     /// The folder its pages and Workers are read from instead of what its build holds: a checkout's root.
     pub fn ui(&self) -> Option<PathBuf> {
-        Some(std::fs::read_to_string(self.home.join(UI)).ok()?.trim().into())
+        Self::ui_in(&self.home)
+    }
+
+    /// `ui`, for the throwaway network in `home`.
+    pub fn ui_in(home: &Path) -> Option<PathBuf> {
+        Some(std::fs::read_to_string(home.join(UI)).ok()?.trim().into())
     }
 
     /// Says which folder that is for the throwaway network in `home`, read by its programs.

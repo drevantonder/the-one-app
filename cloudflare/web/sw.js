@@ -12,6 +12,9 @@ import { NOTE_FALLBACK } from "/shared/protocol.js";
 
 const KEPT = "one.page";
 const PLACES = /^\/($|page\/|accounts\/|app\/|settings($|\/)|vault$)/;
+// A page served from this machine has no trip to save, and a kept copy would only show what a throwaway network's UI
+// folder was before its last change: it goes to the network, as it does with no worker.
+const NEARBY = /^(localhost|127(\.\d+){3}|\[::1\])$/.test(location.hostname);
 /// The custom build's name, which the Workers' build writes in (Settings::web).
 const NAME = "";
 
@@ -20,7 +23,7 @@ addEventListener("activate", (e) => e.waitUntil(clients.claim()));
 
 addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.mode !== "navigate" || e.request.method !== "GET" || url.origin !== location.origin || !PLACES.test(url.pathname)) return;
+  if (NEARBY || e.request.mode !== "navigate" || e.request.method !== "GET" || url.origin !== location.origin || !PLACES.test(url.pathname)) return;
   const fresh = fetch("/index.html", { cache: "no-cache" }).then(async (r) => {
     if (r.ok) await (await caches.open(KEPT)).put("/index.html", r.clone());
     return r;

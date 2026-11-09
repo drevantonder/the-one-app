@@ -80,6 +80,10 @@ pub fn run(rest: &[String]) -> Result<()> {
         }
         None => start(&dir)?,
     };
+    network::read_pages_again(&dir)?;
+    if ui.is_some() {
+        eprintln!("Its pages and screens are read from there now, and again by each command here. Its Workers' own code is read when they start: {} throwaway restart, once you've changed that.", dev());
+    }
     if rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
         return cloudflare_node(&dir);
     }
@@ -232,8 +236,8 @@ fn commands(mcp: &str) -> one::cli::Command {
     let form = |usage: &str, about: String| (usage.to_string(), about);
     one::cli::Command {
         help: vec![
-            form("throwaway [--build <program>] [--ui <folder>]", "start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is: on this machine beside yours, with only what every new one starts with, to look around and test in. --build runs that program of a network (by default the one beside this), and --ui reads its pages and Workers from a checkout, as they are there, instead of what the build holds".into()),
-            form("throwaway restart", "start it again, keeping its data, to pick up a changed UI folder".into()),
+            form("throwaway [--build <program>] [--ui <folder>]", "start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is: on this machine beside yours, with only what every new one starts with, to look around and test in. --build runs that program of a network (by default the one beside this), and --ui reads its pages and Workers from a checkout, as they are there, instead of what the build holds: its pages and screens are read again by each command here, whether or not it's running already".into()),
+            form("throwaway restart", "start it again, keeping its data, to pick up a changed Worker in the UI folder".into()),
             form("throwaway <command>", format!("any command, in it: {CLI}-dev throwaway status, {CLI}-dev throwaway apps, {CLI}-dev throwaway repos list")),
             form("throwaway mcp", format!("its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}")),
             form("throwaway sign-in", "sign its CLI in as its user, with no browser".into()),
