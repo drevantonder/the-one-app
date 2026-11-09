@@ -1,6 +1,6 @@
 # Who gets in, and who can open what
 
-Andre's decisions, 2026-11-09, from T3 thread 8c27e598. This replaces `docs/plan-device-approval.md`, which goes when step 4 lands. Where the two disagree, this one holds. `ARCHITECTURE.md`'s Trust section changes with step 2.
+Andre's decisions, 2026-11-09, from T3 thread 8c27e598. `ARCHITECTURE.md`'s Trust section changes with step 2.
 
 **The one rule: signing in only lets you ask. Someone already in the network has to say yes, either at the time or in advance with an invite.**
 
@@ -21,9 +21,9 @@ Every network works the same way. A network's settings say which providers it ha
 | Lost every device | Sign in, then a holder of the recovery key approves and restores them; or the recovery key itself |
 | A computer with no browser, or no working sign-in | QR, or a one-time link or code, from a device already in. Single use, short-lived |
 
-A sign-in never lets anyone in by itself, for any network or user, so the "no tap" path goes. Being at the domain only decides who may ask. It's checked in the provider's signed token, not by the `hd` hint. Requests go out as ordinary pushes (a sleeping phone must still alert), and stay until answered or expired. Every join shows "joined · Remove" on the user's other devices. The approving device checks the sign-in's proof itself (`src/onboarding/sign_in_proof.rs`), so a hacked auth Worker can make requests and never approve one. The link-phishing guard in `docs/plan-device-approval.md` stays until the short code covers it.
+A sign-in never lets anyone in by itself, for any network or user, so the "no tap" path goes. Being at the domain only decides who may ask. It's checked in the provider's signed token, not by the `hd` hint. Requests go out as ordinary pushes (a sleeping phone must still alert), and stay until answered or expired. Every join shows "joined · Remove" on the user's other devices. The approving device checks the sign-in's proof itself (`src/onboarding/sign_in_proof.rs`), so a hacked auth Worker can make requests and never approve one. The link-phishing guard stays (ARCHITECTURE.md's Trust): the short code doesn't cover it.
 
-An invited user's device adds itself, attaching the provider's signed token as proof against the invite in the log, so no one need be online. Every device checks that proof. Providers change their signing keys, so the key that was valid is saved with the proof, or old joins couldn't be checked. Shared data reaches them once a device holding those keys is online, with no tap.
+An invited user's device is listed with no tap, by the provider's signed token as proof against the invite in the log. Its device holds no key to write that step, so an admin's device that's online writes it for it. Every device checks that proof. Providers change their signing keys, so the key that was valid is saved with the proof, or old joins couldn't be checked. Shared data reaches them once a device holding those keys is online, with no tap.
 
 **Keys.** Each scope has random keys, sealed to who may open them and to the network's recovery key, as today. A device holds its user's keys, so a new device needs one handover. Keys are never derived from anything a rename can change: not from an app's, database's or scope's name.
 

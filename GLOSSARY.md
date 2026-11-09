@@ -20,6 +20,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Identity**: what a user signs in with: a passkey, or their account at a **provider** (an OIDC one the network has
   registered with, by issuer and subject). A user can have several, each linked from a device already signed in.
   Avoid: login, for this.
+- **Invite**: an admin's yes, given in advance: a link, or, where the network has providers, an email written in the signed
+  log, which that account signs in with and goes straight in. Also asking someone already in the network into a group.
 - **Agent**: an AI acting for a user (Claude Code, Codex, a T3 thread), through one of that user's clients: the CLI,
   MCP or a browser. It acts as that user, never as itself: it has no permissions of its own.
 
@@ -31,7 +33,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   sign-in is its device: nothing ties it to the computer it's on, so it's never part of that computer's. The Cloudflare
   node is not a device.
 - **Onboarding**: what someone sees on a device before they're in the network, first time or coming back: the first
-  screen, proving who they are, waiting for a device of theirs to approve it, and starting. Our word for the journey and
+  screen, proving who they are, waiting for someone to say yes, and starting. Our word for the journey and
   for its folder (`src/onboarding/`); users see Sign In, Join and Waiting for Approval.
 - **Client**: where a user or their agent uses the network, and the only place keys are opened: the native apps (Mac,
   iPhone, Android, Windows), the web client in a browser, the CLI and the local MCP server on a computer, and the remote
