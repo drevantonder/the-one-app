@@ -1,11 +1,7 @@
-# Journeys
+# Onboarding
 
-Notes on what people go through in The One App, written as we go.
-
-## Getting in
-
-What someone sees on a device before they're in the network: the first screen, signing in, waiting for another of
-their devices to let this one in, and starting.
+What someone sees on a device before they're in the network, the first time or coming back: the first screen, signing
+in, waiting for another of their devices to let this one in, and starting.
 
 2026-11-09, found by reading the code, not by walking it:
 
