@@ -688,6 +688,17 @@ pub fn passkey_keys(prf: &[u8]) -> (SigningKey, [u8; 32]) {
     (SigningKey::from_bytes(&seed), hkdf(prf, b"one/passkey-device/seal"))
 }
 
+/// The network's recovery key, 64 hex characters, from the file at `path` on this machine, by its absolute path: never
+/// typed or pasted into a chat, so one given in a path's place is refused, and never printed.
+pub fn recovery_key_in(path: &str) -> Result<String> {
+    let looks_like_key = |t: &str| t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit());
+    ensure!(!looks_like_key(path.trim()), "give the file the recovery key is in, never the key itself");
+    ensure!(std::path::Path::new(path).is_absolute(), "give the recovery key's file by its absolute path, like /home/you/recovery.key: {path} isn't one");
+    let key = std::fs::read_to_string(path).with_context(|| format!("couldn't read {path}"))?.trim().to_ascii_lowercase();
+    ensure!(looks_like_key(&key), "that file doesn't hold a recovery key: 64 hex characters");
+    Ok(key)
+}
+
 pub fn unhex(s: &str) -> Result<[u8; 32]> {
     HEXLOWER.decode(s.as_bytes()).ok().and_then(|b| b.try_into().ok()).context("not a key: 64 hex characters")
 }

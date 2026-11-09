@@ -53,7 +53,7 @@ function Backups() {
 
   async function load() {
     try {
-      const [got, state] = await Promise.all([api("GET", "/v1/backups"), api("GET", "/v1/state")])
+      const [got, state] = await Promise.all([api("POST", "/v1/backups/status", {}), api("GET", "/v1/state")])
       setBackups(got)
       setAdmin(state.user?.role === "admin")
       setNetwork(state.network || {})
@@ -221,7 +221,7 @@ function Place({ place: p, admin, stopped }) {
     setBusy(true)
     setError("")
     try {
-      await api("POST", "/v1/backups/place", { id: p.id, deleted: true })
+      await api("POST", "/v1/backups/remove_place", { place: p.id })
       stopped()
     } catch (e) {
       setError(said(e))

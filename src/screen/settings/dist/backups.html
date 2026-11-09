@@ -47,7 +47,7 @@ function T() {
 	let [v, x] = r(ee), [C, w] = r(null), [T, se] = r(""), [O, k] = r(!1), [j, N] = r(null), [P, I] = r(!1), L = n(0), R;
 	i[1] === Symbol.for("react.memo_cache_sentinel") ? (R = async function() {
 		try {
-			let [e, t] = await Promise.all([ne("GET", "/v1/backups"), ne("GET", "/v1/state")]);
+			let [e, t] = await Promise.all([ne("POST", "/v1/backups/status", {}), ne("GET", "/v1/state")]);
 			u(e), _(t.user?.role === "admin"), x(t.network || {}), w(null);
 		} catch (e) {
 			let t = e;
@@ -275,10 +275,7 @@ function A(n) {
 		})) {
 			one.tap("medium"), ee(!0), g("");
 			try {
-				await ne("POST", "/v1/backups/place", {
-					id: s.id,
-					deleted: !0
-				}), l();
+				await ne("POST", "/v1/backups/remove_place", { place: s.id }), l();
 			} catch (e) {
 				g(ie(e)), ee(!1);
 			}
