@@ -39,16 +39,12 @@ export const offline = {
     this.trying = false;
     if (this.waiting.size) (this.later(), redraw());
   },
-  /// The banner, once it's been a moment: one problem box, quiet, as it mends itself.
+  /// The banner, once it's been a moment: one thin line, with Try Now while it isn't already trying.
   banner() {
     if (!this.shown || !this.waiting.size) return null;
     const at = new Date(Math.min(...[...this.waiting.values()].map((w) => w.at)));
     const today = at.toDateString() === new Date().toDateString();
     const when = new Intl.DateTimeFormat(undefined, today ? { timeStyle: "short" } : { dateStyle: "medium", timeStyle: "short" }).format(at);
-    return h(ui.Problem, {
-      quiet: true, title: "Offline", text: `Showing what this device kept from ${when}.`,
-      action: this.trying ? { label: "Trying…", run: () => {} } : { label: "Try Now", run: () => this.now() },
-      className: "max-w-none rounded-none border-0 border-b",
-    });
+    return h(ui.Banner, { action: this.trying ? undefined : { label: "Try Now", run: () => this.now() } }, `Offline. Showing what this device kept from ${when}.`);
   },
 };

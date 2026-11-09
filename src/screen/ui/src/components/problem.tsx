@@ -31,4 +31,19 @@ function Problem({ title, text, action, warn = false, quiet = false, className }
   )
 }
 
-export { Problem }
+/// What's wrong with a whole window, as one thin grey line across its top (being offline: it mends itself), with an action
+/// only where pressing it does something.
+function Banner({ children, action, className }: {
+  children: React.ReactNode
+  action?: { label: string; run: () => unknown }
+  className?: string
+}) {
+  return (
+    <div data-slot="banner" role="status" className={cn("flex min-h-9 shrink-0 items-center gap-3 border-b px-4 py-1 text-[13px] text-muted-foreground", className)}>
+      <p className="min-w-0 flex-1 leading-snug">{children}</p>
+      {action && <Button variant="ghost" size="xs" className="-mr-2" onClick={() => action.run()}>{action.label}</Button>}
+    </div>
+  )
+}
+
+export { Problem, Banner }
