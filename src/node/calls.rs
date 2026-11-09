@@ -423,11 +423,11 @@ impl Node {
         let r = runs.first().unwrap_or(&Value::Null);
         let why = match (r["name"].as_str(), r["online"] == true, r["problem"].as_str()) {
             _ if runs.is_empty() => "it runs on none".to_string(),
-            (None, ..) => "the node it ran on was removed".to_string(),
+            (None, ..) => "its device was removed".to_string(),
             (Some(node), false, _) => format!("{node} is off"),
             (Some(node), true, problem) => format!("on {node}, {}", problem.unwrap_or("it isn't running")),
         };
-        Some(format!("{title} needs its service on a node that's on: {why}. Turn it on, or move it with apps_move {app} <node> (apps_devices {app} lists them)."))
+        Some(format!("{title} needs a device that's on: {why}. Turn it on, or move it with apps_move {app} <node> (apps_devices {app} lists them)."))
     }
 
     /// Runs a service's call on every device that runs it for the caller, one at a time: `{ <device>: answer }`, or

@@ -373,8 +373,8 @@ export default {
             })),
           };
         }
-        if (problem) return `Couldn't read your machines' AI plans: ${problem}`;
-        if (!all.length) return "No AI sign-ins on your machines.";
+        if (problem) return `Couldn't read your devices' AI plans: ${problem}`;
+        if (!all.length) return "No AI sign-ins on your devices.";
         return ids.map((id) => all.filter((p) => p.provider === id)).filter((r) => r.length).map((r) => section(r, now)).join("\n\n");
       },
     },

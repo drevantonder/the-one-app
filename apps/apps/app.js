@@ -65,8 +65,8 @@ function where(a) {
   let problem = null;
   if (a.added?.length && !runs_on.some((r) => r.name && r.online && !r.problem)) {
     const r = runs_on[0];
-    const text = !r ? "Choose the node it runs on." : !r.name ? "The node it ran on was removed. Choose where it runs now." : !r.online ? `${r.name} is off. Turn it on, or move it to another node.` : r.problem;
-    problem = nodes.length || r ? { title: `${title} needs its service on a node that's on`, text, move: nodes.length > 0 } : { title: `${title} can't run on your devices yet`, text: "None of them is a platform its service is built for.", move: false };
+    const text = !r ? "Choose the device it runs on." : !r.name ? "Its device was removed. Choose another." : !r.online ? `${r.name} is off. Turn it on, or move it.` : r.problem;
+    problem = nodes.length || r ? { title: `${title} needs a device that's on`, text, move: nodes.length > 0 } : { title: `${title} can't run on your devices yet`, text: "It isn’t built for any of them.", move: false };
   }
   return { runs_on, nodes, problem };
 }
@@ -75,7 +75,7 @@ function nodeFor(a, node) {
   const w = where(a);
   if (!w) return undefined;
   if (node) {
-    if (!w.nodes.some((n) => n.toLowerCase() === String(node).toLowerCase())) throw new Error(`${a.title || a.name} can't run on ${node}: it can run on ${w.nodes.join(", ") || "none of your nodes"}`);
+    if (!w.nodes.some((n) => n.toLowerCase() === String(node).toLowerCase())) throw new Error(`${a.title || a.name} can't run on ${node}: it can run on ${w.nodes.join(", ") || "none of your devices"}`);
     return node;
   }
   if (w.nodes.length > 1) throw new Error(`Where should ${a.title || a.name} run? Give node: ${w.nodes.join(" or ")}.`);
