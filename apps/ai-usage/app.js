@@ -404,7 +404,7 @@ export default {
       sizes: ["small", "medium", "large"],
       async render(ctx) {
         const b = ctx.user;
-        if (!b) return { t: "text", text: "No plans yet.", size: "sm", tone: "muted" };
+        if (!b) return { t: "text", text: "No plans yet.", tone: "muted" };
         const now = ctx.now();
         const plans = [];
         for (const id of Object.keys(PROVIDERS)) {
@@ -412,38 +412,51 @@ export default {
           for (const p of reads) {
             if (p.session_used == null && p.weekly_used == null) continue;
             const account = reads.length > 1 && p.account ? p.account.split(" · ")[0] : "";
-            plans.push({ name: PROVIDERS[id].title, mark: markOf(id).image, account, session: p.session_used, week: p.weekly_used, resets: p.session_resets ?? p.weekly_resets });
+            plans.push({ name: [PROVIDERS[id].title, account].filter(Boolean).join(" · "), mark: markOf(id).image, session: p.session_used, week: p.weekly_used, sessionResets: p.session_resets, weekResets: p.weekly_resets });
           }
         }
         if (!plans.length) return { t: "text", text: "No readings yet.", tone: "muted" };
         const worst = (p) => Math.max(p.session ?? 0, p.week ?? 0);
-        const fit = { small: 3, medium: 4, large: 8 }[ctx.size] || 4;
+        const level = (u) => (u >= 85 ? "bad" : u >= 70 ? "warn" : "good");
+        const next = Date.now() + 300_000;
+        const spacer = { t: "col", grow: true, gap: 0, c: [] };
+        // Small is one fact: the limit nearest its end.
+        if (ctx.size === "small") {
+          const p = plans.reduce((a, b) => (worst(b) > worst(a) ? b : a));
+          const session = (p.session ?? -1) >= (p.week ?? -1), used = session ? p.session : p.week, at = session ? p.sessionResets : p.weekResets;
+          return {
+            t: "col", header: false, next, gap: 2,
+            c: [
+              { t: "row", gap: 6, c: [{ t: "image", url: p.mark, w: 18, h: 18 }, { t: "text", text: p.name, size: "sm", lines: 1 }] },
+              spacer,
+              { t: "stat", value: Math.round(used), unit: "%", tone: level(used), label: session ? "Session" : "Week" },
+              ...(at != null ? [{ t: "text", text: `Resets ${countdown(at, now)}`, size: "sm", tone: "muted", lines: 1 }] : []),
+            ],
+          };
+        }
+        const fit = { medium: 4, large: 6 }[ctx.size] || 4;
         const top = new Set([...plans].sort((a, b) => worst(b) - worst(a)).slice(0, fit));
         const show = plans.filter((p) => top.has(p));
-        const level = (u) => (u >= 85 ? "bad" : u >= 70 ? "warn" : "good");
-        const cell = (w, n) => ({ t: "col", w, align: "center", c: [n || { t: "col", c: [] }] });
-        const label = (text) => ({ t: "text", text, size: "xs", weight: "medium", tone: "muted", lines: 1 });
-        const ring = (u, w, alt) => (u == null ? null : { t: "gauge", value: u / 100, tone: level(u), w, label: "", alt: `${alt} ${u}% used` });
-        const small = ctx.size === "small", w = small ? 22 : 44, r = small ? 14 : 20;
-        const header = { t: "row", gap: small ? 4 : 6, c: [{ t: "col", grow: true, c: [label("Plans")] }, cell(w, label(small ? "5H" : "SESSION")), cell(w, label(small ? "7D" : "WEEK"))] };
+        const cell = (n) => ({ t: "col", w: 56, align: "center", c: [n] });
+        const label = (text) => ({ t: "text", text, size: "sm", tone: "muted", lines: 1 });
+        const percent = (u) => ({ t: "text", text: u == null ? "–" : `${Math.round(u)}%`, weight: "medium", tone: u == null ? "muted" : level(u), lines: 1 });
+        const header = { t: "row", gap: 8, c: [{ t: "col", grow: true, gap: 0, c: [] }, cell(label("Session")), cell(label("Week"))] };
         const row = (p) => {
-          const name = [p.name, p.account].filter(Boolean).join(" · ");
-          const sub = ctx.size === "large" && p.resets != null ? `Resets ${countdown(p.resets, now)}` : null;
+          const at = p.sessionResets ?? p.weekResets;
+          const sub = ctx.size === "large" && at != null ? `Resets ${countdown(at, now)}` : null;
           return {
-            t: "row", gap: small ? 4 : 6,
+            t: "row", gap: 8,
             c: [
-              { t: "image", url: p.mark, w: small ? 16 : 20, h: small ? 16 : 20 },
-              { t: "col", grow: true, gap: 1, c: [{ t: "text", text: small ? p.account.split(" ")[0] || p.name : name, size: "sm", lines: 1 }, ...(sub ? [{ t: "text", text: sub, size: "xs", tone: "muted", lines: 1 }] : [])] },
-              cell(w, ring(p.session, r, `${name} session`)),
-              cell(w, ring(p.week, r, `${name} week`)),
+              { t: "image", url: p.mark, w: 20, h: 20 },
+              { t: "col", grow: true, gap: 1, c: [{ t: "text", text: p.name, lines: 1 }, ...(sub ? [{ t: "text", text: sub, size: "sm", tone: "muted", lines: 1 }] : [])] },
+              cell(percent(p.session)),
+              cell(percent(p.week)),
             ],
           };
         };
         const body = [header, ...show.map(row)];
-        const out = ctx.size === "large" && show.filter((p) => worst(p) >= 85).sort((a, b) => worst(b) - worst(a))[0];
-        if (out) body.push({ t: "row", gap: 6, c: [{ t: "icon", name: "warning-fill", tone: "bad", size: "xs" }, { t: "text", text: `${[out.name, out.account].filter(Boolean).join(" · ")} is at ${worst(out)}%${out.resets != null ? `, resets ${countdown(out.resets, now)}` : ""}`, size: "xs", tone: "bad", lines: 1 }] });
-        const c = body.length < 4 ? [{ t: "col", gap: 8, c: body }, { t: "col", grow: true, gap: 0, c: [] }] : body.flatMap((n, i) => (i ? [{ t: "col", grow: true, gap: 0, c: [] }, n] : [n]));
-        return { t: "col", header: false, next: Date.now() + 300_000, c };
+        const c = body.length < 4 ? [{ t: "col", gap: 8, c: body }, spacer] : body.flatMap((n, i) => (i ? [spacer, n] : [n]));
+        return { t: "col", header: false, next, c };
       },
     },
   },
