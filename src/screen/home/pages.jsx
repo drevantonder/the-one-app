@@ -96,9 +96,8 @@ function pendingItem(kept, p) {
 /// A page's items: its widgets and apps in its user's order, then its Accounts folder.
 function pageView(p) {
   const arrange = home.canArrange(p.scope)
-  // Empty only with nothing on it at all: Accounts' folder, on the first page, is something (Andre).
   const first = p.scope === home.pages()[0]?.scope
-  const empty = !first && !home.appsOn(p).length && !home.widgetsOn(p).length && !home.waiting(p)
+  const empty = !home.appsOn(p).length && !home.widgetsOn(p).length && !home.waiting(p)
   let list = home.items(p).map((item) => {
     if (item.pending) return pendingItem(item.kept, p)
     if (item.widget) return widgetItem(item.widget, item.kept, p)
@@ -618,42 +617,46 @@ function Grid({ page, editing, refreshing }) {
   )
 }
 
-/// A page: its title (alone in a window), then one grid, as a home screen's.
+/// A page: its title, with Edit Home Page beside it (while arranging, Add and Done), then one grid, as a home screen's.
 function Page({ page, editing, refreshing, bottom }) {
   const { scope, title, subtitle, arrange } = page
   return (
     <section
       data-page={scope}
-      className={cn("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-5 pt-5 [scroll-snap-stop:always]", editing && swipe && "pt-[calc(60px+env(safe-area-inset-top))]")}
+      className="h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-5 pt-[calc(1.25rem+env(safe-area-inset-top))] [scroll-snap-stop:always]"
       style={{ paddingBottom: bottom }}
     >
-      {!swipe && (
-        <div className="flex items-start gap-3 px-1 pb-5">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
-            {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
-          </div>
-          {arrange && (
-            <div data-ctl className="mt-1.5 flex shrink-0 gap-2">
-              {editing && <Button variant="outline" size="sm" onClick={(e) => editMenu(home.page(scope), e.currentTarget)}>Edit</Button>}
-              <Button variant={editing ? "default" : "outline"} size="sm" onClick={() => edit(!editing)}>{editing ? "Done" : "Edit Home Page"}</Button>
-            </div>
-          )}
+      <div className="flex items-start gap-3 px-1 pb-5">
+        <div className="min-w-0 flex-1">
+          <h1 className="large-title text-3xl font-bold tracking-tight">{title}</h1>
+          {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
         </div>
-      )}
+        {arrange && (
+          <div data-ctl className="mt-1.5 flex shrink-0 gap-2">
+            {editing ? (
+              <>
+                <Button variant="outline" size="sm" onClick={(e) => editMenu(home.page(scope), e.currentTarget)}>Add</Button>
+                <Button size="sm" onClick={() => edit(false)}>Done</Button>
+              </>
+            ) : (
+              <Button variant="ghost" size="icon-sm" aria-label={editHomePage.title} onClick={() => edit(true)}><Icon name={editHomePage.icon} /></Button>
+            )}
+          </div>
+        )}
+      </div>
       {page.missing ? (
         <Empty>This device can't open this page. Sign out and in again to choose it.</Empty>
       ) : (
         <>
-          {page.empty && <Empty action={page.arrange && page.store ? { label: "Open the App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
           <Grid page={page} editing={editing && !!arrange} refreshing={refreshing} />
+          {page.empty && <Empty className="py-6" action={page.arrange && page.store ? { label: "Open the App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
         </>
       )}
     </section>
   )
 }
 
-/// Under the pages: the one shown's name, then a dot for each, with a cog for Settings. Slide along it to change page.
+/// Under the pages: a dot for each, with a cog for Settings. Slide along it to change page.
 function Dots({ scopes, at, strip, attention }) {
   const [sliding, setSliding] = useState(false)
   const go = (scope, now = false) => {
@@ -687,8 +690,7 @@ function Dots({ scopes, at, strip, attention }) {
   }
   const page = scopes.indexOf(at) + 1
   return (
-    <nav data-ctl className="pointer-events-none fixed inset-x-0 bottom-[calc(10px+env(safe-area-inset-bottom))] flex flex-col items-center gap-1.5">
-      <div className="max-w-[70%] text-center text-[13px] font-semibold text-muted-foreground">{titleOf(at)}</div>
+    <nav data-ctl className="pointer-events-none fixed inset-x-0 bottom-[calc(10px+env(safe-area-inset-bottom))] flex flex-col items-center">
       <div onPointerDown={slide} className={cn("pointer-events-auto flex h-11 touch-none items-center rounded-full border bg-background/90 shadow-lg backdrop-blur-xl transition-transform", sliding && "scale-[1.08]")}>
         <button
           type="button"
@@ -890,6 +892,8 @@ function Pages() {
     S.render = (now) => {
       if (swipe && S.editing && S.at === SETTINGS) S.editing = false
       const next = snapshot()
+      // The bar names the page only once its own title has scrolled away.
+      if (!swipe && next.phase === "ready" && !S.named) S.named = true, one.largeTitle(titleOf(S.at))
       S.view = next.view
       if (now) flushSync(() => setSnap(next))
       else setSnap(next)
@@ -978,15 +982,9 @@ function Pages() {
           if (scopes[i] && scopes[i] !== S.at) { S.at = scopes[i]; S.render() }
         } : undefined}
       >
-        {view.map((page) => <Page key={page.scope} page={page} editing={editing && page.scope !== SETTINGS} refreshing={refreshing} bottom={swipe ? "calc(120px + env(safe-area-inset-bottom))" : 20} />)}
+        {view.map((page) => <Page key={page.scope} page={page} editing={editing && page.scope !== SETTINGS} refreshing={refreshing} bottom={swipe ? "calc(88px + env(safe-area-inset-bottom))" : 20} />)}
       </div>
       {swipe && <Dots scopes={scopes} at={at} strip={strip} attention={attention} />}
-      {swipe && editing && at !== SETTINGS && (
-        <div data-ctl className="pointer-events-none fixed inset-x-4 top-[calc(10px+env(safe-area-inset-top))] z-10 flex justify-between">
-          <Button className="pointer-events-auto" variant="outline" onClick={(e) => { const p = home.page(S.at); if (p) editMenu(p, e.currentTarget) }}>Edit</Button>
-          <Button className="pointer-events-auto" onClick={() => edit(false)}>Done</Button>
-        </div>
-      )}
       <Dialogs dialog={dialog} />
     </div>
   )
@@ -1008,7 +1006,6 @@ function refresh() {
 }
 
 async function start() {
-  one.title("")
   const kept = await one.cache("pages").catch(() => null)
   const first = !kept?.state
   if (!first) {

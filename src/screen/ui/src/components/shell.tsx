@@ -83,7 +83,7 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
       </Sidebar>
       {/* Where the bar starts: past the sidebar's button while the sidebar's away, as the sidebar goes. */}
       <SidebarInset className="min-w-0 overflow-hidden [--shell-bar-start:calc(var(--titlebar-area-x,0px)+3.25rem)] peer-data-[state=expanded]:[--shell-bar-start:0.75rem]">
-        <header data-slot="shell-bar" className="flex h-(--shell-bar) shrink-0 items-center gap-2 border-b pr-3 pl-(--shell-bar-start) transition-[padding] duration-200 ease-linear wco:border-b-0">
+        <header data-slot="shell-bar" className={cn("flex h-(--shell-bar) shrink-0 items-center gap-2 pr-3 pl-(--shell-bar-start) transition-[padding] duration-200 ease-linear", title && "border-b wco:border-b-0")}>
           {back && (
             <Button variant="ghost" size="icon" className="relative z-20 size-7" onClick={onBack} aria-label="Back">
               <CaretLeftIcon />
