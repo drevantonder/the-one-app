@@ -1019,6 +1019,7 @@ fn viewer_path(d: &Device, ttl: i64) -> Result<String> {
     uvarint(&mut ttl_msg, ttl as u64);
     let mut msg = vec![0x0a, ttl_msg.len() as u8]; // 1: ttl
     msg.extend(ttl_msg);
+    msg.extend([0x10, 0x03]); // 2: policy ALLOW_ACTIVATION; left out, Cua makes the ticket view-only
     msg.extend([0x18, 0x01]); // 3: clipboard
     msg.extend([0x22, 0x01, b'~']); // 4: files_root
     let mut frame = vec![0, 0, 0, 0, msg.len() as u8];
