@@ -302,6 +302,54 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     a.call(notes("post", json!({ "text": "after" }))).await.unwrap();
 }
 
+/// The recovery key is sealed only to a device of someone an admin named, not to a node, and only where nothing holds it
+/// yet; naming a holder changes nothing a device already opens; and one taken off is sealed no more.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
+    use data_encoding::BASE64URL_NOPAD as B64U;
+    use one::keys::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
+    let dir = temp("holders");
+    std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
+    let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let global = one::database::scopes::Scope::Global;
+    let new_device = async |platform: &str| {
+        let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+        let e = Endpoint::of(&key);
+        let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": platform, "user": me.user, "platform": platform })).unwrap();
+        one::settings::approve(&a, &asked, &one::settings::Joining::Own).await.unwrap();
+        key
+    };
+    let sealed_for = |key: &ed25519_dalek::SigningKey| B64U.encode(&seal_to(&Endpoint::of(key).seal, &secret).unwrap());
+    let name = async |holds: bool| one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
+    let (phone, browser) = (new_device("iphone").await, new_device("browser").await);
+    let opens = async |key: &ed25519_dalek::SigningKey| a.sealed_keys(&me, &global, Some(&hex(&key.verifying_key().to_bytes())), None).await.unwrap()["sealed"].clone();
+    let before = opens(&phone).await;
+
+    let to = hex(&phone.verifying_key().to_bytes());
+    assert!(a.seal_recovery(&to, &sealed_for(&phone)).await.is_err(), "no one is named yet");
+    name(true).await;
+    assert_eq!(opens(&phone).await, before, "naming a holder rewrites nothing sealed");
+    assert!(a.seal_recovery(&hex(&a.id()), &B64U.encode(&seal_to(&one::keys::public_of(&[9; 32]), &secret).unwrap())).await.is_err(), "not a node");
+    assert!(a.seal_recovery(&hex(&browser.verifying_key().to_bytes()), &sealed_for(&browser)).await.is_err(), "not a browser");
+
+    a.seal_recovery(&to, &sealed_for(&phone)).await.unwrap();
+    let listed = a.recovery_holders(&me).await.unwrap();
+    assert_eq!(listed["holders"][0]["devices"][0]["holds"], true, "{listed}");
+    assert_eq!(listed["holders"][0]["devices"].as_array().unwrap().len(), 1, "only the phone: {listed}");
+    assert!(a.seal_recovery(&to, &sealed_for(&phone)).await.is_err(), "the one there stays");
+    let held: Vec<_> = walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_recovery/")).collect();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(open_sealed(&seal_secret(&phone), &std::fs::read(&held[0]).unwrap()).unwrap(), secret, "it opens to the key on that device alone");
+    assert!(open_sealed(&seal_secret(&browser), &std::fs::read(&held[0]).unwrap()).is_err());
+
+    name(false).await;
+    let laptop = new_device("linux").await;
+    assert!(a.seal_recovery(&hex(&laptop.verifying_key().to_bytes()), &sealed_for(&laptop)).await.is_err(), "taken off, none of their devices is sealed it");
+    assert!(a.recovery_holders(&me).await.unwrap()["holders"].as_array().unwrap().is_empty());
+}
+
 /// A file put from elsewhere (a client device's, a sign-in's) is read back by whoever put it alone, or by someone who
 /// may use a scope that names it: knowing its hash isn't enough. A file put to answer one request (git's push, to
 /// Repos' `_http`) goes once it's answered, unless something keeps it.

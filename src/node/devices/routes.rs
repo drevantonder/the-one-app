@@ -3,7 +3,7 @@
 
 use axum::Json;
 use axum::extract::State;
-use axum::routing::post;
+use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -23,6 +23,8 @@ pub fn routes() -> Routes {
         .route("/v1/erase", Who::SignedIn, post(erase))
         .says(Op::post("Erase what a device keeps").body::<Device>().answers_as(json!({ "type": "object", "required": ["erasing"], "properties": { "erasing": { "type": "string", "description": "the device's name" } } })))
         .route("/v1/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
+        .route("/v1/devices/recovery-holders", Who::SignedIn, get(recovery_holders))
+        .route("/v1/devices/recovery-holders/seal", Who::ThisMachine, post(seal_recovery))
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -78,4 +80,22 @@ async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<Approv
     let mut approved = node.approve_with_recovery(given(&body.code, "code")?, &key, body.confirm).await?;
     approved["said"] = json!(crate::settings::said_approved(&approved));
     Ok(Json(approved))
+}
+
+async fn recovery_holders(State(node): State<Node>, me: Me) -> Reply {
+    Ok(Json(node.recovery_holders(&me.caller).await?))
+}
+
+/// The recovery key, sealed on this machine by the command that read its file (`devices::cli`), for a device that may
+/// hold it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SealRecovery {
+    to: String,
+    sealed: String,
+}
+
+async fn seal_recovery(State(node): State<Node>, Body(body): Body<SealRecovery>) -> Reply {
+    node.seal_recovery(given(&body.to, "to")?, given(&body.sealed, "sealed")?).await?;
+    done()
 }

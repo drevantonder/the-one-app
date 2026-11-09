@@ -805,7 +805,7 @@ pub const PLATFORMS: [&str; 7] = ["mac", "windows", "linux", "iphone", "android"
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use ed25519_dalek::SigningKey;
     use serde_json::{Value, json};
@@ -879,6 +879,51 @@ mod tests {
         let mac = Dev::new(1);
         let net = Net::new(&mac, BOTH, &[7; 32]);
         (mac, net)
+    }
+
+    /// Only an admin names who holds the recovery key; a value that doesn't read, or someone since taken out, names no
+    /// one; and it's sealed only to a holder's own client devices that say what they are, never a node, a browser, a
+    /// remote MCP client, a passkey or a service.
+    #[test]
+    fn only_an_admin_names_a_recovery_holder_and_only_some_devices_may_hold_it() -> anyhow::Result<()> {
+        let (mac, mut net) = setup();
+        let holders = |list: &str| setting(crate::database::scopes::RECOVERY_HOLDERS, Some(list));
+        let with = |d: &Dev, user: &str, name: &str, platform: Option<&str>, kinds: &[Kind], new: Option<(&str, Role)>| {
+            let mut c = device(&d.endpoint(), user, name, kinds, new);
+            if let Some(p) = platform {
+                c.data["platform"] = json!(p);
+            }
+            c
+        };
+        let (phone, browser, mcp, laptop, unsaid, node, bobs, bobs_phone) = (Dev::new(3), Dev::new(4), Dev::new(5), Dev::new(6), Dev::new(8), Dev::new(9), Dev::new(10), Dev::new(11));
+        for (d, name, platform, kinds) in [(&phone, "iphone", Some("iphone"), &[Kind::Client][..]), (&browser, "chrome", Some("browser"), &[Kind::Client]), (&mcp, "claude", Some("cloudflare"), &[Kind::Client]), (&laptop, "cli", Some("linux"), &[Kind::Client]), (&unsaid, "old", None, &[Kind::Client]), (&node, "box", Some("linux"), BOTH)] {
+            assert!(net.step(&mac, ANDRE, with(d, ANDRE, name, platform, kinds, None)));
+        }
+        let mut passkey = passkey(&Dev::new(12).endpoint(), ANDRE, "Passkey", "cred");
+        passkey.data["platform"] = json!("iphone");
+        assert!(net.step(&mac, ANDRE, passkey));
+        assert!(net.step(&mac, ANDRE, with(&bobs, BOB, "bob", Some("android"), &[Kind::Client], Some(("Bob", Role::Member)))));
+        assert!(net.step(&bobs, BOB, with(&bobs_phone, BOB, "bob's", Some("iphone"), &[Kind::Client], None)));
+
+        let named = json!([ANDRE, BOB]).to_string();
+        assert!(!net.step(&bobs, BOB, holders(&named)), "only an admin names one");
+        assert!(net.db.recovery_holders()?.is_empty());
+        assert!(net.step(&mac, ANDRE, holders(&named)));
+        assert_eq!(net.db.recovery_holders()?, [ANDRE.to_string(), BOB.to_string()].into());
+        let keys = |user: &str, net: &Net| net.db.recovery_devices(user).unwrap().iter().map(|d| d.key).collect::<BTreeSet<_>>();
+        assert_eq!(keys(ANDRE, &net), [phone.id(), laptop.id()].into(), "not the node, browser, remote MCP, passkey or one that hasn't said what it is");
+        assert_eq!(keys(BOB, &net), [bobs.id(), bobs_phone.id()].into());
+
+        assert!(net.step(&mac, ANDRE, remove_device(&phone.id())));
+        assert_eq!(keys(ANDRE, &net), [laptop.id()].into(), "a device taken out holds nothing more");
+        assert!(net.step(&mac, ANDRE, holders(&json!([ANDRE]).to_string())));
+        assert_eq!(net.db.recovery_holders()?, [ANDRE.to_string()].into(), "taken off the list");
+        assert!(net.step(&mac, ANDRE, holders(&json!([ANDRE, BOB]).to_string())));
+        assert!(net.step(&mac, ANDRE, remove_user(BOB)));
+        assert_eq!(net.db.recovery_holders()?, [ANDRE.to_string()].into(), "someone taken out of the network holds nothing");
+        assert!(net.step(&mac, ANDRE, holders("not json")));
+        assert!(net.db.recovery_holders()?.is_empty(), "a value that doesn't read names no one");
+        Ok(())
     }
 
     /// What a device signed in with is recorded with its listing, for its user's next device to be checked against;

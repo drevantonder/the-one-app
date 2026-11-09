@@ -19,6 +19,7 @@
 //! <folder>/<app>/_app_schedules/<endpoint>/<n>  and sealed to an endpoint that runs its app schedules (`keys::seal_to`)
 //! <folder>/_vault/<n>/<endpoint key hex>     the scope's Vault secret key n, sealed to a machine its `vault` entry grants
 //! <folder>/_vault/<n>/recovery               and to the network's recovery key
+//! global/_recovery/<recovery key hex>/<endpoint key hex>   the recovery key, sealed to a device of someone who holds it
 //! <folder>/<app>/<database>/…               its steps, sealed with its key in their epoch, from the app's (`database_keys`)
 //! ```
 //!
@@ -516,6 +517,12 @@ pub fn app_schedules_key_name_before(scope: &str, app: &str, endpoint: &str, n: 
 /// half is in the scope's `vault` entry, and what's sealed to that opens only on those machines.
 pub fn vault_key_name(scope: &str, n: u32, to: &str) -> String {
     format!("{}/{n}/{to}", vault_keys_folder(scope))
+}
+
+/// Where the network's recovery key (`recovery`, its public half) is kept sealed to a device (`to`) of someone who holds
+/// it, so a new recovery key starts with none of the old one's.
+pub fn recovery_held_name(recovery: &str, to: &str) -> String {
+    format!("{}/_recovery/{recovery}/{to}", crate::bucket::folder("global"))
 }
 
 /// The folder of a scope's Vault secret keys, one folder each (`vault_key_name`).

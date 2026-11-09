@@ -293,6 +293,27 @@ impl ScopeDb {
         Ok(self.rows("SELECT key FROM recovery WHERE set_at IS NULL ORDER BY n", [], |r| r.get::<_, String>(0))?.iter().map(|k| key(k)).collect())
     }
 
+    /// Who holds the recovery key, as the network's settings say: users still in the network, by id. A value that
+    /// doesn't read names no one.
+    pub fn recovery_holders(&self) -> Result<BTreeSet<String>> {
+        let named: BTreeSet<String> = self.setting(RECOVERY_HOLDERS)?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+        let mut holders = BTreeSet::new();
+        for user in named {
+            if self.user(&user)?.is_some() {
+                holders.insert(user);
+            }
+        }
+        Ok(holders)
+    }
+
+    /// The devices of a holder of the recovery key that it may be sealed to: only a client's, as a node holds no keys;
+    /// never a browser's, whose code a Worker serves, a remote MCP client's, or a passkey's, which is wherever that
+    /// passkey syncs; and only one that has said what it is.
+    pub fn recovery_devices(&self, user: &str) -> Result<Vec<Machine>> {
+        let holds = |m: &Machine| m.user == user && m.roles == BTreeSet::from([Kind::Client]) && m.passkey.is_none() && m.seal != m.key && m.platform.as_deref().is_some_and(|p| !["browser", "cloudflare"].contains(&p));
+        Ok(self.clients()?.into_iter().filter(holds).collect())
+    }
+
     /// A device as someone gives it, by its name or the start of its key: the device, not the parts of it named for it.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let listed: Vec<Machine> = self.machines()?.into_iter().filter(|m| !m.removed).collect();
@@ -870,6 +891,8 @@ impl CoreDb {
 pub const APP_DATABASE: &str = "main";
 /// The setting that names the Cloudflare node's endpoint (its key, hex).
 pub const CLOUDFLARE_NODE: &str = "cloudflare_node";
+/// The setting that says who holds the recovery key: a JSON list of users' ids. Only an admin changes a setting.
+pub const RECOVERY_HOLDERS: &str = "recovery_holders";
 /// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.
 pub const APPS_PART: &str = "apps";
 /// Who agents act as when the Vault fills their requests (`vault_fetch`), in an item's apps: no app's name.

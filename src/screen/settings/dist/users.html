@@ -65,7 +65,7 @@ function j() {
 					size: 36
 				}),
 				title: `${e.name}${e.id === I ? " (you)" : ""}`,
-				sub: e.handle ? `@${e.handle}` : void 0,
+				sub: [e.handle && `@${e.handle}`, e.recovery_holder && "Holds the recovery key"].filter(Boolean).join(" · ") || void 0,
 				trailing: n,
 				onClick: e.id === I && e.handle ? () => x() : void 0
 			}, e.id);

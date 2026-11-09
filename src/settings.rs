@@ -95,6 +95,7 @@ enum Route {
     Passkey,
     Seen,
     VaultGrant,
+    RecoveryHolder,
 }
 
 /// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
@@ -126,6 +127,7 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("GET", "/v1/devices/seen", Route::Seen, true),
     // A machine with a node that opens the Vault seals what's in it to the new key at once.
     ("POST", "/v1/vault/grant", Route::VaultGrant, false),
+    ("POST", "/v1/devices/recovery-holder", Route::RecoveryHolder, true),
 ];
 
 /// What the OpenAPI document says of a route: a line for whoever reads it (`Tool`'s own, for a tool's route), and the body
@@ -156,6 +158,7 @@ fn about(route: Route) -> (&'static str, Value) {
         Route::Passkey => ("List a passkey as this user's", of::<body::Passkey>()),
         Route::Seen => ("Say the waiting devices were seen", of::<body::Nothing>()),
         Route::VaultGrant => ("", of::<body::VaultGrant>()),
+        Route::RecoveryHolder => ("Name someone as holding the recovery key, or take them off", of::<body::RecoveryHolder>()),
     }
 }
 
@@ -278,6 +281,14 @@ mod body {
     pub struct Setting {
         pub name: String,
         pub value: Option<String>,
+    }
+
+    #[derive(Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct RecoveryHolder {
+        /// By name or id.
+        pub user: String,
+        pub holds: bool,
     }
 
     #[derive(Deserialize, schemars::JsonSchema)]
@@ -451,6 +462,7 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             m.write(content::setting(&body.name, body.value.as_deref())).await?;
             done
         }
+        Route::RecoveryHolder => recovery_holder(m, read::<body::RecoveryHolder>(path, raw)?).await?,
         Route::Group => group(m, &read::<body::Named>(path, raw)?.name).await?,
         Route::Invite => {
             let body: body::Invite = read(path, raw)?;
@@ -638,6 +650,29 @@ pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, sco
     };
     allowed!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s user switches what it runs");
     Ok(content::service(&key, name, on, scope))
+}
+
+/// An admin says `body.user` holds the recovery key, or no longer does: the whole list in one setting, written after
+/// reading what's new. It hands them nothing: someone who has the key does that on a computer (`devices::cli`). → what
+/// to tell the user.
+async fn recovery_holder(m: &impl Me, body: body::RecoveryHolder) -> Result<Value> {
+    let me = m.user()?;
+    let (value, name) = m.who(|who| {
+        allowed!(who.may(&me, "change-settings", scopes::NETWORK), "Only an admin says who holds the recovery key.");
+        let user = who.find_user(&body.user)?;
+        let name = who.user(&user)?.map(|u| u.name).unwrap_or_default();
+        let mut holders = who.recovery_holders()?;
+        match body.holds {
+            true => drop(holders.insert(user)),
+            false => drop(holders.remove(&user)),
+        }
+        Ok((serde_json::to_string(&holders)?, name))
+    })?;
+    m.write(content::setting(scopes::RECOVERY_HOLDERS, Some(&value))).await?;
+    Ok(json!({ "said": match body.holds {
+        true => format!("{name} is named as holding the recovery key. They get it once someone who has it seals it to their devices."),
+        false => format!("{name} is no longer named as holding the recovery key. Anything already sealed to their devices still opens it, until the recovery key itself is replaced."),
+    } }))
 }
 
 /// A group called `name`, with this user its first admin: → `{ group }`, its id.

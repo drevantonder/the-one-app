@@ -81,7 +81,7 @@ function Users() {
                 key={u.id}
                 leading={<Avatar id={u.id} name={u.name} size={36} />}
                 title={`${u.name}${u.id === me ? " (you)" : ""}`}
-                sub={u.handle ? `@${u.handle}` : undefined}
+                sub={[u.handle && `@${u.handle}`, u.recovery_holder && "Holds the recovery key"].filter(Boolean).join(" · ") || undefined}
                 trailing={trailing}
                 onClick={u.id === me && u.handle ? () => startHandle() : undefined}
               />

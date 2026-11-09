@@ -181,6 +181,9 @@ pub struct NetworkUser {
     pub handle: String,
     pub role: Role,
     pub me: bool,
+    /// Whether an admin named them as holding the recovery key.
+    #[serde(default)]
+    pub recovery_holder: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -512,7 +515,8 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
             linked: if c.user == me { m.linked_sign_ins(&c.key).unwrap_or_default() } else { Vec::new() },
         })
         .collect();
-    let users = m.users()?.iter().filter(|u| !u.removed).map(|u| NetworkUser { id: u.id.clone(), name: u.name.clone(), handle: u.handle.clone(), role: u.role, me: u.id == me }).collect();
+    let holders = m.recovery_holders()?;
+    let users = m.users()?.iter().filter(|u| !u.removed).map(|u| NetworkUser { id: u.id.clone(), name: u.name.clone(), handle: u.handle.clone(), role: u.role, me: u.id == me, recovery_holder: holders.contains(&u.id) }).collect();
     let mut groups = Vec::new();
     for g in m.groups()? {
         let members = |of: &BTreeMap<String, Role>| of.iter().map(|(user, role)| Member { user: user.clone(), role: *role }).collect();

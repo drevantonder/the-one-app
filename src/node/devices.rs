@@ -176,6 +176,59 @@ impl Node {
 }
 
 impl Node {
+    /// Who holds the recovery key, for any user of the network, as who's who says it does and what the bucket has for
+    /// them: `{ recovery, holders: [{ user, name, devices: [{ key, seal, name, holds }] }] }`. A device with `holds` false
+    /// waits for someone with the key to seal it (`devices::cli`).
+    pub async fn recovery_holders(&self, caller: &Caller) -> Result<Value> {
+        ensure!(self.is_user(&caller.user), "only the network's users read who holds its recovery key");
+        let bucket = self.bucket()?;
+        let (recovery, holders) = self.with(|i| {
+            let db = i.r.db();
+            let mut holders = Vec::new();
+            for user in db.recovery_holders()? {
+                let name = db.user(&user)?.map(|u| u.name).unwrap_or_default();
+                holders.push((user.clone(), name, db.recovery_devices(&user)?));
+            }
+            Ok((db.recovery()?.as_ref().map(hex), holders))
+        })?;
+        let mut out = Vec::new();
+        for (user, name, devices) in holders {
+            let mut listed = Vec::new();
+            for d in devices {
+                let holds = match &recovery {
+                    Some(r) => Bucket::get(&bucket, &crate::keys::recovery_held_name(r, &hex(&d.key))).await?.is_some(),
+                    None => false,
+                };
+                listed.push(json!({ "key": hex(&d.key), "seal": hex(&d.seal), "name": d.name, "holds": holds }));
+            }
+            out.push(json!({ "user": user, "name": name, "devices": listed }));
+        }
+        Ok(json!({ "recovery": recovery, "holders": out }))
+    }
+
+    /// Keeps the recovery key, sealed by whoever has its file on this machine, for `to`: only a device who's who says may
+    /// hold it, of someone an admin named (`ScopeDb::recovery_devices`), and only by an admin's own machine. This node
+    /// never sees the key: what's sealed goes by. One there already stays.
+    pub async fn seal_recovery(&self, to: &str, sealed: &str) -> Result<()> {
+        let sealed = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("sealed is base64url"))?;
+        ensure!(!sealed.is_empty() && sealed.len() <= SEALED_MAX, "a sealed key is at most {SEALED_MAX} bytes");
+        let key = crate::keys::unhex(to)?;
+        let me = self.user()?;
+        let recovery = self.with(|i| {
+            let db = i.r.db();
+            allowed!(db.may(&me, "change-settings", scopes::NETWORK), "only an admin seals the recovery key to someone who holds it");
+            let may_hold = db.recovery_holders()?.into_iter().try_fold(false, |found, user| Ok::<_, anyhow::Error>(found || db.recovery_devices(&user)?.iter().any(|d| d.key == key)))?;
+            ensure!(may_hold, "the recovery key is sealed only to a device of someone an admin named, and not to a browser, a node or a passkey");
+            db.recovery()?.context("this network has no recovery key to seal")
+        })?;
+        if !crate::database::stored::created(&self.bucket()?, &crate::keys::recovery_held_name(&hex(&recovery), to), &sealed).await? {
+            return Err(crate::protocol::Coded::error(crate::protocol::code::ALREADY, "that device has the recovery key already"));
+        }
+        Ok(())
+    }
+}
+
+impl Node {
     /// The network's address, where users sign in.
     pub fn address(&self) -> Result<String> {
         self.with(|i| super::calls::address(i.r.db()))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))

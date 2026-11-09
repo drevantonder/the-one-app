@@ -90,7 +90,8 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Bucket**: the network's one store, a folder or S3-compatible storage, holding everything sealed. Only the URL signer
   holds its credentials.
 - **Key**: every client, node and service has its own. Each scope has numbered **epochs** of keys, sealed to the devices
-  that may open it and to the **recovery key**, which an admin keeps offline.
+  that may open it and to the **recovery key**, which an admin keeps offline. Its **holders** are users an admin named,
+  who can read everything and restore anyone; it's sealed to their devices that are only clients, never a node or a browser.
 - **Database**: one SQLite database, kept sealed in the bucket as steps at numbered positions, the bucket deciding their
   order. A scope has three kinds: **an app's database**, its data and the truth; **the node's database**, how things
   went (usage, errors, runs); and **the scope database**, who's who, permissions and keys.
