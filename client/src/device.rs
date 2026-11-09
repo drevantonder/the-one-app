@@ -239,7 +239,8 @@ impl Device {
         if !wrote {
             return Err(failed("Who's who changed too often to write to: try again."));
         }
-        let told = keys::signed_request_by(&signing, one::protocol::RELAY, json!({ "add": self.key(), "role": "client" }), keys::next_at(now())).await.map_err(failed)?;
+        let admin = reader.truth().is_some_and(|t| t.db.may(&user, "invite", one::database::scopes::NETWORK));
+        let told = keys::signed_request_by(&signing, one::protocol::RELAY, json!({ "add": self.key(), "role": "client", "admin": admin }), keys::next_at(now())).await.map_err(failed)?;
         let (status, out) = http("POST", &format!("{}/relay/tell", self.address), None, Some(told)).await?;
         if !(200..300).contains(&status) && out["code"] != one::protocol::code::ALREADY {
             return Err(failed(error(&out).unwrap_or_else(|| format!("{YOURS}'s relay answered {status}."))));

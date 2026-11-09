@@ -268,6 +268,15 @@ impl Workers {
     }
 
     fn start_as(domain: Option<&str>, google: bool, devices: Vec<String>) -> Workers {
+        Workers::start_with(domain, google, devices, None)
+    }
+
+    /// As `for_devices`, with the network's recovery key on the relay's list, as a deploy puts it there.
+    fn with_recovery(devices: Vec<String>, recovery: String) -> Workers {
+        Workers::start_with(None, false, devices, Some(recovery))
+    }
+
+    fn start_with(domain: Option<&str>, google: bool, devices: Vec<String>, recovery: Option<String>) -> Workers {
         let gateway = port();
         let mut settings = cloudflare::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
@@ -1067,6 +1076,20 @@ mod relay {
             assert!(device.removed().await, "a device the relay took out wasn't taken out");
             assert!(!signed_in_again.removed().await, "a new key was taken out with the old one");
         });
+    }
+
+    /// A sole admin with no device left comes back through the recovery key as an admin: only it, of the keys that
+    /// aren't an admin's, adds one.
+    #[test]
+    fn the_recovery_key_lets_back_in_an_admin_and_no_other_non_admin_key_does() {
+        let (first, recovery, member) = (SecretKey::generate(), SecretKey::generate(), SecretKey::generate());
+        let k = super::Workers::with_recovery(vec![hex(&first)], hex(&recovery));
+        let address = k.address.replace("localhost", "127.0.0.1");
+        assert_eq!(tell(&address, &first, json!({ "add": hex(&member), "role": "client" })), 204);
+        assert_eq!(tell(&address, &member, json!({ "add": hex(&SecretKey::generate()), "role": "client", "admin": true })), 403, "a member's device added an admin's");
+        let phone = SecretKey::generate();
+        assert_eq!(tell(&address, &recovery, json!({ "add": hex(&phone), "role": "client", "admin": true })), 204, "the recovery key didn't let an admin back in");
+        assert_eq!(tell(&address, &phone, json!({ "add": hex(&SecretKey::generate()), "role": "client", "admin": true })), 204, "that device isn't an admin's");
     }
 
     #[test]

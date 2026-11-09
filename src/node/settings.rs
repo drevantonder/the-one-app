@@ -209,7 +209,8 @@ impl Node {
         if !self.with(|i| Ok(i.r.db().client(&endpoint.key)?.is_some_and(|c| c.user == user && c.seal == endpoint.seal)))? {
             self.write_step_as(recovery, &user, content::device(&endpoint, &user, &name, &[scopes::Kind::Client], None)).await?;
         }
-        let relay = crate::settings::tell(self, recovery, json!({ "add": hex(&endpoint.key), "role": "client" })).await.err().map(|err| format!("{err:#}"));
+        let admin = self.with(|i| Ok(i.r.db().may(&user, "invite", scopes::NETWORK)))?;
+        let relay = crate::settings::tell(self, recovery, json!({ "add": hex(&endpoint.key), "role": "client", "admin": admin })).await.err().map(|err| format!("{err:#}"));
         let scopes: Vec<Scope> = self.with(|i| Ok(i.r.db().may_scopes(&user, "use")?))?;
         let (mut sealed, mut not) = (Vec::new(), Vec::new());
         for scope in scopes {

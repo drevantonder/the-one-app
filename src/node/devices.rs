@@ -259,7 +259,7 @@ impl Node {
             self.tell_relay(json!({ "remove": hex(&old) }));
         }
         if done.insert(now) {
-            self.tell_relay(json!({ "add": hex(&now), "role": "client" }));
+            self.tell_relay(json!({ "add": hex(&now), "role": "client", "recovery": true }));
         }
     }
 

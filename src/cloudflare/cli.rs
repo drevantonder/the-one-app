@@ -24,8 +24,9 @@ fn devices_here(node: &Client, settings: crate::cloudflare::Settings, needed: bo
         })
         .collect();
     anyhow::ensure!(!needed || !devices.is_empty(), "no node of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new network, whose relay takes devices once this runs again beside one");
-    // The network's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
-    devices.extend(network.as_ref().and_then(|n| n.recovery.as_ref()).map(|k| json!({ "key": k, "role": "client", "admin": false })));
+    // The network's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes, as
+    // an admin's if its user is one.
+    devices.extend(network.as_ref().and_then(|n| n.recovery.as_ref()).map(|k| json!({ "key": k, "role": "client", "admin": false, "recovery": true })));
     let root = network.and_then(|n| n.root).filter(|r| r.len() == 64);
     Ok(crate::cloudflare::Settings { devices, root, ..settings })
 }

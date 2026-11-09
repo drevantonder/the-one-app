@@ -35,9 +35,10 @@
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
-// - `{ add, role, admin? }`: a key (hex) to let in, and what it is: a client by any key on the list, a compute or a
-//   service only by an admin's or a compute's (nodes add the computers they pair and their users' services), and an
-//   admin only by an admin's; one already in is changed only by an admin's, keeping who let it in.
+// - `{ add, role, admin?, recovery? }`: a key (hex) to let in, and what it is: a client by any key on the list, a compute
+//   or a service only by an admin's or a compute's (nodes add the computers they pair and their users' services), and an
+//   admin only by an admin's or the recovery key (`by` is "recovery"; a new one is named so by an admin's, `recovery`);
+//   one already in is changed only by those, keeping who let it in.
 // - `{ remove }`: a key to take out, by an admin, the key that let it in, or itself, with the keys it let in that aren't
 //   admins', and theirs, and the pairing codes they made; never the last admin. A pairing code's computer is taken out
 //   the same way, by its code's maker too.
@@ -240,6 +241,10 @@ export class Relay extends DurableObject {
       for (const { key, role, admin } of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
         if (isKey(key) && rolesOf(role).every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'network', ?, ?)", key, admin === true ? 1 : 0, role);
       }
+    }
+    // The recovery key, as each deploy says (a network from before had it as any client).
+    for (const { key, recovery } of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
+      if (recovery === true && isKey(key)) this.sql.exec("UPDATE keys SET by = 'recovery' WHERE key = ?", key);
     }
     // Rebuilt from the sockets' attachments, which Hibernation keeps.
     this.sockets = new Map();
@@ -679,12 +684,14 @@ export class Relay extends DurableObject {
       if (!ROLES.includes(told.role)) return `add says its role: ${ROLES.join(", ")}`;
       const wants = told.admin === true;
       const it = this.key(told.add);
-      if (wants && !admin) return "only an admin's device adds an admin's";
+      // The recovery key lets back in an admin with no device left, as who's who says; it counts for nothing else here.
+      const trusted = admin || by.by === "recovery";
+      if (wants && !trusted) return "only an admin's device adds an admin's";
       // Adding a key again as it is, by the device that let it in (approving a device again to finish it), changes
       // nothing and is done.
       const same = it && it.by === told.by && it.role === told.role && it.admin === (wants ? 1 : 0);
       if (it && !same) {
-        if (!admin) return { error: "that key is in already: only an admin's device changes it", code: CODES.already };
+        if (!trusted) return { error: "that key is in already: only an admin's device changes it", code: CODES.already };
         if (it.admin === 1 && !wants && this.admins() === 1) return "that's the last admin's key";
         this.sql.exec("UPDATE keys SET admin = ?, role = ? WHERE key = ?", wants ? 1 : 0, told.role, told.add);
         if (told.role !== "client") this.endSessionsOf(told.add);
@@ -692,6 +699,7 @@ export class Relay extends DurableObject {
         if (told.role !== "client" && !admin && !is(by, "compute")) return "only an admin's device or a compute adds a compute or a service";
         this.sql.exec("INSERT INTO keys VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
       }
+      if (told.recovery === true && admin) this.sql.exec("UPDATE keys SET by = 'recovery' WHERE key = ?", told.add);
       // A pairing code's computer, added, is one of the network's: it reaches every endpoint now.
       this.sql.exec("DELETE FROM pairings WHERE key = ?", told.add);
       const ws = this.sockets.get(told.add);
