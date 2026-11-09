@@ -394,15 +394,22 @@ impl Node {
                     }
                 }
             }
-            // Newly added, its first widget goes on that page for whoever added it, unless they have one of it already.
+            // Newly added, its first widget goes on that page for whoever added it, unless they have one of it already; and
+            // added by someone who'd taken it off that page, it's back on it.
             let own = Scope::User(caller.user.clone());
-            if let (true, false, Some(widget), true) = (added, here.iter().any(|n| n == app), &widget, i.r.holds(&own)) {
+            if added && i.r.holds(&own) {
                 let page = if *scope == own { "user".to_string() } else { scope.to_string() };
                 let was = arranged.get(&page).cloned().unwrap_or(Value::Null);
                 let mut items = was["items"].as_array().cloned().unwrap_or_default();
-                if !items.iter().any(|item| item["app"] == app && item["widget"].is_string()) {
+                let hidden = was["hidden"].as_array().cloned().unwrap_or_default();
+                let shown: Vec<Value> = hidden.iter().filter(|n| n.as_str() != Some(app)).cloned().collect();
+                let widget = widget.as_ref().filter(|_| !here.iter().any(|n| n == app) && !items.iter().any(|item| item["app"] == app && item["widget"].is_string()));
+                if let Some(widget) = widget {
                     items.push(json!({ "app": app, "widget": widget, "id": new_id() }));
-                    out.push((own, content::arrange(&page, json!(items), was["hidden"].clone(), was["pages"].clone())));
+                }
+                if widget.is_some() || shown.len() != hidden.len() {
+                    let hidden = if shown.len() != hidden.len() { json!(shown) } else { was["hidden"].clone() };
+                    out.push((own, content::arrange(&page, json!(items), hidden, was["pages"].clone())));
                 }
             }
             Ok(out)
