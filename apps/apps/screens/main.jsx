@@ -72,6 +72,7 @@ function Main() {
     const found = apps.data.apps
       .map((a) => (restored.includes(a.name) ? { ...a, deleted: null } : a))
       .filter((a) => (!accounts || a.keeps_accounts) && (!q || [a.title, a.name, a.tagline || "", a.description || ""].some((t) => t.toLowerCase().includes(q))))
+    const failed = (a) => !a.deleted && apps.data.failing?.includes(a.name)
     const section = (title, of) => of.length > 0 && (
       <Section key={title} title={title}>
         <Grid min="17rem" max={4} gap="0.25rem">
@@ -80,7 +81,7 @@ function Main() {
       </Section>
     )
     tiles = found.length
-      ? <>{section("Built In", found.filter((a) => a.built_in && !a.deleted))}{section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted))}{section("Recently Deleted", found.filter((a) => a.deleted))}</>
+      ? <>{section("Schedule Failed", found.filter(failed))}{section("Built In", found.filter((a) => a.built_in && !a.deleted && !failed(a)))}{section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted && !failed(a)))}{section("Recently Deleted", found.filter((a) => a.deleted))}</>
       : <Empty>{query.trim() ? `Nothing matches “${query.trim().toLowerCase()}”.` : "No results."}</Empty>
   } else tiles = <Pending call={apps} rows={8} tiles="17rem" />
 

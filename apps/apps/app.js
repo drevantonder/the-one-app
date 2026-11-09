@@ -273,15 +273,18 @@ export default {
       input: { type: "object", properties: {} },
       output: {
         type: "object",
-        required: ["apps", "places", "admin"],
+        required: ["apps", "places", "admin", "failing"],
         properties: {
           apps: { type: "array", items: { type: "object", required: ["name", "title", "owner", "added"], additionalProperties: true } },
           places: { type: "array", items: { type: "object", required: ["scope", "id", "name", "may"], additionalProperties: true } },
           admin: { type: "boolean" },
+          failing: { type: "array", items: { type: "string" }, description: "the apps with a schedule, that you may switch, that failed its last run" },
         },
       },
       async run(ctx) {
-        return { apps: (await listed(ctx, { full: true })).apps, places: places(ctx), admin: ctx.me.role === "admin" };
+        // The Cloudflare node doesn't know which schedules failed.
+        const failing = await ctx.failing().catch(() => []);
+        return { apps: (await listed(ctx, { full: true })).apps, places: places(ctx), admin: ctx.me.role === "admin", failing: [...new Set(failing.map((s) => s.app))] };
       },
     },
     _health: {
