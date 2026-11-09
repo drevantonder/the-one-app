@@ -1,13 +1,14 @@
 // Every screen showing: the one beside the sidebar, and the sheets over it, each an app's or the client's own, in a
 // sandboxed frame whose bridge (src/screen/bridge.js) this page answers: an app's acting only as that app, and only the
 // client's own as the user (settings.js).
+import { move, settle } from "./moves.js";
 import { offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
-import { back, go, listed, own, route } from "./routes.js";
+import { back, go, home, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
-import { KEPT_SCREENS, here, joined, reads, settingAt, settingsItems, titleOf } from "./store.js";
-import { $, h, ui } from "./view.js";
+import { KEPT_SCREENS, app, here, joined, reads, settingAt, settingsItems, titleOf } from "./store.js";
+import { $, h, reveal, ui } from "./view.js";
 
 let frames = [];
 
@@ -46,17 +47,19 @@ const kept = {
   // An https URL of its own, which the cache takes on any page's origin (the app's tauri:// one too, where it
   // takes only http and https).
   url: (kind, key) => `https://kept.invalid/${kind}/${encodeURIComponent(key)}`,
-  async get(kind, key) {
+  /// What was kept, if it was drawn at `width` (a still is, as a page isn't; at another it would show squashed).
+  async get(kind, key, width) {
     try {
-      return (await (await (await caches.open(KEPT_SCREENS)).match(kept.url(kind, key)))?.text()) ?? null;
+      const got = await (await caches.open(KEPT_SCREENS)).match(kept.url(kind, key));
+      return (width && got?.headers.get("x-kept-width") !== String(width) ? null : await got?.text()) ?? null;
     } catch {
       return null;
     }
   },
-  put(kind, key, html) {
+  put(kind, key, html, width) {
     if (typeof html !== "string" || html.length > 2_000_000) return;
-    const at = { "x-kept-at": String(Date.now()) };
-    window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html, { headers: at }))).catch(() => {});
+    const headers = { "x-kept-at": String(Date.now()), ...(width ? { "x-kept-width": String(width) } : {}) };
+    window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html, { headers }))).catch(() => {});
   },
   async when(kind, key) {
     try {
@@ -132,11 +135,12 @@ function sandboxed(r) {
 }
 
 /// What a route shows, in a new frame: its page as kept here if there is one, else as the node gives it now; one
-/// that's changed since (its app deployed) starts the screen again. → the frame's record. Beside the sidebar, its
-/// still shows until the screen has drawn and had its calls answered.
+/// that's changed since (its app deployed) starts the screen again. → the frame's record, whose `drawn` is once its still
+/// or the screen itself has drawn. Beside the sidebar, its still shows until the screen says it has drawn.
 function frameFor(r, into, { sheet } = {}) {
   const frame = sandboxed(r);
-  const f = { frame, route: r, sheet, into, key: JSON.stringify(r), busy: 0, quiet: 0 };
+  const f = { frame, route: r, sheet, into, key: JSON.stringify(r) };
+  f.drawn = new Promise((done) => (f.saysDrawn = done));
   frames.push(f);
   // A spinner only for a wait that's long enough to notice.
   into.innerHTML = "";
@@ -158,17 +162,11 @@ function frameFor(r, into, { sheet } = {}) {
     if (!into.isConnected) return;
     if (f.still) frame.style.visibility = "hidden";
     into.append(frame);
-    frame.addEventListener("load", () => {
-      f.loaded = true;
-      $(".screen-status", into)?.remove();
-      // A screen that asks nothing shows in place of its still soon after it loads.
-      if (f.still) setTimeout(() => watch(f), 1500);
-    }, { once: true });
   };
   const fresh = screenPage(r);
   // The client's own aren't kept: one kept before they came from its files came from a node.
   const looking = developer.on() && r.kind !== "own" && { what: "page", app: r.app, screen: r.screen, source: "kept", at: Date.now(), started: performance.now() };
-  const tried = Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
+  const tried = Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key, into.clientWidth)]).then(([page, still]) => {
     if (looking && page) developer.keep(looking);
     if (f.page) return;
     if (still) showStill(f, still);
@@ -191,7 +189,7 @@ function frameFor(r, into, { sheet } = {}) {
   fresh.then((page) => ((came = true), offline.done(f.key), update(page)), async (err) => {
     await tried;
     if (f.page) return away();
-    f.loaded = true;
+    screenDrew(f);
     failed(into, one.plain(err).title);
   });
   return f;
@@ -207,39 +205,112 @@ function showStill(f, html) {
   f.still = { frame, html: oneHost.look(html.replace("</head>", `${scrolled}</head>`), appearance(), false, platform.look()) };
   $(".screen-status", f.into)?.remove();
   f.into.prepend(frame);
+  // One that never says it has drawn shows anyway, whatever it's waiting on.
+  setTimeout(() => f.still?.frame === frame && screenDrew(f), 4000);
 }
 
-/// The screen showing in place of its still, once it's had its calls answered (and nothing more asked for a moment),
-/// or after a few seconds whatever it's waiting on.
-function watch(f, until = Date.now() + 4000) {
-  if (!f.still || f.watched) return;
-  f.watched = true;
-  const check = () => {
-    if ((f.busy || Date.now() - f.quiet < 50) && Date.now() < until) return void setTimeout(check, 20);
-    f.frame.style.visibility = "";
-    f.still.frame.remove();
-    f.still = null;
-  };
-  check();
+/// The screen has drawn: it shows in place of its still, and its wait is over.
+function screenDrew(f) {
+  f.loaded = true;
+  $(".screen-status", f.into)?.remove();
+  f.frame.style.visibility = "";
+  f.still?.frame.remove();
+  f.still = null;
+  f.saysDrawn();
+}
+
+/// The screen showing, and the one being drawn behind it to take its place; and an app grown out of its icon on a
+/// phone, for Back to shrink it into again.
+let showing = null, coming = null, grown = null;
+/// How long the screen showing waits for the next to draw before making way for its spinner.
+const WAIT_TO_DRAW = 1000;
+
+/// A route's tile as the window draws it, if it has one (an app's, or a Settings item's).
+const tileOf = (r) => (r.kind === "screen" ? app(r.app) : settingsItems().find((i) => i.name === r.name)) || null;
+
+/// How the screen `r` takes the place of what shows: on a phone an app opened from its icon (`opened`, where it was)
+/// grows from it, and Back to where it was opened from shrinks it there; on a computer, pages cross and screens rise.
+function how(r, opened) {
+  const key = JSON.stringify(r);
+  if (platform.phone()) {
+    const tile = opened && tileOf(r);
+    if (tile) {
+      grown = { key, rect: opened, tile, width: innerWidth, height: innerHeight };
+      return { grow: grown };
+    }
+    if (grown && home(r) && grown.key === showing?.key && grown.width === innerWidth && grown.height === innerHeight) {
+      const shrink = grown;
+      grown = null;
+      return { shrink };
+    }
+    return { rise: true };
+  }
+  return home(r) && showing && home(showing.route) ? { cross: true } : { rise: true };
+}
+
+/// The screen's frames as they're dropped with their layer.
+function drop(layer) {
+  layer.remove();
+  frames = frames.filter((f) => f.into !== layer);
+}
+
+/// The window begins to show `f`: its bar says so (`begin`), and what it's said it's called.
+function announced(f, begin) {
+  showing = f;
+  f.begun = true;
+  begin();
+  if ("said" in f) saying(f);
+}
+function saying(f) {
+  titled.forEach((fn) => fn(f.said));
+  document.title = f.said || String(f.name || "") || titleOf(f.route);
 }
 
 export const screen = {
-  show(detail, r) {
-    frames = frames.filter((f) => f.sheet);
-    const title = titleOf(r);
-    document.title = title;
-    detail.innerHTML = `<div class="screen"></div>`;
+  /// Shows `r` where the window shows screens. What shows stays until `r`'s next has drawn; a nav away from it goes the
+  /// same way. `begin` puts the window's bar on it, when it starts to show (as a phone's goes back, when it's left).
+  show(detail, r, begin = () => {}, opened) {
+    document.title = titleOf(r);
     devtools.since = Date.now();
     devtools.draw();
+    settle();
+    if (coming) (drop(coming.into), (coming = null));
+    const box = $(".screen", detail) || detail.insertAdjacentElement("afterbegin", Object.assign(document.createElement("div"), { className: "screen" }));
+    const from = showing?.into.isConnected ? showing.into : null;
+    if (!from && showing) drop(showing.into);
+    const into = Object.assign(document.createElement("div"), { className: "screen-layer" });
+    if (platform.phone() && !home(r)) into.dataset.bar = "";
+    if (from) {
+      into.classList.add("coming");
+      frames.filter((f) => f.into === from).forEach((f) => (f.leaving = true));
+    }
+    box.append(into);
     // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the gateway's, not a node's.
     const item = r.kind === "own" && settingsItems().find((i) => i.name === r.name && i.url && here(i.url));
+    let f;
     if (item) {
       const frame = Object.assign(document.createElement("iframe"), { className: "screen-frame", src: item.url });
-      frame.setAttribute("aria-label", title);
+      frame.setAttribute("aria-label", titleOf(r));
       frame.setAttribute("allow", "publickey-credentials-get; publickey-credentials-create");
-      return void $(".screen", detail).append(frame);
+      f = { into, route: r, key: JSON.stringify(r), drawn: new Promise((done) => frame.addEventListener("load", done, { once: true })) };
+      into.append(frame);
+    } else f = frameFor(r, into);
+    if (!from) {
+      announced(f, begin);
+      Promise.race([f.drawn, new Promise((done) => setTimeout(done, WAIT_TO_DRAW))]).then(() => reveal());
+      return;
     }
-    frameFor(r, $(".screen", detail));
+    coming = f;
+    const goes = how(r, opened);
+    Promise.race([f.drawn, new Promise((done) => setTimeout(done, WAIT_TO_DRAW))]).then(() => {
+      if (coming !== f) return;
+      coming = null;
+      if (!goes.shrink) announced(f, begin);
+      move(from, into, goes, () => {
+        drop(from);
+        if (goes.shrink) announced(f, begin);
+      });
+    });
   },
 };
 
@@ -322,13 +393,15 @@ export function openSheet(r) {
 addEventListener("message", async (e) => {
   const still = frames.find((x) => x.still?.frame.contentWindow === e.source)?.still;
   if (still && e.data?.oneFrame) return void still.frame.contentWindow.postMessage({ oneScreen: still.html }, "*");
+  if (still && e.data?.oneWritten) return void frames.find((x) => x.still === still)?.saysDrawn();
   const f = frames.find((x) => x.frame.contentWindow === e.source);
   if (!f) return;
   const r = f.route, mine = r.kind === "own";
   if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
   // The panel's window fits its screen.
   if (typeof e.data?.oneHeight === "number") return void (f.sheet || platform.fit(e.data.oneHeight));
-  if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill));
+  if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill, f.frame.clientWidth));
+  if (e.data?.oneDrawn) return void screenDrew(f);
   const { one: m, id } = e.data || {};
   if (!m || typeof m !== "object") return;
   // What a call answered last time, if it only reads: from this device, at once, while the window still starts.
@@ -338,12 +411,9 @@ addEventListener("message", async (e) => {
   }
   // What's here needs no node: the icons, and what this device keeps for its own screens (`one.cache`, the home's last
   // pages), so a screen offline starts from them.
-  f.busy++;
-  watch(f);
   if (m.type !== "icons" && !(mine && m.type === "cache")) await joined;
-  const answered = () => ((f.busy = Math.max(0, f.busy - 1)), (f.quiet = Date.now()));
-  const reply = (ok) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*"));
-  const fail = (err) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err), code: err?.code }, "*"));
+  const reply = (ok) => f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*");
+  const fail = (err) => f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err), code: err?.code }, "*");
   try {
     reply(await oneHost.answer(m, {
       frame: f.frame,
@@ -364,7 +434,7 @@ addEventListener("message", async (e) => {
         // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,
         // Backups in Settings) opens as if picked there, with no Back; only what's deeper than it is pushed.
         f.sheet?.close(null);
-        go(to, { pushed: !listed(to) });
+        go(to, { pushed: !listed(to) }, Array.isArray(m.rect) && m.rect.length === 4 && m.rect.every(Number.isFinite) ? m.rect : undefined);
         return null;
       },
       close: (value) => {
@@ -378,9 +448,10 @@ addEventListener("message", async (e) => {
         // A sheet too says nothing while the screen's large title shows (`one.largeTitle`, which names it).
         if (f.sheet) f.sheet.title(title || (m.name ? "" : titleOf(r)));
         // Developer's panel has the bar of the screen it's under.
-        else if (!f.dock && f.into.isConnected) {
-          titled.forEach((fn) => fn(title));
-          document.title = title || String(m.name || "") || titleOf(r);
+        else if (!f.dock && f.into.isConnected && !f.leaving) {
+          f.said = title;
+          f.name = m.name;
+          if (f.begun) saying(f);
         }
         return null;
       },
@@ -403,7 +474,7 @@ addEventListener("message", async (e) => {
       traces: () => (developer.on() ? developer.kept : null),
       own: mine && {
         ...ownAnswers,
-        appearance: (m) => (m.value != null && tell({ oneScheme: setAppearance(String(m.value)) }), appearance()),
+        appearance: (m) => (m.value == null ? appearance() : new Promise((done) => ui.transition(() => (tell({ oneScheme: setAppearance(String(m.value)) }), done(appearance()))))),
         request: async (m) => (await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true,
       },
     }));

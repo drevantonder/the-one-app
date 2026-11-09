@@ -38,6 +38,8 @@
       if (now !== tall) window.parent.postMessage({ oneHeight: (tall = now) }, "*");
     };
     addEventListener("load", () => {
+      loaded = true;
+      settled();
       if (window.ResizeObserver && document.body) new ResizeObserver(measure).observe(document.body);
       new MutationObserver(later).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
       addEventListener("scroll", later, { passive: true });
@@ -70,6 +72,19 @@
     }
     // Nothing else answers: the node refuses browsers, which would run a screen as this machine's own programs.
     throw new Error("Open this in the app.");
+  }
+
+  // The screen has drawn, for the page holding the frame to show it in place of what shows there: it's loaded and has
+  // what it asked for, a moment after its last call came back. It says so once.
+  let loaded = false, out = 0, told = false, quiet = 0;
+  function settled() {
+    if (told || !loaded || out || !framed) return;
+    clearTimeout(quiet);
+    quiet = setTimeout(() => {
+      if (out || told) return;
+      told = true;
+      window.parent.postMessage({ oneDrawn: true }, "*");
+    }, 50);
   }
 
   // Icons are Phosphor's (vendor/phosphor), the same in every client: each a path on a 256-point grid, filled in the
@@ -156,12 +171,15 @@
     config: ctx.config,
     // The page the window opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,
-    call: (tool, input = {}) => call(tool, input),
+    call: (tool, input = {}) => (out++, call(tool, input).finally(() => (out--, settled()))),
     // Opens one of this app's screens; or with `app`, another app's (a notification's link, say). `scope` is the page
     // it's opened for (else this screen's). With `sheet`, it slides up over this one, and this resolves once it's gone,
-    // to what it gave `close`; otherwise it's pushed on top, with Back.
-    open: (screen, params = {}, app, { scope, sheet } = {}) =>
-      host({ type: "open", screen, params, ...(app && app !== ctx.app ? { app } : {}), ...(scope ? { scope } : {}), ...(sheet ? { sheet: true } : {}) }),
+    // to what it gave `close`; otherwise it's pushed on top, with Back. `from`, the element it was opened from (an app's
+    // icon), which the window may grow it out of.
+    open: (screen, params = {}, app, { scope, sheet, from } = {}) => {
+      const rect = from instanceof Element && from.getBoundingClientRect();
+      return host({ type: "open", screen, params, ...(app && app !== ctx.app ? { app } : {}), ...(scope ? { scope } : {}), ...(sheet ? { sheet: true } : {}), ...(rect ? { rect: [rect.left, rect.top, rect.width, rect.height].map(Math.round) } : {}) });
+    },
     // Closes this screen: a sheet goes, giving `value` to who opened it; a pushed screen goes back.
     close: (value = null) => host({ type: "close", value }),
     // The window's own menu, at `at` ({ x, y } in this page, or the element it's for), of `items`, each

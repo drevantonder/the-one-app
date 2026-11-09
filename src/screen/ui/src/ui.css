@@ -13,6 +13,12 @@
 :root { --shell-bar: 3rem; }
 .wco { --shell-bar: var(--titlebar-area-height); }
 
+/* Asked for no motion: a plain swap everywhere, sheets and alerts included. */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after { transition-duration: 0s !important; }
+  [data-state] { animation: none !important; }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

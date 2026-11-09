@@ -88,7 +88,7 @@ export const home = (() => {
     const s = app(h.state?.config?.store);
     return s && hasScreens(s) && pages().some((p) => scopes(s).includes(p.scope)) ? s : null;
   }
-  const open = (a, p, screen = "main", params = {}) => () => one.open(screen, params, a.name, p ? { scope: p.scope } : {});
+  const open = (a, p, screen = "main", params = {}) => (from) => one.open(screen, params, a.name, { ...(p ? { scope: p.scope } : {}), from });
   const settings = (a, p, add) => (has(a, "settings") ? open(a, p, "settings", add ? { add: true } : {}) : null);
   const inStore = (a) => (store() && has(store(), "app") && (a.deploys || 0) > 0 ? open(store(), null, "app", { app: a.name }) : null);
   const addAccountApp = () => (store() ? open(store(), null, "main", { accounts: true }) : null);

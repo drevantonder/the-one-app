@@ -3,7 +3,7 @@
 // at the place the URL names (routes.js), from what the nodes say (store.js). App screens are untrusted: each runs in a
 // sandboxed frame, and this page answers its bridge, making each call itself; the client's own screens (Settings) are
 // answered as the user (settings.js). The modules import only downward, as each is named by its content with its
-// imports' names in it (src/web.rs): view, platform, request, store, routes, offline, settings, screens, window, web.
+// imports' names in it (src/web.rs): view, platform, request, store, routes, offline, settings, moves, screens, window, web.
 //
 // The bridge (src/screen/), loaded after this, gives `one`; this page answers it for its own use (`__one.host`).
 import { offline } from "./offline.js";

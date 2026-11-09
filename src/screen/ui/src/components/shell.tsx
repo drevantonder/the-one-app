@@ -56,16 +56,19 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
   if (phone) {
     return (
       <div className={cn("flex h-full flex-col pt-[env(safe-area-inset-top)]", className)}>
-        {back && (
-          <header data-slot="shell-bar" className="grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center px-1">
-            <Button variant="ghost" className="justify-self-start px-2" onClick={onBack} aria-label="Back">
-              <CaretLeftIcon />
-            </Button>
-            <h1 className="min-w-0 truncate text-[15px] font-semibold">{title}</h1>
-          </header>
-        )}
         {banner}
-        {body}
+        {/* The bar lies over where the screen is, which keeps its size as a screen with no bar gives way to one with a bar. */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {back && (
+            <header data-slot="shell-bar" className="absolute inset-x-0 top-0 z-10 grid h-11 grid-cols-[1fr_auto_1fr] items-center bg-background px-1">
+              <Button variant="ghost" className="justify-self-start px-2" onClick={onBack} aria-label="Back">
+                <CaretLeftIcon />
+              </Button>
+              <h1 className="min-w-0 truncate text-[15px] font-semibold">{title}</h1>
+            </header>
+          )}
+          {body}
+        </div>
       </div>
     )
   }
@@ -77,7 +80,8 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
       </div>
       <Sidebar>
         <div className="h-(--shell-bar) shrink-0" />
-        <SidebarContent>
+        <SidebarContent className="relative">
+          <Selected />
           {sections.map((s) => <ShellGroup key={s.key} section={s} onGo={onGo} />)}
         </SidebarContent>
       </Sidebar>
@@ -103,6 +107,23 @@ function Shell({ sections, title, back, onBack, onGo, developer, onDeveloper, op
   )
 }
 
+/// The highlight behind the selected row, one element that slides from row to row.
+function Selected() {
+  const ref = React.useRef<HTMLSpanElement>(null)
+  React.useLayoutEffect(() => {
+    const el = ref.current!
+    const row = el.parentElement!.querySelector<HTMLElement>('[data-sidebar="menu-button"][data-active="true"]')
+    el.style.visibility = row ? "" : "hidden"
+    if (!row) return
+    const box = el.parentElement!.getBoundingClientRect(), at = row.getBoundingClientRect()
+    el.style.width = `${at.width}px`
+    el.style.height = `${at.height}px`
+    el.style.translate = `${at.left - box.left}px ${at.top - box.top + el.parentElement!.scrollTop}px`
+    if (!el.dataset.placed) requestAnimationFrame(() => (el.dataset.placed = ""))
+  })
+  return <span ref={ref} aria-hidden="true" className="absolute top-0 left-0 rounded-md bg-sidebar-accent data-[placed]:transition-[translate] data-[placed]:duration-200 data-[placed]:ease-out motion-reduce:transition-none" />
+}
+
 function ShellGroup({ section, onGo }: { section: ShellSection; onGo?: (href: string) => void }) {
   const { isMobile, setOpenMobile } = useSidebar()
   // A plain click goes in place, and closes the sidebar's sheet; any other is the browser's (a new tab).
@@ -122,7 +143,7 @@ function ShellGroup({ section, onGo }: { section: ShellSection; onGo?: (href: st
       <SidebarMenu>
         {section.items.map((item) => (
           <SidebarMenuItem key={item.key}>
-            <SidebarMenuButton asChild isActive={item.selected}>
+            <SidebarMenuButton asChild isActive={item.selected} className="data-[active=true]:bg-transparent">
               <a
                 href={item.href}
                 {...(item.external ? { target: "_blank", rel: "noopener" } : { onClick: go(item.href) })}

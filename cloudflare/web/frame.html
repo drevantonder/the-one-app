@@ -12,6 +12,7 @@
       document.open();
       document.write(e.data.oneScreen);
       document.close();
+      requestAnimationFrame(() => requestAnimationFrame(() => parent.postMessage({ oneWritten: true }, "*")));
     });
     parent.postMessage({ oneFrame: true }, "*");
   }

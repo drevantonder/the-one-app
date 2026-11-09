@@ -13,8 +13,28 @@ export const logo = "/logo.png";
 const stages = new Set([ui.Welcome, ui.Join, ui.Starting]);
 let shown = null;
 const draw = () => OneUI["react-dom"].flushSync(() => view.render(shown));
+
+/// The screen before the window, kept over it as it was, until the window's first screen has drawn (`reveal`).
+let cover = null;
+function keepOver() {
+  const was = $("#root").firstElementChild?.cloneNode(true);
+  if (!was) return;
+  cover = document.createElement("div");
+  cover.className = "window-cover";
+  cover.append(was);
+  document.body.append(cover);
+}
+export function reveal() {
+  const leaving = cover;
+  cover = null;
+  if (!leaving) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return leaving.remove();
+  ui.animate(leaving, { opacity: [1, 0] }, { duration: 0.2, ease: "linear" }).finished.then(() => leaving.remove());
+}
+
 export function show(element) {
   const changing = shown && stages.has(shown.type) && stages.has(element.type) && (shown.type !== element.type || shown.key !== element.key);
+  if (shown && stages.has(shown.type) && !stages.has(element.type)) keepOver();
   shown = element;
   if (changing) ui.transition(draw);
   else draw();

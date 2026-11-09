@@ -46,11 +46,11 @@ function under(r) {
 
 /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens deeper than the sidebar is pushed
 /// on top, so Back returns to it.
-export function go(r, { pushed = false } = {}) {
+export function go(r, { pushed = false } = {}, opened) {
   // Pushed on a screen, the sidebar keeps what it had selected, and the bar offers Back.
   const state = pushed ? { back: true, selection: history.state?.selection || location.pathname + location.search } : null;
   history.pushState(state, "", href(r));
-  moved();
+  moved(opened);
 }
 /// Back: to what came before in this tab, or for a screen opened straight, to the page it's under.
 export function back() {
@@ -64,8 +64,8 @@ const selection = () => history.state?.selection || location.pathname + location
 /// What goes where the URL now says (`whenMoved`): the window, drawn there.
 const moves = [];
 export const whenMoved = (fn) => moves.push(fn);
-const moved = () => moves.forEach((fn) => fn());
-addEventListener("popstate", moved);
+const moved = (opened) => moves.forEach((fn) => fn(opened));
+addEventListener("popstate", () => moved());
 
 /// Where each of the sidebar's links goes, as it was last listed.
 const links = new Map();

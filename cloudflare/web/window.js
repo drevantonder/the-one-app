@@ -12,23 +12,25 @@ import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, store, titleOf, whenChanged, whenSignedOut } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
 
-/// The bar's title over the screen, as the screen in it last said.
-let barTitle = "";
+/// The bar's title over the screen, as the screen in it last said; and whether it offers Back, as the screen it's over
+/// does, on a phone that's every screen but the home screen.
+let barTitle = "", barBack = false;
 /// Whether the window is what shows, rather than what stands before it.
 let windowShown = false;
 export const windowShowing = () => windowShown;
 let shown = "";
 
-export function render() {
+export function render(opened) {
   if (!store.state || isJoining()) return;
   if (!network()) return void ((windowShown = false), show(message("Not Set Up Yet", "Set it up on one of your computers first.")));
   if (platform.panel) return drawPanel();
   const r = route(), key = JSON.stringify(r);
   // The screen where the window is, kept as it is while the rest redraws around it.
   const fresh = !(shown === key && hasScreen());
-  if (fresh) (shown = key), (barTitle = home(r) ? "" : titleOf(r));
+  if (fresh) shown = key;
+  else barBack = barBackAt(r);
   drawWindow();
-  if (fresh) screen.show(detail, r);
+  if (fresh) screen.show(detail, r, () => ((barTitle = home(r) ? "" : titleOf(r)), (barBack = barBackAt(r)), drawWindow()), opened);
 }
 whenChanged(render);
 whenMoved(render);
@@ -47,6 +49,8 @@ function countBadges(drawn) {
 }
 
 /// A newer version of the client needs a newer app than this one, which stays on what it has.
+const barBackAt = (r) => (platform.phone() ? !home(r) : !!history.state?.back);
+
 const appBehind = () =>
   platform.behind() ? h(ui.Problem, { quiet: true, title: `Update ${config().name}`, text: "This app needs an update to get the newest version.", className: "max-w-none rounded-none border-0 border-b" }) : null;
 
@@ -55,11 +59,11 @@ function drawWindow() {
   const drawn = sections();
   countBadges(drawn);
   const banner = appBehind() || offline.banner();
-  if (platform.phone()) return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: !home(route()), onBack: back, screen: detail, banner }));
+  if (platform.phone()) return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: barBack, onBack: back, screen: detail, banner }));
   show(h(ui.Shell, {
     sections: drawn,
     title: barTitle,
-    back: !!history.state?.back,
+    back: barBack,
     onBack: back,
     onGo: (to) => linked(to) && go(linked(to)),
     developer: developer.on(),

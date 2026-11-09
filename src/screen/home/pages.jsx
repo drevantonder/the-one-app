@@ -126,7 +126,7 @@ const settingsView = () => ({
   list: (home.data.state.settings_items || []).map((item) => tile(`settings:${item.name}`, {
     name: item.title, icon: { name: item.name, title: item.title, icon: item.icon, color: item.color }, badge: item.badge || 0,
     // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.
-    open: () => (item.url ? one.link(item.url) : item.app ? one.open("main", {}, item.app) : one.open(item.name)),
+    open: (from) => (item.url ? one.link(item.url) : item.app ? one.open("main", {}, item.app, { from }) : one.open(item.name, {}, undefined, { from })),
   })),
 })
 
@@ -187,9 +187,27 @@ async function save(p, items, hidden = hiddenOf(p), { reload = false } = {}) {
 
 const resize = (p, kept, size) => save(p, keptOf(p).map((k) => (k.widget && k.id === kept.id ? { ...k, size } : k)))
 
+const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches
+
+/// What's being taken off a page, shrinking away where it was as its neighbours glide into its place.
+function shrinkAway(key) {
+  const el = document.querySelector(`[data-cell="${CSS.escape(key)}"]`)
+  if (!el) return
+  flipNext = true
+  if (calm()) return
+  const r = el.getBoundingClientRect(), z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+  const ghost = el.cloneNode(true)
+  ghost.removeAttribute("data-cell")
+  ghost.className = "pointer-events-none fixed left-0 top-0 z-20 m-0 grid"
+  Object.assign(ghost.style, { width: `${r.width / z}px`, height: `${r.height / z}px`, gridColumn: "", gridRow: "", animation: "none", transform: `translate(${r.left / z}px, ${r.top / z}px)` })
+  document.body.append(ghost)
+  ghost.animate([{ scale: 1, opacity: 1 }, { scale: 0.4, opacity: 0 }], { duration: 180, easing: "ease-in", fill: "forwards" }).finished.then(() => ghost.remove())
+}
+
 /// Takes a widget off a page, or an app's icon: the app stays added there, under Edit's Taken Off This Page.
 function remove(p, item) {
   one.tap("medium")
+  shrinkAway(item.key)
   const kept = keptOf(p).filter((k) => keyOf(k) !== item.key)
   const app = item.key.startsWith("app:") && item.key.slice(4)
   save(p, kept, app && !hiddenOf(p).includes(app) ? [...hiddenOf(p), app] : hiddenOf(p))
@@ -503,6 +521,10 @@ function Folder({ apps, size }) {
 function Cell({ page, at, editing, refreshing, nth, icon }) {
   const { item, size, col, row, w, h } = at
   const el = useRef(null)
+  // A widget that was a grey card a moment ago fades in over where the card was.
+  const wasPending = useRef(false)
+  const arrived = wasPending.current || item.kind === "pending"
+  wasPending.current = arrived
   const wide = item.kind === "widget" || item.kind === "pending"
   const arrange = editing && !!item.key
   const resizable = arrange && item.kind === "widget" && home.supported(item.w).length > 1
@@ -513,7 +535,7 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
         w={item.w}
         host={item.host}
         tree={home.tree(item.w, size)}
-        className={cn("h-full", item.open && "cursor-pointer active:opacity-80", refreshing && "opacity-50 transition-opacity")}
+        className={cn("h-full", item.open && "cursor-pointer active:opacity-80", refreshing && "opacity-50 transition-opacity", arrived && "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-[160ms]")}
         onClick={item.open ? (e) => !S.editing && !quiet() && !e.defaultPrevented && !e.target.closest("button, input, label, a") && item.open() : undefined}
       />
     )
@@ -521,7 +543,7 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
     body = <div aria-hidden="true" className="h-full animate-pulse rounded-3xl bg-muted motion-reduce:animate-none" style={{ zoom: "var(--unzoom, 1)" }} />
   } else {
     body = (
-      <Tile name={item.name} icon={item.icon} size={icon} badge={item.badge} onClick={() => !S.editing && !quiet() && (one.tap(), item.open())}>
+      <Tile name={item.name} icon={item.icon} size={icon} badge={item.badge} onClick={(e) => !S.editing && !quiet() && (one.tap(), item.open(e.currentTarget.querySelector("[data-slot=app-icon]")))}>
         {item.kind === "accounts" && <Folder apps={item.apps} size={icon} />}
       </Tile>
     )
@@ -598,6 +620,8 @@ function Grid({ page, editing, refreshing }) {
     for (const el of ref.current.children) {
       const r = el.getBoundingClientRect(), before = was.current.get(el.dataset.cell)
       next.set(el.dataset.cell, r)
+      // Someone new on a page already drawn pops in.
+      if (!before && was.current.size && !calm()) el.animate([{ scale: 0.4, opacity: 0 }, { scale: 1, opacity: 1 }], { duration: 220, easing: "cubic-bezier(0.22, 1, 0.36, 1)" })
       if (!flipNext || !before) continue
       const dx = before.left - r.left, dy = before.top - r.top
       if (!dx && !dy) continue
