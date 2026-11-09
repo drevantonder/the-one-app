@@ -139,7 +139,10 @@ impl Apps {
             if !runtime.restart() && runtime.apart {
                 return Ok(());
             }
-            runtime.wait_ready(generation)
+            runtime.wait_ready(generation)?;
+            // The runtime it replaced answers until this one is up: what it said about its apps goes with it.
+            runtime.described.lock().unwrap().clear();
+            Ok(())
         })
         .await?
     }
