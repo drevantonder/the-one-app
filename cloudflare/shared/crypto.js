@@ -9,7 +9,8 @@
 // shared secret, salted with share ‖ the recipient's public key. Each key seals once, so the zero nonce is safe.
 //
 // Sealed under a secret (a passkey's PRF output, a refresh token, an access token), bytes are
-// nonce ‖ AES-256-GCM(key, nonce, plain), with key and the copy's id both derived from the secret.
+// 1 ‖ nonce ‖ AES-256-GCM(key, nonce, plain, authenticating that 1), with key and the copy's id both derived from the
+// secret. What was sealed before that format has no version and opens forever (tests/sealed/, src/keys.rs's FORMAT).
 
 import { CODES, ENDPOINT, FRESH, READS, SESSION, SIGNED_NOTE, SOCKET } from "./protocol.js";
 
@@ -58,6 +59,7 @@ async function aes(key, use) {
 }
 
 const ZERO = new Uint8Array(12);
+const NUMBERED = new Uint8Array([1]);
 
 export async function sealTo(to, plain) {
   to = bytes(to);
@@ -98,14 +100,22 @@ export async function idOf(secret) {
 
 export async function sealUnder(secret, plain) {
   const nonce = random(12);
-  const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, await aes(await hkdf(secret, "one/sealed-under"), "encrypt"), bytes(plain));
-  return concat(nonce, new Uint8Array(sealed));
+  const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: NUMBERED }, await aes(await hkdf(secret, "one/sealed-under"), "encrypt"), bytes(plain));
+  return concat(NUMBERED, nonce, new Uint8Array(sealed));
 }
 
+/// What's sealed in src/keys.rs's FORMAT starts with it. Something sealed before can start with that byte by chance, so
+/// it's tried as both: AES-GCM says which it was.
 export async function openUnder(secret, sealed) {
   sealed = bytes(sealed);
   const key = await aes(await hkdf(secret, "one/sealed-under"), "decrypt");
-  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: sealed.slice(0, 12) }, key, sealed.slice(12)));
+  const open = async (body, additionalData) => new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: body.slice(0, 12), additionalData }, key, body.slice(12)));
+  if (sealed[0] === NUMBERED[0]) {
+    try {
+      return await open(sealed.slice(1), NUMBERED);
+    } catch {}
+  }
+  return open(sealed, new Uint8Array());
 }
 
 export async function sha256(v) {

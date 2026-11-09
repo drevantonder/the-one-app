@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use aes_gcm::aead::Aead;
+use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit};
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,9 @@ pub const EVERY: u64 = 3_600_000;
 pub const TAKE_OVER: u64 = 2 * 3_600_000;
 
 const OBJECT: &str = "the one app 2026-11-01 backups: an object's key";
+/// An object in `keys::FORMAT`. A key of its own and not the version authenticated, as its nonce is fixed: the same
+/// content sealed under one key twice, with different authenticated bytes, would give away what authenticates it.
+const OBJECT_NUMBERED: &str = "the one app 2026-11-09 backups: an object's key, format 1";
 const SNAPSHOT: &str = "the one app 2026-11-01 backups: a scope's snapshots' key";
 const KEY_ID: &str = "the one app 2026-11-01 backups: a key's id";
 
@@ -69,7 +72,9 @@ fn lock_object(key: &[u8; 32], name: &str, bytes: &[u8]) -> Vec<u8> {
 }
 
 fn open_object(key: &[u8; 32], name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
-    let plain = cipher(&blake3::derive_key(OBJECT, &[&key[..], name.as_bytes()].concat())).decrypt(&zero(), bytes).map_err(|_| anyhow!("object {} didn't decrypt", &name[..12]))?;
+    let under = |context: &str, body: &[u8]| cipher(&blake3::derive_key(context, &[&key[..], name.as_bytes()].concat())).decrypt(&zero(), body).ok();
+    let numbered = bytes.strip_prefix(crate::keys::NUMBERED).and_then(|body| under(OBJECT_NUMBERED, body));
+    let plain = numbered.or_else(|| under(OBJECT, bytes)).ok_or_else(|| anyhow!("object {} didn't decrypt", &name[..12]))?;
     ensure!(name_of(key, &plain) == name, "object {} isn't what its name says", &name[..12]);
     Ok(plain)
 }
@@ -101,9 +106,11 @@ fn lock_snapshot(key: &[u8; 32], s: &Snapshot) -> Vec<u8> {
 
 /// Opens a snapshot with whichever of `keys` it was written with; None if none of them.
 fn open_snapshot(keys: &[[u8; 32]], bytes: &[u8]) -> Result<Option<(Snapshot, [u8; 32])>> {
-    ensure!(bytes.len() > 16 + 12, "not a snapshot");
-    let Some(key) = keys.iter().find(|k| key_id(k).as_bytes() == &bytes[..16]) else { return Ok(None) };
-    let plain = cipher(&blake3::derive_key(SNAPSHOT, key)).decrypt(bytes[16..28].into(), &bytes[28..]).map_err(|_| anyhow!("a snapshot didn't decrypt"))?;
+    // A key's id is hex, so one written before formats were numbered never starts with the version.
+    let (aad, body) = crate::keys::forms(bytes).next().expect("always at least the form with no version");
+    ensure!(body.len() > 16 + 12, "not a snapshot");
+    let Some(key) = keys.iter().find(|k| key_id(k).as_bytes() == &body[..16]) else { return Ok(None) };
+    let plain = cipher(&blake3::derive_key(SNAPSHOT, key)).decrypt(body[16..28].into(), Payload { msg: &body[28..], aad }).map_err(|_| anyhow!("a snapshot didn't decrypt"))?;
     Ok(Some((serde_json::from_slice(&plain)?, *key)))
 }
 
@@ -667,6 +674,36 @@ mod tests {
 
     use ed25519_dalek::SigningKey;
     use serde_json::json;
+
+    #[test]
+    fn a_numbered_object_and_snapshot_open_as_do_those_from_before() {
+        let key: [u8; 32] = rand::random();
+        let plain = b"a deploy's bundle".to_vec();
+        let name = name_of(&key, &plain);
+        let derive = |context: &str| blake3::derive_key(context, &[&key[..], name.as_bytes()].concat());
+        let numbered = [crate::keys::NUMBERED, &cipher(&derive(OBJECT_NUMBERED)).encrypt(&zero(), plain.as_slice()).unwrap()].concat();
+        assert_eq!(open_object(&key, &name, &numbered).unwrap(), plain);
+        assert!(open_object(&key, &name, &numbered[1..]).is_err(), "not with its version taken off");
+        assert_eq!(open_object(&key, &name, &lock_object(&key, &name, &plain)).unwrap(), plain, "as written before");
+        // Written before, and starting with the version by chance: the same format, tried next.
+        let unlucky = (0..u32::MAX).find_map(|n| {
+            let plain = n.to_be_bytes().to_vec();
+            let name = name_of(&key, &plain);
+            let sealed = lock_object(&key, &name, &plain);
+            (sealed[0] == crate::keys::FORMAT).then_some((name, sealed, plain))
+        });
+        let (name, sealed, plain) = unlucky.unwrap();
+        assert_eq!(open_object(&key, &name, &sealed).unwrap(), plain);
+
+        let snapshot = Snapshot { scope: "global".into(), time: 5, ..Default::default() };
+        let nonce: [u8; 12] = rand::random();
+        let json = serde_json::to_vec(&snapshot).unwrap();
+        let sealed = cipher(&blake3::derive_key(SNAPSHOT, &key)).encrypt(&nonce.into(), Payload { msg: &json, aad: crate::keys::NUMBERED }).unwrap();
+        let numbered = [crate::keys::NUMBERED, key_id(&key).as_bytes(), &nonce, &sealed].concat();
+        assert_eq!(open_snapshot(&[key], &numbered).unwrap().unwrap().0, snapshot);
+        assert!(open_snapshot(&[key], &numbered[1..]).is_err(), "not with its version taken off");
+        assert_eq!(open_snapshot(&[key], &lock_snapshot(&key, &snapshot)).unwrap().unwrap().0, snapshot, "as written before");
+    }
 
     #[tokio::test]
     async fn a_restore_check_passes_a_whole_backup_and_catches_one_corrupted_or_missing() {

@@ -40,6 +40,22 @@ use std::collections::BTreeMap;
 /// How old a signed request may be when it's checked, in milliseconds, either way.
 pub const FRESH: u64 = 60_000;
 
+/// The first byte of everything sealed since formats were numbered, and authenticated with it, so taking it off, or
+/// putting it on what was sealed before, opens nothing. What was sealed before has no version and opens forever
+/// (`tests/sealed/`). A later format is one more, and reads one more in `database::READS`: an older build takes what it
+/// can't read for junk and passes over it.
+pub const FORMAT: u8 = 1;
+/// What's authenticated with a format, before what each seal adds.
+pub(crate) const NUMBERED: &[u8] = &[FORMAT];
+const UNNUMBERED: &[u8] = &[];
+
+/// The ways `sealed` may have been written, newest first: what's authenticated with that format, and what follows its
+/// version. What was sealed before can start with `FORMAT` by chance, where it starts with random bytes, so each is
+/// tried: AES-GCM says which it was.
+pub(crate) fn forms(sealed: &[u8]) -> impl Iterator<Item = (&'static [u8], &[u8])> {
+    sealed.strip_prefix(NUMBERED).map(|body| (NUMBERED, body)).into_iter().chain([(UNNUMBERED, sealed)])
+}
+
 fn hkdf(ikm: &[u8], info: &[u8]) -> [u8; 32] {
     hkdf_salted(ikm, &[], info)
 }
@@ -94,8 +110,10 @@ pub fn seal_app_key(epoch_key: &[u8; 32], app: &str, app_key: &[u8; 32]) -> Vec<
 }
 
 pub fn open_app_key(epoch_key: &[u8; 32], app: &str, sealed: &[u8]) -> Result<[u8; 32]> {
-    ensure!(sealed.len() == 60, "not a sealed app key");
-    let plain = cipher(&hkdf(epoch_key, format!("one/app\0{app}").as_bytes())).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that epoch's key doesn't open {app}'s"))?;
+    let key = cipher(&hkdf(epoch_key, format!("one/app\0{app}").as_bytes()));
+    let mut forms = forms(sealed).filter(|(_, body)| body.len() == 60).peekable();
+    ensure!(forms.peek().is_some(), "not a sealed app key");
+    let plain = forms.find_map(|(aad, body)| key.decrypt(body[..12].into(), Payload { msg: &body[12..], aad }).ok()).ok_or_else(|| anyhow!("that epoch's key doesn't open {app}'s"))?;
     plain.try_into().map_err(|_| anyhow!("an app's key is 32 bytes"))
 }
 
@@ -179,8 +197,15 @@ pub fn seal_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
 
 pub fn open_sealed(secret: &[u8; 32], sealed: &[u8]) -> Result<Vec<u8>> {
     ensure!(sealed.len() >= 48, "not sealed");
-    let share: [u8; 32] = sealed[..32].try_into()?;
-    opened(&MontgomeryPoint(share).mul_clamped(*secret).0, &public_of(secret), sealed)
+    let mut wrong = None;
+    for (aad, body) in forms(sealed).filter(|(_, body)| body.len() >= 48) {
+        let share: [u8; 32] = body[..32].try_into()?;
+        match opened(&agree(secret, &share), &public_of(secret), aad, body) {
+            Ok(plain) => return Ok(plain),
+            Err(err) => wrong = Some(err),
+        }
+    }
+    Err(wrong.context("not sealed")?)
 }
 
 /// What opens what's sealed to a seal key: its secret, or where that can't be read (a browser's WebCrypto key), what
@@ -220,13 +245,20 @@ pub fn sign_with(secret: &[u8; 32], bytes: &[u8]) -> [u8; 64] {
 /// `open_sealed`, by what opens it.
 pub async fn open_sealed_by(opens: &impl Opens, sealed: &[u8]) -> Result<Vec<u8>> {
     ensure!(sealed.len() >= 48, "not sealed");
-    let share: [u8; 32] = sealed[..32].try_into()?;
-    opened(&opens.shared(&share).await?, &opens.public(), sealed)
+    let mut wrong = None;
+    for (aad, body) in forms(sealed).filter(|(_, body)| body.len() >= 48) {
+        let share: [u8; 32] = body[..32].try_into()?;
+        match opened(&opens.shared(&share).await?, &opens.public(), aad, body) {
+            Ok(plain) => return Ok(plain),
+            Err(err) => wrong = Some(err),
+        }
+    }
+    Err(wrong.context("not sealed")?)
 }
 
-fn opened(shared: &[u8; 32], public: &[u8; 32], sealed: &[u8]) -> Result<Vec<u8>> {
-    let key = hkdf_salted(shared, &[&sealed[..32], public].concat(), b"one/sealed-to");
-    cipher(&key).decrypt(&Default::default(), &sealed[32..]).map_err(|_| anyhow!("that key doesn't open it"))
+fn opened(shared: &[u8; 32], public: &[u8; 32], aad: &[u8], body: &[u8]) -> Result<Vec<u8>> {
+    let key = hkdf_salted(shared, &[&body[..32], public].concat(), b"one/sealed-to");
+    cipher(&key).decrypt(&Default::default(), Payload { msg: &body[32..], aad }).map_err(|_| anyhow!("that key doesn't open it"))
 }
 
 /// The id a copy sealed under `secret` is kept by.
@@ -234,17 +266,19 @@ pub fn id_of(secret: &[u8]) -> String {
     B64U.encode(&hkdf(secret, b"one/id"))
 }
 
-/// Seals `plain` under a secret (a passkey's PRF output, a refresh token): nonce ‖ AES-256-GCM.
+/// Seals `plain` under a secret (a passkey's PRF output, a refresh token): `FORMAT` ‖ nonce ‖ AES-256-GCM.
 pub fn seal_under(secret: &[u8], plain: &[u8]) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
-    let mut out = nonce.to_vec();
-    out.extend(cipher(&hkdf(secret, b"one/sealed-under")).encrypt(&nonce.into(), plain).expect("encrypting in memory"));
+    let mut out = NUMBERED.to_vec();
+    out.extend(nonce);
+    out.extend(cipher(&hkdf(secret, b"one/sealed-under")).encrypt(&nonce.into(), Payload { msg: plain, aad: NUMBERED }).expect("encrypting in memory"));
     out
 }
 
 pub fn open_under(secret: &[u8], sealed: &[u8]) -> Result<Vec<u8>> {
     ensure!(sealed.len() >= 28, "not sealed");
-    cipher(&hkdf(secret, b"one/sealed-under")).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that secret doesn't open it"))
+    let key = cipher(&hkdf(secret, b"one/sealed-under"));
+    forms(sealed).filter(|(_, body)| body.len() >= 28).find_map(|(aad, body)| key.decrypt(body[..12].into(), Payload { msg: &body[12..], aad }).ok()).ok_or_else(|| anyhow!("that secret doesn't open it"))
 }
 
 pub fn decode_key(text: &str) -> Result<[u8; 32]> {
@@ -444,16 +478,24 @@ pub fn seal(epoch: u32, key: &[u8; 32], name: &str, bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// What was sealed as an object, by its first byte, which isn't random there: an epoch's top byte is 0 in anything
+/// sealed before formats were numbered. → what's authenticated with its format, and what follows its version.
+fn object_form(sealed: &[u8]) -> (&'static [u8], &[u8]) {
+    forms(sealed).next().expect("always at least the form with no version")
+}
+
 pub fn epoch_of(sealed: &[u8]) -> Result<u32> {
-    ensure!(sealed.len() >= 4 + 12 + 16, "too short to be sealed");
-    Ok(u32::from_be_bytes(sealed[..4].try_into().expect("4 bytes")))
+    let (_, body) = object_form(sealed);
+    ensure!(body.len() >= 4 + 12 + 16, "too short to be sealed");
+    Ok(u32::from_be_bytes(body[..4].try_into().expect("4 bytes")))
 }
 
 /// Opens what `seal` sealed, with its epoch's key.
 pub fn open(key: &[u8; 32], name: &str, sealed: &[u8]) -> Result<Vec<u8>> {
     epoch_of(sealed).with_context(|| format!("{name} isn't sealed"))?;
-    let nonce: [u8; 12] = sealed[4..16].try_into().expect("12 bytes");
-    Aes256Gcm::new(key.into()).decrypt(&nonce.into(), Payload { msg: &sealed[16..], aad: name.as_bytes() }).map_err(|_| anyhow!("{name} didn't open with its key"))
+    let (aad, body) = object_form(sealed);
+    let nonce: [u8; 12] = body[4..16].try_into().expect("12 bytes");
+    Aes256Gcm::new(key.into()).decrypt(&nonce.into(), Payload { msg: &body[16..], aad: &[aad, name.as_bytes()].concat() }).map_err(|_| anyhow!("{name} didn't open with its key"))
 }
 
 /// A database key a caller hands a node for one call.
@@ -821,6 +863,62 @@ mod tests {
         assert_eq!(open(&key, "user-1/notes/main/1", &sealed).unwrap(), b"step");
         assert!(open(&key, "user-1/notes/main/2", &sealed).is_err(), "not as another object");
         assert!(open(&rand::random(), "user-1/notes/main/1", &sealed).is_err(), "not with another key");
+    }
+
+    /// What's sealed in `FORMAT`, written here by hand, so the format is stated apart from the code that reads it.
+    fn gcm(key: &[u8; 32], nonce: &[u8; 12], msg: &[u8], aad: &[u8]) -> Vec<u8> {
+        cipher(key).encrypt(nonce.into(), Payload { msg, aad }).unwrap()
+    }
+
+    fn app_key_label(app: &str) -> Vec<u8> {
+        format!("one/app\0{app}").into_bytes()
+    }
+
+    /// Sealed to `to` by hand, in `format`, from a share whose first byte is `first`, if any.
+    fn sealed_to(to: &[u8; 32], format: &[u8], first: Option<u8>, plain: &[u8]) -> Vec<u8> {
+        loop {
+            let ephemeral: [u8; 32] = rand::random();
+            let share = public_of(&ephemeral);
+            if first.is_some_and(|f| share[0] != f) {
+                continue;
+            }
+            let key = hkdf_salted(&agree(&ephemeral, to), &[&share[..], to].concat(), b"one/sealed-to");
+            return [format, &share[..], &gcm(&key, &[0; 12], plain, format)].concat();
+        }
+    }
+
+    #[test]
+    fn a_numbered_format_opens_and_what_came_before_still_does_whatever_its_first_byte() {
+        let key: [u8; 32] = rand::random();
+        let nonce: [u8; 12] = rand::random();
+        let aad = [NUMBERED, b"a/b/1"].concat();
+        let object = [NUMBERED, &7u32.to_be_bytes(), &nonce, &gcm(&key, &nonce, b"step", &aad)].concat();
+        assert_eq!(epoch_of(&object).unwrap(), 7);
+        assert_eq!(open(&key, "a/b/1", &object).unwrap(), b"step");
+        assert!(open(&key, "a/b/2", &object).is_err(), "only as itself");
+        assert!(open(&key, "a/b/1", &object[1..]).is_err(), "not with its version taken off");
+        let before = [&7u32.to_be_bytes()[..], &nonce, &gcm(&key, &nonce, b"step", b"a/b/1")].concat();
+        assert_eq!(epoch_of(&before).unwrap(), 7);
+        assert_eq!(open(&key, "a/b/1", &before).unwrap(), b"step");
+        assert!(open(&key, "a/b/1", &[NUMBERED, &before[..]].concat()).is_err(), "nor with one put on");
+
+        let (secret, public) = twin(&rand::random());
+        let numbered = sealed_to(&public, NUMBERED, None, b"an epoch");
+        assert_eq!(open_sealed(&secret, &numbered).unwrap(), b"an epoch");
+        assert!(open_sealed(&secret, &numbered[1..]).is_err(), "not with its version taken off");
+        let unlucky = sealed_to(&public, UNNUMBERED, Some(FORMAT), b"an epoch");
+        assert_eq!(open_sealed(&secret, &unlucky).unwrap(), b"an epoch", "sealed before, and starting with the version by chance");
+        assert!(open_sealed(&secret, &[NUMBERED, &sealed_to(&public, UNNUMBERED, None, b"x")[..]].concat()).is_err(), "not with a version put on");
+
+        let under = hkdf(b"a token", b"one/sealed-under");
+        let unlucky_nonce = [FORMAT, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        assert_eq!(open_under(b"a token", &[NUMBERED, &nonce, &gcm(&under, &nonce, b"copy", NUMBERED)].concat()).unwrap(), b"copy");
+        assert_eq!(open_under(b"a token", &[&unlucky_nonce[..], &gcm(&under, &unlucky_nonce, b"copy", UNNUMBERED)].concat()).unwrap(), b"copy");
+
+        let app = hkdf(&key, &app_key_label("tally"));
+        let made: [u8; 32] = rand::random();
+        assert_eq!(open_app_key(&key, "tally", &[NUMBERED, &nonce, &gcm(&app, &nonce, &made, NUMBERED)].concat()).unwrap(), made);
+        assert_eq!(open_app_key(&key, "tally", &[&unlucky_nonce[..], &gcm(&app, &unlucky_nonce, &made, UNNUMBERED)].concat()).unwrap(), made);
     }
 
     #[test]
