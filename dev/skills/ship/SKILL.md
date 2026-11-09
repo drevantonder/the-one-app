@@ -20,7 +20,7 @@ description: Getting a change you made to The One App out to every device. Use o
      3. `one-dev deploy apps`
      4. `one-dev deploy workers <commit>`
      5. `one-dev publish web <folder>`
-   - `one-dev` itself, which no device takes: `install <folder>/one-dev "$(command -v one-dev)"`, then `scp` it to `.local/bin/` on ptc and linux.
+   - `one-dev` itself, which no device takes: `install <folder>/one-dev "$(command -v one-dev)"`, then `scp` it to `.local/bin/` on `drevan@100.76.107.116` (ptc) and `linux`, for their throwaways.
 4. `one-dev changes --sent`, only once all of it went out: what you leave unmarked goes out next time.
 5. The ptc-update skill, at the same time if you like: it's built on its own machine.
 6. `one-dev status --until <commit>`, for the devices online. A Mac that's behind: the mac-behind skill.
