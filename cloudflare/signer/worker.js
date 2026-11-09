@@ -174,7 +174,7 @@ async function urls(request, env) {
 async function update(env, url) {
   if (!env.BUCKET) return refusal(503, `${env.YOURS} has no bucket yet`);
   const name = url.pathname.slice(1);
-  if (!isName(name) || !/^updates\/[A-Za-z0-9._-]+$/.test(name)) return refusal(404, "no such update");
+  if (!isName(name) || !/^updates\/[A-Za-z0-9._-]+$/.test(name)) return refusal(404, "No such update.");
   const { read } = await bucketUrls(JSON.parse(env.BUCKET), { read: [name] }, 300);
   return new Response(null, { status: 302, headers: { location: read[name], "cache-control": "no-store" } });
 }
