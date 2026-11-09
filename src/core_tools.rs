@@ -209,7 +209,7 @@ impl Feature {
 
 /// Every feature's, in the order they're listed.
 pub fn all() -> Vec<Feature> {
-    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), crate::vault::tools::feature(), crate::backups::tools::feature(), crate::groups::tools::feature(), devices::feature(), crate::widgets::tools::feature(), crate::push::tools::feature(), crate::logs::feature()]
+    vec![crate::app::tools::add_feature(), crate::app::tools::remove_feature(), crate::vault::tools::feature(), crate::backups::tools::feature(), crate::groups::tools::feature(), devices::feature(), crate::widgets::tools::feature(), crate::push::tools::feature(), crate::logs::tools::feature()]
 }
 
 /// The feature with the tool `name` (as MCP names it), and the tool's place in it.

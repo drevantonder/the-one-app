@@ -280,36 +280,12 @@ mod tests {
     }
 }
 
-/// Logs, as the core's tool `logs`: a device's log, or one of its services'.
-pub fn feature() -> crate::core_tools::Feature {
-    crate::core_tools::Feature {
-        name: "logs",
-        title: "Logs",
-        description: "A device's log, or one of its services', over the network".into(),
-        guide: String::new(),
-        tools: vec![crate::core_tools::Tool::steps(tool())],
-        #[cfg(feature = "node")]
-        steps: tool::run,
-    }
-}
-
-pub(crate) fn tool() -> serde_json::Value {
-    serde_json::json!({
-        "name": "logs",
-        "description": "Read a device's log over the network, instead of ssh: its node's, or one of its services', or for a phone or computer app, what its app and page say went wrong (read while the app is open and connected). The newest lines (200 by default, at most 1000 or 48 KiB), oldest first. Only the device's user and the network's admins may.",
-        "reads": true,
-        "input": { "type": "object", "required": ["device"], "properties": {
-            "device": { "type": "string", "description": "the device's name (devices_requests and groups_list name them; the status command lists them)" },
-            "service": { "type": "string", "description": "a service's name, like whatsapp; omit for the node's own log, and for an app's" },
-            "since": { "type": "string", "description": "only the last this long: 30s, 10m, 2h or 1d" },
-            "grep": { "type": "string", "description": "only lines with this text in them, whatever its case" },
-            "lines": { "type": "integer", "description": "how many of the newest to give" },
-        } },
-    })
-}
-
+pub mod tools;
 
 #[cfg(feature = "node")]
-mod tool;
+pub mod cli;
+
 #[cfg(feature = "node")]
-pub use tool::*;
+mod tee;
+#[cfg(feature = "node")]
+pub use tee::*;
