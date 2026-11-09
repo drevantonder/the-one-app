@@ -193,10 +193,16 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
     };
     for n in bucket.list(&crate::keys::epochs_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
         copy(&crate::keys::epoch_name(scope, n, "recovery"), true)?;
+        for to in bucket.list(&format!("{}/{n}", crate::keys::epochs_folder(scope)))?.into_iter().filter(|t| t.starts_with("recovery.")) {
+            copy(&crate::keys::epoch_name(scope, n, &to), true)?;
+        }
     }
     // And each of its Vault's keys, sealed to the recovery key, so what's sealed in its items comes back with it.
     for n in bucket.list(&crate::keys::vault_keys_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
         copy(&crate::keys::vault_key_name(scope, n, "recovery"), true)?;
+        for to in bucket.list(&format!("{}/{n}", crate::keys::vault_keys_folder(scope)))?.into_iter().filter(|t| t.starts_with("recovery.")) {
+            copy(&crate::keys::vault_key_name(scope, n, &to), true)?;
+        }
     }
     // The recovery key's copies, sealed to its holders' devices: asked for again each run, as a bad one can be replaced.
     if scope == "global" {
@@ -460,10 +466,13 @@ pub fn open_keys(place: &Place, network: &str, recovery_secret: &[u8; 32]) -> Re
     for dir in place.list(&format!("{network}/keys"))? {
         for id in place.list(&format!("{network}/keys/{dir}"))? {
             let sealed = place.get(&format!("{network}/keys/{dir}/{id}"))?.context("a key went missing")?;
-            out.entry(scope_of(&dir)).or_insert_with(Vec::new).push(unseal(recovery_secret, &sealed)?);
+            // A backup made before the recovery key was replaced opens with the key it was made under, not this one.
+            if let Ok(key) = unseal(recovery_secret, &sealed) {
+                out.entry(scope_of(&dir)).or_insert_with(Vec::new).push(key);
+            }
         }
     }
-    ensure!(!out.is_empty(), "no backup of this network here");
+    ensure!(!out.is_empty(), "that recovery key doesn't open this backup, or there's no backup of this network here");
     Ok(out)
 }
 

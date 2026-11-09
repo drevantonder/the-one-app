@@ -519,6 +519,23 @@ pub fn vault_key_name(scope: &str, n: u32, to: &str) -> String {
     format!("{}/{n}/{to}", vault_keys_folder(scope))
 }
 
+/// Whom an epoch's or a Vault's key is also kept sealed to, under a recovery key other than the one it was first sealed
+/// to: the name beside `recovery`, by that key's twin (`twin_public`).
+pub fn recovery_to(twin: &[u8; 32]) -> String {
+    format!("recovery.{}", hex(twin))
+}
+
+/// Where a recovery key whose twin is `twin` finds epoch `n` of a scope: under its own name first, as it was handed
+/// over to it, then at `recovery`.
+pub fn recovery_epoch_names(scope: &str, n: u32, twin: &[u8; 32]) -> [String; 2] {
+    [epoch_name(scope, n, &recovery_to(twin)), epoch_name(scope, n, "recovery")]
+}
+
+/// The epoch `hash` names, out of what's kept for a recovery key, opened with its twin's `secret`.
+pub fn opened_recovery_epoch(secret: &[u8; 32], hash: &str, kept: &[Vec<u8>]) -> Option<[u8; 32]> {
+    kept.iter().find_map(|sealed| <[u8; 32]>::try_from(open_sealed(secret, sealed).ok()?).ok().filter(|k| epoch_hash(k) == hash))
+}
+
 /// Where the network's recovery key (`recovery`, its public half) is kept sealed to a device (`to`) of someone who holds
 /// it, so a new recovery key starts with none of the old one's.
 pub fn recovery_held_name(recovery: &str, to: &str) -> String {
@@ -849,6 +866,23 @@ pub fn recovery_key_in(at: &str) -> Result<String> {
     };
     let key = text.trim().to_ascii_lowercase();
     ensure!(looks_like_key(&key), "that file doesn't hold a recovery key: 64 hex characters");
+    Ok(key)
+}
+
+/// The next recovery key, for replacing the one in use (`devices::cli`): the one already in the file at `at`, to finish
+/// a replacement that stopped, or a new one, written there only if `write`, readable by this user alone.
+pub fn next_recovery_key(at: &str, write: bool) -> Result<String> {
+    if std::path::Path::new(at).exists() {
+        return recovery_key_in(at);
+    }
+    let key = HEXLOWER.encode(&rand::random::<[u8; 32]>());
+    if write {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        std::io::Write::write_all(&mut options.open(at).with_context(|| format!("couldn't write the new key to {at}"))?, format!("{key}\n").as_bytes())?;
+    }
     Ok(key)
 }
 

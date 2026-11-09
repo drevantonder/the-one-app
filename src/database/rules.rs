@@ -36,8 +36,9 @@ pub fn signed(who: &ScopeDb, scope: &Scope, step: &Step) -> Result<()> {
     let (w, author) = (step.user(), step.author());
     if who.recovery()? == Some(author) {
         // The network's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would,
-        // and hands over to the next recovery key.
-        ensure!(of_global(step, scope) && matches!(step.content.change(), Some(Change::Device | Change::Recovery)) && who.user(w)?.is_some(), "the recovery key only lets a device in");
+        // hands over to the next recovery key, and starts the next keys of each scope, which only it can do for a user
+        // whose devices are all gone, so what the old key could open stops growing.
+        ensure!(of_global(step, scope) && matches!(step.content.change(), Some(Change::Device | Change::Recovery | Change::Epoch | Change::Vault)) && who.user(w)?.is_some(), "the recovery key only lets a device in, or replaces itself");
         return Ok(());
     }
     allowed!(who.may(w, "use", &object(scope)), "{w} can't write in {scope}");
@@ -153,6 +154,10 @@ impl Rule<'_> {
     }
 
     /// Whether `k` is one of the network's machines that run things, or its Cloudflare node.
+    fn by_recovery(&self) -> Result<bool> {
+        Ok(self.who.recovery()? == Some(self.step.author()))
+    }
+
     fn runs_things(&self, k: &Key) -> Result<bool> {
         Ok(self.who.compute(k)?.is_some() || self.who.cloudflare_node()? == Some(*k))
     }
@@ -340,7 +345,7 @@ impl Rule<'_> {
 
     fn epoch(&self) -> Result<()> {
         let scope = Scope::parse(&self.text("scope")?)?;
-        allowed!(self.may("remove", &object(&scope)), "only the scope's admins start its new epoch");
+        allowed!(self.by_recovery()? || self.may("remove", &object(&scope)), "only the scope's admins start its new epoch");
         if let Scope::Group(g) = &scope {
             self.who.group(g)?.context("no such group")?;
         }
@@ -409,7 +414,7 @@ impl Rule<'_> {
     /// Who opens a scope's Vault is its admins' to say, never a member's who can only add to it.
     fn vault(&self) -> Result<()> {
         let scope = Scope::parse(&self.text("scope")?)?;
-        allowed!(self.may("choose-devices", &object(&scope)), "only the scope's user, or its admins, say which machines open its Vault");
+        allowed!(self.by_recovery()? || self.may("choose-devices", &object(&scope)), "only the scope's user, or its admins, say which machines open its Vault");
         let n = self.data["n"].as_u64().context("no n")?;
         ensure!(n == u64::from(self.who.vault(&scope)?.map_or(0, |v| v.n)) + 1, "a Vault key follows the one before it");
         let public = self.key("public")?;
@@ -1672,6 +1677,11 @@ mod tests {
         assert!(net.step(&recovery, ANDRE, node("recovery", json!({ "key": hex(&other.id()) }))));
         assert_eq!((net.db.recovery()?, net.db.recovery_set()?, net.db.recovery_was()?), (Some(other.id()), net.at, vec![recovery.id()]));
         assert!(!net.step(&recovery, BOB, device(&Dev::new(11).endpoint(), BOB, "y", &[Kind::Client], None)), "the old recovery key lets nobody in");
+        // Handed over, the new key starts a scope's next keys, for a user with no device left to do it, and nothing else.
+        let new_epoch = |n: u32| epoch(&Scope::User(BOB.to_string()), n, &[], &H.repeat(64));
+        assert!(!net.step(&recovery, BOB, new_epoch(1)), "not the old key");
+        assert!(net.step(&other, ANDRE, new_epoch(1)), "and a scope's next keys, whoever's it is");
+        assert!(!net.step(&other, ANDRE, role(BOB, Role::Admin)), "and nothing else");
         Ok(())
     }
 
@@ -1702,17 +1712,17 @@ mod tests {
         global   remove linux                       YY..........
         global   remove bob's box                   YYY.........
         global   remove bob's tablet (removed)      ............
-        global   global's epoch 2                   YY..........
-        global   bob's epoch 2                      ..Y.........
-        global   andre's epoch 2                    Y...........
-        global   g's epoch 2                        YYY.........
+        global   global's epoch 2                   YY........YY
+        global   bob's epoch 2                      ..Y.......YY
+        global   andre's epoch 2                    Y.........YY
+        global   g's epoch 2                        YYY.......YY
         global   runs on linux                      YYYY........
         global   app schedules, bob's               ..Y.........
         global   app schedules, global's            YY..........
         global   app schedules, g's                 ..Y.........
-        global   vault, global's                    YY..........
-        global   vault, bob's                       ..Y.........
-        global   vault, g's                         ..Y.........
+        global   vault, global's                    YY........YY
+        global   vault, bob's                       ..Y.......YY
+        global   vault, g's                         ..Y.......YY
         global   a new group                        YYYY........
         global   invite andre to g, member          YYY.........
         global   invite andre to g, admin           YYY.........

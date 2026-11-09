@@ -131,6 +131,14 @@ impl<O: Opens, D: Address + Keep + Signs> one::settings::Me for Mine<'_, O, D> {
     async fn leave(&self) -> anyhow::Result<()> {
         self.keyring.leave(self.client, self.on).await.map_err(to_one)
     }
+
+    async fn stored(&self, name: &str) -> anyhow::Result<Option<Vec<u8>>> {
+        Ok(one::bucket::Bucket::get(self.on.bucket(), name).await?.map(|o| o.bytes))
+    }
+
+    async fn open(&self, sealed: &[u8]) -> anyhow::Result<Vec<u8>> {
+        keys::open_sealed_by(self.keyring.opens(), sealed).await
+    }
 }
 
 impl<O: Opens> Keyring<O> {

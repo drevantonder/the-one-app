@@ -20,6 +20,7 @@ pub fn commands() -> Command {
         help: vec![
             ("status".into(), format!("this device, and the users, groups and devices in {YOURS}")),
             ("sign-in [--address <url>]".into(), format!("sign this machine in, as you: approve its code by signing in on any of your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't run, this computer becomes one of your devices, once you approve its next code too, and asks your devices for everything")),
+            ("sign-in --recovery-key <file> [--address <url>]".into(), format!("when no device of yours is left to approve this one: sign in, and this computer lets itself in with {YOURS}'s recovery key, from a file or - for stdin")),
             ("sign-in --invite <link>".into(), "join with the invite link someone sent you, on your first computer: you make your passkey in a browser, and they approve this computer's code".into()),
             ("sign-out".into(), "sign this machine out, and take it out of your devices if it's one".into()),
             ("create <name> --as <your name> [--user <id>]".into(), "create a network, with you as its first admin (--user: who you were in one it replaces, so your sign-in is still yours)".into()),
@@ -31,7 +32,7 @@ pub fn commands() -> Command {
         ],
         run: |g| {
             let takes = match g.words().as_slice() {
-                ["sign-in"] => &["address", "invite"][..],
+                ["sign-in"] => &["address", "invite", "recovery-key"][..],
                 ["status"] => &[],
                 ["create", ..] => &["as", "user"],
                 ["pair"] => &["user"],
@@ -154,7 +155,10 @@ fn sign_in(g: &Given) -> Result<()> {
         println!("Signed in as {me}. {CLI} and {CLI} mcp on this machine act as you until {CLI} sign-out.");
         return Ok(());
     }
-    client_device::join(&address, invite.as_ref().map(|(_, secret)| secret.as_str()))?;
+    match g.flag("recovery-key") {
+        Some(file) => client_device::join_by_recovery(&address, file)?,
+        None => client_device::join(&address, invite.as_ref().map(|(_, secret)| secret.as_str()))?,
+    }
     let me = node.state()?.user.map_or("you".into(), |u| u.name);
     println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", crate::sign_in::hostname());
     Ok(())

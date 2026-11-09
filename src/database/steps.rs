@@ -875,6 +875,15 @@ impl Reader {
 /// first.
 /// → the epochs, each only once who's who says it's the one it made (none before it's read the freeze), and the steps'
 /// key in each.
+/// The names an epoch sealed to `to` may be under: a device's its own; the recovery key's its own after a replacement,
+/// then the one every epoch was first sealed under.
+fn names(to: &str, opens: &impl crate::keys::Opens) -> Vec<String> {
+    match to {
+        "recovery" => vec![crate::keys::recovery_to(&opens.public()), to.to_string()],
+        to => vec![to.to_string()],
+    }
+}
+
 pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Reader, to: &str, opens: &impl crate::keys::Opens, welcome: &mut Option<Welcome>, now: u64) -> Result<(BTreeMap<u32, [u8; 32]>, crate::database::stored::Keys)> {
     let mut sealed = fetch(bucket, reader.at(), welcome.as_ref().filter(|_| reader.truth.is_none())).await?;
     let (mut epochs, mut tried, mut keys) = (BTreeMap::new(), std::collections::BTreeSet::new(), crate::database::stored::Keys::new());
@@ -889,10 +898,13 @@ pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Re
             break;
         }
         for n in &wanted {
-            if let Some(o) = bucket.get(&crate::keys::epoch_name("global", *n, to)).await?
-                && let Some(key) = crate::keys::open_sealed_by(opens, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok())
-            {
-                epochs.insert(*n, key);
+            for to in names(to, opens) {
+                if let Some(o) = bucket.get(&crate::keys::epoch_name("global", *n, &to)).await?
+                    && let Some(key) = crate::keys::open_sealed_by(opens, &o.bytes).await.ok().and_then(|k| <[u8; 32]>::try_from(k).ok())
+                {
+                    epochs.insert(*n, key);
+                    break;
+                }
             }
         }
         if !wanted.is_empty() {

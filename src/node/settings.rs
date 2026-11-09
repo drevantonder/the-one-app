@@ -125,6 +125,14 @@ impl Me for Node {
     async fn leave(&self) -> Result<()> {
         bail!("{} is this device: remove it from another of your devices", self.device_name())
     }
+
+    async fn stored(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        Ok(Bucket::get(&self.bucket()?, name).await?.map(|o| o.bytes))
+    }
+
+    async fn open(&self, sealed: &[u8]) -> Result<Vec<u8>> {
+        crate::keys::open_sealed(&self.seal_secret(), sealed)
+    }
 }
 
 /// The routes a machine with a node answers as its own device (`settings::on_a_node`), for its own programs.
@@ -223,15 +231,11 @@ impl Node {
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let hashes: BTreeMap<u32, String> = self.with(|i| Ok(i.r.db().epoch_hashes(scope)?))?;
         let secret = crate::keys::seal_secret(recovery);
+        let twin = crate::keys::twin_public(&recovery.verifying_key().to_bytes())?;
         let mut opened = 0;
         for (n, hash) in hashes {
-            let Some(o) = Bucket::get(&bucket, &crate::keys::epoch_name(&name, n, "recovery")).await? else {
-                tracing::warn!("{scope}'s epoch {n} isn't sealed to the recovery key");
-                continue;
-            };
-            let key = crate::keys::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == hash);
-            let Some(key) = key else {
-                tracing::warn!("{scope}'s epoch {n} sealed to the recovery key isn't the key its entry made: passed over");
+            let Some(key) = self.opened_for(&name, n, &hash, &secret, &twin).await? else {
+                tracing::warn!("{scope}'s epoch {n} isn't sealed to the recovery key, or isn't the key its entry made: passed over");
                 continue;
             };
             let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
@@ -241,5 +245,200 @@ impl Node {
             opened += 1;
         }
         Ok(opened)
+    }
+
+    /// Epoch `n` of the scope named `name`, opened with the recovery key whose twin's secret and public are given.
+    async fn opened_for(&self, name: &str, n: u32, hash: &str, secret: &[u8; 32], twin: &[u8; 32]) -> Result<Option<[u8; 32]>> {
+        let bucket = self.bucket()?;
+        let mut kept = Vec::new();
+        for at in crate::keys::recovery_epoch_names(name, n, twin) {
+            kept.extend(Bucket::get(&bucket, &at).await?.map(|o| o.bytes));
+        }
+        Ok(crate::keys::opened_recovery_epoch(secret, hash, &kept))
+    }
+
+    /// Replaces the recovery key on this machine, from its file, the only way to take one that was seen or stolen out of
+    /// use: every epoch and Vault key it opens is sealed to the next too, so nothing already there is lost to it; the next
+    /// is named; and each scope still in use gets a new epoch, and each Vault new keys, sealed to the next and not the
+    /// old, so what the old one opens stops growing. Copies held under the old key stop counting, as they're kept under
+    /// its name, and nothing already sealed is touched. Run again (with `old` that was, or is now, the network's key) it
+    /// finishes what it didn't. Without `confirm`, says what it would do. → what was done.
+    pub async fn replace_recovery(&self, old: &ed25519_dalek::SigningKey, new: &ed25519_dalek::SigningKey, confirm: bool) -> Result<Value> {
+        self.read_scope_now(&Scope::Global).await?;
+        let (old_public, new_public) = (old.verifying_key().to_bytes(), new.verifying_key().to_bytes());
+        ensure!(old_public != new_public, "The new recovery key is the same as the one it replaces.");
+        let (now, user, scopes, holders) = self.with(|i| {
+            let db = i.r.db();
+            let scopes: Vec<Scope> = db.scopes()?.into_iter().filter(|s| db.epoch(s).is_ok_and(|n| n > 0)).filter(|s| in_use(db, s)).collect();
+            Ok((db.recovery()?, i.user.clone(), scopes, db.recovery_holders()?.len()))
+        })?;
+        ensure!(now == Some(old_public) || now == Some(new_public), "That file doesn't hold {}'s recovery key.", crate::config::YOURS);
+        if !confirm {
+            return Ok(json!({ "said": format!("Would replace {}'s recovery key: {} scopes get new keys, and whatever {holders} holder(s) were sealed stops counting until the new key is sealed to them. Run it again with --confirm.", crate::config::YOURS, scopes.len()) }));
+        }
+        let not_carried = self.carry_to_next(old, new).await?;
+        if now == Some(old_public) {
+            self.write_step_as(old, &user, content::recovery(&new_public)).await?;
+            self.read_scope_now(&Scope::Global).await?;
+        }
+        ensure!(self.with(|i| i.r.db().recovery())? == Some(new_public), "The next recovery key wasn't taken. Nothing else changed: run this again.");
+        let (renewed, not_renewed) = self.renew_under_next(new, &user).await?;
+        let said = format!(
+            "{} has a new recovery key: {} scopes have new keys, and old holders' copies no longer count. Seal the new key to its holders with `{} devices holders seal` when you're ready.{}{}",
+            crate::config::YOURS,
+            renewed.len(),
+            crate::config::CLI,
+            if not_carried.is_empty() { String::new() } else { format!(" Couldn't carry over: {}.", not_carried.join(", ")) },
+            if not_renewed.is_empty() { String::new() } else { format!(" Couldn't renew {}: run this again.", not_renewed.iter().map(|n| n["scope"].as_str().unwrap_or("")).collect::<Vec<_>>().join(", ")) },
+        );
+        Ok(json!({ "said": said, "renewed": renewed, "not_renewed": not_renewed, "not_carried": not_carried }))
+    }
+
+    /// Seals every epoch and Vault key `old` opens to `new`, under `new`'s own name, beside what's there: → what it couldn't.
+    async fn carry_to_next(&self, old: &ed25519_dalek::SigningKey, new: &ed25519_dalek::SigningKey) -> Result<Vec<String>> {
+        let bucket = self.bucket()?;
+        let (old_secret, old_twin) = (crate::keys::seal_secret(old), crate::keys::twin_public(&old.verifying_key().to_bytes())?);
+        let new_twin = crate::keys::twin_public(&new.verifying_key().to_bytes())?;
+        let to = crate::keys::recovery_to(&new_twin);
+        let (hashes, vaults) = self.with(|i| {
+            let db = i.r.db();
+            let scopes = db.scopes()?;
+            let hashes: Vec<(Scope, BTreeMap<u32, String>)> = scopes.iter().map(|s| Ok::<_, anyhow::Error>((s.clone(), db.epoch_hashes(s)?))).collect::<Result<_>>()?;
+            let vaults: Vec<(Scope, BTreeMap<u32, Key>)> = scopes.iter().map(|s| Ok::<_, anyhow::Error>((s.clone(), db.vault_publics(s)?))).collect::<Result<_>>()?;
+            Ok((hashes, vaults))
+        })?;
+        let mut not = Vec::new();
+        for (scope, epochs) in hashes {
+            let name = scope.to_string();
+            for (n, hash) in epochs {
+                // Under the new key already: made since a handover that stopped.
+                if self.opened_for(&name, n, &hash, &crate::keys::seal_secret(new), &new_twin).await?.is_some() {
+                    continue;
+                }
+                match self.opened_for(&name, n, &hash, &old_secret, &old_twin).await? {
+                    Some(key) => drop(crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, &to), &crate::keys::seal_to(&new_twin, &key)?).await?),
+                    None => not.push(format!("{scope}'s epoch {n}")),
+                }
+            }
+        }
+        for (scope, publics) in vaults {
+            let name = scope.to_string();
+            for (n, public) in publics {
+                let mut secret = None;
+                if let Some(o) = Bucket::get(&bucket, &crate::keys::vault_key_name(&name, n, "recovery")).await?
+                    && crate::keys::open_sealed(&crate::keys::seal_secret(new), &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).is_some_and(|k| crate::keys::public_of(&k) == public)
+                {
+                    continue;
+                }
+                for at in [crate::keys::vault_key_name(&name, n, &crate::keys::recovery_to(&old_twin)), crate::keys::vault_key_name(&name, n, "recovery")] {
+                    if let Some(o) = Bucket::get(&bucket, &at).await?
+                        && let Some(k) = crate::keys::open_sealed(&old_secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok())
+                        && crate::keys::public_of(&k) == public
+                    {
+                        secret = Some(k);
+                        break;
+                    }
+                }
+                match secret {
+                    Some(k) => drop(crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&name, n, &to), &crate::keys::seal_to(&new_twin, &k)?).await?),
+                    None => not.push(format!("{scope}'s Vault key {n}")),
+                }
+            }
+        }
+        Ok(not)
+    }
+
+    /// A new epoch of each scope still in use, and new Vault keys, signed by the network's recovery key `new`, sealed to it
+    /// and to whoever may open them: each one already sealed to it is left as it is. → what was done, and what wasn't.
+    async fn renew_under_next(&self, new: &ed25519_dalek::SigningKey, user: &str) -> Result<(Vec<String>, Vec<Value>)> {
+        let bucket = self.bucket()?;
+        let (secret, twin) = (crate::keys::seal_secret(new), crate::keys::twin_public(&new.verifying_key().to_bytes())?);
+        let (scopes, vaults) = self.with(|i| {
+            let db = i.r.db();
+            Ok((db.scopes()?.into_iter().filter(|s| in_use(db, s)).collect::<Vec<_>>(), db.vaults()?))
+        })?;
+        let (mut renewed, mut not) = (Vec::new(), Vec::new());
+        for scope in scopes {
+            let name = scope.to_string();
+            let (newest, hash) = self.with(|i| {
+                let db = i.r.db();
+                let n = db.epoch(&scope)?;
+                Ok((n, db.epoch_hash(&scope, n)?))
+            })?;
+            if newest == 0 {
+                continue;
+            }
+            // Sealed to the new key under `recovery`, as only an epoch made since the handover is: a run that finishes one
+            // that stopped. A carried-over copy, under its own name, doesn't count.
+            let held = Bucket::get(&bucket, &crate::keys::epoch_name(&name, newest, "recovery")).await?;
+            if hash.is_some_and(|h| crate::keys::opened_recovery_epoch(&secret, &h, &held.into_iter().map(|o| o.bytes).collect::<Vec<_>>()).is_some()) {
+                continue;
+            }
+            match self.epoch_by_recovery(new, user, &scope, newest + 1, &twin).await {
+                Ok(()) => renewed.push(name),
+                Err(err) => not.push(json!({ "scope": name, "why": format!("{err:#}") })),
+            }
+        }
+        for (scope, vault) in vaults.into_iter().filter(|(s, _)| self.with(|i| Ok(in_use(i.r.db(), s))).unwrap_or(false)) {
+            let name = scope.to_string();
+            let held = Bucket::get(&bucket, &crate::keys::vault_key_name(&name, vault.n, "recovery")).await?;
+            if held.and_then(|o| crate::keys::open_sealed(&secret, &o.bytes).ok()).and_then(|k| <[u8; 32]>::try_from(k).ok()).is_some_and(|k| crate::keys::public_of(&k) == vault.public) {
+                continue;
+            }
+            if let Err(err) = self.vault_by_recovery(new, user, &scope, vault.n + 1, &vault.to, &twin).await {
+                not.push(json!({ "scope": format!("{name}'s Vault"), "why": format!("{err:#}") }));
+            }
+        }
+        Ok((renewed, not))
+    }
+
+    /// Starts epoch `n` of `scope`, signed by the network's recovery key: its step first, as a new epoch always is, then
+    /// sealed to the recovery key's twin and to each client of whoever may open it.
+    async fn epoch_by_recovery(&self, recovery: &ed25519_dalek::SigningKey, user: &str, scope: &Scope, n: u32, twin: &[u8; 32]) -> Result<()> {
+        let to: Vec<crate::keys::Endpoint> = self.with(|i| Ok(i.r.db().openers(scope)?.into_iter().filter(|c| c.seal != c.key).map(|c| crate::keys::Endpoint { key: c.key, seal: c.seal }).collect()))?;
+        let key: [u8; 32] = rand::random();
+        let hash = crate::keys::epoch_hash(&key);
+        self.write_step_as(recovery, user, content::epoch(scope, n, &to.iter().map(|e| e.key).collect::<Vec<_>>(), &hash)).await?;
+        self.read_scope_now(&Scope::Global).await?;
+        ensure!(self.with(|i| i.r.db().epoch_hash(scope, n))? == Some(hash), "Another device made new keys for {scope} just now. Run this again.");
+        let (bucket, name) = (self.bucket()?, scope.to_string());
+        crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::keys::seal_to(twin, &key)?).await?;
+        for e in &to {
+            crate::database::stored::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&e.key)), &crate::keys::seal_to(&e.seal, &key)?).await?;
+        }
+        self.forget_epochs(scope);
+        Ok(())
+    }
+
+    /// New keys for a Vault, signed by the network's recovery key, sealed to it and to the machines that open it now.
+    async fn vault_by_recovery(&self, recovery: &ed25519_dalek::SigningKey, user: &str, scope: &Scope, n: u32, to: &[Key], twin: &[u8; 32]) -> Result<()> {
+        let secret: [u8; 32] = rand::random();
+        let public = crate::keys::public_of(&secret);
+        self.write_step_as(recovery, user, content::vault(scope, n, &public, to)).await?;
+        self.read_scope_now(&Scope::Global).await?;
+        let seals = self.with(|i| {
+            let db = i.r.db();
+            ensure!(db.vault_publics(scope)?.get(&n) == Some(&public), "Another device made new keys for this Vault just now. Run this again.");
+            let mut seals = Vec::new();
+            for k in to {
+                seals.extend(db.seal_key(k)?.map(|s| (hex(k), s)));
+            }
+            Ok(seals)
+        })?;
+        let (bucket, name) = (self.bucket()?, scope.to_string());
+        crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&name, n, "recovery"), &crate::keys::seal_to(twin, &secret)?).await?;
+        for (at, seal) in seals {
+            crate::database::stored::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::keys::seal_to(&seal, &secret)?).await?;
+        }
+        Ok(())
+    }
+}
+
+/// Whether a scope still has someone to use it: not a removed user's own, nor a group that's gone.
+fn in_use(db: &ScopeDb, scope: &Scope) -> bool {
+    match scope {
+        Scope::Global => true,
+        Scope::User(u) => db.user(u).is_ok_and(|u| u.is_some()),
+        Scope::Group(g) => db.group(g).is_ok_and(|g| g.is_some()),
     }
 }

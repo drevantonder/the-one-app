@@ -67,6 +67,10 @@ pub trait Me: Signs {
     fn wait(&self, ms: u64) -> impl Future<Output = ()>;
     /// Takes itself out of its user's devices, as it signs out.
     fn leave(&self) -> impl Future<Output = Result<()>>;
+    /// What's kept at `name` in the bucket, sealed as it is.
+    fn stored(&self, name: &str) -> impl Future<Output = Result<Option<Vec<u8>>>>;
+    /// Opens what's sealed to this device.
+    fn open(&self, sealed: &[u8]) -> impl Future<Output = Result<Vec<u8>>>;
 }
 
 /// What a device answers itself of a node's routes, signing what they change.
@@ -98,6 +102,7 @@ enum Route {
     VaultGrant,
     RecoveryHolder,
     Code,
+    Restore,
 }
 
 /// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
@@ -132,6 +137,7 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/vault/grant", Route::VaultGrant, false),
     ("POST", "/v1/devices/recovery-holder", Route::RecoveryHolder, true),
     ("GET", "/v1/devices/code", Route::Code, true),
+    ("POST", "/v1/devices/restore", Route::Restore, true),
 ];
 
 /// What the OpenAPI document says of a route: a line for whoever reads it (`Tool`'s own, for a tool's route), and the body
@@ -165,6 +171,7 @@ fn about(route: Route) -> (&'static str, Value) {
         Route::VaultGrant => ("", of::<body::VaultGrant>()),
         Route::RecoveryHolder => ("Name someone as holding the recovery key, or take them off", of::<body::RecoveryHolder>()),
         Route::Code => ("This device's code, read from its own screen", of::<body::Nothing>()),
+        Route::Restore => ("For someone holding the recovery key: give a device of someone who lost every device their keys", of::<body::Approve>()),
     }
 }
 
@@ -581,6 +588,10 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
         Route::Code => {
             read::<body::Nothing>(path, raw)?;
             json!({ "code": keys::spaced_code(&keys::join_code(&Endpoint { key: m.public(), seal: m.seal() })) })
+        }
+        Route::Restore => {
+            let body: body::Approve = read(path, raw)?;
+            restore(m, &body.code, body.confirm).await?
         }
     })
 }
@@ -1312,6 +1323,64 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
         keep_invites(m, &kept).await?;
     }
     Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not_sealed }))
+}
+
+/// Restores someone who lost every device, on the device of someone holding the recovery key: opens this device's own
+/// copy of it, and with that each epoch of each scope the device showing `code`'s user may use, sealed to that device.
+/// Only someone holding it can, as only their own copy opens it; an admin has already let the device in. `code` is the
+/// whole of its code, from its own screen. → whose it is without `confirm`; what was given it, with.
+async fn restore(m: &impl Me, code: &str, confirm: bool) -> Result<Value> {
+    let me = m.user()?;
+    allowed!(m.who(|who| Ok(who.recovery_holders()?.contains(&me)))?, "Only someone named as holding the recovery key restores someone.");
+    let listed = m.who(|who| Ok(who.clients()?.into_iter().filter(|c| c.passkey.is_none() && c.seal != c.key).map(|c| {
+        let whole = keys::join_code(&Endpoint { key: c.key, seal: c.seal });
+        (c, whole)
+    }).collect::<Vec<_>>()))?;
+    let (target, _) = the_one(listed, |(_, whole)| whole, |(_, whole)| whole, code)?;
+    let whose = m.who(|who| Ok(who.user(&target.user)?.map(|u| u.name).unwrap_or_default()))?;
+    if !confirm {
+        return Ok(json!({ "device": target.name, "user": whose, "said": format!("{} is {whose}'s device. Restore it only if they say so: it opens everything of theirs.", target.name) }));
+    }
+    let recovery = m.who(|who| who.recovery())?.ok_or_else(|| anyhow!("{YOURS} has no recovery key."))?;
+    let to = hex(&m.public());
+    let copy = m.stored(&keys::recovery_held_name(&hex(&recovery), &to)).await?.ok_or_else(|| anyhow!("This device doesn't have the recovery key: someone with its file seals it here first."))?;
+    let sealed = keys::held_sealed(&recovery, &to, &copy).ok_or_else(|| anyhow!("What's kept for this device isn't a copy the recovery key signed."))?;
+    let secret: [u8; 32] = m.open(sealed).await?.try_into().map_err(|_| anyhow!("What's sealed to this device isn't the recovery key."))?;
+    let signing = ed25519_dalek::SigningKey::from_bytes(&secret);
+    ensure!(signing.verifying_key().to_bytes() == recovery, "What's sealed to this device isn't {YOURS}'s recovery key.");
+    let (seal_secret, twin) = (keys::seal_secret(&signing), keys::twin_public(&recovery)?);
+    let scopes = m.who(|who| who.may_scopes(&target.user, "use"))?;
+    let (mut given, mut not_given) = (Vec::new(), Vec::new());
+    for scope in scopes {
+        let name = scope.to_string();
+        let mut opened = 0;
+        let mut failed: Option<anyhow::Error> = None;
+        for (n, hash) in m.who(|who| who.epoch_hashes(&scope))? {
+            let mut kept = Vec::new();
+            for at in keys::recovery_epoch_names(&name, n, &twin) {
+                kept.extend(m.stored(&at).await?);
+            }
+            let Some(key) = keys::opened_recovery_epoch(&seal_secret, &hash, &kept) else { continue };
+            opened += 1;
+            match m.keep_key(json!({ "scope": name, "n": n, "to": hex(&target.key), "sealed": B64U.encode(&keys::seal_to(&target.seal, &key)?) })).await {
+                Err(err) if Coded::of(&err).as_deref() != Some(code::ALREADY) => {
+                    failed = Some(err);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match failed {
+            Some(err) => not_given.push(json!({ "scope": name, "why": format!("{err:#}") })),
+            None if opened > 0 => given.push(name),
+            None => {}
+        }
+    }
+    let mut said = format!("{} has {whose}'s keys now.", target.name);
+    for n in &not_given {
+        said.push_str(&format!(" It wasn't given {}'s: {}.", n["scope"].as_str().unwrap_or(""), n["why"].as_str().unwrap_or("")));
+    }
+    Ok(json!({ "device": target.name, "user": whose, "given": given, "not_given": not_given, "said": said }))
 }
 
 /// Seals each epoch of `scope` sealed to this device to `to`, but those it has.

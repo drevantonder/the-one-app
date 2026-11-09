@@ -478,6 +478,7 @@ function Devices() {
             removeOld={removeOld}
             signOut={signOut}
             schedule={() => show({ schedules: {} })}
+            restore={() => show({ restore: {} })}
             act={act}
           />
         )}
@@ -494,6 +495,7 @@ function Devices() {
       {data && dialog.for?.remove && <RemoveDevice key={dialog.n} {...dialog.for.remove} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.signIns && <SignIns key={dialog.n} clients={dialog.for.signIns} me={dialog.for.me} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.add && <AddDevice key={dialog.n} data={data} open={dialog.open} setOpen={setDialogOpen} />}
+      {data && dialog.for?.restore && <Restore key={dialog.n} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.schedules && <AppSchedules key={dialog.n} m={m} asked={dialog.for.schedules} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
     </div>
   )
@@ -615,7 +617,7 @@ function Scanned({ scan, done, cancel }) {
 
 // ---- Devices ----
 
-function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule, act }) {
+function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule, restore, act }) {
   const { device, state, passkey } = data
   const { cards, passkeys, stale } = m.drawn
   const mine = cards.filter((c) => c.user === m.me)
@@ -628,7 +630,8 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
     const r = state.network.recovery_used
     recovery.push(`The recovery key last let in a device of ${r.user === m.me ? "yours" : `${m.userName(r.user)}’s`}, ${day(r.time)}.`)
   }
-  const side = scheduling || (!!device.keys && passkey) || passkeys.length > 0 || recovery.length > 0
+  const holder = !!device.keys && !!state.network?.users?.find((u) => u.me)?.recovery_holder
+  const side = scheduling || (!!device.keys && passkey) || passkeys.length > 0 || recovery.length > 0 || holder
   return (
     <div className={cn("grid max-w-5xl items-start gap-x-8 gap-y-8", side && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]")}>
       <div className="flex min-w-0 flex-col gap-4">
@@ -717,6 +720,11 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
                 ))}
               </List>
             </Section>
+          )}
+          {holder && (
+            <List>
+              <ListAdd icon={<Icon name="key" />} onClick={restore}>Restore Someone</ListAdd>
+            </List>
           )}
           {recovery.length > 0 && <div className="flex flex-col gap-2">{recovery.map((line) => <Note key={line}>{line}</Note>)}</div>}
         </div>
@@ -959,6 +967,42 @@ const Go = ({ children, busy, disabled, variant = "default", onClick }) => (
   <Button size="sm" variant={variant} disabled={busy || disabled} onClick={onClick}>{busy && <Spinner className="text-current" />}{children}</Button>
 )
 const Cancel = ({ setOpen }) => <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+
+/// For someone holding the recovery key: gives the device showing a code the keys of a user who lost every device. Says
+/// whose it is, then does it.
+function Restore({ open, setOpen, done }) {
+  const [code, setCode] = useState("")
+  const [asked, setAsked] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  async function go() {
+    if (!code.trim() || busy) return
+    setBusy(true)
+    setError("")
+    try {
+      if (!asked) {
+        setAsked((await api("POST", "/v1/devices/restore", { code })).said)
+        setBusy(false)
+        return
+      }
+      await api("POST", "/v1/devices/restore", { code, confirm: true })
+      one.tap("success")
+      done()
+    } catch (e) {
+      setError(said(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <ResponsiveDialog open={open} onOpenChange={setOpen} title="Restore Someone" action={<Go busy={busy} disabled={!code.trim()} onClick={go}>{asked ? "Restore" : "Next"}</Go>}>
+      <div className="flex flex-col gap-4 p-4">
+        <Input autoFocus value={code} onChange={(e) => (setCode(e.target.value), setAsked(""))} placeholder="Code on their new device" aria-label="Code on their new device" autoComplete="off" spellCheck={false} enterKeyHint="done" onKeyDown={(e) => e.key === "Enter" && go()} />
+        {asked && <Note>{asked}</Note>}
+        {error && <Problem title={error} />}
+      </div>
+    </ResponsiveDialog>
+  )
+}
 
 /// Renames a device: its node, or its app's sign-ins.
 function Rename({ card, open, setOpen, done }) {

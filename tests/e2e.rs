@@ -368,6 +368,113 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     assert!(a.recovery_holders(&me).await.unwrap()["holders"].as_array().unwrap().is_empty());
 }
 
+/// Someone who lost every device: a holder's own copy of the recovery key gives their new device their own scope's keys,
+/// by the code on that device's screen, and someone not named as a holder can't. The holder's device here is a node
+/// standing in for a client, its copy put where a client's would be, as a node is never sealed one; and being the same
+/// user's, its node may also hand the device their keys, so what shows restoring did it is what restoring says it opened.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_holder_restores_someone_and_no_one_else_can() {
+    use data_encoding::BASE64URL_NOPAD as B64U;
+    use one::database::scopes::Scope;
+    use one::keys::{Endpoint, hex, join_code, seal_to, unhex};
+    let dir = temp("restore");
+    std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
+    let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let own = Scope::User(me.user.clone());
+    eventually("their own scope's first keys", &a, async || !a.sealed_keys(&me, &own, Some(&hex(&a.id())), None).await.unwrap()["sealed"].as_object().unwrap().is_empty()).await;
+    let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
+    let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let e = Endpoint::of(&phone);
+    let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "new phone", "user": me.user, "platform": "iphone" })).unwrap();
+    one::settings::approve(&a, &asked, &one::settings::Joining::Lost).await.unwrap();
+    let to = hex(&e.key);
+    let code = one::keys::spaced_code(&join_code(&e));
+    let opens = async || a.sealed_keys(&me, &own, Some(&to), None).await.unwrap()["sealed"].as_object().unwrap().len();
+    let name = async |holds: bool| one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
+    let restore = async |confirm: bool| one::settings::answer(&a, "POST", "/v1/devices/restore", json!({ "code": code, "confirm": confirm }).to_string().as_bytes()).await.unwrap();
+
+    assert!(restore(true).await.is_err(), "no one is named yet");
+    name(true).await;
+    assert!(restore(true).await.unwrap_err().to_string().contains("doesn't have the recovery key"), "named, without its own copy");
+    a.seal_recovery(&to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &seal_to(&e.seal, &secret).unwrap()))).await.unwrap();
+    let phone_copy = walk(&dir).into_iter().find(|p| p.to_string_lossy().contains("/_recovery/")).unwrap();
+    let mine = phone_copy.with_file_name(hex(&a.id()));
+    std::fs::write(&mine, one::keys::held_copy(&recovery, &hex(&a.id()), &seal_to(&one::settings::Me::seal(&a), &secret).unwrap())).unwrap();
+
+    assert!(restore(false).await.unwrap()["said"].as_str().unwrap().contains("new phone"), "without confirm, whose it is");
+    let done = restore(true).await.unwrap();
+    assert!(done["given"].as_array().unwrap().iter().any(|s| s.as_str() == Some(&own.to_string())), "{done}");
+    assert_eq!(opens().await, 1, "their own scope reaches them");
+    let wrong = one::settings::answer(&a, "POST", "/v1/devices/restore", json!({ "code": "AAAA AAAA AAAA AAAA", "confirm": true }).to_string().as_bytes()).await.unwrap();
+    assert!(wrong.is_err(), "a code no listed device shows does nothing");
+    name(false).await;
+    assert!(restore(true).await.is_err(), "taken off the list, they restore no one");
+}
+
+/// Replacing the recovery key: old holders' copies stop counting, each scope gets a new epoch only the new key and its
+/// users open, every old epoch still opens with both keys, and nothing already sealed is deleted. Run again, it changes
+/// nothing more.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replaced_recovery_key_stops_what_the_old_one_opens_growing() {
+    use one::keys::{Endpoint, epoch_name, hex, open_sealed, seal_secret, seal_to, twin_public, unhex};
+    use data_encoding::BASE64URL_NOPAD as B64U;
+    let dir = temp("replace");
+    std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
+    let old_secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let global = one::database::scopes::Scope::Global;
+    let old = ed25519_dalek::SigningKey::from_bytes(&old_secret);
+    let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let e = Endpoint::of(&phone);
+    let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
+    one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
+    one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
+    a.seal_recovery(&hex(&e.key), &B64U.encode(&one::keys::held_copy(&old, &hex(&e.key), &seal_to(&e.seal, &old_secret).unwrap()))).await.unwrap();
+    assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], true);
+
+    let own = one::database::scopes::Scope::User(me.user.clone());
+    a.set_item(&me, &own, json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
+    let new = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let new_secret = seal_secret(&new);
+    let file_at = |name: &str| walk(&dir).into_iter().find(|p| p.to_string_lossy().ends_with(name));
+    let opened = |sealed: &[u8], secret: &[u8; 32]| open_sealed(secret, sealed).ok().and_then(|k| <[u8; 32]>::try_from(k).ok());
+    let before = a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap();
+    let n1 = before["epoch"].as_u64().unwrap() as u32;
+
+    let said = a.replace_recovery(&old, &new, false).await.unwrap();
+    assert!(said["said"].as_str().unwrap().contains("Would"), "{said}");
+    assert_eq!(a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"], n1, "and changes nothing");
+    assert!(a.replace_recovery(&new, &ed25519_dalek::SigningKey::from_bytes(&rand::random()), true).await.is_err(), "a file that isn't the recovery key changes nothing");
+
+    let done = a.replace_recovery(&old, &new, true).await.unwrap();
+    assert!(done["not_renewed"].as_array().unwrap().is_empty() && done["not_carried"].as_array().unwrap().is_empty(), "{done}");
+    assert_eq!(a.state().unwrap().network.unwrap().recovery.unwrap(), hex(&new.verifying_key().to_bytes()));
+    let n2 = a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"].as_u64().unwrap() as u32;
+    assert!(n2 > n1, "global has a new epoch");
+
+    let new_copy = std::fs::read(file_at(&epoch_name("global", n2, "recovery")).unwrap()).unwrap();
+    let key = opened(&new_copy, &new_secret).expect("the new epoch opens with the new key");
+    assert!(opened(&new_copy, &seal_secret(&old)).is_none(), "and never with the old");
+    let to_phone = std::fs::read(file_at(&epoch_name("global", n2, &hex(&e.key))).unwrap()).unwrap();
+    assert_eq!(opened(&to_phone, &seal_secret(&phone)), Some(key), "and its users' devices open it");
+    let carried = std::fs::read(file_at(&epoch_name("global", n1, &one::keys::recovery_to(&twin_public(&new.verifying_key().to_bytes()).unwrap()))).unwrap()).unwrap();
+    let was = std::fs::read(file_at(&epoch_name("global", n1, "recovery")).unwrap()).unwrap();
+    assert_eq!(opened(&carried, &new_secret), opened(&was, &seal_secret(&old)), "the new key opens what the old did, and the old copy is still there");
+
+    let vault = std::fs::read(file_at(&one::keys::vault_key_name(&own.to_string(), 2, "recovery")).expect("the Vault has new keys")).unwrap();
+    assert!(opened(&vault, &new_secret).is_some() && opened(&vault, &seal_secret(&old)).is_none(), "under the new key only");
+
+    assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "old holders' copies stop counting");
+    assert!(walk(&dir).into_iter().any(|p| p.to_string_lossy().contains(&format!("/_recovery/{}/", hex(&old.verifying_key().to_bytes())))), "and nothing sealed was deleted");
+
+    let again = a.replace_recovery(&old, &new, true).await.unwrap();
+    assert!(again["renewed"].as_array().unwrap().is_empty(), "run again, nothing's made twice: {again}");
+    assert_eq!(a.sealed_keys(&me, &global, Some("recovery"), None).await.unwrap()["epoch"].as_u64().unwrap() as u32, n2);
+}
+
 /// A backup keeps the copies of the recovery key its holders' devices have, as they were signed, so a restored network
 /// still knows who held it.
 #[tokio::test(flavor = "multi_thread")]

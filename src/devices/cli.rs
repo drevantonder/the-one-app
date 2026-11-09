@@ -17,6 +17,8 @@ pub fn commands() -> Command {
             ("devices holders".into(), "who holds the recovery key, and which of their devices have it".into()),
             ("devices holders add|remove <user>".into(), "for an admin: name someone as holding the recovery key, or take them off".into()),
             ("devices holders seal [<code>] --recovery-key <file> [--confirm]".into(), "seal the recovery key, from a file or - for stdin, to the device of someone named that shows this code on its own screen (`devices code` there); with no code, says which are waiting".into()),
+            ("devices restore <code> [--confirm]".into(), "for someone holding the recovery key: give the device showing this code, on a user who lost every device, their keys; an admin lets it in first".into()),
+            ("devices recovery-key replace --recovery-key <file> --new-key-file <file> [--confirm]".into(), "replace the recovery key, for one that was seen or stolen: a new one is written to the new file (or read from it, to finish a run that stopped), every scope gets new keys, and old holders' copies stop counting; nothing already sealed is deleted".into()),
             ("devices code".into(), "this device's code, for someone sealing it the recovery key or restoring you".into()),
         ],
         run,
@@ -38,6 +40,11 @@ fn run(g: &Given) -> Result<bool> {
             println!("{}", answer["said"].as_str().unwrap_or(""));
         }
         ["devices", "holders", "seal", code @ ..] => seal(g, code.first().copied())?,
+        ["devices", "restore", code] => {
+            let answer = g.node.post_for(g.agent, "/v1/devices/restore", json!({ "code": code, "confirm": g.has("confirm") }))?;
+            println!("{}", answer["said"].as_str().unwrap_or(""));
+        }
+        ["devices", "recovery-key", "replace"] => replace(g)?,
         ["devices", "code"] => println!("{}", g.node.get("/v1/devices/code")?["code"].as_str().unwrap_or("")),
         _ => return Ok(false),
     }
@@ -59,6 +66,21 @@ fn holders(said: &Value) {
             println!("  {}: {}", device["name"].as_str().unwrap_or(""), if device["holds"] == true { "has it" } else { "doesn't have it yet" });
         }
     }
+}
+
+/// Replaces the recovery key. The new one is written to its file first, unreadable by anyone else, so a failure later
+/// never leaves a network whose key is lost; and read from it on a run that finishes one that stopped.
+fn replace(g: &Given) -> Result<()> {
+    let recovery = keys::recovery_key_in(g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?)?;
+    let at = g.flag("new-key-file").context("give --new-key-file: a file for the new key, which goes in your admins' password manager")?;
+    let confirm = g.has("confirm");
+    let next = keys::next_recovery_key(at, confirm)?;
+    let answer = g.node.post_for(g.agent, "/v1/devices/recovery-key/replace", json!({ "recovery": recovery, "next": next, "confirm": confirm }))?;
+    println!("{}", answer["said"].as_str().unwrap_or(""));
+    if confirm {
+        println!("The new recovery key is in {at}.");
+    }
+    Ok(())
 }
 
 /// Seals the recovery key from its file to the one named holder's device showing `code`, here on this machine: the node

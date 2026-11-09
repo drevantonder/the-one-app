@@ -44,7 +44,7 @@ The recovery key's holders, named by an admin, can read everything and restore a
 3. **Identities.** Linked logins, passkeys that belong to an account, domain from the signed token.
 4. **One ask-and-approve flow.** Push, short code, invites and the domain rule in the log, QR and links as the fallback.
 5. **User keys and sealing to the recovery key's holders.**
-6. **Recovery.** Holders restoring someone, and the recovery key admitting a device.
+6. **Recovery.** Holders restoring someone, and the recovery key admitting a device. Built.
 7. **Delete the old rules:** `passkey_only`, placeholder emails, today's request workflow and code pages, and any start and freshness rule the short code makes needless.
 8. **Tighten Cloudflare.** A deploy token that may only edit Workers, kept in 1Password; audit logs sent elsewhere.
 9. **Test passkey PRF on real devices,** only if Andre still wants that shortcut.

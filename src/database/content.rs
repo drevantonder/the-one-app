@@ -255,6 +255,11 @@ pub fn epoch(scope: &Scope, n: u32, to: &[Key], hash: &str) -> Content {
     node(Change::Epoch, json!({ "scope": scope.to_string(), "n": n, "to": to.iter().map(hex).collect::<Vec<_>>(), "hash": hash }))
 }
 
+/// The network's next recovery key, `key`, written by the one before it.
+pub fn recovery(key: &Key) -> Content {
+    node(Change::Recovery, json!({ "key": hex(key) }))
+}
+
 /// A scope's Vault key `n`, its public half `public`, sealed to the machines `to`.
 pub fn vault(scope: &Scope, n: u32, public: &[u8; 32], to: &[Key]) -> Content {
     node(Change::Vault, json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))

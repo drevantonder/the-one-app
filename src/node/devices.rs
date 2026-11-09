@@ -125,7 +125,8 @@ impl Node {
                 sealed_to(to)?;
                 self.with(|i| {
                     let db = i.r.db();
-                    allowed!(db.may(&caller.user, "use", &scopes::object(scope)), "you don't use {scope}");
+                    // Whoever holds the recovery key can open any scope's keys, so may seal them to the user they're for.
+                    allowed!(db.may(&caller.user, "use", &scopes::object(scope)) || (n <= newest && db.recovery_holders()?.contains(&caller.user)), "you don't use {scope}");
                     ensure!(n >= 1 && n <= newest + 1, "{scope} has no epoch {n}: its newest is {newest}");
                     allowed!(n <= newest || db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins start its new epoch");
                     match to {

@@ -130,6 +130,22 @@ pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
     }
 }
 
+/// Makes this computer one of its user's devices by the network's recovery key, from a file, when no device is left
+/// to say yes: it's signed in, so auth says whose it is.
+pub fn join_by_recovery(address: &str, file: &str) -> Result<()> {
+    let address = address.trim_end_matches('/');
+    let recovery = one::keys::unhex(&one::keys::recovery_key_in(file)?)?;
+    let device = kept_or_new(address)?;
+    let token = crate::sign_in::token()?.with_context(|| format!("this computer is signed out: {CLI} sign-in"))?;
+    let (d, name) = (device.clone(), crate::sign_in::hostname());
+    run(move || async move { d.ask(&token, &name, None).await })?;
+    let d = device.clone();
+    run(move || async move { d.admit_by_recovery(&recovery).await })?;
+    let d = device.clone();
+    anyhow::ensure!(run(move || async move { d.connect().await })?, "The recovery key let this device in, but it can't reach {YOURS} yet. Run {CLI} sign-in again in a moment.");
+    Ok(())
+}
+
 /// The device this computer signs in at `address` for, its key ‖ seal key (hex), which its sign-in names: the one it
 /// has for that network, or a new one.
 pub fn signing_in_for(address: &str) -> Result<String> {

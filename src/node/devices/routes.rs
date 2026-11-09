@@ -23,6 +23,7 @@ pub fn routes() -> Routes {
         .route("/v1/erase", Who::SignedIn, post(erase))
         .says(Op::post("Erase what a device keeps").body::<Device>().answers_as(json!({ "type": "object", "required": ["erasing"], "properties": { "erasing": { "type": "string", "description": "the device's name" } } })))
         .route("/v1/devices/approve-with-recovery", Who::ThisMachine, post(approve_with_recovery))
+        .route("/v1/devices/recovery-key/replace", Who::ThisMachine, post(replace_recovery))
         .route("/v1/devices/recovery-holders", Who::SignedIn, get(recovery_holders))
         .route("/v1/devices/recovery-holders/seal", Who::ThisMachine, post(seal_recovery))
 }
@@ -80,6 +81,21 @@ async fn approve_with_recovery(State(node): State<Node>, Body(body): Body<Approv
     let mut approved = node.approve_with_recovery(given(&body.code, "code")?, &key, body.confirm).await?;
     approved["said"] = json!(crate::settings::said_approved(&approved));
     Ok(Json(approved))
+}
+
+/// Replaces the recovery key with `next`, both read by the command on this machine (`devices::cli`) and never kept.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplaceRecovery {
+    recovery: String,
+    next: String,
+    #[serde(default)]
+    confirm: bool,
+}
+
+async fn replace_recovery(State(node): State<Node>, Body(body): Body<ReplaceRecovery>) -> Reply {
+    let key = |hex: &str, what: &str| crate::keys::unhex(hex.trim()).map_err(|_| anyhow::anyhow!("{what} is 64 hex characters")).map(|k| ed25519_dalek::SigningKey::from_bytes(&k));
+    Ok(Json(node.replace_recovery(&key(&body.recovery, "a recovery key")?, &key(&body.next, "the next recovery key")?, body.confirm).await?))
 }
 
 async fn recovery_holders(State(node): State<Node>, me: Me) -> Reply {
