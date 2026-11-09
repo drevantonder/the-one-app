@@ -36,15 +36,15 @@ function tileFor({ tile, rect: [x, y, w] }) {
   return { back, front, remove: () => (root.unmount(), back.remove(), front.remove()) };
 }
 
-/// A layer's clip-path that shows only `rect`, with an icon's corners.
-function clipTo(el, [x, y, w, h]) {
+/// A layer's clip-path that shows only `rect`, with an icon's corners or those of `round`.
+function clipTo(el, [x, y, w, h], round = w * 0.225) {
   const b = el.getBoundingClientRect();
-  return `inset(${y - b.top}px ${b.right - x - w}px ${b.bottom - y - h}px ${x - b.left}px round ${w * 0.225}px)`;
+  return `inset(${y - b.top}px ${b.right - x - w}px ${b.bottom - y - h}px ${x - b.left}px round ${round}px)`;
 }
 const WHOLE = "inset(0px 0px 0px 0px round 0px)";
 
-/// On a phone, the app's screen growing out of its icon on the home screen (`grow`), or shrinking back into it
-/// (`shrink`), as the icon's tile, clipped the same, fades into it or out of it.
+/// On a phone, the app's screen and its bar growing out of its icon on the home screen (`grow`), or shrinking back into
+/// it (`shrink`), as the icon's tile, clipped the same, fades into it or out of it.
 function zoom(from, to, { tile, rect }, shrink, clean) {
   const app = shrink ? from : to;
   const icon = tileFor({ tile, rect });
@@ -52,16 +52,20 @@ function zoom(from, to, { tile, rect }, shrink, clean) {
   if (shrink) (from.style.zIndex = "1"), (to.style.zIndex = "0");
   const bar = $('[data-slot="shell-bar"]');
   // Going back it's the icon's shape first, a square the window's width, near where the icon is, and then only smaller.
+  // Its corners stay small while it's large, and it's gone by the time it's the icon's size, so it never cuts into the
+  // home screen behind it.
   const square = [0, Math.max(0, Math.min(innerHeight - innerWidth, rect[1] - innerWidth / 2)), innerWidth, innerWidth];
-  const clip = (el) => (shrink ? [WHOLE, clipTo(el, square), clipTo(el, rect)] : [clipTo(el, rect), WHOLE]);
+  const clip = (el) => (shrink ? [WHOLE, clipTo(el, square, 20), clipTo(el, rect)] : [clipTo(el, rect), WHOLE]);
   const times = { duration: GROWS, ease: GROW, ...(shrink ? { times: [0, 0.3, 1] } : {}) };
+  const parts = bar ? [app, bar] : [app];
   play([
-    animate(app, { clipPath: clip(app) }, times),
+    ...parts.map((el) => animate(el, { clipPath: clip(el) }, times)),
+    // Growing, the home screen goes once it's covered: the app's edges take the last moment to reach the window's.
+    ...(shrink ? parts.map((el) => animate(el, { opacity: [1, 1, 0, 0] }, { duration: GROWS, ease: "linear", times: [0, 0.1, 0.5, 1] })) : [animate(from, { opacity: [1, 0] }, { duration: 0.08, delay: 0.06, ease: "linear" })]),
     animate(icon.back, { clipPath: clip(icon.back) }, times),
     // The tile's colour is the icon's, there only while it's about the icon's size.
-    animate(icon.back, { opacity: shrink ? [0, 0, 1, 1] : [1, 0.2, 0, 0] }, { duration: GROWS, ease: "linear", times: shrink ? [0, 0.22, 0.45, 1] : [0, 0.16, 0.32, 1] }),
+    animate(icon.back, { opacity: shrink ? [0, 0, 1, 1] : [1, 0.2, 0, 0] }, { duration: GROWS, ease: "linear", times: shrink ? [0, 0.55, 0.75, 1] : [0, 0.16, 0.32, 1] }),
     animate(icon.front, { opacity: shrink ? [0, 1] : [1, 0] }, shrink ? { duration: 0.1, delay: 0.13 } : { duration: 0.1 }),
-    ...(bar ? [animate(bar, { opacity: shrink ? [1, 0] : [0, 1] }, shrink ? { duration: 0.1 } : { duration: 0.2, delay: 0.1 })] : []),
   ], () => (icon.remove(), clean()));
 }
 

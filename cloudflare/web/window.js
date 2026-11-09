@@ -7,7 +7,7 @@ import { platform } from "./platform.js";
 import { qrSvg } from "./qr.js";
 import { api, developer, fresh, retryWait, sleep } from "./request.js";
 import { back, go, home, linked, own, route, sidebar, whenMoved } from "./routes.js";
-import { detail, devtools, hasScreen, openSheet, overWindow, screen, setBarStart, tell, whenTitled } from "./screens.js";
+import { detail, devtools, hasScreen, openSheet, overWindow, replacing, screen, setBarStart, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, store, titleOf, whenChanged, whenSignedOut } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
@@ -28,7 +28,7 @@ export function render(opened) {
   // The screen where the window is, kept as it is while the rest redraws around it.
   const fresh = !(shown === key && hasScreen());
   if (fresh) shown = key;
-  else barBack = barBackAt(r);
+  else if (!replacing()) barBack = barBackAt(r);
   drawWindow();
   if (fresh) screen.show(detail, r, () => ((barTitle = home(r) ? "" : titleOf(r)), (barBack = barBackAt(r)), drawWindow()), opened);
 }

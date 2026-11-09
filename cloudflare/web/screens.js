@@ -260,6 +260,9 @@ function how(r, opened) {
   return home(r) && showing && home(showing.route) ? { cross: true } : { rise: true };
 }
 
+/// Whether a next screen is being drawn behind the one showing, whose bar stays till it goes.
+export const replacing = () => !!coming;
+
 /// The screen's frames as they're dropped with their layer.
 function drop(layer) {
   layer.remove();
