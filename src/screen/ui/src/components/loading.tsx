@@ -1,6 +1,7 @@
 import * as React from "react"
 import { Grid } from "@/components/layout"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
 import { Problem } from "@/components/problem"
 import { bridge } from "@/lib/bridge"
 import { appear } from "@/lib/moves"
@@ -11,9 +12,18 @@ function failureSentence(err: unknown): string {
   return bridge().plain(err).title.replace(/(\. Try again)?\.$/, "")
 }
 
-/// What a failed first load says (`problem` is `one.plain`'s answer), with Try Again where trying again can work.
-function LoadFailure({ problem, retry }: { problem: { title: string; next?: string; final?: boolean; mends?: boolean }; retry: () => unknown }) {
-  return <Problem quiet={problem.mends} title={problem.title} text={problem.next} action={problem.final ? undefined : { label: "Try Again", run: retry }} />
+/// What a failed first load says (`problem` is `one.plain`'s answer), with Try Again where trying again can work. An app
+/// that isn't added is no fault, so it's one grey line, with the App Store's page for it to add it from.
+function LoadFailure({ problem, retry }: { problem: { title: string; next?: string; final?: boolean; mends?: boolean; notAdded?: boolean }; retry?: () => unknown }) {
+  if (problem.notAdded) {
+    return (
+      <p data-slot="not-added" className="flex max-w-2xl flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+        {problem.title}
+        <Button variant="ghost" size="sm" className="-ml-2 text-foreground" onClick={() => bridge().open("app", { app: bridge().app }, "apps")}>Add</Button>
+      </p>
+    )
+  }
+  return <Problem quiet={problem.mends} title={problem.title} text={problem.next} action={problem.final || !retry ? undefined : { label: "Try Again", run: retry }} />
 }
 
 /// Grey shapes the shape of what's coming, once it's taken longer than a blink, so a quick load shows nothing between:

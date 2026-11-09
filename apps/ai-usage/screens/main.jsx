@@ -1,7 +1,7 @@
 // AI Usage: each provider and its accounts' windows, metered. The accounts fill the room: more columns where there's more of it.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Empty, Grid, Hint, LargeTitle, Problem, Progress, Skeleton } from "@one/ui"
+import { AppIcon, Empty, Grid, Hint, LargeTitle, LoadFailure, Problem, Progress, Skeleton } from "@one/ui"
 
 function Meter({ label, w }) {
   if (!w || w.used == null) return null
@@ -97,7 +97,7 @@ function Body() {
   }, [])
 
   const { data, error } = state
-  if (error) return <Problem title={one.plain(error).title} text={one.plain(error).next} />
+  if (error) return <LoadFailure problem={one.plain(error)} />
   if (!data) return <Waiting />
   if (data.problem) return <Problem title="Can’t read your AI plans" text={data.problem} />
   if (!data.providers || !data.providers.length) return <Empty>No AI sign-ins on your devices.</Empty>

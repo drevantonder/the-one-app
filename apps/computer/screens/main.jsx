@@ -2,7 +2,7 @@
 // agent uses one, and a row otherwise. Looked at again every 5 seconds while it can be seen.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, Icon, LargeTitle, List, ListRow, Problem, Section, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Skeleton, Switch } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Icon, LargeTitle, List, ListRow, LoadFailure, Problem, Section, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Skeleton, Switch } from "@one/ui"
 
 const without = (o, k) => {
   const { [k]: _, ...rest } = o
@@ -232,7 +232,7 @@ function Body() {
     one.call("_mirror_launch", { device }).then(refresh, (err) => note(device, one.plain(err).title))
   }
 
-  if (error && !data) return <Problem title={one.plain(error).title} text={one.plain(error).next} />
+  if (error && !data) return <LoadFailure problem={one.plain(error)} />
   if (!data) return <Waiting />
   const devices = data.devices.map((d) => (d.device in pending ? { ...d, on: pending[d.device] } : d))
   const inUse = devices.filter((d) => d.on && d.using)

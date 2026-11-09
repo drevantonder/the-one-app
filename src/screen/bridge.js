@@ -282,8 +282,9 @@
       // Something that isn't there won't be there on a second try,
       // and neither will what isn't allowed, or needs signing in first: `final` says trying again can't work.
       const final = err?.code === "refused" || err?.code === "not_signed_in" || err?.code === "not_added" || /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b|^no \w+ [\w./-]+\.?$/i.test(msg);
-      // What is on its way needs nobody: it's said in no colour (Problem's `quiet`).
-      return { title: said, safe: "Nothing was lost.", next: "", final, mends: err?.code === "restarting" && /\bstarting\b/i.test(msg) };
+      // What is on its way needs nobody: it's said in no colour (Problem's `quiet`). An app that isn't added has one fix,
+      // adding it, which `notAdded` leads to.
+      return { title: said, safe: "Nothing was lost.", next: "", final, mends: err?.code === "restarting" && /\bstarting\b/i.test(msg), notAdded: err?.code === "not_added" };
     },
     // A large title at the top of a screen, as iOS draws one: the window's own title stays empty while it shows, and is
     // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so

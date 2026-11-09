@@ -6,32 +6,32 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AppIcon as a, Button as o, Empty as s, Grid as c, Icon as l, LargeTitle as u, List as d, ListRow as f, Problem as p, Section as m, Sheet as h, SheetContent as g, SheetDescription as _, SheetHeader as v, SheetTitle as y, Skeleton as b, Switch as x } from "@one/ui";
-import { Fragment as S, jsx as C, jsxs as w } from "react/jsx-runtime";
-var T = (e, t) => {
+import { AppIcon as a, Button as o, Empty as s, Grid as c, Icon as l, LargeTitle as u, List as d, ListRow as f, LoadFailure as p, Problem as m, Section as h, Sheet as g, SheetContent as _, SheetDescription as v, SheetHeader as y, SheetTitle as b, Skeleton as x, Switch as S } from "@one/ui";
+import { Fragment as C, jsx as w, jsxs as T } from "react/jsx-runtime";
+var E = (e, t) => {
 	let { [t]: n, ...r } = e;
 	return r;
-}, E = (e) => {
+}, D = (e) => {
 	let t = (e.content || []).find((e) => e.type === "image");
 	return t ? `data:${t.mimeType};base64,${t.data}` : null;
 };
-function D(t) {
+function O(t) {
 	let n = e(9), { src: r, ratio: i, className: a, children: o } = t, s = i === void 0 ? "16 / 10" : i, c = `relative grid place-items-center overflow-hidden rounded-xl bg-muted text-muted-foreground ring-1 ring-border ring-inset ${a === void 0 ? "" : a}`, l;
 	n[0] === s ? l = n[1] : (l = { aspectRatio: s }, n[0] = s, n[1] = l);
 	let u;
-	n[2] !== o || n[3] !== r ? (u = r ? /* @__PURE__ */ C("img", {
+	n[2] !== o || n[3] !== r ? (u = r ? /* @__PURE__ */ w("img", {
 		src: r,
 		alt: "",
 		className: "size-full object-cover"
 	}) : o, n[2] = o, n[3] = r, n[4] = u) : u = n[4];
 	let d;
-	return n[5] !== c || n[6] !== l || n[7] !== u ? (d = /* @__PURE__ */ C("div", {
+	return n[5] !== c || n[6] !== l || n[7] !== u ? (d = /* @__PURE__ */ w("div", {
 		className: c,
 		style: l,
 		children: u
 	}), n[5] = c, n[6] = l, n[7] = u, n[8] = d) : d = n[8], d;
 }
-function O(e, { asking: t, note: n, fix: r }) {
+function k(e, { asking: t, note: n, fix: r }) {
 	let i = e.permissions && e.kind === "mac" && (!e.permissions.accessibility || !e.permissions.screen_recording), a = e.title || e.device, o = n ? { title: n } : i ? {
 		title: `${e.permissions.accessibility ? "Screen Recording" : "Accessibility"} is off`,
 		text: `Agents can’t use ${a} until it’s on.`,
@@ -49,39 +49,39 @@ function O(e, { asking: t, note: n, fix: r }) {
 		off: !!(e.why || e.missing || t || i)
 	};
 }
-function k(t) {
+function A(t) {
 	let n = e(7), { d: r, src: i, open: a } = t;
 	if (r.mirroring?.running) {
 		let e;
-		return n[0] === i ? e = n[1] : (e = /* @__PURE__ */ C(D, {
+		return n[0] === i ? e = n[1] : (e = /* @__PURE__ */ w(O, {
 			src: i,
 			ratio: "9 / 16",
 			className: "w-24"
 		}), n[0] = i, n[1] = e), e;
 	}
 	let s;
-	n[2] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ C(l, {
+	n[2] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ w(l, {
 		name: "device-mobile",
 		className: "size-5 shrink-0 text-muted-foreground"
 	}), n[2] = s) : s = n[2];
 	let c;
-	n[3] === Symbol.for("react.memo_cache_sentinel") ? (c = /* @__PURE__ */ w("div", {
+	n[3] === Symbol.for("react.memo_cache_sentinel") ? (c = /* @__PURE__ */ T("div", {
 		className: "min-w-0 flex-1",
-		children: [/* @__PURE__ */ C("div", {
+		children: [/* @__PURE__ */ w("div", {
 			className: "font-medium",
 			children: "iPhone Mirroring"
-		}), /* @__PURE__ */ C("div", {
+		}), /* @__PURE__ */ w("div", {
 			className: "text-muted-foreground",
 			children: "Pair it in your iPhone’s Settings › General."
 		})]
 	}), n[3] = c) : c = n[3];
 	let u;
-	return n[4] !== r.device || n[5] !== a ? (u = /* @__PURE__ */ w("div", {
+	return n[4] !== r.device || n[5] !== a ? (u = /* @__PURE__ */ T("div", {
 		className: "flex items-center gap-3 text-sm",
 		children: [
 			s,
 			c,
-			/* @__PURE__ */ C(o, {
+			/* @__PURE__ */ w(o, {
 				size: "sm",
 				variant: "secondary",
 				onClick: () => a(r.device),
@@ -90,101 +90,101 @@ function k(t) {
 		]
 	}), n[4] = r.device, n[5] = a, n[6] = u) : u = n[6], u;
 }
-function A(t) {
+function j(t) {
 	let n = e(34), { d: r, shot: i, mirror: a, mirroring: o, note: s, allow: c, fix: l, asking: u, openMirror: d } = t, f;
 	n[0] !== r.device || n[1] !== l ? (f = () => l(r.device), n[0] = r.device, n[1] = l, n[2] = f) : f = n[2];
 	let p;
-	n[3] !== u || n[4] !== r || n[5] !== s || n[6] !== f ? (p = O(r, {
+	n[3] !== u || n[4] !== r || n[5] !== s || n[6] !== f ? (p = k(r, {
 		asking: u,
 		note: s,
 		fix: f
 	}), n[3] = u, n[4] = r, n[5] = s, n[6] = f, n[7] = p) : p = n[7];
 	let m = p, h;
-	n[8] === i ? h = n[9] : (h = /* @__PURE__ */ C(D, { src: i }), n[8] = i, n[9] = h);
+	n[8] === i ? h = n[9] : (h = /* @__PURE__ */ w(O, { src: i }), n[8] = i, n[9] = h);
 	let g;
-	n[10] === m.title ? g = n[11] : (g = /* @__PURE__ */ C("div", {
+	n[10] === m.title ? g = n[11] : (g = /* @__PURE__ */ w("div", {
 		className: "min-w-0 flex-1 truncate text-sm font-medium",
 		children: m.title
 	}), n[10] = m.title, n[11] = g);
 	let _ = !!r.on, v;
 	n[12] !== c || n[13] !== r.device ? (v = (e) => c(r.device, e), n[12] = c, n[13] = r.device, n[14] = v) : v = n[14];
 	let y;
-	n[15] !== _ || n[16] !== v || n[17] !== m.off ? (y = /* @__PURE__ */ C(x, {
+	n[15] !== _ || n[16] !== v || n[17] !== m.off ? (y = /* @__PURE__ */ w(S, {
 		checked: _,
 		disabled: m.off,
 		onCheckedChange: v,
 		"aria-label": "Let agents use it"
 	}), n[15] = _, n[16] = v, n[17] = m.off, n[18] = y) : y = n[18];
 	let b;
-	n[19] !== g || n[20] !== y ? (b = /* @__PURE__ */ w("div", {
+	n[19] !== g || n[20] !== y ? (b = /* @__PURE__ */ T("div", {
 		className: "flex items-center gap-2",
 		children: [g, y]
 	}), n[19] = g, n[20] = y, n[21] = b) : b = n[21];
-	let S;
-	n[22] === m.line ? S = n[23] : (S = m.line && /* @__PURE__ */ C("div", {
+	let x;
+	n[22] === m.line ? x = n[23] : (x = m.line && /* @__PURE__ */ w("div", {
 		className: "-mt-1 text-sm text-muted-foreground",
 		children: m.line
-	}), n[22] = m.line, n[23] = S);
-	let T;
-	n[24] !== r || n[25] !== a || n[26] !== o || n[27] !== d ? (T = o && r.kind === "mac" && /* @__PURE__ */ C("div", {
+	}), n[22] = m.line, n[23] = x);
+	let C;
+	n[24] !== r || n[25] !== a || n[26] !== o || n[27] !== d ? (C = o && r.kind === "mac" && /* @__PURE__ */ w("div", {
 		className: "mt-2",
-		children: /* @__PURE__ */ C(k, {
+		children: /* @__PURE__ */ w(A, {
 			d: r,
 			src: a,
 			open: d
 		})
-	}), n[24] = r, n[25] = a, n[26] = o, n[27] = d, n[28] = T) : T = n[28];
+	}), n[24] = r, n[25] = a, n[26] = o, n[27] = d, n[28] = C) : C = n[28];
 	let E;
-	return n[29] !== T || n[30] !== h || n[31] !== b || n[32] !== S ? (E = /* @__PURE__ */ w("div", {
+	return n[29] !== C || n[30] !== h || n[31] !== b || n[32] !== x ? (E = /* @__PURE__ */ T("div", {
 		className: "flex min-w-0 flex-col gap-2",
 		children: [
 			h,
 			b,
-			S,
-			T
+			x,
+			C
 		]
-	}), n[29] = T, n[30] = h, n[31] = b, n[32] = S, n[33] = E) : E = n[33], E;
+	}), n[29] = C, n[30] = h, n[31] = b, n[32] = x, n[33] = E) : E = n[33], E;
 }
-function j(t) {
+function M(t) {
 	let n = e(39), { d: r, mirror: i, mirroring: a, note: o, allow: s, fix: c, asking: u, openMirror: d } = t, f;
 	n[0] !== r.device || n[1] !== c ? (f = () => c(r.device), n[0] = r.device, n[1] = c, n[2] = f) : f = n[2];
-	let m;
-	n[3] !== u || n[4] !== r || n[5] !== o || n[6] !== f ? (m = O(r, {
+	let p;
+	n[3] !== u || n[4] !== r || n[5] !== o || n[6] !== f ? (p = k(r, {
 		asking: u,
 		note: o,
 		fix: f
-	}), n[3] = u, n[4] = r, n[5] = o, n[6] = f, n[7] = m) : m = n[7];
-	let h = m, g = r.kind === "mac" ? "laptop" : "desktop", _;
-	n[8] === g ? _ = n[9] : (_ = /* @__PURE__ */ C(l, {
+	}), n[3] = u, n[4] = r, n[5] = o, n[6] = f, n[7] = p) : p = n[7];
+	let h = p, g = r.kind === "mac" ? "laptop" : "desktop", _;
+	n[8] === g ? _ = n[9] : (_ = /* @__PURE__ */ w(l, {
 		name: g,
 		className: "size-5 shrink-0 text-muted-foreground"
 	}), n[8] = g, n[9] = _);
 	let v;
-	n[10] === h.title ? v = n[11] : (v = /* @__PURE__ */ C("div", {
+	n[10] === h.title ? v = n[11] : (v = /* @__PURE__ */ w("div", {
 		className: "truncate font-medium",
 		children: h.title
 	}), n[10] = h.title, n[11] = v);
 	let y;
-	n[12] === h.line ? y = n[13] : (y = h.line && /* @__PURE__ */ C("div", {
+	n[12] === h.line ? y = n[13] : (y = h.line && /* @__PURE__ */ w("div", {
 		className: "truncate text-muted-foreground",
 		children: h.line
 	}), n[12] = h.line, n[13] = y);
 	let b;
-	n[14] !== v || n[15] !== y ? (b = /* @__PURE__ */ w("div", {
+	n[14] !== v || n[15] !== y ? (b = /* @__PURE__ */ T("div", {
 		className: "min-w-0 flex-1",
 		children: [v, y]
 	}), n[14] = v, n[15] = y, n[16] = b) : b = n[16];
-	let S = !!r.on, T;
-	n[17] !== s || n[18] !== r.device ? (T = (e) => s(r.device, e), n[17] = s, n[18] = r.device, n[19] = T) : T = n[19];
+	let x = !!r.on, C;
+	n[17] !== s || n[18] !== r.device ? (C = (e) => s(r.device, e), n[17] = s, n[18] = r.device, n[19] = C) : C = n[19];
 	let E;
-	n[20] !== S || n[21] !== T || n[22] !== h.off ? (E = /* @__PURE__ */ C(x, {
-		checked: S,
+	n[20] !== x || n[21] !== C || n[22] !== h.off ? (E = /* @__PURE__ */ w(S, {
+		checked: x,
 		disabled: h.off,
-		onCheckedChange: T,
+		onCheckedChange: C,
 		"aria-label": "Let agents use it"
-	}), n[20] = S, n[21] = T, n[22] = h.off, n[23] = E) : E = n[23];
+	}), n[20] = x, n[21] = C, n[22] = h.off, n[23] = E) : E = n[23];
 	let D;
-	n[24] !== E || n[25] !== _ || n[26] !== b ? (D = /* @__PURE__ */ w("div", {
+	n[24] !== E || n[25] !== _ || n[26] !== b ? (D = /* @__PURE__ */ T("div", {
 		className: "flex items-center gap-3 text-sm",
 		children: [
 			_,
@@ -192,8 +192,8 @@ function j(t) {
 			E
 		]
 	}), n[24] = E, n[25] = _, n[26] = b, n[27] = D) : D = n[27];
-	let A;
-	n[28] === h.box ? A = n[29] : (A = h.box && /* @__PURE__ */ C(p, {
+	let O;
+	n[28] === h.box ? O = n[29] : (O = h.box && /* @__PURE__ */ w(m, {
 		warn: h.box.warn,
 		title: h.box.title,
 		text: h.box.text,
@@ -201,41 +201,41 @@ function j(t) {
 			label: "Fix",
 			run: h.box.fix
 		}
-	}), n[28] = h.box, n[29] = A);
+	}), n[28] = h.box, n[29] = O);
 	let j;
-	n[30] !== r || n[31] !== i || n[32] !== a || n[33] !== d ? (j = a && r.kind === "mac" && /* @__PURE__ */ C(k, {
+	n[30] !== r || n[31] !== i || n[32] !== a || n[33] !== d ? (j = a && r.kind === "mac" && /* @__PURE__ */ w(A, {
 		d: r,
 		src: i,
 		open: d
 	}), n[30] = r, n[31] = i, n[32] = a, n[33] = d, n[34] = j) : j = n[34];
 	let M;
-	return n[35] !== D || n[36] !== A || n[37] !== j ? (M = /* @__PURE__ */ w("div", {
+	return n[35] !== D || n[36] !== O || n[37] !== j ? (M = /* @__PURE__ */ T("div", {
 		className: "flex flex-col gap-2 px-3 py-2.5",
 		children: [
 			D,
-			A,
+			O,
 			j
 		]
-	}), n[35] = D, n[36] = A, n[37] = j, n[38] = M) : M = n[38], M;
+	}), n[35] = D, n[36] = O, n[37] = j, n[38] = M) : M = n[38], M;
 }
-function M({ device: e, onClose: t }) {
+function N({ device: e, onClose: t }) {
 	let r = n(null);
 	e && (r.current = e);
-	let i = r.current, o = !!i?.permissions?.accessibility, s = !!i?.permissions?.screen_recording, c = i?.title || i?.device, l = ({ on: e }) => e ? null : /* @__PURE__ */ C("span", {
+	let i = r.current, o = !!i?.permissions?.accessibility, s = !!i?.permissions?.screen_recording, c = i?.title || i?.device, l = ({ on: e }) => e ? null : /* @__PURE__ */ w("span", {
 		className: "text-sm text-warning",
 		children: "Off"
 	});
-	return /* @__PURE__ */ C(h, {
+	return /* @__PURE__ */ w(g, {
 		open: !!e,
 		onOpenChange: (e) => !e && t(),
-		children: /* @__PURE__ */ w(g, {
+		children: /* @__PURE__ */ T(_, {
 			side: "bottom",
 			className: "max-h-[90svh] overflow-y-auto rounded-t-xl",
-			children: [/* @__PURE__ */ w(v, { children: [/* @__PURE__ */ C(y, { children: c }), /* @__PURE__ */ C(_, { children: "Agents need both to use this Mac." })] }), /* @__PURE__ */ w("div", {
+			children: [/* @__PURE__ */ T(y, { children: [/* @__PURE__ */ w(b, { children: c }), /* @__PURE__ */ w(v, { children: "Agents need both to use this Mac." })] }), /* @__PURE__ */ T("div", {
 				className: "flex flex-col gap-6 p-4 pt-0",
 				children: [
-					/* @__PURE__ */ w(d, { children: [/* @__PURE__ */ C(f, {
-						leading: /* @__PURE__ */ C(a, {
+					/* @__PURE__ */ T(d, { children: [/* @__PURE__ */ w(f, {
+						leading: /* @__PURE__ */ w(a, {
 							app: {
 								name: "accessibility",
 								icon: "cursor-click"
@@ -244,9 +244,9 @@ function M({ device: e, onClose: t }) {
 						}),
 						title: "Accessibility",
 						sub: "Clicks, typing and windows",
-						trailing: /* @__PURE__ */ C(l, { on: o })
-					}), /* @__PURE__ */ C(f, {
-						leading: /* @__PURE__ */ C(a, {
+						trailing: /* @__PURE__ */ w(l, { on: o })
+					}), /* @__PURE__ */ w(f, {
+						leading: /* @__PURE__ */ w(a, {
 							app: {
 								name: "screen",
 								icon: "desktop"
@@ -255,31 +255,31 @@ function M({ device: e, onClose: t }) {
 						}),
 						title: "Screen Recording",
 						sub: "What’s on screen",
-						trailing: /* @__PURE__ */ C(l, { on: s })
+						trailing: /* @__PURE__ */ w(l, { on: s })
 					})] }),
-					/* @__PURE__ */ C(m, {
+					/* @__PURE__ */ w(h, {
 						title: "Turn Them On",
-						children: /* @__PURE__ */ w(d, { children: [/* @__PURE__ */ w(N, {
+						children: /* @__PURE__ */ T(d, { children: [/* @__PURE__ */ T(P, {
 							n: 1,
 							title: `Open System Settings on ${c}`,
 							children: [
 								"Go to ",
-								/* @__PURE__ */ C("b", { children: "Privacy & Security" }),
+								/* @__PURE__ */ w("b", { children: "Privacy & Security" }),
 								" → ",
-								/* @__PURE__ */ C("b", { children: o ? "Screen & System Audio Recording" : "Accessibility" }),
+								/* @__PURE__ */ w("b", { children: o ? "Screen & System Audio Recording" : "Accessibility" }),
 								"."
 							]
-						}), !(o && s) && /* @__PURE__ */ w(N, {
+						}), !(o && s) && /* @__PURE__ */ T(P, {
 							n: 2,
 							title: `Turn On ${one.config.name}`,
 							children: [
 								"Approve with Touch ID",
-								o ? /* @__PURE__ */ w(S, { children: [", then choose ", /* @__PURE__ */ C("b", { children: "Quit & Reopen" })] }) : "",
+								o ? /* @__PURE__ */ T(C, { children: [", then choose ", /* @__PURE__ */ w("b", { children: "Quit & Reopen" })] }) : "",
 								"."
 							]
 						})] })
 					}),
-					/* @__PURE__ */ C("p", {
+					/* @__PURE__ */ w("p", {
 						className: "text-center text-sm text-muted-foreground",
 						children: "This page updates automatically once permission is granted."
 					})
@@ -288,62 +288,62 @@ function M({ device: e, onClose: t }) {
 		})
 	});
 }
-function N(t) {
+function P(t) {
 	let n = e(12), { n: r, title: i, children: a } = t, o;
-	n[0] === r ? o = n[1] : (o = /* @__PURE__ */ C("span", {
+	n[0] === r ? o = n[1] : (o = /* @__PURE__ */ w("span", {
 		className: "grid size-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground",
 		children: r
 	}), n[0] = r, n[1] = o);
 	let s;
-	n[2] === i ? s = n[3] : (s = /* @__PURE__ */ C("div", {
+	n[2] === i ? s = n[3] : (s = /* @__PURE__ */ w("div", {
 		className: "font-medium",
 		children: i
 	}), n[2] = i, n[3] = s);
 	let c;
-	n[4] === a ? c = n[5] : (c = /* @__PURE__ */ C("div", {
+	n[4] === a ? c = n[5] : (c = /* @__PURE__ */ w("div", {
 		className: "text-muted-foreground",
 		children: a
 	}), n[4] = a, n[5] = c);
 	let l;
-	n[6] !== s || n[7] !== c ? (l = /* @__PURE__ */ w("div", {
+	n[6] !== s || n[7] !== c ? (l = /* @__PURE__ */ T("div", {
 		className: "min-w-0",
 		children: [s, c]
 	}), n[6] = s, n[7] = c, n[8] = l) : l = n[8];
 	let u;
-	return n[9] !== o || n[10] !== l ? (u = /* @__PURE__ */ w("div", {
+	return n[9] !== o || n[10] !== l ? (u = /* @__PURE__ */ T("div", {
 		className: "flex gap-3 px-3 py-2.5 text-sm",
 		children: [o, l]
 	}), n[9] = o, n[10] = l, n[11] = u) : u = n[11], u;
 }
-function P() {
+function F() {
 	let n = e(3), [i, a] = r(!1), o, s;
 	if (n[0] === Symbol.for("react.memo_cache_sentinel") ? (o = () => {
 		let e = setTimeout(() => a(!0), 100);
 		return () => clearTimeout(e);
 	}, s = [], n[0] = o, n[1] = s) : (o = n[0], s = n[1]), t(o, s), !i) return null;
 	let l;
-	return n[2] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ C(c, {
+	return n[2] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ w(c, {
 		min: "20rem",
 		max: 4,
-		children: [0, 1].map(F)
+		children: [0, 1].map(I)
 	}), n[2] = l) : l = n[2], l;
 }
-function F(e) {
-	return /* @__PURE__ */ C(b, { className: "aspect-[16/10] rounded-xl" }, e);
+function I(e) {
+	return /* @__PURE__ */ w(x, { className: "aspect-[16/10] rounded-xl" }, e);
 }
-function I() {
-	let [e, i] = r(null), [a, o] = r(null), [l, u] = r({}), [f, m] = r({}), [h, g] = r({}), [_, v] = r({}), [y, b] = r(null), x = n(0), S = n(!0), D = n(null);
+function L() {
+	let [e, i] = r(null), [a, o] = r(null), [l, u] = r({}), [f, m] = r({}), [h, g] = r({}), [_, v] = r({}), [y, b] = r(null), x = n(0), S = n(!0), C = n(null);
 	t(() => {}, []);
 	let O = (e, t) => {
 		v((n) => ({
 			...n,
 			[e]: t
-		})), setTimeout(() => v((t) => T(t, e)), 8e3);
+		})), setTimeout(() => v((t) => E(t, e)), 8e3);
 	};
 	async function k(e) {
 		let t = async (e, t, n) => {
 			try {
-				let r = E(await one.call(t, {
+				let r = D(await one.call(t, {
 					device: n,
 					width: 640
 				}));
@@ -355,7 +355,7 @@ function I() {
 		};
 		await Promise.all([...e.filter((e) => e.on && e.using).map((e) => t(e.device, "screen", e.device)), ...e.filter((e) => e.on && e.mirroring?.running).map((e) => t(`${e.device}:mirror`, "_mirror_screen", e.device))]);
 	}
-	async function N() {
+	async function A() {
 		let e = ++x.current, t;
 		try {
 			t = await one.call("_devices", {});
@@ -363,15 +363,15 @@ function I() {
 			o(e);
 			return;
 		}
-		e === x.current && (o(null), i(t), D.current = t.devices, await k(t.devices));
+		e === x.current && (o(null), i(t), C.current = t.devices, await k(t.devices));
 	}
 	t(() => {
-		N().finally(() => S.current = !1);
+		A().finally(() => S.current = !1);
 		let e = async () => {
 			if (!(S.current || document.visibilityState === "hidden")) {
 				S.current = !0;
 				try {
-					await N();
+					await A();
 				} finally {
 					S.current = !1;
 				}
@@ -379,8 +379,8 @@ function I() {
 		}, t = setInterval(e, 5e3);
 		return document.addEventListener("visibilitychange", e), () => (clearInterval(t), document.removeEventListener("visibilitychange", e));
 	}, []);
-	async function F(e, t) {
-		v((t) => T(t, e)), m((n) => ({
+	async function P(e, t) {
+		v((t) => E(t, e)), m((n) => ({
 			...n,
 			[e]: t
 		})), t && g((t) => ({
@@ -395,17 +395,14 @@ function I() {
 		} catch (t) {
 			O(e, one.plain(t).title);
 		} finally {
-			m((t) => T(t, e)), g((t) => T(t, e)), N();
+			m((t) => E(t, e)), g((t) => E(t, e)), A();
 		}
 	}
 	function I(e) {
-		one.call("_mirror_launch", { device: e }).then(N, (t) => O(e, one.plain(t).title));
+		one.call("_mirror_launch", { device: e }).then(A, (t) => O(e, one.plain(t).title));
 	}
-	if (a && !e) return /* @__PURE__ */ C(p, {
-		title: one.plain(a).title,
-		text: one.plain(a).next
-	});
-	if (!e) return /* @__PURE__ */ C(P, {});
+	if (a && !e) return /* @__PURE__ */ w(p, { problem: one.plain(a) });
+	if (!e) return /* @__PURE__ */ w(F, {});
 	let L = e.devices.map((e) => e.device in f ? {
 		...e,
 		on: f[e.device]
@@ -415,33 +412,33 @@ function I() {
 		mirroring: e.mirroring,
 		asking: !!h[t.device],
 		note: _[t.device],
-		allow: F,
+		allow: P,
 		fix: b,
 		openMirror: I
 	});
-	return L.length ? /* @__PURE__ */ w("div", {
+	return L.length ? /* @__PURE__ */ T("div", {
 		className: "flex flex-col gap-6",
 		children: [
-			R.length > 0 && /* @__PURE__ */ C(c, {
+			R.length > 0 && /* @__PURE__ */ w(c, {
 				min: "20rem",
 				max: 4,
 				gap: "1.5rem",
 				className: "items-start",
-				children: R.map((e) => /* @__PURE__ */ C(A, {
+				children: R.map((e) => /* @__PURE__ */ w(j, {
 					shot: l[e.device],
 					...B(e)
 				}, e.device))
 			}),
-			z.length > 0 && /* @__PURE__ */ C(d, { children: z.map((e) => /* @__PURE__ */ C(j, { ...B(e) }, e.device)) }),
-			/* @__PURE__ */ C(M, {
+			z.length > 0 && /* @__PURE__ */ w(d, { children: z.map((e) => /* @__PURE__ */ w(M, { ...B(e) }, e.device)) }),
+			/* @__PURE__ */ w(N, {
 				device: y && L.find((e) => e.device === y),
 				onClose: () => b(null)
 			})
 		]
-	}) : /* @__PURE__ */ C(s, { children: "Agents can use your Mac once you let them, in its menu bar." });
+	}) : /* @__PURE__ */ w(s, { children: "Agents can use your Mac once you let them, in its menu bar." });
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ w("div", {
+i(document.getElementById("root")).render(/* @__PURE__ */ T("div", {
 	className: "flex flex-col gap-4",
-	children: [/* @__PURE__ */ C(u, { children: "Computer Use" }), /* @__PURE__ */ C(I, {})]
+	children: [/* @__PURE__ */ w(u, { children: "Computer Use" }), /* @__PURE__ */ w(L, {})]
 }));
 </script>
