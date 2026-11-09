@@ -100,16 +100,21 @@ export const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r)
 
 /// A page that links @one/ui and the bridge (`linked`, src/screen.rs: an app's as its node gives it, and the client's
 /// own), with them written in from this window's cache, where its own page has them: a sandboxed frame's cache is its
-/// alone, so it would download them again for every screen. Each that can't be had here stays linked.
+/// alone, so it would download them again for every screen. Each that can't be had here stays linked. Its import map
+/// is this client's own too, not the one the node wrote in, which says what @one/ui exported when that node was built.
 const LINKED = /<link rel="stylesheet" href="(\/screen\/[a-z/]+\.css\?v=[0-9a-f]+)">|<script( nonce="[0-9a-f]+")? src="(\/screen\/[a-z/]+\.js\?v=[0-9a-f]+)"><\/script>/g;
+const IMPORT_MAP = /<script( nonce="[0-9a-f]+")? type="importmap">.*?<\/script>/s;
 const linkedFiles = {};
 const linkedFile = (url) =>
   (linkedFiles[url] ||= fetch(url).then((r) => (r.ok ? r.text() : Promise.reject(new Error(UNANSWERED)))).catch((err) => (delete linkedFiles[url], Promise.reject(err))));
 async function linkedIn(page) {
   const urls = [...new Set(Array.from(page.matchAll(LINKED), (m) => m[1] || m[3]))];
   if (!urls.length) return page;
-  const texts = Object.fromEntries(await Promise.all(urls.map((url) => linkedFile(url).then((text) => [url, text], () => [url, null]))));
-  return page.replace(LINKED, (whole, css, nonce = "", js) => (texts[css || js] == null ? whole : css ? `<style>${texts[css]}</style>` : `<script${nonce}>${texts[js]}</script>`));
+  const map = asset("screen/ui/importmap.json");
+  const texts = Object.fromEntries(await Promise.all([...urls, map].map((url) => linkedFile(url).then((text) => [url, text], () => [url, null]))));
+  return page
+    .replace(LINKED, (whole, css, nonce = "", js) => (texts[css || js] == null ? whole : css ? `<style>${texts[css]}</style>` : `<script${nonce}>${texts[js]}</script>`))
+    .replace(IMPORT_MAP, (whole, nonce = "") => (texts[map] == null ? whole : `<script${nonce} type="importmap">${texts[map]}</script>`));
 }
 
 /// A screen that couldn't open: the problem, where it would be.

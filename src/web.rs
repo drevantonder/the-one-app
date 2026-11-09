@@ -71,7 +71,7 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
         // The scripts web.js imports are asked for beside it, not a round trip after each, on a first visit.
         let preload: String = names.iter().filter(|(path, _)| scripts.contains(path) && !["web.js", "net-worker.js"].contains(&path.as_str())).map(|(_, name)| format!("<link rel=\"modulepreload\" href=\"{name}\">\n")).collect();
         text = text.replacen("<script type=\"module\"", &format!("{preload}<script type=\"module\""), 1);
-        let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json", "net-worker.js"].contains(&path.as_str()) || path.starts_with("screens/")).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
+        let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json", "net-worker.js", "screen/ui/importmap.json"].contains(&path.as_str()) || path.starts_with("screens/")).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
         let label = format!(
             "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-cli\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",
             attr(crate::config::NAME),
@@ -84,7 +84,7 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
 }
 
 /// The client's build, as the web client fetches it (`/client/<version>/`): what its files hash to, so a browser
-/// keeps one for good. None if this build has no client (`update` builds it, where Rust builds for WebAssembly).
+/// keeps one for good. None if this build has no client (`update node` builds it, where Rust builds for WebAssembly).
 pub fn client_version() -> Option<String> {
     use sha2::Digest;
     let mut hash = sha2::Sha256::new();
