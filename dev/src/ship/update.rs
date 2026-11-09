@@ -265,8 +265,9 @@ fn same_rust(at: &At) -> Result<()> {
     let (code, built_config) = one::config::BUILD.split('+').next().unwrap_or("").split_once('-').map_or((one::config::BUILD.split('+').next().unwrap_or(""), None), |(c, d)| (c, Some(d)));
     let stale = || format!("{CLI}-dev is from {}, and what's built into it has changed since: {CLI}-dev update dev", one::config::BUILD);
     let files = git(&at.src, &["diff", "--name-only", code, &at.commit]).with_context(stale)?;
-    // What `update dev` sends: so whatever makes this program stale, it has something to send.
-    ensure!(!Parts::of(files.lines()).dev && built_config.is_none_or(|c| at.config.as_deref().is_some_and(|d| d.starts_with(c))), "{}", stale());
+    // What is built in is also what `update dev` sends: so whatever makes this program stale, it has something to send. A
+    // change to dev/ alone doesn't, or any push to it would hold back the Workers and the web client until `update dev`.
+    ensure!(!Parts::of(files.lines()).is_built_in() &&built_config.is_none_or(|c| at.config.as_deref().is_some_and(|d| d.starts_with(c))), "{}", stale());
     Ok(())
 }
 

@@ -33,6 +33,13 @@ impl Parts {
         Parts { all: true, ..Parts::rust() }
     }
 
+    /// Whether the change is in what this program is built with, which the Workers and the web client are put together with
+    /// (the client's WebAssembly, the config's logo and name): Rust anywhere, or the client. A change to dev/ alone is
+    /// only to this program, and the Cloudflare node's is built for the node; neither is in what it puts together.
+    pub(super) fn is_built_in(&self) -> bool {
+        self.node && self.dev
+    }
+
     /// What a change to Rust, or to anything not known to be outside the node, sends: all of it.
     fn rust() -> Parts {
         Parts { node: true, mac: true, dev: true, workers: true, web: true, ..Default::default() }
@@ -148,6 +155,8 @@ mod tests {
         assert!(!native.node && native.mac);
         assert_eq!(of(&["client/native/windows/build.sh"]), Parts::default());
         assert_eq!(of(&["dev/src/ship.rs"]), Parts { dev: true, ..Default::default() }, "no device takes one-dev");
+        assert!(!of(&["dev/src/ship.rs"]).is_built_in() && !of(&["cloudflare/node/src/lib.rs"]).is_built_in(), "a change to this program alone doesn't change what it puts together");
+        assert!(of(&["src/node.rs"]).is_built_in() && of(&["client/src/lib.rs"]).is_built_in());
         assert_eq!(of(&["cloudflare/auth/worker.js", "cloudflare/relay/worker.js", "cloudflare/package.json"]), Parts { workers: true, ..Default::default() }, "the Workers alone");
         for file in ["cloudflare/web/web.js", "cloudflare/shared/crypto.js", "src/screen/ui/dist/ui.js", "src/screen/settings/dist/vault.html", "src/screen/bridge.js", "src/onboarding/pages.js", "src/onboarding/pages.tsx"] {
             assert_eq!(of(&[file]), Parts { web: true, workers: true, ..Default::default() }, "{file}: the web client and the Workers that serve it, with no node");
