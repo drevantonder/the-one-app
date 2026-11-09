@@ -6,7 +6,7 @@ import { late, offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { CODES } from "../shared/protocol.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
-import { back, go, home, listed, own, route } from "./routes.js";
+import { back, go, hold, home, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
 import { KEPT_SCREENS, app, config, here, joined, keeping, reads, settingAt, settingsItems, tabTitle, titleOf } from "./store.js";
 import { $, h, reveal, ui } from "./view.js";
@@ -341,6 +341,7 @@ export const replacing = () => !!coming;
 /// The screen's frames as they're dropped with their layer.
 function drop(layer) {
   layer.remove();
+  frames.filter((f) => f.into === layer).forEach((f) => holding(f, 0));
   frames = frames.filter((f) => f.into !== layer);
 }
 
@@ -535,8 +536,22 @@ export const devtools = {
   },
 };
 
-/// Whether something is over the window that Escape closes: an alert or a menu.
-export const overWindow = () => !!$("[role=alertdialog], [role=menu]");
+/// What's open over a screen or the window, for Back to close (routes.js's `hold`): `who` holds an entry for each of `n`
+/// that are open, and each one's `close` is Escape to it.
+function holding(who, n, close) {
+  who.held ||= [];
+  while (who.held.length < n) who.held.push(hold(close));
+  while (who.held.length > n) who.held.pop()();
+}
+/// The window's own: dialogs, alerts and menus open in this page (the screens' report theirs, which bridge.js counts alike).
+const over = {};
+const OVER = "[role=dialog][data-state=open], [role=alertdialog][data-state=open], [role=menu][data-state=open], [role=listbox][data-state=open]";
+new MutationObserver(() => holding(over, document.querySelectorAll(OVER).length, () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })))).observe(document.body, {
+  childList: true,
+  subtree: true,
+  attributes: true,
+  attributeFilter: ["data-state"],
+});
 
 /// A screen over the window, in a sheet: → what it gave `one.close` once it's gone, else null.
 export function openSheet(r) {
@@ -546,7 +561,7 @@ export function openSheet(r) {
     // Its screen draws in a frame that fills the body, so until it says how tall it is the body is a short wait.
     sheet.fit(128);
     const f = frameFor(r, sheet.body, { sheet: { close: (v) => ((value = v ?? null), sheet.close()), title: sheet.setTitle, fit: sheet.fit } });
-    sheet.closed.then(() => ((frames = frames.filter((x) => x !== f)), done(value)));
+    sheet.closed.then(() => (holding(f, 0), (frames = frames.filter((x) => x !== f)), done(value)));
   });
 }
 
@@ -579,6 +594,7 @@ addEventListener("message", async (e) => {
   if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill, f.frame.clientWidth));
   if (e.data?.oneShown) return void ((f.shown = true), $(".screen-status", f.into)?.remove(), f.frame.contentWindow?.postMessage({ oneOffline: !!offline.banner() }, "*"));
   if (e.data?.oneDimmed !== undefined) return void (f.sheet || ((f.dimmed = !!e.data.oneDimmed), showing === f && dimmed()));
+  if (typeof e.data?.oneOver === "number") return void holding(f, e.data.oneOver, () => f.frame.contentWindow?.postMessage({ oneEscape: true }, "*"));
   if (e.data?.oneDrawn) return void (e.data.early && f.still ? null : screenDrew(f));
   const { one: m, id } = e.data || {};
   if (!m || typeof m !== "object") return;

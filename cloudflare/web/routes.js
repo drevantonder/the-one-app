@@ -45,9 +45,39 @@ function under(r) {
   return own("pages", { scope: r.scope || (settingsItems().some((i) => i.app === r.app) ? "settings" : "user") });
 }
 
+/// What's over the window (a sheet, a dialog, a menu) holds a history entry, so Back closes the top one and the page
+/// stays, as Escape does: `hold(close)` → what to call once it's gone some other way, which takes its entry away. An
+/// entry's `over` is how many are held at it.
+const held = [];
+/// What waits for the entries held to be behind us: going somewhere, once Back has closed what's over the window.
+let unwinding = null;
+export function hold(close) {
+  const entry = { close };
+  held.push(entry);
+  history.pushState({ ...history.state, over: held.length }, "", location.href);
+  return () => {
+    const at = held.indexOf(entry);
+    if (at < 0) return;
+    held.splice(at, 1);
+    if (at === held.length && history.state?.over === at + 1) unwind(null, 1);
+  };
+}
+/// Closes the top of what's held, for a hardware Back → whether there was one.
+export const closeTop = () => held.length > 0 && (held.at(-1).close(), true);
+/// Back `steps` entries (by default to the one under every held), then `then`.
+function unwind(then, steps = history.state?.over) {
+  if (!unwinding) {
+    unwinding = [];
+    history.go(-steps);
+  }
+  if (then) unwinding.push(then);
+}
+if (history.state?.over) history.replaceState((({ over, ...rest }) => rest)(history.state), "");
+
 /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens deeper than the sidebar is pushed
 /// on top, so Back returns to it.
 export function go(r, { pushed = false } = {}, opened) {
+  if (unwinding || history.state?.over) return unwind(() => go(r, { pushed }, opened));
   // Already there (a double tap): one Back still leaves it.
   if (href(r) === location.pathname + location.search) return moved(opened);
   // Pushed on a screen, the sidebar keeps what it had selected, and the bar offers Back.
@@ -57,6 +87,7 @@ export function go(r, { pushed = false } = {}, opened) {
 }
 /// Back: to what came before in this tab, or for a screen opened straight, to the page it's under.
 export function back() {
+  if (unwinding || history.state?.over) return unwind(back);
   if (history.state?.back) return history.back();
   history.replaceState(null, "", href(under(route())));
   moved();
@@ -68,7 +99,16 @@ const selection = () => history.state?.selection || location.pathname + location
 const moves = [];
 export const whenMoved = (fn) => moves.push(fn);
 const moved = (opened) => moves.forEach((fn) => fn(opened));
-addEventListener("popstate", () => moved());
+addEventListener("popstate", () => {
+  // What's held beyond the entry now at goes, as Back's meant it to.
+  const depth = history.state?.over || 0;
+  const closing = held.length > depth || unwinding;
+  while (held.length > depth) held.pop().close();
+  if (!closing) return moved();
+  const then = unwinding || [];
+  unwinding = null;
+  then.forEach((fn) => fn());
+});
 
 /// Where each of the sidebar's links goes, as it was last listed.
 const links = new Map();

@@ -6,8 +6,8 @@ import { offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { qrSvg } from "./qr.js";
 import { api, developer, fresh, retryWait, sleep } from "./request.js";
-import { back, go, home, linked, own, route, sidebar, whenMoved } from "./routes.js";
-import { detail, devtools, hasScreen, openSheet, overWindow, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
+import { back, closeTop, go, home, linked, own, route, sidebar, whenMoved } from "./routes.js";
+import { detail, devtools, hasScreen, openSheet, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, signOut, store, titleOf, whenChanged } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
@@ -97,11 +97,11 @@ function drawPanel() {
   if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", platform.panelScreen()));
 }
 
-/// A phone's hardware Back: what's over the window (an alert, a menu) closes first, as Escape does; then a
+/// A phone's hardware Back: what's over the window or its screen (a sheet, an alert, a menu) closes first, as Escape does; then a
 /// pushed screen goes back, and so does one a user has gone deeper than the home screen. → whether it took it: if
 /// not, the app leaves.
 export function hardwareBack() {
-  if (overWindow()) return document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), true;
+  if (closeTop()) return true;
   if (history.state?.back || (platform.phone() && !home(route()))) return back(), true;
   return false;
 }

@@ -36,6 +36,7 @@
       if (m.oneEvent) one.__event(m.oneEvent);
       if (m.oneFocus && lastFocus?.isConnected) lastFocus.focus({ preventScroll: true });
       if (m.oneBar !== undefined) ((barStart = m.oneBar), placeLargeTitle("margin-inline-start 200ms linear"));
+      if (m.oneEscape) (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       if (m.oneLeft) (handlers.left || []).forEach((f) => f());
       if (m.oneOffline !== undefined) {
         const back = windowSays && !m.oneOffline;
@@ -65,11 +66,14 @@
       const now = Math.ceil(document.body?.scrollHeight || 0);
       if (now !== tall) window.parent.postMessage({ oneHeight: (tall = now) }, "*");
     };
-    // A dialog of this screen's own over it, for the page holding the frame to dim what's around it to match.
-    let dialog = false;
+    // A dialog of this screen's own over it, for the page holding the frame to dim what's around it to match; and how
+    // many dialogs, menus and lists it has open, for Back to close them (the page counts its own alike).
+    let dialog = false, open = 0;
     const dimming = () => {
       const now = !!document.querySelector("[data-slot=dialog-overlay], [data-slot=sheet-overlay], [data-slot=alert-dialog-overlay]");
       if (now !== dialog) window.parent.postMessage({ oneDimmed: (dialog = now) }, "*");
+      const n = document.querySelectorAll("[role=dialog][data-state=open], [role=alertdialog][data-state=open], [role=menu][data-state=open], [role=listbox][data-state=open]").length;
+      if (n !== open) window.parent.postMessage({ oneOver: (open = n) }, "*");
     };
     addEventListener("load", () => {
       loaded = true;
