@@ -9,15 +9,6 @@ use crate::config::CLI;
 use crate::core_tools::Reader;
 use crate::{build, tools};
 
-/// A place an app is added for, as `--scope` gives it, as a user says it.
-fn place_said(scope: &str) -> &str {
-    match scope {
-        "user" => "you",
-        "global" => "everyone",
-        group => group,
-    }
-}
-
 pub fn commands() -> Command {
     Command {
         help: vec![
@@ -52,8 +43,8 @@ pub fn commands() -> Command {
                 }
                 ["deploy", app] if g.has("version") => {
                     let version = g.flag("version").context("give --version <hash>")?;
-                    let here = g.node.post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?["here"] == true;
-                    println!("{}", deployed_said(g.node, &format!("Deployed {app} ({version}) again."), here));
+                    let deployed = g.node.post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?;
+                    deployed_said(g.node, app, &deployed, "")?;
                 }
                 ["deploy", dir] => deploy(g, std::path::Path::new(dir))?,
                 ["deploys", app] => {
@@ -85,8 +76,7 @@ pub fn commands() -> Command {
                     if !g.has("confirm") && !asked_yes(&command)? {
                         return Err(Failed::Refused(Reader::Cli.unconfirmed(&command)).into());
                     }
-                    g.node.post("/v1/remove/remove", json!({ "app": app, "scope": scope }))?;
-                    println!("{app} is no longer added for {}.", place_said(scope));
+                    println!("{}", g.node.post("/v1/remove/remove", json!({ "app": app, "scope": scope }))?["said"].as_str().unwrap_or_default());
                 }
                 ["fork", app, name] => {
                     g.node.post("/v1/fork", json!({ "app": app, "name": name, "owner": g.flag("owner") }))?;
@@ -94,8 +84,7 @@ pub fn commands() -> Command {
                 }
                 ["add", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    g.node.post("/v1/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?;
-                    println!("{app} is added for {}.", place_said(scope));
+                    println!("{}", g.node.post("/v1/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?["said"].as_str().unwrap_or_default());
                 }
                 ["schedules"] => {
                     for app in &g.node.apps()? {
@@ -138,18 +127,16 @@ fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
     };
     let (blob, service) = build::built_with_service(node, dir)?;
     let deployed = node.post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?;
-    println!("{}", deployed_said(node, &format!("Deployed {name} ({}).{service}", &blob[..12]), deployed["here"] == true));
-    if let Some(said) = crate::app::deploy::lacking_said(&deployed["lacking"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect::<Vec<_>>()) {
-        println!("{said}");
-    }
+    deployed_said(node, &name, &deployed, &service)?;
     Ok(())
 }
 
-/// What a deploy did, after `done`: which devices run it yet, as far as this one knows (`here`, whether it does).
-fn deployed_said(node: &Client, done: &str, here: bool) -> String {
-    let device = node.state().map(|s| s.device.name).unwrap_or_else(|_| "This device".into());
-    match here {
-        true => format!("{done} {device} runs it now; your other devices take it within a few seconds."),
-        false => format!("{done} Your devices take it within a few seconds: until then, its calls say they don't have its latest version yet."),
+/// Says what the deploy did. One that doesn't start is deployed, but this command failed.
+fn deployed_said(node: &Client, app: &str, deployed: &Value, service: &str) -> Result<()> {
+    let said = format!("{}{service}", crate::app::deploy::said(node, app, deployed, crate::core_tools::Reader::Cli));
+    if deployed["failed"].is_string() {
+        anyhow::bail!("{said}");
     }
+    println!("{said}");
+    Ok(())
 }

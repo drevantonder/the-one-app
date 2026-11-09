@@ -99,8 +99,36 @@ pub fn lacking(described: &serde_json::Value) -> Vec<String> {
 }
 
 /// What a deploy says when `lacking` names any, or nothing.
-pub fn lacking_said(names: &[String]) -> Option<String> {
+fn lacking_said(names: &[String]) -> Option<String> {
     (!names.is_empty()).then(|| format!("{} {} no title or no output: give each a title, and an output, the JSON Schema of its answer ({{ \"type\": \"string\" }} for text). The API's document and agents read them, and a tool that answers what its output doesn't say fails.", names.join(", "), if names.len() == 1 { "has" } else { "have" }))
+}
+
+/// What a deploy did, and what's next, as `reader` would do it. `node` says whether the app is on a page of the caller's.
+pub fn said(node: &crate::api::Client, app: &str, r: &serde_json::Value, reader: crate::core_tools::Reader) -> String {
+    use crate::config::CLI;
+    use crate::core_tools::Reader;
+    let short = |b: &serde_json::Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
+    let added = node.get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["added"].as_array().is_some_and(|i| !i.is_empty()))) == Some(true);
+    let tools: Vec<String> = r["tools"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(|t| match reader { Reader::Cli => format!("{CLI} {app} {t}"), _ => format!("{app}_{t}") }).collect();
+    let add = match reader { Reader::Cli => format!("{CLI} add {app}"), _ => format!("add {{ app: \"{app}\", scope: \"user\" }}") };
+    let mut out = vec![format!("Deployed {app} ({}){}.", short(&r["bundle"]), if r["made"] == true { ", a new app of yours" } else { "" })];
+    match (r["failed"].as_str(), r["here"] == true) {
+        (Some(why), _) => out.push(format!("{why}. Fix it and deploy again.")),
+        (_, false) => out.push("Your devices take it within a few seconds: until then, its calls say they don't have its latest version yet.".into()),
+        _ if !added => out.push(format!("Nobody sees it until it's on a page: {add} puts it on yours.")),
+        _ if tools.is_empty() => out.push("It's running, and your other devices take it within a few seconds.".into()),
+        _ => out.push(format!("It's running, and your other devices take it within a few seconds. Its tools: {}.", tools.join(", "))),
+    }
+    let lacking: Vec<String> = r["lacking"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect();
+    out.extend(lacking_said(&lacking));
+    out.push(match (&r["before"], reader) {
+        (b, _) if *b == r["bundle"] => "It ran this version already.".into(),
+        (serde_json::Value::String(_), Reader::Cli) => format!("To undo: {CLI} deploy {app} --version {}.", short(&r["before"])),
+        (serde_json::Value::String(_), _) => format!("To undo: deploy {{ app: \"{app}\", version: \"{}\" }}.", short(&r["before"])),
+        (_, Reader::Cli) => format!("To undo: {CLI} apps delete {app}."),
+        _ => "To undo: apps_delete.".into(),
+    });
+    out.join("\n")
 }
 
 /// Whether an app's files, by path, have a React screen: `screens/<name>.jsx` or `.tsx`, which `screens` builds.

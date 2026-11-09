@@ -72,12 +72,12 @@ mod serve {
     pub async fn add(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
         let (app, scope) = (text(&input, "app")?, node.scope_for(&me, text(&input, "scope")?)?);
         node.add(&me, app, &scope, true, input.get("node").and_then(Value::as_str)).await?;
-        Ok(json!({ "said": format!("Added {app}.") }))
+        Ok(json!({ "said": format!("{app} is on {}, on every device.", node.page_said(&scope)?) }))
     }
 
     pub async fn remove(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
         let (app, scope) = (text(&input, "app")?, node.scope_for(&me, text(&input, "scope")?)?);
         node.add(&me, app, &scope, false, None).await?;
-        Ok(json!({ "said": format!("Removed {app}.") }))
+        Ok(json!({ "said": format!("{app} is off {}, and what it kept there is gone.", node.page_said(&scope)?) }))
     }
 }

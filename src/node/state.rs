@@ -189,6 +189,15 @@ impl Node {
         Scope::parse_for(scope, &caller.user).or_else(|_| self.find_group(scope).map(Scope::Group))
     }
 
+    /// A scope's page, as a user says it.
+    pub fn page_said(&self, scope: &Scope) -> Result<String> {
+        Ok(match scope {
+            Scope::User(_) => "your page".into(),
+            Scope::Global => "Everyone's page".into(),
+            Scope::Group(g) => format!("{}'s page", self.with(|i| i.r.db().group(g))?.map_or_else(|| g.clone(), |g| g.name)),
+        })
+    }
+
     pub fn find_group(&self, name: &str) -> Result<String> {
         self.with(|i| i.r.db().find_group(name))
     }
