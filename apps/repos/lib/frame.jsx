@@ -37,6 +37,11 @@ export function RepoTabs({ repo, on, info }) {
   )
 }
 
+const SHA = /^[0-9a-f]{40}$/
+
+/// What a screen knows of where it is before its first answer comes: its params, as `PathBar` reads a call's.
+export const placed = ({ repo, ref, path }) => ({ repo, path: path || "", ...(SHA.test(ref) ? { sha: ref } : { branch: ref || "main" }) })
+
 export function PathBar({ d, file = false }) {
   const parts = (d.path || "").split("/").filter(Boolean)
   const ref = refOf(d)

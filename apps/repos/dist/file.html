@@ -33,8 +33,12 @@ var L = (t) => {
 		size: "sm",
 		className: a
 	}), n[2] = a, n[3] = r, n[4] = o) : o = n[4], o;
-};
-function R(t) {
+}, R = /^[0-9a-f]{40}$/, z = ({ repo: e, ref: t, path: n }) => ({
+	repo: e,
+	path: n || "",
+	...R.test(t) ? { sha: t } : { branch: t || "main" }
+});
+function B(t) {
 	let n = e(47), { d: r, file: i } = t, a = i !== void 0 && i, o = r.path || "", c, l, u, d, f, p, m, h;
 	if (n[0] !== r || n[1] !== a || n[2] !== o) {
 		c = Symbol.for("react.early_return_sentinel");
@@ -49,13 +53,13 @@ function R(t) {
 			let _ = g;
 			if (!e.length && !a && r.branch) {
 				let e;
-				n[16] !== _ || n[17] !== r ? (e = /* @__PURE__ */ T(B, {
+				n[16] !== _ || n[17] !== r ? (e = /* @__PURE__ */ T(H, {
 					d: r,
 					open: _
 				}), n[16] = _, n[17] = r, n[18] = e) : e = n[18], c = e;
 				break bb0;
 			}
-			p = "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2", n[19] !== _ || n[20] !== r ? (m = /* @__PURE__ */ T(B, {
+			p = "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2", n[19] !== _ || n[20] !== r ? (m = /* @__PURE__ */ T(H, {
 				d: r,
 				open: _
 			}), n[19] = _, n[20] = r, n[21] = m) : m = n[21], n[22] !== r.branch || n[23] !== r.repo ? (h = !r.branch && /* @__PURE__ */ T(s, {
@@ -70,7 +74,7 @@ function R(t) {
 				ref: i
 			}), n[25] = r.repo, n[26] = i, n[27] = v) : v = n[27];
 			let y;
-			n[28] === r.repo ? y = n[29] : (y = r.repo.split("/").pop(), n[28] = r.repo, n[29] = y), n[30] !== v || n[31] !== y ? (d = /* @__PURE__ */ T(z, {
+			n[28] === r.repo ? y = n[29] : (y = r.repo.split("/").pop(), n[28] = r.repo, n[29] = y), n[30] !== v || n[31] !== y ? (d = /* @__PURE__ */ T(V, {
 				onClick: v,
 				children: y
 			}), n[30] = v, n[31] = y, n[32] = d) : d = n[32], f = e.map((t, n) => {
@@ -83,7 +87,7 @@ function R(t) {
 					}), a ? /* @__PURE__ */ T("strong", {
 						className: "font-semibold",
 						children: t
-					}) : /* @__PURE__ */ T(z, {
+					}) : /* @__PURE__ */ T(V, {
 						onClick: () => P("repo", {
 							repo: r.repo,
 							ref: i,
@@ -122,7 +126,7 @@ function R(t) {
 		]
 	}), n[42] = _, n[43] = p, n[44] = m, n[45] = h, n[46] = v) : v = n[46], v;
 }
-var z = (t) => {
+var V = (t) => {
 	let n = e(3), { onClick: r, children: i } = t, a;
 	return n[0] !== i || n[1] !== r ? (a = /* @__PURE__ */ T("button", {
 		type: "button",
@@ -131,7 +135,7 @@ var z = (t) => {
 		children: i
 	}), n[0] = i, n[1] = r, n[2] = a) : a = n[2], a;
 };
-function B(t) {
+function H(t) {
 	let n = e(12), { d: r, open: i } = t, a = r.branch ? "git-branch" : "git-commit", o;
 	n[0] === a ? o = n[1] : (o = /* @__PURE__ */ T(f, { name: a }), n[0] = a, n[1] = o);
 	let c;
@@ -159,7 +163,7 @@ function B(t) {
 		]
 	}), n[8] = i, n[9] = o, n[10] = l, n[11] = d) : d = n[11], d;
 }
-function V(t) {
+function U(t) {
 	let n = e(55), { c: r, d: i } = t, a = k(), c;
 	n[0] === i ? c = n[1] : (c = () => P("history", {
 		repo: i.repo,
@@ -283,9 +287,9 @@ function V(t) {
 		children: [C, O]
 	}), n[52] = C, n[53] = O, n[54] = M) : M = n[54], M;
 }
-var H = one.params, U = (e) => e.split("/").slice(0, -1).join("/"), W = (e) => /\.(md|mdx|markdown)$/i.test(e);
-function G(t) {
-	let n = e(32), { d: r, path: a } = t, [o, s] = i(W(a) ? "preview" : "code");
+var W = one.params, G = (e) => e.split("/").slice(0, -1).join("/"), K = (e) => /\.(md|mdx|markdown)$/i.test(e);
+function q(t) {
+	let n = e(32), { d: r, path: a } = t, [o, s] = i(K(a) ? "preview" : "code");
 	if (r.submodule) {
 		let e;
 		n[0] === r.submodule ? e = n[1] : (e = j(r.submodule), n[0] = r.submodule, n[1] = e);
@@ -317,7 +321,7 @@ function G(t) {
 		] }), n[10] = e, n[11] = t), t;
 	}
 	let f;
-	n[12] === a ? f = n[13] : (f = W(a), n[12] = a, n[13] = f);
+	n[12] === a ? f = n[13] : (f = K(a), n[12] = a, n[13] = f);
 	let p = f, h;
 	if (n[14] !== r.text || n[15] !== a) {
 		let e;
@@ -359,8 +363,8 @@ function G(t) {
 		children: [b, S]
 	}), n[29] = b, n[30] = S, n[31] = C) : C = n[31], C;
 }
-function K(t) {
-	let n = e(24), { repo: i, rev: a, path: o } = t, s;
+function J(t) {
+	let n = e(33), { repo: i, rev: a, path: o } = t, s;
 	n[0] !== o || n[1] !== i || n[2] !== a ? (s = {
 		repo: i,
 		ref: a,
@@ -373,42 +377,58 @@ function K(t) {
 	let d = c.data;
 	if (!d) {
 		let e;
-		return n[7] === c ? e = n[8] : (e = /* @__PURE__ */ T(h, {
+		n[7] !== o || n[8] !== i || n[9] !== a ? (e = z({
+			repo: i,
+			ref: a,
+			path: o
+		}), n[7] = o, n[8] = i, n[9] = a, n[10] = e) : e = n[10];
+		let t;
+		n[11] === e ? t = n[12] : (t = /* @__PURE__ */ T(B, {
+			d: e,
+			file: !0
+		}), n[11] = e, n[12] = t);
+		let r;
+		n[13] === c ? r = n[14] : (r = /* @__PURE__ */ T(h, {
 			call: c,
 			rows: 2
-		}), n[7] = c, n[8] = e), e;
+		}), n[13] = c, n[14] = r);
+		let s;
+		return n[15] !== t || n[16] !== r ? (s = /* @__PURE__ */ E("div", {
+			className: "flex min-w-0 flex-col gap-3",
+			children: [t, r]
+		}), n[15] = t, n[16] = r, n[17] = s) : s = n[17], s;
 	}
 	let f;
-	n[9] === d ? f = n[10] : (f = /* @__PURE__ */ T(R, {
+	n[18] === d ? f = n[19] : (f = /* @__PURE__ */ T(B, {
 		d,
 		file: !0
-	}), n[9] = d, n[10] = f);
+	}), n[18] = d, n[19] = f);
 	let p;
-	n[11] !== d || n[12] !== o ? (p = {
+	n[20] !== d || n[21] !== o ? (p = {
 		...d,
 		path: o
-	}, n[11] = d, n[12] = o, n[13] = p) : p = n[13];
+	}, n[20] = d, n[21] = o, n[22] = p) : p = n[22];
 	let m;
-	n[14] !== d.latest || n[15] !== p ? (m = /* @__PURE__ */ T(V, {
+	n[23] !== d.latest || n[24] !== p ? (m = /* @__PURE__ */ T(U, {
 		c: d.latest,
 		d: p
-	}), n[14] = d.latest, n[15] = p, n[16] = m) : m = n[16];
+	}), n[23] = d.latest, n[24] = p, n[25] = m) : m = n[25];
 	let g;
-	n[17] !== d || n[18] !== o ? (g = /* @__PURE__ */ T(G, {
+	n[26] !== d || n[27] !== o ? (g = /* @__PURE__ */ T(q, {
 		d,
 		path: o
-	}), n[17] = d, n[18] = o, n[19] = g) : g = n[19];
+	}), n[26] = d, n[27] = o, n[28] = g) : g = n[28];
 	let _;
-	return n[20] !== f || n[21] !== m || n[22] !== g ? (_ = /* @__PURE__ */ E("div", {
+	return n[29] !== f || n[30] !== m || n[31] !== g ? (_ = /* @__PURE__ */ E("div", {
 		className: "flex min-w-0 flex-col gap-3",
 		children: [
 			f,
 			m,
 			g
 		]
-	}), n[20] = f, n[21] = m, n[22] = g, n[23] = _) : _ = n[23], _;
+	}), n[29] = f, n[30] = m, n[31] = g, n[32] = _) : _ = n[32], _;
 }
-function q(t) {
+function Y(t) {
 	let n = e(27), { repo: r, rev: i, dir: a, path: o, pick: s, enter: c } = t, l;
 	n[0] !== a || n[1] !== r || n[2] !== i ? (l = {
 		repo: r,
@@ -425,11 +445,11 @@ function q(t) {
 	}
 	let f;
 	n[6] === a ? f = n[7] : (f = (e) => (a ? a + "/" : "") + e.name, n[6] = a, n[7] = f);
-	let m = f, g = J, _;
+	let m = f, g = X, _;
 	n[8] !== a || n[9] !== c ? (_ = a && /* @__PURE__ */ T(g, {
 		icon: "folder",
 		name: "..",
-		onClick: () => c(U(a))
+		onClick: () => c(G(a))
 	}), n[8] = a, n[9] = c, n[10] = _) : _ = n[10];
 	let v;
 	n[11] === d.entries ? v = n[12] : (v = d.entries || [], n[11] = d.entries, n[12] = v);
@@ -453,7 +473,7 @@ function q(t) {
 	let b;
 	return n[24] !== _ || n[25] !== y ? (b = /* @__PURE__ */ E(p, { children: [_, y] }), n[24] = _, n[25] = y, n[26] = b) : b = n[26], b;
 }
-function J(e) {
+function X(e) {
 	let { icon: t, name: n, selected: r, onClick: i } = e;
 	return /* @__PURE__ */ E("button", {
 		type: "button",
@@ -469,22 +489,22 @@ function J(e) {
 		})]
 	});
 }
-function Y() {
-	let t = e(8), n = k(), [r, a] = i(H.path), o;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (o = U(H.path), t[0] = o) : o = t[0];
+function Z() {
+	let t = e(8), n = k(), [r, a] = i(W.path), o;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (o = G(W.path), t[0] = o) : o = t[0];
 	let [s, c] = i(o), l;
-	t[1] === r ? l = t[2] : (l = /* @__PURE__ */ T(K, {
-		repo: H.repo,
-		rev: H.ref,
+	t[1] === r ? l = t[2] : (l = /* @__PURE__ */ T(J, {
+		repo: W.repo,
+		rev: W.ref,
 		path: r
 	}, r), t[1] = r, t[2] = l);
 	let u = l, d;
 	return t[3] !== s || t[4] !== u || t[5] !== r || t[6] !== n ? (d = n ? /* @__PURE__ */ T(g, {
 		wide: 640,
 		size: "20rem",
-		list: /* @__PURE__ */ T(q, {
-			repo: H.repo,
-			rev: H.ref,
+		list: /* @__PURE__ */ T(Y, {
+			repo: W.repo,
+			rev: W.ref,
 			dir: s,
 			path: r,
 			pick: a,
@@ -493,5 +513,5 @@ function Y() {
 		detail: u
 	}) : u, t[3] = s, t[4] = u, t[5] = r, t[6] = n, t[7] = d) : d = t[7], d;
 }
-a(document.getElementById("root")).render(/* @__PURE__ */ T(O, { children: /* @__PURE__ */ T(Y, {}) }));
+a(document.getElementById("root")).render(/* @__PURE__ */ T(O, { children: /* @__PURE__ */ T(Z, {}) }));
 </script>

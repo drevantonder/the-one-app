@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { Card, CodeView, CopyButton, Empty, fileSize, Icon, List, Markdown, Pending, Split, Tabs, TabsList, TabsTrigger, useCall } from "@one/ui"
-import { CommitCard, PathBar } from "../lib/frame.jsx"
+import { CommitCard, PathBar, placed } from "../lib/frame.jsx"
 import { WIDE, Frame, plural, short, useWide } from "../lib/use.jsx"
 
 const P = one.params
@@ -48,7 +48,14 @@ function File({ repo, rev, path }) {
     one.title(path.split("/").pop())
   }, [path])
   const d = file.data
-  if (!d) return <Pending call={file} rows={2} />
+  if (!d) {
+    return (
+      <div className="flex min-w-0 flex-col gap-3">
+        <PathBar d={placed({ repo, ref: rev, path })} file />
+        <Pending call={file} rows={2} />
+      </div>
+    )
+  }
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <PathBar d={d} file />

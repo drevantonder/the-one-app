@@ -1,5 +1,7 @@
-// Reads git objects out of a repo's packs, which are blobs. A pack is indexed the first time it's read (each object's
-// offset and hash) and kept in memory while the app runs; packs are never thin, so every delta's base is in its pack.
+// Reads git objects out of a repo's packs, which are blobs. Each pack has the index file its push stored (each object's
+// hash and offset), so reading one inflates only the objects asked for; a pack being pushed has none yet, and is worked
+// out whole (`index`). Packs are kept in memory while the app runs and are never thin, so every delta's base is in
+// its pack.
 //
 // pako's low-level inflate, because a pack's objects are zlib streams back to back with no lengths: it says how much
 // input each stream used, which DecompressionStream can't.
@@ -62,28 +64,35 @@ class Pack {
     this.held = 0;
   }
 
+  /// The object at `start`'s type, size, where its stream starts, and its base.
+  head(start) {
+    const b = this.bytes;
+    let at = start;
+    let c = b[at++], type = (c >> 4) & 7, size = c & 15, shift = 4;
+    while (c & 0x80) { c = b[at++]; size += (c & 0x7f) * 2 ** shift; shift += 7; }
+    let base = null;
+    if (type === OFS_DELTA) {
+      c = b[at++];
+      let off = c & 0x7f;
+      while (c & 0x80) { c = b[at++]; off = (off + 1) * 128 + (c & 0x7f); }
+      base = start - off;
+    } else if (type === REF_DELTA) {
+      base = hex(b.subarray(at, at + 20));
+      at += 20;
+    }
+    const header = { type, size, data: at, base };
+    this.headers.set(start, header);
+    return header;
+  }
+
   async index() {
     const b = this.bytes;
     if (utf8.decode(b.subarray(0, 4)) !== "PACK") throw new Error("a pack is damaged");
     const count = ((b[8] << 24) | (b[9] << 16) | (b[10] << 8) | b[11]) >>> 0;
     let at = 12;
     for (let n = 0; n < count; n++) {
-      const start = at;
-      let c = b[at++], type = (c >> 4) & 7, size = c & 15, shift = 4;
-      while (c & 0x80) { c = b[at++]; size += (c & 0x7f) * 2 ** shift; shift += 7; }
-      let base = null;
-      if (type === OFS_DELTA) {
-        c = b[at++];
-        let off = c & 0x7f;
-        while (c & 0x80) { c = b[at++]; off = (off + 1) * 128 + (c & 0x7f); }
-        base = start - off;
-      } else if (type === REF_DELTA) {
-        base = hex(b.subarray(at, at + 20));
-        at += 20;
-      }
-      const header = { type, size, data: at, base };
-      this.headers.set(start, header);
-      [, at] = inflate(b, at, size);
+      const header = this.head(at);
+      [, at] = inflate(b, header.data, header.size);
     }
     // Hash every object; a REF_DELTA's base may come later in the pack, so those wait for a second pass.
     let waiting = [...this.headers.keys()];
@@ -115,7 +124,7 @@ class Pack {
       this.recent.set(offset, hit);
       return hit;
     }
-    const h = this.headers.get(offset);
+    const h = this.headers.get(offset) || this.head(offset);
     const [raw] = inflate(this.bytes, h.data, h.size);
     let obj;
     if (h.type === OFS_DELTA || h.type === REF_DELTA) {
@@ -137,17 +146,22 @@ class Pack {
 
 const packs = new Map(); // blob hash → Promise<Pack>
 
-function pack(ctx, hash) {
+function pack(ctx, { hash, idx }) {
   if (!packs.has(hash)) {
-    const p = ctx.blob.get(hash).then((bytes) => new Pack(bytes).index());
+    const p = Promise.all([ctx.blob.get(hash), ctx.blob.get(idx)]).then(([bytes, index]) => {
+      const pack = new Pack(bytes);
+      for (const e of listed(index)) pack.at.set(e.sha, e.offset);
+      return pack;
+    });
     p.catch(() => packs.delete(hash));
     packs.set(hash, p);
   }
   return packs.get(hash);
 }
 
-export async function objects(ctx, hashes) {
-  const all = await Promise.all(hashes.map((h) => pack(ctx, h)));
+/// `held` is each pack's `{ hash, idx }`: its blob and its index file's.
+export async function objects(ctx, held) {
+  const all = await Promise.all(held.map((p) => pack(ctx, p)));
   const parsed = new Map();
   const raw = (sha) => {
     for (const p of all) {

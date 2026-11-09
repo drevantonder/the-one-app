@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { Avatar, Button, Empty, List, Pending, Section, Split, useCall } from "@one/ui"
 import { CommitView } from "../lib/commit-view.jsx"
-import { PathBar } from "../lib/frame.jsx"
+import { PathBar, placed } from "../lib/frame.jsx"
 import { SmallCopy } from "../lib/parts.jsx"
 import { WIDE_BESIDE, Frame, ago, go, short, useBeside, useWide } from "../lib/use.jsx"
 
@@ -50,7 +50,14 @@ function History() {
     one.title(P.path ? `History of ${P.path.split("/").pop()}` : "History")
   }, [])
 
-  if (!d) return <Pending call={log} rows={5} />
+  if (!d) {
+    return (
+      <div className="flex max-w-2xl flex-col gap-4">
+        <PathBar d={placed(at)} />
+        <Pending call={log} rows={5} />
+      </div>
+    )
+  }
   if (!d.commits.length) {
     return (
       <div className="flex max-w-2xl flex-col gap-4">

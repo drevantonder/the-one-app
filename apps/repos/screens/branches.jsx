@@ -12,7 +12,7 @@ function Branches() {
   useEffect(() => {
     one.title("Branches")
   }, [])
-  if (!call.data) return <Pending call={call} rows={3} />
+  if (!call.data) return <Pending call={call} rows={3} tiles="22rem" />
   if (!call.data.length) {
     return (
       <Empty>

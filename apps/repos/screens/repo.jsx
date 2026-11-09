@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { Button, Card, CardContent, CopyButton, Empty, Hint, Icon, List, ListRow, Markdown, Pending, Problem, Spinner, useCall } from "@one/ui"
-import { CommitCard, PathBar, RepoTabs } from "../lib/frame.jsx"
+import { CommitCard, PathBar, RepoTabs, placed } from "../lib/frame.jsx"
 import { GitHubMark, RepoIcon } from "../lib/parts.jsx"
 import { Frame, ago, go, refOf, said, short, useAddress, useBeside, useWide, where } from "../lib/use.jsx"
 
@@ -199,7 +199,17 @@ function Repo() {
     if (d?.file) one.open("file", { repo: d.repo, ref: refOf(d), path: at })
   }, [d?.file])
 
-  if (!d) return <Frame><RepoTabs repo={P.repo} on="code" /><Pending call={tree} rows={6} /></Frame>
+  if (!d) {
+    return (
+      <Frame>
+        <RepoTabs repo={P.repo} on="code" />
+        <div className="flex max-w-2xl flex-col gap-3">
+          <PathBar d={placed({ repo: P.repo, ref: P.ref, path: at })} />
+          <Pending call={tree} rows={6} />
+        </div>
+      </Frame>
+    )
+  }
   if (d.file) return null
   const info = { open_issues: d.open_issues, yours: d.yours }
 

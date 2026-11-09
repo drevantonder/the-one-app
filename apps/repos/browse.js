@@ -15,8 +15,7 @@ const utf8 = new TextDecoder();
 
 export async function open(ctx, g, r, ref) {
   const branches = await g.query("select branch, head, name, time from branches where repo = ? order by branch", [r.id]);
-  const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [r.id])).map((p) => p.hash);
-  const o = await objects(ctx, packs);
+  const o = await objects(ctx, await g.query("select p.hash, i.idx from packs p join indexes i on i.pack = p.hash where p.repo = ? order by p.time, p.hash", [r.id]));
   if (!branches.length) return { r, o, branches, ref: null, sha: null };
   ref ||= branches.find((b) => b.branch === "main")?.branch || branches[0].branch;
   const b = branches.find((x) => x.branch === ref);
