@@ -2,18 +2,11 @@ import * as React from "react"
 import { WarningCircleIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { List, ListRow } from "@/components/layout"
-import { failureSentence } from "@/components/loading"
+import { bridge, failureSentence } from "@/components/loading"
 
 /// What an app that keeps accounts answers to its `accounts` call, one each: its name, whether it works and, if it
 /// doesn't, why. An app may add what it likes (a device, say) for its own rows.
 type Account = { account: string; ok?: boolean; why?: string; [more: string]: unknown }
-
-type Bridge = {
-  call: (tool: string, input?: object) => Promise<any>
-  on: (event: string, run: () => void) => void
-  plain: (err: unknown) => { title: string; next?: string }
-}
-const bridge = () => (globalThis as unknown as { one: Bridge }).one
 
 /// The accounts an app has signed in (its `accounts` call), kept fresh: asked for now and again whenever the app
 /// changes; a later failure keeps what's shown. `signOut(account, input?)` (the app's `sign_out` call) takes one off at

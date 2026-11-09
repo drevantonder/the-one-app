@@ -1,8 +1,8 @@
 // How an app is doing, for its owners: its errors, its schedules' recent runs, who used it, and its AI cost.
 import { useEffect } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, List, ListRow, ListSkeleton } from "@one/ui"
-import { Failed, Section, useCall } from "../lib/store.jsx"
+import { Empty, List, ListRow, Pending, useCall } from "@one/ui"
+import { Section } from "../lib/store.jsx"
 
 const what = { cli: "CLI", mcp: "Agent", phone: "iPhone", mac: "Mac", browser: "Browser", schedule: "Schedule", app: "Another app", node: "The device", api: "A program on the device" }
 const usd = (n) => "$" + (n < 1 ? n.toFixed(4) : n.toFixed(2))
@@ -15,7 +15,7 @@ function Activity() {
     one.title("Activity")
   }, [])
   if (!app) return <Empty>This page isn't here. The link may be old or mistyped.</Empty>
-  if (!health.data) return <div className="p-4">{health.error ? <Failed error={health.error} retry={health.reload} /> : <ListSkeleton rows={4} />}</div>
+  if (!health.data) return <div className="p-4"><Pending call={health} rows={4} /></div>
 
   const { insights, activity } = health.data
   const errors = insights?.errors || []

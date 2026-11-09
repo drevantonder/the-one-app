@@ -2,10 +2,10 @@
 // repo make, change and delete them.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Input, List, ListRow, Problem, ResponsiveDialog, Spinner } from "@one/ui"
+import { Button, Empty, Input, List, ListRow, Problem, ResponsiveDialog, Spinner, Pending, useCall } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
 import { LabelChip } from "../lib/parts.jsx"
-import { Frame, Pending, plural, said, useCall } from "../lib/use.jsx"
+import { Frame, plural, said } from "../lib/use.jsx"
 
 const P = one.params
 const COLOURS = ["d73a4a", "0075ca", "a2eeef", "7057ff", "008672", "e4e669", "d876e3", "fbca04"]

@@ -437,10 +437,19 @@ function Devices() {
     setBusyCode("")
   }
 
+  const tabs = (
+    <Tabs value={tab} onValueChange={setTab}>
+      <TabsList className="max-w-full justify-start overflow-x-auto">
+        <TabsTrigger value="devices">Devices</TabsTrigger>
+        <TabsTrigger value="priority">Priority</TabsTrigger>
+        <TabsTrigger value="services">Services</TabsTrigger>
+      </TabsList>
+    </Tabs>
+  )
   let body
   if (!data) {
     body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => load() }} />
-      : <ListSkeleton rows={3} />
+      : <>{tabs}<ListSkeleton rows={3} /></>
   } else {
     const { waiting, device } = data
     const joined = m.justJoined()
@@ -454,13 +463,7 @@ function Devices() {
         {joined.map((c) => <Joined key={c.key} c={c} remove={() => remove(c.name, [c.key], null)} />)}
         {scan?.error && <Problem title={scan.error} />}
         {scan?.r && <Scanned scan={scan} done={() => (setScan(null), load())} cancel={() => setScan(null)} />}
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="max-w-full justify-start overflow-x-auto">
-            <TabsTrigger value="devices">Devices</TabsTrigger>
-            <TabsTrigger value="priority">Priority</TabsTrigger>
-            <TabsTrigger value="services">Services</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {tabs}
         {tab === "priority" ? (
           <Priority m={m} move={moveMenu} />
         ) : tab === "services" ? (
@@ -487,7 +490,7 @@ function Devices() {
     <div className="@container flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="large-title text-3xl font-bold tracking-tight">Devices</h1>
-        {data && <Button variant={data.waiting.length ? "outline" : "default"} onClick={() => show({ add: true })}><Icon name="plus" />Add a Device</Button>}
+        <Button variant={data?.waiting.length ? "outline" : "default"} disabled={!data} onClick={() => show({ add: true })}><Icon name="plus" />Add a Device</Button>
       </div>
       {body}
       {data && dialog.for?.rename && <Rename key={dialog.n} card={dialog.for.rename} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}

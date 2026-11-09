@@ -2,9 +2,9 @@
 // room, the app opened beside them.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, Icon, Input, Problem, Split, useWidth, ListSkeleton } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Icon, Input, Problem, Pending, Split, useWidth } from "@one/ui"
 import { AppPage } from "../lib/app-page.jsx"
-import { Failed, Section, onAPage, openApp, said, useApps } from "../lib/store.jsx"
+import { Section, onAPage, openApp, said, useApps } from "../lib/store.jsx"
 
 // The sections: the apps built into the release, and those made in this network (each network words that its own way,
 // in its settings).
@@ -88,7 +88,7 @@ function Main() {
     tiles = found.length
       ? <>{section("Built In", found.filter((a) => a.built_in && !a.deleted))}{section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted))}{section("Recently Deleted", found.filter((a) => a.deleted))}</>
       : <Empty>{query.trim() ? `Nothing matches “${query.trim().toLowerCase()}”.` : "No results."}</Empty>
-  } else tiles = apps.error ? <Failed error={apps.error} retry={apps.reload} /> : <ListSkeleton rows={4} />
+  } else tiles = <Pending call={apps} rows={8} tiles="17rem" />
 
   const top = (
     <div className="flex flex-col gap-3">

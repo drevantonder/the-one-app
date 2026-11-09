@@ -1,6 +1,7 @@
 import * as React from "react"
 import { CaretRightIcon, PlusIcon } from "@phosphor-icons/react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { appear, glide } from "@/lib/moves"
 import { cn } from "@/lib/utils"
 
 /// A grid that fills the room it has: as many columns as fit at `min` wide each, at most `max` of them, so a big window
@@ -21,12 +22,27 @@ function Grid({ min = "14rem", max = 6, gap = "1rem", className, style, ...props
   )
 }
 
-/// Rows in one group, which stops at a readable width however wide the room is.
+/// Rows in one group, which stops at a readable width however wide the room is. A row added fades in, and those pushed
+/// or pulled by a row coming or going glide to their new place.
 function List({ className, ...props }: React.ComponentProps<"div">) {
+  const list = React.useRef<HTMLDivElement>(null)
+  const was = React.useRef(new Map<Element, number>())
+  React.useLayoutEffect(() => {
+    const now = new Map<Element, number>()
+    for (const row of list.current!.children as HTMLCollectionOf<HTMLElement>) {
+      now.set(row, row.offsetTop)
+      if (!was.current.size) continue
+      const before = was.current.get(row)
+      if (before === undefined) appear(row)
+      else if (Math.abs(before - row.offsetTop) > 1) glide(row, before - row.offsetTop)
+    }
+    was.current = now
+  })
   return (
     <div
+      ref={list}
       data-slot="list"
-      className={cn("w-full max-w-2xl divide-y overflow-hidden rounded-xl border bg-card text-card-foreground", className)}
+      className={cn("relative w-full max-w-2xl divide-y overflow-hidden rounded-xl border bg-card text-card-foreground", className)}
       {...props}
     />
   )
@@ -123,6 +139,14 @@ function Split({ list, detail, title, onClose, wide = 720, className }: {
 }) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const beside = width >= wide
+  // What's open is told apart by its `key`, as it must be for its own state to start afresh.
+  const open = React.isValidElement(detail) ? detail.key : null
+  const pane = React.useRef<HTMLDivElement>(null)
+  const was = React.useRef(open)
+  React.useLayoutEffect(() => {
+    if (open && open !== was.current && pane.current) appear(pane.current, was.current ? 0.4 : 0)
+    was.current = open
+  }, [open])
   return (
     <div
       ref={ref}
@@ -132,7 +156,7 @@ function Split({ list, detail, title, onClose, wide = 720, className }: {
     >
       <div className="min-w-0">{list}</div>
       {beside ? (
-        detail && <div className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 max-w-2xl animate-in overflow-y-auto duration-200 fade-in-0 motion-reduce:animate-none">{detail}</div>
+        detail && <div ref={pane} className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 max-w-2xl overflow-y-auto">{detail}</div>
       ) : (
         <Sheet open={!!detail && width > 0} onOpenChange={(open) => !open && onClose?.()}>
           <SheetContent side="bottom" className="max-h-[90svh] overflow-y-auto rounded-t-xl">

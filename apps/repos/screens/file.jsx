@@ -2,9 +2,9 @@
 // its code). Where there's room its folder's files are beside it, to go from one to the next without leaving.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Card, CodeView, CopyButton, Empty, Icon, List, Markdown, Tabs, TabsList, TabsTrigger, fileSize } from "@one/ui"
+import { Card, CodeView, CopyButton, Empty, Icon, List, Markdown, Tabs, TabsList, TabsTrigger, fileSize, Pending, useCall } from "@one/ui"
 import { CommitCard, PathBar } from "../lib/frame.jsx"
-import { Beside, Frame, Pending, plural, short, useCall, useWide } from "../lib/use.jsx"
+import { Beside, Frame, plural, short, useWide } from "../lib/use.jsx"
 
 const P = one.params
 const dirOf = (path) => path.split("/").slice(0, -1).join("/")

@@ -1,40 +1,9 @@
-// What every Repos screen shares: a call's answer, kept fresh; the room a screen has; times and names as a user
+// What every Repos screen shares: the room a screen has; times and names as a user
 // reads them; and where git reaches a repo.
-import { createContext, useCallback, useContext, useEffect, useState } from "react"
-import { ListSkeleton, Problem, useWidth } from "@one/ui"
-
-// The node's "changed" events go to every part that has loaded something: the bridge has no way to stop listening, so
-// this is its one listener.
-const listening = new Set()
-one.on("changed", () => listening.forEach((reload) => reload()))
-
-/// A call's answer: { data, error, reload }. Asked for when drawn, and again whenever the app changes; a later failure
-/// keeps what's shown. With `input` null it isn't asked for (yet). With `keep`, an answer stays shown while the next one
-/// for other input is out, rather than grey shapes.
-export function useCall(tool, input, keep = false) {
-  const [state, setState] = useState({ data: null, error: null })
-  const key = JSON.stringify(input)
-  const reload = useCallback(
-    () => (input === null ? Promise.resolve() : one.call(tool, input).then((data) => setState({ data, error: null }), (error) => setState((s) => ({ data: s.data, error })))),
-    [tool, key],
-  )
-  useEffect(() => {
-    if (!keep) setState({ data: null, error: null })
-    reload()
-    listening.add(reload)
-    return () => listening.delete(reload)
-  }, [reload])
-  return { ...state, reload }
-}
+import { createContext, useContext, useEffect, useState } from "react"
+import { useWidth } from "@one/ui"
 
 export const said = (error) => one.plain(error)
-
-export function Failed({ error, retry }) {
-  const p = said(error)
-  return <Problem title={p.title} text={p.next} action={{ label: "Try Again", run: retry }} />
-}
-
-export const Pending = ({ call, rows = 4 }) => (call.error ? <Failed error={call.error} retry={call.reload} /> : <ListSkeleton rows={rows} />)
 
 export function Section({ title, children }) {
   return (

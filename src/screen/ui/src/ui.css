@@ -20,6 +20,15 @@
 }
 
 @layer base {
+  /* What's pressed dims the moment it's touched, and comes back quickly. In this layer so what has its own transition
+     keeps it. */
+  :where(button, summary, a[href], [role=button], [role=tab], [role=link], [role=switch], [role=menuitem], [role=option]) {
+    transition: opacity 150ms ease-out;
+  }
+  :where(button, summary, a[href], [role=button], [role=tab], [role=link], [role=switch], [role=menuitem], [role=option]):active:not(:disabled, [aria-disabled=true], :has(:is(button, a[href], [role=button], [role=switch]):active)) {
+    opacity: 0.7;
+    transition-duration: 0s;
+  }
   * {
     @apply border-border outline-ring/50;
   }

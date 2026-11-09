@@ -2,6 +2,7 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 import { Slot } from "radix-ui"
+import { Spinner } from "@/components/ui/spinner"
 
 const buttonVariants = cva(
   "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
@@ -60,4 +61,26 @@ function Button({
   )
 }
 
-export { Button, buttonVariants }
+/// A button that's working: disabled, with a spinner, until its `run` is done.
+function LoadingButton({ run, children, ...props }: Omit<React.ComponentProps<typeof Button>, "onClick"> & { run: () => unknown }) {
+  const [busy, setBusy] = React.useState(false)
+  return (
+    <Button
+      {...props}
+      disabled={busy || props.disabled}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          await run()
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {busy && <Spinner />}
+      {children}
+    </Button>
+  )
+}
+
+export { Button, LoadingButton, buttonVariants }

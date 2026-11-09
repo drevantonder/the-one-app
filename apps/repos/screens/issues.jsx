@@ -2,11 +2,11 @@
 // there's room.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, Empty, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Spinner, Tabs, TabsList, TabsTrigger } from "@one/ui"
+import { Avatar, Button, Empty, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Spinner, Tabs, TabsList, TabsTrigger, Pending, Swap, useCall } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
 import { IssueView } from "../lib/issue-view.jsx"
 import { LabelChip, MarkdownField, StateIcon } from "../lib/parts.jsx"
-import { Beside, Frame, Pending, ago, go, plural, said, useBeside, useCall } from "../lib/use.jsx"
+import { Beside, Frame, ago, go, plural, said, useBeside } from "../lib/use.jsx"
 
 const P = one.params
 
@@ -90,7 +90,7 @@ function Issues() {
   const [creating, setCreating] = useState(false)
   const input = { repo: P.repo, state: f.state, page }
   for (const k of ["label", "assignee", "author", "q"]) if (f[k]) input[k] = f[k]
-  const list = useCall("issues", input, true)
+  const list = useCall("issues", input)
   const labels = useCall("labels", { repo: P.repo })
   const users = useCall("_users", { repo: P.repo })
   const d = list.data
@@ -107,13 +107,11 @@ function Issues() {
       if (typed.trim() === f.q) return
       setF((x) => ({ ...x, q: typed.trim() }))
       setPage(0)
-      setShown(null)
     }, 250)
     return () => clearTimeout(t)
   }, [typed])
 
-  const set = (key, value) => (setF((x) => ({ ...x, [key]: value })), setPage(0), setShown(null))
-  const turn = (to) => (setPage(to), setShown(null))
+  const set = (key, value) => (setF((x) => ({ ...x, [key]: value })), setPage(0))
   const open = (i) => (beside ? setShown(i.number) : go("issue", { repo: P.repo, number: i.number }))
   const made = (number) => {
     setCreating(false)
@@ -136,8 +134,9 @@ function Issues() {
     )
   }
   const names = (users.data || []).map((p) => ({ value: p.handle, title: p.name }))
-  // Where there's room the newest is open from the start, so the page isn't half empty.
-  const current = beside ? shown ?? d.issues[0]?.number : null
+  // Where there's room the newest is open from the start, so the page isn't half empty; the one that's open stays
+  // while the list it's in does.
+  const current = beside ? (d.issues.some((i) => i.number === shown) ? shown : d.issues[0]?.number) : null
   const none = filtered ? "No issues match." : f.state === "open" ? "No open issues." : "No closed issues."
   const left = (
     <div className="flex max-w-2xl flex-col gap-3">
@@ -159,12 +158,14 @@ function Issues() {
         <Filter title="Label" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} also={{ title: "Edit Labels…", run: () => go("labels", { repo: P.repo }) }} />
         <Filter title="Assignee" value={f.assignee} choices={[{ value: "none", title: "Assigned to no one" }, ...names]} set={(v) => set("assignee", v)} />
       </div>
-      {list.error && <Problem title={said(list.error).title} />}
-      {d.issues.length ? <List>{d.issues.map((i) => <Row key={i.number} i={i} selected={current === i.number} open={open} />)}</List> : <Empty>{none}</Empty>}
+      {list.error && !list.moving && <Problem title={said(list.error).title} />}
+      <Swap call={list} rows={4}>
+        {(now) => (now.issues.length ? <List>{now.issues.map((i) => <Row key={i.number} i={i} selected={current === i.number} open={open} />)}</List> : <Empty>{none}</Empty>)}
+      </Swap>
       {(page > 0 || d.more) && (
         <div className="flex gap-2">
-          <Button variant="outline" disabled={!page} onClick={() => turn(page - 1)}>Previous</Button>
-          <Button variant="outline" disabled={!d.more} onClick={() => turn(page + 1)}>Next</Button>
+          <Button variant="outline" disabled={!page} onClick={() => setPage(page - 1)}>Previous</Button>
+          <Button variant="outline" disabled={!d.more} onClick={() => setPage(page + 1)}>Next</Button>
         </div>
       )}
     </div>
@@ -172,7 +173,7 @@ function Issues() {
   return (
     <>
       {tabs}
-      <Beside size="34rem" list={left} detail={current && <IssueView key={current} repo={P.repo} number={current} onGone={() => (setShown(null), list.reload())} />} />
+      <Beside size="34rem" list={left} detail={current && <IssueView repo={P.repo} number={current} onGone={() => (setShown(null), list.reload())} />} />
       {creating && <NewIssue done={made} />}
     </>
   )

@@ -4,160 +4,117 @@
 /*$vite$:1*/</style>
 <div id="root"></div>
 <script type="module">import { c as e } from "react/compiler-runtime";
-import { createContext as t, useCallback as n, useEffect as r, useState as i } from "react";
-import { createRoot as a } from "react-dom/client";
-import { Badge as o, Empty as s, Icon as c, List as l, ListRow as u, ListSkeleton as d, Problem as f, useWidth as p } from "@one/ui";
-import { jsx as m, jsxs as h } from "react/jsx-runtime";
-var g = /* @__PURE__ */ new Set();
-one.on("changed", () => g.forEach((e) => e()));
-function _(e, t, a = !1) {
-	let [o, s] = i({
-		data: null,
-		error: null
-	}), c = JSON.stringify(t), l = n(() => t === null ? Promise.resolve() : one.call(e, t).then((e) => s({
-		data: e,
-		error: null
-	}), (e) => s((t) => ({
-		data: t.data,
-		error: e
-	}))), [e, c]);
-	return r(() => (a || s({
-		data: null,
-		error: null
-	}), l(), g.add(l), () => g.delete(l)), [l]), {
-		...o,
-		reload: l
-	};
-}
-var v = (e) => one.plain(e);
-function y(t) {
-	let n = e(8), { error: r, retry: i } = t, a;
-	n[0] === r ? a = n[1] : (a = v(r), n[0] = r, n[1] = a);
-	let o = a, s;
-	n[2] === i ? s = n[3] : (s = {
-		label: "Try Again",
-		run: i
-	}, n[2] = i, n[3] = s);
-	let c;
-	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ m(f, {
-		title: o.title,
-		text: o.next,
-		action: s
-	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = c) : c = n[7], c;
-}
-var b = (t) => {
-	let n = e(4), { call: r, rows: i } = t, a = i === void 0 ? 4 : i, o;
-	return n[0] !== r.error || n[1] !== r.reload || n[2] !== a ? (o = r.error ? /* @__PURE__ */ m(y, {
-		error: r.error,
-		retry: r.reload
-	}) : /* @__PURE__ */ m(d, { rows: a }), n[0] = r.error, n[1] = r.reload, n[2] = a, n[3] = o) : o = n[3], o;
-}, x = t(0);
-function S(t) {
-	let n = e(6), { children: r } = t, [i, a] = p(), o;
-	n[0] !== r || n[1] !== a ? (o = /* @__PURE__ */ m(x.Provider, {
+import { createContext as t, useEffect as n, useState as r } from "react";
+import { createRoot as i } from "react-dom/client";
+import { Badge as a, Empty as o, Icon as s, List as c, ListRow as l, Pending as u, useCall as d, useWidth as f } from "@one/ui";
+import { jsx as p, jsxs as m } from "react/jsx-runtime";
+var h = t(0);
+function g(t) {
+	let n = e(6), { children: r } = t, [i, a] = f(), o;
+	n[0] !== r || n[1] !== a ? (o = /* @__PURE__ */ p(h.Provider, {
 		value: a,
 		children: r
 	}), n[0] = r, n[1] = a, n[2] = o) : o = n[2];
 	let s;
-	return n[3] !== i || n[4] !== o ? (s = /* @__PURE__ */ m("div", {
+	return n[3] !== i || n[4] !== o ? (s = /* @__PURE__ */ p("div", {
 		className: "p-4",
-		children: /* @__PURE__ */ m("div", {
+		children: /* @__PURE__ */ p("div", {
 			ref: i,
 			children: o
 		})
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
-var C = (e) => one.ago(Date.parse(e), { long: !0 }), w = (e) => String(e || "").slice(0, 7), T = (e, t) => one.open(e, t), E = "<address>/repos/", D = "<you>", O = one.call("_address").then((e) => (E = e?.base || E, D = e?.handle || D), () => {});
-function k() {
-	let t = e(3), [, n] = i(0), a, o;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (a = () => void O.then(() => n(j)), o = [], t[0] = a, t[1] = o) : (a = t[0], o = t[1]), r(a, o);
+var _ = (e) => one.ago(Date.parse(e), { long: !0 }), v = (e) => String(e || "").slice(0, 7), y = (e, t) => one.open(e, t), b = "<address>/repos/", x = "<you>", S = one.call("_address").then((e) => (b = e?.base || b, x = e?.handle || x), () => {});
+function C() {
+	let t = e(3), [, i] = r(0), a, o;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (a = () => void S.then(() => i(T)), o = [], t[0] = a, t[1] = o) : (a = t[0], o = t[1]), n(a, o);
 	let s;
 	return t[2] === Symbol.for("react.memo_cache_sentinel") ? (s = {
-		address: A,
-		mine: D
+		address: w,
+		mine: x
 	}, t[2] = s) : s = t[2], s;
 }
-function A(e) {
-	return `${E}${e}.git`;
+function w(e) {
+	return `${b}${e}.git`;
 }
-function j(e) {
+function T(e) {
 	return e + 1;
 }
-var M = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`, N = one.params;
-function P() {
-	let t = e(15), { address: n } = k(), i;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (i = { repo: N.repo }, t[0] = i) : i = t[0];
-	let a = _("branches", i), o;
-	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (o = [], t[1] = o) : o = t[1], r(L, o), !a.data) {
+var E = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`, D = one.params;
+function O() {
+	let t = e(15), { address: r } = C(), i;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (i = { repo: D.repo }, t[0] = i) : i = t[0];
+	let a = d("branches", i), s;
+	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (s = [], t[1] = s) : s = t[1], n(j, s), !a.data) {
 		let e;
-		return t[2] === a ? e = t[3] : (e = /* @__PURE__ */ m(b, {
+		return t[2] === a ? e = t[3] : (e = /* @__PURE__ */ p(u, {
 			call: a,
 			rows: 3
 		}), t[2] = a, t[3] = e), e;
 	}
 	if (!a.data.length) {
 		let e;
-		t[4] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ h("span", {
+		t[4] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ m("span", {
 			className: "block",
 			children: [
 				"No branches yet. ",
-				M,
+				E,
 				", push one:"
 			]
 		}), t[4] = e) : e = t[4];
-		let r;
-		t[5] === n ? r = t[6] : (r = n(N.repo), t[5] = n, t[6] = r);
+		let n;
+		t[5] === r ? n = t[6] : (n = r(D.repo), t[5] = r, t[6] = n);
 		let i;
-		return t[7] === r ? i = t[8] : (i = /* @__PURE__ */ h(s, { children: [e, /* @__PURE__ */ h("code", {
+		return t[7] === n ? i = t[8] : (i = /* @__PURE__ */ m(o, { children: [e, /* @__PURE__ */ m("code", {
 			className: "mt-2 block rounded-md bg-muted px-2 py-1 font-mono text-xs",
 			children: [
 				"git push ",
-				r,
+				n,
 				" main"
 			]
-		})] }), t[7] = r, t[8] = i), i;
+		})] }), t[7] = n, t[8] = i), i;
 	}
-	let c, u;
+	let l, f;
 	if (t[9] !== a.data) {
-		let e = [...a.data].sort(I);
-		c = l, u = e.map(F), t[9] = a.data, t[10] = c, t[11] = u;
-	} else c = t[10], u = t[11];
-	let d;
-	return t[12] !== c || t[13] !== u ? (d = /* @__PURE__ */ m(c, { children: u }), t[12] = c, t[13] = u, t[14] = d) : d = t[14], d;
+		let e = [...a.data].sort(A);
+		l = c, f = e.map(k), t[9] = a.data, t[10] = l, t[11] = f;
+	} else l = t[10], f = t[11];
+	let h;
+	return t[12] !== l || t[13] !== f ? (h = /* @__PURE__ */ p(l, { children: f }), t[12] = l, t[13] = f, t[14] = h) : h = t[14], h;
 }
-function F(e) {
-	return /* @__PURE__ */ m(u, {
-		leading: /* @__PURE__ */ m(c, {
+function k(e) {
+	return /* @__PURE__ */ p(l, {
+		leading: /* @__PURE__ */ p(s, {
 			name: "git-branch",
 			className: "size-5 text-muted-foreground"
 		}),
-		title: /* @__PURE__ */ h("span", {
+		title: /* @__PURE__ */ m("span", {
 			className: "flex items-center gap-2",
-			children: [/* @__PURE__ */ m("span", {
+			children: [/* @__PURE__ */ p("span", {
 				className: "truncate",
 				children: e.branch
-			}), e.branch === "main" && /* @__PURE__ */ m(o, {
+			}), e.branch === "main" && /* @__PURE__ */ p(a, {
 				variant: "secondary",
 				children: "Default"
 			})]
 		}),
-		trailing: /* @__PURE__ */ m("span", {
+		trailing: /* @__PURE__ */ p("span", {
 			className: "text-xs text-muted-foreground",
-			children: C(e.time)
+			children: _(e.time)
 		}),
-		sub: e.subject ? `${e.subject} · ${e.author}` : `${w(e.head)} · ${e.pushed_by}`,
-		onClick: () => T("repo", {
-			repo: N.repo,
+		sub: e.subject ? `${e.subject} · ${e.author}` : `${v(e.head)} · ${e.pushed_by}`,
+		onClick: () => y("repo", {
+			repo: D.repo,
 			ref: e.branch,
-			path: N.path || ""
+			path: D.path || ""
 		})
 	}, e.branch);
 }
-function I(e, t) {
+function A(e, t) {
 	return (t.branch === "main") - (e.branch === "main") || Date.parse(t.time) - Date.parse(e.time);
 }
-function L() {
+function j() {
 	one.title("Branches");
 }
-a(document.getElementById("root")).render(/* @__PURE__ */ m(S, { children: /* @__PURE__ */ m(P, {}) }));
+i(document.getElementById("root")).render(/* @__PURE__ */ p(g, { children: /* @__PURE__ */ p(O, {}) }));
 </script>

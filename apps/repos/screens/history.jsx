@@ -1,11 +1,11 @@
 // A repo's commits, newest first, under the day each was made; a commit opens beside the list where there's room.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, Empty, List } from "@one/ui"
+import { Avatar, Button, Empty, List, Pending, useCall } from "@one/ui"
 import { CommitView } from "../lib/commit-view.jsx"
 import { PathBar } from "../lib/frame.jsx"
 import { SmallCopy } from "../lib/parts.jsx"
-import { Beside, Frame, Pending, ago, go, short, useBeside, useCall } from "../lib/use.jsx"
+import { Beside, Frame, ago, go, short, useBeside } from "../lib/use.jsx"
 
 const P = one.params
 const at = { repo: P.repo, ref: P.ref, path: P.path || "" }
@@ -80,7 +80,7 @@ function History() {
       </div>
     </div>
   )
-  return <Beside size="28rem" list={list} detail={<CommitView key={current} repo={d.repo} sha={current} files={false} />} />
+  return <Beside size="28rem" list={list} detail={<CommitView repo={d.repo} sha={current} files={false} />} />
 }
 
 createRoot(document.getElementById("root")).render(<Frame><History /></Frame>)

@@ -2,10 +2,10 @@
 // its README, and its branches and commits. Deleted, it says so, with Restore for its owners, and Erase.
 import { useCallback, useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Card, CardContent, CopyButton, Empty, Icon, List, ListRow, Markdown, Problem, Spinner } from "@one/ui"
+import { Button, Card, CardContent, CopyButton, Empty, Icon, List, ListRow, Markdown, Problem, Spinner, Pending, useCall } from "@one/ui"
 import { CommitCard, PathBar, RepoTabs } from "../lib/frame.jsx"
 import { GitHubMark, RepoIcon } from "../lib/parts.jsx"
-import { Frame, Pending, ago, go, refOf, said, short, useAddress, useBeside, useCall, useWide, where } from "../lib/use.jsx"
+import { Frame, ago, go, refOf, said, short, useAddress, useBeside, useWide, where } from "../lib/use.jsx"
 
 const P = one.params
 const at = P.path || ""
@@ -208,7 +208,7 @@ function Repo() {
     if (d?.file) one.open("file", { repo: d.repo, ref: refOf(d), path: at })
   }, [d?.file])
 
-  if (!d) return <Frame><Pending call={tree} rows={3} /></Frame>
+  if (!d) return <Frame><RepoTabs repo={P.repo} on="code" /><Pending call={tree} rows={6} /></Frame>
   if (d.file) return null
   const info = { open_issues: d.open_issues, yours: d.yours }
 

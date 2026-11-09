@@ -1,9 +1,9 @@
 // Repos: this network's repos, GitHub's beside them (connected, not copied), and Recently Deleted; searchable.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Grid, Icon, Input, List, ListRow, Problem, Spinner } from "@one/ui"
+import { Button, Empty, Grid, Icon, Input, List, ListRow, Problem, ListSkeleton, Pending, useCall } from "@one/ui"
 import { RepoIcon } from "../lib/parts.jsx"
-import { Frame, Pending, Section, ago, go, plural, said, useAddress, useCall, where } from "../lib/use.jsx"
+import { Frame, Section, ago, go, plural, said, useAddress, where } from "../lib/use.jsx"
 
 function Gone({ r, restore }) {
   return (
@@ -53,7 +53,13 @@ function Main() {
       .finally(() => setRestoring((s) => (s.delete(name), new Set(s))))
   }
 
-  if (!own.data) return <Frame><Pending call={own} /></Frame>
+  const find = (
+    <div className="relative max-w-md">
+      <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
+      <Input className="pl-8" placeholder="Find a repo" aria-label="Find a repo" value={query} onChange={(e) => setQuery(e.target.value)} />
+    </div>
+  )
+  if (!own.data) return <Frame><div className="flex flex-col gap-6">{find}<Pending call={own} rows={6} tiles="22rem" /></div></Frame>
 
   const q = query.trim().toLowerCase()
   const githubs = github.data
@@ -78,18 +84,11 @@ function Main() {
   return (
     <Frame>
       <div className="flex flex-col gap-6">
-        <div className="relative max-w-md">
-          <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Find a repo" aria-label="Find a repo" value={query} onChange={(e) => setQuery(e.target.value)} />
-        </div>
+        {find}
         {trouble && <Problem title={trouble} />}
-        {here.length > 0 && <Tiles of={here} />}
+        {here.length > 0 ? <Tiles of={here} /> : !asked && !q && <ListSkeleton rows={6} tiles="22rem" />}
         {githubTrouble ? (
           <Section title="GitHub"><Problem title={githubTrouble} action={{ label: "Settings", run: () => one.open("settings") }} /></Section>
-        ) : !githubs ? (
-          <Section title="GitHub">
-            <p className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Loading GitHub's repos…</p>
-          </Section>
         ) : (
           githubShown.length > 0 && <Section title="GitHub"><Tiles of={githubShown} /></Section>
         )}

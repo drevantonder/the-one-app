@@ -1,8 +1,8 @@
 // A repo's branches, the default first and then the newest: each opens the repo on it.
 import { useEffect } from "react"
 import { createRoot } from "react-dom/client"
-import { Badge, Empty, Icon, List, ListRow } from "@one/ui"
-import { Frame, Pending, ago, go, short, useAddress, useCall, where } from "../lib/use.jsx"
+import { Badge, Empty, Icon, List, ListRow, Pending, useCall } from "@one/ui"
+import { Frame, ago, go, short, useAddress, where } from "../lib/use.jsx"
 
 const P = one.params
 

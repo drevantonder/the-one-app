@@ -1,10 +1,11 @@
 import { WarningCircleIcon } from "@phosphor-icons/react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
+import { Button, LoadingButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 /// A problem, shown on the thing it's about: a symbol, a short title, one sentence, and the action that fixes it. `warn`
-/// for what can wait; `quiet` for what doesn't need the user (it mends itself), in no colour; otherwise it's red.
+/// for what can wait; `quiet` for what doesn't need the user (it mends itself), in no colour; otherwise it's red. Its
+/// action shows it's working until `run` is done, so pressing Try Again never looks like nothing happened.
 function Problem({ title, text, action, warn = false, quiet = false, className }: {
   title: string
   text?: string
@@ -21,9 +22,9 @@ function Problem({ title, text, action, warn = false, quiet = false, className }
         <AlertDescription>
           {text && <p>{text}</p>}
           {action && (
-            <Button variant="outline" size="sm" className="mt-2 text-foreground" onClick={() => action.run()}>
+            <LoadingButton variant="outline" size="sm" className="mt-2 text-foreground" run={action.run}>
               {action.label}
-            </Button>
+            </LoadingButton>
           )}
         </AlertDescription>
       )}

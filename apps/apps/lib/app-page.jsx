@@ -2,8 +2,8 @@
 // isn't (app.jsx): its icon and name, where it runs, its schedules, what it works with, its source, and, for its owners,
 // its activity and deleting it.
 import { useEffect, useRef, useState } from "react"
-import { AppIcon, Button, Empty, Icon, List, ListRow, Problem, Switch } from "@one/ui"
-import { Section, onAPage, openApp, said, useCall } from "./store.jsx"
+import { AppIcon, Button, Empty, Icon, List, ListRow, ListSkeleton, Problem, Switch, useCall } from "@one/ui"
+import { Section, onAPage, openApp, said } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
 const ago = (t) => (one.ago(t) === "now" ? "just now" : one.ago(t) + " ago")
@@ -125,6 +125,8 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
     if (i != null) more[i].run()
   }
   const adds = a.deployed || admin
+  // What's asked for apart comes in as one, rather than each pushing down what's under it.
+  const answered = [code, health, where].every((c) => c.of !== null || c.error)
 
   return (
     <div className="flex flex-col gap-6">
@@ -150,6 +152,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
 
       {error && <Problem title={error} />}
 
+      {answered ? <>
       {w?.problem && <Problem warn title={w.problem.title} text={w.problem.text} action={w.problem.move ? { label: "Move", run: () => move() } : undefined} />}
       {w && w.runs_on.length > 0 && (
         <Section title="Runs On">
@@ -221,6 +224,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
       )}
 
       <p className="text-sm text-muted-foreground">Made by {a.owner_name}</p>
+      </> : <ListSkeleton rows={3} />}
     </div>
   )
 }

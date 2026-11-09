@@ -1,9 +1,9 @@
 // A commit: who made it and what it says, the files it changed, and each file's diff, loaded as it comes near the
 // screen. It's the Commit screen, and what History shows beside its list where there's room.
 import { useEffect, useRef, useState } from "react"
-import { Avatar, Badge, Button, Card, DiffView, Empty, Icon, List, ListRow, Problem, Spinner, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
+import { Avatar, Badge, Button, Card, DiffView, Empty, Icon, List, ListRow, Problem, Spinner, Tabs, TabsList, TabsTrigger, Swap, useCall, useWidth } from "@one/ui"
 import { Counts, SmallCopy } from "./parts.jsx"
-import { Pending, ago, go, plural, said, short, useCall } from "./use.jsx"
+import { ago, go, plural, said, short } from "./use.jsx"
 
 const BADGE = { added: "Added", deleted: "Deleted", renamed: "Renamed" }
 
@@ -64,19 +64,15 @@ function DiffFile({ d, f, k, split, load, loading }) {
 
 export function CommitView({ repo, sha, files = true }) {
   const commit = useCall("commit", { repo, sha })
-  const d = commit.data
+  return <Swap call={commit}>{(d) => <Commit d={d} repo={repo} sha={sha} files={files} />}</Swap>
+}
+
+function Commit({ d, repo, sha, files }) {
   const [room, width] = useWidth()
   const [asked, setAsked] = useState(null)
   const split = asked ?? width >= 720
   const [more, setMore] = useState({})
   const [asking, setAsking] = useState({})
-
-  useEffect(() => {
-    setMore({})
-    setAsking({})
-  }, [repo, sha])
-
-  if (!d) return <div ref={room}><Pending call={commit} rows={3} /></div>
 
   const load = async (k, loud) => {
     const patch = (p) => setMore((m) => ({ ...m, [k]: { ...m[k], ...p } }))

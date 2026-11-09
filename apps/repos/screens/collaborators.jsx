@@ -1,9 +1,9 @@
 // Who pushes to a repo: its owner, a group's members, and the collaborators its owners added, whom they add and remove.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, Icon, Input, List, ListRow, Problem, ResponsiveDialog } from "@one/ui"
+import { Avatar, Button, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Pending, useCall } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
-import { Frame, Pending, Section, said, useCall } from "../lib/use.jsx"
+import { Frame, Section, said } from "../lib/use.jsx"
 
 const P = one.params
 

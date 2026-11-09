@@ -242,9 +242,10 @@
       const said = parts.map((s) => (/^\S*@/.test(s) ? s : s[0].toUpperCase() + s.slice(1)).replace(/([^.!?])$/, "$1.")).join(" ");
       if (!said || said.length > 200 || /something went wrong|internal (server )?error|unexpected|undefined|null|is not a function|\[object/i.test(said))
         return { title: "That didn't work.", safe: "Nothing was lost.", next: "" };
-      // Something that isn't there won't be there on a second try: say so, and offer the way home instead.
-      const missing = /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b/i.test(msg);
-      return { title: said, safe: "Nothing was lost.", next: "", missing };
+      // Something that isn't there won't be there on a second try,
+      // and neither will what isn't allowed, or needs signing in first: `final` says trying again can't work.
+      const final = err?.code === "refused" || err?.code === "not_signed_in" || /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b|^no \w+ [\w./-]+\.?$/i.test(msg);
+      return { title: said, safe: "Nothing was lost.", next: "", final };
     },
     // A large title at the top of a screen, as iOS draws one: the window's own title stays empty while it shows, and is
     // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so

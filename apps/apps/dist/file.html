@@ -4,77 +4,43 @@
 /*$vite$:1*/</style>
 <div id="root"></div>
 <script type="module">import { c as e } from "react/compiler-runtime";
-import { useCallback as t, useEffect as n, useState as r } from "react";
-import { createRoot as i } from "react-dom/client";
-import { CodeView as a, Empty as o, ListSkeleton as s, Problem as c } from "@one/ui";
-import { jsx as l } from "react/jsx-runtime";
-var u = /* @__PURE__ */ new Set();
-one.on("changed", () => u.forEach((e) => e()));
-function d(e, i) {
-	let [a, o] = r({
-		data: null,
-		error: null
-	}), s = JSON.stringify(i), c = t(() => one.call(e, i).then((e) => o({
-		data: e,
-		error: null
-	}), (e) => o((t) => ({
-		data: t.data,
-		error: e
-	}))), [e, s]);
-	return n(() => (c(), u.add(c), () => u.delete(c)), [c]), {
-		...a,
-		reload: c
-	};
-}
-var f = (e) => one.plain(e);
-function p(t) {
-	let n = e(8), { error: r, retry: i } = t, a;
-	n[0] === r ? a = n[1] : (a = f(r), n[0] = r, n[1] = a);
-	let o = a, s;
-	n[2] === i ? s = n[3] : (s = {
-		label: "Try Again",
-		run: i
-	}, n[2] = i, n[3] = s);
-	let u;
-	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (u = /* @__PURE__ */ l(c, {
-		title: o.title,
-		text: o.next,
-		action: s
-	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = u) : u = n[7], u;
-}
-var { app: m, path: h } = one.params;
-function g() {
-	let t = e(9), r;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (r = {
-		app: m,
-		path: h
-	}, t[0] = r) : r = t[0];
-	let i = d("code", r), c;
-	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (c = [], t[1] = c) : c = t[1], n(_, c), !m || !h) {
+import { useEffect as t } from "react";
+import { createRoot as n } from "react-dom/client";
+import { CodeView as r, Empty as i, Pending as a, useCall as o } from "@one/ui";
+import { jsx as s } from "react/jsx-runtime";
+var { app: c, path: l } = one.params;
+function u() {
+	let n = e(8), u;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (u = {
+		app: c,
+		path: l
+	}, n[0] = u) : u = n[0];
+	let f = o("code", u), p;
+	if (n[1] === Symbol.for("react.memo_cache_sentinel") ? (p = [], n[1] = p) : p = n[1], t(d, p), !c || !l) {
 		let e;
-		return t[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ l(o, { children: "This page isn't here. The link may be old or mistyped." }), t[2] = e) : e = t[2], e;
+		return n[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ s(i, { children: "This page isn't here. The link may be old or mistyped." }), n[2] = e) : e = n[2], e;
 	}
-	if (!i.data) {
+	if (!f.data) {
 		let e;
-		return t[3] !== i.error || t[4] !== i.reload ? (e = /* @__PURE__ */ l("div", {
+		return n[3] === f ? e = n[4] : (e = /* @__PURE__ */ s("div", {
 			className: "p-4",
-			children: i.error ? /* @__PURE__ */ l(p, {
-				error: i.error,
-				retry: i.reload
-			}) : /* @__PURE__ */ l(s, { rows: 1 })
-		}), t[3] = i.error, t[4] = i.reload, t[5] = e) : e = t[5], e;
+			children: /* @__PURE__ */ s(a, {
+				call: f,
+				rows: 1
+			})
+		}), n[3] = f, n[4] = e), e;
 	}
-	let u;
-	return t[6] !== i.data.path || t[7] !== i.data.text ? (u = /* @__PURE__ */ l("div", {
+	let m;
+	return n[5] !== f.data.path || n[6] !== f.data.text ? (m = /* @__PURE__ */ s("div", {
 		className: "p-4",
-		children: /* @__PURE__ */ l(a, {
-			text: i.data.text,
-			path: i.data.path
+		children: /* @__PURE__ */ s(r, {
+			text: f.data.text,
+			path: f.data.path
 		})
-	}), t[6] = i.data.path, t[7] = i.data.text, t[8] = u) : u = t[8], u;
+	}), n[5] = f.data.path, n[6] = f.data.text, n[7] = m) : m = n[7], m;
 }
-function _() {
-	one.title((h || "").split("/").pop() || "Code");
+function d() {
+	one.title((l || "").split("/").pop() || "Code");
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ l(g, {}));
+n(document.getElementById("root")).render(/* @__PURE__ */ s(u, {}));
 </script>

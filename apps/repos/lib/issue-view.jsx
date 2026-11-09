@@ -1,10 +1,10 @@
 // An issue, as GitHub shows one: its title and state, its body and comments in order, a comment box with Close or
 // Reopen, its assignees and labels (beside it where there's room, above it where there isn't), and for its repo's
 // owners, Delete. It's the Issue screen, and what Issues shows beside its list where there's room.
-import { useEffect, useState } from "react"
-import { Avatar, Button, Card, Icon, Input, Markdown, ResponsiveDialog, Spinner, Problem, cn, useWidth } from "@one/ui"
+import { useState } from "react"
+import { Avatar, Button, Card, Icon, Input, Markdown, ResponsiveDialog, Spinner, Problem, Swap, cn, useCall, useWidth } from "@one/ui"
 import { LabelChip, MarkdownField, StateIcon } from "./parts.jsx"
-import { Pending, ago, go, plural, said, useCall } from "./use.jsx"
+import { ago, go, plural, said } from "./use.jsx"
 
 const reason = (i) => (i.state_reason === "not_planned" ? "not planned" : "completed")
 
@@ -133,8 +133,11 @@ function EditDialog({ d, act, done }) {
 
 export function IssueView({ repo, number, onGone }) {
   const issue = useCall("issue", { repo, number: Number(number) })
+  return <Swap call={issue}>{(d) => <Issue d={d} repo={repo} reload={issue.reload} onGone={onGone} />}</Swap>
+}
+
+function Issue({ d, repo, reload, onGone }) {
   const [room, width] = useWidth()
-  const d = issue.data
   const [users, setUsers] = useState(null)
   const [draft, setDraft] = useState("")
   const [error, setError] = useState("")
@@ -142,20 +145,10 @@ export function IssueView({ repo, number, onGone }) {
   const [dialog, setDialog] = useState(null)
   const [editing, setEditing] = useState(null)
 
-  useEffect(() => {
-    setUsers(null)
-    setDraft("")
-    setError("")
-    setDialog(null)
-    setEditing(null)
-  }, [repo, number])
-
-  if (!d) return <div ref={room}><Pending call={issue} rows={3} /></div>
-
   const act = async (tool, input) => {
     await one.call(tool, { repo, number: d.number, ...input })
     one.tap("success")
-    await issue.reload()
+    await reload()
   }
   const sending = async (key, tool, build) => {
     const text = draft
@@ -201,7 +194,7 @@ export function IssueView({ repo, number, onGone }) {
     if (!(await one.alert({ title: "Delete this comment?", text: "It can't be brought back.", action: "Delete", danger: true }))) return
     try {
       await one.call("delete_comment", { repo, id: c.id, confirm: true })
-      await issue.reload()
+      await reload()
     } catch (err) {
       setError(said(err).title)
     }
@@ -224,7 +217,7 @@ export function IssueView({ repo, number, onGone }) {
   let shown = d.state === "open"
   for (const c of d.comments) {
     if (!shown && c.created > d.closed) (timeline.push(<ClosedEvent key="closed" d={d} />), (shown = true))
-    timeline.push(<Comment key={c.id} d={d} c={c} editing={editing === c.id} edit={() => setEditing(c.id)} done={() => setEditing(null)} menu={more} reload={issue.reload} />)
+    timeline.push(<Comment key={c.id} d={d} c={c} editing={editing === c.id} edit={() => setEditing(c.id)} done={() => setEditing(null)} menu={more} reload={reload} />)
   }
   if (!shown) timeline.push(<ClosedEvent key="closed" d={d} />)
 
@@ -288,7 +281,7 @@ export function IssueView({ repo, number, onGone }) {
           chosen={d.assignees.map((a) => a.handle)}
           save={(keys) => one.call("edit_issue", { repo, number: d.number, assignees: keys })}
           empty="No one to assign."
-          done={() => (setDialog(null), issue.reload())}
+          done={() => (setDialog(null), reload())}
         />
       )}
       {dialog?.labels && (
@@ -299,7 +292,7 @@ export function IssueView({ repo, number, onGone }) {
           save={(keys) => one.call("edit_issue", { repo, number: d.number, labels: keys })}
           empty="This repo has no labels."
           extra={<Button variant="outline" className="self-start" onClick={() => go("labels", { repo })}>Edit Labels…</Button>}
-          done={() => (setDialog(null), issue.reload())}
+          done={() => (setDialog(null), reload())}
         />
       )}
     </div>
