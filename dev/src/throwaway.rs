@@ -26,14 +26,23 @@ pub(crate) mod sign_in;
 pub(crate) use network::node_at;
 use network::{ older_build, no_client_running, running, start, stop, stop_some};
 
+fn is_checkout(top: &Path) -> bool {
+    top.join(".git").exists() && top.join("Cargo.toml").exists() && top.join("ARCHITECTURE.md").exists()
+}
+
+/// The checkout this program was built in (`<checkout>/target/<profile>/`), if it was.
+fn built_in() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    Some(exe.parent()?.parent()?.parent()?.to_path_buf()).filter(|top| is_checkout(top))
+}
+
 /// The throwaway network for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout the
 /// current folder is in, wherever in it, as git finds it, beside the downloads every throwaway network shares: → its folder,
 /// and the checkout. So a checkout's own build finds its throwaway network from any folder, as an MCP client starts it, and
 /// from a folder in no checkout there is none: nothing starts a network for a folder that isn't one.
 fn folder() -> Option<(PathBuf, PathBuf)> {
     let base = PathBuf::from(format!("{}-throwaway", one::home().display()));
-    let is_checkout = |top: &Path| top.join(".git").exists() && top.join("Cargo.toml").exists() && top.join("ARCHITECTURE.md").exists();
-    let built = std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok()).and_then(|exe| Some(exe.parent()?.parent()?.parent()?.to_path_buf())).filter(|top| is_checkout(top));
+    let built = built_in();
     let top = || std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success()).map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim())).filter(|top| is_checkout(top));
     let checkout = built.or_else(top)?;
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(checkout.to_string_lossy().as_bytes()).into();
@@ -55,7 +64,15 @@ pub fn run(rest: &[String]) -> Result<()> {
     };
     // These two need what only this checkout's debug build made with them holds; the first time in a checkout there is none.
     if build.is_none() && (rest.iter().map(String::as_str).eq(["client", "web"]) || rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"])) {
-        rebuild::with_web_client_and_cloudflare_node(&checkout)?;
+        // This program is the build it replaces (a build of this checkout, named before it's replaced), and writes the pages a UI folder
+        // is served as (`read_pages_again`): the new one runs this command, so those pages hold what its Workers' do.
+        let this = built_in().and(std::env::current_exe().ok());
+        if rebuild::with_web_client_and_cloudflare_node(&checkout)?
+            && let Some(this) = this
+        {
+            use std::os::unix::process::CommandExt;
+            return Err(std::process::Command::new(this).args(std::env::args_os().skip(1)).exec().into());
+        }
     }
     network::choose(&dir, build.as_deref(), ui.as_deref())?;
     match rest.first().map(String::as_str) {
@@ -125,7 +142,7 @@ fn chosen(rest: &[String]) -> Result<(Option<PathBuf>, Option<PathBuf>, &[String
 /// `build --dev`: this checkout's debug build with the web client and the Cloudflare node in it.
 pub fn build_dev() -> Result<()> {
     let (_, checkout) = folder().context("run this in a checkout of The One App")?;
-    rebuild::with_web_client_and_cloudflare_node(&checkout)
+    rebuild::with_web_client_and_cloudflare_node(&checkout).map(drop)
 }
 
 /// `sign-in`, as the throwaway network's user, with no passkey: its CLI signs in as any does, with its own git config and
