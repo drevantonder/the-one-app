@@ -31,7 +31,7 @@ function Stage({ logo, children }: { logo?: string; children: React.ReactNode })
 /// `action`, the one thing to do, if any, as a button that runs or a link, named `invite` instead when what's typed is an invite
 /// link; `other`, a second way in (a Mac's Join with a Pairing Code), or back from it; `note`, a grey line under them;
 /// `problem`, why the last try didn't work. Near the top, not centred: what comes in later (a problem, a client's name)
-/// grows it down, never moving what's already there. A text, a callout and a problem have their places even when empty, for a
+/// grows it down, never moving what's already there. A text, a callout, a note and a problem have their places even when empty, for a
 /// page's script to fill.
 function Welcome({ logo, title, text, field, callout, children, action, other, note, problem }: {
   logo?: string
@@ -74,7 +74,7 @@ function Welcome({ logo, title, text, field, callout, children, action, other, n
         {other && (other.href
           ? <Button variant="ghost" className={pressed} data-slot="welcome-other" asChild><a href={other.href}>{other.label}</a></Button>
           : <Button variant="ghost" className={pressed} data-slot="welcome-other" onClick={() => other.run?.()}>{other.label}</Button>)}
-        {note && <p data-slot="welcome-note" className="text-sm text-balance text-muted-foreground">{note}</p>}
+        <p data-slot="welcome-note" className="text-sm text-balance text-muted-foreground empty:hidden">{note}</p>
         <div ref={told} data-slot="welcome-problem" className="mt-3 w-full text-left empty:hidden">{problem && <Problem title={problem} />}</div>
     </Stage>
   )

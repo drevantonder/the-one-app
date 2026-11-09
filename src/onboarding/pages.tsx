@@ -8,8 +8,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Welcome } from "./welcome"
 
 const logo = "{{logo}}"
-const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system."
-const ANOTHER = "Add a second passkey, on another device or a security key, so losing one doesn't lock you out."
+const ANOTHER = "Add a second one, so losing one doesn't lock you out."
 
 export const pages = {
   "sign-in": <Welcome logo={logo} title="{{name}}" action={{ label: "Sign In" }} />,
@@ -19,7 +18,7 @@ export const pages = {
   "invite-google": <Welcome logo={logo} title="Join {{name}}" action={{ label: "Sign In with Google" }} />,
   "joined": <Welcome logo={logo} title="You've joined {{yours}}" action={{ label: "Open {{name}}", href: "/" }} />,
   "passkeys": (
-    <Welcome logo={logo} title="Passkeys" text="Each one signs you in to {{name}}." callout={ANOTHER} action={{ label: "Add a Passkey" }} note={WORKS}>
+    <Welcome logo={logo} title="Passkeys" text="Each one signs you in to {{name}}." callout={ANOTHER} action={{ label: "Add a Passkey" }}>
       <Spinner className="size-5" />
       <List data-slot="passkeys" className="empty:hidden" />
     </Welcome>
