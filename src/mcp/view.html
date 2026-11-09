@@ -126,6 +126,7 @@
     out.append(el);
     bar();
     watch();
+    aloneIfLate(top());
   }
 
   // In place of everything: a grey line, or what went wrong as a problem box.
@@ -136,6 +137,9 @@
     if (failed) createRoot(out.appendChild(document.createElement("div"))).render(h(ui.Problem, { title: one.plain(text).title }));
     size();
   }
+
+  // Those too slow to come with the rest, each asked for by itself.
+  const aloneIfLate = (layer) => (layer?.s.widgets || []).filter((w) => w.late).forEach((w) => redraw(layer, w).catch(() => {}));
 
   function widgets(s) {
     if (!(s.widgets || []).length) return Object.assign(document.createElement("div"), { className: "empty", textContent: "No widgets." });
@@ -195,6 +199,8 @@
       const now = fresh.find((x) => x.app === w.app && x.widget === w.widget), i = s.widgets.indexOf(w);
       const el = [...layer.el.children].find((c) => c.__w === w);
       if (!now || !el || i < 0) continue;
+      // Too slow to come with the rest: it stays as it was, and comes by itself.
+      if (now.late && !only) { if (!w.late) redraw(layer, w).catch(() => {}); continue; }
       s.widgets[i] = now;
       draw(el, now);
     }

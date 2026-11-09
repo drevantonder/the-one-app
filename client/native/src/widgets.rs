@@ -36,7 +36,8 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     for (scope, title) in &pages {
         // An app's widgets show on a page it's added to.
         let here: Vec<&Value> = apps.iter().filter(|a| a["added"].as_array().is_some_and(|s| s.iter().any(|s| in_scope(s.as_str().unwrap_or(""), scope)))).collect();
-        let widgets = match crate::node(device, "GET", &format!("/v1/widgets?scope={}", url::form_urlencoded::byte_serialize(scope.as_bytes()).collect::<String>()), None).await {
+        let query = |extra: &str| format!("/v1/widgets?scope={}{extra}", url::form_urlencoded::byte_serialize(scope.as_bytes()).collect::<String>());
+        let widgets = match crate::node(device, "GET", &query(""), None).await {
             Ok(Value::Array(w)) => w,
             _ => {
                 answered = false;
@@ -45,8 +46,21 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
                 continue;
             }
         };
-        for w in widgets {
-            let name = w["app"].as_str().unwrap_or_default();
+        for mut w in widgets {
+            let name = w["app"].as_str().unwrap_or_default().to_string();
+            let name = name.as_str();
+            // Too slow to come with the rest: asked for alone, and if that fails too, as it was last kept.
+            if w["late"] == true {
+                let kind = format!("{name}.{}", w["widget"].as_str().unwrap_or_default());
+                match crate::node(device, "GET", &query(&format!("&kind={}", url::form_urlencoded::byte_serialize(kind.as_bytes()).collect::<String>())), None).await {
+                    Ok(Value::Array(alone)) if !alone.is_empty() => w = alone.into_iter().next().unwrap_or_default(),
+                    _ => {
+                        answered = false;
+                        items.extend(kept["widgets"].as_array().into_iter().flatten().find(|i| i["scope"] == scope.as_str() && i["kind"] == kind.as_str()).cloned());
+                        continue;
+                    }
+                }
+            }
             let Some(app) = here.iter().find(|a| a["name"] == name) else { continue };
             let named = w["title"].as_str().or(app["title"].as_str()).or(w["widget"].as_str()).unwrap_or_default();
             let widget = w["widget"].as_str().unwrap_or_default();

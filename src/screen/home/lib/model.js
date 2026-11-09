@@ -3,8 +3,9 @@
 import { arranged } from "@one/ui";
 
 export const home = (() => {
-  // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can.
-  const h = { state: null, apps: [], widgets: {}, badges: {}, failed: new Set() };
+  // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can. `late`: widgets
+  // too slow to come with their page, being asked for alone. `read`: the pages read since this screen started.
+  const h = { state: null, apps: [], widgets: {}, badges: {}, failed: new Set(), late: new Set(), read: new Set() };
   const me = () => h.state?.user;
   const network = () => h.state?.network;
   const isAdmin = () => me()?.role === "admin";
@@ -46,9 +47,15 @@ export const home = (() => {
   const supported = (w) => SIZES.filter((s) => !w.sizes || w.sizes[s]);
   const tree = (w, size) => w.sizes?.[size] || w.root;
 
-  /// A widget as one copy of it on a page draws: at its size, with the options chosen for it.
-  function placed(w, item) {
+  /// Which widget on which page, as a page's `late` knows it.
+  const lateKey = (scope, w) => `${scope}/${w.app}.${w.widget}`;
+  const HOUR = 3_600_000;
+
+  /// A widget as one copy of it on a page draws: at its size, with the options chosen for it. Over an hour old, once
+  /// reading it again hasn't brought anything newer, it says when it's from (`old`), as the home-screen widgets do.
+  function placed(w, item, scope) {
     const copy = { ...w, instance: item.id, sizes: { ...(w.sizes || {}) } };
+    if (h.read.has(scope) && !h.late.has(lateKey(scope, w)) && w.fetched && Date.now() - w.fetched > HOUR) copy.old = w.fetched;
     if (item.size && supported(w).includes(item.size)) copy.size = item.size;
     const mine = item.id && w.placed?.[item.id];
     if (mine?.sizes) Object.assign(copy.sizes, mine.sizes);
@@ -64,9 +71,9 @@ export const home = (() => {
     return arranged(appsOn(p), h.state?.arrangements?.[p.scope], (item) => {
       const w = widgets.find((w) => w.app === item.app && w.widget === item.widget);
       if (!item.id || seen.has(item.id)) return null;
-      if (!w && !(waiting(p) && h.apps.some((a) => a.name === item.app && scopes(a).includes(p.scope)))) return null;
+      if (!w && !((waiting(p) || h.late.has(lateKey(p.scope, item))) && h.apps.some((a) => a.name === item.app && scopes(a).includes(p.scope)))) return null;
       seen.add(item.id);
-      return w ? { widget: placed(w, item), kept: item } : { pending: true, kept: item };
+      return w ? { widget: placed(w, item, p.scope), kept: item } : { pending: true, kept: item };
     });
   }
 
@@ -137,11 +144,29 @@ export const home = (() => {
     await loadWidgets(null, drawn);
   }
 
+  /// Takes in a page's widgets as read: each stamped with when; one too slow to come with the rest stays as it was
+  /// last kept (else a grey card) and is asked for alone, drawn when it comes.
+  function took(scope, read, drawn) {
+    const was = h.widgets[scope] || [], now = Date.now();
+    const same = (w) => (x) => x.app === w.app && x.widget === w.widget;
+    h.widgets[scope] = read.flatMap((w) => (w.late ? was.filter(same(w)) : [{ ...w, fetched: now }]));
+    for (const w of read.filter((w) => w.late && !h.late.has(lateKey(scope, w)))) {
+      const key = lateKey(scope, w);
+      h.late.add(key);
+      one.api("GET", `/v1/widgets?scope=${encodeURIComponent(scope)}&kind=${encodeURIComponent(`${w.app}.${w.widget}`)}`).then(([fresh]) => {
+        if (fresh) h.widgets[scope] = [...(h.widgets[scope] || []).filter((x) => !same(fresh)(x)), { ...fresh, fetched: Date.now() }];
+      }, () => void h.failed.add(scope)).then(() => {
+        h.late.delete(key);
+        (drawn || h.redraw)?.();
+      });
+    }
+  }
+
   /// Reads the widgets and badges of the pages in `only` (scopes), or of every page.
   async function loadWidgets(only, drawn) {
     const q = (p) => `scope=${encodeURIComponent(p.scope)}`;
     await Promise.all(allPages().filter((p) => !only || only.includes(p.scope)).flatMap((p) => [
-      one.api("GET", `/v1/widgets?${q(p)}`).then((w) => { h.widgets[p.scope] = w; h.failed.delete(p.scope); }, () => void h.failed.add(p.scope)).then(() => drawn?.()),
+      one.api("GET", `/v1/widgets?${q(p)}`).then((w) => { took(p.scope, w, drawn); h.failed.delete(p.scope); }, () => void h.failed.add(p.scope)).then(() => { h.read.add(p.scope); drawn?.(); }),
       // Badges that couldn't be read stay as they were.
       one.api("GET", `/v1/badges?${q(p)}`).then((b) => { h.badges[p.scope] = b; }, () => {}).then(() => drawn?.()),
     ]));

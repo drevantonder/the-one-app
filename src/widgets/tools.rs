@@ -14,7 +14,7 @@ pub fn feature() -> Feature {
         tools: vec![Tool::route(
             json!({
                 "name": "show", "title": "Show the widgets", "reads": true,
-                "description": "Show the user's widgets inline, drawn as their apps draw them (or as text where a chat can't draw them): all of them, one app's, or one. Use it when they ask how things stand at a glance.",
+                "description": "Show the user's widgets inline, drawn as their apps draw them (or as text where a chat can't draw them): all of them, one app's, or one. Use it when they ask how things stand at a glance. One that says it's still drawing took too long beside the rest: ask for it alone, with its app and widget.",
                 "input": { "type": "object", "properties": {
                     "app": { "type": "string", "description": "only this app's widgets" },
                     "widget": { "type": "string", "description": "only the widget of this name" },
@@ -39,7 +39,8 @@ mod serve {
 
     /// The widgets `input` asks for (`scope`, `app`, `widget`): in words, and as they are to draw.
     pub async fn show(node: Node, me: Caller, input: Map<String, Value>) -> Result<Value> {
-        let all = node.widgets(me, input.get("scope").and_then(Value::as_str)).await?;
+        let alone = input.get("app").and_then(Value::as_str).zip(input.get("widget").and_then(Value::as_str));
+        let all = node.widgets(me, input.get("scope").and_then(Value::as_str), alone).await?;
         let wanted: Vec<Value> = all
             .into_iter()
             .filter(|w| input.get("app").and_then(Value::as_str).is_none_or(|a| w["app"] == a) && input.get("widget").and_then(Value::as_str).is_none_or(|n| w["widget"] == n))

@@ -586,6 +586,28 @@ fn every_renderer_of_a_widgets_tree_draws_the_same_types_and_tones() {
     assert!(missing.is_empty(), "{}", missing.join("\n"));
 }
 
+/// A widget too slow to draw beside the rest of its page comes marked `late`, from either node, and is then asked for
+/// alone with `kind=<app>.<widget>`: a client that doesn't take it in shows "Still drawing." for good, and a node that
+/// doesn't send it holds back the whole page again.
+#[test]
+fn both_nodes_mark_a_late_widget_and_every_client_asks_for_it_alone() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let read = |p: &str| std::fs::read_to_string(root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let mut missing = Vec::new();
+    let mut names = |who: &str, source: &str, wanted: &[&str]| {
+        for name in wanted.iter().filter(|name| !source.contains(**name)) {
+            missing.push(format!("{who} doesn't name `{name}`"));
+        }
+    };
+    names("the node's widgets", &read("src/node/screens.rs"), &["[\"late\"] = json!(true)"]);
+    names("the node's route", &read("src/node/widgets.rs"), &["kind: Option<String>"]);
+    names("the Cloudflare node", &read("cloudflare/node/worker.js"), &["late: true", "searchParams.get(\"kind\")"]);
+    names("the pages", &read("src/screen/home/lib/model.js"), &["w.late", "&kind="]);
+    names("the native widgets", &read("client/native/src/widgets.rs"), &["w[\"late\"]", "&kind="]);
+    names("a chat's view", &read("src/mcp/view.html"), &["w.late", "widgets_show"]);
+    assert!(missing.is_empty(), "{}", missing.join("\n"));
+}
+
 /// Every `state.<field>` the screens, the web client and the Workers read of `GET /v1/state` is a field the node says
 /// (`one::state::State`): a field renamed or dropped there shows as a screen that reads nothing, which no one sees fail.
 /// The sample has a value in every field, so a field added to the Rust is added here (it won't compile otherwise).

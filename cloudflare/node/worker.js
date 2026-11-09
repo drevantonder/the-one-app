@@ -35,7 +35,7 @@ import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 import { b64u, hex, isKey } from "./crypto.js";
 import { Refused, json, near, refuse, textOf } from "./http.js";
-import { ASKS, BLOBS, CODES, HEADER, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT } from "./protocol.js";
+import { ASKS, BLOBS, CODES, HEADER, LATE_WIDGET, LOG, MOST_URLS, NODE_APP, READS, URLS, VAULT, WIDGET_LIMIT_MS } from "./protocol.js";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -740,37 +740,47 @@ class Run {
       .filter((p) => p.scopes.length);
   }
 
-  /// Every widget of a page, drawn for this user (src/node/screens.rs: `widgets`). One whose app needs a device says so.
-  async widgets(page) {
+  /// Every widget of a page, drawn for this user (src/node/screens.rs: `widgets`), each within `WIDGET_LIMIT_MS` so a slow
+  /// one holds back only itself; with `kind` (`<app>.<widget>`), that one alone, however long it takes. One whose app
+  /// needs a device says so.
+  async widgets(page, kind) {
+    const at = kind?.indexOf(".") ?? -1;
+    if (kind && at < 1) refuse(400, "a widget's kind is <app>.<widget>");
+    const only = kind ? { app: kind.slice(0, at), widget: kind.slice(at + 1) } : null;
     const key = page === `user:${this.who.user}` ? "user" : page;
     const placed = (this.view.state.arrangements?.[key]?.items || []).filter((i) => typeof i.widget === "string" && i.options && Object.keys(i.options).length);
-    const each = await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
+    const each = await Promise.all(this.pages(page).filter(({ app }) => !only || app.name === only.app).map(async ({ app, scopes }) => {
       const d = await this.user.describe(this.who, app).catch(keysFirst);
-      return Promise.all((d?.widgets || []).map(async (w) => {
+      return Promise.all((d?.widgets || []).filter((w) => !only || w.name === only.widget).map((w) => {
         const size = w.size || "medium";
+        const said = { app: app.name, widget: w.name, title: w.title, description: w.description, size };
         const draw = (at, options) => this.run(app, "widget", { name: w.name, size: at, options }, scopes);
-        const one = { app: app.name, widget: w.name, title: w.title, description: w.description, size };
-        try {
-          const root = await draw(size, {});
-          const sizes = { [size]: root };
-          for (const other of (w.sizes || []).filter((s) => s !== size)) await draw(other, {}).then((t) => (sizes[other] = t), () => {});
-          one.sizes = sizes;
-          one.root = root;
-          if (w.options?.length) one.options = await this.run(app, "options", { name: w.name }, scopes).catch((err) => {
-            console.error(`${app.name}'s options for ${w.name}: ${err.message}`);
-            return w.options;
-          });
-          const mine = {};
-          for (const item of placed.filter((i) => i.app === app.name && i.widget === w.name)) {
-            const at = item.size || size;
-            mine[item.id || ""] = await draw(at, item.options).then((t) => ({ sizes: { [at]: t } }), (err) => ({ error: err.message }));
+        const drawing = (async () => {
+          const one = { ...said };
+          try {
+            const root = await draw(size, {});
+            const sizes = { [size]: root };
+            await Promise.all((w.sizes || []).filter((s) => s !== size).map((other) => draw(other, {}).then((t) => (sizes[other] = t), () => {})));
+            one.sizes = sizes;
+            one.root = root;
+            if (w.options?.length) one.options = await this.run(app, "options", { name: w.name }, scopes).catch((err) => {
+              console.error(`${app.name}'s options for ${w.name}: ${err.message}`);
+              return w.options;
+            });
+            const mine = {};
+            await Promise.all(placed.filter((i) => i.app === app.name && i.widget === w.name).map(async (item) => {
+              const at = item.size || size;
+              mine[item.id || ""] = await draw(at, item.options).then((t) => ({ sizes: { [at]: t } }), (err) => ({ error: err.message }));
+            }));
+            if (Object.keys(mine).length) one.placed = mine;
+          } catch (err) {
+            one.error = err.message;
+            one.root = { t: "text", text: err.status === 503 ? err.message : "This widget stopped working.", tone: "muted" };
           }
-          if (Object.keys(mine).length) one.placed = mine;
-        } catch (err) {
-          one.error = err.message;
-          one.root = { t: "text", text: err.status === 503 ? err.message : "This widget stopped working.", tone: "muted" };
-        }
-        return one;
+          return one;
+        })();
+        if (only) return drawing;
+        return Promise.race([drawing, new Promise((late) => setTimeout(() => late({ ...said, late: true, root: { t: "text", text: LATE_WIDGET, tone: "muted" } }), WIDGET_LIMIT_MS))]);
       }));
     }));
     return each.flat();
@@ -1003,7 +1013,7 @@ async function route(p, request) {
     const scope = url.searchParams.get("scope");
     if (path === "/v1/state") return json(run.view.state);
     if (path === "/v1/apps") return tagged(request, JSON.stringify(await run.apps()), "application/json");
-    if (path === "/v1/widgets") return json(await run.widgets(scope));
+    if (path === "/v1/widgets") return json(await run.widgets(scope, url.searchParams.get("kind")));
     return json(await run.badges(scope));
   }
   // Anything else only a machine does: to a client that asks one itself (`x-one-elsewhere`), the machines of its

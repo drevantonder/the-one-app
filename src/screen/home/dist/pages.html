@@ -15,7 +15,9 @@ var k = (() => {
 		apps: [],
 		widgets: {},
 		badges: {},
-		failed: /* @__PURE__ */ new Set()
+		failed: /* @__PURE__ */ new Set(),
+		late: /* @__PURE__ */ new Set(),
+		read: /* @__PURE__ */ new Set()
 	}, t = () => e.state?.user, n = () => e.state?.network, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => e?.tools?.find((e) => e.accounts)?.name, l = (e) => (e.added || []).map((e) => e.startsWith("user:") ? "user" : e), u = () => e.state?.pages || [], d = () => u().filter((e) => !e.hidden), f = (e) => u().find((t) => t.scope === e);
 	function p(e) {
 		return e === "user" ? !0 : e === "global" ? r() : (n()?.groups.find((t) => `group:${t.id}` === e))?.members.some((e) => e.user === t()?.id && e.role === "admin") || !1;
@@ -30,23 +32,23 @@ var k = (() => {
 		"medium",
 		"large",
 		"xl"
-	], b = (e) => y.filter((t) => !e.sizes || e.sizes[t]), x = (e, t) => e.sizes?.[t] || e.root;
-	function S(e, t) {
-		let n = {
-			...e,
-			instance: t.id,
-			sizes: { ...e.sizes || {} }
+	], b = (e) => y.filter((t) => !e.sizes || e.sizes[t]), x = (e, t) => e.sizes?.[t] || e.root, S = (e, t) => `${e}/${t.app}.${t.widget}`;
+	function w(t, n, r) {
+		let i = {
+			...t,
+			instance: n.id,
+			sizes: { ...t.sizes || {} }
 		};
-		t.size && b(e).includes(t.size) && (n.size = t.size);
-		let r = t.id && e.placed?.[t.id];
-		return r?.sizes && Object.assign(n.sizes, r.sizes), r?.error && (n.error = r.error), n;
+		e.read.has(r) && !e.late.has(S(r, t)) && t.fetched && Date.now() - t.fetched > 36e5 && (i.old = t.fetched), n.size && b(t).includes(n.size) && (i.size = n.size);
+		let a = n.id && t.placed?.[n.id];
+		return a?.sizes && Object.assign(i.sizes, a.sizes), a?.error && (i.error = a.error), i;
 	}
-	function w(t) {
+	function T(t) {
 		let n = _(t), r = /* @__PURE__ */ new Set();
 		return C(m(t), e.state?.arrangements?.[t.scope], (i) => {
 			let a = n.find((e) => e.app === i.app && e.widget === i.widget);
-			return !i.id || r.has(i.id) || !a && !(v(t) && e.apps.some((e) => e.name === i.app && l(e).includes(t.scope))) ? null : (r.add(i.id), a ? {
-				widget: S(a, i),
+			return !i.id || r.has(i.id) || !a && !((v(t) || e.late.has(S(t.scope, i))) && e.apps.some((e) => e.name === i.app && l(e).includes(t.scope))) ? null : (r.add(i.id), a ? {
+				widget: w(a, i, t.scope),
 				kept: i
 			} : {
 				pending: !0,
@@ -54,50 +56,50 @@ var k = (() => {
 			});
 		});
 	}
-	function T() {
+	function E() {
 		let t = a(e.state?.config?.store);
 		return t && s(t) && d().some((e) => l(t).includes(e.scope)) ? t : null;
 	}
-	let E = (e, t, n = "main", r = {}) => (i) => one.open(n, r, e.name, {
+	let D = (e, t, n = "main", r = {}) => (i) => one.open(n, r, e.name, {
 		...t ? { scope: t.scope } : {},
 		from: i
-	}), D = (e, t, n) => o(e, "settings") ? E(e, t, "settings", n ? { add: !0 } : {}) : null, O = (e) => T() && o(T(), "app") && (e.deploys || 0) > 0 ? E(T(), null, "app", { app: e.name }) : null, k = () => T() ? E(T(), null, "main", { accounts: !0 }) : null, A = () => T() && E(T(), null)();
-	async function j(e, t, n = {}) {
+	}), O = (e, t, n) => o(e, "settings") ? D(e, t, "settings", n ? { add: !0 } : {}) : null, k = (e) => E() && o(E(), "app") && (e.deploys || 0) > 0 ? D(E(), null, "app", { app: e.name }) : null, A = () => E() ? D(E(), null, "main", { accounts: !0 }) : null, j = () => E() && D(E(), null)();
+	async function M(e, t, n = {}) {
 		return (await one.api("POST", "/v1/call", {
 			app: e,
 			tool: t,
 			input: n
 		})).ok;
 	}
-	let M = (e) => one.alert({
+	let N = (e) => one.alert({
 		title: "Couldn’t Do That",
 		text: one.plain(e).title
 	});
-	async function N(t, n) {
+	async function P(t, n) {
 		let r = e.apps;
 		n && (e.apps = n(e.apps), e.redraw?.());
 		try {
-			await t(), await I(e.redraw);
+			await t(), await L(e.redraw);
 		} catch (t) {
-			n && (e.apps = r, e.redraw?.()), M(t);
+			n && (e.apps = r, e.redraw?.()), N(t);
 		}
 	}
-	function P(e, t) {
+	function F(e, t) {
 		let n = [];
-		return D(e, t) && n.push({
+		return O(e, t) && n.push({
 			title: "Settings",
 			icon: "gear-six",
-			run: D(e, t)
-		}), O(e) && n.push({
+			run: O(e, t)
+		}), k(e) && n.push({
 			title: "Open in App Store",
 			icon: "bag",
-			run: O(e)
+			run: k(e)
 		}), p(t.scope) && (e.deploys || 0) > 0 && n.push({
 			title: `Remove from ${t.title}`,
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => N(() => one.api("POST", "/v1/remove/remove", {
+			run: () => P(() => one.api("POST", "/v1/remove/remove", {
 				app: e.name,
 				scope: t.scope
 			}), (n) => n.map((n) => n.name === e.name ? {
@@ -106,7 +108,7 @@ var k = (() => {
 			} : n))
 		}), n;
 	}
-	async function F(e, t) {
+	async function I(e, t) {
 		if (!e.length) return;
 		t instanceof Event && (t = {
 			x: t.clientX,
@@ -115,24 +117,44 @@ var k = (() => {
 		let n = await one.menu(e, t).catch(() => null);
 		n != null && e[n]?.run();
 	}
-	async function I(t) {
-		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await L(null, t);
+	async function L(t) {
+		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await z(null, t);
 	}
-	async function L(t, n) {
+	function R(t, n, r) {
+		let i = e.widgets[t] || [], a = Date.now(), o = (e) => (t) => t.app === e.app && t.widget === e.widget;
+		e.widgets[t] = n.flatMap((e) => e.late ? i.filter(o(e)) : [{
+			...e,
+			fetched: a
+		}]);
+		for (let i of n.filter((n) => n.late && !e.late.has(S(t, n)))) {
+			let n = S(t, i);
+			e.late.add(n), one.api("GET", `/v1/widgets?scope=${encodeURIComponent(t)}&kind=${encodeURIComponent(`${i.app}.${i.widget}`)}`).then(([n]) => {
+				n && (e.widgets[t] = [...(e.widgets[t] || []).filter((e) => !o(n)(e)), {
+					...n,
+					fetched: Date.now()
+				}]);
+			}, () => void e.failed.add(t)).then(() => {
+				e.late.delete(n), (r || e.redraw)?.();
+			});
+		}
+	}
+	async function z(t, n) {
 		let r = (e) => `scope=${encodeURIComponent(e.scope)}`;
-		await Promise.all(u().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((n) => {
-			e.widgets[t.scope] = n, e.failed.delete(t.scope);
-		}, () => void e.failed.add(t.scope)).then(() => n?.()), one.api("GET", `/v1/badges?${r(t)}`).then((n) => {
+		await Promise.all(u().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((r) => {
+			R(t.scope, r, n), e.failed.delete(t.scope);
+		}, () => void e.failed.add(t.scope)).then(() => {
+			e.read.add(t.scope), n?.();
+		}), one.api("GET", `/v1/badges?${r(t)}`).then((n) => {
 			e.badges[t.scope] = n;
 		}, () => {}).then(() => n?.())]));
 	}
-	let R = (t) => u().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
-	function z(t) {
+	let B = (t) => u().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
+	function V(t) {
 		let n, r, i = !1, a = /* @__PURE__ */ new Set(), o = (r) => {
 			r ? r.forEach((e) => a.add(e)) : i = !0, clearTimeout(n), n = setTimeout(() => {
-				let n = i ? I(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
+				let n = i ? L(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
 					e.apps = t;
-				}), L([...a], t)]);
+				}), z([...a], t)]);
 				i = !1, a.clear(), n.then(() => {
 					t(), l(), c();
 				}).catch(() => {});
@@ -147,7 +169,7 @@ var k = (() => {
 			Object.values(e.widgets).flat().forEach((e) => Object.values(e.sizes || { root: e.root }).forEach(n)), t.length && (r = setTimeout(() => o(u().map((e) => e.scope)), Math.min(9e5, Math.max(6e4, Math.min(...t) - Date.now()))));
 		};
 		one.on("changed", (e) => {
-			e.type === "changed" && e.apps?.length ? o(R(e.apps)) : [
+			e.type === "changed" && e.apps?.length ? o(B(e.apps)) : [
 				"changed",
 				"devices",
 				"network"
@@ -172,23 +194,23 @@ var k = (() => {
 		badge: g,
 		widgetsOn: _,
 		waiting: v,
-		items: w,
+		items: T,
 		supported: b,
 		tree: x,
-		store: T,
-		open: E,
-		settings: D,
-		inStore: O,
-		addAccountApp: k,
-		openStore: A,
-		call: j,
-		failed: M,
-		change: N,
-		actions: P,
-		menu: F,
-		load: I,
-		loadWidgets: L,
-		watch: z
+		store: E,
+		open: D,
+		settings: O,
+		inStore: k,
+		addAccountApp: A,
+		openStore: j,
+		call: M,
+		failed: N,
+		change: P,
+		actions: F,
+		menu: I,
+		load: L,
+		loadWidgets: z,
+		watch: V
 	};
 })(), { scope: A, swipe: j } = one.params || {}, M = "settings", N = 52, P = {
 	small: [2, 2],
@@ -208,7 +230,7 @@ var k = (() => {
 }, L = 450, R = 200, z = !!window.__oneLifts, B = {
 	title: "Edit Home Page",
 	icon: "dots-nine",
-	run: () => Z(!0)
+	run: () => Q(!0)
 }, V = {
 	editing: !1,
 	leaving: !1,
@@ -275,7 +297,7 @@ function ce(e, t, n) {
 		host: se(n),
 		p: n,
 		open: !k.tree(e, c)?.link && r && k.hasScreens(r) ? k.open(r, n) : null,
-		menu: (r) => k.menu(Te(e, t, n, ee(c, te(n.scope)), te(n.scope), s), r)
+		menu: (r) => k.menu(we(e, t, n, ee(c, te(n.scope)), te(n.scope), s), r)
 	};
 }
 function le(e, t) {
@@ -284,7 +306,7 @@ function le(e, t) {
 		icon: "minus-circle",
 		danger: !0,
 		section: !0,
-		run: () => xe(t, { key: n })
+		run: () => be(t, { key: n })
 	}], e) : void 0;
 	return {
 		slot: n,
@@ -396,7 +418,7 @@ function Y(e, t = k.items(e).map((e) => e.app ? { app: e.app.name } : e.kept)) {
 		!e.widget && r.includes(e.app) && !n.some((t) => me(t) === me(e)) && n.splice(Math.min(t, n.length), 0, e);
 	}), n;
 }
-var ge, _e = () => {
+var ge, X = () => {
 	clearTimeout(ge), ge = setTimeout(() => one.cache("pages", {
 		state: k.data.state,
 		apps: k.data.apps,
@@ -404,7 +426,7 @@ var ge, _e = () => {
 		badges: k.data.badges
 	}).catch(() => {}), 500);
 };
-async function X(e, t, n = J(e), { reload: r = !1 } = {}) {
+async function Z(e, t, n = J(e), { reload: r = !1 } = {}) {
 	let i = k.data.state, a = i.arrangements, o = a?.[e.scope] || {};
 	i.arrangements = {
 		...a || {},
@@ -422,18 +444,18 @@ async function X(e, t, n = J(e), { reload: r = !1 } = {}) {
 			items: t,
 			hidden: n,
 			...o.pages ? { pages: o.pages } : {}
-		}), r && (await k.loadWidgets([e.scope]), q()), _e();
+		}), r && (await k.loadWidgets([e.scope]), q()), X();
 	} catch (e) {
 		k.data.state.arrangements === s && (k.data.state.arrangements = a, q()), V.undo = [], k.failed(e);
 	}
 }
-var ve = (e, t, n) => X(e, Y(e).map((e) => e.widget && e.id === t.id ? {
+var _e = (e, t, n) => Z(e, Y(e).map((e) => e.widget && e.id === t.id ? {
 	...e,
 	size: n
-} : e)), ye = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
-function be(e) {
+} : e)), ve = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+function ye(e) {
 	let t = document.querySelector(`[data-cell="${CSS.escape(e)}"]`);
-	if (!t || (G = !0, ye())) return;
+	if (!t || (G = !0, ve())) return;
 	let n = t.getBoundingClientRect(), r = parseFloat(getComputedStyle(document.documentElement).zoom) || 1, i = t.cloneNode(!0);
 	i.removeAttribute("data-cell"), i.className = "pointer-events-none fixed left-0 top-0 z-20 m-0 grid", Object.assign(i.style, {
 		width: `${n.width / r}px`,
@@ -454,35 +476,35 @@ function be(e) {
 		fill: "forwards"
 	}).finished.then(() => i.remove());
 }
-function xe(e, t) {
-	one.tap("medium"), be(t.key);
+function be(e, t) {
+	one.tap("medium"), ye(t.key);
 	let n = Y(e), r = n.findIndex((e) => me(e) === t.key);
 	V.undo.push({
 		p: e,
 		gone: n[r],
 		at: r
-	}), n[r]?.widget ? X(e, n.filter((e, t) => t !== r)) : X(e, n, [.../* @__PURE__ */ new Set([...J(e), n[r]?.app || t.key.slice(4)])]);
+	}), n[r]?.widget ? Z(e, n.filter((e, t) => t !== r)) : Z(e, n, [.../* @__PURE__ */ new Set([...J(e), n[r]?.app || t.key.slice(4)])]);
 }
-function Se() {
+function xe() {
 	let { p: e, gone: t, at: n } = V.undo.pop();
-	one.tap(), G = !0, t.widget ? X(e, Y(e).toSpliced(Math.min(n, Y(e).length), 0, t)) : Ce(e, t.app);
+	one.tap(), G = !0, t.widget ? Z(e, Y(e).toSpliced(Math.min(n, Y(e).length), 0, t)) : Se(e, t.app);
 }
-function Ce(e, t) {
+function Se(e, t) {
 	G = !0;
 	let n = Y(e);
-	X(e, n.some((e) => e.app === t) ? n : n.toSpliced(we(e, n), 0, { app: t }), J(e).filter((e) => e !== t));
+	Z(e, n.some((e) => e.app === t) ? n : n.toSpliced(Ce(e, n), 0, { app: t }), J(e).filter((e) => e !== t));
 }
-function we(e, t) {
-	let n = document.querySelector(`[data-page="${CSS.escape(e.scope)}"]`).getBoundingClientRect().top, r = je(e.scope).find((e) => e.dataset.cell !== "accounts" && e.getBoundingClientRect().top >= n), i = r ? t.findIndex((e) => me(e) === r.dataset.cell) : -1;
+function Ce(e, t) {
+	let n = document.querySelector(`[data-page="${CSS.escape(e.scope)}"]`).getBoundingClientRect().top, r = Ae(e.scope).find((e) => e.dataset.cell !== "accounts" && e.getBoundingClientRect().top >= n), i = r ? t.findIndex((e) => me(e) === r.dataset.cell) : -1;
 	return i < 0 ? t.length : i;
 }
-function Te(e, t, n, r, i, a) {
+function we(e, t, n, r, i, a) {
 	let o = k.canArrange(n.scope), s = o && !a ? k.supported(e).filter((e) => P[e][0] <= i) : [], c = s.length > 1 ? s.map((e) => ({
 		title: F[e],
 		icon: I[e],
 		row: !0,
 		checked: e === r,
-		run: () => e !== r && ve(n, t, e)
+		run: () => e !== r && _e(n, t, e)
 	})) : [];
 	return o && (e.options || []).length && c.push({
 		title: "Edit Widget",
@@ -507,16 +529,16 @@ function Te(e, t, n, r, i, a) {
 		icon: "minus-circle",
 		danger: !0,
 		section: !0,
-		run: () => xe(n, { key: `widget:${t.id}` })
+		run: () => be(n, { key: `widget:${t.id}` })
 	}), c;
 }
-function Ee() {
+function Te() {
 	V.dialog = {
 		kind: "pages",
 		groups: k.allPages().filter((e) => e.scope.startsWith("group:"))
 	}, V.render();
 }
-function De(e) {
+function Ee(e) {
 	let t = k.data.state, n = t.arrangements, r = n?.user, i = r?.items || Y(k.page("user") || { scope: "user" }), a = t.pages;
 	t.arrangements = {
 		...n || {},
@@ -540,20 +562,20 @@ function De(e) {
 		items: i,
 		hidden: r?.hidden || [],
 		pages: e
-	}).then(_e, (e) => {
+	}).then(X, (e) => {
 		k.data.state.arrangements === o && (k.data.state.arrangements = n, k.data.state.pages = a, q()), k.failed(e);
 	});
 }
-var Oe;
-function Z(e) {
-	V.editing !== e && (V.editing = e, clearTimeout(Oe), V.leaving = !e && !ye(), e ? one.tap("medium") : V.undo = [], V.leaving && (Oe = setTimeout(() => {
+var De;
+function Q(e) {
+	V.editing !== e && (V.editing = e, clearTimeout(De), V.leaving = !e && !ve(), e ? one.tap("medium") : V.undo = [], V.leaving && (De = setTimeout(() => {
 		V.leaving = !1, V.render();
 	}, R)), V.render());
 }
-function ke(e) {
+function Oe(e) {
 	V.at = e, V.editing = V.leaving = !1, V.undo = [], V.render();
 }
-function Ae(e) {
+function ke(e) {
 	let t = e.closest?.("[data-cell]"), n = t?.closest("[data-page]")?.dataset.page, r = t && V.view.find((e) => e.scope === n)?.list.find((e) => e.slot === t.dataset.cell);
 	return r && {
 		item: r,
@@ -562,8 +584,8 @@ function Ae(e) {
 		p: k.page(n)
 	};
 }
-var je = (e) => [...document.querySelectorAll(`[data-page="${CSS.escape(e)}"] [data-cell]`)];
-function Me(e, t, n, r) {
+var Ae = (e) => [...document.querySelectorAll(`[data-page="${CSS.escape(e)}"] [data-cell]`)];
+function je(e, t, n, r) {
 	e.preventDefault(), e.stopPropagation();
 	let i = t.size, { cell: a, gap: o, columns: s } = V.geometry[n.scope], { left: c, top: l } = r.getBoundingClientRect(), u = k.supported(t.w).filter((e) => P[e][0] <= s);
 	H = { resize: !0 };
@@ -573,19 +595,19 @@ function Me(e, t, n, r) {
 	}, f = () => {
 		H = null, removeEventListener("pointermove", d), removeEventListener("pointerup", f), removeEventListener("pointercancel", f);
 		let e = V.sizes[t.key];
-		delete V.sizes[t.key], e && e !== i ? ve(n, t.kept, e) : V.render();
+		delete V.sizes[t.key], e && e !== i ? _e(n, t.kept, e) : V.render();
 	};
 	addEventListener("pointermove", d), addEventListener("pointerup", f), addEventListener("pointercancel", f);
 }
-function Ne() {
+function Me() {
 	if (H && !H.ready) {
-		if (H.ready = !0, W = Date.now() + 600, H.page) return H = null, Z(!0);
+		if (H.ready = !0, W = Date.now() + 600, H.page) return H = null, Q(!0);
 		one.tap("medium"), H.el.style.scale = "1.06";
 	}
 }
-var Pe = !1, Fe = (e) => U && e.pointerId === U.id || H && !H.resize && e.pointerId === H.id;
-function Ie(e, t) {
-	if (U) return void ze(e, t);
+var Ne = !1, Pe = (e) => U && e.pointerId === U.id || H && !H.resize && e.pointerId === H.id;
+function Fe(e, t) {
+	if (U) return void Re(e, t);
 	let n = Math.hypot(e - H.x, t - H.y);
 	if (!H.ready) {
 		n > 8 && (clearTimeout(H.timer), H = null);
@@ -593,17 +615,17 @@ function Ie(e, t) {
 	}
 	if (H.page || n < (V.editing ? 4 : 10) || !k.canArrange(H.scope)) return;
 	let { item: r, el: i, scope: a, p: o, id: s, x: c, y: l } = H;
-	H = null, i.style.scale = "", Z(!0), Re(o, a, r.slot, c, l, s), ze(e, t);
+	H = null, i.style.scale = "", Q(!0), Le(o, a, r.slot, c, l, s), Re(e, t);
 }
-function Le(e) {
-	if (U) return void Be();
+function Ie(e) {
+	if (U) return void ze();
 	clearTimeout(H.timer);
 	let t = H;
-	if (H = null, t.el && (t.el.style.scale = ""), V.editing && t.page && !e.closest?.("[data-cell], [role=dialog]")) return Z(!1);
+	if (H = null, t.el && (t.el.style.scale = ""), V.editing && t.page && !e.closest?.("[data-cell], [role=dialog]")) return Q(!1);
 	!V.editing && t.ready && t.item?.menu && (W = Date.now() + 400, t.item.menu(t.el));
 }
-function Re(e, t, n, r, i, a) {
-	let o = je(t).find((e) => e.dataset.cell === n);
+function Le(e, t, n, r, i, a) {
+	let o = Ae(t).find((e) => e.dataset.cell === n);
 	if (!o) return;
 	let s = o.getBoundingClientRect(), c = o.cloneNode(!0);
 	c.removeAttribute("data-cell"), c.className = "pointer-events-none fixed left-0 top-0 z-20 m-0 grid scale-[1.07] drop-shadow-xl transition-[scale] duration-150 [&>[data-ctl]]:hidden", Object.assign(c.style, {
@@ -625,44 +647,44 @@ function Re(e, t, n, r, i, a) {
 		dx: r - s.left,
 		dy: i - s.top,
 		before: l.list.map((e) => e.slot)
-	}, one.tap("medium"), ze(r, i);
+	}, one.tap("medium"), Re(r, i);
 }
-function ze(e, t) {
+function Re(e, t) {
 	let n = U;
 	n.ghost.style.transform = `translate(${e - n.dx}px, ${t - n.dy}px)`;
 	let r = V.view.find((e) => e.scope === n.scope).list.map((e) => e.slot), i = r.filter((e) => e !== "accounts"), a = null, o = 0;
-	for (let r of je(n.scope)) {
+	for (let r of Ae(n.scope)) {
 		let i = r.getBoundingClientRect(), s = r.dataset.cell;
 		o = Math.max(o, i.bottom), s !== n.slot && s !== "accounts" && e >= i.left && e <= i.right && t >= i.top && t <= i.bottom && (a = s);
 	}
 	let s = r.indexOf(n.slot), c = -1;
 	a && a !== n.over ? c = r.indexOf(a) : !a && t > o && n.slot !== i.at(-1) && (c = r.indexOf(i.at(-1))), n.over = a, c < 0 || c === s || (r.splice(s, 1), r.splice(c, 0, n.slot), V.order[n.scope] = r, G = !0, V.render(!0), one.tap());
 }
-function Be() {
+function ze() {
 	let e = U;
 	U = null, W = Date.now() + 300;
 	let t = e.el.getBoundingClientRect();
 	e.ghost.style.transition = "transform 0.22s ease, scale 0.22s ease", e.ghost.style.scale = "1", e.ghost.style.transform = `translate(${t.left}px, ${t.top}px)`, setTimeout(() => {
 		e.ghost.remove(), e.el.style.visibility = "", e.el.style.animation = "";
 		let t = V.view.find((t) => t.scope === e.scope).list.filter((e) => e.key), n = t.map((e) => e.key).join(" ") !== e.before.filter((e) => e !== "accounts").join(" ");
-		delete V.order[e.scope], n ? X(e.p, Y(e.p, t.map((e) => e.kept))) : V.render();
+		delete V.order[e.scope], n ? Z(e.p, Y(e.p, t.map((e) => e.kept))) : V.render();
 	}, 220);
 }
 window.__oneDrag = (e, t, n) => {
 	if (e === "start" && !U) {
-		let e = document.querySelector("[data-one-lifted]") || document.elementFromPoint(t, n), r = e && Ae(e);
+		let e = document.querySelector("[data-one-lifted]") || document.elementFromPoint(t, n), r = e && ke(e);
 		if (!r?.item.key || !r.p || !k.canArrange(r.p.scope)) return !1;
-		e.style?.removeProperty("visibility"), e.removeAttribute?.("data-one-lifted"), Z(!0);
+		e.style?.removeProperty("visibility"), e.removeAttribute?.("data-one-lifted"), Q(!0);
 		let i = r.el.getBoundingClientRect();
-		return Re(r.p, r.scope, r.item.slot, Math.min(Math.max(t, i.left), i.right), Math.min(Math.max(n, i.top), i.bottom), "shell"), !0;
+		return Le(r.p, r.scope, r.item.slot, Math.min(Math.max(t, i.left), i.right), Math.min(Math.max(n, i.top), i.bottom), "shell"), !0;
 	}
-	return U?.id === "shell" && (e === "move" ? ze(t, n) : Be(), !0);
+	return U?.id === "shell" && (e === "move" ? Re(t, n) : ze(), !0);
 };
-function Ve(e) {
+function Be(e) {
 	if (V.undo.length && !V.editing && !e.target.closest("[data-undo]") && (V.undo = [], V.render()), e.button !== 0 || U || H || e.target.closest("[data-ctl]")) return;
 	let t = e.target.closest("[data-page]")?.dataset.page;
 	if (!t || t === M || !k.page(t)) return;
-	let n = Ae(e.target), r = n?.item.key || n?.item.menu ? n : void 0;
+	let n = ke(e.target), r = n?.item.key || n?.item.menu ? n : void 0;
 	(r?.item.menu || ae(t)) && (V.editing ? H = r?.item.key ? {
 		...r,
 		x: e.clientX,
@@ -683,17 +705,17 @@ function Ve(e) {
 		y: e.clientY,
 		id: e.pointerId,
 		touch: e.pointerType !== "mouse"
-	}, H.timer = setTimeout(() => Ne(), L)));
+	}, H.timer = setTimeout(() => Me(), L)));
 }
-function He(e) {
+function Ve(e) {
 	if (!e.target.closest("[data-page]") || e.target.closest("[data-ctl]")) return;
-	if (e.preventDefault(), H && H.touch) return void Ne();
+	if (e.preventDefault(), H && H.touch) return void Me();
 	if (V.editing || U) return;
-	let t = Ae(e.target);
+	let t = ke(e.target);
 	if (t?.item.menu) return one.tap("medium"), t.item.menu(t.el);
-	ae(e.target.closest("[data-page]")?.dataset.page) && Z(!0);
+	ae(e.target.closest("[data-page]")?.dataset.page) && Q(!0);
 }
-var Q = "motion-safe:animate-[comes_200ms_ease-out]", $ = "pointer-events-none motion-safe:animate-[goes_200ms_ease-in_forwards]";
+var $ = "motion-safe:animate-[comes_200ms_ease-out]", He = "pointer-events-none motion-safe:animate-[goes_200ms_ease-in_forwards]";
 function Ue(t) {
 	let n = e(15), { name: r, icon: i, size: a, badge: o, onClick: l, children: u } = t, d;
 	n[0] !== u || n[1] !== i || n[2] !== a ? (d = u || /* @__PURE__ */ D(s, {
@@ -799,10 +821,10 @@ function Ge({ page: e, at: t, tall: n, editing: i, leaving: a, refreshing: o, nt
 				variant: "outline",
 				size: "icon-xs",
 				"aria-label": `Remove ${u.name}`,
-				className: w("absolute -top-2 z-10 size-6 rounded-full shadow-md", i ? Q : $),
+				className: w("absolute -top-2 z-10 size-6 rounded-full shadow-md", i ? $ : He),
 				style: { left: b ? -8 : `calc(50% - ${c / 2}px - 8px)` },
 				onClick: (t) => {
-					t.stopPropagation(), xe(e.p, u);
+					t.stopPropagation(), be(e.p, u);
 				},
 				children: /* @__PURE__ */ D(d, { name: "minus" })
 			}),
@@ -810,8 +832,8 @@ function Ge({ page: e, at: t, tall: n, editing: i, leaving: a, refreshing: o, nt
 				"data-ctl": !0,
 				type: "button",
 				"aria-label": "Resize",
-				className: w("absolute -bottom-1.5 -right-1.5 z-10 size-[30px] cursor-nwse-resize touch-none", i ? Q : $),
-				onPointerDown: (t) => Me(t, u, e.p, _.current),
+				className: w("absolute -bottom-1.5 -right-1.5 z-10 size-[30px] cursor-nwse-resize touch-none", i ? $ : He),
+				onPointerDown: (t) => je(t, u, e.p, _.current),
 				children: /* @__PURE__ */ D("span", { className: "absolute bottom-1.5 right-1.5 size-3.5 rounded-br-[10px] border-b-[3px] border-r-[3px] border-foreground/55" })
 			})
 		]
@@ -837,7 +859,7 @@ function qe({ page: e, editing: t, leaving: i, refreshing: a }) {
 		let e = /* @__PURE__ */ new Map();
 		for (let t of o.current.children) {
 			let n = t.getBoundingClientRect(), r = g.current.get(t.dataset.cell);
-			if (e.set(t.dataset.cell, n), !r && g.current.size && !ye() && t.animate([{
+			if (e.set(t.dataset.cell, n), !r && g.current.size && !ve() && t.animate([{
 				scale: .4,
 				opacity: 0
 			}, {
@@ -900,13 +922,13 @@ function Je({ page: e, editing: t, leaving: i, undone: a, refreshing: o, bottom:
 					"data-undo": !0,
 					variant: "ghost",
 					size: "sm",
-					className: Q,
-					onClick: Se,
+					className: $,
+					onClick: xe,
 					children: "Undo"
 				}), h ? /* @__PURE__ */ O(E, { children: [e.addable && /* @__PURE__ */ D(l, {
 					variant: "outline",
 					size: "sm",
-					className: t ? Q : $,
+					className: t ? $ : He,
 					onClick: () => (V.dialog = {
 						kind: "add",
 						p: k.page(c)
@@ -914,15 +936,15 @@ function Je({ page: e, editing: t, leaving: i, undone: a, refreshing: o, bottom:
 					children: "Add"
 				}), /* @__PURE__ */ D(l, {
 					size: "sm",
-					className: t ? Q : $,
-					onClick: () => Z(!1),
+					className: t ? $ : He,
+					onClick: () => Q(!1),
 					children: "Done"
 				})] }) : /* @__PURE__ */ D(l, {
 					variant: "ghost",
 					size: "icon-sm",
-					className: Q,
+					className: $,
 					"aria-label": B.title,
-					onClick: () => Z(!0),
+					onClick: () => Q(!0),
 					children: /* @__PURE__ */ D(d, { name: B.icon })
 				})]
 			})]
@@ -947,8 +969,8 @@ function Je({ page: e, editing: t, leaving: i, undone: a, refreshing: o, bottom:
 				children: /* @__PURE__ */ D(l, {
 					variant: "ghost",
 					size: "sm",
-					className: w("-ml-3", t ? Q : $),
-					onClick: Ee,
+					className: w("-ml-3", t ? $ : He),
+					onClick: Te,
 					children: "Edit Pages"
 				})
 			})
@@ -962,7 +984,7 @@ function Ye(t) {
 		n ? (i.scrollTo({
 			left: a * i.clientWidth,
 			behavior: "instant"
-		}), ke(e)) : i.scrollTo({
+		}), Oe(e)) : i.scrollTo({
 			left: a * i.clientWidth,
 			behavior: "smooth"
 		});
@@ -1054,7 +1076,7 @@ function Xe(t) {
 		};
 		for (let t of r.options || []) JSON.stringify(e[t.name] ?? null) === JSON.stringify(t.default ?? null) && delete e[t.name];
 		let t = Object.keys(e).length ? e : void 0;
-		JSON.stringify(t) !== JSON.stringify(a.options) && (V.refreshing.add(a.id), X(o, Y(o).map((e) => e.widget && e.id === a.id ? {
+		JSON.stringify(t) !== JSON.stringify(a.options) && (V.refreshing.add(a.id), Z(o, Y(o).map((e) => e.widget && e.id === a.id ? {
 			...e,
 			options: t
 		} : e), J(o), { reload: !0 }).finally(() => {
@@ -1129,7 +1151,7 @@ function Qe(t) {
 		let o = a, s;
 		n[16] !== r || n[17] !== o ? (s = (e, t) => o(() => {
 			let n = [...crypto.getRandomValues(/* @__PURE__ */ new Uint8Array(5))].map($e).join(""), i = Y(r);
-			G = !0, X(r, i.toSpliced(we(r, i), 0, {
+			G = !0, Z(r, i.toSpliced(Ce(r, i), 0, {
 				app: e.app,
 				widget: e.widget,
 				id: n,
@@ -1149,7 +1171,7 @@ function Qe(t) {
 				name: k.label(e),
 				icon: e,
 				size: 56,
-				onClick: () => o(() => Ce(r, e.name))
+				onClick: () => o(() => Se(r, e.name))
 			}, e.name))
 		})] }), n[1] = i, n[2] = r, n[3] = c, n[4] = u, n[5] = f, n[6] = p, n[7] = h, n[8] = g, n[9] = _, n[10] = v, n[11] = y;
 	} else c = n[3], u = n[4], f = n[5], p = n[6], h = n[7], g = n[8], _ = n[9], v = n[10], y = n[11];
@@ -1283,7 +1305,7 @@ function rt(t) {
 		JSON.stringify(e) !== JSON.stringify({
 			order: a.map(ot),
 			hidden: a.filter(at).map(it)
-		}) && De(e);
+		}) && Ee(e);
 	}, n[6] = o, n[7] = a, n[8] = p, n[9] = c, n[10] = C) : C = n[10];
 	let T = C, E = m, k;
 	n[11] === T ? k = n[12] : (k = (e) => !e && T(), n[11] = T, n[12] = k);
@@ -1455,7 +1477,7 @@ function pt() {
 	let L;
 	o[18] === C ? L = o[19] : (L = j ? (e) => {
 		let t = Math.round(e.currentTarget.scrollLeft / Math.max(1, e.currentTarget.clientWidth));
-		C[t] && C[t] !== V.at && ke(C[t]);
+		C[t] && C[t] !== V.at && Oe(C[t]);
 	} : void 0, o[18] = C, o[19] = L);
 	let R;
 	if (o[20] !== y || o[21] !== g || o[22] !== _ || o[23] !== x || o[24] !== v || o[25] !== m) {
@@ -1507,27 +1529,27 @@ function ht() {
 }
 function gt() {
 	let e = St, t = xt, n = bt, r = yt, i = vt, a = _t;
-	return document.addEventListener("pointerdown", Ve), addEventListener("pointermove", t), addEventListener("pointerup", e), addEventListener("pointercancel", n), document.addEventListener("touchmove", r, { passive: !1 }), document.addEventListener("touchend", i), document.addEventListener("touchcancel", i), addEventListener("keydown", a), document.oncontextmenu = He, () => {
-		document.removeEventListener("pointerdown", Ve), removeEventListener("pointermove", t), removeEventListener("pointerup", e), removeEventListener("pointercancel", n), document.removeEventListener("touchmove", r), document.removeEventListener("touchend", i), document.removeEventListener("touchcancel", i), removeEventListener("keydown", a), document.oncontextmenu = null;
+	return document.addEventListener("pointerdown", Be), addEventListener("pointermove", t), addEventListener("pointerup", e), addEventListener("pointercancel", n), document.addEventListener("touchmove", r, { passive: !1 }), document.addEventListener("touchend", i), document.addEventListener("touchcancel", i), addEventListener("keydown", a), document.oncontextmenu = Ve, () => {
+		document.removeEventListener("pointerdown", Be), removeEventListener("pointermove", t), removeEventListener("pointerup", e), removeEventListener("pointercancel", n), document.removeEventListener("touchmove", r), document.removeEventListener("touchend", i), document.removeEventListener("touchcancel", i), removeEventListener("keydown", a), document.oncontextmenu = null;
 	};
 }
 function _t(e) {
-	e.key === "Escape" && V.editing && !document.querySelector("[role=dialog]") && Z(!1);
+	e.key === "Escape" && V.editing && !document.querySelector("[role=dialog]") && Q(!1);
 }
 function vt(e) {
-	Pe && (Pe = !1, (U || H) && Le(e.target));
+	Ne && (Ne = !1, (U || H) && Ie(e.target));
 }
 function yt(e) {
-	(U || H?.ready || H?.resize) && e.preventDefault(), Pe && e.touches[0] && Ie(e.touches[0].clientX, e.touches[0].clientY);
+	(U || H?.ready || H?.resize) && e.preventDefault(), Ne && e.touches[0] && Fe(e.touches[0].clientX, e.touches[0].clientY);
 }
 function bt(e) {
-	Fe(e) && (e.pointerType === "touch" && (U || H?.ready) ? Pe = !0 : U ? Be() : (clearTimeout(H.timer), H.el && (H.el.style.scale = ""), H = null));
+	Pe(e) && (e.pointerType === "touch" && (U || H?.ready) ? Ne = !0 : U ? ze() : (clearTimeout(H.timer), H.el && (H.el.style.scale = ""), H = null));
 }
 function xt(e) {
-	return Fe(e) && Ie(e.clientX, e.clientY);
+	return Pe(e) && Fe(e.clientX, e.clientY);
 }
 function St(e) {
-	return Fe(e) && Le(e.target);
+	return Pe(e) && Ie(e.target);
 }
 function Ct(e) {
 	return e.scope;
@@ -1536,10 +1558,10 @@ var wt = !1;
 function Tt() {
 	return new Promise((e, t) => {
 		k.load(() => {
-			V.phase = "ready", q(), e();
+			V.phase = "ready", q(), X(), e();
 		}).then(() => {
-			q(), _e(), wt ||= (k.watch(() => {
-				q(), _e();
+			q(), X(), wt ||= (k.watch(() => {
+				q(), X();
 			}), !0);
 		}, t);
 	});

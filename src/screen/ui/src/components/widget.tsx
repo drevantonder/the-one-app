@@ -46,8 +46,15 @@ function time(n: Tree) {
   return d.toLocaleDateString(undefined, s < 7 * 86400 ? { weekday: "short" } : { day: "numeric", month: "short" })
 }
 
-/// A widget, as a card: its tree under its title (unless the tree labels itself); a broken one says so, and why. Where
-/// a window draws screens at its smaller text (a zoom on the page), a widget keeps its own size.
+/// When a widget that's old (`w.old`, in ms) was last read, as the home-screen widgets say it: "Updated 2 h ago".
+function updated(at: number) {
+  const said = time({ at })
+  return Date.now() - at < 86_400_000 ? `Updated ${said} ago` : `Updated ${said}`
+}
+
+/// A widget, as a card: its tree under its title (unless the tree labels itself), dimmed with when it's from if it's
+/// old (`w.old`); a broken one says so, and why. Where a window draws screens at its smaller text (a zoom on the page),
+/// a widget keeps its own size.
 function WidgetCard({ w, host, tree = w.root, className, style, ...props }: { w: Widget; host: WidgetHost; tree?: Tree } & React.ComponentProps<"div">) {
   const why = w.error ? one().plain(w.error).title : ""
   return (
@@ -65,10 +72,11 @@ function WidgetCard({ w, host, tree = w.root, className, style, ...props }: { w:
           {why && why !== "That didn't work." && <div className="line-clamp-4 select-text break-words text-[13px] text-muted-foreground">{why}</div>}
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col [&>[data-w=col]]:flex-1 [&>.contents>[data-w=col]]:flex-1">
+        <div className={cn("flex min-h-0 flex-1 flex-col [&>[data-w=col]]:flex-1 [&>.contents>[data-w=col]]:flex-1", w.old && "opacity-50")}>
           <Node n={tree} w={w} host={host} />
         </div>
       )}
+      {w.old && !w.error && <div className="shrink-0 truncate text-xs text-muted-foreground">{updated(w.old)}</div>}
     </div>
   )
 }

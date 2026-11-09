@@ -1108,7 +1108,7 @@ let watching = false
 /// the pages are drawn: each page's widgets come after, a grey card in each one's place until they do.
 function refresh() {
   return new Promise((drawn, failed) => {
-    home.load(() => { S.phase = "ready"; draw(); drawn() }).then(() => {
+    home.load(() => { S.phase = "ready"; draw(); keep(); drawn() }).then(() => {
       draw()
       keep()
       if (!watching) home.watch(() => { draw(); keep() }), (watching = true)

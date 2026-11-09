@@ -110,6 +110,11 @@ pub fn update_refusal(yours: &str) -> String {
 /// (and the browser's, which can't open it either).
 pub const NOTE_FALLBACK: &str = "You have a new notification.";
 
+/// How long a widget may take to draw beside the rest of its page. One that takes longer comes as `late`, showing
+/// `LATE_WIDGET`, so the others aren't held back; asked for alone (`kind=<app>.<widget>`), it takes what it takes.
+pub const WIDGET_LIMIT_MS: u64 = 1_000;
+pub const LATE_WIDGET: &str = "Still drawing.";
+
 /// The codes the node's errors carry beside their text (`{ error, code }`), which callers act on, never on the text.
 /// An app's error may carry one too (an error with a `code`), the Workers and clients of other languages read the
 /// same ones from `shared/protocol.js`'s `CODES`, each as its value in camelCase.
@@ -252,6 +257,8 @@ pub fn javascript() -> String {
          export const LOG = {log};\n\
          export const BLOBS = {blobs};\n\
          export const NOTE_FALLBACK = {fallback};\n\
+         export const WIDGET_LIMIT_MS = {widget_limit};\n\
+         export const LATE_WIDGET = {late_widget};\n\
          export const CODES = {codes};\n\
          export const YOURS = {yours};\n\
          export const Yours = YOURS[0].toUpperCase() + YOURS.slice(1);\n\
@@ -294,6 +301,8 @@ pub fn javascript() -> String {
         log = json!(crate::database::scopes::CoreDb::Log.name()),
         blobs = json!(crate::database::scopes::CoreDb::Blobs.name()),
         fallback = json!(NOTE_FALLBACK),
+        widget_limit = WIDGET_LIMIT_MS,
+        late_widget = json!(LATE_WIDGET),
         yours = json!(crate::config::YOURS),
         codes = json!(code::ALL.iter().map(|c| (code::camel(c), c)).collect::<std::collections::BTreeMap<_, _>>()),
         update = json!(UPDATE_REFUSAL),
