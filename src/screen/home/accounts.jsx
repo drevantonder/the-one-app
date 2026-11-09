@@ -7,7 +7,7 @@
 // dist/accounts.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Icon, List, ListRow, Problem, Skeleton } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Icon, List, ListRow, Problem, Skeleton } from "@one/ui"
 import { home } from "./lib/model.js"
 
 /// Only what this screen shows: the user's pages and the apps on them, not the widgets Home draws.
@@ -64,7 +64,7 @@ function AppAccounts({ item, list }) {
   if (!list.length) {
     return !signIn && a.needs && store
       ? <List><ListRow title={a.needs} onClick={store} /></List>
-      : <p className="px-1 text-sm text-muted-foreground">No accounts yet</p>
+      : null
   }
   return (
     <List>
@@ -143,24 +143,26 @@ function Accounts() {
   return (
     <div className="flex flex-col gap-8">
       <h1 className="large-title text-3xl font-bold tracking-tight">Accounts</h1>
+      <Grid min="20rem" max={3} gap="2rem" className="items-start">
       {withAccounts.map((item) => {
         const { a, p, signIn } = item
         return (
-          <section key={a.name} className="flex max-w-2xl flex-col gap-3">
+          <section key={a.name} className="flex min-w-0 flex-col gap-2">
             <div className="flex items-center gap-3">
               <AppIcon app={a} size={32} />
-              <h2 className="min-w-0 flex-1 truncate text-lg font-semibold">{home.label(a)}</h2>
+              <h2 className="min-w-0 flex-1 truncate text-base font-semibold">{home.label(a)}</h2>
+              {signIn && accounts[a.name] !== undefined && !(accounts[a.name] instanceof Error) && (
+                <Button variant="secondary" size="sm" onClick={(e) => addAccount(a, p, e.currentTarget, stale.current, async () => (await show()))}>Add Account</Button>
+              )}
               <Button variant="ghost" size="icon-sm" aria-label={`More for ${home.label(a)}`} onClick={(e) => home.menu(home.actions(a, p), e.currentTarget)}>
                 <Icon name="dots-three-outline-fill" className="size-[18px]" />
               </Button>
             </div>
             <AppAccounts item={item} list={accounts[a.name]} />
-            {signIn && accounts[a.name] !== undefined && !(accounts[a.name] instanceof Error) && (
-              <Button variant="secondary" className="self-start" onClick={(e) => addAccount(a, p, e.currentTarget, stale.current, async () => (await show()))}>Add Account</Button>
-            )}
           </section>
         )
       })}
+      </Grid>
       {!withAccounts.length && <Empty className="mr-auto max-w-md px-0 py-0 text-left items-start" action={may ? { label: "Add Account", run: () => home.addAccountApp()?.() } : undefined}>The accounts your apps sign in to, like your email and chats, show here.</Empty>}
       {may && withAccounts.length > 0 && <Button variant="outline" className="self-start" onClick={() => home.addAccountApp()?.()}>Add Account for Another App</Button>}
     </div>
