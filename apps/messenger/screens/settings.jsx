@@ -2,7 +2,7 @@
 // or makes one, and opens messenger.com in it to sign in.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AccountList, Empty, Hint, Input, List, ListNote, ListRow, ListSkeleton, LoadFailure, LoadingButton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useAccounts } from "@one/ui"
+import { AccountList, Empty, Hint, Input, List, ListNote, ListRow, ListSkeleton, LoadFailure, LoadingButton, Problem, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useAccounts } from "@one/ui"
 
 const BLURB = "Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send."
 // The choice that makes a profile of its own, not one already there.
@@ -26,8 +26,7 @@ function Pick({ free, onSigningIn }) {
     }
   }
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium text-muted-foreground">Browser Profile</h2>
+    <Section title="Browser Profile">
       <List>
         <ListRow
           title="Profile"
@@ -50,7 +49,7 @@ function Pick({ free, onSigningIn }) {
       <Hint>Each has its own sign-ins.</Hint>
       {why && <Problem title={why} action={{ label: "Try Again", run: go }} />}
       <LoadingButton className="self-start" run={go}>Sign In to Messenger</LoadingButton>
-    </section>
+    </Section>
   )
 }
 
@@ -66,15 +65,14 @@ function SigningIn({ link, onDone }) {
     onDone()
   }
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium text-muted-foreground">Sign In</h2>
+    <Section title="Sign In">
       <List>
         <ListRow title="Open the device" onClick={() => one.link(link.url)} />
         <ListNote>{`Sign in to messenger.com in the ${link.profile} profile, and tick Keep me signed in.`}</ListNote>
       </List>
       {why && <Problem title={why} action={{ label: "Try Again", run: done }} />}
       <LoadingButton className="self-start" run={done}>Done</LoadingButton>
-    </section>
+    </Section>
   )
 }
 
@@ -103,7 +101,7 @@ function Settings() {
   const needs = accounts.filter((a) => !a.ok)
   return (
     <div className="flex flex-col gap-6">
-      {!accounts.length && !picking && <Empty className="mx-auto max-w-md" action={{ label: "Add Account", run: pick }}>{BLURB}</Empty>}
+      {!accounts.length && !picking && <Empty action={{ label: "Add Account", run: pick }}>{BLURB}</Empty>}
       {needs.map((a) => <Problem key={a.account} warn title={a.account + " needs signing in"} text="Sign it out, then add it again." />)}
       {accounts.length > 0 && (
         <AccountList

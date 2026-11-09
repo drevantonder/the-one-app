@@ -2,7 +2,7 @@
 // where there's more of it.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Card, Empty, Grid, Problem, Progress, Skeleton } from "@one/ui"
+import { AppIcon, Card, Empty, Grid, LargeTitle, Problem, Progress, Skeleton } from "@one/ui"
 
 function Meter({ label, w }) {
   if (!w || w.used == null) return null
@@ -83,7 +83,7 @@ function Waiting() {
   )
 }
 
-function Main() {
+function Body() {
   const [state, setState] = useState({})
   useEffect(() => {
     const run = () =>
@@ -108,4 +108,4 @@ function Main() {
   )
 }
 
-createRoot(document.getElementById("root")).render(<Main />)
+createRoot(document.getElementById("root")).render(<div className="flex flex-col gap-4"><LargeTitle>AI Usage</LargeTitle><Body /></div>)

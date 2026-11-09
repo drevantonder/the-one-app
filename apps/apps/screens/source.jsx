@@ -20,7 +20,7 @@ function Source() {
     }
   }, [a, link])
 
-  if (!list.data) return <div className="p-4"><Pending call={list} rows={1} /></div>
+  if (!list.data) return <Pending call={list} rows={1} />
   if (!a) return <Empty>This app isn’t here.</Empty>
 
   const save = async (to) => {
@@ -36,7 +36,7 @@ function Source() {
   }
 
   return (
-    <form className="flex flex-col items-start gap-4 p-4" onSubmit={(e) => (e.preventDefault(), save((link || "").trim()))}>
+    <form className="flex flex-col items-start gap-4" onSubmit={(e) => (e.preventDefault(), save((link || "").trim()))}>
       <Input
         ref={field}
         type="url"

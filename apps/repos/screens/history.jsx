@@ -1,11 +1,11 @@
 // A repo's commits, newest first, under the day each was made; a commit opens beside the list where there's room.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, Empty, List, Pending, useCall } from "@one/ui"
+import { Avatar, Button, Empty, List, Pending, Section, Split, useCall } from "@one/ui"
 import { CommitView } from "../lib/commit-view.jsx"
 import { PathBar } from "../lib/frame.jsx"
 import { SmallCopy } from "../lib/parts.jsx"
-import { Beside, Frame, ago, go, short, useBeside } from "../lib/use.jsx"
+import { WIDE_BESIDE, Frame, ago, go, short, useBeside } from "../lib/use.jsx"
 
 const P = one.params
 const at = { repo: P.repo, ref: P.ref, path: P.path || "" }
@@ -69,10 +69,9 @@ function History() {
     <div className="flex max-w-2xl flex-col gap-4">
       <PathBar d={d} />
       {groups.map((g) => (
-        <section key={g.day} className="flex flex-col gap-1.5">
-          <h2 className="text-sm font-medium text-muted-foreground">{g.day}</h2>
+        <Section key={g.day} title={g.day}>
           <List>{g.commits.map((c) => <Row key={c.sha} c={c} selected={current === c.sha} open={open} />)}</List>
-        </section>
+        </Section>
       ))}
       <div className="flex gap-2">
         <Button variant="outline" disabled={!page} onClick={() => go("history", { ...at, page: page - 1 })}>Newer</Button>
@@ -80,7 +79,7 @@ function History() {
       </div>
     </div>
   )
-  return <Beside size="28rem" list={list} detail={<CommitView repo={d.repo} sha={current} files={false} />} />
+  return <Split wide={WIDE_BESIDE} size="28rem" list={list} detail={beside && <CommitView repo={d.repo} sha={current} files={false} />} />
 }
 
 createRoot(document.getElementById("root")).render(<Frame><History /></Frame>)

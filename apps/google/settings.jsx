@@ -3,7 +3,7 @@
 // Google, which sends the browser back here with { back: the address it came back to } to finish. Opened with
 // { add: true } (a shell's Add Account), it starts signing in at once.
 import { useEffect, useRef, useState } from "react"
-import { AccountList, Empty, List, ListRow, ListSkeleton, LoadFailure, Loading, LoadingButton, Problem, failureSentence, useAccounts } from "@one/ui"
+import { AccountList, Empty, List, ListRow, ListSkeleton, LoadFailure, Loading, LoadingButton, Problem, Section, failureSentence, useAccounts } from "@one/ui"
 
 export function GoogleSettings({ title, blurb }) {
   const { accounts, problem, retry, failed, signOut, reload } = useAccounts()
@@ -92,10 +92,10 @@ export function GoogleSettings({ title, blurb }) {
         </AccountList>
       )}
       {step?.link && (
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium text-muted-foreground">Sign In</h2>
+        <Section title="Sign In">
           <List><ListRow title="Sign in to Google" sub={`and allow ${title}`} onClick={() => one.link(step.link)} /></List>
-        </section>
+          <Hint>Google brings you back here when you're done.</Hint>
+        </Section>
       )}
       {step?.finishing && <Loading>Signing In</Loading>}
       {step?.why && <Problem title={step.why} action={{ label: "Try Again", run: step.retry }} />}

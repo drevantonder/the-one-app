@@ -17,11 +17,8 @@ function D(t) {
 	}), n[0] = r, n[1] = a, n[2] = o) : o = n[2];
 	let s;
 	return n[3] !== i || n[4] !== o ? (s = /* @__PURE__ */ C("div", {
-		className: "p-4",
-		children: /* @__PURE__ */ C("div", {
-			ref: i,
-			children: o
-		})
+		ref: i,
+		children: o
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
 var O = (e) => one.ago(Date.parse(e), { long: !0 }), k = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, A = (e, t) => one.open(e, t), j = "<address>/repos/", M = "<you>";
@@ -355,12 +352,12 @@ function V(t) {
 		number: o
 	}, n[0] = r, n[1] = o, n[2] = s) : s = n[2];
 	let c = b("issue", s), l;
-	n[3] !== c.reload || n[4] !== a || n[5] !== r ? (l = (e) => /* @__PURE__ */ C(H, {
+	n[3] !== c || n[4] !== a || n[5] !== r ? (l = (e) => /* @__PURE__ */ C(H, {
 		d: e,
 		repo: r,
 		reload: c.reload,
 		onGone: a
-	}), n[3] = c.reload, n[4] = a, n[5] = r, n[6] = l) : l = n[6];
+	}), n[3] = c, n[4] = a, n[5] = r, n[6] = l) : l = n[6];
 	let u;
 	return n[7] !== c || n[8] !== l ? (u = /* @__PURE__ */ C(m, {
 		call: c,
@@ -712,7 +709,7 @@ function H(t) {
 			variant: "outline",
 			className: "self-start",
 			onClick: () => A("labels", { repo: a }),
-			children: "Edit Labels…"
+			children: "Edit Labels"
 		}),
 		done: () => (j(null), s())
 	}), n[143] = i.labels, n[144] = i.number, n[145] = D, n[146] = s, n[147] = a, n[148] = $) : $ = n[148];

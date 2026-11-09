@@ -1,9 +1,9 @@
 // A repo's Settings, for its owners, as GitHub's: who pushes to it, its labels, and deleting it.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Icon, List, ListRow, Problem, Pending, useCall } from "@one/ui"
+import { Button, Empty, Icon, List, ListRow, Pending, Problem, Section, useCall } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
-import { Frame, Section, go, said } from "../lib/use.jsx"
+import { Frame, go, said } from "../lib/use.jsx"
 
 const P = one.params
 

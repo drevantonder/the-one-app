@@ -4,7 +4,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/backups.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Spinner, Split, Tabs, TabsList, TabsTrigger } from "@one/ui"
+import { AppIcon, Button, Empty, Icon, Input, Label, LargeTitle, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Spinner, Split, Tabs, TabsList, TabsTrigger } from "@one/ui"
 
 const api = one.api
 const name = (device) => String(device || "").replace(/\.local$/, "")
@@ -63,7 +63,6 @@ function Backups() {
     }
   }
   useEffect(() => {
-    one.largeTitle("Backups")
     one.on("changed", load)
     // Times like "12 minutes ago" stay true.
     const every = setInterval(load, 30000)
@@ -99,7 +98,7 @@ function Backups() {
   if (!backups) {
     return (
       <div className="flex max-w-2xl flex-col gap-4">
-        <h1 className="large-title text-3xl font-bold tracking-tight">Backups</h1>
+        <LargeTitle>Backups</LargeTitle>
         {problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} /> : <ListSkeleton rows={2} />}
       </div>
     )
@@ -123,10 +122,7 @@ function Backups() {
         onClose={() => setOpen(null)}
         list={
           <div className="flex max-w-2xl flex-col gap-6">
-            <div className="flex items-center justify-between gap-3">
-              <h1 className="large-title text-3xl font-bold tracking-tight">Backups</h1>
-              {waiting ? <Button disabled role="status"><Spinner />Backing Up…</Button> : !!places.length && !trouble && <Button onClick={backUpNow}>Back Up Now</Button>}
-            </div>
+            <LargeTitle action={waiting ? <Button disabled role="status"><Spinner />Backing Up…</Button> : !!places.length && !trouble && <Button onClick={backUpNow}>Back Up Now</Button>}>Backups</LargeTitle>
 
             {trouble ? (
               <Problem
@@ -175,13 +171,6 @@ function Backups() {
 }
 
 // A heading over a part of the screen.
-const Section = ({ title, children }) => (
-  <section className="flex flex-col gap-2">
-    <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-    {children}
-  </section>
-)
-
 // Facts as rows: a name, and what it is, which can be selected.
 function Info({ rows }) {
   const shown = rows.filter(([, value]) => value)

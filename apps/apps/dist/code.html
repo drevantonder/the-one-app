@@ -28,21 +28,15 @@ function m() {
 	}
 	if (!o.data) {
 		let e;
-		return n[3] === o ? e = n[4] : (e = /* @__PURE__ */ u("div", {
-			className: "p-4",
-			children: /* @__PURE__ */ u(s, {
-				call: o,
-				rows: 4
-			})
+		return n[3] === o ? e = n[4] : (e = /* @__PURE__ */ u(s, {
+			call: o,
+			rows: 4
 		}), n[3] = o, n[4] = e), e;
 	}
 	let m;
 	n[5] === o.data.files ? m = n[6] : (m = p(o.data.files, f).map(h), n[5] = o.data.files, n[6] = m);
 	let _;
-	return n[7] === m ? _ = n[8] : (_ = /* @__PURE__ */ u("div", {
-		className: "p-4",
-		children: /* @__PURE__ */ u(a, { children: m })
-	}), n[7] = m, n[8] = _), _;
+	return n[7] === m ? _ = n[8] : (_ = /* @__PURE__ */ u(a, { children: m }), n[7] = m, n[8] = _), _;
 }
 function h(e) {
 	let [t, n] = e;

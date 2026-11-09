@@ -6,83 +6,77 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AccountList as a, Hint as o, Input as s, List as c, ListNote as l, ListRow as u, ListSkeleton as d, LoadFailure as f, LoadingButton as p, Problem as m, Select as h, SelectContent as g, SelectItem as _, SelectTrigger as v, SelectValue as y, useAccounts as b } from "@one/ui";
-import { jsx as x, jsxs as S } from "react/jsx-runtime";
-var C = "Recent chats take a few minutes to arrive.";
-function w(n) {
-	let i = e(21), { phone: a, device: s, had: u, done: d } = n, f;
+import { AccountList as a, Hint as o, Input as s, List as c, ListNote as l, ListRow as u, ListSkeleton as d, LoadFailure as f, LoadingButton as p, Problem as m, Section as h, Select as g, SelectContent as _, SelectItem as v, SelectTrigger as y, SelectValue as b, useAccounts as x } from "@one/ui";
+import { jsx as S, jsxs as C } from "react/jsx-runtime";
+var w = "Recent chats take a few minutes to arrive.";
+function T(n) {
+	let i = e(20), { phone: a, device: s, had: u, done: d } = n, f;
 	i[0] === Symbol.for("react.memo_cache_sentinel") ? (f = {}, i[0] = f) : f = i[0];
-	let [p, m] = r(f), [h, g] = r(C), _;
-	i[1] !== s || i[2] !== d || i[3] !== u ? (_ = () => {
+	let [p, m] = r(f), [g, _] = r(w), v;
+	i[1] !== s || i[2] !== d || i[3] !== u ? (v = () => {
 		let e = !1;
 		return (async () => {
 			for (let t = 0; t < 90 && !e; t++) {
-				let t = await one.call("_pairing", s ? { device: s } : {}).catch(D);
+				let t = await one.call("_pairing", s ? { device: s } : {}).catch(O);
 				if (e) return;
 				if (t.error) {
-					g(t.error), m({}), setTimeout(d, 3e3);
+					_(t.error), m({}), setTimeout(d, 3e3);
 					return;
 				}
 				if (!t.qr) {
-					if ((await one.call("accounts").catch(E)).length > u) return d();
-					g("The codes ran out before the phone linked."), m({}), setTimeout(d, 3e3);
+					if ((await one.call("accounts").catch(D)).length > u) return d();
+					_("The codes ran out before the phone linked."), m({}), setTimeout(d, 3e3);
 					return;
 				}
 				m({
 					qr: t.qr,
 					code: t.code || ""
-				}), await new Promise(T);
+				}), await new Promise(E);
 			}
 			e || d();
 		})(), () => void (e = !0);
-	}, i[1] = s, i[2] = d, i[3] = u, i[4] = _) : _ = i[4];
-	let v;
-	i[5] === Symbol.for("react.memo_cache_sentinel") ? (v = [], i[5] = v) : v = i[5], t(_, v);
+	}, i[1] = s, i[2] = d, i[3] = u, i[4] = v) : v = i[4];
 	let y;
-	i[6] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ x("h2", {
-		className: "text-sm font-medium text-muted-foreground",
-		children: "Link a Device"
-	}), i[6] = y) : y = i[6];
+	i[5] === Symbol.for("react.memo_cache_sentinel") ? (y = [], i[5] = y) : y = i[5], t(v, y);
 	let b;
-	i[7] === Symbol.for("react.memo_cache_sentinel") ? (b = /* @__PURE__ */ x(l, { children: "On the phone, open WhatsApp › Settings › Linked devices › Link a device." }), i[7] = b) : b = i[7];
-	let w = `Scan this code${a ? ", or tap Link with phone number instead and type the code under it" : ""}.`, O;
-	i[8] === w ? O = i[9] : (O = /* @__PURE__ */ S(c, { children: [b, /* @__PURE__ */ x(l, { children: w })] }), i[8] = w, i[9] = O);
+	i[6] === Symbol.for("react.memo_cache_sentinel") ? (b = /* @__PURE__ */ S(l, { children: "On the phone, open WhatsApp › Settings › Linked devices › Link a device." }), i[6] = b) : b = i[6];
+	let x = `Scan this code${a ? ", or tap Link with phone number instead and type the code under it" : ""}.`, T;
+	i[7] === x ? T = i[8] : (T = /* @__PURE__ */ C(c, { children: [b, /* @__PURE__ */ S(l, { children: x })] }), i[7] = x, i[8] = T);
 	let k;
-	i[10] === p.qr ? k = i[11] : (k = p.qr && /* @__PURE__ */ x("img", {
+	i[9] === p.qr ? k = i[10] : (k = p.qr && /* @__PURE__ */ S("img", {
 		alt: "",
 		src: p.qr,
 		className: "mx-auto my-2 block size-[220px] rounded-xl bg-white [image-rendering:pixelated]"
-	}), i[10] = p.qr, i[11] = k);
+	}), i[9] = p.qr, i[10] = k);
 	let A;
-	i[12] === p.code ? A = i[13] : (A = p.code && /* @__PURE__ */ x("p", {
+	i[11] === p.code ? A = i[12] : (A = p.code && /* @__PURE__ */ S("p", {
 		className: "text-center font-mono text-2xl font-semibold tracking-widest",
 		children: p.code
-	}), i[12] = p.code, i[13] = A);
+	}), i[11] = p.code, i[12] = A);
 	let j;
-	i[14] === h ? j = i[15] : (j = /* @__PURE__ */ x(o, { children: h }), i[14] = h, i[15] = j);
+	i[13] === g ? j = i[14] : (j = /* @__PURE__ */ S(o, { children: g }), i[13] = g, i[14] = j);
 	let M;
-	return i[16] !== j || i[17] !== O || i[18] !== k || i[19] !== A ? (M = /* @__PURE__ */ S("section", {
-		className: "flex flex-col gap-2",
+	return i[15] !== T || i[16] !== k || i[17] !== A || i[18] !== j ? (M = /* @__PURE__ */ C(h, {
+		title: "Link a Device",
 		children: [
-			y,
-			O,
+			T,
 			k,
 			A,
 			j
 		]
-	}), i[16] = j, i[17] = O, i[18] = k, i[19] = A, i[20] = M) : M = i[20], M;
+	}), i[15] = T, i[16] = k, i[17] = A, i[18] = j, i[19] = M) : M = i[19], M;
 }
-function T(e) {
+function E(e) {
 	return setTimeout(e, 2e3);
 }
-function E() {
+function D() {
 	return [];
 }
-function D(e) {
+function O(e) {
 	return { error: e.message };
 }
-function O() {
-	let { accounts: e, problem: i, retry: l, failed: C, signOut: T, reload: E } = b(), [D, O] = r(null), [k, A] = r(""), [j, M] = r(""), [N, P] = r(null), [F, I] = r(!1), L = n(null);
+function k() {
+	let { accounts: e, problem: i, retry: l, failed: h, signOut: w, reload: E } = x(), [D, O] = r(null), [k, A] = r(""), [j, M] = r(""), [N, P] = r(null), [F, I] = r(!1), L = n(null);
 	t(() => {
 		one.call("_running").then((e) => O(e.devices), () => (I(!0), O([])));
 	}, []);
@@ -110,12 +104,12 @@ function O() {
 		} });
 	}
 	let V = () => (P(null), E());
-	if (i && !e) return /* @__PURE__ */ x(f, {
+	if (i && !e) return /* @__PURE__ */ S(f, {
 		problem: i,
 		retry: l
 	});
-	if (!z) return /* @__PURE__ */ x(d, {});
-	if (!D.length && !F) return /* @__PURE__ */ x(m, {
+	if (!z) return /* @__PURE__ */ S(d, {});
+	if (!D.length && !F) return /* @__PURE__ */ S(m, {
 		warn: !0,
 		title: "WhatsApp isn’t on any of your devices yet.",
 		action: {
@@ -124,11 +118,11 @@ function O() {
 		}
 	});
 	let H = e.filter((e) => !e.ok);
-	return /* @__PURE__ */ S("div", {
+	return /* @__PURE__ */ C("div", {
 		className: "flex flex-col gap-6",
 		children: [
-			!e.length && /* @__PURE__ */ x(o, { children: "Link WhatsApp, and your agents can read your chats and, when you ask, send." }),
-			H.map((e) => /* @__PURE__ */ x(m, {
+			!e.length && /* @__PURE__ */ S(o, { children: "Link WhatsApp, and your agents can read your chats and, when you ask, send." }),
+			H.map((e) => /* @__PURE__ */ S(m, {
 				warn: !0,
 				title: e.account + " needs linking again",
 				text: one.plain(e.why || "Needs linking again").title.replace(/^Needs linking again\.$/, "Link it from the phone again."),
@@ -137,11 +131,11 @@ function O() {
 					run: () => B()
 				}
 			}, e.account)),
-			e.length > 0 && /* @__PURE__ */ x(a, {
+			e.length > 0 && /* @__PURE__ */ S(a, {
 				title: "Accounts",
 				accounts: e,
-				failed: C,
-				signOut: (e) => T(e, { device: e.device }),
+				failed: h,
+				signOut: (e) => w(e, { device: e.device }),
 				confirm: (e) => one.alert({
 					title: `Sign out of ${e.account}?`,
 					text: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
@@ -153,33 +147,33 @@ function O() {
 					warn: !0
 				}
 			}),
-			N?.pairing ? /* @__PURE__ */ x(w, {
+			N?.pairing ? /* @__PURE__ */ S(T, {
 				...N.pairing,
 				done: V
-			}) : /* @__PURE__ */ S("section", {
+			}) : /* @__PURE__ */ C("section", {
 				className: "flex flex-col gap-2",
 				children: [
-					/* @__PURE__ */ S(c, { children: [D.length > 1 && /* @__PURE__ */ x(u, {
+					/* @__PURE__ */ C(c, { children: [D.length > 1 && /* @__PURE__ */ S(u, {
 						title: "Link on",
-						trailing: /* @__PURE__ */ S(h, {
+						trailing: /* @__PURE__ */ C(g, {
 							value: R,
 							onValueChange: M,
-							children: [/* @__PURE__ */ x(v, {
+							children: [/* @__PURE__ */ S(y, {
 								size: "sm",
 								"aria-label": "Link on",
-								children: /* @__PURE__ */ x(y, {})
-							}), /* @__PURE__ */ x(g, {
+								children: /* @__PURE__ */ S(b, {})
+							}), /* @__PURE__ */ S(_, {
 								align: "end",
 								position: "popper",
-								children: D.map((e) => /* @__PURE__ */ x(_, {
+								children: D.map((e) => /* @__PURE__ */ S(v, {
 									value: e,
 									children: e
 								}, e))
 							})]
 						})
-					}), /* @__PURE__ */ x("div", {
+					}), /* @__PURE__ */ S("div", {
 						className: "px-3 py-2.5",
-						children: /* @__PURE__ */ x(s, {
+						children: /* @__PURE__ */ S(s, {
 							ref: L,
 							type: "tel",
 							placeholder: "Phone number (optional)",
@@ -188,14 +182,14 @@ function O() {
 							onChange: (e) => A(e.target.value)
 						})
 					})] }),
-					N?.why && /* @__PURE__ */ x(m, {
+					N?.why && /* @__PURE__ */ S(m, {
 						title: N.why,
 						action: {
 							label: "Try Again",
 							run: N.retry
 						}
 					}),
-					/* @__PURE__ */ x(p, {
+					/* @__PURE__ */ S(p, {
 						className: "self-start",
 						run: B,
 						children: "Add Account"
@@ -205,5 +199,5 @@ function O() {
 		]
 	});
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ x(O, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ S(k, {}));
 </script>

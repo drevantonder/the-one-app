@@ -3,14 +3,13 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/developer.html.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { List, Skeleton, Switch } from "@one/ui"
+import { LargeTitle, List, Skeleton, Switch } from "@one/ui"
 
 function Developer() {
   // Not known until the device says.
   const [on, setOn] = useState(null)
 
   useEffect(() => {
-    one.largeTitle("Developer")
     one.developer().then(setOn)
   }, [])
 
@@ -23,7 +22,7 @@ function Developer() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-4">
-      <h1 className="large-title text-3xl font-bold tracking-tight">Developer</h1>
+      <LargeTitle>Developer</LargeTitle>
       <List>
         <label className="flex cursor-pointer items-center gap-3 px-3 py-3 text-sm">
           <span className="min-w-0 flex-1 font-medium">Developer Mode</span>

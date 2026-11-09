@@ -6,55 +6,52 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
-import { CopyButton as i, Problem as a, Skeleton as o } from "@one/ui";
-import { Fragment as s, jsx as c, jsxs as l } from "react/jsx-runtime";
-function u() {
-	let r = e(8), [u, d] = n(null), [f, p] = n(null), m;
-	r[0] === Symbol.for("react.memo_cache_sentinel") ? (m = async function() {
+import { CopyButton as i, LargeTitle as a, Problem as o, Skeleton as s } from "@one/ui";
+import { Fragment as c, jsx as l, jsxs as u } from "react/jsx-runtime";
+function d() {
+	let r = e(8), [d, f] = n(null), [p, m] = n(null), h;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (h = async function() {
 		try {
-			d((await one.api("GET", "/v1/state")).agent_prompt), p(null);
+			f((await one.api("GET", "/v1/state")).agent_prompt), m(null);
 		} catch (e) {
 			let t = e;
-			p(one.plain(t));
+			m(one.plain(t));
 		}
-	}, r[0] = m) : m = r[0];
-	let h = m, g, _;
-	r[1] === Symbol.for("react.memo_cache_sentinel") ? (g = () => {
-		one.largeTitle("Connect Your AI"), h();
-	}, _ = [], r[1] = g, r[2] = _) : (g = r[1], _ = r[2]), t(g, _);
-	let v, y;
-	r[3] === Symbol.for("react.memo_cache_sentinel") ? (v = /* @__PURE__ */ c("h1", {
-		className: "large-title text-3xl font-bold tracking-tight",
-		children: "Connect Your AI"
-	}), y = /* @__PURE__ */ c("p", {
+	}, r[0] = h) : h = r[0];
+	let g = h, _, v;
+	r[1] === Symbol.for("react.memo_cache_sentinel") ? (_ = () => {
+		g();
+	}, v = [], r[1] = _, r[2] = v) : (_ = r[1], v = r[2]), t(_, v);
+	let y, b;
+	r[3] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ l(a, { children: "Connect Your AI" }), b = /* @__PURE__ */ l("p", {
 		className: "text-sm text-muted-foreground",
 		children: "Send this to Claude, ChatGPT or any other AI."
-	}), r[3] = v, r[4] = y) : (v = r[3], y = r[4]);
-	let b;
-	return r[5] !== f || r[6] !== u ? (b = /* @__PURE__ */ l("div", {
+	}), r[3] = y, r[4] = b) : (y = r[3], b = r[4]);
+	let x;
+	return r[5] !== p || r[6] !== d ? (x = /* @__PURE__ */ u("div", {
 		className: "flex max-w-2xl flex-col gap-4",
 		children: [
-			v,
 			y,
-			f && u === null ? /* @__PURE__ */ c(a, {
-				title: f.title,
-				text: f.next,
+			b,
+			p && d === null ? /* @__PURE__ */ l(o, {
+				title: p.title,
+				text: p.next,
 				action: {
 					label: "Try Again",
-					run: h
+					run: g
 				}
-			}) : /* @__PURE__ */ l(s, { children: [/* @__PURE__ */ c("div", {
-				"aria-busy": u === null || void 0,
+			}) : /* @__PURE__ */ u(c, { children: [/* @__PURE__ */ l("div", {
+				"aria-busy": d === null || void 0,
 				className: "min-h-[4.25rem] rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed select-text [overflow-wrap:anywhere]",
-				children: u ?? /* @__PURE__ */ l(s, { children: [/* @__PURE__ */ c(o, { className: "my-1 h-3.5 w-full" }), /* @__PURE__ */ c(o, { className: "my-1 h-3.5 w-2/3" })] })
-			}), u === null ? /* @__PURE__ */ c(o, { className: "h-9 w-20" }) : /* @__PURE__ */ c(i, {
-				text: u,
+				children: d ?? /* @__PURE__ */ u(c, { children: [/* @__PURE__ */ l(s, { className: "my-1 h-3.5 w-full" }), /* @__PURE__ */ l(s, { className: "my-1 h-3.5 w-2/3" })] })
+			}), d === null ? /* @__PURE__ */ l(s, { className: "h-9 w-20" }) : /* @__PURE__ */ l(i, {
+				text: d,
 				variant: "default",
 				size: "default",
 				className: "min-w-24 self-start"
 			})] })
 		]
-	}), r[5] = f, r[6] = u, r[7] = b) : b = r[7], b;
+	}), r[5] = p, r[6] = d, r[7] = x) : x = r[7], x;
 }
-r(document.getElementById("root")).render(/* @__PURE__ */ c(u, {}));
+r(document.getElementById("root")).render(/* @__PURE__ */ l(d, {}));
 </script>

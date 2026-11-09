@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
   AppIcon, Button, Empty, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Split, Switch,
-  Tabs, TabsList, TabsTrigger,
+  Tabs, TabsList, TabsTrigger, LargeTitle, Section,
 } from "@one/ui"
 import { appNamed } from "./agents.js"
 
@@ -151,7 +151,6 @@ function Vault() {
   }
 
   useEffect(() => {
-    one.largeTitle("Vault")
     load()
     // The node's own entries (an item changed) change no app.
     one.on("changed", (e) => e.type === "changed" && !(e.apps || []).length && load())
@@ -203,10 +202,7 @@ function Vault() {
         onClose={() => setOpenId(null)}
         list={
           <div className="flex max-w-2xl flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <h1 className="large-title text-3xl font-bold tracking-tight">Vault</h1>
-              <Button onClick={startNew}><Icon name="plus" />New Item</Button>
-            </div>
+            <LargeTitle action={<Button onClick={startNew}>New Item</Button>}>Vault</LargeTitle>
             {pages.length > 1 && <Pages pages={pages} value={scope} onChange={show} />}
             {!!items?.length && <Search value={query} onChange={setQuery} />}
             {body}
@@ -267,13 +263,6 @@ function Search({ value, onChange }) {
 }
 
 // A heading over a part of an item.
-const Section = ({ title, children }) => (
-  <section className="flex flex-col gap-2">
-    <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-    {children}
-  </section>
-)
-
 const quiet = { autoCapitalize: "none", autoCorrect: "off", spellCheck: false }
 // An input that's a row of a List: the list's lines are its edges.
 const inRow = "h-11 rounded-none border-x-0 border-t-0 bg-transparent px-3 shadow-none focus-visible:ring-0 dark:bg-transparent"

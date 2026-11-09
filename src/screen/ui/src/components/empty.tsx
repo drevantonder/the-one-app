@@ -8,7 +8,7 @@ function Empty({ children, action, className }: {
   className?: string
 }) {
   return (
-    <div data-slot="empty" className={cn("flex flex-col items-center gap-4 px-6 py-12 text-center text-sm text-muted-foreground", className)}>
+    <div data-slot="empty" className={cn("flex flex-col items-start gap-4 py-2 text-sm text-muted-foreground", className)}>
       <p>{children}</p>
       {action && <Button onClick={() => action.run()}>{action.label}</Button>}
     </div>

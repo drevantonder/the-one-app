@@ -7,13 +7,9 @@ import { AppPage } from "../lib/app-page.jsx"
 
 function App() {
   const apps = useApps()
-  return (
-    <div className="p-4">
-      {apps.data
-        ? <AppPage bar name={one.params.app} apps={apps} onOpen={(app) => one.open("app", { app })} onGone={() => one.close()} />
-        : <Pending call={apps} />}
-    </div>
-  )
+  return apps.data
+    ? <AppPage bar name={one.params.app} apps={apps} onOpen={(app) => one.open("app", { app })} onGone={() => one.close()} />
+    : <Pending call={apps} />
 }
 
 createRoot(document.getElementById("root")).render(<App />)

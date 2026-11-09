@@ -4,7 +4,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/labs.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Empty, List, ListSkeleton, Problem, Switch } from "@one/ui"
+import { AppIcon, Empty, LargeTitle, List, ListSkeleton, Problem, Section, Switch } from "@one/ui"
 
 // Labs under each app's (or service's) name, in the order they come.
 function groups(labs, kind) {
@@ -33,7 +33,6 @@ function Labs() {
     }
   }
   useEffect(() => {
-    one.largeTitle("Labs")
     one.on("changed", load)
     load()
   }, [])
@@ -55,13 +54,9 @@ function Labs() {
 
   const row = (l) => <Lab key={l.setting} lab={l} on={asked[l.setting] ?? l.on} busy={l.setting in asked} set={(on) => set(l, on)} />
   const group = (ls) => (
-    <section key={ls[0].app?.name ?? ls[0].service?.name} className="flex flex-col gap-2">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-        <AppIcon app={ls[0].app || ls[0].service} size={18} />
-        {(ls[0].app || ls[0].service).title}
-      </h2>
+    <Section key={ls[0].app?.name ?? ls[0].service?.name} title={<><AppIcon app={ls[0].app || ls[0].service} size={18} />{(ls[0].app || ls[0].service).title}</>}>
       <List>{ls.map(row)}</List>
-    </section>
+    </Section>
   )
 
   let body
@@ -84,7 +79,7 @@ function Labs() {
   return (
     <div className="flex max-w-2xl flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h1 className="large-title text-3xl font-bold tracking-tight">Labs</h1>
+        <LargeTitle>Labs</LargeTitle>
         <p className="text-sm text-muted-foreground">What you turn on here is on for everyone.</p>
       </div>
       {body}

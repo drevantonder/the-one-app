@@ -2,11 +2,11 @@
 // there's room.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, Empty, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Spinner, Tabs, TabsList, TabsTrigger, Pending, Swap, useCall } from "@one/ui"
+import { Avatar, Button, Empty, Icon, Input, List, ListRow, Pending, Problem, ResponsiveDialog, Spinner, Split, Swap, Tabs, TabsList, TabsTrigger, useCall } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
 import { IssueView } from "../lib/issue-view.jsx"
 import { LabelChip, MarkdownField, StateIcon } from "../lib/parts.jsx"
-import { Beside, Frame, ago, go, plural, said, useBeside } from "../lib/use.jsx"
+import { WIDE_BESIDE, Frame, ago, go, plural, said, useBeside } from "../lib/use.jsx"
 
 const P = one.params
 
@@ -155,7 +155,7 @@ function Issues() {
           <Input className="pl-8" placeholder="Search" aria-label="Search" value={typed} onChange={(e) => setTyped(e.target.value)} />
         </div>
         <Filter title="Author" value={f.author} choices={names} set={(v) => set("author", v)} />
-        <Filter title="Label" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} also={{ title: "Edit Labels…", run: () => go("labels", { repo: P.repo }) }} />
+        <Filter title="Label" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} also={{ title: "Edit Labels", run: () => go("labels", { repo: P.repo }) }} />
         <Filter title="Assignee" value={f.assignee} choices={[{ value: "none", title: "Assigned to no one" }, ...names]} set={(v) => set("assignee", v)} />
       </div>
       {list.error && !list.moving && <Problem title={said(list.error).title} />}
@@ -173,7 +173,7 @@ function Issues() {
   return (
     <>
       {tabs}
-      <Beside size="34rem" list={left} detail={current && <IssueView repo={P.repo} number={current} onGone={() => (setShown(null), list.reload())} />} />
+      <Split wide={WIDE_BESIDE} size="34rem" list={left} detail={beside && current && <IssueView repo={P.repo} number={current} onGone={() => (setShown(null), list.reload())} />} />
       {creating && <NewIssue done={made} />}
     </>
   )

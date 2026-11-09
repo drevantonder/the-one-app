@@ -14,3 +14,9 @@ export function appear(el: Element, from = 0) {
 export function glide(el: Element, by: number) {
   if (!still()) animate(el, { translate: [`0 ${by}px`, "0 0"] }, { duration: 0.2, ease: SETTLE })
 }
+
+/// A grid opening a second column (`opening`) or closing it: its tracks slide from `from` to `to`, and its gap with them.
+/// The browser's own animation, with no fill, so the grid is left as its style says.
+export function slideColumns(el: Element, from: string, to: string, opening: boolean) {
+  if (!still()) el.animate({ gridTemplateColumns: [from, to], columnGap: opening ? ["0px", "1.5rem"] : ["1.5rem", "0px"] }, { duration: 200, easing: `cubic-bezier(${SETTLE})` })
+}

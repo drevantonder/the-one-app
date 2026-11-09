@@ -5,120 +5,117 @@
 <div id="root"></div>
 <script type="module">import { createRoot as e } from "react-dom/client";
 import { useEffect as t, useRef as n, useState as r } from "react";
-import { AccountList as i, Empty as a, List as o, ListRow as s, ListSkeleton as c, LoadFailure as l, Loading as u, LoadingButton as d, Problem as f, failureSentence as p, useAccounts as m } from "@one/ui";
-import { jsx as h, jsxs as g } from "react/jsx-runtime";
-function _({ title: e, blurb: _ }) {
-	let { accounts: v, problem: y, retry: b, failed: x, signOut: S, reload: C } = m(), [w, T] = r(null), [E, D] = r(!1), [O, k] = r(null), A = () => (D(!1), T(null));
-	async function j(e) {
+import { AccountList as i, Empty as a, List as o, ListRow as s, ListSkeleton as c, LoadFailure as l, Loading as u, LoadingButton as d, Problem as f, Section as p, failureSentence as m, useAccounts as h } from "@one/ui";
+import { jsx as g, jsxs as _ } from "react/jsx-runtime";
+function v({ title: e, blurb: v }) {
+	let { accounts: y, problem: b, retry: x, failed: S, signOut: C, reload: w } = h(), [T, E] = r(null), [D, O] = r(!1), [k, A] = r(null), j = () => (O(!1), E(null));
+	async function M(e) {
 		let t;
 		try {
 			t = (await one.call("sign_in", e ? { account: e } : {})).url;
 		} catch (t) {
 			if (t.code === "no_client" && one.vault) try {
-				if (await one.vault("client")) return j(e);
+				if (await one.vault("client")) return M(e);
 			} catch (e) {
 				t = e;
 			}
 			let n = /Ask (.+?) to set up (.+?)(?::|$)/.exec(t.message);
-			return n ? k({
+			return n ? A({
 				title: n[2] + " isn’t set up",
 				text: "Ask " + n[1] + " to set it up."
-			}) : T({
-				why: p(t),
-				retry: () => j(e)
+			}) : E({
+				why: m(t),
+				retry: () => M(e)
 			});
 		}
-		D(!0), T({ link: t });
+		O(!0), E({ link: t });
 	}
-	async function M(e) {
-		D(!0), T({ finishing: !0 });
+	async function N(e) {
+		O(!0), E({ finishing: !0 });
 		try {
 			let t = await one.call("finish_sign_in", { code: e });
 			if (t?.signed_in === !1) throw Error(t.why);
 		} catch (e) {
-			return e.code === "not_waiting" ? (A(), C()) : T({
-				why: p(e),
-				retry: () => j()
+			return e.code === "not_waiting" ? (j(), w()) : E({
+				why: m(e),
+				retry: () => M()
 			});
 		}
-		A(), C();
+		j(), w();
 	}
 	t(() => {
-		one.params.back ? M(one.params.back) : one.params.add && j();
+		one.params.back ? N(one.params.back) : one.params.add && M();
 	}, []);
-	let N = n(null), P = v && JSON.stringify(v);
+	let P = n(null), F = y && JSON.stringify(y);
 	if (t(() => {
-		N.current !== null && P !== N.current && w?.link && A(), P !== null && (N.current = P);
-	}, [P]), y && !v) return /* @__PURE__ */ h(l, {
-		problem: y,
-		retry: b
+		P.current !== null && F !== P.current && T?.link && j(), F !== null && (P.current = F);
+	}, [F]), b && !y) return /* @__PURE__ */ g(l, {
+		problem: b,
+		retry: x
 	});
-	if (!v) return /* @__PURE__ */ h(c, {});
-	let F = O ? [] : v.filter((e) => !e.ok);
-	return /* @__PURE__ */ g("div", {
+	if (!y) return /* @__PURE__ */ g(c, {});
+	let I = k ? [] : y.filter((e) => !e.ok);
+	return /* @__PURE__ */ _("div", {
 		className: "flex flex-col gap-6",
 		children: [
-			O && /* @__PURE__ */ h(f, {
+			k && /* @__PURE__ */ g(f, {
 				warn: !0,
-				title: O.title,
-				text: O.text
+				title: k.title,
+				text: k.text
 			}),
-			!v.length && !O && !E && /* @__PURE__ */ h(a, {
+			!y.length && !k && !D && /* @__PURE__ */ g(a, {
 				className: "mx-auto max-w-md",
 				action: {
 					label: "Sign In to Google",
-					run: () => j()
+					run: () => M()
 				},
-				children: _
+				children: v
 			}),
-			F.map((t) => /* @__PURE__ */ h(f, {
+			I.map((t) => /* @__PURE__ */ g(f, {
 				warn: !0,
 				title: t.account + " needs signing in",
 				text: one.plain(t.why || "Needs signing in again").title.replace(/^Needs signing in again\.$/, `Sign in to Google again to let ${e} in.`),
 				action: {
 					label: "Sign In",
-					run: () => j(t.account)
+					run: () => M(t.account)
 				}
 			}, t.account)),
-			v.length > 0 && /* @__PURE__ */ h(i, {
+			y.length > 0 && /* @__PURE__ */ g(i, {
 				title: "Accounts",
-				accounts: v,
-				failed: x,
-				signOut: S,
+				accounts: y,
+				failed: S,
+				signOut: C,
 				line: (e, t) => e.ok ? t ? null : { text: "Used first" } : {
 					text: "Sign in again",
 					warn: !0
 				},
-				children: !O && /* @__PURE__ */ h(d, {
+				children: !k && /* @__PURE__ */ g(d, {
 					variant: "secondary",
 					className: "self-start",
-					run: () => j(),
+					run: () => M(),
 					children: "Add Account"
 				})
 			}),
-			w?.link && /* @__PURE__ */ g("section", {
-				className: "flex flex-col gap-2",
-				children: [/* @__PURE__ */ h("h2", {
-					className: "text-sm font-medium text-muted-foreground",
-					children: "Sign In"
-				}), /* @__PURE__ */ h(o, { children: /* @__PURE__ */ h(s, {
+			T?.link && /* @__PURE__ */ _(p, {
+				title: "Sign In",
+				children: [/* @__PURE__ */ g(o, { children: /* @__PURE__ */ g(s, {
 					title: "Sign in to Google",
 					sub: `and allow ${e}`,
-					onClick: () => one.link(w.link)
-				}) })]
+					onClick: () => one.link(T.link)
+				}) }), /* @__PURE__ */ g(Hint, { children: "Google brings you back here when you're done." })]
 			}),
-			w?.finishing && /* @__PURE__ */ h(u, { children: "Signing In" }),
-			w?.why && /* @__PURE__ */ h(f, {
-				title: w.why,
+			T?.finishing && /* @__PURE__ */ g(u, { children: "Signing In" }),
+			T?.why && /* @__PURE__ */ g(f, {
+				title: T.why,
 				action: {
 					label: "Try Again",
-					run: w.retry
+					run: T.retry
 				}
 			})
 		]
 	});
 }
-e(document.getElementById("root")).render(/* @__PURE__ */ h(_, {
+e(document.getElementById("root")).render(/* @__PURE__ */ g(v, {
 	title: "Google Drive",
 	blurb: "Sign in, and your apps can save copies to your Drive."
 }));

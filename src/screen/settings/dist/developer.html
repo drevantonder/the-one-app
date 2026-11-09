@@ -6,49 +6,46 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
-import { List as i, Skeleton as a, Switch as o } from "@one/ui";
-import { jsx as s, jsxs as c } from "react/jsx-runtime";
-function l() {
-	let r = e(10), [l, u] = n(null), d, f;
-	r[0] === Symbol.for("react.memo_cache_sentinel") ? (d = () => {
-		one.largeTitle("Developer"), one.developer().then(u);
-	}, f = [], r[0] = d, r[1] = f) : (d = r[0], f = r[1]), t(d, f);
-	let p;
-	r[2] === Symbol.for("react.memo_cache_sentinel") ? (p = async function(e) {
-		one.tap(), u(e), u(await one.developer(e).catch(() => !e));
-	}, r[2] = p) : p = r[2];
-	let m = p, h;
-	r[3] === Symbol.for("react.memo_cache_sentinel") ? (h = /* @__PURE__ */ s("h1", {
-		className: "large-title text-3xl font-bold tracking-tight",
-		children: "Developer"
-	}), r[3] = h) : h = r[3];
-	let g;
-	r[4] === Symbol.for("react.memo_cache_sentinel") ? (g = /* @__PURE__ */ s("span", {
+import { LargeTitle as i, List as a, Skeleton as o, Switch as s } from "@one/ui";
+import { jsx as c, jsxs as l } from "react/jsx-runtime";
+function u() {
+	let r = e(10), [u, d] = n(null), f, p;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (f = () => {
+		one.developer().then(d);
+	}, p = [], r[0] = f, r[1] = p) : (f = r[0], p = r[1]), t(f, p);
+	let m;
+	r[2] === Symbol.for("react.memo_cache_sentinel") ? (m = async function(e) {
+		one.tap(), d(e), d(await one.developer(e).catch(() => !e));
+	}, r[2] = m) : m = r[2];
+	let h = m, g;
+	r[3] === Symbol.for("react.memo_cache_sentinel") ? (g = /* @__PURE__ */ c(i, { children: "Developer" }), r[3] = g) : g = r[3];
+	let _;
+	r[4] === Symbol.for("react.memo_cache_sentinel") ? (_ = /* @__PURE__ */ c("span", {
 		className: "min-w-0 flex-1 font-medium",
 		children: "Developer Mode"
-	}), r[4] = g) : g = r[4];
-	let _;
-	r[5] === l ? _ = r[6] : (_ = /* @__PURE__ */ s(i, { children: /* @__PURE__ */ c("label", {
-		className: "flex cursor-pointer items-center gap-3 px-3 py-3 text-sm",
-		children: [g, l === null ? /* @__PURE__ */ s(a, { className: "h-[1.15rem] w-8 rounded-full" }) : /* @__PURE__ */ s(o, {
-			checked: l,
-			onCheckedChange: m
-		})]
-	}) }), r[5] = l, r[6] = _);
+	}), r[4] = _) : _ = r[4];
 	let v;
-	r[7] === Symbol.for("react.memo_cache_sentinel") ? (v = /* @__PURE__ */ s("p", {
+	r[5] === u ? v = r[6] : (v = /* @__PURE__ */ c(a, { children: /* @__PURE__ */ l("label", {
+		className: "flex cursor-pointer items-center gap-3 px-3 py-3 text-sm",
+		children: [_, u === null ? /* @__PURE__ */ c(o, { className: "h-[1.15rem] w-8 rounded-full" }) : /* @__PURE__ */ c(s, {
+			checked: u,
+			onCheckedChange: h
+		})]
+	}) }), r[5] = u, r[6] = v);
+	let y;
+	r[7] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ c("p", {
 		className: "px-1 text-sm text-muted-foreground",
 		children: "Puts a </> at the top of every screen on this device, to see where its time goes."
-	}), r[7] = v) : v = r[7];
-	let y;
-	return r[8] === _ ? y = r[9] : (y = /* @__PURE__ */ c("div", {
+	}), r[7] = y) : y = r[7];
+	let b;
+	return r[8] === v ? b = r[9] : (b = /* @__PURE__ */ l("div", {
 		className: "flex max-w-2xl flex-col gap-4",
 		children: [
-			h,
-			_,
-			v
+			g,
+			v,
+			y
 		]
-	}), r[8] = _, r[9] = y), y;
+	}), r[8] = v, r[9] = b), b;
 }
-r(document.getElementById("root")).render(/* @__PURE__ */ s(l, {}));
+r(document.getElementById("root")).render(/* @__PURE__ */ c(u, {}));
 </script>

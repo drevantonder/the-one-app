@@ -9,7 +9,7 @@ import { createRoot } from "react-dom/client"
 import {
   Avatar, AppIcon, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
   DropdownMenuSeparator, DropdownMenuTrigger, Empty, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog,
-  Split, Tabs, TabsList, TabsTrigger, useDialog,
+  Split, Tabs, TabsList, TabsTrigger, useDialog, LargeTitle, Section,
 } from "@one/ui"
 
 const api = one.api
@@ -47,7 +47,6 @@ function Groups() {
     }
   }
   useEffect(() => {
-    one.largeTitle("Groups")
     load()
     one.on("changed", load)
   }, [])
@@ -173,10 +172,7 @@ function Groups() {
         onClose={() => setOpenId(null)}
         list={
           <div className="flex max-w-2xl flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <h1 className="large-title text-3xl font-bold tracking-tight">Groups</h1>
-              {state && !empty && <Button onClick={() => startCreate()}><Icon name="plus" />New Group</Button>}
-            </div>
+            <LargeTitle action={state && !empty && <Button onClick={() => startCreate()}>New Group</Button>}>Groups</LargeTitle>
             {body}
           </div>
         }
@@ -203,19 +199,6 @@ function Groups() {
   )
 }
 
-// A heading over a group of rows, with what it ends with.
-const Section = ({ title, action, children }) => (
-  <section className="flex flex-col gap-2">
-    {(title || action) && (
-      <div className="flex min-h-8 items-center justify-between gap-3">
-        <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-        {action}
-      </div>
-    )}
-    {children}
-  </section>
-)
-
 // One group: its members, who's invited, its handle, and leaving it.
 function Group({ g, state, me, pending, sent, error, change, remove, invite, handle }) {
   const admin = g.role === "admin"
@@ -231,7 +214,7 @@ function Group({ g, state, me, pending, sent, error, change, remove, invite, han
         <h2 className="min-w-0 text-xl font-semibold break-words select-text">{g.name}</h2>
       </div>
 
-      <Section title="Members" action={admin && <Button variant="secondary" size="sm" onClick={invite}><Icon name="plus" />Invite Someone</Button>}>
+      <Section title="Members" action={admin && <Button variant="secondary" size="sm" onClick={invite}>Invite Someone</Button>}>
         <List>
           {members.map((m) => {
             const role = pending[`${g.id}:${m.user}`] || m.role
@@ -331,7 +314,7 @@ function Invite({ g, state, sent, open, setOpen, send }) {
   const matches = others.filter((u) => u.name.toLowerCase().includes(query.trim().toLowerCase()))
   const pick = (user) => (setOpen(false), send(user, role))
   return (
-    <ResponsiveDialog open={open} onOpenChange={setOpen} title={`Invite to ${g.name}`} action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>}>
+    <ResponsiveDialog open={open} onOpenChange={setOpen} title={`Invite to ${g.name}`} action={<Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>}>
       <div className="flex flex-col gap-4 overflow-y-auto p-4">
         {!others.length ? <Empty className="py-6">{state.network.users.length > 1 ? "Everyone is in this group already." : `No one else is in ${one.config.yours} yet.`}</Empty> : (
           <>

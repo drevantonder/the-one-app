@@ -718,7 +718,7 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
   return (
     <section
       data-page={scope}
-      className={cn("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-5 [scroll-snap-stop:always]", swipe ? "pt-[calc(1.25rem+env(safe-area-inset-top))]" : "pt-4")}
+      className={cn("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-4 [scroll-snap-stop:always]", swipe ? "pt-[calc(1.25rem+env(safe-area-inset-top))]" : "pt-4")}
       style={{ paddingBottom: bottom }}
     >
       <div className="flex items-start gap-3 pb-5">
@@ -745,7 +745,7 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
       ) : (
         <>
           <Grid page={page} editing={editing && !!arrange} leaving={leaving && !!arrange} refreshing={refreshing} />
-          {page.empty && <Empty className={cn("items-start px-0 pb-6 text-left", page.list.length ? "pt-6" : "pt-0")} action={page.arrange && page.store ? { label: "Open App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
+          {page.empty && <Empty className={cn("pb-6", page.list.length ? "pt-6" : "pt-0")} action={page.arrange && page.store ? { label: "Open App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
           {changing && page.groups && (
             <div data-ctl className="pt-8">
               <Button variant="ghost" size="sm" className={cn("-ml-3", editing ? COMES : GOES)} onClick={editPages}>Edit Pages</Button>
@@ -830,7 +830,7 @@ function Options({ w, kept, p, close }) {
     save(p, keptOf(p).map((k) => (k.widget && k.id === kept.id ? { ...k, options: next } : k)), hiddenOf(p), { reload: true }).finally(() => { S.refreshing.delete(kept.id); draw() })
   }
   return (
-    <ResponsiveDialog open onOpenChange={(open) => !open && done()} title={w.title || w.widget} action={<Button size="sm" onClick={done}>Done</Button>}>
+    <ResponsiveDialog open onOpenChange={(open) => !open && done()} title={w.title || w.widget} action={<Button variant="secondary" size="sm" onClick={done}>Done</Button>}>
       <div className="flex flex-col divide-y overflow-y-auto">
         {(w.options || []).map((o, i) => (
           <div key={o.name} className="flex min-h-12 items-center justify-between gap-3 px-4 py-2">
@@ -958,7 +958,7 @@ function EditPages({ groups, close }) {
     if (JSON.stringify(pages) !== JSON.stringify({ order: groups.map((p) => p.scope), hidden: groups.filter((p) => p.hidden).map((p) => p.scope) })) keepPages(pages)
   }
   return (
-    <ResponsiveDialog open onOpenChange={(open) => !open && done()} title="Pages" action={<Button size="sm" onClick={done}>Done</Button>}>
+    <ResponsiveDialog open onOpenChange={(open) => !open && done()} title="Pages" action={<Button variant="secondary" size="sm" onClick={done}>Done</Button>}>
       <div className="flex flex-col overflow-y-auto">
         <div ref={list} className="divide-y">
           {order.map((scope) => (

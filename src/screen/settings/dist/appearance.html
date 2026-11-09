@@ -6,9 +6,9 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
-import { Icon as i, cn as a } from "@one/ui";
-import { Fragment as o, jsx as s, jsxs as c } from "react/jsx-runtime";
-var l = [
+import { Icon as i, LargeTitle as a, cn as o } from "@one/ui";
+import { Fragment as s, jsx as c, jsxs as l } from "react/jsx-runtime";
+var u = [
 	{
 		value: "light",
 		title: "Light"
@@ -22,13 +22,13 @@ var l = [
 		title: "Automatic"
 	}
 ];
-function u(t) {
-	let n = e(13), { dark: r } = t, i = r ? "bg-white" : "bg-black", o = r ? "bg-[#141414]" : "bg-white", l;
-	n[0] === o ? l = n[1] : (l = a("flex flex-1 flex-col gap-1.5 overflow-hidden pt-2 pl-2", o), n[0] = o, n[1] = l);
+function d(t) {
+	let n = e(13), { dark: r } = t, i = r ? "bg-white" : "bg-black", a = r ? "bg-[#141414]" : "bg-white", s;
+	n[0] === a ? s = n[1] : (s = o("flex flex-1 flex-col gap-1.5 overflow-hidden pt-2 pl-2", a), n[0] = a, n[1] = s);
 	let u;
-	n[2] === i ? u = n[3] : (u = a("block h-[5px] w-[30px] rounded-full opacity-70", i), n[2] = i, n[3] = u);
+	n[2] === i ? u = n[3] : (u = o("block h-[5px] w-[30px] rounded-full opacity-70", i), n[2] = i, n[3] = u);
 	let d;
-	n[4] === u ? d = n[5] : (d = /* @__PURE__ */ s("b", { className: u }), n[4] = u, n[5] = d);
+	n[4] === u ? d = n[5] : (d = /* @__PURE__ */ c("b", { className: u }), n[4] = u, n[5] = d);
 	let f;
 	n[6] === Symbol.for("react.memo_cache_sentinel") ? (f = [
 		0,
@@ -37,71 +37,68 @@ function u(t) {
 		3
 	], n[6] = f) : f = n[6];
 	let p;
-	n[7] === i ? p = n[8] : (p = f.map((e) => /* @__PURE__ */ s("i", { className: a("block min-h-3.5 w-[50px] rounded-[3px] opacity-[0.12]", i) }, e)), n[7] = i, n[8] = p);
+	n[7] === i ? p = n[8] : (p = f.map((e) => /* @__PURE__ */ c("i", { className: o("block min-h-3.5 w-[50px] rounded-[3px] opacity-[0.12]", i) }, e)), n[7] = i, n[8] = p);
 	let m;
-	return n[9] !== l || n[10] !== d || n[11] !== p ? (m = /* @__PURE__ */ c("div", {
-		className: l,
+	return n[9] !== s || n[10] !== d || n[11] !== p ? (m = /* @__PURE__ */ l("div", {
+		className: s,
 		children: [d, p]
-	}), n[9] = l, n[10] = d, n[11] = p, n[12] = m) : m = n[12], m;
+	}), n[9] = s, n[10] = d, n[11] = p, n[12] = m) : m = n[12], m;
 }
-function d(t) {
+function f(t) {
 	let n = e(2), { value: r } = t, i;
-	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ s("div", {
+	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ c("div", {
 		className: "flex h-[120px] w-[66px] overflow-hidden rounded-[10px]",
-		children: r === "automatic" ? /* @__PURE__ */ c(o, { children: [/* @__PURE__ */ s(u, {}), /* @__PURE__ */ s("div", {
+		children: r === "automatic" ? /* @__PURE__ */ l(s, { children: [/* @__PURE__ */ c(d, {}), /* @__PURE__ */ c("div", {
 			className: "flex flex-1 overflow-hidden",
-			children: /* @__PURE__ */ s("div", {
+			children: /* @__PURE__ */ c("div", {
 				className: "-ml-[25px] flex flex-1",
-				children: /* @__PURE__ */ s(u, { dark: !0 })
+				children: /* @__PURE__ */ c(d, { dark: !0 })
 			})
-		})] }) : /* @__PURE__ */ s(u, { dark: r === "dark" })
+		})] }) : /* @__PURE__ */ c(d, { dark: r === "dark" })
 	}), n[0] = r, n[1] = i), i;
 }
-function f() {
-	let r = e(8), [o, u] = n(null), f, p;
-	r[0] === Symbol.for("react.memo_cache_sentinel") ? (f = () => {
-		one.largeTitle("Appearance"), one.appearance().then(u);
-	}, p = [], r[0] = f, r[1] = p) : (f = r[0], p = r[1]), t(f, p);
-	let m;
-	r[2] === Symbol.for("react.memo_cache_sentinel") ? (m = async function(e) {
-		one.tap(), u(e), u(await one.appearance(e));
-	}, r[2] = m) : m = r[2];
-	let h = m, g;
-	r[3] === Symbol.for("react.memo_cache_sentinel") ? (g = /* @__PURE__ */ s("h1", {
-		className: "large-title text-3xl font-bold tracking-tight",
-		children: "Appearance"
-	}), r[3] = g) : g = r[3];
-	let _;
-	r[4] === o ? _ = r[5] : (_ = l.map((e) => {
-		let { value: t, title: n } = e, r = t === o;
-		return /* @__PURE__ */ c("button", {
+function p() {
+	let r = e(8), [s, d] = n(null), p, m;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (p = () => {
+		one.appearance().then(d);
+	}, m = [], r[0] = p, r[1] = m) : (p = r[0], m = r[1]), t(p, m);
+	let h;
+	r[2] === Symbol.for("react.memo_cache_sentinel") ? (h = async function(e) {
+		one.tap(), d(e), d(await one.appearance(e));
+	}, r[2] = h) : h = r[2];
+	let g = h, _;
+	r[3] === Symbol.for("react.memo_cache_sentinel") ? (_ = /* @__PURE__ */ c(a, { children: "Appearance" }), r[3] = _) : _ = r[3];
+	let v;
+	r[4] === s ? v = r[5] : (v = u.map((e) => {
+		let { value: t, title: n } = e, r = t === s;
+		return /* @__PURE__ */ l("button", {
 			type: "button",
 			role: "radio",
 			"aria-checked": r,
-			onClick: () => h(t),
+			onClick: () => g(t),
 			className: "group flex cursor-pointer flex-col items-center gap-2.5 rounded-xl p-1 text-sm font-medium outline-none",
-			children: [/* @__PURE__ */ s("span", {
-				className: a("rounded-xl p-1 ring-1 ring-border transition-shadow group-focus-visible:ring-[3px] group-focus-visible:ring-ring/50", r && "ring-2 ring-primary"),
-				children: /* @__PURE__ */ s(d, { value: t })
-			}), /* @__PURE__ */ c("span", {
+			children: [/* @__PURE__ */ c("span", {
+				className: o("rounded-xl p-1 ring-1 ring-border transition-shadow group-focus-visible:ring-[3px] group-focus-visible:ring-ring/50", r && "ring-2 ring-primary"),
+				children: /* @__PURE__ */ c(f, { value: t })
+			}), /* @__PURE__ */ l("span", {
 				className: "flex items-center gap-1.5",
-				children: [/* @__PURE__ */ s(i, {
+				children: [/* @__PURE__ */ c(i, {
 					name: r ? "check-circle-fill" : "circle",
-					className: a("size-4", !r && "text-muted-foreground")
+					className: o("size-4", !r && "text-muted-foreground")
 				}), n]
 			})]
 		}, t);
-	}), r[4] = o, r[5] = _);
-	let v;
-	return r[6] === _ ? v = r[7] : (v = /* @__PURE__ */ c("div", {
+	}), r[4] = s, r[5] = v);
+	let y;
+	return r[6] === v ? y = r[7] : (y = /* @__PURE__ */ l("div", {
 		className: "flex max-w-2xl flex-col gap-6",
-		children: [g, /* @__PURE__ */ s("div", {
+		children: [_, /* @__PURE__ */ c("div", {
 			role: "radiogroup",
 			"aria-label": "Appearance",
 			className: "flex flex-wrap gap-6",
-			children: _
+			children: v
 		})]
-	}), r[6] = _, r[7] = v), v;
+	}), r[6] = v, r[7] = y), y;
 }
-r(document.getElementById("root")).render(/* @__PURE__ */ s(f, {}));
+r(document.getElementById("root")).render(/* @__PURE__ */ c(p, {}));
 </script>

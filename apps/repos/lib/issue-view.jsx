@@ -291,7 +291,7 @@ function Issue({ d, repo, reload, onGone }) {
           chosen={d.labels.map((l) => l.name)}
           save={(keys) => one.call("edit_issue", { repo, number: d.number, labels: keys })}
           empty="This repo has no labels."
-          extra={<Button variant="outline" className="self-start" onClick={() => go("labels", { repo })}>Edit Labels…</Button>}
+          extra={<Button variant="outline" className="self-start" onClick={() => go("labels", { repo })}>Edit Labels</Button>}
           done={() => (setDialog(null), reload())}
         />
       )}

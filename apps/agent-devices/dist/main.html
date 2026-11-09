@@ -6,17 +6,17 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { Empty as a, Grid as o, Problem as s, Skeleton as c } from "@one/ui";
-import { jsx as l, jsxs as u } from "react/jsx-runtime";
-var d = (e) => `${e.on || ""}/${e.name}`, f = (e) => e.on ? {
+import { Empty as a, Grid as o, LargeTitle as s, Problem as c, Skeleton as l } from "@one/ui";
+import { jsx as u, jsxs as d } from "react/jsx-runtime";
+var f = (e) => `${e.on || ""}/${e.name}`, p = (e) => e.on ? {
 	device: e.name,
 	on: e.on
-} : { device: e.name }, p = (e) => String(e || "").split(".")[0], m = (e) => e.state !== "running", h = (e) => e.borrowed?.no_screen, g = (e) => e.charAt(0).toUpperCase() + e.slice(1), _ = {
+} : { device: e.name }, m = (e) => String(e || "").split(".")[0], h = (e) => e.state !== "running", g = (e) => e.borrowed?.no_screen, _ = (e) => e.charAt(0).toUpperCase() + e.slice(1), v = {
 	windows: "Windows",
 	android: "Android",
 	iphone: "iPhone"
-}, v = (e) => _[e.name] || g(e.name), y = (e) => e.state === "paused" ? "Paused" : "Off", b = (e) => e.kind === "android" || e.kind === "iphone";
-function x(t) {
+}, y = (e) => v[e.name] || _(e.name), b = (e) => e.state === "paused" ? "Paused" : "Off", x = (e) => e.kind === "android" || e.kind === "iphone";
+function S(t) {
 	let n = e(4), { browser: r, c: i } = t, a;
 	n[0] === Symbol.for("react.memo_cache_sentinel") ? (a = {
 		fill: "none",
@@ -25,90 +25,90 @@ function x(t) {
 		viewBox: "0 0 24 24"
 	}, n[0] = a) : a = n[0];
 	let o = a;
-	if (b(i)) {
+	if (x(i)) {
 		let e;
-		return n[1] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ u("svg", {
+		return n[1] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d("svg", {
 			width: "40",
 			height: "40",
 			...o,
-			children: [/* @__PURE__ */ l("rect", {
+			children: [/* @__PURE__ */ u("rect", {
 				x: "7",
 				y: "2.5",
 				width: "10",
 				height: "19",
 				rx: "2"
-			}), /* @__PURE__ */ l("path", { d: "M11 18.5h2" })]
+			}), /* @__PURE__ */ u("path", { d: "M11 18.5h2" })]
 		}), n[1] = e) : e = n[1], e;
 	}
 	if (r) {
 		let e;
-		return n[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ u("svg", {
+		return n[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d("svg", {
 			width: "44",
 			height: "44",
 			...o,
-			children: [/* @__PURE__ */ l("rect", {
+			children: [/* @__PURE__ */ u("rect", {
 				x: "3",
 				y: "4.5",
 				width: "18",
 				height: "15",
 				rx: "2"
-			}), /* @__PURE__ */ l("path", { d: "M3 8.5h18" })]
+			}), /* @__PURE__ */ u("path", { d: "M3 8.5h18" })]
 		}), n[2] = e) : e = n[2], e;
 	}
 	let s;
-	return n[3] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ u("svg", {
+	return n[3] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ d("svg", {
 		width: "48",
 		height: "48",
 		...o,
-		children: [/* @__PURE__ */ l("rect", {
+		children: [/* @__PURE__ */ u("rect", {
 			x: "4",
 			y: "5",
 			width: "16",
 			height: "11",
 			rx: "1.5"
-		}), /* @__PURE__ */ l("path", { d: "M2 19h20" })]
+		}), /* @__PURE__ */ u("path", { d: "M2 19h20" })]
 	}), n[3] = s) : s = n[3], s;
 }
-function S(t) {
+function C(t) {
 	let n = e(34), { c: r, hosts: i, src: a } = t, o = r.borrowed, s;
-	n[0] !== o || n[1] !== r ? (s = o?.signing_in ? "Signing in to sites" : o ? o.for || "In use" : v(r), n[0] = o, n[1] = r, n[2] = s) : s = n[2];
-	let c = s, g;
-	n[3] !== o || n[4] !== r ? (g = o ? o.signing_in ? o.profile || "" : o.by || "An agent" : m(r) ? y(r) : "", n[3] = o, n[4] = r, n[5] = g) : g = n[5];
+	n[0] !== o || n[1] !== r ? (s = o?.signing_in ? "Signing in to sites" : o ? o.for || "In use" : y(r), n[0] = o, n[1] = r, n[2] = s) : s = n[2];
+	let c = s, l;
+	n[3] !== o || n[4] !== r ? (l = o ? o.signing_in ? o.profile || "" : o.by || "An agent" : h(r) ? b(r) : "", n[3] = o, n[4] = r, n[5] = l) : l = n[5];
 	let _;
-	n[6] !== r.on || n[7] !== i ? (_ = i > 1 ? p(r.on) : "", n[6] = r.on, n[7] = i, n[8] = _) : _ = n[8];
-	let S;
-	n[9] !== g || n[10] !== _ ? (S = [g, _].filter(Boolean), n[9] = g, n[10] = _, n[11] = S) : S = n[11];
-	let C = S.join(" · "), w;
-	n[12] === r ? w = n[13] : (w = !h(r) && (!m(r) || r.kind !== "linux"), n[12] = r, n[13] = w);
+	n[6] !== r.on || n[7] !== i ? (_ = i > 1 ? m(r.on) : "", n[6] = r.on, n[7] = i, n[8] = _) : _ = n[8];
+	let v;
+	n[9] !== l || n[10] !== _ ? (v = [l, _].filter(Boolean), n[9] = l, n[10] = _, n[11] = v) : v = n[11];
+	let C = v.join(" · "), w;
+	n[12] === r ? w = n[13] : (w = !g(r) && (!h(r) || r.kind !== "linux"), n[12] = r, n[13] = w);
 	let T = w, E = T ? "button" : "div", D;
-	n[14] === r ? D = n[15] : (D = d(r), n[14] = r, n[15] = D);
+	n[14] === r ? D = n[15] : (D = f(r), n[14] = r, n[15] = D);
 	let O;
-	n[16] !== r || n[17] !== T ? (O = T ? () => one.open("device", f(r)) : void 0, n[16] = r, n[17] = T, n[18] = O) : O = n[18];
+	n[16] !== r || n[17] !== T ? (O = T ? () => one.open("device", p(r)) : void 0, n[16] = r, n[17] = T, n[18] = O) : O = n[18];
 	let k = `group block w-full min-w-0 text-left outline-none ${T ? "cursor-pointer" : ""}`, A;
-	n[19] !== r || n[20] !== a ? (A = /* @__PURE__ */ l("div", {
+	n[19] !== r || n[20] !== a ? (A = /* @__PURE__ */ u("div", {
 		className: "relative grid aspect-[16/10] place-items-center overflow-hidden rounded-xl bg-muted text-muted-foreground ring-1 ring-border ring-inset group-focus-visible:outline-3 group-focus-visible:outline-ring/50",
-		children: a ? /* @__PURE__ */ l("img", {
+		children: a ? /* @__PURE__ */ u("img", {
 			src: a,
 			alt: "",
-			className: b(r) ? "absolute left-1/2 top-2 h-[calc(100%-1rem)] w-auto -translate-x-1/2 rounded-xl" : "size-full object-cover",
-			style: m(r) ? { filter: "grayscale(0.9) brightness(0.5)" } : void 0
-		}) : /* @__PURE__ */ l(x, {
-			browser: h(r),
+			className: x(r) ? "absolute left-1/2 top-2 h-[calc(100%-1rem)] w-auto -translate-x-1/2 rounded-xl" : "size-full object-cover",
+			style: h(r) ? { filter: "grayscale(0.9) brightness(0.5)" } : void 0
+		}) : /* @__PURE__ */ u(S, {
+			browser: g(r),
 			c: r
 		})
 	}), n[19] = r, n[20] = a, n[21] = A) : A = n[21];
 	let j;
-	n[22] === c ? j = n[23] : (j = /* @__PURE__ */ l("div", {
+	n[22] === c ? j = n[23] : (j = /* @__PURE__ */ u("div", {
 		className: "mt-2 truncate text-sm font-medium",
 		children: c
 	}), n[22] = c, n[23] = j);
 	let M;
-	n[24] === C ? M = n[25] : (M = /* @__PURE__ */ l("div", {
+	n[24] === C ? M = n[25] : (M = /* @__PURE__ */ u("div", {
 		className: "min-h-5 truncate text-sm text-muted-foreground",
 		children: C
 	}), n[24] = C, n[25] = M);
 	let N;
-	return n[26] !== E || n[27] !== j || n[28] !== M || n[29] !== D || n[30] !== O || n[31] !== k || n[32] !== A ? (N = /* @__PURE__ */ u(E, {
+	return n[26] !== E || n[27] !== j || n[28] !== M || n[29] !== D || n[30] !== O || n[31] !== k || n[32] !== A ? (N = /* @__PURE__ */ d(E, {
 		"data-k": D,
 		onClick: O,
 		className: k,
@@ -119,8 +119,8 @@ function S(t) {
 		]
 	}), n[26] = E, n[27] = j, n[28] = M, n[29] = D, n[30] = O, n[31] = k, n[32] = A, n[33] = N) : N = n[33], N;
 }
-function C() {
-	let [e, i] = r(null), [u, p] = r(null), [g, _] = r({}), v = n({
+function w() {
+	let [e, i] = r(null), [s, d] = r(null), [m, _] = r({}), v = n({
 		devices: null,
 		hashes: {},
 		asked: {},
@@ -133,13 +133,13 @@ function C() {
 		let n = t.getBoundingClientRect();
 		return n.bottom > 0 && n.top < innerHeight;
 	};
-	function x() {
+	function b() {
 		let e = v.current;
 		for (let t of e.devices || []) {
-			let n = d(t);
-			m(t) || h(t) || Date.now() - (e.asked[n] || 0) < 2e4 || !y(n) || (e.asked[n] = Date.now(), one.call("_screen", {
-				...f(t),
-				width: b(t) ? 160 : 480,
+			let n = f(t);
+			h(t) || g(t) || Date.now() - (e.asked[n] || 0) < 2e4 || !y(n) || (e.asked[n] = Date.now(), one.call("_screen", {
+				...p(t),
+				width: x(t) ? 160 : 480,
 				have: e.hashes[n] || ""
 			}).then((t) => {
 				if (t.age > 20 && !e.retried[n] && ([e.retried[n], e.asked[n]] = [!0, Date.now() - 16e3]), t.same) return;
@@ -151,56 +151,59 @@ function C() {
 			}).catch(() => {}));
 		}
 	}
-	async function C() {
+	async function S() {
 		let e = v.current;
 		try {
 			let t = await one.call("_list", { have: e.listed });
-			t.same || (e.devices = (t.devices || []).filter((e) => !e.spare || e.borrowed), e.listed = t.hash || "", i(e.devices)), p(null);
+			t.same || (e.devices = (t.devices || []).filter((e) => !e.spare || e.borrowed), e.listed = t.hash || "", i(e.devices)), d(null);
 		} catch (t) {
-			e.listed = "", p(one.plain(t));
+			e.listed = "", d(one.plain(t));
 			return;
 		}
-		requestAnimationFrame(x);
+		requestAnimationFrame(b);
 	}
 	async function w() {
 		let e = v.current;
 		if (!(e.busy || document.visibilityState === "hidden")) {
 			e.busy = !0;
 			try {
-				await C();
+				await S();
 			} finally {
 				e.busy = !1;
 			}
 		}
 	}
 	if (t(() => {
-		one.title("Agent Devices"), w();
+		w();
 		let e = setInterval(w, 5e3);
-		return document.addEventListener("visibilitychange", w), addEventListener("scroll", x, { passive: !0 }), () => {
-			clearInterval(e), document.removeEventListener("visibilitychange", w), removeEventListener("scroll", x);
+		return document.addEventListener("visibilitychange", w), addEventListener("scroll", b, { passive: !0 }), () => {
+			clearInterval(e), document.removeEventListener("visibilitychange", w), removeEventListener("scroll", b);
 		};
 	}, []), t(() => {
-		requestAnimationFrame(x);
-	}, [e]), u) return /* @__PURE__ */ l(s, {
-		title: u.title,
-		text: u.next
+		requestAnimationFrame(b);
+	}, [e]), s) return /* @__PURE__ */ u(c, {
+		title: s.title,
+		text: s.next
 	});
-	if (!e) return /* @__PURE__ */ l(o, {
+	if (!e) return /* @__PURE__ */ u(o, {
 		min: "16rem",
 		max: 4,
-		children: [0, 1].map((e) => /* @__PURE__ */ l(c, { className: "aspect-[16/10] rounded-xl" }, e))
+		children: [0, 1].map((e) => /* @__PURE__ */ u(l, { className: "aspect-[16/10] rounded-xl" }, e))
 	});
-	if (!e.length) return /* @__PURE__ */ l(a, { children: "None yet. Agents make one when they need a browser." });
-	let T = new Set(e.map((e) => e.on)).size, E = (e) => e.borrowed ? 0 : m(e) ? 2 : 1, D = [...e].sort((e, t) => E(e) - E(t) || (Date.parse(e.borrowed?.since) || 0) - (Date.parse(t.borrowed?.since) || 0) || e.name.localeCompare(t.name));
-	return /* @__PURE__ */ l(o, {
+	if (!e.length) return /* @__PURE__ */ u(a, { children: "None yet. Agents make one when they need a browser." });
+	let T = new Set(e.map((e) => e.on)).size, E = (e) => e.borrowed ? 0 : h(e) ? 2 : 1, D = [...e].sort((e, t) => E(e) - E(t) || (Date.parse(e.borrowed?.since) || 0) - (Date.parse(t.borrowed?.since) || 0) || e.name.localeCompare(t.name));
+	return /* @__PURE__ */ u(o, {
 		min: "16rem",
 		max: 4,
-		children: D.map((e) => /* @__PURE__ */ l(S, {
+		children: D.map((e) => /* @__PURE__ */ u(C, {
 			c: e,
 			hosts: T,
-			src: g[d(e)]
-		}, d(e)))
+			src: m[f(e)]
+		}, f(e)))
 	});
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ l(C, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ d("div", {
+	className: "flex flex-col gap-4",
+	children: [/* @__PURE__ */ u(s, { children: "Agent Devices" }), /* @__PURE__ */ u(w, {})]
+}));
 </script>

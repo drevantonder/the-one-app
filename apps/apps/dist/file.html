@@ -22,21 +22,15 @@ function u() {
 	}
 	if (!f.data) {
 		let e;
-		return n[3] === f ? e = n[4] : (e = /* @__PURE__ */ s("div", {
-			className: "p-4",
-			children: /* @__PURE__ */ s(a, {
-				call: f,
-				rows: 1
-			})
+		return n[3] === f ? e = n[4] : (e = /* @__PURE__ */ s(a, {
+			call: f,
+			rows: 1
 		}), n[3] = f, n[4] = e), e;
 	}
 	let m;
-	return n[5] !== f.data.path || n[6] !== f.data.text ? (m = /* @__PURE__ */ s("div", {
-		className: "p-4",
-		children: /* @__PURE__ */ s(r, {
-			text: f.data.text,
-			path: f.data.path
-		})
+	return n[5] !== f.data.path || n[6] !== f.data.text ? (m = /* @__PURE__ */ s(r, {
+		text: f.data.text,
+		path: f.data.path
 	}), n[5] = f.data.path, n[6] = f.data.text, n[7] = m) : m = n[7], m;
 }
 function d() {

@@ -5,7 +5,7 @@
 // bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, AppIcon, Button, Empty, List, ListRow, ListSkeleton, Problem } from "@one/ui"
+import { AppIcon, Avatar, Button, Empty, LargeTitle, List, ListRow, ListSkeleton, Problem } from "@one/ui"
 import { appNamed, asking } from "./agents.js"
 
 const api = one.api
@@ -29,7 +29,6 @@ function Requests() {
     }
   }
   useEffect(() => {
-    one.largeTitle("Requests")
     load()
     one.on("changed", load)
   }, [])
@@ -98,7 +97,7 @@ function Requests() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-4">
-      <h1 className="large-title text-3xl font-bold tracking-tight">Requests</h1>
+      <LargeTitle>Requests</LargeTitle>
       {body}
     </div>
   )

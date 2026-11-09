@@ -8,7 +8,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Icon, Input, Label, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Spinner, Switch, Tabs, TabsList, TabsTrigger, AppIcon, cn, useDialog } from "@one/ui"
+import { AppIcon, Button, cn, Empty, Icon, Input, Label, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Spinner, Switch, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
 
 const api = one.api
 const said = (err) => one.plain(err).title
@@ -275,7 +275,6 @@ function Devices() {
   // The same screen first loaded gets the one asked about from its QR, the app that sent them to choose where its
   // schedules run, and Add Device (a Mac's Pair a Computer…, `add`).
   useEffect(() => {
-    one.largeTitle("Devices")
     const schedulesAsked = one.params?.schedules ? { app: String(one.params.schedules), scope: one.params.scope && String(one.params.scope) } : null
     load().then((first) => {
       if (!first) return
@@ -488,10 +487,7 @@ function Devices() {
 
   return (
     <div className="@container flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="large-title text-3xl font-bold tracking-tight">Devices</h1>
-        <Button variant={data?.waiting.length ? "outline" : "default"} disabled={!data} onClick={() => show({ add: true })}><Icon name="plus" />Add Device</Button>
-      </div>
+      <LargeTitle action={<Button variant={data?.waiting.length ? "outline" : "default"} disabled={!data} onClick={() => show({ add: true })}>Add Device</Button>}>Devices</LargeTitle>
       {body}
       {data && dialog.for?.rename && <Rename key={dialog.n} card={dialog.for.rename} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.remove && <RemoveDevice key={dialog.n} {...dialog.for.remove} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
@@ -505,13 +501,6 @@ function Devices() {
 const latest = { current: { place() {}, moveMenu() {} } }
 
 // A heading over a part of the page.
-const Section = ({ title, children, className }) => (
-  <section className={cn("flex flex-col gap-2", className)}>
-    <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-    {children}
-  </section>
-)
-
 const Note = ({ children }) => <p className="max-w-2xl text-sm text-muted-foreground">{children}</p>
 
 // A row of a list that does something: a plus or another symbol, and what it does.
@@ -970,7 +959,7 @@ const list = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} an
 const Go = ({ children, busy, disabled, variant = "default", onClick }) => (
   <Button size="sm" variant={variant} disabled={busy || disabled} onClick={onClick}>{busy && <Spinner className="text-current" />}{children}</Button>
 )
-const Cancel = ({ setOpen }) => <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+const Cancel = ({ setOpen }) => <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
 
 /// Renames a device: its node, or its app's sign-ins.
 function Rename({ card, open, setOpen, done }) {

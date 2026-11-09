@@ -24,21 +24,19 @@ function Code() {
     one.title(dir.replace(/\/$/, "").split("/").pop() || "Code")
   }, [])
   if (!app) return <Empty>This page isn’t here.</Empty>
-  if (!code.data) return <div className="p-4"><Pending call={code} rows={4} /></div>
+  if (!code.data) return <Pending call={code} rows={4} />
   return (
-    <div className="p-4">
-      <List>
-        {folder(code.data.files, dir).map(([name, f]) => (
-          <ListRow
-            key={name}
-            leading={<Icon name={f.dir ? "folder" : "file"} className="size-5 text-muted-foreground" />}
-            title={name.replace(/\/$/, "")}
-            trailing={!f.dir && <span className="text-muted-foreground">{fileSize(f.size)}</span>}
-            onClick={() => (f.dir ? one.open("code", { app, dir: f.dir }) : one.open("file", { app, path: f.path }))}
-          />
-        ))}
-      </List>
-    </div>
+    <List>
+      {folder(code.data.files, dir).map(([name, f]) => (
+        <ListRow
+          key={name}
+          leading={<Icon name={f.dir ? "folder" : "file"} className="size-5 text-muted-foreground" />}
+          title={name.replace(/\/$/, "")}
+          trailing={!f.dir && <span className="text-muted-foreground">{fileSize(f.size)}</span>}
+          onClick={() => (f.dir ? one.open("code", { app, dir: f.dir }) : one.open("file", { app, path: f.path }))}
+        />
+      ))}
+    </List>
   )
 }
 

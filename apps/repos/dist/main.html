@@ -6,39 +6,23 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { createContext as t, useEffect as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { Button as a, Empty as o, Grid as s, Icon as c, Input as l, List as u, ListRow as d, ListSkeleton as f, Pending as p, Problem as m, cn as h, useCall as g, useWidth as _ } from "@one/ui";
-import { Fragment as v, jsx as y, jsxs as b } from "react/jsx-runtime";
-var x = (e) => one.plain(e);
-function S(t) {
-	let n = e(5), { title: r, children: i } = t, a;
-	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ y("h2", {
-		className: "text-sm font-medium text-muted-foreground",
-		children: r
-	}), n[0] = r, n[1] = a);
-	let o;
-	return n[2] !== i || n[3] !== a ? (o = /* @__PURE__ */ b("section", {
-		className: "flex flex-col gap-2",
-		children: [a, i]
-	}), n[2] = i, n[3] = a, n[4] = o) : o = n[4], o;
-}
-var C = t(0);
-function w(t) {
-	let n = e(6), { children: r } = t, [i, a] = _(), o;
-	n[0] !== r || n[1] !== a ? (o = /* @__PURE__ */ y(C.Provider, {
+import { Button as a, Empty as o, Grid as s, Icon as c, Input as l, LargeTitle as u, List as d, ListRow as f, ListSkeleton as p, Pending as m, Problem as h, Section as g, cn as _, useCall as v, useWidth as y } from "@one/ui";
+import { Fragment as b, jsx as x, jsxs as S } from "react/jsx-runtime";
+var C = (e) => one.plain(e), w = t(0);
+function T(t) {
+	let n = e(6), { children: r } = t, [i, a] = y(), o;
+	n[0] !== r || n[1] !== a ? (o = /* @__PURE__ */ x(w.Provider, {
 		value: a,
 		children: r
 	}), n[0] = r, n[1] = a, n[2] = o) : o = n[2];
 	let s;
-	return n[3] !== i || n[4] !== o ? (s = /* @__PURE__ */ y("div", {
-		className: "p-4",
-		children: /* @__PURE__ */ y("div", {
-			ref: i,
-			children: o
-		})
+	return n[3] !== i || n[4] !== o ? (s = /* @__PURE__ */ x("div", {
+		ref: i,
+		children: o
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
-var T = (e) => one.ago(Date.parse(e), { long: !0 }), E = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, D = (e) => String(e || "").startsWith("github.com/"), O = (e, t) => one.open(e, t), k = "<address>/repos/", A = "<you>", j = one.call("_address").then((e) => (k = e?.base || k, A = e?.handle || A), () => {});
-function ee() {
+var E = (e) => one.ago(Date.parse(e), { long: !0 }), ee = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, D = (e) => String(e || "").startsWith("github.com/"), O = (e, t) => one.open(e, t), k = "<address>/repos/", A = "<you>", j = one.call("_address").then((e) => (k = e?.base || k, A = e?.handle || A), () => {});
+function te() {
 	let t = e(3), [, i] = r(0), a, o;
 	t[0] === Symbol.for("react.memo_cache_sentinel") ? (a = () => void j.then(() => i(N)), o = [], t[0] = a, t[1] = o) : (a = t[0], o = t[1]), n(a, o);
 	let s;
@@ -53,14 +37,14 @@ function M(e) {
 function N(e) {
 	return e + 1;
 }
-var te = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`;
+var ne = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`;
 function P(t) {
 	let n = e(5), { className: r } = t, i;
-	n[0] === r ? i = n[1] : (i = h("size-4 shrink-0", r), n[0] = r, n[1] = i);
+	n[0] === r ? i = n[1] : (i = _("size-4 shrink-0", r), n[0] = r, n[1] = i);
 	let a;
-	n[2] === Symbol.for("react.memo_cache_sentinel") ? (a = /* @__PURE__ */ y("path", { d: "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" }), n[2] = a) : a = n[2];
+	n[2] === Symbol.for("react.memo_cache_sentinel") ? (a = /* @__PURE__ */ x("path", { d: "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" }), n[2] = a) : a = n[2];
 	let o;
-	return n[3] === i ? o = n[4] : (o = /* @__PURE__ */ y("svg", {
+	return n[3] === i ? o = n[4] : (o = /* @__PURE__ */ x("svg", {
 		viewBox: "0 0 16 16",
 		fill: "currentColor",
 		"aria-hidden": "true",
@@ -72,14 +56,14 @@ var F = (t) => {
 	let n = e(6), { repo: r, github: i, className: a } = t, o;
 	n[0] !== r || n[1] !== i ? (o = i === void 0 ? D(r) : i, n[0] = r, n[1] = i, n[2] = o) : o = n[2];
 	let s = o, l;
-	return n[3] !== a || n[4] !== s ? (l = s ? /* @__PURE__ */ y(P, { className: a }) : /* @__PURE__ */ y(c, {
+	return n[3] !== a || n[4] !== s ? (l = s ? /* @__PURE__ */ x(P, { className: a }) : /* @__PURE__ */ x(c, {
 		name: "book",
 		className: a
 	}), n[3] = a, n[4] = s, n[5] = l) : l = n[5], l;
 };
-function ne(t) {
+function re(t) {
 	let n = e(23), { r, restore: i } = t, o = !!r.github, s;
-	n[0] !== r.repo || n[1] !== o ? (s = /* @__PURE__ */ y(F, {
+	n[0] !== r.repo || n[1] !== o ? (s = /* @__PURE__ */ x(F, {
 		repo: r.repo,
 		github: o,
 		className: "size-5 text-muted-foreground"
@@ -87,14 +71,14 @@ function ne(t) {
 	let c;
 	n[3] !== r.name.length || n[4] !== r.repo ? (c = r.repo.slice(0, -r.name.length), n[3] = r.name.length, n[4] = r.repo, n[5] = c) : c = n[5];
 	let l;
-	n[6] === c ? l = n[7] : (l = /* @__PURE__ */ y("span", {
+	n[6] === c ? l = n[7] : (l = /* @__PURE__ */ x("span", {
 		className: "font-normal text-muted-foreground",
 		children: c
 	}), n[6] = c, n[7] = l);
 	let u;
-	n[8] !== r.name || n[9] !== l ? (u = /* @__PURE__ */ b(v, { children: [l, r.name] }), n[8] = r.name, n[9] = l, n[10] = u) : u = n[10];
-	let f = "Deleted " + T(r.deleted.time), p;
-	n[11] !== r.name || n[12] !== r.yours || n[13] !== i ? (p = r.yours ? /* @__PURE__ */ y(a, {
+	n[8] !== r.name || n[9] !== l ? (u = /* @__PURE__ */ S(b, { children: [l, r.name] }), n[8] = r.name, n[9] = l, n[10] = u) : u = n[10];
+	let d = "Deleted " + E(r.deleted.time), p;
+	n[11] !== r.name || n[12] !== r.yours || n[13] !== i ? (p = r.yours ? /* @__PURE__ */ x(a, {
 		variant: "secondary",
 		size: "sm",
 		onClick: (e) => (e.stopPropagation(), i(r.name)),
@@ -103,197 +87,201 @@ function ne(t) {
 	let m;
 	n[15] === r.repo ? m = n[16] : (m = () => O("repo", { repo: r.repo }), n[15] = r.repo, n[16] = m);
 	let h;
-	return n[17] !== s || n[18] !== u || n[19] !== f || n[20] !== p || n[21] !== m ? (h = /* @__PURE__ */ y(d, {
+	return n[17] !== s || n[18] !== u || n[19] !== d || n[20] !== p || n[21] !== m ? (h = /* @__PURE__ */ x(f, {
 		leading: s,
 		title: u,
-		sub: f,
+		sub: d,
 		trailing: p,
 		onClick: m
-	}), n[17] = s, n[18] = u, n[19] = f, n[20] = p, n[21] = m, n[22] = h) : h = n[22], h;
+	}), n[17] = s, n[18] = u, n[19] = d, n[20] = p, n[21] = m, n[22] = h) : h = n[22], h;
 }
 function I(t) {
 	let n = e(30), { r } = t, i;
 	n[0] !== r.name.length || n[1] !== r.repo ? (i = r.repo.slice(0, -r.name.length), n[0] = r.name.length, n[1] = r.repo, n[2] = i) : i = n[2];
 	let a = i, o = r.github?.private && "Private", s = r.branch, c = r.updated || r.created, l;
-	n[3] === c ? l = n[4] : (l = T(c), n[3] = c, n[4] = l);
-	let u = r.from && "fork of " + r.from, f;
-	n[5] === r.open_issues ? f = n[6] : (f = r.open_issues && E(r.open_issues, "open issue", "open issues"), n[5] = r.open_issues, n[6] = f);
+	n[3] === c ? l = n[4] : (l = E(c), n[3] = c, n[4] = l);
+	let u = r.from && "fork of " + r.from, d;
+	n[5] === r.open_issues ? d = n[6] : (d = r.open_issues && ee(r.open_issues, "open issue", "open issues"), n[5] = r.open_issues, n[6] = d);
 	let p;
-	n[7] !== r.branch || n[8] !== o || n[9] !== l || n[10] !== u || n[11] !== f ? (p = [
+	n[7] !== r.branch || n[8] !== o || n[9] !== l || n[10] !== u || n[11] !== d ? (p = [
 		o,
 		s,
 		l,
 		u,
-		f
-	].filter(Boolean), n[7] = r.branch, n[8] = o, n[9] = l, n[10] = u, n[11] = f, n[12] = p) : p = n[12];
+		d
+	].filter(Boolean), n[7] = r.branch, n[8] = o, n[9] = l, n[10] = u, n[11] = d, n[12] = p) : p = n[12];
 	let m = p.join(" · "), h;
 	n[13] === r.repo ? h = n[14] : (h = () => O("repo", { repo: r.repo }), n[13] = r.repo, n[14] = h);
 	let g = !!r.github, _;
-	n[15] !== r.repo || n[16] !== g ? (_ = /* @__PURE__ */ y(F, {
+	n[15] !== r.repo || n[16] !== g ? (_ = /* @__PURE__ */ x(F, {
 		repo: r.repo,
 		github: g,
 		className: "size-5 text-muted-foreground"
 	}), n[15] = r.repo, n[16] = g, n[17] = _) : _ = n[17];
-	let x;
-	n[18] === a ? x = n[19] : (x = /* @__PURE__ */ y("span", {
+	let v;
+	n[18] === a ? v = n[19] : (v = /* @__PURE__ */ x("span", {
 		className: "font-normal text-muted-foreground",
 		children: a
-	}), n[18] = a, n[19] = x);
-	let S;
-	n[20] !== r.name || n[21] !== x ? (S = /* @__PURE__ */ b(v, { children: [x, r.name] }), n[20] = r.name, n[21] = x, n[22] = S) : S = n[22];
+	}), n[18] = a, n[19] = v);
+	let y;
+	n[20] !== r.name || n[21] !== v ? (y = /* @__PURE__ */ S(b, { children: [v, r.name] }), n[20] = r.name, n[21] = v, n[22] = y) : y = n[22];
 	let C;
-	n[23] !== m || n[24] !== _ || n[25] !== S ? (C = /* @__PURE__ */ y(d, {
+	n[23] !== m || n[24] !== _ || n[25] !== y ? (C = /* @__PURE__ */ x(f, {
 		leading: _,
-		title: S,
+		title: y,
 		sub: m
-	}), n[23] = m, n[24] = _, n[25] = S, n[26] = C) : C = n[26];
+	}), n[23] = m, n[24] = _, n[25] = y, n[26] = C) : C = n[26];
 	let w;
-	return n[27] !== C || n[28] !== h ? (w = /* @__PURE__ */ y("button", {
+	return n[27] !== C || n[28] !== h ? (w = /* @__PURE__ */ x("button", {
 		type: "button",
 		className: "min-w-0 cursor-pointer rounded-xl text-left outline-none hover:bg-accent/50 focus-visible:bg-accent/50",
 		onClick: h,
 		children: C
 	}), n[27] = C, n[28] = h, n[29] = w) : w = n[29], w;
 }
-var L = (t) => {
+var ie = (t) => {
 	let n = e(4), { of: r } = t, i;
-	n[0] === r ? i = n[1] : (i = r.map(z), n[0] = r, n[1] = i);
+	n[0] === r ? i = n[1] : (i = r.map(R), n[0] = r, n[1] = i);
 	let a;
-	return n[2] === i ? a = n[3] : (a = /* @__PURE__ */ y(s, {
+	return n[2] === i ? a = n[3] : (a = /* @__PURE__ */ x(s, {
 		min: "22rem",
 		max: 4,
 		gap: "0.25rem",
 		children: i
 	}), n[2] = i, n[3] = a), a;
 };
-function R() {
-	let t = e(67), { address: i, mine: a } = ee(), s;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (s = { source: "one" }, t[0] = s) : s = t[0];
-	let d = g("list", s), h;
-	t[1] === Symbol.for("react.memo_cache_sentinel") ? (h = { source: "github" }, t[1] = h) : h = t[1];
-	let _ = g("list", h), [v, C] = r(""), T;
-	t[2] === Symbol.for("react.memo_cache_sentinel") ? (T = /* @__PURE__ */ new Set(), t[2] = T) : T = t[2];
-	let [E, D] = r(T), [O, k] = r(""), A;
-	t[3] === Symbol.for("react.memo_cache_sentinel") ? (A = [], t[3] = A) : A = t[3], n(ie, A);
-	let j;
-	t[4] === d ? j = t[5] : (j = (e) => {
-		k(""), D((t) => new Set(t).add(e)), one.call("restore", { repo: e }).then(() => d.reload()).catch((e) => k(x(e).title)).finally(() => D((t) => (t.delete(e), new Set(t))));
-	}, t[4] = d, t[5] = j);
-	let M = j, N;
-	t[6] === Symbol.for("react.memo_cache_sentinel") ? (N = /* @__PURE__ */ y(c, {
+function L() {
+	let t = e(69), { address: n, mine: i } = te(), a;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (a = { source: "one" }, t[0] = a) : a = t[0];
+	let s = v("list", a), f;
+	t[1] === Symbol.for("react.memo_cache_sentinel") ? (f = { source: "github" }, t[1] = f) : f = t[1];
+	let _ = v("list", f), [y, b] = r(""), w;
+	t[2] === Symbol.for("react.memo_cache_sentinel") ? (w = /* @__PURE__ */ new Set(), t[2] = w) : w = t[2];
+	let [E, ee] = r(w), [D, O] = r(""), k;
+	t[3] === s ? k = t[4] : (k = (e) => {
+		O(""), ee((t) => new Set(t).add(e)), one.call("restore", { repo: e }).then(() => s.reload()).catch((e) => O(C(e).title)).finally(() => ee((t) => (t.delete(e), new Set(t))));
+	}, t[3] = s, t[4] = k);
+	let A = k, j;
+	t[5] === Symbol.for("react.memo_cache_sentinel") ? (j = /* @__PURE__ */ x(c, {
 		name: "magnifying-glass",
 		className: "pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
-	}), t[6] = N) : N = t[6];
-	let P;
-	t[7] === Symbol.for("react.memo_cache_sentinel") ? (P = (e) => C(e.target.value), t[7] = P) : P = t[7];
-	let F;
-	t[8] === v ? F = t[9] : (F = /* @__PURE__ */ b("div", {
+	}), t[5] = j) : j = t[5];
+	let M;
+	t[6] === Symbol.for("react.memo_cache_sentinel") ? (M = (e) => b(e.target.value), t[6] = M) : M = t[6];
+	let N;
+	t[7] === y ? N = t[8] : (N = /* @__PURE__ */ S("div", {
 		className: "relative max-w-md",
-		children: [N, /* @__PURE__ */ y(l, {
+		children: [j, /* @__PURE__ */ x(l, {
 			className: "pl-8",
 			placeholder: "Search",
 			"aria-label": "Search",
-			value: v,
-			onChange: P
+			value: y,
+			onChange: M
 		})]
-	}), t[8] = v, t[9] = F);
+	}), t[7] = y, t[8] = N);
+	let P = N, F;
+	t[9] === Symbol.for("react.memo_cache_sentinel") ? (F = /* @__PURE__ */ x(u, { children: "Repos" }), t[9] = F) : F = t[9];
 	let I = F;
-	if (!d.data) {
+	if (!s.data) {
 		let e;
-		t[10] === d ? e = t[11] : (e = /* @__PURE__ */ y(p, {
-			call: d,
+		t[10] === s ? e = t[11] : (e = /* @__PURE__ */ x(m, {
+			call: s,
 			rows: 6,
-			tiles: "22rem"
-		}), t[10] = d, t[11] = e);
+			tiles: "22rem",
+			icon: 20
+		}), t[10] = s, t[11] = e);
 		let n;
-		return t[12] !== I || t[13] !== e ? (n = /* @__PURE__ */ y(w, { children: /* @__PURE__ */ b("div", {
+		return t[12] !== P || t[13] !== e ? (n = /* @__PURE__ */ x(T, { children: /* @__PURE__ */ S("div", {
 			className: "flex flex-col gap-6",
-			children: [I, e]
-		}) }), t[12] = I, t[13] = e, t[14] = n) : n = t[14], n;
+			children: [
+				I,
+				P,
+				e
+			]
+		}) }), t[12] = P, t[13] = e, t[14] = n) : n = t[14], n;
 	}
-	let R, z, B, V, H, U, W, G, K, q, J, Y, X;
-	if (t[15] !== i || t[16] !== I || t[17] !== _.data || t[18] !== _.error || t[19] !== a || t[20] !== d.data || t[21] !== v || t[22] !== M || t[23] !== E || t[24] !== O) {
+	let L, R, z, B, V, H, U, W, G, K, q, J, Y, X;
+	if (t[15] !== n || t[16] !== P || t[17] !== _.data || t[18] !== _.error || t[19] !== i || t[20] !== s.data || t[21] !== y || t[22] !== A || t[23] !== E || t[24] !== D) {
 		J = Symbol.for("react.early_return_sentinel");
 		bb0: {
-			let e = v.trim().toLowerCase(), n = _.data, r;
-			t[38] === _.error ? r = t[39] : (r = _.error ? x(_.error).title : "", t[38] = _.error, t[39] = r), V = r;
-			let s = d.data.filter((t) => !e || t.repo.includes(e) || (t.from || "").includes(e));
-			B = (n || []).filter((t) => !e || t.repo.toLowerCase().includes(e));
-			let c;
-			if (t[40] === E ? c = t[41] : (c = (e) => e.deleted && !E.has(e.repo), t[40] = E, t[41] = c), H = s.filter(c), U = s.filter((e) => !H.includes(e)), z = n || _.error, !d.data.length && !n?.length && z && !V) {
+			let e = y.trim().toLowerCase(), r = _.data, a;
+			t[39] === _.error ? a = t[40] : (a = _.error ? C(_.error).title : "", t[39] = _.error, t[40] = a), B = a;
+			let c = s.data.filter((t) => !e || t.repo.includes(e) || (t.from || "").includes(e));
+			z = (r || []).filter((t) => !e || t.repo.toLowerCase().includes(e));
+			let l;
+			if (t[41] === E ? l = t[42] : (l = (e) => e.deleted && !E.has(e.repo), t[41] = E, t[42] = l), V = c.filter(l), H = c.filter((e) => !V.includes(e)), R = r || _.error, !s.data.length && !r?.length && R && !B) {
 				let e;
-				t[42] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ b("span", {
+				t[43] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ S("span", {
 					className: "block",
 					children: [
 						"No repos yet. ",
-						te,
+						ne,
 						", push one:"
 					]
-				}), t[42] = e) : e = t[42];
-				let n = `${a}/<name>`, r;
-				t[43] !== i || t[44] !== n ? (r = i(n), t[43] = i, t[44] = n, t[45] = r) : r = t[45];
+				}), t[43] = e) : e = t[43];
+				let r = `${i}/<name>`, a;
+				t[44] !== n || t[45] !== r ? (a = n(r), t[44] = n, t[45] = r, t[46] = a) : a = t[46];
 				let s;
-				t[46] === r ? s = t[47] : (s = /* @__PURE__ */ y(w, { children: /* @__PURE__ */ b(o, { children: [e, /* @__PURE__ */ b("code", {
+				t[47] === a ? s = t[48] : (s = /* @__PURE__ */ S(T, { children: [I, /* @__PURE__ */ S(o, { children: [e, /* @__PURE__ */ S("code", {
 					className: "mt-2 block rounded-md bg-muted px-2 py-1 font-mono text-xs",
 					children: [
 						"git push ",
-						r,
+						a,
 						" main"
 					]
-				})] }) }), t[46] = r, t[47] = s), J = s;
+				})] })] }), t[47] = a, t[48] = s), J = s;
 				break bb0;
 			}
-			R = w, Y = "flex flex-col gap-6", X = I, t[48] === O ? W = t[49] : (W = O && /* @__PURE__ */ y(m, { title: O }), t[48] = O, t[49] = W), G = U.length > 0 ? /* @__PURE__ */ y(L, { of: U }) : !z && !e && /* @__PURE__ */ y(f, {
+			L = T, Y = "flex flex-col gap-6", X = I, U = P, t[49] === D ? W = t[50] : (W = D && /* @__PURE__ */ x(h, { title: D }), t[49] = D, t[50] = W), G = H.length > 0 ? /* @__PURE__ */ x(ie, { of: H }) : !R && !e && /* @__PURE__ */ x(p, {
 				rows: 6,
-				tiles: "22rem"
-			}), K = V ? /* @__PURE__ */ y(S, {
+				tiles: "22rem",
+				icon: 20
+			}), K = B ? /* @__PURE__ */ x(g, {
 				title: "GitHub",
-				children: /* @__PURE__ */ y(m, {
-					title: V,
+				children: /* @__PURE__ */ x(h, {
+					title: B,
 					action: {
 						label: "Settings",
-						run: re
+						run: ae
 					}
 				})
-			}) : B.length > 0 && /* @__PURE__ */ y(S, {
+			}) : z.length > 0 && /* @__PURE__ */ x(g, {
 				title: "GitHub",
-				children: /* @__PURE__ */ y(L, { of: B })
-			}), q = H.length > 0 && /* @__PURE__ */ y(S, {
+				children: /* @__PURE__ */ x(ie, { of: z })
+			}), q = V.length > 0 && /* @__PURE__ */ x(g, {
 				title: "Recently Deleted",
-				children: /* @__PURE__ */ y(u, { children: H.map((e) => /* @__PURE__ */ y(ne, {
+				children: /* @__PURE__ */ x(d, { children: V.map((e) => /* @__PURE__ */ x(re, {
 					r: e,
-					restore: M
+					restore: A
 				}, e.repo)) })
 			});
 		}
-		t[15] = i, t[16] = I, t[17] = _.data, t[18] = _.error, t[19] = a, t[20] = d.data, t[21] = v, t[22] = M, t[23] = E, t[24] = O, t[25] = R, t[26] = z, t[27] = B, t[28] = V, t[29] = H, t[30] = U, t[31] = W, t[32] = G, t[33] = K, t[34] = q, t[35] = J, t[36] = Y, t[37] = X;
-	} else R = t[25], z = t[26], B = t[27], V = t[28], H = t[29], U = t[30], W = t[31], G = t[32], K = t[33], q = t[34], J = t[35], Y = t[36], X = t[37];
+		t[15] = n, t[16] = P, t[17] = _.data, t[18] = _.error, t[19] = i, t[20] = s.data, t[21] = y, t[22] = A, t[23] = E, t[24] = D, t[25] = L, t[26] = R, t[27] = z, t[28] = B, t[29] = V, t[30] = H, t[31] = U, t[32] = W, t[33] = G, t[34] = K, t[35] = q, t[36] = J, t[37] = Y, t[38] = X;
+	} else L = t[25], R = t[26], z = t[27], B = t[28], V = t[29], H = t[30], U = t[31], W = t[32], G = t[33], K = t[34], q = t[35], J = t[36], Y = t[37], X = t[38];
 	if (J !== Symbol.for("react.early_return_sentinel")) return J;
 	let Z;
-	t[50] !== z || t[51] !== B || t[52] !== V || t[53] !== H || t[54] !== U.length ? (Z = !U.length && !B.length && !H.length && z && !V && /* @__PURE__ */ y(o, { children: "No repos match." }), t[50] = z, t[51] = B, t[52] = V, t[53] = H, t[54] = U.length, t[55] = Z) : Z = t[55];
+	t[51] !== R || t[52] !== z || t[53] !== B || t[54] !== V || t[55] !== H.length ? (Z = !H.length && !z.length && !V.length && R && !B && /* @__PURE__ */ x(o, { children: "No repos match." }), t[51] = R, t[52] = z, t[53] = B, t[54] = V, t[55] = H.length, t[56] = Z) : Z = t[56];
 	let Q;
-	t[56] !== W || t[57] !== G || t[58] !== K || t[59] !== q || t[60] !== Z || t[61] !== Y || t[62] !== X ? (Q = /* @__PURE__ */ b("div", {
+	t[57] !== U || t[58] !== W || t[59] !== G || t[60] !== K || t[61] !== q || t[62] !== Z || t[63] !== Y || t[64] !== X ? (Q = /* @__PURE__ */ S("div", {
 		className: Y,
 		children: [
 			X,
+			U,
 			W,
 			G,
 			K,
 			q,
 			Z
 		]
-	}), t[56] = W, t[57] = G, t[58] = K, t[59] = q, t[60] = Z, t[61] = Y, t[62] = X, t[63] = Q) : Q = t[63];
+	}), t[57] = U, t[58] = W, t[59] = G, t[60] = K, t[61] = q, t[62] = Z, t[63] = Y, t[64] = X, t[65] = Q) : Q = t[65];
 	let $;
-	return t[64] !== R || t[65] !== Q ? ($ = /* @__PURE__ */ y(R, { children: Q }), t[64] = R, t[65] = Q, t[66] = $) : $ = t[66], $;
+	return t[66] !== L || t[67] !== Q ? ($ = /* @__PURE__ */ x(L, { children: Q }), t[66] = L, t[67] = Q, t[68] = $) : $ = t[68], $;
 }
-function re() {
+function ae() {
 	return one.open("settings");
 }
-function ie() {
-	one.title("Repos");
-}
-i(document.getElementById("root")).render(/* @__PURE__ */ y(R, {}));
-function z(e) {
-	return /* @__PURE__ */ y(I, { r: e }, e.repo);
+i(document.getElementById("root")).render(/* @__PURE__ */ x(L, {}));
+function R(e) {
+	return /* @__PURE__ */ x(I, { r: e }, e.repo);
 }
 </script>

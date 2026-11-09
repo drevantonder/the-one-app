@@ -1,9 +1,9 @@
 // Who pushes to a repo: its owner, a group's members, and the collaborators its owners added, whom they add and remove.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Pending, useCall } from "@one/ui"
+import { Avatar, Button, Hint, Icon, Input, List, ListRow, Pending, Problem, ResponsiveDialog, Section, useCall } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
-import { Frame, Section, said } from "../lib/use.jsx"
+import { Frame, said } from "../lib/use.jsx"
 
 const P = one.params
 
@@ -27,7 +27,7 @@ function Add({ d, done }) {
     }
   }
   return (
-    <ResponsiveDialog open onOpenChange={(o) => !o && done(false)} title="Add Collaborator" tall action={<Button variant="secondary" size="sm" onClick={() => done(false)}>Cancel</Button>}>
+    <ResponsiveDialog open onOpenChange={(o) => !o && done(false)} title="Add Collaborator" action={<Button variant="ghost" size="sm" onClick={() => done(false)}>Cancel</Button>}>
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
         <div className="relative">
           <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
@@ -90,9 +90,9 @@ function Collaborators() {
               ))}
             </List>
           ) : (
-            <p className="px-1 text-sm text-muted-foreground">No one else pushes to it.</p>
+            <Hint>No one else pushes to it.</Hint>
           )}
-          {d.yours && <Button variant="outline" className="self-start" onClick={() => setAdding(true)}><Icon name="plus" />Add Collaborator</Button>}
+          {d.yours && <Button variant="outline" className="self-start" onClick={() => setAdding(true)}>Add Collaborator</Button>}
         </Section>
       </div>
       {adding && <Add d={d} done={(did) => (setAdding(false), did && (setTrouble(""), call.reload()))} />}

@@ -6,30 +6,30 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AppIcon as a, Empty as o, List as s, ListSkeleton as c, Problem as l, Switch as u } from "@one/ui";
-import { Fragment as d, jsx as f, jsxs as p } from "react/jsx-runtime";
-function m(e, t) {
+import { AppIcon as a, Empty as o, LargeTitle as s, List as c, ListSkeleton as l, Problem as u, Section as d, Switch as f } from "@one/ui";
+import { Fragment as p, jsx as m, jsxs as h } from "react/jsx-runtime";
+function g(e, t) {
 	let n = /* @__PURE__ */ new Map();
 	for (let r of e.filter((e) => e[t])) n.set(r[t].name, [...n.get(r[t].name) || [], r]);
 	return [...n.values()];
 }
-function h() {
-	let [e, i] = r(null), [u, h] = r(null), [_, v] = r(""), [y, b] = r({}), x = n(0);
-	async function S() {
-		let e = ++x.current;
+function _() {
+	let [e, i] = r(null), [f, _] = r(null), [y, b] = r(""), [x, S] = r({}), C = n(0);
+	async function w() {
+		let e = ++C.current;
 		try {
 			let t = await one.api("GET", "/v1/labs");
-			if (e !== x.current) return;
-			i(t), h(null);
+			if (e !== C.current) return;
+			i(t), _(null);
 		} catch (t) {
-			e === x.current && h(one.plain(t));
+			e === C.current && _(one.plain(t));
 		}
 	}
 	t(() => {
-		one.largeTitle("Labs"), one.on("changed", S), S();
+		one.on("changed", w), w();
 	}, []);
-	async function C(e, t) {
-		v(""), b((n) => ({
+	async function T(e, t) {
+		b(""), S((n) => ({
 			...n,
 			[e.setting]: t
 		}));
@@ -39,86 +39,80 @@ function h() {
 				value: t ? "on" : null
 			});
 		} catch (e) {
-			v(one.plain(e).title);
+			b(one.plain(e).title);
 		}
-		await S(), b((t) => {
+		await w(), S((t) => {
 			let { [e.setting]: n, ...r } = t;
 			return r;
 		});
 	}
-	let w = (e) => /* @__PURE__ */ f(g, {
+	let E = (e) => /* @__PURE__ */ m(v, {
 		lab: e,
-		on: y[e.setting] ?? e.on,
-		busy: e.setting in y,
-		set: (t) => C(e, t)
-	}, e.setting), T = (e) => /* @__PURE__ */ p("section", {
-		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ p("h2", {
-			className: "flex items-center gap-2 text-sm font-medium text-muted-foreground",
-			children: [/* @__PURE__ */ f(a, {
-				app: e[0].app || e[0].service,
-				size: 18
-			}), (e[0].app || e[0].service).title]
-		}), /* @__PURE__ */ f(s, { children: e.map(w) })]
-	}, e[0].app?.name ?? e[0].service?.name), E;
-	if (!e) E = u ? /* @__PURE__ */ f(l, {
-		title: u.title,
-		text: u.next,
+		on: x[e.setting] ?? e.on,
+		busy: e.setting in x,
+		set: (t) => T(e, t)
+	}, e.setting), D = (e) => /* @__PURE__ */ m(d, {
+		title: /* @__PURE__ */ h(p, { children: [/* @__PURE__ */ m(a, {
+			app: e[0].app || e[0].service,
+			size: 18
+		}), (e[0].app || e[0].service).title] }),
+		children: /* @__PURE__ */ m(c, { children: e.map(E) })
+	}, e[0].app?.name ?? e[0].service?.name), O;
+	if (!e) O = f ? /* @__PURE__ */ m(u, {
+		title: f.title,
+		text: f.next,
 		action: {
 			label: "Try Again",
-			run: S
+			run: w
 		}
-	}) : /* @__PURE__ */ f(c, { rows: 3 });
-	else if (!e.length) E = /* @__PURE__ */ f(o, { children: "Nothing to try right now." });
+	}) : /* @__PURE__ */ m(l, { rows: 3 });
+	else if (!e.length) O = /* @__PURE__ */ m(o, { children: "Nothing to try right now." });
 	else {
 		let t = e.filter((e) => !e.app && !e.service);
-		E = /* @__PURE__ */ p(d, { children: [
-			!!t.length && /* @__PURE__ */ f(s, { children: t.map(w) }),
-			[...m(e, "app"), ...m(e, "service")].map(T),
-			_ && /* @__PURE__ */ f(l, { title: _ })
+		O = /* @__PURE__ */ h(p, { children: [
+			!!t.length && /* @__PURE__ */ m(c, { children: t.map(E) }),
+			[...g(e, "app"), ...g(e, "service")].map(D),
+			y && /* @__PURE__ */ m(u, { title: y })
 		] });
 	}
-	return /* @__PURE__ */ p("div", {
+	return /* @__PURE__ */ h("div", {
 		className: "flex max-w-2xl flex-col gap-6",
-		children: [/* @__PURE__ */ p("div", {
+		children: [/* @__PURE__ */ h("div", {
 			className: "flex flex-col gap-2",
-			children: [/* @__PURE__ */ f("h1", {
-				className: "large-title text-3xl font-bold tracking-tight",
-				children: "Labs"
-			}), /* @__PURE__ */ f("p", {
+			children: [/* @__PURE__ */ m(s, { children: "Labs" }), /* @__PURE__ */ m("p", {
 				className: "text-sm text-muted-foreground",
 				children: "What you turn on here is on for everyone."
 			})]
-		}), E]
+		}), O]
 	});
 }
-function g(t) {
+function v(t) {
 	let n = e(14), { lab: r, on: i, busy: a, set: o } = t, s;
-	n[0] === r.title ? s = n[1] : (s = /* @__PURE__ */ f("span", {
+	n[0] === r.title ? s = n[1] : (s = /* @__PURE__ */ m("span", {
 		className: "block font-medium",
 		children: r.title
 	}), n[0] = r.title, n[1] = s);
 	let c;
-	n[2] === r.description ? c = n[3] : (c = r.description && /* @__PURE__ */ f("span", {
+	n[2] === r.description ? c = n[3] : (c = r.description && /* @__PURE__ */ m("span", {
 		className: "block text-muted-foreground",
 		children: r.description
 	}), n[2] = r.description, n[3] = c);
 	let l;
-	n[4] !== s || n[5] !== c ? (l = /* @__PURE__ */ p("span", {
+	n[4] !== s || n[5] !== c ? (l = /* @__PURE__ */ h("span", {
 		className: "min-w-0 flex-1",
 		children: [s, c]
 	}), n[4] = s, n[5] = c, n[6] = l) : l = n[6];
-	let d = a || void 0, m;
-	n[7] !== i || n[8] !== o || n[9] !== d ? (m = /* @__PURE__ */ f(u, {
+	let u = a || void 0, d;
+	n[7] !== i || n[8] !== o || n[9] !== u ? (d = /* @__PURE__ */ m(f, {
 		checked: i,
-		"aria-busy": d,
+		"aria-busy": u,
 		onCheckedChange: o
-	}), n[7] = i, n[8] = o, n[9] = d, n[10] = m) : m = n[10];
-	let h;
-	return n[11] !== l || n[12] !== m ? (h = /* @__PURE__ */ p("label", {
+	}), n[7] = i, n[8] = o, n[9] = u, n[10] = d) : d = n[10];
+	let p;
+	return n[11] !== l || n[12] !== d ? (p = /* @__PURE__ */ h("label", {
 		className: "flex cursor-pointer items-center gap-3 px-3 py-3 text-sm",
-		children: [l, m]
-	}), n[11] = l, n[12] = m, n[13] = h) : h = n[13], h;
+		children: [l, d]
+	}), n[11] = l, n[12] = d, n[13] = p) : p = n[13], p;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ f(h, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ m(_, {}));
 </script>

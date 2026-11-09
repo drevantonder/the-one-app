@@ -11,12 +11,8 @@ function File() {
     one.title((path || "").split("/").pop() || "Code")
   }, [])
   if (!app || !path) return <Empty>This page isn’t here.</Empty>
-  if (!file.data) return <div className="p-4"><Pending call={file} rows={1} /></div>
-  return (
-    <div className="p-4">
-      <CodeView text={file.data.text} path={file.data.path} />
-    </div>
-  )
+  if (!file.data) return <Pending call={file} rows={1} />
+  return <CodeView text={file.data.text} path={file.data.path} />
 }
 
 createRoot(document.getElementById("root")).render(<File />)

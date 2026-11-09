@@ -6,20 +6,8 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t } from "react";
 import { createRoot as n } from "react-dom/client";
-import { Empty as r, List as i, ListRow as a, Pending as o, useCall as s } from "@one/ui";
-import { Fragment as c, jsx as l, jsxs as u } from "react/jsx-runtime";
-function d(t) {
-	let n = e(5), { title: r, children: i } = t, a;
-	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ l("h2", {
-		className: "text-sm font-medium text-muted-foreground",
-		children: r
-	}), n[0] = r, n[1] = a);
-	let o;
-	return n[2] !== i || n[3] !== a ? (o = /* @__PURE__ */ u("section", {
-		className: "flex flex-col gap-2",
-		children: [a, i]
-	}), n[2] = i, n[3] = a, n[4] = o) : o = n[4], o;
-}
+import { Empty as r, List as i, ListRow as a, Pending as o, Section as s, useCall as c } from "@one/ui";
+import { Fragment as l, jsx as u, jsxs as d } from "react/jsx-runtime";
 var f = {
 	cli: "CLI",
 	mcp: "Agent",
@@ -30,26 +18,23 @@ var f = {
 	app: "Another app",
 	node: "The device",
 	api: "A program on the device"
-}, p = (e) => "$" + (e < 1 ? e.toFixed(4) : e.toFixed(2)), m = (e) => /* @__PURE__ */ l("span", {
+}, p = (e) => "$" + (e < 1 ? e.toFixed(4) : e.toFixed(2)), m = (e) => /* @__PURE__ */ u("span", {
 	className: "text-muted-foreground",
 	children: e
 });
 function h() {
-	let n = e(27), a = one.params.app, c;
-	n[0] === Symbol.for("react.memo_cache_sentinel") ? (c = { app: a }, n[0] = c) : c = n[0];
-	let f = s("_health", c), p;
+	let n = e(27), a = one.params.app, l;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (l = { app: a }, n[0] = l) : l = n[0];
+	let f = c("_health", l), p;
 	if (n[1] === Symbol.for("react.memo_cache_sentinel") ? (p = [], n[1] = p) : p = n[1], t(b, p), !a) {
 		let e;
-		return n[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ l(r, { children: "This page isn’t here." }), n[2] = e) : e = n[2], e;
+		return n[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ u(r, { children: "This page isn’t here." }), n[2] = e) : e = n[2], e;
 	}
 	if (!f.data) {
 		let e;
-		return n[3] === f ? e = n[4] : (e = /* @__PURE__ */ l("div", {
-			className: "p-4",
-			children: /* @__PURE__ */ l(o, {
-				call: f,
-				rows: 4
-			})
+		return n[3] === f ? e = n[4] : (e = /* @__PURE__ */ u(o, {
+			call: f,
+			rows: 4
 		}), n[3] = f, n[4] = e), e;
 	}
 	let { insights: m, activity: h } = f.data, x;
@@ -63,31 +48,31 @@ function h() {
 	let O = D;
 	if (!S.length && !w.length && !E.length && !O.length) {
 		let e;
-		return n[13] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ l(r, { children: "Nothing yet." }), n[13] = e) : e = n[13], e;
+		return n[13] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ u(r, { children: "Nothing yet." }), n[13] = e) : e = n[13], e;
 	}
 	let k;
-	n[14] === S ? k = n[15] : (k = S.length > 0 && /* @__PURE__ */ l(d, {
+	n[14] === S ? k = n[15] : (k = S.length > 0 && /* @__PURE__ */ u(s, {
 		title: "Errors",
-		children: /* @__PURE__ */ l(i, { children: S.slice(0, 20).map(y) })
+		children: /* @__PURE__ */ u(i, { children: S.slice(0, 20).map(y) })
 	}), n[14] = S, n[15] = k);
 	let A;
-	n[16] === w ? A = n[17] : (A = w.length > 0 && /* @__PURE__ */ l(d, {
+	n[16] === w ? A = n[17] : (A = w.length > 0 && /* @__PURE__ */ u(s, {
 		title: "Runs",
-		children: /* @__PURE__ */ l(i, { children: w.slice(0, 12).map(v) })
+		children: /* @__PURE__ */ u(i, { children: w.slice(0, 12).map(v) })
 	}), n[16] = w, n[17] = A);
 	let j;
-	n[18] === E ? j = n[19] : (j = E.length > 0 && /* @__PURE__ */ l(d, {
+	n[18] === E ? j = n[19] : (j = E.length > 0 && /* @__PURE__ */ u(s, {
 		title: "Used By",
-		children: /* @__PURE__ */ l(i, { children: E.slice(0, 20).map(_) })
+		children: /* @__PURE__ */ u(i, { children: E.slice(0, 20).map(_) })
 	}), n[18] = E, n[19] = j);
 	let M;
-	n[20] === O ? M = n[21] : (M = O.length > 0 && /* @__PURE__ */ l(d, {
+	n[20] === O ? M = n[21] : (M = O.length > 0 && /* @__PURE__ */ u(s, {
 		title: "AI Cost",
-		children: /* @__PURE__ */ l(i, { children: O.map(g) })
+		children: /* @__PURE__ */ u(i, { children: O.map(g) })
 	}), n[20] = O, n[21] = M);
 	let N;
-	return n[22] !== k || n[23] !== A || n[24] !== j || n[25] !== M ? (N = /* @__PURE__ */ u("div", {
-		className: "flex flex-col gap-6 p-4",
+	return n[22] !== k || n[23] !== A || n[24] !== j || n[25] !== M ? (N = /* @__PURE__ */ d("div", {
+		className: "flex flex-col gap-6",
 		children: [
 			k,
 			A,
@@ -97,25 +82,25 @@ function h() {
 	}), n[22] = k, n[23] = A, n[24] = j, n[25] = M, n[26] = N) : N = n[26], N;
 }
 function g(e) {
-	return /* @__PURE__ */ l(a, {
+	return /* @__PURE__ */ u(a, {
 		title: e.model,
 		trailing: m(p(e.usd))
 	}, e.model);
 }
 function _(e, t) {
-	return /* @__PURE__ */ l(a, {
+	return /* @__PURE__ */ u(a, {
 		title: e.user,
 		sub: e.agent || f[e.client] || e.client,
 		trailing: m(one.ago(e.last))
 	}, t);
 }
 function v(e, t) {
-	return /* @__PURE__ */ l(a, {
-		title: /* @__PURE__ */ u(c, { children: [!e.ok && /* @__PURE__ */ l("span", {
+	return /* @__PURE__ */ u(a, {
+		title: /* @__PURE__ */ d(l, { children: [!e.ok && /* @__PURE__ */ u("span", {
 			className: "text-destructive",
 			children: "✕ "
 		}), e.schedule] }),
-		sub: e.ok ? `${e.device || ""} · ${e.ms < 1e3 ? e.ms + " ms" : (e.ms / 1e3).toFixed(1) + " s"}` : /* @__PURE__ */ l("span", {
+		sub: e.ok ? `${e.device || ""} · ${e.ms < 1e3 ? e.ms + " ms" : (e.ms / 1e3).toFixed(1) + " s"}` : /* @__PURE__ */ u("span", {
 			className: "text-destructive",
 			children: e.error || "Failed"
 		}),
@@ -123,8 +108,8 @@ function v(e, t) {
 	}, t);
 }
 function y(e, t) {
-	return /* @__PURE__ */ l(a, {
-		title: /* @__PURE__ */ l("span", {
+	return /* @__PURE__ */ u(a, {
+		title: /* @__PURE__ */ u("span", {
 			className: "text-destructive",
 			children: e.error || "Failed"
 		}),
@@ -135,5 +120,5 @@ function y(e, t) {
 function b() {
 	one.title("Activity");
 }
-n(document.getElementById("root")).render(/* @__PURE__ */ l(h, {}));
+n(document.getElementById("root")).render(/* @__PURE__ */ u(h, {}));
 </script>

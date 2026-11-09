@@ -2,16 +2,9 @@ import * as React from "react"
 import { Grid } from "@/components/layout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Problem } from "@/components/problem"
+import { bridge } from "@/lib/bridge"
 import { appear } from "@/lib/moves"
 import { cn } from "@/lib/utils"
-
-/// The bridge every screen has (src/screen/bridge.js), as `one`.
-type Bridge = {
-  call: (tool: string, input?: object) => Promise<any>
-  on: (event: string, run: () => void) => void
-  plain: (err: unknown) => { title: string; next?: string; final?: boolean }
-}
-const bridge = () => (globalThis as unknown as { one: Bridge }).one
 
 /// A failure's first sentence, without "Try again." (what the button says), as the window words it (`one.plain`).
 function failureSentence(err: unknown): string {
@@ -24,8 +17,9 @@ function LoadFailure({ problem, retry }: { problem: { title: string; next?: stri
 }
 
 /// Grey shapes the shape of what's coming, once it's taken longer than a blink, so a quick load shows nothing between:
-/// `rows` of a List, or with `tiles` (the width of a column) that many tiles of a Grid. What takes their place fades in.
-function ListSkeleton({ rows = 2, tiles }: { rows?: number; tiles?: string }) {
+/// `rows` of a List, or with `tiles` (the width of a column) that many tiles of a Grid; `icon`, how many pixels each one's
+/// is, as what's coming draws it. What takes their place fades in.
+function ListSkeleton({ rows = 2, tiles, icon = tiles ? 56 : 32 }: { rows?: number; tiles?: string; icon?: number }) {
   const [late, setLate] = React.useState(false)
   const shapes = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => {
@@ -42,17 +36,17 @@ function ListSkeleton({ rows = 2, tiles }: { rows?: number; tiles?: string }) {
     }
   }, [late])
   if (!late) return null
-  const each = Array.from({ length: rows }, (_, i) => <SkeletonRow key={i} icon={tiles ? "size-14 rounded-xl" : "size-8 rounded-lg"} className={tiles ? "p-2" : "px-3 py-2.5"} />)
+  const each = Array.from({ length: rows }, (_, i) => <SkeletonRow key={i} icon={icon} className={icon > 32 ? "p-2" : "px-3 py-2.5"} />)
   const fades = "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
   return tiles
     ? <Grid ref={shapes} data-slot="list-skeleton" aria-busy="true" min={tiles} max={4} gap="0.25rem" className={fades}>{each}</Grid>
     : <div ref={shapes} data-slot="list-skeleton" aria-busy="true" className={cn("w-full max-w-2xl divide-y overflow-hidden rounded-xl border bg-card", fades)}>{each}</div>
 }
 
-function SkeletonRow({ icon, className }: { icon: string; className: string }) {
+function SkeletonRow({ icon, className }: { icon: number; className: string }) {
   return (
     <div className={cn("flex min-w-0 items-center gap-3", className)}>
-      <Skeleton className={cn("shrink-0", icon)} />
+      <Skeleton className="shrink-0 rounded-lg" style={{ width: icon, height: icon }} />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-5 items-center"><Skeleton className="h-3 w-2/5" /></div>
         <div className="flex h-5 items-center"><Skeleton className="h-3 w-3/4" /></div>
@@ -62,8 +56,8 @@ function SkeletonRow({ icon, className }: { icon: string; className: string }) {
 }
 
 /// What a call hasn't answered yet: grey shapes, or why it couldn't.
-function Pending({ call, rows = 3, tiles }: { call: Call; rows?: number; tiles?: string }) {
-  return call.error ? <LoadFailure problem={bridge().plain(call.error)} retry={call.reload} /> : <ListSkeleton rows={rows} tiles={tiles} />
+function Pending({ call, rows = 3, tiles, icon }: { call: Call; rows?: number; tiles?: string; icon?: number }) {
+  return call.error ? <LoadFailure problem={bridge().plain(call.error)} retry={call.reload} /> : <ListSkeleton rows={rows} tiles={tiles} icon={icon} />
 }
 
 /// A call's answer, from the app's node: `data` is null until the first comes, and a later failure keeps what's shown, in
@@ -131,5 +125,5 @@ function Loading({ children }: { children: React.ReactNode }) {
   )
 }
 
-export { bridge, failureSentence, Loading, LoadFailure, ListSkeleton, Pending, Swap, useCall }
+export { failureSentence, Loading, LoadFailure, ListSkeleton, Pending, Swap, useCall }
 export type { Call }

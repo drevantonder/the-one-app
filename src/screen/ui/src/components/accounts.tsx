@@ -1,8 +1,9 @@
 import * as React from "react"
 import { WarningCircleIcon } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
-import { List, ListRow } from "@/components/layout"
-import { bridge, failureSentence } from "@/components/loading"
+import { List, ListRow, Section } from "@/components/layout"
+import { failureSentence } from "@/components/loading"
+import { bridge } from "@/lib/bridge"
 
 /// What an app that keeps accounts answers to its `accounts` call, one each: its name, whether it works and, if it
 /// doesn't, why. An app may add what it likes (a device, say) for its own rows.
@@ -74,8 +75,7 @@ function AccountList({ title, accounts, failed = {}, line, signOut, confirm, chi
 }) {
   const out = async (a: Account) => (!confirm || (await confirm(a))) && signOut(a)
   return (
-    <section data-slot="account-list" className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+    <Section title={title}>
       <List>
         {accounts.map((a, i) => {
           const said = failed[a.account] ? { text: failed[a.account], warn: true } : line?.(a, i)
@@ -95,7 +95,7 @@ function AccountList({ title, accounts, failed = {}, line, signOut, confirm, chi
         })}
       </List>
       {children}
-    </section>
+    </Section>
   )
 }
 

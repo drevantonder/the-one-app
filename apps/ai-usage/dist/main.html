@@ -6,85 +6,85 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
-import { AppIcon as i, Card as a, Empty as o, Grid as s, Problem as c, Progress as l, Skeleton as u } from "@one/ui";
-import { jsx as d, jsxs as f } from "react/jsx-runtime";
-function p(t) {
+import { AppIcon as i, Card as a, Empty as o, Grid as s, LargeTitle as c, Problem as l, Progress as u, Skeleton as d } from "@one/ui";
+import { jsx as f, jsxs as p } from "react/jsx-runtime";
+function m(t) {
 	let n = e(12), { label: r, w: i } = t;
 	if (!i || i.used == null) return null;
 	let a;
-	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ d("span", {
+	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ f("span", {
 		className: "truncate text-muted-foreground",
 		title: r,
 		children: r
 	}), n[0] = r, n[1] = a);
 	let o, s;
-	n[2] === i.used ? (o = n[3], s = n[4]) : (o = /* @__PURE__ */ d(l, {
+	n[2] === i.used ? (o = n[3], s = n[4]) : (o = /* @__PURE__ */ f(u, {
 		value: i.used,
 		meter: !0
-	}), s = /* @__PURE__ */ f("span", {
+	}), s = /* @__PURE__ */ p("span", {
 		className: "text-right tabular-nums",
 		children: [i.used, "%"]
 	}), n[2] = i.used, n[3] = o, n[4] = s);
-	let c = i.countdown ? `resets ${i.countdown}` : "", u;
-	n[5] === c ? u = n[6] : (u = /* @__PURE__ */ d("span", {
+	let c = i.countdown ? `resets ${i.countdown}` : "", l;
+	n[5] === c ? l = n[6] : (l = /* @__PURE__ */ f("span", {
 		className: "col-span-3 -mt-0.5 text-xs text-muted-foreground @sm:col-span-1 @sm:mt-0 @sm:text-right @sm:whitespace-nowrap",
 		children: c
-	}), n[5] = c, n[6] = u);
-	let p;
-	return n[7] !== a || n[8] !== o || n[9] !== s || n[10] !== u ? (p = /* @__PURE__ */ f("div", {
+	}), n[5] = c, n[6] = l);
+	let d;
+	return n[7] !== a || n[8] !== o || n[9] !== s || n[10] !== l ? (d = /* @__PURE__ */ p("div", {
 		className: "grid grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem] items-center gap-x-3 gap-y-1 text-sm @sm:grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem_10rem]",
 		children: [
 			a,
 			o,
 			s,
-			u
+			l
 		]
-	}), n[7] = a, n[8] = o, n[9] = s, n[10] = u, n[11] = p) : p = n[11], p;
+	}), n[7] = a, n[8] = o, n[9] = s, n[10] = l, n[11] = d) : d = n[11], d;
 }
-var m = (e) => (e.devices || []).length ? `on ${e.devices.join(", ")}` : "";
-function h(t) {
+var h = (e) => (e.devices || []).length ? `on ${e.devices.join(", ")}` : "";
+function g(t) {
 	let n = e(29), { p: r, several: i } = t, a = r.account || "", o;
 	n[0] === a ? o = n[1] : (o = a.split(" · "), n[0] = a, n[1] = o);
-	let [s, l] = o, u = r.active && i ? "In use" : r.disabled ? "Not used" : "", h;
-	n[2] !== l || n[3] !== r || n[4] !== u || n[5] !== s ? (h = r.account && /* @__PURE__ */ f("div", { children: [/* @__PURE__ */ f("div", {
+	let [s, c] = o, u = r.active && i ? "In use" : r.disabled ? "Not used" : "", d;
+	n[2] !== c || n[3] !== r || n[4] !== u || n[5] !== s ? (d = r.account && /* @__PURE__ */ p("div", { children: [/* @__PURE__ */ p("div", {
 		className: "flex items-baseline justify-between gap-2",
-		children: [/* @__PURE__ */ d("span", {
+		children: [/* @__PURE__ */ f("span", {
 			className: "min-w-0 truncate font-semibold",
 			children: s
-		}), /* @__PURE__ */ d("span", {
+		}), /* @__PURE__ */ f("span", {
 			className: "shrink-0 text-sm text-muted-foreground",
 			children: u
 		})]
-	}), /* @__PURE__ */ d("div", {
+	}), /* @__PURE__ */ f("div", {
 		className: "truncate text-sm text-muted-foreground",
-		children: [l, m(r)].filter(Boolean).join(" · ")
-	})] }), n[2] = l, n[3] = r, n[4] = u, n[5] = s, n[6] = h) : h = n[6];
-	let _;
-	n[7] === r.session ? _ = n[8] : (_ = /* @__PURE__ */ d(p, {
+		children: [c, h(r)].filter(Boolean).join(" · ")
+	})] }), n[2] = c, n[3] = r, n[4] = u, n[5] = s, n[6] = d) : d = n[6];
+	let g;
+	n[7] === r.session ? g = n[8] : (g = /* @__PURE__ */ f(m, {
 		label: "Session",
 		w: r.session
-	}), n[7] = r.session, n[8] = _);
+	}), n[7] = r.session, n[8] = g);
 	let v;
-	n[9] === r.weekly ? v = n[10] : (v = /* @__PURE__ */ d(p, {
+	n[9] === r.weekly ? v = n[10] : (v = /* @__PURE__ */ f(m, {
 		label: "Weekly",
 		w: r.weekly
 	}), n[9] = r.weekly, n[10] = v);
 	let y;
-	n[11] === r.monthly ? y = n[12] : (y = /* @__PURE__ */ d(p, {
+	n[11] === r.monthly ? y = n[12] : (y = /* @__PURE__ */ f(m, {
 		label: "Monthly",
 		w: r.monthly
 	}), n[11] = r.monthly, n[12] = y);
 	let b;
 	n[13] === r.models ? b = n[14] : (b = r.models || [], n[13] = r.models, n[14] = b);
 	let x;
-	n[15] === b ? x = n[16] : (x = b.map(g), n[15] = b, n[16] = x);
+	n[15] === b ? x = n[16] : (x = b.map(_), n[15] = b, n[16] = x);
 	let S;
-	n[17] === r.extra ? S = n[18] : (S = r.extra && /* @__PURE__ */ f("div", {
+	n[17] === r.extra ? S = n[18] : (S = r.extra && /* @__PURE__ */ p("div", {
 		className: "flex justify-between gap-3 text-sm",
-		children: [/* @__PURE__ */ d("span", {
+		children: [/* @__PURE__ */ f("span", {
 			className: "text-muted-foreground",
 			children: "Extra"
-		}), /* @__PURE__ */ f("span", {
+		}), /* @__PURE__ */ p("span", {
 			className: "text-muted-foreground",
 			children: [
 				"$",
@@ -95,48 +95,48 @@ function h(t) {
 		})]
 	}), n[17] = r.extra, n[18] = S);
 	let C;
-	n[19] === r.alarm ? C = n[20] : (C = r.alarm && /* @__PURE__ */ d(c, {
+	n[19] === r.alarm ? C = n[20] : (C = r.alarm && /* @__PURE__ */ f(l, {
 		warn: r.alarm.tone === "warn",
 		title: r.alarm.text,
 		className: "mt-1"
 	}), n[19] = r.alarm, n[20] = C);
 	let w;
-	return n[21] !== C || n[22] !== h || n[23] !== _ || n[24] !== v || n[25] !== y || n[26] !== x || n[27] !== S ? (w = /* @__PURE__ */ f("div", {
+	return n[21] !== C || n[22] !== d || n[23] !== g || n[24] !== v || n[25] !== y || n[26] !== x || n[27] !== S ? (w = /* @__PURE__ */ p("div", {
 		className: "flex flex-col gap-2 border-t pt-4 first:border-t-0 first:pt-0",
 		children: [
-			h,
-			_,
+			d,
+			g,
 			v,
 			y,
 			x,
 			S,
 			C
 		]
-	}), n[21] = C, n[22] = h, n[23] = _, n[24] = v, n[25] = y, n[26] = x, n[27] = S, n[28] = w) : w = n[28], w;
+	}), n[21] = C, n[22] = d, n[23] = g, n[24] = v, n[25] = y, n[26] = x, n[27] = S, n[28] = w) : w = n[28], w;
 }
-function g(e) {
-	return /* @__PURE__ */ d(p, {
+function _(e) {
+	return /* @__PURE__ */ f(m, {
 		label: e.name,
 		w: e
 	}, e.name);
 }
-function _(t) {
-	let n = e(38), { reads: r, mark: o } = t, s = r[0], l;
-	n[0] === r ? l = n[1] : (l = new Set(r.map(v).filter(Boolean)), n[0] = r, n[1] = l);
+function v(t) {
+	let n = e(38), { reads: r, mark: o } = t, s = r[0], c;
+	n[0] === r ? c = n[1] : (c = new Set(r.map(y).filter(Boolean)), n[0] = r, n[1] = c);
 	let u;
-	n[2] === l ? u = n[3] : (u = [...l], n[2] = l, n[3] = u);
-	let p = u, g;
-	n[4] === s ? g = n[5] : (g = s.account ? "" : m(s), n[4] = s, n[5] = g);
-	let _ = s.updatedAgo ? `updated ${s.updatedAgo}` : "", y;
-	n[6] !== s.plan || n[7] !== g || n[8] !== _ ? (y = [
+	n[2] === c ? u = n[3] : (u = [...c], n[2] = c, n[3] = u);
+	let d = u, m;
+	n[4] === s ? m = n[5] : (m = s.account ? "" : h(s), n[4] = s, n[5] = m);
+	let _ = s.updatedAgo ? `updated ${s.updatedAgo}` : "", v;
+	n[6] !== s.plan || n[7] !== m || n[8] !== _ ? (v = [
 		s.plan,
-		g,
+		m,
 		_
-	].filter(Boolean), n[6] = s.plan, n[7] = g, n[8] = _, n[9] = y) : y = n[9];
-	let b = y.join(" · "), x;
+	].filter(Boolean), n[6] = s.plan, n[7] = m, n[8] = _, n[9] = v) : v = n[9];
+	let b = v.join(" · "), x;
 	n[10] === o ? x = n[11] : (x = o && /^data:image\/svg\+xml,/.test(o.image), n[10] = o, n[11] = x);
 	let S = x, C;
-	n[12] !== S || n[13] !== o || n[14] !== s.id || n[15] !== s.title ? (C = S && /* @__PURE__ */ d(i, {
+	n[12] !== S || n[13] !== o || n[14] !== s.id || n[15] !== s.title ? (C = S && /* @__PURE__ */ f(i, {
 		app: {
 			name: s.id,
 			title: s.title,
@@ -146,41 +146,41 @@ function _(t) {
 		size: 32
 	}), n[12] = S, n[13] = o, n[14] = s.id, n[15] = s.title, n[16] = C) : C = n[16];
 	let w;
-	n[17] === s.title ? w = n[18] : (w = /* @__PURE__ */ d("h2", {
+	n[17] === s.title ? w = n[18] : (w = /* @__PURE__ */ f("h2", {
 		className: "truncate text-base font-semibold",
 		children: s.title
 	}), n[17] = s.title, n[18] = w);
 	let T;
-	n[19] === b ? T = n[20] : (T = b && /* @__PURE__ */ d("p", {
+	n[19] === b ? T = n[20] : (T = b && /* @__PURE__ */ f("p", {
 		className: "text-sm text-muted-foreground",
 		children: b
 	}), n[19] = b, n[20] = T);
 	let E;
-	n[21] !== w || n[22] !== T ? (E = /* @__PURE__ */ f("div", {
+	n[21] !== w || n[22] !== T ? (E = /* @__PURE__ */ p("div", {
 		className: "min-w-0 flex-1",
 		children: [w, T]
 	}), n[21] = w, n[22] = T, n[23] = E) : E = n[23];
 	let D;
-	n[24] !== E || n[25] !== C ? (D = /* @__PURE__ */ f("div", {
+	n[24] !== E || n[25] !== C ? (D = /* @__PURE__ */ p("div", {
 		className: "flex items-center gap-3",
 		children: [C, E]
 	}), n[24] = E, n[25] = C, n[26] = D) : D = n[26];
 	let O;
 	if (n[27] !== r) {
 		let e;
-		n[29] === r.length ? e = n[30] : (e = (e) => /* @__PURE__ */ d(h, {
+		n[29] === r.length ? e = n[30] : (e = (e) => /* @__PURE__ */ f(g, {
 			p: e,
 			several: r.length > 1
 		}, e.account || e.id), n[29] = r.length, n[30] = e), O = r.map(e), n[27] = r, n[28] = O;
 	} else O = n[28];
 	let k;
-	n[31] !== s.title || n[32] !== p ? (k = p.length > 0 && /* @__PURE__ */ d(c, {
+	n[31] !== s.title || n[32] !== d ? (k = d.length > 0 && /* @__PURE__ */ f(l, {
 		warn: !0,
 		title: `Can’t read ${s.title} now`,
-		text: p.join("; ")
-	}), n[31] = s.title, n[32] = p, n[33] = k) : k = n[33];
+		text: d.join("; ")
+	}), n[31] = s.title, n[32] = d, n[33] = k) : k = n[33];
 	let A;
-	return n[34] !== D || n[35] !== O || n[36] !== k ? (A = /* @__PURE__ */ f(a, {
+	return n[34] !== D || n[35] !== O || n[36] !== k ? (A = /* @__PURE__ */ p(a, {
 		className: "@container min-w-0 gap-4 p-4",
 		children: [
 			D,
@@ -189,33 +189,33 @@ function _(t) {
 		]
 	}), n[34] = D, n[35] = O, n[36] = k, n[37] = A) : A = n[37], A;
 }
-function v(e) {
+function y(e) {
 	return e.stale;
 }
-function y() {
+function b() {
 	let r = e(3), [i, a] = n(!1), o, c;
 	if (r[0] === Symbol.for("react.memo_cache_sentinel") ? (o = () => {
 		let e = setTimeout(() => a(!0), 100);
 		return () => clearTimeout(e);
 	}, c = [], r[0] = o, r[1] = c) : (o = r[0], c = r[1]), t(o, c), !i) return null;
 	let l;
-	return r[2] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ d(s, {
+	return r[2] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ f(s, {
 		min: "22rem",
 		max: 4,
-		children: [0, 1].map(b)
+		children: [0, 1].map(x)
 	}), r[2] = l) : l = r[2], l;
 }
-function b(e) {
-	return /* @__PURE__ */ d(u, { className: "h-56 rounded-xl" }, e);
+function x(e) {
+	return /* @__PURE__ */ f(d, { className: "h-56 rounded-xl" }, e);
 }
-function x() {
+function S() {
 	let r = e(22), i;
 	r[0] === Symbol.for("react.memo_cache_sentinel") ? (i = {}, r[0] = i) : i = r[0];
-	let [a, l] = n(i), u, f;
+	let [a, c] = n(i), u, d;
 	r[1] === Symbol.for("react.memo_cache_sentinel") ? (u = () => {
-		let e = () => one.call("status", { format: "json" }).then((e) => l({ data: e }), (e) => l((t) => t.data ? t : { error: e }));
+		let e = () => one.call("status", { format: "json" }).then((e) => c({ data: e }), (e) => c((t) => t.data ? t : { error: e }));
 		one.on("changed", e), e();
-	}, f = [], r[1] = u, r[2] = f) : (u = r[1], f = r[2]), t(u, f);
+	}, d = [], r[1] = u, r[2] = d) : (u = r[1], d = r[2]), t(u, d);
 	let { data: p, error: m } = a;
 	if (m) {
 		let e;
@@ -223,43 +223,46 @@ function x() {
 		let t = e.title, n;
 		r[5] === m ? n = r[6] : (n = one.plain(m), r[5] = m, r[6] = n);
 		let i;
-		return r[7] !== e.title || r[8] !== n.next ? (i = /* @__PURE__ */ d(c, {
+		return r[7] !== e.title || r[8] !== n.next ? (i = /* @__PURE__ */ f(l, {
 			title: t,
 			text: n.next
 		}), r[7] = e.title, r[8] = n.next, r[9] = i) : i = r[9], i;
 	}
 	if (!p) {
 		let e;
-		return r[10] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(y, {}), r[10] = e) : e = r[10], e;
+		return r[10] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ f(b, {}), r[10] = e) : e = r[10], e;
 	}
 	if (p.problem) {
 		let e;
-		return r[11] === p.problem ? e = r[12] : (e = /* @__PURE__ */ d(c, {
+		return r[11] === p.problem ? e = r[12] : (e = /* @__PURE__ */ f(l, {
 			title: "Can’t read your AI plans",
 			text: p.problem
 		}), r[11] = p.problem, r[12] = e), e;
 	}
 	if (!p.providers || !p.providers.length) {
 		let e;
-		return r[13] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(o, { children: "No AI sign-ins on your devices." }), r[13] = e) : e = r[13], e;
+		return r[13] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ f(o, { children: "No AI sign-ins on your devices." }), r[13] = e) : e = r[13], e;
 	}
 	let h;
-	r[14] === p.providers ? h = r[15] : (h = new Set(p.providers.map(S)), r[14] = p.providers, r[15] = h);
+	r[14] === p.providers ? h = r[15] : (h = new Set(p.providers.map(C)), r[14] = p.providers, r[15] = h);
 	let g;
 	r[16] === h ? g = r[17] : (g = [...h], r[16] = h, r[17] = g);
-	let v = g, b;
-	return r[18] !== p.marks || r[19] !== p.providers || r[20] !== v ? (b = /* @__PURE__ */ d(s, {
+	let _ = g, y;
+	return r[18] !== p.marks || r[19] !== p.providers || r[20] !== _ ? (y = /* @__PURE__ */ f(s, {
 		min: "22rem",
 		max: 4,
 		className: "items-start",
-		children: v.map((e) => /* @__PURE__ */ d(_, {
+		children: _.map((e) => /* @__PURE__ */ f(v, {
 			reads: p.providers.filter((t) => t.id === e),
 			mark: (p.marks || {})[e]
 		}, e))
-	}), r[18] = p.marks, r[19] = p.providers, r[20] = v, r[21] = b) : b = r[21], b;
+	}), r[18] = p.marks, r[19] = p.providers, r[20] = _, r[21] = y) : y = r[21], y;
 }
-function S(e) {
+function C(e) {
 	return e.id;
 }
-r(document.getElementById("root")).render(/* @__PURE__ */ d(x, {}));
+r(document.getElementById("root")).render(/* @__PURE__ */ p("div", {
+	className: "flex flex-col gap-4",
+	children: [/* @__PURE__ */ f(c, { children: "AI Usage" }), /* @__PURE__ */ f(S, {})]
+}));
 </script>

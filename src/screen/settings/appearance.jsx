@@ -3,7 +3,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/appearance.html.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Icon, cn } from "@one/ui"
+import { cn, Icon, LargeTitle } from "@one/ui"
 
 const CHOICES = [
   { value: "light", title: "Light" },
@@ -41,7 +41,6 @@ function Appearance() {
   const [chosen, setChosen] = useState(null)
 
   useEffect(() => {
-    one.largeTitle("Appearance")
     one.appearance().then(setChosen)
   }, [])
 
@@ -54,7 +53,7 @@ function Appearance() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
-      <h1 className="large-title text-3xl font-bold tracking-tight">Appearance</h1>
+      <LargeTitle>Appearance</LargeTitle>
       <div role="radiogroup" aria-label="Appearance" className="flex flex-wrap gap-6">
         {CHOICES.map(({ value, title }) => {
           const on = value === chosen

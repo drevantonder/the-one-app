@@ -2,7 +2,7 @@
 // agent uses one, and a row otherwise. Looked at again every 5 seconds while it can be seen.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, Icon, List, ListRow, Problem, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Skeleton, Switch } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Icon, LargeTitle, List, ListRow, Problem, Section, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Skeleton, Switch } from "@one/ui"
 
 const without = (o, k) => {
   const { [k]: _, ...rest } = o
@@ -103,8 +103,7 @@ function Fix({ device, onClose }) {
             <ListRow leading={<AppIcon app={{ name: "accessibility", icon: "cursor-click" }} size={32} />} title="Accessibility" sub="Clicks, typing and windows" trailing={<Off on={a11y} />} />
             <ListRow leading={<AppIcon app={{ name: "screen", icon: "desktop" }} size={32} />} title="Screen Recording" sub="What’s on screen" trailing={<Off on={sr} />} />
           </List>
-          <section className="flex flex-col gap-2">
-            <h2 className="px-1 text-sm font-medium text-muted-foreground">Turn Them On</h2>
+          <Section title="Turn Them On">
             <List>
               <Step n={1} title={`Open System Settings on ${name}`}>
                 Go to <b>Privacy &amp; Security</b> → <b>{a11y ? "Screen & System Audio Recording" : "Accessibility"}</b>.
@@ -115,7 +114,8 @@ function Fix({ device, onClose }) {
                 </Step>
               )}
             </List>
-          </section>
+          </Section>
+          <p className="text-center text-sm text-muted-foreground">This page updates automatically once permission is granted.</p>
         </div>
       </SheetContent>
     </Sheet>
@@ -148,7 +148,7 @@ function Waiting() {
   )
 }
 
-function Main() {
+function Body() {
   const [data, setData] = useState(null) // { devices, mirroring }
   const [error, setError] = useState(null)
   const [pics, setPics] = useState({}) // by device: a data URL
@@ -161,7 +161,6 @@ function Main() {
   const latest = useRef(null)
 
   useEffect(() => {
-    one.title("Computer Use")
   }, [])
 
   const note = (device, text) => {
@@ -253,4 +252,4 @@ function Main() {
   )
 }
 
-createRoot(document.getElementById("root")).render(<Main />)
+createRoot(document.getElementById("root")).render(<div className="flex flex-col gap-4"><LargeTitle>Computer Use</LargeTitle><Body /></div>)

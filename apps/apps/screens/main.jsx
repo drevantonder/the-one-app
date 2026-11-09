@@ -2,9 +2,9 @@
 // room, the app opened beside them.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, Icon, Input, Problem, Pending, Split, useWidth } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Icon, Input, LargeTitle, Pending, Problem, Section, Split, useWidth } from "@one/ui"
 import { AppPage } from "../lib/app-page.jsx"
-import { Section, onAPage, openApp, said, useApps } from "../lib/store.jsx"
+import { onAPage, openApp, said, useApps } from "../lib/store.jsx"
 
 // The sections: the apps built into the release, and those made in this network (each network words that its own way,
 // in its settings).
@@ -57,10 +57,6 @@ function Main() {
   const [ref, width] = useWidth()
   const beside = width >= WIDE
 
-  useEffect(() => {
-    one.title("App Store")
-  }, [])
-
   const add = (a) => {
     setError("")
     apps.add(a).catch((err) => setError(said(err).title))
@@ -106,16 +102,14 @@ function Main() {
   )
 
   return (
-    <div className="p-4">
-      <div ref={ref}>
-        <Split
-          wide={WIDE}
-          list={<div className="flex flex-col gap-6">{top}{error && <Problem title={error} />}{tiles}</div>}
-          detail={beside && shown && apps.data && (
-            <AppPage key={shown} name={shown} apps={apps} onOpen={setShown} onGone={() => setShown(null)} />
-          )}
-        />
-      </div>
+    <div ref={ref}>
+      <Split
+        wide={WIDE}
+        list={<div className="flex flex-col gap-6"><LargeTitle>App Store</LargeTitle>{top}{error && <Problem title={error} />}{tiles}</div>}
+        detail={beside && shown && apps.data && (
+          <AppPage key={shown} name={shown} apps={apps} onOpen={setShown} onGone={() => setShown(null)} />
+        )}
+      />
     </div>
   )
 }

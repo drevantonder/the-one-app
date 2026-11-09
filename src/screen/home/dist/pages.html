@@ -900,7 +900,7 @@ function Je({ page: e, editing: t, leaving: i, undone: a, refreshing: o, bottom:
 		!h && g.current && (_.current = Math.max(1, Math.round(g.current.offsetHeight / parseFloat(getComputedStyle(g.current).lineHeight))));
 	}), /* @__PURE__ */ O("section", {
 		"data-page": c,
-		className: w("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-5 [scroll-snap-stop:always]", j ? "pt-[calc(1.25rem+env(safe-area-inset-top))]" : "pt-4"),
+		className: w("h-full min-w-0 flex-[0_0_100%] snap-start overflow-y-auto px-4 [scroll-snap-stop:always]", j ? "pt-[calc(1.25rem+env(safe-area-inset-top))]" : "pt-4"),
 		style: { paddingBottom: s },
 		children: [/* @__PURE__ */ O("div", {
 			className: "flex items-start gap-3 pb-5",
@@ -956,7 +956,7 @@ function Je({ page: e, editing: t, leaving: i, undone: a, refreshing: o, bottom:
 				refreshing: o
 			}),
 			e.empty && /* @__PURE__ */ D(u, {
-				className: w("items-start px-0 pb-6 text-left", e.list.length ? "pt-6" : "pt-0"),
+				className: w("pb-6", e.list.length ? "pt-6" : "pt-0"),
 				action: e.arrange && e.store ? {
 					label: "Open App Store",
 					run: k.openStore
@@ -1087,6 +1087,7 @@ function Xe(t) {
 	n[10] === w ? T = n[11] : (T = (e) => !e && w(), n[10] = w, n[11] = T);
 	let E = r.title || r.widget, k;
 	n[12] === w ? k = n[13] : (k = /* @__PURE__ */ D(l, {
+		variant: "secondary",
 		size: "sm",
 		onClick: w,
 		children: "Done"
@@ -1311,6 +1312,7 @@ function rt(t) {
 	n[11] === T ? k = n[12] : (k = (e) => !e && T(), n[11] = T, n[12] = k);
 	let A;
 	n[13] === T ? A = n[14] : (A = /* @__PURE__ */ D(l, {
+		variant: "secondary",
 		size: "sm",
 		onClick: T,
 		children: "Done"

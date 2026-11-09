@@ -1,7 +1,7 @@
 // Agent Devices' page: every agent device as a picture, those in use first, each with its name and one short line.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, Grid, Problem, Skeleton } from "@one/ui"
+import { Empty, Grid, LargeTitle, Problem, Skeleton } from "@one/ui"
 
 const key = (c) => `${c.on || ""}/${c.name}`
 const at = (c) => (c.on ? { device: c.name, on: c.on } : { device: c.name })
@@ -66,7 +66,7 @@ function Tile({ c, hosts, src }) {
   )
 }
 
-function Page() {
+function Body() {
   const [devices, setDevices] = useState(null)
   const [problem, setProblem] = useState(null)
   const [pics, setPics] = useState({}) // by the device it's on/name: a data URL
@@ -125,7 +125,6 @@ function Page() {
   }
 
   useEffect(() => {
-    one.title("Agent Devices")
     tick()
     const timer = setInterval(tick, 5000)
     document.addEventListener("visibilitychange", tick)
@@ -155,4 +154,4 @@ function Page() {
   )
 }
 
-createRoot(document.getElementById("root")).render(<Page />)
+createRoot(document.getElementById("root")).render(<div className="flex flex-col gap-4"><LargeTitle>Agent Devices</LargeTitle><Body /></div>)

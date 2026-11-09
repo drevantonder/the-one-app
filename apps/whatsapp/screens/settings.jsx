@@ -1,7 +1,7 @@
 // Settings: each WhatsApp account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AccountList, Hint, Input, List, ListNote, ListRow, ListSkeleton, LoadFailure, LoadingButton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useAccounts } from "@one/ui"
+import { AccountList, Hint, Input, List, ListNote, ListRow, ListSkeleton, LoadFailure, LoadingButton, Problem, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useAccounts } from "@one/ui"
 
 const NOTE = "Recent chats take a few minutes to arrive."
 
@@ -34,8 +34,7 @@ function Pairing({ phone, device, had, done }) {
     return () => void (over = true)
   }, [])
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium text-muted-foreground">Link a Device</h2>
+    <Section title="Link a Device">
       <List>
         <ListNote>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</ListNote>
         <ListNote>{`Scan this code${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.`}</ListNote>
@@ -43,7 +42,7 @@ function Pairing({ phone, device, had, done }) {
       {codes.qr && <img alt="" src={codes.qr} className="mx-auto my-2 block size-[220px] rounded-xl bg-white [image-rendering:pixelated]" />}
       {codes.code && <p className="text-center font-mono text-2xl font-semibold tracking-widest">{codes.code}</p>}
       <Hint>{note}</Hint>
-    </section>
+    </Section>
   )
 }
 

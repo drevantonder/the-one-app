@@ -1,24 +1,64 @@
 import * as React from "react"
 import { CaretRightIcon, PlusIcon } from "@phosphor-icons/react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { appear, glide } from "@/lib/moves"
+import { bridge } from "@/lib/bridge"
+import { appear, glide, slideColumns } from "@/lib/moves"
 import { cn } from "@/lib/utils"
 
 /// A grid that fills the room it has: as many columns as fit at `min` wide each, at most `max` of them, so a big window
 /// gets bigger tiles rather than more of them past that.
-function Grid({ min = "14rem", max = 6, gap = "1rem", className, style, ...props }: React.ComponentProps<"div"> & {
+function Grid({ min = "14rem", max = 6, gap = "1rem", className, style, ref, ...props }: React.ComponentProps<"div"> & {
   min?: string
   max?: number
   gap?: string
 }) {
+  const grid = React.useRef<HTMLDivElement>(null)
+  React.useImperativeHandle(ref, () => grid.current!)
+  // Tiles the room's change sends to another row dim and settle there, rather than snap or fly through each other.
+  React.useLayoutEffect(() => {
+    const el = grid.current!
+    let room = 0
+    let was = new Map<Element, number>()
+    const seen = new ResizeObserver(() => {
+      const now = new Map([...(el.children as HTMLCollectionOf<HTMLElement>)].map((tile) => [tile as Element, tile.offsetTop]))
+      if (room && room !== el.offsetWidth && [...now].some(([tile, top]) => was.has(tile) && was.get(tile) !== top)) appear(el, 0.4)
+      room = el.offsetWidth
+      was = now
+    })
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [])
   const column = `minmax(min(100%, max(${min}, (100% - ${max - 1} * ${gap}) / ${max})), 1fr)`
   return (
     <div
+      ref={grid}
       data-slot="grid"
       className={cn("grid", className)}
       style={{ gridTemplateColumns: `repeat(auto-fill, ${column})`, gap, ...style }}
       {...props}
     />
+  )
+}
+
+/// A screen's name, large, at its top, with its one main action beside it. Once it scrolls away the window's bar says it instead.
+function LargeTitle({ children, action }: { children: string; action?: React.ReactNode }) {
+  React.useEffect(() => void bridge().largeTitle(children), [children])
+  return (
+    <div data-slot="large-title" className="flex min-w-0 items-center justify-between gap-3">
+      <h1 className="large-title min-w-0 text-3xl font-bold tracking-tight [overflow-wrap:anywhere]">{children}</h1>
+      {action}
+    </div>
+  )
+}
+
+/// A part of a screen under a small grey heading, with what acts on the whole part at the heading's end.
+function Section({ title, action, className, children }: { title?: React.ReactNode; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
+  const heading = title && <h2 className="flex min-w-0 items-center gap-2 text-sm font-medium text-muted-foreground">{title}</h2>
+  return (
+    <section data-slot="section" className={cn("flex min-w-0 flex-col gap-2", className)}>
+      {action ? <div className="flex min-h-8 items-center justify-between gap-3">{heading}{action}</div> : heading}
+      {children}
+    </section>
   )
 }
 
@@ -127,18 +167,22 @@ function useWidth<T extends HTMLElement>() {
 }
 
 /// A list and what's open from it: the list has the room until something's open, then that's beside it where there's
-/// room (`wide`, its own width, not the window's), else in a sheet that slides up over it. `detail` is what's open, or nothing; `onClose` is told when the sheet is closed.
-function Split({ list, detail, title, onClose, wide = 720, className }: {
+/// room (`wide`, its own width, not the window's), the list narrowing to `size` as it comes, and each scrolling on its own;
+/// else it's in a sheet that slides up over it. `detail` is what's open, or nothing; `onClose` is told when the sheet is
+/// closed. What opens elsewhere where it's narrow passes no `detail` there.
+function Split({ list, detail, title, onClose, wide = 720, size = "26rem", className }: {
   list: React.ReactNode
   detail?: React.ReactNode
   /// What's open, for the sheet's title (and screen readers).
   title?: string
   onClose?: () => void
   wide?: number
+  size?: string
   className?: string
 }) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const beside = width >= wide
+  const side = beside && !!detail
   // What's open is told apart by its `key`, as it must be for its own state to start afresh.
   const open = React.isValidElement(detail) ? detail.key : null
   const pane = React.useRef<HTMLDivElement>(null)
@@ -147,16 +191,22 @@ function Split({ list, detail, title, onClose, wide = 720, className }: {
     if (open && open !== was.current && pane.current) appear(pane.current, was.current ? 0.4 : 0)
     was.current = open
   }, [open])
+  const before = React.useRef({ side, tracks: "" })
+  React.useLayoutEffect(() => {
+    const tracks = getComputedStyle(ref.current!).gridTemplateColumns
+    if (before.current.tracks && before.current.side !== side) slideColumns(ref.current!, side ? `${before.current.tracks} 0px` : before.current.tracks, side ? tracks : `${tracks} 0px`, side)
+    before.current = { side, tracks }
+  })
   return (
     <div
       ref={ref}
       data-slot="split"
       className={cn("grid items-start gap-6", className)}
-      style={{ gridTemplateColumns: beside && detail ? "minmax(0, 26rem) minmax(0, 1fr)" : "minmax(0, 1fr)" }}
+      style={{ gridTemplateColumns: side ? `minmax(0, ${size}) minmax(0, 1fr)` : "minmax(0, 1fr)" }}
     >
       <div className="min-w-0">{list}</div>
       {beside ? (
-        detail && <div ref={pane} className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 max-w-2xl overflow-y-auto">{detail}</div>
+        detail && <div ref={pane} className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 overflow-y-auto">{detail}</div>
       ) : (
         <Sheet open={!!detail && width > 0} onOpenChange={(open) => !open && onClose?.()}>
           <SheetContent side="bottom" className="max-h-[90svh] overflow-y-auto rounded-t-xl">
@@ -172,4 +222,4 @@ function Split({ list, detail, title, onClose, wide = 720, className }: {
   )
 }
 
-export { Grid, Hint, List, ListAdd, ListNote, ListRow, Split, useWidth }
+export { Grid, Hint, LargeTitle, List, ListAdd, ListNote, ListRow, Section, Split, useWidth }

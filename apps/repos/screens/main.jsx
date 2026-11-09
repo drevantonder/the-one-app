@@ -1,9 +1,9 @@
 // Repos: this network's repos, GitHub's beside them (connected, not copied), and Recently Deleted; searchable.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Grid, Icon, Input, List, ListRow, Problem, ListSkeleton, Pending, useCall } from "@one/ui"
+import { Button, Empty, Grid, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Pending, Problem, Section, useCall } from "@one/ui"
 import { RepoIcon } from "../lib/parts.jsx"
-import { Frame, Section, ago, go, plural, said, useAddress, where } from "../lib/use.jsx"
+import { Frame, ago, go, plural, said, useAddress, where } from "../lib/use.jsx"
 
 function Gone({ r, restore }) {
   return (
@@ -40,10 +40,6 @@ function Main() {
   const [restoring, setRestoring] = useState(new Set())
   const [trouble, setTrouble] = useState("")
 
-  useEffect(() => {
-    one.title("Repos")
-  }, [])
-
   const restore = (name) => {
     setTrouble("")
     setRestoring((s) => new Set(s).add(name))
@@ -59,7 +55,8 @@ function Main() {
       <Input className="pl-8" placeholder="Search" aria-label="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
     </div>
   )
-  if (!own.data) return <Frame><div className="flex flex-col gap-6">{find}<Pending call={own} rows={6} tiles="22rem" /></div></Frame>
+  const title = <LargeTitle>Repos</LargeTitle>
+  if (!own.data) return <Frame><div className="flex flex-col gap-6">{title}{find}<Pending call={own} rows={6} tiles="22rem" icon={20} /></div></Frame>
 
   const q = query.trim().toLowerCase()
   const githubs = github.data
@@ -73,6 +70,7 @@ function Main() {
   if (!own.data.length && !githubs?.length && asked && !githubTrouble) {
     return (
       <Frame>
+        {title}
         <Empty>
           <span className="block">No repos yet. {where}, push one:</span>
           <code className="mt-2 block rounded-md bg-muted px-2 py-1 font-mono text-xs">git push {address(`${mine}/<name>`)} main</code>
@@ -84,9 +82,10 @@ function Main() {
   return (
     <Frame>
       <div className="flex flex-col gap-6">
+        {title}
         {find}
         {trouble && <Problem title={trouble} />}
-        {here.length > 0 ? <Tiles of={here} /> : !asked && !q && <ListSkeleton rows={6} tiles="22rem" />}
+        {here.length > 0 ? <Tiles of={here} /> : !asked && !q && <ListSkeleton rows={6} tiles="22rem" icon={20} />}
         {githubTrouble ? (
           <Section title="GitHub"><Problem title={githubTrouble} action={{ label: "Settings", run: () => one.open("settings") }} /></Section>
         ) : (

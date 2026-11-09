@@ -45,7 +45,7 @@ export function PathBar({ d, file = false }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
       <BranchButton d={d} open={branches} />
-      {!d.branch && <Button variant="outline" size="sm" onClick={() => go("repo", { repo: d.repo })}>Back to main</Button>}
+      {!d.branch && <Button variant="outline" size="sm" onClick={() => go("repo", { repo: d.repo })}>Back to Main</Button>}
       <nav aria-label="Path" className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm">
         <Crumb onClick={() => go("repo", { repo: d.repo, ref })}>{d.repo}</Crumb>
         {parts.map((p, k) => {

@@ -7,7 +7,7 @@
 // dist/accounts.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, Icon, List, ListRow, Problem, Skeleton } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Icon, LargeTitle, List, ListRow, Problem, Skeleton } from "@one/ui"
 import { home } from "./lib/model.js"
 
 /// Only what this screen shows: the user's pages and the apps on them, not the widgets Home draws.
@@ -114,7 +114,6 @@ function Accounts() {
   const reload = () => show().catch((err) => (setProblem(one.plain(err)), setPhase("error")))
 
   useEffect(() => {
-    one.largeTitle("Accounts")
     const wait = setTimeout(() => setSlow(true), 100)
     reload()
     // An app's own change (a sign-in finished on its settings screen) lists its accounts again; a change to the apps or
@@ -141,8 +140,8 @@ function Accounts() {
   }
   const { withAccounts, may } = view
   return (
-    <div className="flex flex-col gap-8 px-2">
-      <h1 className="large-title text-3xl font-bold tracking-tight">Accounts</h1>
+    <div className="flex flex-col gap-8">
+      <LargeTitle>Accounts</LargeTitle>
       <Grid min="20rem" max={3} gap="2rem" className="items-start">
       {withAccounts.map((item) => {
         const { a, p, signIn } = item
@@ -163,7 +162,7 @@ function Accounts() {
         )
       })}
       </Grid>
-      {!withAccounts.length && <Empty className="mr-auto max-w-md px-0 py-0 text-left items-start" action={may ? { label: "Add Account", run: () => home.addAccountApp()?.() } : undefined}>No accounts yet.</Empty>}
+      {!withAccounts.length && <Empty action={may ? { label: "Add Account", run: () => home.addAccountApp()?.() } : undefined}>No accounts yet.</Empty>}
       {may && withAccounts.length > 0 && <Button variant="outline" className="self-start" onClick={() => home.addAccountApp()?.()}>Add Account for Another App</Button>}
     </div>
   )

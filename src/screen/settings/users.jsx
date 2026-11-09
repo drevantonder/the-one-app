@@ -8,7 +8,7 @@ import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
   Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
-  DropdownMenuSeparator, DropdownMenuTrigger, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, useDialog,
+  DropdownMenuSeparator, DropdownMenuTrigger, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, useDialog, LargeTitle, Section,
 } from "@one/ui"
 
 const api = one.api
@@ -35,7 +35,6 @@ function Users() {
     }
   }
   useEffect(() => {
-    one.largeTitle("Users")
     load()
     one.on("changed", load)
   }, [])
@@ -95,12 +94,11 @@ function Users() {
         </List>
         {error && <Problem title={error} />}
         {admin && domain && (
-          <section className="flex max-w-2xl flex-col gap-2">
-            <h2 className="text-sm font-medium text-muted-foreground">Add Someone</h2>
+          <Section className="max-w-2xl" title="Add Someone">
             <p className="text-sm text-muted-foreground">
               Anyone with a Google account at {domain} joins {yours} by signing in with Google{address && <> at <b>{address.replace(/^https?:\/\//, "")}</b></>}.
             </p>
-          </section>
+          </Section>
         )}
       </>
     )
@@ -109,10 +107,7 @@ function Users() {
   return (
     <>
       <div className="flex max-w-2xl flex-col gap-4">
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="large-title text-3xl font-bold tracking-tight">Users</h1>
-          {state && admin && !domain && <Button onClick={() => startAdd()}><Icon name="plus" />Add Someone</Button>}
-        </div>
+        <LargeTitle action={state && admin && !domain && <Button onClick={() => startAdd()}>Add Someone</Button>}>Users</LargeTitle>
         {body}
       </div>
       {add.n > 0 && <AddSomeone key={`add${add.n}`} open={add.open} setOpen={setAddOpen} />}

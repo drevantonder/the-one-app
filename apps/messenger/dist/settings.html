@@ -6,106 +6,100 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AccountList as a, Empty as o, Hint as s, Input as c, List as l, ListNote as u, ListRow as d, ListSkeleton as f, LoadFailure as p, LoadingButton as m, Problem as h, Select as g, SelectContent as _, SelectItem as v, SelectTrigger as y, SelectValue as b, useAccounts as x } from "@one/ui";
-import { jsx as S, jsxs as C } from "react/jsx-runtime";
-var w = "Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.", T = "\0", E = () => one.call("_profiles").then((e) => (e || []).map((e) => e.profile), () => []);
-function D(t) {
-	let i = e(30), { free: a, onSigningIn: o } = t, [u, f] = r(a[0] ?? T), [p, x] = r(""), [w, E] = r(null), D = n(null), k;
-	i[0] !== u || i[1] !== p || i[2] !== o ? (k = async () => {
-		let e = u === T ? p.trim() : u;
-		if (!e) return D.current?.focus();
-		E(null);
+import { AccountList as a, Empty as o, Hint as s, Input as c, List as l, ListNote as u, ListRow as d, ListSkeleton as f, LoadFailure as p, LoadingButton as m, Problem as h, Section as g, Select as _, SelectContent as v, SelectItem as y, SelectTrigger as b, SelectValue as x, useAccounts as S } from "@one/ui";
+import { jsx as C, jsxs as w } from "react/jsx-runtime";
+var T = "Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.", E = "\0", D = () => one.call("_profiles").then((e) => (e || []).map((e) => e.profile), () => []);
+function O(t) {
+	let i = e(29), { free: a, onSigningIn: o } = t, [u, f] = r(a[0] ?? E), [p, S] = r(""), [T, D] = r(null), O = n(null), A;
+	i[0] !== u || i[1] !== p || i[2] !== o ? (A = async () => {
+		let e = u === E ? p.trim() : u;
+		if (!e) return O.current?.focus();
+		D(null);
 		try {
 			o(await one.call("sign_in", { profile: e }));
 		} catch (e) {
 			let t = e;
-			E(one.plain(t).title);
+			D(one.plain(t).title);
 		}
-	}, i[0] = u, i[1] = p, i[2] = o, i[3] = k) : k = i[3];
-	let A = k, j;
-	i[4] === Symbol.for("react.memo_cache_sentinel") ? (j = /* @__PURE__ */ S("h2", {
-		className: "text-sm font-medium text-muted-foreground",
-		children: "Browser Profile"
-	}), i[4] = j) : j = i[4];
-	let M;
-	i[5] === Symbol.for("react.memo_cache_sentinel") ? (M = /* @__PURE__ */ S(y, {
+	}, i[0] = u, i[1] = p, i[2] = o, i[3] = A) : A = i[3];
+	let j = A, M;
+	i[4] === Symbol.for("react.memo_cache_sentinel") ? (M = /* @__PURE__ */ C(b, {
 		size: "sm",
 		"aria-label": "Browser profile",
-		children: /* @__PURE__ */ S(b, {})
-	}), i[5] = M) : M = i[5];
+		children: /* @__PURE__ */ C(x, {})
+	}), i[4] = M) : M = i[4];
 	let N;
-	i[6] === a ? N = i[7] : (N = a.map(O), i[6] = a, i[7] = N);
+	i[5] === a ? N = i[6] : (N = a.map(k), i[5] = a, i[6] = N);
 	let P;
-	i[8] === Symbol.for("react.memo_cache_sentinel") ? (P = /* @__PURE__ */ S(v, {
-		value: T,
+	i[7] === Symbol.for("react.memo_cache_sentinel") ? (P = /* @__PURE__ */ C(y, {
+		value: E,
 		children: "New Profile…"
-	}), i[8] = P) : P = i[8];
+	}), i[7] = P) : P = i[7];
 	let F;
-	i[9] === N ? F = i[10] : (F = /* @__PURE__ */ C(_, {
+	i[8] === N ? F = i[9] : (F = /* @__PURE__ */ w(v, {
 		align: "end",
 		position: "popper",
 		children: [N, P]
-	}), i[9] = N, i[10] = F);
+	}), i[8] = N, i[9] = F);
 	let I;
-	i[11] !== u || i[12] !== F ? (I = /* @__PURE__ */ S(d, {
+	i[10] !== u || i[11] !== F ? (I = /* @__PURE__ */ C(d, {
 		title: "Profile",
-		trailing: /* @__PURE__ */ C(g, {
+		trailing: /* @__PURE__ */ w(_, {
 			value: u,
 			onValueChange: f,
 			children: [M, F]
 		})
-	}), i[11] = u, i[12] = F, i[13] = I) : I = i[13];
+	}), i[10] = u, i[11] = F, i[12] = I) : I = i[12];
 	let L;
-	i[14] !== u || i[15] !== p ? (L = u === T && /* @__PURE__ */ S("div", {
+	i[13] !== u || i[14] !== p ? (L = u === E && /* @__PURE__ */ C("div", {
 		className: "px-3 py-2.5",
-		children: /* @__PURE__ */ S(c, {
-			ref: D,
+		children: /* @__PURE__ */ C(c, {
+			ref: O,
 			placeholder: "Its name, like Personal or Work",
 			"aria-label": "Its name",
 			autoCapitalize: "words",
 			autoCorrect: "off",
 			value: p,
-			onChange: (e) => x(e.target.value)
+			onChange: (e) => S(e.target.value)
 		})
-	}), i[14] = u, i[15] = p, i[16] = L) : L = i[16];
+	}), i[13] = u, i[14] = p, i[15] = L) : L = i[15];
 	let R;
-	i[17] !== I || i[18] !== L ? (R = /* @__PURE__ */ C(l, { children: [I, L] }), i[17] = I, i[18] = L, i[19] = R) : R = i[19];
+	i[16] !== I || i[17] !== L ? (R = /* @__PURE__ */ w(l, { children: [I, L] }), i[16] = I, i[17] = L, i[18] = R) : R = i[18];
 	let z;
-	i[20] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ S(s, { children: "Each has its own sign-ins." }), i[20] = z) : z = i[20];
+	i[19] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ C(s, { children: "Each has its own sign-ins." }), i[19] = z) : z = i[19];
 	let B;
-	i[21] !== A || i[22] !== w ? (B = w && /* @__PURE__ */ S(h, {
-		title: w,
+	i[20] !== j || i[21] !== T ? (B = T && /* @__PURE__ */ C(h, {
+		title: T,
 		action: {
 			label: "Try Again",
-			run: A
+			run: j
 		}
-	}), i[21] = A, i[22] = w, i[23] = B) : B = i[23];
+	}), i[20] = j, i[21] = T, i[22] = B) : B = i[22];
 	let V;
-	i[24] === A ? V = i[25] : (V = /* @__PURE__ */ S(m, {
+	i[23] === j ? V = i[24] : (V = /* @__PURE__ */ C(m, {
 		className: "self-start",
-		run: A,
+		run: j,
 		children: "Sign In to Messenger"
-	}), i[24] = A, i[25] = V);
+	}), i[23] = j, i[24] = V);
 	let H;
-	return i[26] !== B || i[27] !== V || i[28] !== R ? (H = /* @__PURE__ */ C("section", {
-		className: "flex flex-col gap-2",
+	return i[25] !== B || i[26] !== V || i[27] !== R ? (H = /* @__PURE__ */ w(g, {
+		title: "Browser Profile",
 		children: [
-			j,
 			R,
 			z,
 			B,
 			V
 		]
-	}), i[26] = B, i[27] = V, i[28] = R, i[29] = H) : H = i[29], H;
+	}), i[25] = B, i[26] = V, i[27] = R, i[28] = H) : H = i[28], H;
 }
-function O(e) {
-	return /* @__PURE__ */ S(v, {
+function k(e) {
+	return /* @__PURE__ */ C(y, {
 		value: e,
 		children: e
 	}, e);
 }
-function k(t) {
-	let n = e(20), { link: i, onDone: a } = t, [o, s] = r(null), c;
+function A(t) {
+	let n = e(19), { link: i, onDone: a } = t, [o, s] = r(null), c;
 	n[0] !== i.profile || n[1] !== a ? (c = async () => {
 		s(null);
 		try {
@@ -117,76 +111,69 @@ function k(t) {
 		a();
 	}, n[0] = i.profile, n[1] = a, n[2] = c) : c = n[2];
 	let f = c, p;
-	n[3] === Symbol.for("react.memo_cache_sentinel") ? (p = /* @__PURE__ */ S("h2", {
-		className: "text-sm font-medium text-muted-foreground",
-		children: "Sign In"
-	}), n[3] = p) : p = n[3];
-	let g;
-	n[4] === i.url ? g = n[5] : (g = /* @__PURE__ */ S(d, {
+	n[3] === i.url ? p = n[4] : (p = /* @__PURE__ */ C(d, {
 		title: "Open the device",
 		onClick: () => one.link(i.url)
-	}), n[4] = i.url, n[5] = g);
+	}), n[3] = i.url, n[4] = p);
 	let _ = `Sign in to messenger.com in the ${i.profile} profile, and tick Keep me signed in.`, v;
-	n[6] === _ ? v = n[7] : (v = /* @__PURE__ */ S(u, { children: _ }), n[6] = _, n[7] = v);
+	n[5] === _ ? v = n[6] : (v = /* @__PURE__ */ C(u, { children: _ }), n[5] = _, n[6] = v);
 	let y;
-	n[8] !== g || n[9] !== v ? (y = /* @__PURE__ */ C(l, { children: [g, v] }), n[8] = g, n[9] = v, n[10] = y) : y = n[10];
+	n[7] !== p || n[8] !== v ? (y = /* @__PURE__ */ w(l, { children: [p, v] }), n[7] = p, n[8] = v, n[9] = y) : y = n[9];
 	let b;
-	n[11] !== f || n[12] !== o ? (b = o && /* @__PURE__ */ S(h, {
+	n[10] !== f || n[11] !== o ? (b = o && /* @__PURE__ */ C(h, {
 		title: o,
 		action: {
 			label: "Try Again",
 			run: f
 		}
-	}), n[11] = f, n[12] = o, n[13] = b) : b = n[13];
+	}), n[10] = f, n[11] = o, n[12] = b) : b = n[12];
 	let x;
-	n[14] === f ? x = n[15] : (x = /* @__PURE__ */ S(m, {
+	n[13] === f ? x = n[14] : (x = /* @__PURE__ */ C(m, {
 		className: "self-start",
 		run: f,
 		children: "Done"
-	}), n[14] = f, n[15] = x);
-	let w;
-	return n[16] !== y || n[17] !== b || n[18] !== x ? (w = /* @__PURE__ */ C("section", {
-		className: "flex flex-col gap-2",
+	}), n[13] = f, n[14] = x);
+	let S;
+	return n[15] !== y || n[16] !== b || n[17] !== x ? (S = /* @__PURE__ */ w(g, {
+		title: "Sign In",
 		children: [
-			p,
 			y,
 			b,
 			x
 		]
-	}), n[16] = y, n[17] = b, n[18] = x, n[19] = w) : w = n[19], w;
+	}), n[15] = y, n[16] = b, n[17] = x, n[18] = S) : S = n[18], S;
 }
-function A() {
-	let { accounts: e, problem: i, retry: s, failed: c, signOut: l, reload: u } = x(), [d, g] = r(null), _ = n(null);
-	_.current ||= E();
+function j() {
+	let { accounts: e, problem: i, retry: s, failed: c, signOut: l, reload: u } = S(), [d, g] = r(null), _ = n(null);
+	_.current ||= D();
 	let v = async () => {
 		let e = await _.current;
-		_.current = E(), g({ picking: [...new Set(e)] });
+		_.current = D(), g({ picking: [...new Set(e)] });
 	}, y = () => (g(null), u());
 	if (t(() => {
 		one.params.add && _.current.then(() => v());
-	}, []), i && !e) return /* @__PURE__ */ S(p, {
+	}, []), i && !e) return /* @__PURE__ */ C(p, {
 		problem: i,
 		retry: s
 	});
-	if (!e) return /* @__PURE__ */ S(f, {});
-	let b = !!d, T = e.filter((e) => !e.ok);
-	return /* @__PURE__ */ C("div", {
+	if (!e) return /* @__PURE__ */ C(f, {});
+	let b = !!d, x = e.filter((e) => !e.ok);
+	return /* @__PURE__ */ w("div", {
 		className: "flex flex-col gap-6",
 		children: [
-			!e.length && !b && /* @__PURE__ */ S(o, {
-				className: "mx-auto max-w-md",
+			!e.length && !b && /* @__PURE__ */ C(o, {
 				action: {
 					label: "Add Account",
 					run: v
 				},
-				children: w
+				children: T
 			}),
-			T.map((e) => /* @__PURE__ */ S(h, {
+			x.map((e) => /* @__PURE__ */ C(h, {
 				warn: !0,
 				title: e.account + " needs signing in",
 				text: "Sign it out, then add it again."
 			}, e.account)),
-			e.length > 0 && /* @__PURE__ */ S(a, {
+			e.length > 0 && /* @__PURE__ */ C(a, {
 				title: "Browser Profiles",
 				accounts: e,
 				failed: c,
@@ -195,23 +182,23 @@ function A() {
 					text: "Sign in again",
 					warn: !0
 				},
-				children: !b && /* @__PURE__ */ S(m, {
+				children: !b && /* @__PURE__ */ C(m, {
 					variant: "secondary",
 					className: "self-start",
 					run: v,
 					children: "Add Account"
 				})
 			}),
-			d?.picking && /* @__PURE__ */ S(D, {
+			d?.picking && /* @__PURE__ */ C(O, {
 				free: d.picking.filter((t) => !e.some((e) => e.account === t)),
 				onSigningIn: (e) => g({ link: e })
 			}),
-			d?.link && /* @__PURE__ */ S(k, {
+			d?.link && /* @__PURE__ */ C(A, {
 				link: d.link,
 				onDone: y
 			})
 		]
 	});
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ S(A, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ C(j, {}));
 </script>

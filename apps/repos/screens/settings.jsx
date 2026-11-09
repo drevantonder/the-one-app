@@ -4,8 +4,8 @@
 // { add: true } (a shell's Add Account), it starts signing in at once.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Card, CardContent, Empty, Icon, List, ListRow, Problem, Spinner, Pending, useCall } from "@one/ui"
-import { Frame, Section, said } from "../lib/use.jsx"
+import { Button, Card, CardContent, Empty, Icon, List, ListRow, Pending, Problem, Section, Spinner, useCall } from "@one/ui"
+import { Frame, said } from "../lib/use.jsx"
 
 const P = one.params
 

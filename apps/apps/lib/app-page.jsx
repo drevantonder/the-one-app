@@ -2,8 +2,8 @@
 // isn't (app.jsx): its icon and name, where it runs, its schedules, what it works with, its source, and, for its owners,
 // its activity and deleting it.
 import { useEffect, useRef, useState } from "react"
-import { AppIcon, Button, Empty, Icon, List, ListRow, ListSkeleton, Problem, Switch, useCall } from "@one/ui"
-import { Section, onAPage, openApp, said } from "./store.jsx"
+import { AppIcon, Button, Empty, Icon, List, ListRow, ListSkeleton, Problem, Section, Switch, useCall } from "@one/ui"
+import { onAPage, openApp, said } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
 const ago = (t) => (one.ago(t) === "now" ? "just now" : one.ago(t) + " ago")
