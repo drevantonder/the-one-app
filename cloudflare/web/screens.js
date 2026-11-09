@@ -108,16 +108,17 @@ export const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r)
 /// is this client's own too, not the one the node wrote in, which says what @one/ui exported when that node was built.
 const LINKED = /<link rel="stylesheet" href="(\/screen\/[a-z/]+\.css\?v=[0-9a-f]+)">|<script( nonce="[0-9a-f]+")? src="(\/screen\/[a-z/]+\.js\?v=[0-9a-f]+)"><\/script>/g;
 const IMPORT_MAP = /<script( nonce="[0-9a-f]+")? type="importmap">.*?<\/script>/s;
+const KIT = "/screen/ui/ui.js";
 const linkedFiles = {};
 const linkedFile = (url) =>
   (linkedFiles[url] ||= fetch(url).then((r) => (r.ok ? r.text() : Promise.reject(new Error(UNANSWERED)))).catch((err) => (delete linkedFiles[url], Promise.reject(err))));
-async function linkedIn(page) {
+async function linkedIn(page, kitted) {
   const urls = [...new Set(Array.from(page.matchAll(LINKED), (m) => m[1] || m[3]))];
   if (!urls.length) return page;
   const map = asset("screen/ui/importmap.json");
   const texts = Object.fromEntries(await Promise.all([...urls, map].map((url) => linkedFile(url).then((text) => [url, text], () => [url, null]))));
   return page
-    .replace(LINKED, (whole, css, nonce = "", js) => (texts[css || js] == null ? whole : css ? `<style>${texts[css]}</style>` : `<script${nonce}>${texts[js]}</script>`))
+    .replace(LINKED, (whole, css, nonce = "", js) => (kitted && js?.startsWith(KIT) ? "" : texts[css || js] == null ? whole : css ? `<style>${texts[css]}</style>` : `<script${nonce}>${texts[js]}</script>`))
     .replace(IMPORT_MAP, (whole, nonce = "") => (texts[map] == null ? whole : `<script${nonce} type="importmap">${texts[map]}</script>`));
 }
 
@@ -154,27 +155,57 @@ async function deleted(f, r) {
 /// What a frame loads, told the window's appearance so its empty page is the window's colour (frame.html).
 const framePage = () => `${asset("frame.html")}#${appearance()}`;
 
-/// A sandboxed frame for a page this window writes in (frame.html takes it).
+/// A sandboxed frame for a page this window writes in (frame.html takes it), named for `r` if it's for one yet.
 function sandboxed(r) {
   const frame = document.createElement("iframe");
   frame.className = "screen-frame";
   frame.setAttribute("sandbox", "allow-scripts allow-forms");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.src = framePage();
-  frame.setAttribute("aria-label", titleOf(r));
+  if (r) frame.setAttribute("aria-label", titleOf(r));
   return frame;
+}
+
+/// A frame with @one/ui already running in it and nothing yet shown, hidden in a layer of its own where the next screen
+/// will go (a frame can't move without reloading), so the next screen needs only its own page written in. Made once the
+/// window is quiet, and again after it's used; `spareRefused` if this browser can't keep it (frame.html).
+let spare = null, spareRefused = false;
+function warmSpare() {
+  const box = $(".screen", detail);
+  if (spare?.into.isConnected || spareRefused || platform.panel || !box) return;
+  const src = $(`script[src^="${KIT}"]`)?.getAttribute("src");
+  if (!src) return;
+  const into = Object.assign(document.createElement("div"), { className: "screen-layer coming" });
+  const frame = sandboxed();
+  frame.setAttribute("aria-hidden", "true");
+  into.append(frame);
+  box.append(into);
+  spare = { into, frame, src };
+}
+const whenQuiet = (f) => f.drawn.then(() => setTimeout(warmSpare, 800));
+/// `r`'s frame in a layer of `box`, hidden while `from` shows: the spare's, if there's one ready.
+function screenIn(box, r, from) {
+  const ready = spare?.kitted && spare.into.isConnected ? spare : null;
+  if (!ready) return frameFor(r, layerFor(box, r, from));
+  spare = null;
+  const { into, frame } = ready;
+  into.className = from ? "screen-layer coming" : "screen-layer";
+  if (platform.phone() && !home(r)) into.dataset.bar = "";
+  frame.removeAttribute("aria-hidden");
+  frame.setAttribute("aria-label", titleOf(r));
+  return frameFor(r, into, { kitted: frame });
 }
 
 /// What a route shows, in a new frame: its page as kept here if there is one, else as the node gives it now; one
 /// that's changed since (its app deployed) starts the screen again. → the frame's record, whose `drawn` is once its still
 /// or the screen itself has drawn. Beside the sidebar, its still shows until the screen says it has drawn.
-function frameFor(r, into, { sheet } = {}) {
-  const frame = sandboxed(r);
-  const f = { frame, route: r, sheet, into, key: JSON.stringify(r) };
+function frameFor(r, into, { sheet, kitted } = {}) {
+  const frame = kitted || sandboxed(r);
+  const f = { frame, route: r, sheet, into, key: JSON.stringify(r), kitted: !!kitted };
   f.drawn = new Promise((done) => (f.saysDrawn = done));
   frames.push(f);
   // A spinner only for a wait that's long enough to notice.
-  into.innerHTML = "";
+  if (!kitted) into.innerHTML = "";
   setTimeout(() => f.loaded || f.shown || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status"><span class="spinner"></span></div>`), 400);
   // A screen that's nothing yet after 5 seconds: the spinner gives way to one problem, which goes as the screen loads.
   setTimeout(() => {
@@ -184,15 +215,16 @@ function frameFor(r, into, { sheet } = {}) {
     into.prepend(status);
     OneUI["react-dom/client"].createRoot(status).render(h(ui.Problem, { quiet: true, title: "Not opening yet", text: UNANSWERED, className: "m-6" }));
   }, 5000);
-  const written = (page) => linkedIn(page).catch(() => page).then((html) => oneHost.look(html, appearance(), !!sheet, platform.look()));
+  const written = (page, kit) => linkedIn(page, kit).catch(() => page).then((html) => oneHost.look(html, appearance(), !!sheet, platform.look()));
   const draw = async (page) => {
     f.page = page;
-    const html = await written(page);
+    const html = await written(page, f.kitted);
     if (f.page !== page || f.html) return;
     f.html = html;
     if (!into.isConnected) return;
     if (f.still) frame.style.visibility = "hidden";
-    into.append(frame);
+    if (f.kitted) frame.contentWindow.postMessage({ oneScreen: html }, "*");
+    else into.append(frame);
   };
   const fresh = screenPage(r);
   // The client's own aren't kept: one kept before they came from its files came from a node.
@@ -208,6 +240,7 @@ function frameFor(r, into, { sheet } = {}) {
     if (!f.html) return draw(page);
     if (same(page, f.page)) return;
     f.page = page;
+    f.kitted = false;
     const html = await written(page);
     if (f.page !== page) return;
     f.html = html;
@@ -298,6 +331,22 @@ function drop(layer) {
   frames = frames.filter((f) => f.into !== layer);
 }
 
+/// The pages left for a screen, a page's frame hidden where it is (moving a frame reloads it) so Back to it is instant
+/// and it keeps its place, by route. On a phone they're one, a frame of the pages side by side, wherever its URL opened it.
+const parked = new Map();
+const PARKED = 3;
+const parkKey = (r) => (platform.phone() ? "pages" : JSON.stringify(r));
+/// What shows goes: a page, parked; anything else, gone.
+function retire(layer) {
+  const f = frames.find((x) => x.into === layer);
+  if (!f || !home(f.route)) return drop(layer);
+  layer.removeAttribute("style");
+  layer.dataset.parked = "";
+  parked.delete(parkKey(f.route));
+  parked.set(parkKey(f.route), f);
+  for (const old of [...parked.keys()].slice(0, -PARKED)) (drop(parked.get(old).into), parked.delete(old));
+}
+
 /// The window begins to show `f`: its bar says so (`begin`), and what it's said it's called.
 function announced(f, begin) {
   showing = f;
@@ -310,7 +359,30 @@ function saying(f) {
   document.title = f.said || String(f.name || "") || titleOf(f.route);
 }
 
+/// A layer for `r`'s screen in `box`, hidden while `from` still shows.
+function layerFor(box, r, from) {
+  const into = Object.assign(document.createElement("div"), { className: "screen-layer" });
+  if (platform.phone() && !home(r)) into.dataset.bar = "";
+  if (from) into.classList.add("coming");
+  box.append(into);
+  return into;
+}
+
+/// The screen a press has started before it lets go (`screen.ready`), for `show` to take up.
+let readied = null;
+
 export const screen = {
+  /// Starts `r`'s screen behind what shows, as the press that opens it comes down. If it isn't opened, the next `show`
+  /// drops it.
+  ready(detail, r) {
+    const key = JSON.stringify(r);
+    const box = $(".screen", detail);
+    if (!box || readied?.key === key || showing?.key === key || !showing?.into.isConnected || parked.has(parkKey(r))) return;
+    if (r.kind === "own" && settingsItems().some((i) => i.name === r.name && i.url && here(i.url))) return;
+    if (readied) drop(readied.into);
+    readied = screenIn(box, r, showing.into);
+  },
+
   /// Shows `r` where the window shows screens. What shows stays until `r`'s next has drawn; a nav away from it goes the
   /// same way. `begin` puts the window's bar on it, when it starts to show (as a phone's goes back, when it's left).
   show(detail, r, begin = () => {}, opened) {
@@ -319,26 +391,43 @@ export const screen = {
     devtools.draw();
     settle();
     if (coming) (drop(coming.into), (coming = null));
+    const key = JSON.stringify(r);
+    const early = readied?.key === key ? readied : null;
+    if (readied && readied !== early) drop(readied.into);
+    readied = null;
+    if (showing?.key === key && showing.into.isConnected) return void announced(showing, begin);
     const box = $(".screen", detail) || detail.insertAdjacentElement("afterbegin", Object.assign(document.createElement("div"), { className: "screen" }));
     const from = showing?.into.isConnected ? showing.into : null;
     if (!from && showing) drop(showing.into);
-    const into = Object.assign(document.createElement("div"), { className: "screen-layer" });
-    if (platform.phone() && !home(r)) into.dataset.bar = "";
-    if (from) {
-      into.classList.add("coming");
-      frames.filter((f) => f.into === from).forEach((f) => (f.leaving = true));
+    for (const [key, f] of parked) if (!f.into.isConnected) (drop(f.into), parked.delete(key));
+    if (from) frames.filter((f) => f.into === from).forEach((f) => (f.leaving = true));
+    const left = parked.get(parkKey(r));
+    if (left && from) {
+      if (early) drop(early.into);
+      parked.delete(parkKey(r));
+      left.leaving = false;
+      delete left.into.dataset.parked;
+      const goes = how(r, opened);
+      if (!goes.shrink) announced(left, begin);
+      return move(from, left.into, goes, () => {
+        retire(from);
+        if (goes.shrink) announced(left, begin);
+      });
     }
-    box.append(into);
+    if (early && !from) drop(early.into);
     // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the gateway's, not a node's.
     const item = r.kind === "own" && settingsItems().find((i) => i.name === r.name && i.url && here(i.url));
     let f;
-    if (item) {
+    if (early && from) f = early;
+    else if (item) {
       const frame = Object.assign(document.createElement("iframe"), { className: "screen-frame", src: item.url });
       frame.setAttribute("aria-label", titleOf(r));
       frame.setAttribute("allow", "publickey-credentials-get; publickey-credentials-create");
-      f = { into, route: r, key: JSON.stringify(r), drawn: new Promise((done) => frame.addEventListener("load", done, { once: true })) };
-      into.append(frame);
-    } else f = frameFor(r, into);
+      f = { into: layerFor(box, r, from), route: r, key: JSON.stringify(r), drawn: new Promise((done) => frame.addEventListener("load", done, { once: true })) };
+      f.into.append(frame);
+    } else f = screenIn(box, r, from);
+    const into = f.into;
+    whenQuiet(f);
     if (!from) {
       announced(f, begin);
       Promise.race([f.drawn, new Promise((done) => setTimeout(done, WAIT_TO_DRAW))]).then(() => reveal());
@@ -351,7 +440,7 @@ export const screen = {
       coming = null;
       if (!goes.shrink) announced(f, begin);
       move(from, into, goes, () => {
-        drop(from);
+        retire(from);
         if (goes.shrink) announced(f, begin);
       });
     });
@@ -445,6 +534,12 @@ export async function openRequest(scope, id) {
 /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
 /// the client's own screens', as the user, which no app's may.
 addEventListener("message", async (e) => {
+  if (spare && e.source === spare.frame.contentWindow) {
+    if (e.data?.oneFrame) linkedFile(spare.src).then((kit) => e.source?.postMessage({ oneKit: kit }, "*")).catch(() => {});
+    else if (e.data?.oneKitted === true) spare.kitted = true;
+    else if (e.data?.oneKitted === false) ((spareRefused = true), spare.into.remove(), (spare = null));
+    return;
+  }
   const still = frames.find((x) => x.still?.frame.contentWindow === e.source)?.still;
   if (still && e.data?.oneFrame) return void still.frame.contentWindow.postMessage({ oneScreen: still.html }, "*");
   if (still && e.data?.oneWritten) return void frames.find((x) => x.still === still)?.saysDrawn();
@@ -459,6 +554,16 @@ addEventListener("message", async (e) => {
   if (e.data?.oneDrawn) return void screenDrew(f);
   const { one: m, id } = e.data || {};
   if (!m || typeof m !== "object") return;
+  /// Where this screen's `one.open` goes.
+  const opensTo = (m) => {
+    const params = JSON.stringify(m.params || {});
+    // Any screen may send its user to choose the device that runs its app's schedules, in Settings › Devices.
+    // An app's says only which app's schedules, and where: no code to approve.
+    return m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params: mine ? params : JSON.stringify({ schedules: m.params?.schedules, scope: m.params?.scope }) }
+      : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
+      : mine ? { kind: "own", name: String(m.screen || ""), params }
+      : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
+  };
   // What a call answered last time, if it only reads: from this device, at once, while the window still starts.
   if (m.type === "kept") {
     const got = mine ? null : await platform.kept(r.app, String(m.tool || ""), m.input ?? {}).catch(() => null);
@@ -476,14 +581,12 @@ addEventListener("message", async (e) => {
         if (mine) throw new Error("Settings has no app to call.");
         return call(r.app, tool, input, reads(r.app, tool));
       },
+      opening: (m) => {
+        if (!m.sheet && !platform.panel) screen.ready(detail, opensTo(m));
+        return null;
+      },
       open: (m) => {
-        const params = JSON.stringify(m.params || {});
-        // Any screen may send its user to choose the device that runs its app's schedules, in Settings › Devices.
-        // An app's says only which app's schedules, and where: no code to approve.
-        const to = m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params: mine ? params : JSON.stringify({ schedules: m.params?.schedules, scope: m.params?.scope }) }
-          : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
-          : mine ? { kind: "own", name: String(m.screen || ""), params }
-          : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
+        const to = opensTo(m);
         if (platform.panel) return void platform.main(to);
         if (m.sheet) return openSheet(to);
         // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,

@@ -84,7 +84,9 @@ export const home = (() => {
     const s = app(h.state?.config?.store);
     return s && hasScreens(s) && pages().some((p) => scopes(s).includes(p.scope)) ? s : null;
   }
-  const open = (a, p, screen = "main", params = {}) => (from) => one.open(screen, params, a.name, { ...(p ? { scope: p.scope } : {}), from });
+  /// What a tile runs to open `screen`, with the element it was opened from; `.press`, as the press comes down.
+  const opens = (screen, params, app, options = {}) => Object.assign((from) => one.open(screen, params, app, { ...options, from }), { press: () => one.opening(screen, params, app, options) });
+  const open = (a, p, screen = "main", params = {}) => opens(screen, params, a.name, p ? { scope: p.scope } : {});
   const settings = (a, p, add) => (has(a, "settings") ? open(a, p, "settings", add ? { add: true } : {}) : null);
   const inStore = (a) => (store() && has(store(), "app") && (a.deploys || 0) > 0 ? open(store(), null, "app", { app: a.name }) : null);
   const addAccountApp = () => (store() ? open(store(), null, "main", { accounts: true }) : null);
@@ -215,6 +217,6 @@ export const home = (() => {
 
   return {
     data: h, me, network, label, app, has, hasScreens, allPages, pages, page, canArrange, appsOn, accountsOn, accountsTool, badge, widgetsOn, waiting, items,
-    supported, tree, store, open, settings, inStore, addAccountApp, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
+    supported, tree, store, open, opens, settings, inStore, addAccountApp, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
   };
 })();

@@ -28,17 +28,18 @@ type ShellPage = { key: string; title: string; href: string; selected?: boolean;
 /// The window every client shows screens in: the sidebar of pages, the current one's apps under it and Settings at its
 /// foot, and beside it a bar with the title over what's open (`children`, or `screen`, an element the client keeps its
 /// screens' frames in, put here as it is). Where its room is narrow, the sidebar is a sheet behind the bar's button. `onGo`
-/// is told of a plain click on a row (a click with a modifier opens the link as the browser does); `back`, a Back button
+/// is told of a plain click on a row (a click with a modifier opens the link as the browser does), and `onPress` as a plain press comes down on one, before it lets go; `back`, a Back button
 /// before the title; `onBarStart`, how far along the bar its own buttons reach. A `phone`'s has no sidebar: its home is the
 /// pages side by side (their own titles, no bar), and what's opened from them has a bar with Back, as the native phone apps
 /// had. `banner`, what's wrong with the whole window (being offline), once, at the top of what it shows.
-function Shell({ pages = [], settings, title, back, onBack, onGo, onBarStart, developer, onDeveloper, open, onOpenChange, screen, children, className, phone, banner }: {
+function Shell({ pages = [], settings, title, back, onBack, onGo, onPress, onBarStart, developer, onDeveloper, open, onOpenChange, screen, children, className, phone, banner }: {
   pages?: ShellPage[]
   settings?: ShellPage
   title?: string
   back?: boolean
   onBack?: () => void
   onGo?: (href: string) => void
+  onPress?: (href: string) => void
   onBarStart?: (px: number) => void
   developer?: boolean
   onDeveloper?: () => void
@@ -93,9 +94,9 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onBarStart, de
             <SidebarMenu>
               {pages.map((p) => (
                 <React.Fragment key={p.key}>
-                  <ShellRow row={p.items.length ? { ...p, badge: 0 } : p} onGo={onGo} className="font-medium" />
+                  <ShellRow row={p.items.length ? { ...p, badge: 0 } : p} onGo={onGo} onPress={onPress} className="font-medium" />
                   {p.items.map((item) => (
-                    <ShellRow key={item.key} row={item} onGo={onGo}>
+                    <ShellRow key={item.key} row={item} onGo={onGo} onPress={onPress}>
                       {item.folder ? <Folder apps={item.folder} /> : item.app && <AppIcon app={item.app} size={20} />}
                     </ShellRow>
                   ))}
@@ -106,7 +107,7 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onBarStart, de
           {settings && (
             <SidebarGroup className="sticky bottom-0 mt-auto bg-sidebar has-data-[active=true]:bg-transparent">
               <SidebarMenu>
-                <ShellRow row={settings} onGo={onGo} className="font-medium">
+                <ShellRow row={settings} onGo={onGo} onPress={onPress} className="font-medium">
                   <GearSixIcon />
                 </ShellRow>
               </SidebarMenu>
@@ -166,7 +167,7 @@ function Selected({ rows }: { rows: ShellPage[] }) {
   return <span ref={ref} aria-hidden="true" className="absolute top-0 left-0 rounded-md bg-sidebar-accent data-[placed]:transition-[translate] data-[placed]:duration-200 data-[placed]:ease-out motion-reduce:transition-none" />
 }
 
-function ShellRow({ row, onGo, className, children }: { row: ShellItem; onGo?: (href: string) => void; className?: string; children?: React.ReactNode }) {
+function ShellRow({ row, onGo, onPress, className, children }: { row: ShellItem; onGo?: (href: string) => void; onPress?: (href: string) => void; className?: string; children?: React.ReactNode }) {
   const { isMobile, setOpenMobile } = useSidebar()
   // A plain click goes in place, and closes the sidebar's sheet; any other is the browser's (a new tab).
   const go = (e: React.MouseEvent) => {
@@ -178,7 +179,7 @@ function ShellRow({ row, onGo, className, children }: { row: ShellItem; onGo?: (
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={row.selected} className={cn("data-[active=true]:bg-transparent", className)}>
-        <a href={row.href} onClick={go}>
+        <a href={row.href} onClick={go} onPointerDown={(e) => !e.button && !e.metaKey && !e.ctrlKey && !e.shiftKey && onPress?.(row.href)}>
           {children}
           <span className="truncate">{row.title}</span>
         </a>

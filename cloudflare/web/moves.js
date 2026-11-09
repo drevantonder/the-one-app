@@ -69,13 +69,14 @@ function zoom(from, to, { tile, rect }, shrink, clean) {
   ], () => (icon.remove(), clean()));
 }
 
-/// Takes `from` away and shows `to`, as `how` says (`rise`, `cross`, `grow` or `shrink`), then `done`.
+/// Takes `from` away and shows `to`, as `how` says (`rise`, `cross`, `grow` or `shrink`), then `done`, which puts `from` away.
 export function move(from, to, how, done) {
   settle();
   to.classList.remove("coming");
+  // Over a layer that's older in the page (a page kept alive, or the spare frame's), and the reverse for a shrink below.
+  to.style.zIndex = "1";
   from.style.pointerEvents = "none";
   const clean = () => {
-    from.remove();
     to.removeAttribute("style");
     done();
   };

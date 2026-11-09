@@ -12,6 +12,7 @@ html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
 .screen { flex: 1; position: relative; min-height: 0; }
 .screen-layer { position: absolute; inset: 0; }
 .screen-layer.coming { opacity: 0; pointer-events: none; }
+.screen-layer[data-parked] { visibility: hidden; pointer-events: none; }
 .screen-layer[data-bar] { top: 2.75rem; }
 /* A screen with a large title reaches up behind the bar, that title's middle (--title-middle, by its top padding and
    text size) on the bar's. */

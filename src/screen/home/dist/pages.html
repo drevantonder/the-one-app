@@ -60,46 +60,46 @@ var A = (() => {
 		let t = a(e.state?.config?.store);
 		return t && s(t) && d().some((e) => l(t).includes(e.scope)) ? t : null;
 	}
-	let D = (e, t, n = "main", r = {}) => (i) => one.open(n, r, e.name, {
-		...t ? { scope: t.scope } : {},
+	let D = (e, t, n, r = {}) => Object.assign((i) => one.open(e, t, n, {
+		...r,
 		from: i
-	}), O = (e, t, n) => o(e, "settings") ? D(e, t, "settings", n ? { add: !0 } : {}) : null, k = (e) => E() && o(E(), "app") && (e.deploys || 0) > 0 ? D(E(), null, "app", { app: e.name }) : null, A = () => E() ? D(E(), null, "main", { accounts: !0 }) : null, j = () => E() && D(E(), null)();
-	async function M(e, t, n = {}) {
+	}), { press: () => one.opening(e, t, n, r) }), O = (e, t, n = "main", r = {}) => D(n, r, e.name, t ? { scope: t.scope } : {}), k = (e, t, n) => o(e, "settings") ? O(e, t, "settings", n ? { add: !0 } : {}) : null, A = (e) => E() && o(E(), "app") && (e.deploys || 0) > 0 ? O(E(), null, "app", { app: e.name }) : null, j = () => E() ? O(E(), null, "main", { accounts: !0 }) : null, M = () => E() && O(E(), null)();
+	async function N(e, t, n = {}) {
 		return (await one.api("POST", "/v1/call", {
 			app: e,
 			tool: t,
 			input: n
 		})).ok;
 	}
-	let N = (e) => one.alert({
+	let P = (e) => one.alert({
 		title: "Couldn’t Do That",
 		text: one.plain(e).title
 	});
-	async function P(t, n) {
+	async function F(t, n) {
 		let r = e.apps;
 		n && (e.apps = n(e.apps), e.redraw?.());
 		try {
-			await t(), await L(e.redraw);
+			await t(), await R(e.redraw);
 		} catch (t) {
-			n && (e.apps = r, e.redraw?.()), N(t);
+			n && (e.apps = r, e.redraw?.()), P(t);
 		}
 	}
-	function F(e, t) {
+	function I(e, t) {
 		let n = [];
-		return O(e, t) && n.push({
+		return k(e, t) && n.push({
 			title: "Settings",
 			icon: "gear-six",
-			run: O(e, t)
-		}), k(e) && n.push({
+			run: k(e, t)
+		}), A(e) && n.push({
 			title: "Open in App Store",
 			icon: "bag",
-			run: k(e)
+			run: A(e)
 		}), p(t.scope) && (e.deploys || 0) > 0 && n.push({
 			title: `Remove from ${t.title}`,
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => P(() => one.api("POST", "/v1/remove/remove", {
+			run: () => F(() => one.api("POST", "/v1/remove/remove", {
 				app: e.name,
 				scope: t.scope
 			}), (n) => n.map((n) => n.name === e.name ? {
@@ -108,7 +108,7 @@ var A = (() => {
 			} : n))
 		}), n;
 	}
-	async function I(e, t) {
+	async function L(e, t) {
 		if (!e.length) return;
 		t instanceof Event && (t = {
 			x: t.clientX,
@@ -117,10 +117,10 @@ var A = (() => {
 		let n = await one.menu(e, t).catch(() => null);
 		n != null && e[n]?.run();
 	}
-	async function L(t) {
-		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await z(null, t);
+	async function R(t) {
+		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await B(null, t);
 	}
-	function R(t, n, r) {
+	function z(t, n, r) {
 		let i = e.widgets[t] || [], a = Date.now(), o = (e) => (t) => t.app === e.app && t.widget === e.widget;
 		e.widgets[t] = n.flatMap((e) => e.late ? i.filter(o(e)) : [{
 			...e,
@@ -138,23 +138,23 @@ var A = (() => {
 			});
 		}
 	}
-	async function z(t, n) {
+	async function B(t, n) {
 		let r = (e) => `scope=${encodeURIComponent(e.scope)}`;
 		await Promise.all(u().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((r) => {
-			R(t.scope, r, n), e.failed.delete(t.scope);
+			z(t.scope, r, n), e.failed.delete(t.scope);
 		}, () => void e.failed.add(t.scope)).then(() => {
 			e.read.add(t.scope), n?.();
 		}), one.api("GET", `/v1/badges?${r(t)}`).then((n) => {
 			e.badges[t.scope] = n;
 		}, () => {}).then(() => n?.())]));
 	}
-	let B = (t) => u().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
-	function V(t) {
+	let V = (t) => u().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
+	function H(t) {
 		let n, r, i = !1, a = /* @__PURE__ */ new Set(), o = (r) => {
 			r ? r.forEach((e) => a.add(e)) : i = !0, clearTimeout(n), n = setTimeout(() => {
-				let n = i ? L(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
+				let n = i ? R(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
 					e.apps = t;
-				}), z([...a], t)]);
+				}), B([...a], t)]);
 				i = !1, a.clear(), n.then(() => {
 					t(), l(), c();
 				}).catch(() => {});
@@ -169,7 +169,7 @@ var A = (() => {
 			Object.values(e.widgets).flat().forEach((e) => Object.values(e.sizes || { root: e.root }).forEach(n)), t.length && (r = setTimeout(() => o(u().map((e) => e.scope)), Math.min(9e5, Math.max(6e4, Math.min(...t) - Date.now()))));
 		};
 		one.on("changed", (e) => {
-			e.type === "changed" && e.apps?.length ? o(B(e.apps)) : [
+			e.type === "changed" && e.apps?.length ? o(V(e.apps)) : [
 				"changed",
 				"devices",
 				"network"
@@ -198,19 +198,20 @@ var A = (() => {
 		supported: b,
 		tree: x,
 		store: E,
-		open: D,
-		settings: O,
-		inStore: k,
-		addAccountApp: A,
-		openStore: j,
-		call: M,
-		failed: N,
-		change: P,
-		actions: F,
-		menu: I,
-		load: L,
-		loadWidgets: z,
-		watch: V
+		open: O,
+		opens: D,
+		settings: k,
+		inStore: A,
+		addAccountApp: j,
+		openStore: M,
+		call: N,
+		failed: P,
+		change: F,
+		actions: I,
+		menu: L,
+		load: R,
+		loadWidgets: B,
+		watch: H
 	};
 })(), { scope: j, swipe: M } = one.params || {}, N = "settings", P = 52, F = {
 	small: [2, 2],
@@ -347,7 +348,7 @@ function ue(e) {
 			kind: "accounts",
 			name: "Accounts",
 			apps: e,
-			open: () => one.open("accounts")
+			open: A.opens("accounts", {})
 		});
 	}
 	return {
@@ -377,7 +378,7 @@ var de = () => ({
 			color: e.color
 		},
 		badge: e.badge || 0,
-		open: (t) => e.url ? one.link(e.url) : e.app ? one.open("main", {}, e.app, { from: t }) : one.open(e.name, {}, void 0, { from: t })
+		open: e.url ? () => one.link(e.url) : e.app ? A.opens("main", {}, e.app) : A.opens(e.name, {})
 	}))
 });
 function fe() {
@@ -717,34 +718,35 @@ function He(e) {
 }
 var $ = "motion-safe:animate-[comes_200ms_ease-out]", Ue = "pointer-events-none motion-safe:animate-[goes_200ms_ease-in_forwards]";
 function We(t) {
-	let n = e(15), { name: r, icon: i, size: a, badge: o, onClick: l, children: u } = t, d;
-	n[0] !== u || n[1] !== i || n[2] !== a ? (d = u || /* @__PURE__ */ O(s, {
+	let n = e(16), { name: r, icon: i, size: a, badge: o, onClick: l, onPointerDown: u, children: d } = t, f;
+	n[0] !== d || n[1] !== i || n[2] !== a ? (f = d || /* @__PURE__ */ O(s, {
 		app: i,
 		size: a
-	}), n[0] = u, n[1] = i, n[2] = a, n[3] = d) : d = n[3];
-	let f;
-	n[4] === o ? f = n[5] : (f = o > 0 && /* @__PURE__ */ O(c, {
+	}), n[0] = d, n[1] = i, n[2] = a, n[3] = f) : f = n[3];
+	let p;
+	n[4] === o ? p = n[5] : (p = o > 0 && /* @__PURE__ */ O(c, {
 		variant: "destructive",
 		className: "absolute -right-2 -top-2 h-6 min-w-6 px-1.5 text-sm font-semibold tabular-nums dark:bg-destructive",
 		children: o > 99 ? "99+" : o
-	}), n[4] = o, n[5] = f);
-	let p;
-	n[6] !== d || n[7] !== f ? (p = /* @__PURE__ */ k("span", {
-		className: "relative block rounded-[22%] leading-[0]",
-		children: [d, f]
-	}), n[6] = d, n[7] = f, n[8] = p) : p = n[8];
+	}), n[4] = o, n[5] = p);
 	let m;
-	n[9] === r ? m = n[10] : (m = /* @__PURE__ */ O("span", {
+	n[6] !== f || n[7] !== p ? (m = /* @__PURE__ */ k("span", {
+		className: "relative block rounded-[22%] leading-[0]",
+		children: [f, p]
+	}), n[6] = f, n[7] = p, n[8] = m) : m = n[8];
+	let h;
+	n[9] === r ? h = n[10] : (h = /* @__PURE__ */ O("span", {
 		className: "line-clamp-2 w-[calc(100%+0.75rem)] text-center text-[13px] leading-tight [overflow-wrap:anywhere]",
 		children: r
-	}), n[9] = r, n[10] = m);
-	let h;
-	return n[11] !== l || n[12] !== p || n[13] !== m ? (h = /* @__PURE__ */ k("button", {
+	}), n[9] = r, n[10] = h);
+	let g;
+	return n[11] !== l || n[12] !== u || n[13] !== m || n[14] !== h ? (g = /* @__PURE__ */ k("button", {
 		type: "button",
 		onClick: l,
+		onPointerDown: u,
 		className: "flex min-w-0 flex-col items-center gap-1.5 pt-0.5 text-foreground outline-none [-webkit-tap-highlight-color:transparent] focus-visible:[&>span:first-child]:ring-[3px] focus-visible:[&>span:first-child]:ring-ring/50 active:[&>span:first-child]:opacity-70",
-		children: [p, m]
-	}), n[11] = l, n[12] = p, n[13] = m, n[14] = h) : h = n[14], h;
+		children: [m, h]
+	}), n[11] = l, n[12] = u, n[13] = m, n[14] = h, n[15] = g) : g = n[15], g;
 }
 function Ge(t) {
 	let n = e(15), { apps: r, size: i } = t, a = i * .64 / 3, o = i * .225, c = `repeat(3, ${a}px)`, l = `${a}px`, u = i * .05, d = i * .13, f;
@@ -791,6 +793,7 @@ function Ke({ page: e, at: t, tall: n, editing: i, leaving: a, refreshing: o, nt
 		icon: u.icon,
 		size: c,
 		badge: u.badge,
+		onPointerDown: (e) => !e.button && !H.editing && !q() && u.open.press?.(),
 		onClick: (e) => !H.editing && !q() && (one.tap(), u.open(e.currentTarget.querySelector("[data-slot=app-icon]"))),
 		children: u.kind === "accounts" && /* @__PURE__ */ O(Ge, {
 			apps: u.apps,

@@ -9,7 +9,18 @@
   document.documentElement.style.colorScheme = location.hash === "#automatic" ? "light dark" : location.hash.slice(1);
   if (self.origin === "null") {
     addEventListener("message", function take(e) {
-      if (e.source !== parent || typeof e.data?.oneScreen !== "string") return;
+      if (e.source !== parent) return;
+      // @one/ui ahead of its screen, which is most of what a new frame costs, for a screen's page written without it
+      // (screens.js's `spare`). A browser whose `document.open` clears its globals can't keep it there, so it's asked first.
+      if (typeof e.data?.oneKit === "string") {
+        document.head.append(Object.assign(document.createElement("script"), { textContent: e.data.oneKit }));
+        document.open();
+        document.close();
+        addEventListener("message", take);
+        parent.postMessage({ oneKitted: typeof OneUI === "object" }, "*");
+        return;
+      }
+      if (typeof e.data?.oneScreen !== "string") return;
       removeEventListener("message", take);
       document.open();
       document.write(e.data.oneScreen);

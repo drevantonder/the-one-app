@@ -38,16 +38,3 @@ Object.assign(globalThis, {
     "@one/ui": ui,
   },
 })
-
-// iOS only shows :active (ui.css's press) where a touch is being listened for.
-document.addEventListener("touchstart", () => {}, { passive: true })
-
-// Windows' shell zooms its pages to 14/17 of the user's text scale, sizing the old kit's 17px text to its own (ui.css
-// undoes the others'); this kit is sized as it is, so it keeps only their scale.
-const webview = (globalThis as { chrome?: { webview?: unknown } }).chrome?.webview
-if (webview) {
-  document.addEventListener("DOMContentLoaded", () => {
-    const zoom = parseFloat(document.documentElement.style.zoom)
-    if (zoom) document.documentElement.style.zoom = String((zoom * 17) / 14)
-  })
-}

@@ -66,6 +66,7 @@ function drawWindow() {
     back: barBack,
     onBack: back,
     onGo: (to) => linked(to) && go(linked(to)),
+    onPress: (to) => linked(to) && screen.ready(detail, linked(to)),
     onBarStart: setBarStart,
     developer: developer.on(),
     onDeveloper: () => devtools.toggle(),

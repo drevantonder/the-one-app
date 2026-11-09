@@ -7,6 +7,18 @@
   // A page that answers its own (`__one.host`: the web client's, a chat's view) isn't framed, even in a chat's frame.
   const framed = !ctx.host && window.parent !== window;
 
+  // These are the page's, not @one/ui's, which may have run before this page was written (frame.html's `oneKit`).
+  // iOS only shows :active (ui.css's press) where a touch is being listened for.
+  document.addEventListener("touchstart", () => {}, { passive: true });
+  // Windows' shell zooms its pages to 14/17 of the user's text scale, sizing the old kit's 17px text to its own (ui.css
+  // undoes the others'); this kit is sized as it is, so it keeps only their scale.
+  if (window.chrome?.webview) {
+    document.addEventListener("DOMContentLoaded", () => {
+      const zoom = parseFloat(document.documentElement.style.zoom);
+      if (zoom) document.documentElement.style.zoom = String((zoom * 17) / 14);
+    });
+  }
+
   // Framed: each message goes up as `{ one: message, id }`, answered with `{ oneReply: id, ok }` or `{ oneReply: id,
   // error, code? }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
   let asked = 0;
@@ -42,8 +54,9 @@
       loaded = true;
       window.parent.postMessage({ oneShown: true }, "*");
       settled();
+      setTimeout(() => ((patient = false), settled()), 120);
       if (window.ResizeObserver && document.body) new ResizeObserver(measure).observe(document.body);
-      new MutationObserver(later).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
+      new MutationObserver(() => (later(), settled())).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
       addEventListener("scroll", later, { passive: true });
       later();
     });
@@ -59,7 +72,7 @@
   // Every message a screen sends its host, and every host (the web client, a chat's view) answers each,
   // or refuses it by name. Anything a user touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
-  const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
+  const messages = ["call", "open", "opening", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
     "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer"];
 
   async function host(message) {
@@ -77,16 +90,19 @@
   }
 
   // The screen has drawn, for the page holding the frame to show it in place of what shows there: it's loaded and has
-  // what it asked for, a moment after its last call came back. It says so once.
-  let loaded = false, out = 0, told = false, quiet = 0;
+  // what it asked for, a moment after its last call came back; or, once that's kept the user waiting (`patient` is over),
+  // it has something to show for now: its title, or grey shapes. It says so once.
+  let loaded = false, out = 0, told = false, quiet = 0, patient = true;
+  const showsSomething = () => !!document.body && (!!document.body.innerText.trim() || !!document.querySelector("[data-slot=skeleton], img, svg, canvas, input, button"));
+  const drawnEnough = () => !out || (!patient && showsSomething());
   function settled() {
-    if (told || !loaded || out || !framed) return;
+    if (told || !loaded || !framed || !drawnEnough()) return;
     clearTimeout(quiet);
     quiet = setTimeout(() => {
-      if (out || told) return;
+      if (told || !drawnEnough()) return;
       told = true;
       window.parent.postMessage({ oneDrawn: true }, "*");
-    }, 50);
+    }, out ? 0 : 50);
   }
 
   // Icons are Phosphor's (vendor/phosphor), the same in every client: each a path on a 256-point grid, filled in the
@@ -198,6 +214,9 @@
       const rect = from instanceof Element && from.getBoundingClientRect();
       return host({ type: "open", screen, params, ...(app && app !== ctx.app ? { app } : {}), ...(scope ? { scope } : {}), ...(sheet ? { sheet: true } : {}), ...(rect ? { rect: [rect.left, rect.top, rect.width, rect.height].map(Math.round) } : {}) });
     },
+    // `open`'s `screen`, `params`, `app` and `scope`, as a press that will open it comes down: the window may start on it
+    // before the finger lifts. If nothing is opened after all, it's as if this was never said.
+    opening: (screen, params = {}, app, { scope } = {}) => void host({ type: "opening", screen, params, ...(app && app !== ctx.app ? { app } : {}), ...(scope ? { scope } : {}) }).catch(() => {}),
     // Closes this screen: a sheet goes, giving `value` to who opened it; a pushed screen goes back.
     close: (value = null) => host({ type: "close", value }),
     // The window's own menu, at `at` ({ x, y } in this page, or the element it's for), of `items`, each

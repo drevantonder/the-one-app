@@ -124,7 +124,7 @@ function pageView(p) {
   // Accounts once, on the first page: every page's, listed together, opened as a page.
   if (first) {
     const apps = [...new Map(home.pages().flatMap(home.accountsOn).map((a) => [a.name, a])).values()]
-    list.push({ slot: "accounts", kind: "accounts", name: "Accounts", apps, open: () => one.open("accounts") })
+    list.push({ slot: "accounts", kind: "accounts", name: "Accounts", apps, open: home.opens("accounts", {}) })
   }
   return {
     scope: p.scope, p, title: p.title, subtitle: p.subtitle, arrange, empty, store: !!home.store(), list,
@@ -140,7 +140,7 @@ const settingsView = () => ({
   list: (home.data.state.settings_items || []).map((item) => tile(`settings:${item.name}`, {
     name: item.title, icon: { name: item.name, title: item.title, icon: item.icon, color: item.color }, badge: item.badge || 0,
     // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.
-    open: (from) => (item.url ? one.link(item.url) : item.app ? one.open("main", {}, item.app, { from }) : one.open(item.name, {}, undefined, { from })),
+    open: item.url ? () => one.link(item.url) : item.app ? home.opens("main", {}, item.app) : home.opens(item.name, {}),
   })),
 })
 
@@ -543,9 +543,9 @@ const COMES = "motion-safe:animate-[comes_200ms_ease-out]"
 const GOES = "pointer-events-none motion-safe:animate-[goes_200ms_ease-in_forwards]"
 
 /// An icon and its name; badged with what needs attention.
-function Tile({ name, icon, size, badge, onClick, children }) {
+function Tile({ name, icon, size, badge, onClick, onPointerDown, children }) {
   return (
-    <button type="button" onClick={onClick} className="flex min-w-0 flex-col items-center gap-1.5 pt-0.5 text-foreground outline-none [-webkit-tap-highlight-color:transparent] focus-visible:[&>span:first-child]:ring-[3px] focus-visible:[&>span:first-child]:ring-ring/50 active:[&>span:first-child]:opacity-70">
+    <button type="button" onClick={onClick} onPointerDown={onPointerDown} className="flex min-w-0 flex-col items-center gap-1.5 pt-0.5 text-foreground outline-none [-webkit-tap-highlight-color:transparent] focus-visible:[&>span:first-child]:ring-[3px] focus-visible:[&>span:first-child]:ring-ring/50 active:[&>span:first-child]:opacity-70">
       <span className="relative block rounded-[22%] leading-[0]">
         {children || <AppIcon app={icon} size={size} />}
         {badge > 0 && <Badge variant="destructive" className="absolute -right-2 -top-2 h-6 min-w-6 px-1.5 text-sm font-semibold tabular-nums dark:bg-destructive">{badge > 99 ? "99+" : badge}</Badge>}
@@ -597,7 +597,7 @@ function Cell({ page, at, tall, editing, leaving, refreshing, nth, icon }) {
     body = <div aria-hidden="true" className="h-full animate-pulse rounded-3xl bg-muted motion-reduce:animate-none" style={{ zoom: "var(--unzoom, 1)" }} />
   } else {
     body = (
-      <Tile name={item.name} icon={item.icon} size={icon} badge={item.badge} onClick={(e) => !S.editing && !quiet() && (one.tap(), item.open(e.currentTarget.querySelector("[data-slot=app-icon]")))}>
+      <Tile name={item.name} icon={item.icon} size={icon} badge={item.badge} onPointerDown={(e) => !e.button && !S.editing && !quiet() && item.open.press?.()} onClick={(e) => !S.editing && !quiet() && (one.tap(), item.open(e.currentTarget.querySelector("[data-slot=app-icon]")))}>
         {item.kind === "accounts" && <Folder apps={item.apps} size={icon} />}
       </Tile>
     )
