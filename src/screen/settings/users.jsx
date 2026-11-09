@@ -8,7 +8,7 @@ import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
   Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
-  DropdownMenuSeparator, DropdownMenuTrigger, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, useDialog, LargeTitle, Section,
+  DropdownMenuSeparator, DropdownMenuTrigger, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, useDialog, LargeTitle,
 } from "@one/ui"
 
 const api = one.api
@@ -62,7 +62,6 @@ function Users() {
   // Them first, then everyone by name.
   const users = [...(state?.network?.users || [])].sort((x, y) => (y.id === me) - (x.id === me) || x.name.localeCompare(y.name))
   const admins = users.filter((u) => u.role === "admin").length
-  const address = state?.network?.settings?.address
   const domain = one.config.join_domain
   const handleNow = users.find((u) => u.id === me)?.handle || ""
 

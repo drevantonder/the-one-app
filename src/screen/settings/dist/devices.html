@@ -657,7 +657,7 @@ function Z(t) {
 	}), n[9] = o, n[10] = s, n[11] = u, n[12] = d) : d = n[12], d;
 }
 function ie(t) {
-	let n = e(47), { r, busy: i, answer: a } = t, s = r.yours ? "" : `${r.user}’s first device`, c;
+	let n = e(47), { r, busy: i, answer: a } = t, s = r.yours ? "" : r.lost ? `${r.user}, with no device left` : `${r.user}’s first device`, c;
 	n[0] !== r.place || n[1] !== s ? (c = [s, r.place].filter(Boolean), n[0] = r.place, n[1] = s, n[2] = c) : c = n[2];
 	let l = c.join(" · "), u = `${r.device} wants to join`, d;
 	n[3] !== r.device || n[4] !== r.platform ? (d = H({
@@ -765,7 +765,7 @@ function ae(t) {
 	}) }), n[9] = a, n[10] = s, n[11] = d, n[12] = p, n[13] = m) : m = n[13], m;
 }
 function oe(t) {
-	let n = e(29), { scan: i, done: a, cancel: s } = t, { code: c, r: l } = i, [u, d] = r(!1), [f, p] = r(""), m;
+	let n = e(32), { scan: i, done: a, cancel: s } = t, { code: c, r: l } = i, [u, d] = r(!1), [f, p] = r(""), m;
 	n[0] !== c || n[1] !== a ? (m = async function() {
 		one.tap(), d(!0), p("");
 		try {
@@ -786,46 +786,55 @@ function oe(t) {
 			"?"
 		]
 	}), n[3] = l.device, n[4] = y);
-	let b = l.new ? `${l.user}’s first device. They join ${A}.` : "It can open everything you can.", x;
+	let b = l.new ? `${l.user}’s first device. They join ${A}.` : l.user === void 0 || l.yours ? "It can open everything you can." : `${l.user}’s device.`, x;
 	n[5] === b ? x = n[6] : (x = /* @__PURE__ */ E("div", {
 		className: "text-sm text-muted-foreground",
 		children: b
 	}), n[5] = b, n[6] = x);
 	let S;
-	n[7] !== y || n[8] !== x ? (S = /* @__PURE__ */ D("div", { children: [y, x] }), n[7] = y, n[8] = x, n[9] = S) : S = n[9];
+	n[7] === l.sign_in ? S = n[8] : (S = W(l.sign_in) && /* @__PURE__ */ E("div", {
+		className: "text-sm text-muted-foreground",
+		children: W(l.sign_in)
+	}), n[7] = l.sign_in, n[8] = S);
 	let C;
-	n[10] === f ? C = n[11] : (C = f && /* @__PURE__ */ E(h, { title: f }), n[10] = f, n[11] = C);
+	n[9] !== y || n[10] !== x || n[11] !== S ? (C = /* @__PURE__ */ D("div", { children: [
+		y,
+		x,
+		S
+	] }), n[9] = y, n[10] = x, n[11] = S, n[12] = C) : C = n[12];
 	let w;
-	n[12] !== u || n[13] !== s ? (w = /* @__PURE__ */ E(o, {
+	n[13] === f ? w = n[14] : (w = f && /* @__PURE__ */ E(h, { title: f }), n[13] = f, n[14] = w);
+	let T;
+	n[15] !== u || n[16] !== s ? (T = /* @__PURE__ */ E(o, {
 		variant: "outline",
 		disabled: u,
 		onClick: s,
 		children: "Cancel"
-	}), n[12] = u, n[13] = s, n[14] = w) : w = n[14];
-	let T;
-	n[15] === u ? T = n[16] : (T = u && /* @__PURE__ */ E(v, { className: "text-primary-foreground" }), n[15] = u, n[16] = T);
+	}), n[15] = u, n[16] = s, n[17] = T) : T = n[17];
 	let j;
-	n[17] !== g || n[18] !== u || n[19] !== T ? (j = /* @__PURE__ */ D(o, {
+	n[18] === u ? j = n[19] : (j = u && /* @__PURE__ */ E(v, { className: "text-primary-foreground" }), n[18] = u, n[19] = j);
+	let M;
+	n[20] !== g || n[21] !== u || n[22] !== j ? (M = /* @__PURE__ */ D(o, {
 		disabled: u,
 		onClick: g,
-		children: [T, "Approve"]
-	}), n[17] = g, n[18] = u, n[19] = T, n[20] = j) : j = n[20];
-	let M;
-	n[21] !== j || n[22] !== w ? (M = /* @__PURE__ */ D("div", {
-		className: "flex justify-end gap-2",
-		children: [w, j]
-	}), n[21] = j, n[22] = w, n[23] = M) : M = n[23];
+		children: [j, "Approve"]
+	}), n[20] = g, n[21] = u, n[22] = j, n[23] = M) : M = n[23];
 	let N;
-	return n[24] !== M || n[25] !== _ || n[26] !== S || n[27] !== C ? (N = /* @__PURE__ */ D("div", {
+	n[24] !== M || n[25] !== T ? (N = /* @__PURE__ */ D("div", {
+		className: "flex justify-end gap-2",
+		children: [T, M]
+	}), n[24] = M, n[25] = T, n[26] = N) : N = n[26];
+	let P;
+	return n[27] !== N || n[28] !== _ || n[29] !== C || n[30] !== w ? (P = /* @__PURE__ */ D("div", {
 		role: "group",
 		"aria-label": _,
 		className: "flex w-full max-w-2xl flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground",
 		children: [
-			S,
 			C,
-			M
+			w,
+			N
 		]
-	}), n[24] = M, n[25] = _, n[26] = S, n[27] = C, n[28] = N) : N = n[28], N;
+	}), n[27] = N, n[28] = _, n[29] = C, n[30] = w, n[31] = P) : P = n[31], P;
 }
 function se(t) {
 	let n = e(43), { m: r, data: i, opened: a, flag: s, menu: l, removeOld: u, signOut: d, schedule: p, act: m } = t, { device: h, state: g, passkey: v } = i, { cards: y, passkeys: b, stale: x } = r.drawn, S;
@@ -1418,8 +1427,8 @@ function we(t) {
 	}), n[20] = s, n[21] = c, n[22] = C, n[23] = j, n[24] = P, n[25] = F) : F = n[25], F;
 }
 function Te(n) {
-	let i = e(35), { clients: a, me: s, open: c, setOpen: l, done: u } = n, [d, p] = r(null), [m, _] = r(""), v = a.flatMap(Ee), y;
-	i[0] === u ? y = i[1] : (y = async function(e) {
+	let i = e(35), { clients: a, me: s, open: c, setOpen: l, done: u } = n, [d, p] = r(null), [m, _] = r(""), [v, y] = r(null), b = a.flatMap(Ee), x;
+	i[0] === u ? x = i[1] : (x = async function(e) {
 		p(e.id), _("");
 		try {
 			await O("POST", "/v1/devices/forget-sign-in", {
@@ -1429,35 +1438,44 @@ function Te(n) {
 		} catch (e) {
 			_(k(e)), p(null);
 		}
-	}, i[0] = u, i[1] = y);
-	let b = y, x;
-	i[2] === u ? x = i[3] : (x = async () => {
+	}, i[0] = u, i[1] = x);
+	let S = x, C;
+	i[2] === Symbol.for("react.memo_cache_sentinel") ? (C = async () => {
 		try {
-			(await O("POST", "/v1/devices/record-sign-in", {})).linked && u();
+			y((await O("POST", "/v1/devices/record-sign-in", {})).account || null);
 		} catch (e) {
 			_(k(e));
 		}
-	}, i[2] = u, i[3] = x);
-	let S = x, C;
-	i[4] !== s || i[5] !== c || i[6] !== S ? (C = () => {
+	}, i[2] = C) : C = i[2];
+	let w = C, T;
+	i[3] === u ? T = i[4] : (T = async function() {
+		p("linked"), _("");
+		try {
+			await O("POST", "/v1/devices/record-sign-in", { confirm: !0 }), one.tap("success"), y(null), u();
+		} catch (e) {
+			_(k(e));
+		}
+		p(null);
+	}, i[3] = u, i[4] = T);
+	let A = T, j, M;
+	i[5] !== s || i[6] !== c ? (j = () => {
 		if (!s || !c) return;
-		let e = () => document.visibilityState === "visible" && S();
+		w();
+		let e = () => document.visibilityState === "visible" && w();
 		return document.addEventListener("visibilitychange", e), () => document.removeEventListener("visibilitychange", e);
-	}, i[4] = s, i[5] = c, i[6] = S, i[7] = C) : C = i[7];
-	let w;
-	i[8] !== s || i[9] !== c ? (w = [s, c], i[8] = s, i[9] = c, i[10] = w) : w = i[10], t(C, w);
-	let [T, A] = r(""), j, M;
-	i[11] !== s || i[12] !== c ? (j = () => {
-		s && c && O("POST", "/v1/devices/link-sign-in", {}).then((e) => A(e.url), (e) => _(k(e)));
-	}, M = [s, c], i[11] = s, i[12] = c, i[13] = j, i[14] = M) : (j = i[13], M = i[14]), t(j, M);
-	let N = g, P;
-	i[15] !== s || i[16] !== S || i[17] !== l ? (P = /* @__PURE__ */ E(o, {
+	}, M = [s, c], i[5] = s, i[6] = c, i[7] = j, i[8] = M) : (j = i[7], M = i[8]), t(j, M);
+	let [N, P] = r(""), F, I;
+	i[9] !== s || i[10] !== c ? (F = () => {
+		s && c && O("POST", "/v1/devices/link-sign-in", {}).then((e) => P(e.url), (e) => _(k(e)));
+	}, I = [s, c], i[9] = s, i[10] = c, i[11] = F, i[12] = I) : (F = i[11], I = i[12]), t(F, I);
+	let L = g, R;
+	i[13] === l ? R = i[14] : (R = /* @__PURE__ */ E(o, {
 		variant: "secondary",
 		size: "sm",
-		onClick: () => (s && S(), l(!1)),
+		onClick: () => l(!1),
 		children: "Done"
-	}), i[15] = s, i[16] = S, i[17] = l, i[18] = P) : P = i[18];
-	let F = !!v.length && /* @__PURE__ */ E(f, { children: v.map((e) => /* @__PURE__ */ D("div", {
+	}), i[13] = l, i[14] = R);
+	let z = !!b.length && /* @__PURE__ */ E(f, { children: b.map((e) => /* @__PURE__ */ D("div", {
 		className: "flex items-center gap-3 px-3 py-2 text-sm",
 		children: [/* @__PURE__ */ E("span", {
 			className: "min-w-0 flex-1 truncate font-medium",
@@ -1467,42 +1485,53 @@ function Te(n) {
 			size: "sm",
 			className: "text-destructive",
 			disabled: d !== null,
-			onClick: () => b(e),
+			onClick: () => S(e),
 			children: "Remove"
 		})]
-	}, e.id)) }), I;
-	i[19] !== s || i[20] !== T ? (I = s && T && /* @__PURE__ */ E(o, {
+	}, e.id)) }), B;
+	i[15] !== d || i[16] !== A || i[17] !== v ? (B = v && /* @__PURE__ */ D("div", {
+		className: "flex items-center gap-3 rounded-xl border p-3 text-sm",
+		children: [/* @__PURE__ */ E("span", {
+			className: "min-w-0 flex-1 truncate font-medium",
+			children: W(v)
+		}), /* @__PURE__ */ E(o, {
+			size: "sm",
+			disabled: d !== null,
+			onClick: A,
+			children: "Link It"
+		})]
+	}), i[15] = d, i[16] = A, i[17] = v, i[18] = B) : B = i[18];
+	let V;
+	i[19] !== s || i[20] !== N ? (V = s && N && /* @__PURE__ */ E(o, {
 		variant: "secondary",
 		asChild: !0,
 		children: /* @__PURE__ */ E("a", {
-			href: T,
+			href: N,
 			target: "_blank",
 			rel: "noopener",
 			children: "Link a Sign-In"
 		})
-	}), i[19] = s, i[20] = T, i[21] = I) : I = i[21];
-	let L;
-	i[22] === Symbol.for("react.memo_cache_sentinel") ? (L = /* @__PURE__ */ E(J, { children: "A new device that signs in with one of these is let in without asking." }), i[22] = L) : L = i[22];
-	let R;
-	i[23] === m ? R = i[24] : (R = m && /* @__PURE__ */ E(h, { title: m }), i[23] = m, i[24] = R);
-	let z;
-	i[25] !== F || i[26] !== I || i[27] !== R ? (z = /* @__PURE__ */ D("div", {
+	}), i[19] = s, i[20] = N, i[21] = V) : V = i[21];
+	let H;
+	i[22] === m ? H = i[23] : (H = m && /* @__PURE__ */ E(h, { title: m }), i[22] = m, i[23] = H);
+	let U;
+	i[24] !== z || i[25] !== B || i[26] !== V || i[27] !== H ? (U = /* @__PURE__ */ D("div", {
 		className: "flex flex-col gap-4 overflow-y-auto p-4",
 		children: [
-			F,
-			I,
-			L,
-			R
+			z,
+			B,
+			V,
+			H
 		]
-	}), i[25] = F, i[26] = I, i[27] = R, i[28] = z) : z = i[28];
-	let B;
-	return i[29] !== N || i[30] !== c || i[31] !== l || i[32] !== z || i[33] !== P ? (B = /* @__PURE__ */ E(N, {
+	}), i[24] = z, i[25] = B, i[26] = V, i[27] = H, i[28] = U) : U = i[28];
+	let G;
+	return i[29] !== L || i[30] !== c || i[31] !== l || i[32] !== U || i[33] !== R ? (G = /* @__PURE__ */ E(L, {
 		open: c,
 		onOpenChange: l,
 		title: "Sign-Ins",
-		action: P,
-		children: z
-	}), i[29] = N, i[30] = c, i[31] = l, i[32] = z, i[33] = P, i[34] = B) : B = i[34], B;
+		action: R,
+		children: U
+	}), i[29] = L, i[30] = c, i[31] = l, i[32] = U, i[33] = R, i[34] = G) : G = i[34], G;
 }
 function Ee(e) {
 	return [...e.sign_in ? [{

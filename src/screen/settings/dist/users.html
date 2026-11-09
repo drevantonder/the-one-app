@@ -6,28 +6,28 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
-import { Avatar as i, Button as a, DropdownMenu as o, DropdownMenuContent as s, DropdownMenuItem as c, DropdownMenuRadioGroup as l, DropdownMenuRadioItem as u, DropdownMenuSeparator as d, DropdownMenuTrigger as f, Icon as p, Input as m, LargeTitle as h, List as g, ListRow as _, ListSkeleton as v, Problem as y, ResponsiveDialog as b, Section as x, useDialog as S } from "@one/ui";
-import { Fragment as C, jsx as w, jsxs as T } from "react/jsx-runtime";
-var E = one.api, D = one.config.yours, O = (e) => one.plain(e).title, k = (e) => e === "admin" ? "Admin" : "Member", A = {
+import { Avatar as i, Button as a, DropdownMenu as o, DropdownMenuContent as s, DropdownMenuItem as c, DropdownMenuRadioGroup as l, DropdownMenuRadioItem as u, DropdownMenuSeparator as d, DropdownMenuTrigger as f, Icon as p, Input as m, LargeTitle as h, List as g, ListRow as _, ListSkeleton as v, Problem as y, ResponsiveDialog as b, useDialog as x } from "@one/ui";
+import { Fragment as S, jsx as C, jsxs as w } from "react/jsx-runtime";
+var T = one.api, E = one.config.yours, D = (e) => one.plain(e).title, O = (e) => e === "admin" ? "Admin" : "Member", k = {
 	autoCapitalize: "none",
 	autoCorrect: "off",
 	spellCheck: !1
 };
-function j() {
-	let [e, r] = n(null), [o, s] = n(null), [c, l] = n({}), [u, d] = n(""), [f, p, m] = S(), [b, A, j] = S();
-	async function P() {
+function A() {
+	let [e, r] = n(null), [o, s] = n(null), [c, l] = n({}), [u, d] = n(""), [f, p, m] = x(), [b, k, A] = x();
+	async function N() {
 		try {
-			r(await E("GET", "/v1/state")), s(null);
+			r(await T("GET", "/v1/state")), s(null);
 		} catch (e) {
 			s(one.plain(e));
 		}
 	}
 	t(() => {
-		P(), one.on("changed", P);
+		N(), one.on("changed", N);
 	}, []);
-	async function I(e, t) {
+	async function F(e, t) {
 		if (d(""), t !== null || await one.alert({
-			title: `Remove ${e.name} from ${D}?`,
+			title: `Remove ${e.name} from ${E}?`,
 			text: "Their devices stop reaching it.",
 			action: "Remove",
 			danger: !0
@@ -37,95 +37,88 @@ function j() {
 				[e.id]: t
 			}));
 			try {
-				await (t === null ? E("POST", "/v1/devices/remove", { user: e.id }) : E("POST", "/v1/role", {
+				await (t === null ? T("POST", "/v1/devices/remove", { user: e.id }) : T("POST", "/v1/role", {
 					user: e.id,
 					role: t
 				}));
 			} catch (e) {
-				d(O(e));
+				d(D(e));
 			}
-			l(({ [e.id]: t, ...n }) => n), P();
+			l(({ [e.id]: t, ...n }) => n), N();
 		}
 	}
-	let L = e?.user?.id, R = e?.user?.role === "admin", z = [...e?.network?.users || []].sort((e, t) => (t.id === L) - (e.id === L) || e.name.localeCompare(t.name)), B = z.filter((e) => e.role === "admin").length, V = e?.network?.settings?.address, H = one.config.join_domain, U = z.find((e) => e.id === L)?.handle || "", W;
-	return W = e ? /* @__PURE__ */ T(C, { children: [
-		/* @__PURE__ */ w(g, { children: z.filter((e) => c[e.id] !== null).map((e) => {
-			let t = c[e.id] || e.role, n = !R || e.id === L || t === "admin" && B === 1 ? /* @__PURE__ */ w("span", {
+	let I = e?.user?.id, L = e?.user?.role === "admin", R = [...e?.network?.users || []].sort((e, t) => (t.id === I) - (e.id === I) || e.name.localeCompare(t.name)), z = R.filter((e) => e.role === "admin").length, B = one.config.join_domain, V = R.find((e) => e.id === I)?.handle || "", H;
+	return H = e ? /* @__PURE__ */ w(S, { children: [
+		/* @__PURE__ */ C(g, { children: R.filter((e) => c[e.id] !== null).map((e) => {
+			let t = c[e.id] || e.role, n = !L || e.id === I || t === "admin" && z === 1 ? /* @__PURE__ */ C("span", {
 				className: "text-sm text-muted-foreground",
-				children: k(t)
-			}) : /* @__PURE__ */ w(M, {
+				children: O(t)
+			}) : /* @__PURE__ */ C(j, {
 				user: e,
 				role: t,
-				change: (n) => n !== t && I(e, n)
+				change: (n) => n !== t && F(e, n)
 			});
-			return /* @__PURE__ */ w(_, {
-				leading: /* @__PURE__ */ w(i, {
+			return /* @__PURE__ */ C(_, {
+				leading: /* @__PURE__ */ C(i, {
 					id: e.id,
 					name: e.name,
 					size: 36
 				}),
-				title: `${e.name}${e.id === L ? " (you)" : ""}`,
+				title: `${e.name}${e.id === I ? " (you)" : ""}`,
 				sub: e.handle ? `@${e.handle}` : void 0,
 				trailing: n,
-				onClick: e.id === L && e.handle ? () => A() : void 0
+				onClick: e.id === I && e.handle ? () => k() : void 0
 			}, e.id);
 		}) }),
-		u && /* @__PURE__ */ w(y, { title: u }),
-		R && H && /* @__PURE__ */ w(x, {
-			className: "max-w-2xl",
-			title: "Add Someone",
-			children: /* @__PURE__ */ T("p", {
-				className: "text-sm text-muted-foreground",
-				children: [
-					"Anyone with a Google account at ",
-					H,
-					" joins ",
-					D,
-					" by signing in with Google",
-					V && /* @__PURE__ */ T(C, { children: [" at ", /* @__PURE__ */ w("b", { children: V.replace(/^https?:\/\//, "") })] }),
-					"."
-				]
-			})
+		u && /* @__PURE__ */ C(y, { title: u }),
+		L && B && /* @__PURE__ */ w("p", {
+			className: "max-w-2xl text-sm text-muted-foreground",
+			children: [
+				"Anyone else at ",
+				B,
+				" can sign in and ask."
+			]
 		})
-	] }) : o ? /* @__PURE__ */ w(y, {
+	] }) : o ? /* @__PURE__ */ C(y, {
 		title: o.title,
 		text: o.next,
 		action: {
 			label: "Try Again",
-			run: P
+			run: N
 		}
-	}) : /* @__PURE__ */ w(v, { rows: 3 }), /* @__PURE__ */ T(C, { children: [
-		/* @__PURE__ */ T("div", {
+	}) : /* @__PURE__ */ C(v, { rows: 3 }), /* @__PURE__ */ w(S, { children: [
+		/* @__PURE__ */ w("div", {
 			className: "flex max-w-2xl flex-col gap-4",
-			children: [/* @__PURE__ */ w(h, {
-				action: e && R && !H && /* @__PURE__ */ w(a, {
+			children: [/* @__PURE__ */ C(h, {
+				action: e && L && /* @__PURE__ */ C(a, {
 					onClick: () => p(),
 					children: "Add Someone"
 				}),
 				children: "Users"
-			}), W]
+			}), H]
 		}),
-		f.n > 0 && /* @__PURE__ */ w(N, {
+		f.n > 0 && /* @__PURE__ */ C(M, {
 			open: f.open,
-			setOpen: m
+			setOpen: m,
+			providers: !!e?.network?.settings?.sign_in_clients
 		}, `add${f.n}`),
-		b.n > 0 && /* @__PURE__ */ w(F, {
-			was: U,
+		b.n > 0 && /* @__PURE__ */ C(P, {
+			was: V,
 			open: b.open,
-			setOpen: j,
-			saved: P
+			setOpen: A,
+			saved: N
 		}, `handle${b.n}`)
 	] });
 }
-function M(t) {
+function j(t) {
 	let n = e(23), { user: r, role: i, change: m } = t, h = `${r.name}'s role`, g;
-	n[0] === i ? g = n[1] : (g = k(i), n[0] = i, n[1] = g);
+	n[0] === i ? g = n[1] : (g = O(i), n[0] = i, n[1] = g);
 	let _;
-	n[2] === Symbol.for("react.memo_cache_sentinel") ? (_ = /* @__PURE__ */ w(p, { name: "caret-up-down" }), n[2] = _) : _ = n[2];
+	n[2] === Symbol.for("react.memo_cache_sentinel") ? (_ = /* @__PURE__ */ C(p, { name: "caret-up-down" }), n[2] = _) : _ = n[2];
 	let v;
-	n[3] !== h || n[4] !== g ? (v = /* @__PURE__ */ w(f, {
+	n[3] !== h || n[4] !== g ? (v = /* @__PURE__ */ C(f, {
 		asChild: !0,
-		children: /* @__PURE__ */ T(a, {
+		children: /* @__PURE__ */ w(a, {
 			variant: "outline",
 			size: "sm",
 			"aria-label": h,
@@ -133,31 +126,31 @@ function M(t) {
 		})
 	}), n[3] = h, n[4] = g, n[5] = v) : v = n[5];
 	let y, b;
-	n[6] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ w(u, {
+	n[6] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ C(u, {
 		value: "admin",
 		children: "Admin"
-	}), b = /* @__PURE__ */ w(u, {
+	}), b = /* @__PURE__ */ C(u, {
 		value: "member",
 		children: "Member"
 	}), n[6] = y, n[7] = b) : (y = n[6], b = n[7]);
 	let x;
-	n[8] !== m || n[9] !== i ? (x = /* @__PURE__ */ T(l, {
+	n[8] !== m || n[9] !== i ? (x = /* @__PURE__ */ w(l, {
 		value: i,
 		onValueChange: m,
 		children: [y, b]
 	}), n[8] = m, n[9] = i, n[10] = x) : x = n[10];
 	let S;
-	n[11] === Symbol.for("react.memo_cache_sentinel") ? (S = /* @__PURE__ */ w(d, {}), n[11] = S) : S = n[11];
-	let C;
-	n[12] === m ? C = n[13] : (C = () => m(null), n[12] = m, n[13] = C);
+	n[11] === Symbol.for("react.memo_cache_sentinel") ? (S = /* @__PURE__ */ C(d, {}), n[11] = S) : S = n[11];
+	let T;
+	n[12] === m ? T = n[13] : (T = () => m(null), n[12] = m, n[13] = T);
 	let E;
-	n[14] !== C || n[15] !== r.name ? (E = /* @__PURE__ */ T(c, {
+	n[14] !== T || n[15] !== r.name ? (E = /* @__PURE__ */ w(c, {
 		variant: "destructive",
-		onSelect: C,
+		onSelect: T,
 		children: ["Remove ", r.name]
-	}), n[14] = C, n[15] = r.name, n[16] = E) : E = n[16];
+	}), n[14] = T, n[15] = r.name, n[16] = E) : E = n[16];
 	let D;
-	n[17] !== E || n[18] !== x ? (D = /* @__PURE__ */ T(s, {
+	n[17] !== E || n[18] !== x ? (D = /* @__PURE__ */ w(s, {
 		align: "end",
 		children: [
 			x,
@@ -165,78 +158,105 @@ function M(t) {
 			E
 		]
 	}), n[17] = E, n[18] = x, n[19] = D) : D = n[19];
-	let O;
-	return n[20] !== D || n[21] !== v ? (O = /* @__PURE__ */ T(o, { children: [v, D] }), n[20] = D, n[21] = v, n[22] = O) : O = n[22], O;
+	let k;
+	return n[20] !== D || n[21] !== v ? (k = /* @__PURE__ */ w(o, { children: [v, D] }), n[20] = D, n[21] = v, n[22] = k) : k = n[22], k;
 }
-function N(t) {
-	let r = e(20), { open: i, setOpen: o } = t, [s, c] = n(""), [l, u] = n(null), [d, f] = n(""), [p, h] = n(!1), g;
-	r[0] !== p || r[1] !== s ? (g = async function() {
-		let e = s.trim();
-		if (e && !p) {
-			h(!0), f("");
+function M(t) {
+	let r = e(25), { open: i, setOpen: o, providers: s } = t, [c, l] = n(""), [u, d] = n(""), [f, p] = n(null), [h, g] = n(""), [_, v] = n(!1), x;
+	r[0] !== _ || r[1] !== u || r[2] !== c ? (x = async function() {
+		let e = c.trim();
+		if (e && !_) {
+			v(!0), g("");
 			try {
-				let { link: t, until: n } = await E("POST", "/v1/devices/invite", { name: e });
-				one.tap("success"), u({
+				let { link: t, until: n } = await T("POST", "/v1/devices/invite", {
+					name: e,
+					...u.trim() ? { email: u.trim() } : {}
+				});
+				one.tap("success"), p({
 					who: e,
 					link: t,
+					email: u.trim(),
 					days: Math.max(1, Math.round((n - Date.now()) / 864e5))
 				});
 			} catch (e) {
-				f(O(e));
+				g(D(e));
 			}
-			h(!1);
+			v(!1);
 		}
-	}, r[0] = p, r[1] = s, r[2] = g) : g = r[2];
-	let _ = g, v = l ? `Send ${l.who} This Link` : "Add Someone", x;
-	r[3] !== p || r[4] !== l || r[5] !== _ || r[6] !== s || r[7] !== o ? (x = l ? /* @__PURE__ */ w(a, {
+	}, r[0] = _, r[1] = u, r[2] = c, r[3] = x) : x = r[3];
+	let S = x, E = f ? f.link ? `Send ${f.who} This Link` : `${f.who} Can Sign In` : "Add Someone", O;
+	r[4] !== _ || r[5] !== u || r[6] !== f || r[7] !== S || r[8] !== c || r[9] !== s || r[10] !== o ? (O = f ? /* @__PURE__ */ C(a, {
 		variant: "secondary",
 		size: "sm",
 		onClick: () => o(!1),
 		children: "Done"
-	}) : /* @__PURE__ */ w(a, {
+	}) : /* @__PURE__ */ C(a, {
 		size: "sm",
-		disabled: !s.trim() || p,
-		onClick: _,
-		children: "Make Link"
-	}), r[3] = p, r[4] = l, r[5] = _, r[6] = s, r[7] = o, r[8] = x) : x = r[8];
-	let S;
-	r[9] !== d || r[10] !== l || r[11] !== _ || r[12] !== s ? (S = l ? /* @__PURE__ */ w(P, {
-		link: l.link,
-		days: l.days
-	}) : /* @__PURE__ */ T("form", {
+		disabled: !c.trim() || s && !u.trim() || _,
+		onClick: S,
+		children: s ? "Invite" : "Make Link"
+	}), r[4] = _, r[5] = u, r[6] = f, r[7] = S, r[8] = c, r[9] = s, r[10] = o, r[11] = O) : O = r[11];
+	let k;
+	r[12] !== u || r[13] !== h || r[14] !== f || r[15] !== S || r[16] !== c || r[17] !== s ? (k = f ? f.link ? /* @__PURE__ */ C(N, {
+		link: f.link,
+		days: f.days
+	}) : /* @__PURE__ */ w("p", {
+		className: "p-4 text-sm text-muted-foreground",
+		children: [
+			"With ",
+			f.email,
+			", for ",
+			f.days,
+			" day",
+			f.days > 1 ? "s" : "",
+			"."
+		]
+	}) : /* @__PURE__ */ w("form", {
 		className: "flex flex-col gap-4 p-4",
-		onSubmit: (e) => (e.preventDefault(), _()),
-		children: [/* @__PURE__ */ w(m, {
-			autoFocus: !0,
-			value: s,
-			onChange: (e) => c(e.target.value),
-			placeholder: "Name",
-			"aria-label": "Name",
-			autoComplete: "off",
-			enterKeyHint: "done"
-		}), d && /* @__PURE__ */ w(y, { title: d })]
-	}), r[9] = d, r[10] = l, r[11] = _, r[12] = s, r[13] = S) : S = r[13];
-	let C;
-	return r[14] !== i || r[15] !== o || r[16] !== v || r[17] !== x || r[18] !== S ? (C = /* @__PURE__ */ w(b, {
+		onSubmit: (e) => (e.preventDefault(), S()),
+		children: [
+			/* @__PURE__ */ C(m, {
+				autoFocus: !0,
+				value: c,
+				onChange: (e) => l(e.target.value),
+				placeholder: "Name",
+				"aria-label": "Name",
+				autoComplete: "off",
+				enterKeyHint: "done"
+			}),
+			s && /* @__PURE__ */ C(m, {
+				type: "email",
+				value: u,
+				onChange: (e) => d(e.target.value),
+				placeholder: "Email",
+				"aria-label": "Email",
+				autoComplete: "off",
+				enterKeyHint: "done"
+			}),
+			h && /* @__PURE__ */ C(y, { title: h })
+		]
+	}), r[12] = u, r[13] = h, r[14] = f, r[15] = S, r[16] = c, r[17] = s, r[18] = k) : k = r[18];
+	let A;
+	return r[19] !== i || r[20] !== o || r[21] !== E || r[22] !== O || r[23] !== k ? (A = /* @__PURE__ */ C(b, {
 		open: i,
 		onOpenChange: o,
-		title: v,
-		action: x,
-		children: S
-	}), r[14] = i, r[15] = o, r[16] = v, r[17] = x, r[18] = S, r[19] = C) : C = r[19], C;
+		title: E,
+		action: O,
+		children: k
+	}), r[19] = i, r[20] = o, r[21] = E, r[22] = O, r[23] = k, r[24] = A) : A = r[24], A;
 }
-function P(t) {
+function N(t) {
 	let r = e(19), { link: i, days: o } = t, [s, c] = n(!1), l;
 	r[0] === i ? l = r[1] : (l = async function() {
 		await one.copy(i), one.tap("success"), c(!0), setTimeout(() => c(!1), 1500);
 	}, r[0] = i, r[1] = l);
 	let u = l, d;
-	r[2] === i ? d = r[3] : (d = /* @__PURE__ */ w("p", {
+	r[2] === i ? d = r[3] : (d = /* @__PURE__ */ C("p", {
 		className: "truncate font-mono text-sm select-all",
 		children: i
 	}), r[2] = i, r[3] = d);
 	let f = o > 1 ? "s" : "", m;
-	r[4] !== o || r[5] !== f ? (m = /* @__PURE__ */ T("p", {
+	r[4] !== o || r[5] !== f ? (m = /* @__PURE__ */ w("p", {
 		className: "text-sm text-muted-foreground",
 		children: [
 			"It works once, for ",
@@ -247,24 +267,24 @@ function P(t) {
 		]
 	}), r[4] = o, r[5] = f, r[6] = m) : m = r[6];
 	let h;
-	r[7] !== d || r[8] !== m ? (h = /* @__PURE__ */ T("div", {
+	r[7] !== d || r[8] !== m ? (h = /* @__PURE__ */ w("div", {
 		className: "min-w-0",
 		children: [d, m]
 	}), r[7] = d, r[8] = m, r[9] = h) : h = r[9];
 	let g = s ? "check" : "copy", _;
-	r[10] === g ? _ = r[11] : (_ = /* @__PURE__ */ w(p, { name: g }), r[10] = g, r[11] = _);
+	r[10] === g ? _ = r[11] : (_ = /* @__PURE__ */ C(p, { name: g }), r[10] = g, r[11] = _);
 	let v = s ? "Copied" : "Copy Link", y;
-	r[12] !== u || r[13] !== _ || r[14] !== v ? (y = /* @__PURE__ */ T(a, {
+	r[12] !== u || r[13] !== _ || r[14] !== v ? (y = /* @__PURE__ */ w(a, {
 		onClick: u,
 		children: [_, v]
 	}), r[12] = u, r[13] = _, r[14] = v, r[15] = y) : y = r[15];
 	let b;
-	return r[16] !== h || r[17] !== y ? (b = /* @__PURE__ */ T("div", {
+	return r[16] !== h || r[17] !== y ? (b = /* @__PURE__ */ w("div", {
 		className: "flex flex-col gap-4 p-4",
 		children: [h, y]
 	}), r[16] = h, r[17] = y, r[18] = b) : b = r[18], b;
 }
-function F(t) {
+function P(t) {
 	let r = e(30), { was: i, open: o, setOpen: s, saved: c } = t, [l, u] = n(i), [d, f] = n(""), [p, h] = n(!1), g;
 	r[0] !== l || r[1] !== i ? (g = /^[a-z0-9]+(-[a-z0-9]+)*$/.test(l) && l.length <= 39 && l !== i, r[0] = l, r[1] = i, r[2] = g) : g = r[2];
 	let _ = g, v;
@@ -272,66 +292,66 @@ function F(t) {
 		if (_ && !p) {
 			h(!0), f("");
 			try {
-				await E("POST", "/v1/groups/handle", { handle: l }), s(!1), one.tap("success"), c();
+				await T("POST", "/v1/groups/handle", { handle: l }), s(!1), one.tap("success"), c();
 			} catch (e) {
-				f(O(e)), h(!1);
+				f(D(e)), h(!1);
 			}
 		}
 	}, r[3] = p, r[4] = _, r[5] = c, r[6] = s, r[7] = l, r[8] = v) : v = r[8];
-	let x = v, S = !_ || p, C;
-	r[9] !== x || r[10] !== S ? (C = /* @__PURE__ */ w(a, {
+	let x = v, S = !_ || p, E;
+	r[9] !== x || r[10] !== S ? (E = /* @__PURE__ */ C(a, {
 		size: "sm",
 		disabled: S,
 		onClick: x,
 		children: "Save"
-	}), r[9] = x, r[10] = S, r[11] = C) : C = r[11];
-	let D;
-	r[12] === x ? D = r[13] : (D = (e) => (e.preventDefault(), x()), r[12] = x, r[13] = D);
-	let k;
-	r[14] === Symbol.for("react.memo_cache_sentinel") ? (k = /* @__PURE__ */ w("span", {
+	}), r[9] = x, r[10] = S, r[11] = E) : E = r[11];
+	let O;
+	r[12] === x ? O = r[13] : (O = (e) => (e.preventDefault(), x()), r[12] = x, r[13] = O);
+	let A;
+	r[14] === Symbol.for("react.memo_cache_sentinel") ? (A = /* @__PURE__ */ C("span", {
 		className: "text-muted-foreground",
 		children: "@"
-	}), r[14] = k) : k = r[14];
+	}), r[14] = A) : A = r[14];
 	let j;
 	r[15] === Symbol.for("react.memo_cache_sentinel") ? (j = (e) => u(e.target.value.toLowerCase().replace(/[\s_]/g, "-")), r[15] = j) : j = r[15];
 	let M;
-	r[16] === l ? M = r[17] : (M = /* @__PURE__ */ T("div", {
+	r[16] === l ? M = r[17] : (M = /* @__PURE__ */ w("div", {
 		className: "flex items-center gap-2",
-		children: [k, /* @__PURE__ */ w(m, {
+		children: [A, /* @__PURE__ */ C(m, {
 			autoFocus: !0,
 			value: l,
 			onChange: j,
 			"aria-label": "Handle",
 			autoComplete: "off",
 			enterKeyHint: "done",
-			...A
+			...k
 		})]
 	}), r[16] = l, r[17] = M);
 	let N;
-	r[18] === Symbol.for("react.memo_cache_sentinel") ? (N = /* @__PURE__ */ w("p", {
+	r[18] === Symbol.for("react.memo_cache_sentinel") ? (N = /* @__PURE__ */ C("p", {
 		className: "text-sm text-muted-foreground",
 		children: "Lowercase letters, numbers and hyphens. Your Repos addresses change with it."
 	}), r[18] = N) : N = r[18];
 	let P;
-	r[19] === d ? P = r[20] : (P = d && /* @__PURE__ */ w(y, { title: d }), r[19] = d, r[20] = P);
+	r[19] === d ? P = r[20] : (P = d && /* @__PURE__ */ C(y, { title: d }), r[19] = d, r[20] = P);
 	let F;
-	r[21] !== P || r[22] !== D || r[23] !== M ? (F = /* @__PURE__ */ T("form", {
+	r[21] !== P || r[22] !== O || r[23] !== M ? (F = /* @__PURE__ */ w("form", {
 		className: "flex flex-col gap-4 p-4",
-		onSubmit: D,
+		onSubmit: O,
 		children: [
 			M,
 			N,
 			P
 		]
-	}), r[21] = P, r[22] = D, r[23] = M, r[24] = F) : F = r[24];
+	}), r[21] = P, r[22] = O, r[23] = M, r[24] = F) : F = r[24];
 	let I;
-	return r[25] !== o || r[26] !== s || r[27] !== F || r[28] !== C ? (I = /* @__PURE__ */ w(b, {
+	return r[25] !== o || r[26] !== s || r[27] !== F || r[28] !== E ? (I = /* @__PURE__ */ C(b, {
 		open: o,
 		onOpenChange: s,
 		title: "Handle",
-		action: C,
+		action: E,
 		children: F
-	}), r[25] = o, r[26] = s, r[27] = F, r[28] = C, r[29] = I) : I = r[29], I;
+	}), r[25] = o, r[26] = s, r[27] = F, r[28] = E, r[29] = I) : I = r[29], I;
 }
-r(document.getElementById("root")).render(/* @__PURE__ */ w(j, {}));
+r(document.getElementById("root")).render(/* @__PURE__ */ C(A, {}));
 </script>
