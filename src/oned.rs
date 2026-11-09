@@ -503,7 +503,8 @@ fn start(network: &crate::services::endpoint::Network, name: &str, declared: Opt
         Some(d) => std::fs::write(folder.join(crate::services::endpoint::DECLARED), serde_json::to_vec(d)?)?,
         None => drop(std::fs::remove_file(folder.join(crate::services::endpoint::DECLARED))),
     }
-    Ok(command(&[name])?.stdin(std::process::Stdio::null()).spawn()?)
+    // Its stdin is a pipe only this keeps the end of: the part ends when this does, however (`endpoint::run`).
+    Ok(command(&[name])?.stdin(std::process::Stdio::piped()).spawn()?)
 }
 
 /// Stops a part: asked, then made to, if it hasn't in ten seconds.

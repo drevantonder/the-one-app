@@ -660,8 +660,8 @@ async fn blobs(s: &Service, headers: &HeaderMap, method: &'static str, path: &st
 }
 
 /// Whether this part should stop: this program's binary was replaced, by an update, so the new oned starts it again;
-/// or the oned that started it is gone.
-fn stop_check(parent: u32) -> Result<impl Fn() -> bool> {
+/// or asked to.
+fn stop_check() -> Result<impl Fn() -> bool> {
     use std::os::unix::fs::MetadataExt;
     // Asked to stop (oned switching it off): it stops what it started first, on a Mac too, where nothing else would.
     extern "C" fn asked(_: libc::c_int) {
@@ -671,10 +671,40 @@ fn stop_check(parent: u32) -> Result<impl Fn() -> bool> {
     unsafe { libc::signal(libc::SIGTERM, asked as *const () as libc::sighandler_t) };
     let exe = std::env::current_exe()?.canonicalize()?;
     let ino = std::fs::metadata(&exe)?.ino();
-    Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino) || std::os::unix::process::parent_id() != parent)
+    Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino))
 }
 
 static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The process id of this part's running program, for `die_with_oned`; 0 when none is.
+static PROGRAM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Ends this part, and its program asked to stop, the moment the oned that started it is gone, however it went: oned
+/// keeps the other end of the pipe that is this part's stdin, and closes it by dying. A thread of its own does it, so a
+/// part whose runtime or loops are stuck (a Mac out of memory) still goes, and with it its lock; polling the parent
+/// from those loops didn't. Linux ends the program with it (`PR_SET_PDEATHSIG`); a Mac has nothing like that.
+fn die_with_oned() -> Result<()> {
+    use std::io::Read;
+    use std::os::fd::{AsFd, AsRawFd};
+    // The copy is closed on exec: what this part starts gets /dev/null, not oned's pipe.
+    let mut pipe = std::fs::File::from(std::io::stdin().as_fd().try_clone_to_owned()?);
+    let null = std::fs::File::open("/dev/null")?;
+    // SAFETY: two open descriptors this process owns.
+    ensure!(unsafe { libc::dup2(null.as_raw_fd(), 0) } == 0, "{}", std::io::Error::last_os_error());
+    std::thread::spawn(move || {
+        while pipe.read(&mut [0u8; 64]).is_ok_and(|n| n > 0) {}
+        let program = PROGRAM.load(SeqCst);
+        // SAFETY: a signal to this part's own child, named in `PROGRAM` only while it hasn't been reaped; and an exit
+        // that runs nothing, which a stuck process might wait on.
+        unsafe {
+            if program > 0 {
+                libc::kill(program, libc::SIGTERM);
+            }
+            libc::_exit(1)
+        }
+    });
+    Ok(())
+}
 
 /// `oned <name>`: the service `name` as a part of this device's oned, which started it, until oned stops or this
 /// program is replaced: its program (`oned::program`), started here and again whenever it stops, told where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`,
@@ -687,15 +717,12 @@ pub fn run(name: &str) -> Result<()> {
     let _ = tracing_subscriber::fmt().with_writer(crate::logs::Tee).with_env_filter(filter).try_init();
     let dir = folder(name);
     std::fs::create_dir_all(&dir)?;
-    let parent = std::os::unix::process::parent_id();
+    die_with_oned()?;
     let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("lock"))?;
-    // SAFETY: a plain flock on a file this keeps open: held until this process exits. While another holds it, this
-    // waits, unless the oned that started this one goes meanwhile.
-    while unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        ensure!(std::os::unix::process::parent_id() == parent, "{name}: the oned that started it stopped");
-        std::thread::sleep(Duration::from_millis(500));
-    }
-    let stop = stop_check(parent)?;
+    // SAFETY: a plain flock on a file this keeps open: held until this process exits, however it does. While another
+    // holds it, this waits; the oned that started this one going ends it (`die_with_oned`), even here.
+    ensure!(unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) } == 0, "{name}: {}", std::io::Error::last_os_error());
+    let stop = stop_check()?;
     let program = crate::oned::program(name);
     #[cfg(target_os = "macos")]
     let program = match crate::oned::helper(name) {
@@ -725,6 +752,16 @@ enum Running {
 }
 
 impl Running {
+    /// Its program's process id, if it is one of this process's children.
+    fn pid(&self) -> i32 {
+        match self {
+            Running::Child(child) => child.id() as i32,
+            Running::Unit(_) => 0,
+            #[cfg(target_os = "macos")]
+            Running::Own(pid) => *pid,
+        }
+    }
+
     fn done(&mut self) -> Result<Option<String>> {
         Ok(match self {
             Running::Child(child) => child.try_wait()?.map(|s| s.to_string()),
@@ -898,6 +935,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
         let mut running = match begin(name, program, data, at, service) {
             Ok(r) => {
                 let _ = std::fs::remove_file(&problem);
+                PROGRAM.store(r.pid(), SeqCst);
                 r
             }
             Err(err) => {
@@ -914,6 +952,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
         };
         loop {
             if let Some(status) = running.done()? {
+                PROGRAM.store(0, SeqCst);
                 eprintln!("{} stopped ({status}): starting it again", program.display());
                 std::thread::sleep(Duration::from_secs(2));
                 break;
@@ -926,6 +965,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
             let renewed = built() != started;
             if stop() || renewed {
                 running.end();
+                PROGRAM.store(0, SeqCst);
                 if renewed {
                     eprintln!("{}: a new build is there, so it starts again", program.display());
                 }
