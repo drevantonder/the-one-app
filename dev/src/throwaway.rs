@@ -74,6 +74,7 @@ pub fn run(rest: &[String]) -> Result<()> {
             return Err(std::process::Command::new(this).args(std::env::args_os().skip(1)).exec().into());
         }
     }
+    let starting = network::exclusive(&dir)?;
     network::choose(&dir, build.as_deref(), ui.as_deref())?;
     match rest.first().map(String::as_str) {
         Some("stop") => {
@@ -104,15 +105,16 @@ pub fn run(rest: &[String]) -> Result<()> {
     if rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
         return cloudflare_node(&dir);
     }
+    if rest.first().map(String::as_str) == Some("restart") {
+        start(&dir)?;
+        return Ok(());
+    }
+    drop(starting);
     match rest.first().map(String::as_str) {
         None => return say_where(&dir, &addr),
         Some("client") => {
             let settings = one::cloudflare::Settings::load_in(&dir)?;
             return clients::client(&dir, &checkout, &settings, &rest[1..]);
-        }
-        Some("restart") => {
-            start(&dir)?;
-            return Ok(());
         }
         Some("sign-in") => return sign_in(&dir, &addr),
         Some("git") => return git(&dir, &addr, &rest[1..]),
@@ -189,8 +191,10 @@ fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     let helper = bin.join(one::git_wire::helper());
-    let _ = std::fs::remove_file(&helper);
-    std::os::unix::fs::symlink(network::program(dir)?, &helper)?;
+    // Replaced in one step: another `git` here at once has this one on its PATH while it's linked.
+    let linking = bin.join(format!("{}.{}", one::git_wire::helper(), std::process::id()));
+    std::os::unix::fs::symlink(network::program(dir)?, &linking)?;
+    std::fs::rename(&linking, &helper)?;
     let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())))?;
     let config: usize = std::env::var("GIT_CONFIG_COUNT").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
     let (key, value) = one::git_wire::instead_of(&address);

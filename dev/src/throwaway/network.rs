@@ -14,6 +14,18 @@ use crate::agent;
 
 const BUILD: &str = "build";
 
+/// Holds the throwaway network's folder locked until the returned file is dropped, or the process ends: starting it, stopping it
+/// and what they write are one command's at a time, as starting a new one deletes what another command just wrote, and
+/// two starting it at once start two. A command that finds it running again waits no longer than that. The folder itself is
+/// locked, as stopping deletes what's in it but never it.
+pub(crate) fn exclusive(dir: &Path) -> Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
+    let file = std::fs::File::open(dir).with_context(|| format!("locking {}", dir.display()))?;
+    anyhow::ensure!(unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0, "locking {}: {}", dir.display(), std::io::Error::last_os_error());
+    Ok(file)
+}
+
 /// Says which program the throwaway network in `dir` runs, and which folder its UI is read from, where they're given.
 pub(crate) fn choose(dir: &Path, build: Option<&Path>, ui: Option<&Path>) -> Result<()> {
     std::fs::create_dir_all(dir)?;
@@ -172,7 +184,8 @@ fn create(dir: &Path) -> Result<String> {
 /// `log` in its folder. A client's browser is `client`: starting the network again leaves it running.
 pub(crate) fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, client: bool) -> Result<u32> {
     use std::os::unix::process::CommandExt;
-    let log = std::fs::File::create(dir.join(log))?;
+    let log_path = dir.join(log);
+    let log = std::fs::File::create(&log_path).with_context(|| format!("making {}", log_path.display()))?;
     let child = command.env(one::config::env("HOME"), dir).stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn().with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
     one::mode::record(dir, child.id(), client)?;
     Ok(child.id())
@@ -195,8 +208,9 @@ pub(crate) fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     std::os::unix::process::CommandExt::arg0(&mut command, one::oned::name());
     Throwaway::tell(&mut command, dir, &addr);
     let node_program = spawn(dir, &mut command, "node.log", false)?;
-    std::fs::write(dir.join("pid"), node_program.to_string())?;
-    std::fs::write(dir.join("addr"), &addr)?;
+    for (name, text) in [("pid", node_program.to_string()), ("addr", addr.clone())] {
+        std::fs::write(dir.join(name), text).with_context(|| format!("writing {}", dir.join(name).display()))?;
+    }
     let node = node_at(dir, &addr);
     wait_for(|| node.get("/v1/state").is_ok(), node_program, &dir.join("node.log"))?;
     Ok(addr)
