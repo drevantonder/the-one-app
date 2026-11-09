@@ -13,10 +13,9 @@ html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
 .screen-layer { position: absolute; inset: 0; }
 .screen-layer.coming { opacity: 0; pointer-events: none; }
 .screen-layer[data-bar] { top: 2.75rem; }
-/* A screen with a large title reaches up behind the bar, that title's middle (--title-middle, by its top padding and the
-   text size `look` gives a computer) on the bar's. */
+/* A screen with a large title reaches up behind the bar, that title's middle (--title-middle, by its top padding and
+   text size) on the bar's. */
 :root { --title-middle: 2.125rem; }
-@media (pointer: fine) { :root { --title-middle: 1.625rem; } }
 [data-slot=sidebar-inset]:not([data-banner]) .screen-layer[data-large]:not([data-bar]) { top: calc(var(--shell-bar) / -2 - var(--title-middle)); }
 /* An app's tile growing out of its icon (moves.js), over the bar and under what opens over the window. */
 .screen-tile { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
