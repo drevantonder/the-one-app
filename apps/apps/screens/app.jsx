@@ -2,16 +2,16 @@
 // app's link or a notification opens it.
 import { createRoot } from "react-dom/client"
 import { ListSkeleton } from "@one/ui"
-import { Failed, useList } from "../lib/store.jsx"
+import { Failed, useApps } from "../lib/store.jsx"
 import { AppPage } from "../lib/app-page.jsx"
 
 function App() {
-  const list = useList()
+  const apps = useApps()
   return (
     <div className="p-4">
-      {list.data
-        ? <AppPage bar name={one.params.app} list={list.data} reloadList={list.reload} onOpen={(app) => one.open("app", { app })} onGone={() => one.close()} />
-        : list.error ? <Failed error={list.error} retry={list.reload} /> : <ListSkeleton rows={3} />}
+      {apps.data
+        ? <AppPage bar name={one.params.app} apps={apps} onOpen={(app) => one.open("app", { app })} onGone={() => one.close()} />
+        : apps.error ? <Failed error={apps.error} retry={apps.reload} /> : <ListSkeleton rows={3} />}
     </div>
   )
 }

@@ -2,8 +2,8 @@
 // isn't (app.jsx): its icon and name, where it runs, its schedules, what it works with, its source, and, for its owners,
 // its activity and deleting it.
 import { useEffect, useRef, useState } from "react"
-import { AppIcon, Button, Empty, List, ListRow, Problem, Switch } from "@one/ui"
-import { Section, said, useCall } from "./store.jsx"
+import { AppIcon, Button, Empty, Icon, List, ListRow, Problem, Switch } from "@one/ui"
+import { Section, onAPage, openApp, said, useCall } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
 const ago = (t) => (one.ago(t) === "now" ? "just now" : one.ago(t) + " ago")
@@ -12,13 +12,11 @@ function soon(ms) {
   return m < 1 ? "now" : m < 60 ? "in " + m + "m" : m < 1440 ? "in " + Math.round(m / 60) + "h" : "in " + Math.round(m / 1440) + "d"
 }
 
-export const onAPage = (a, places) => a.added.some((id) => places.some((p) => p.id === id))
-
-/// `list` is what the App Store's list call gave; `onOpen(name)` opens another app's page (a row of Works With),
-/// `onGone()` leaves this one once it's erased, and `reloadList` asks for the list again. `bar`: this page is a screen
-/// of its own, whose bar shows the app's name once the heading scrolls away.
-export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false }) {
-  const { apps, places } = list
+/// `apps` is the App Store's list and adding (`useApps`); `onOpen(name)` opens another app's page (a row of Works With),
+/// `onGone()` leaves this one once it's erased. `bar`: this page is a screen of its own, whose bar shows the app's name
+/// once the heading scrolls away.
+export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
+  const { apps, places, admin } = store.data
   const a = apps.find((x) => x.name === name)
   const code = useCall("code", { app: name })
   const health = useCall("_health", { app: name })
@@ -29,7 +27,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
   const heading = useRef(null)
 
   const refresh = () => {
-    reloadList()
+    store.reload()
     code.reload()
     health.reload()
     where.reload()
@@ -59,7 +57,6 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
     return <Empty action={{ label: "Back to the App Store", run: () => one.open("main") }}>This app isn't here. It may have been erased, or the link is old.</Empty>
   }
 
-  const add = () => one.open("add", { app: name }, undefined, { sheet: true }).then(refresh)
   const editSource = () => one.open("source", { app: name }, undefined, { sheet: true }).then(refresh)
   const retire = async (tool) => {
     if (tool === "restore") return run("restore", () => one.call("restore", { app: name, confirm: true }))
@@ -77,7 +74,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
   const chooseDevice = (scope) => one.open("devices", { schedules: name, scope }, "settings")
 
   const link = (n) => apps.find((x) => x.name === n) || { name: n, title: n }
-  const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : [a.tagline, !a.screens && "Tools\u00a0only"].filter(Boolean).join(" · ")
+  const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : [a.tagline, !a.screens && "Used by your AI"].filter(Boolean).join(" · ")
 
   // Schedules run only on a device chosen for the app's schedules: one that's on with none says so, with the fix.
   // One a deploy removed no longer runs: it isn't the app's any more.
@@ -100,10 +97,33 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
   }
 
   const w = where.data
-  const move = () => one.open("add", { app: name }, undefined, { sheet: true }).then(refresh)
+  const nodeName = (n) => (n === "cloudflare" ? "Cloudflare" : n)
+  // A node to run its service on, from `at` (the button pressed).
+  const move = async (at) => {
+    const running = w.runs_on.find((r) => r.name)?.name
+    const i = await one.menu(w.nodes.map((n) => ({ title: nodeName(n), checked: n === running })), at)
+    if (i != null && w.nodes[i] !== running) run("move", () => one.call("move", { app: name, node: w.nodes[i] }))
+  }
   const owner = a.mine && a.deployed && !a.deleted
   const busyAny = !!health.data && !!(health.data.activity?.length || health.data.insights?.errors?.length || health.data.insights?.usage?.length || health.data.insights?.cost?.length)
   const repo = a.source && /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(a.source)?.[2]
+
+  const on = onAPage(a, places)
+  const offered = places.filter((p) => p.may && !a.added.includes(p.id) && (on || p !== places[0]))
+  const addTo = async (e) => {
+    const i = await one.menu(offered.map((p) => ({ title: p.name })), e.currentTarget)
+    if (i != null) run("add", () => store.add(a, offered[i]))
+  }
+  const more = [
+    ...places.filter((p) => p.may && a.added.includes(p.id)).map((p) => ({ title: `Remove from ${p.name}`, run: () => run("remove", () => one.call("_remove", { app: name, scope: p.scope })) })),
+    ...(owner ? [{ title: "Delete App", danger: true, section: true, run: () => retire("delete") }] : []),
+    ...(a.mine && a.deleted ? [{ title: "Erase App", danger: true, run: () => retire("erase") }] : []),
+  ]
+  const showMore = async (e) => {
+    const i = await one.menu(more, e.currentTarget)
+    if (i != null) more[i].run()
+  }
+  const adds = a.deployed || admin
 
   return (
     <div className="flex flex-col gap-6">
@@ -113,10 +133,14 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
           <div className="flex min-w-0 flex-1 flex-col">
             <h1 ref={heading} className="text-2xl leading-tight font-semibold">{a.title}</h1>
             {tag && <p className="truncate text-muted-foreground">{tag}</p>}
-            <div className="mt-auto pt-2">
+            <div className="mt-auto flex items-center gap-2 pt-2">
               {a.deleted
-                ? a.mine && <Button variant="secondary" size="sm" disabled={busy === "restore"} onClick={() => retire("restore")}>Restore</Button>
-                : <Button variant="secondary" size="sm" onClick={add}>{onAPage(a, places) ? "Manage" : "Add to…"}</Button>}
+                ? a.mine && <Button size="sm" disabled={busy === "restore"} onClick={() => retire("restore")}>Restore</Button>
+                : on
+                  ? a.opens ? <Button size="sm" onClick={() => openApp(a, places)}>Open</Button> : <span className="text-sm text-muted-foreground">Added</span>
+                  : adds ? <Button size="sm" onClick={() => run("add", () => store.add(a))}>Add</Button> : <span className="text-sm text-muted-foreground">Ask an admin to add it first</span>}
+              {!a.deleted && adds && offered.length > 0 && <Button variant="secondary" size="sm" onClick={addTo}>Add to…</Button>}
+              {more.length > 0 && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={showMore}><Icon name="dots-three" className="size-5" /></Button>}
             </div>
           </div>
         </div>
@@ -125,7 +149,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
 
       {error && <Problem title={error} />}
 
-      {w?.problem && <Problem warn title={w.problem.title} text={w.problem.text} action={w.problem.move ? { label: "Move", run: move } : undefined} />}
+      {w?.problem && <Problem warn title={w.problem.title} text={w.problem.text} action={w.problem.move ? { label: "Move", run: () => move() } : undefined} />}
       {w && w.runs_on.length > 0 && (
         <Section title="Runs On">
           <List>
@@ -134,7 +158,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
                 key={r.node + r.scope}
                 title={r.name || "A removed node"}
                 sub={r.name && (!r.online ? "Off" : r.problem)}
-                trailing={w.nodes.length > 0 && <Button size="sm" variant="outline" onClick={move}>Move</Button>}
+                trailing={w.nodes.length > 0 && <Button size="sm" variant="outline" onClick={(e) => move(e.currentTarget)}>Move</Button>}
               />
             ))}
           </List>
@@ -194,13 +218,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
         </div>
       )}
 
-      {(busyAny || owner || (a.mine && a.deleted)) && (
-        <div className="flex flex-col items-start gap-4">
-          {busyAny && <List><ListRow title="Activity" onClick={() => one.open("activity", { app: a.name })} /></List>}
-          {owner && <Button variant="destructive" size="sm" disabled={busy === "delete"} onClick={() => retire("delete")}>Delete App</Button>}
-          {a.mine && a.deleted && <Button variant="destructive" size="sm" disabled={busy === "erase"} onClick={() => retire("erase")}>Erase App</Button>}
-        </div>
-      )}
+      {busyAny && <List><ListRow title="Activity" onClick={() => one.open("activity", { app: a.name })} /></List>}
 
       <p className="text-center text-sm text-muted-foreground">
         Made by {a.owner_name}

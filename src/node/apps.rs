@@ -118,7 +118,7 @@ impl Node {
     /// title and icon, and for one built in, the bundle this release has of it; for those added for them, what it
     /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the network hasn't
     /// added yet, with no deploys, each as its own code describes it. Every app that says what it is has `offers` (a
-    /// `screens` page or widget, `accounts`), and, with a service, `nodes`: the names of the viewer's own nodes it can
+    /// main screen it `opens` to, `screens`: that or a widget, `accounts`), and, with a service, `nodes`: the names of the viewer's own nodes it can
     /// run on, and `cloudflare` for an admin when it's built for that.
     pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
@@ -167,8 +167,10 @@ impl Node {
             let described = self.0.apps.describe_any(&name).await;
             if let Ok(Value::Object(d)) = described {
                 let described = Value::Object(d.clone());
+                let opens = d["screens"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == "main"));
                 info["offers"] = json!({
-                    "screens": d["screens"].as_array().is_some_and(|s| s.iter().any(|s| s["name"] == "main")) || d["widgets"].as_array().is_some_and(|w| !w.is_empty()),
+                    "opens": opens,
+                    "screens": opens || d["widgets"].as_array().is_some_and(|w| !w.is_empty()),
                     "accounts": d["tools"].as_array().is_some_and(|o| o.iter().any(|o| o["accounts"] == true)),
                 });
                 if let Some(nodes) = self.nodes_for(viewer, &described) {
@@ -334,13 +336,20 @@ impl Node {
         }
         // Each one's title, services, and the nodes of the caller's they can run on.
         let mut services = Vec::new();
-        for name in &wanted {
+        let mut widget = None;
+        for (n, name) in wanted.iter().enumerate() {
             let nodes = match self.0.apps.describe_any(name).await {
-                Ok(described) => self.nodes_for(caller, &described),
+                Ok(described) => {
+                    if n == 0 {
+                        widget = described["widgets"][0]["name"].as_str().map(str::to_string);
+                    }
+                    self.nodes_for(caller, &described)
+                }
                 Err(_) => None,
             };
             services.push((self.title(name).await, self.uses(name).await.1, nodes));
         }
+        let arranged = self.arrangements(&caller.user);
         self.with(|i| {
             let m = i.r.db();
             let named = scope_name(i, &scope.to_string())?;
@@ -382,6 +391,17 @@ impl Node {
                     if let Some(to) = to.filter(|_| !running.contains(&to_key.unwrap_or_default())) {
                         out.push((Scope::Global, to));
                     }
+                }
+            }
+            // Newly added, its first widget goes on that page for whoever added it, unless they have one of it already.
+            let own = Scope::User(caller.user.clone());
+            if let (true, false, Some(widget), true) = (added, here.iter().any(|n| n == app), &widget, i.r.holds(&own)) {
+                let page = if *scope == own { "user".to_string() } else { scope.to_string() };
+                let was = arranged.get(&page).cloned().unwrap_or(Value::Null);
+                let mut items = was["items"].as_array().cloned().unwrap_or_default();
+                if !items.iter().any(|item| item["app"] == app && item["widget"].is_string()) {
+                    items.push(json!({ "app": app, "widget": widget, "id": new_id() }));
+                    out.push((own, content::arrange(&page, json!(items), was["hidden"].clone(), was["pages"].clone())));
                 }
             }
             Ok(out)

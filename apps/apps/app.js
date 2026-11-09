@@ -6,7 +6,6 @@
 // deployed (`one deploy apps/apps`), which is committed because a release ships the app as it is.
 import mainHtml from "./dist/main.html" with { type: "text" };
 import appHtml from "./dist/app.html" with { type: "text" };
-import addHtml from "./dist/add.html" with { type: "text" };
 import sourceHtml from "./dist/source.html" with { type: "text" };
 import activityHtml from "./dist/activity.html" with { type: "text" };
 import codeHtml from "./dist/code.html" with { type: "text" };
@@ -106,7 +105,7 @@ async function listed(ctx, { full, gone }) {
       from: a.from || null, forks: a.forks || [], deploys: a.deploys, added: a.added || [],
       added_names: (a.added || []).map(name), uses: a.uses || { apps: [], services: [] }, service: a.service || null, runs_on: a.runs_on || [],
       advanced: !!a.advanced, built_in: !!a.built_in, deployed, up_to_date: a.built_in && deployed ? a.bundle === a.built_in : null,
-      source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: !!a.offers?.screens, keeps_accounts: !!a.offers?.accounts,
+      source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: !!a.offers?.screens, opens: !!a.offers?.opens, keeps_accounts: !!a.offers?.accounts,
     };
   });
   apps.sort((a, b) => a.advanced - b.advanced || a.title.localeCompare(b.title));
@@ -169,11 +168,12 @@ export default {
     _add: {
       title: "Add an app in a place (for the screens)",
       reads: false,
-      description: "For the screens: add an app in a place, as the core's add does, on node.",
-      input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput, node: NODE } },
+      description: "For the screens: add an app in a place, as the core's add does, on the node it already runs on or else the first it can.",
+      input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       output: { type: "null" },
-      async run(ctx, { app, scope, node }) {
-        ctx.add(app, placeOf(ctx, scope), true, node);
+      async run(ctx, { app, scope }) {
+        const w = where(await find(ctx, app));
+        ctx.add(app, placeOf(ctx, scope), true, w?.runs_on.find((r) => r.name)?.name || w?.nodes[0]);
       },
     },
     move: {
@@ -350,7 +350,6 @@ export default {
   screens: {
     main: { title: "App Store", html: mainHtml },
     app: { title: "App", html: appHtml },
-    add: { title: "Add to…", html: addHtml },
     source: { title: "Source Link", html: sourceHtml },
     activity: { title: "Activity", html: activityHtml },
     code: { title: "Code", html: codeHtml },

@@ -95,8 +95,8 @@ function useWidth<T extends HTMLElement>() {
   return [ref, width] as const
 }
 
-/// A list and what's open from it: beside it where there's room (`wide`, its own width, not the window's), else in a
-/// sheet that slides up over it. `detail` is what's open, or nothing; `onClose` is told when the sheet is closed.
+/// A list and what's open from it: the list has the room until something's open, then that's beside it where there's
+/// room (`wide`, its own width, not the window's), else in a sheet that slides up over it. `detail` is what's open, or nothing; `onClose` is told when the sheet is closed.
 function Split({ list, detail, title, onClose, wide = 720, className }: {
   list: React.ReactNode
   detail?: React.ReactNode
@@ -113,11 +113,11 @@ function Split({ list, detail, title, onClose, wide = 720, className }: {
       ref={ref}
       data-slot="split"
       className={cn("grid items-start gap-6", className)}
-      style={{ gridTemplateColumns: beside ? "minmax(0, 26rem) minmax(0, 1fr)" : "minmax(0, 1fr)" }}
+      style={{ gridTemplateColumns: beside && detail ? "minmax(0, 26rem) minmax(0, 1fr)" : "minmax(0, 1fr)" }}
     >
       <div className="min-w-0">{list}</div>
       {beside ? (
-        detail && <div className="min-w-0 max-w-2xl">{detail}</div>
+        detail && <div className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 max-w-2xl overflow-y-auto">{detail}</div>
       ) : (
         <Sheet open={!!detail && width > 0} onOpenChange={(open) => !open && onClose?.()}>
           <SheetContent side="bottom" className="max-h-[90svh] overflow-y-auto rounded-t-xl">
