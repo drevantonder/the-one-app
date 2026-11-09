@@ -31,7 +31,7 @@ function Developer() {
         </label>
       </List>
       <p className="px-1 text-sm text-muted-foreground">
-        On this device, the &lt;/&gt; at the top of every screen opens Developer, whose Timing shows what the screen asked for and where the time went.
+        Puts a &lt;/&gt; at the top of every screen on this device, to see where its time goes.
       </p>
     </div>
   )

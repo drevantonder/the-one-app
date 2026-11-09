@@ -54,18 +54,13 @@ function Labs() {
   }
 
   const row = (l) => <Lab key={l.setting} lab={l} on={asked[l.setting] ?? l.on} busy={l.setting in asked} set={(on) => set(l, on)} />
-  const section = (title, list) => !!list.length && (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-      {list.map((ls) => (
-        <div key={ls[0].app?.name ?? ls[0].service?.name} className="flex flex-col gap-2">
-          <h3 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <AppIcon app={ls[0].app || ls[0].service} size={18} />
-            {(ls[0].app || ls[0].service).title}
-          </h3>
-          <List>{ls.map(row)}</List>
-        </div>
-      ))}
+  const group = (ls) => (
+    <section key={ls[0].app?.name ?? ls[0].service?.name} className="flex flex-col gap-2">
+      <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <AppIcon app={ls[0].app || ls[0].service} size={18} />
+        {(ls[0].app || ls[0].service).title}
+      </h2>
+      <List>{ls.map(row)}</List>
     </section>
   )
 
@@ -80,8 +75,7 @@ function Labs() {
     body = (
       <>
         {!!core.length && <List>{core.map(row)}</List>}
-        {section("Apps", groups(labs, "app"))}
-        {section("Services", groups(labs, "service"))}
+        {[...groups(labs, "app"), ...groups(labs, "service")].map(group)}
         {error && <Problem title={error} />}
       </>
     )
@@ -89,7 +83,10 @@ function Labs() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
-      <h1 className="large-title text-3xl font-bold tracking-tight">Labs</h1>
+      <div className="flex flex-col gap-2">
+        <h1 className="large-title text-3xl font-bold tracking-tight">Labs</h1>
+        <p className="text-sm text-muted-foreground">Features still being built. What you turn on here is on for everyone.</p>
+      </div>
       {body}
     </div>
   )

@@ -51,22 +51,16 @@ function h() {
 		on: y[e.setting] ?? e.on,
 		busy: e.setting in y,
 		set: (t) => C(e, t)
-	}, e.setting), T = (e, t) => !!t.length && /* @__PURE__ */ p("section", {
+	}, e.setting), T = (e) => /* @__PURE__ */ p("section", {
 		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ f("h2", {
-			className: "text-xl font-semibold tracking-tight",
-			children: e
-		}), t.map((e) => /* @__PURE__ */ p("div", {
-			className: "flex flex-col gap-2",
-			children: [/* @__PURE__ */ p("h3", {
-				className: "flex items-center gap-2 text-sm font-medium text-muted-foreground",
-				children: [/* @__PURE__ */ f(a, {
-					app: e[0].app || e[0].service,
-					size: 18
-				}), (e[0].app || e[0].service).title]
-			}), /* @__PURE__ */ f(s, { children: e.map(w) })]
-		}, e[0].app?.name ?? e[0].service?.name))]
-	}), E;
+		children: [/* @__PURE__ */ p("h2", {
+			className: "flex items-center gap-2 text-sm font-medium text-muted-foreground",
+			children: [/* @__PURE__ */ f(a, {
+				app: e[0].app || e[0].service,
+				size: 18
+			}), (e[0].app || e[0].service).title]
+		}), /* @__PURE__ */ f(s, { children: e.map(w) })]
+	}, e[0].app?.name ?? e[0].service?.name), E;
 	if (!e) E = u ? /* @__PURE__ */ f(l, {
 		title: u.title,
 		text: u.next,
@@ -80,16 +74,21 @@ function h() {
 		let t = e.filter((e) => !e.app && !e.service);
 		E = /* @__PURE__ */ p(d, { children: [
 			!!t.length && /* @__PURE__ */ f(s, { children: t.map(w) }),
-			T("Apps", m(e, "app")),
-			T("Services", m(e, "service")),
+			[...m(e, "app"), ...m(e, "service")].map(T),
 			_ && /* @__PURE__ */ f(l, { title: _ })
 		] });
 	}
 	return /* @__PURE__ */ p("div", {
 		className: "flex max-w-2xl flex-col gap-6",
-		children: [/* @__PURE__ */ f("h1", {
-			className: "large-title text-3xl font-bold tracking-tight",
-			children: "Labs"
+		children: [/* @__PURE__ */ p("div", {
+			className: "flex flex-col gap-2",
+			children: [/* @__PURE__ */ f("h1", {
+				className: "large-title text-3xl font-bold tracking-tight",
+				children: "Labs"
+			}), /* @__PURE__ */ f("p", {
+				className: "text-sm text-muted-foreground",
+				children: "Features still being built. What you turn on here is on for everyone."
+			})]
 		}), E]
 	});
 }
