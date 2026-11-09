@@ -277,13 +277,23 @@ pub(crate) fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
     for pid in &pids {
         unsafe { libc::kill(-pid, libc::SIGTERM) };
     }
-    let start = Instant::now();
-    while pids.iter().any(|pid| unsafe { libc::kill(*pid, 0) } == 0) && start.elapsed() < Duration::from_secs(10) {
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    // Gone is every process of a program's group, not only the one that leads it: a Worker's workerd keeps its ports for as
+    // long as it lives, and what starts next asks for them. A killed process is gone a moment after, not when it's killed.
+    let gone = |within: Duration| {
+        let start = Instant::now();
+        // Those of ours that stopped are zombies until waited for.
+        while pids.iter().any(|pid| unsafe {
+            libc::waitpid(*pid as i32, std::ptr::null_mut(), libc::WNOHANG);
+            libc::kill(-pid, 0) == 0
+        }) && start.elapsed() < within {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    gone(Duration::from_secs(10));
     for pid in &pids {
         unsafe { libc::kill(-pid, libc::SIGKILL) };
     }
+    gone(Duration::from_secs(5));
     // What still runs stays listed: its browsers.
     let kept: String = std::fs::read_to_string(dir.join("pids")).unwrap_or_default().lines().filter(|l| !clients && l.ends_with(" client")).map(|l| format!("{l}\n")).collect();
     if kept.is_empty() {
