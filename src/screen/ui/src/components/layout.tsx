@@ -234,7 +234,7 @@ function Split({ list, detail, title, onClose, wide = 720, size = "26rem", class
     >
       <div className="min-w-0">{list}</div>
       {beside ? (
-        detail && <div ref={pane} className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 overflow-y-auto">{detail}</div>
+        detail && <div ref={pane} className="sticky top-4 max-h-[calc(100dvh-1rem)] min-w-0 overflow-y-auto">{detail}</div>
       ) : (
         <Sheet open={!!detail && width > 0} onOpenChange={(open) => !open && onClose?.()}>
           <SheetContent side="bottom" className="max-h-[90svh] overflow-y-auto rounded-t-xl">
