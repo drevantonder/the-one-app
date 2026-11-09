@@ -291,35 +291,8 @@ export const devtools = {
   },
 };
 
-/// A sheet a screen opens in its frame dims the rest of the window too, as a sheet dims a Mac window: the same shade
-/// as the sheet's own, around the frame. A click on it, or Escape, closes the sheet, as one on its backdrop does.
-let shaded = null;
-/// Whether something is over the window that Escape closes: an alert, a menu, or a screen's sheet.
-export const overWindow = () => !!($("[role=alertdialog], [role=menu]") || (shaded && $(".shade.open")));
-function shade(f, on) {
-  const el = $(".shade") || Object.assign(document.createElement("div"), { className: "shade" });
-  if (!on) {
-    if (shaded === f) (shaded = null), el.classList.remove("open");
-    return;
-  }
-  // Over the sheets already open (the frame's own, if it's in one), under any opened after it (an alert).
-  if (shaded !== f) document.body.append(el);
-  shaded = f;
-  place();
-  void el.offsetHeight;
-  el.classList.add("open");
-}
-function place() {
-  const el = $(".shade");
-  if (!shaded || !el) return;
-  if (!shaded.frame.isConnected) return shade(shaded, false);
-  const { left: l, top: t, right: r, bottom: b } = shaded.frame.getBoundingClientRect();
-  el.style.clipPath = `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${l}px ${t}px, ${r}px ${t}px, ${r}px ${b}px, ${l}px ${b}px, ${l}px ${t}px)`;
-}
-addEventListener("resize", place);
-addEventListener("click", (e) => e.target.classList?.contains("shade") && shaded?.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
-// Not while what's over it (an alert, a menu) takes the Escape itself.
-addEventListener("keydown", (e) => e.key === "Escape" && shaded && $(".shade.open") && !$("[role=alertdialog], [role=menu]") && shaded.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
+/// Whether something is over the window that Escape closes: an alert or a menu.
+export const overWindow = () => !!$("[role=alertdialog], [role=menu]");
 
 /// A screen over the window, in a sheet: → what it gave `one.close` once it's gone, else null.
 export function openSheet(r) {
@@ -340,7 +313,6 @@ addEventListener("message", async (e) => {
   if (!f) return;
   const r = f.route, mine = r.kind === "own";
   if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
-  if (typeof e.data?.oneSheets === "number") return void shade(f, e.data.oneSheets > 0);
   // The panel's window fits its screen.
   if (typeof e.data?.oneHeight === "number") return void (f.sheet || platform.fit(e.data.oneHeight));
   if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill));

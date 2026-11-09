@@ -56,9 +56,6 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
 async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<std::collections::HashMap<&'static str, Who>>)>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
     let who = routes.get(path.as_str()).copied().unwrap_or(Who::ThisMachine);
-    if who == Who::Anyone {
-        return next.run(req).await;
-    }
     if let Some(FromClient(key, until)) = req.extensions().get::<FromClient>().copied() {
         return from_client(&node, key, until, who, req, next).await;
     }

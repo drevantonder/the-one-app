@@ -128,7 +128,7 @@ window.oneHost = (() => {
         throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
       case "haptic": return h.haptic ? h.haptic(String(m.style || "selection")) : null;
       case "traces": return h.traces ? h.traces() : null;
-      case "api": case "signOut": case "appearance": case "device": case "notify": case "request": case "cache": case "developer": case "menubar":
+      case "api": case "signOut": case "appearance": case "device": case "notify": case "request": case "cache": case "developer":
         if (!h.own) throw new Error("Only Settings can do that.");
         return h.own[m.type](m);
       default: throw new Error("Unknown message");

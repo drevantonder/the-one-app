@@ -2,8 +2,7 @@
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -15,7 +14,6 @@ pub fn routes() -> Routes {
     Routes::default()
         .route("/v1/apps", Who::SignedIn, get(apps))
         .route("/v1/labs", Who::SignedIn, get(labs))
-        .route("/v1/images/{name}", Who::Anyone, get(image))
         .route("/v1/deploy", Who::SignedIn, post(deploy))
         .route("/v1/add", Who::SignedIn, post(add))
         .route("/v1/schedule", Who::ThisMachine, post(schedule))
@@ -29,13 +27,8 @@ fn owner(node: &Node, named: &str) -> anyhow::Result<String> {
     crate::database::scopes::Principal::parse(named).map(|p| p.to_string()).or_else(|_| node.find_group(named).map(|g| format!("group:{g}")))
 }
 
-#[derive(Deserialize)]
-struct AppsQuery {
-    light: Option<bool>,
-}
-
-async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Query(q): Query<AppsQuery>) -> Result<Response, Error> {
-    let apps = if q.light == Some(true) { node.apps_drawn(&me.caller).await? } else { node.apps(&me.caller).await? };
+async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
+    let apps = node.apps(&me.caller).await?;
     let body = serde_json::to_string(&apps)?;
     let tag = crate::screen::tag(&body);
     Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
@@ -44,16 +37,6 @@ async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, 
 /// Every lab, for an admin's Settings › Labs (`Node::labs`).
 async fn labs(State(node): State<Node>, me: Me) -> Reply {
     Ok(Json(json!(node.labs(&me.caller).await?)))
-}
-
-/// A picture a window's app list names (`Node::apps_drawn`), for anyone who has its name, which is its content's:
-/// kept for good, since it can't change.
-async fn image(State(node): State<Node>, Path(name): Path<String>) -> Response {
-    let found = if name.len() == 32 && name.bytes().all(|b| b.is_ascii_hexdigit()) { node.named_image(&name).await } else { None };
-    match found {
-        Some((kind, bytes)) => ([(axum::http::header::CONTENT_TYPE, kind), (axum::http::header::CACHE_CONTROL, "public, max-age=31536000, immutable".into())], bytes).into_response(),
-        None => (StatusCode::NOT_FOUND, [(axum::http::header::CACHE_CONTROL, "no-store")]).into_response(),
-    }
 }
 
 /// An app's `bundle`, or its `files` (each file's path → its text, built here as `one deploy` builds a folder), to

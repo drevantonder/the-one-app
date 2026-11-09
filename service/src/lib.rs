@@ -130,12 +130,6 @@ impl Host {
         }
         Ok(resp.into_body().into_reader())
     }
-
-    /// `text` with the Vault's fields (`{{name}}`) filled in by the node for call `id`, which only `host` may be sent.
-    pub fn fill(&self, id: u64, text: &str, host: &str) -> Result<String> {
-        let out = self.post(&format!("/v1/services/{}/calls/{id}/vault", self.name), &json!({ "text": text, "host": host })).map_err(|err| anyhow!("the Vault: {err}"))?;
-        Ok(out["text"].as_str().unwrap_or_default().to_string())
-    }
 }
 
 /// A call's input as `T`, where none is an empty one and a field that's null is one not given, as Go's services read them.

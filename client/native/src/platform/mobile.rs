@@ -100,14 +100,6 @@ pub fn login() -> Option<bool> {
 
 pub fn set_login(_: bool) {}
 
-pub fn menubar(_: String, _: bool) -> Vec<String> {
-    Vec::new()
-}
-
-pub fn menubar_hidden() -> Option<Vec<String>> {
-    None
-}
-
 pub fn computer_use() -> Option<bool> {
     None
 }

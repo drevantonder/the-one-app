@@ -79,7 +79,6 @@ enum Route {
     Member,
     Handle,
     Name,
-    Runs,
     Service,
     Retire,
     ForgetSignIn,
@@ -107,7 +106,6 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/member", Route::Member, true),
     ("POST", "/v1/handle", Route::Handle, true),
     ("POST", "/v1/name", Route::Name, false),
-    ("POST", "/v1/runs", Route::Runs, true),
     ("POST", "/v1/service", Route::Service, false),
     ("POST", "/v1/retire", Route::Retire, true),
     ("POST", "/v1/devices/forget-sign-in", Route::ForgetSignIn, true),
@@ -282,12 +280,6 @@ mod body {
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
-    pub struct Runs {
-        pub on: Vec<String>,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
     pub struct Service {
         pub device: String,
         pub name: String,
@@ -425,12 +417,6 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
                 None => m.public(),
             };
             m.write(content::rename("key", &hex(&key), body.name.trim())).await?;
-            done
-        }
-        Route::Runs => {
-            let body: body::Runs = read(path, raw)?;
-            let machines = body.on.iter().map(|d| m.who(|db| db.find_machine(d))).collect::<Result<Vec<_>>>()?;
-            m.write(content::runs(&machines)).await?;
             done
         }
         Route::Service => {

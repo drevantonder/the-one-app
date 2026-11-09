@@ -793,9 +793,7 @@ class Run {
 
   /// Every app in the network, with what each does for this user where it's added for them (src/node/apps.rs:
   /// `catalog`). What it says of itself comes from its latest deploy.
-  /// `light`, as a window draws them (src/node/apps.rs: `apps_drawn`): what shows each one and where.
-  async apps({ light = false } = {}) {
-    const drawn = ["name", "title", "icon", "color", "domain", "image", "image_kind", "added", "deleted", "screens", "widgets", "owner"];
+  async apps() {
     return Promise.all(this.view.apps.map(async ({ reach, ...info }) => {
       const app = deployed(this.view, info.name);
       const d = app && (await this.user.describe(this.who, app).catch(keysFirst));
@@ -803,7 +801,7 @@ class Run {
       const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "needs"];
       for (const [k, v] of Object.entries(d || {})) if (k !== "name" && k !== "schedules" && (mine || shown.includes(k))) info[k] = v;
       if (d) info.offers = { screens: !!d.screens?.some((s) => s.name === "main") || !!d.widgets?.length, accounts: !!d.tools?.some((o) => o.accounts) };
-      return light ? Object.fromEntries(Object.entries(info).filter(([k]) => drawn.includes(k))) : info;
+      return info;
     }));
   }
 }
@@ -1003,7 +1001,7 @@ async function route(p, request) {
     if (path === "/v1/events") return new Response(null, { status: 204 });
     const scope = url.searchParams.get("scope");
     if (path === "/v1/state") return json(run.view.state);
-    if (path === "/v1/apps") return tagged(request, JSON.stringify(await run.apps({ light: url.searchParams.get("light") === "true" })), "application/json");
+    if (path === "/v1/apps") return tagged(request, JSON.stringify(await run.apps()), "application/json");
     if (path === "/v1/widgets") return json(await run.widgets(scope));
     return json(await run.badges(scope));
   }

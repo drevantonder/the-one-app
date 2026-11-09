@@ -56,7 +56,7 @@
   // or refuses it by name. Anything a user touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
-    "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer", "menubar"];
+    "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer"];
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
@@ -292,9 +292,6 @@
     traces: () => host({ type: "traces" }).catch(() => null),
     device: () => host({ type: "device" }),
     notify: () => host({ type: "notify" }),
-    // A Mac's widget (`<app>.<widget>`) shown in its menu bar again (`show`), or hidden: the menu bar panel's.
-    // → the widgets hidden there now.
-    menubar: (kind, show) => host({ type: "menubar", kind: String(kind), show: !!show }),
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),
     // How long ago: short ("5 min", "Tue", "3 Oct") for tight rows, or with `{ long: true }` for where there's room
     // ("5 minutes ago", "3 days ago", "2 years ago").

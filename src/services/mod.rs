@@ -259,18 +259,10 @@ impl Registry {
             }
         }
 
-        async fn fill(State(r): Shared, headers: HeaderMap) -> Response {
-            if let Err(refused) = r.ours(&headers) {
-                return refused;
-            }
-            refused(StatusCode::NOT_IMPLEMENTED, "a service can't fill in the Vault's items yet: the call's node fills them in before it asks")
-        }
-
         axum::Router::new()
             .route("/v1/services/{app}", routing::post(register))
             .route("/v1/services/{app}/calls", routing::get(next_call))
             .route("/v1/services/{app}/calls/{id}", routing::post(reply))
-            .route("/v1/services/{app}/calls/{id}/vault", routing::post(fill))
             .with_state(self.clone())
     }
 }

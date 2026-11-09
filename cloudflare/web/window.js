@@ -85,7 +85,7 @@ function drawPanel() {
   if (signedIn && shown !== "panel") (shown = "panel"), screen.show(detail, own("panel", platform.panelScreen()));
 }
 
-/// A phone's hardware Back: what's over the window (a sheet, an alert, a menu) closes first, as Escape does; then a
+/// A phone's hardware Back: what's over the window (an alert, a menu) closes first, as Escape does; then a
 /// pushed screen goes back, and so does one a user has gone deeper than the home screen. → whether it took it: if
 /// not, the app leaves.
 export function hardwareBack() {

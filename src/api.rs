@@ -6,8 +6,7 @@
 //! `<address>/mcp`) is its user's, and so is its call's; someone it's for who isn't a user of the network yet is
 //! let in as a member by a device whose own user is an admin, since sign-in lets in only those an admin invited
 //! or users at the network's domain. A request without one is this machine's own programs', over its loopback with the
-//! token in the node's home (`local-token`, which only its user reads), or refused, but for a picture a window's app
-//! list names by its content (`/v1/images/<name>`), anyone's who has that name. A file put from elsewhere is read back
+//! token in the node's home (`local-token`, which only its user reads), or refused. A file put from elsewhere is read back
 //! only by whoever put it or may use a scope that names it, up to 512 MiB each and 2 GiB per user that nothing keeps
 //! yet, deleted an hour on (or once its request is answered) unless something does.
 
@@ -47,8 +46,6 @@ pub fn router(node: Node) -> Router {
 /// Who may ask a route. This machine's own programs may ask any; the rest only what its route says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Who {
-    /// Anyone who has its name: a picture named by its content.
-    Anyone,
     /// Also someone signed in at the network's address, and the network's client devices over iroh, each as their
     /// user, with what that user may do.
     SignedIn,
@@ -188,7 +185,6 @@ mod tests {
         for (route, who, asker, status, body) in asked {
             let refused = status == 403 && body["code"] != crate::protocol::code::NOT_LET_IN;
             let (want_refused, then) = match (who, asker) {
-                (Who::Anyone, _) => (false, None),
                 (_, Asker::Nobody) => (true, None),
                 (Who::SignedIn, Asker::SignIn) | (_, Asker::ThisMachine) => (false, Some(401)),
                 (_, Asker::SignIn) => (true, None),
