@@ -53,6 +53,13 @@ fn main() {
     let relay_location = optional("relay_location");
     assert!(["", "wnam", "enam", "sam", "weur", "eeur", "apac", "oc", "afr", "me"].contains(&relay_location.as_str()), "relay_location is one of Cloudflare's location hints");
     let out = format!("{out}pub const RELAY_LOCATION: &str = {relay_location:?};\n");
+    // The iPhone app's bundle id (its extensions are `<id>.widgets` and `<id>.notifications`, its App Group and Keychain
+    // group `group.<id>`); client/native/apple.sh says the same.
+    let iphone = match optional("iphone") {
+        id if id.is_empty() => format!("app.{}.phone", get("cli").as_str().unwrap()),
+        id => id,
+    };
+    let out = format!("{out}pub const IPHONE: &str = {iphone:?};\n");
     // What a user joins, in their words: "your One App network"; a workplace's (one with a join_domain) is shared, "the PTC App network".
     // client/native/apple.sh, client/native/android/app/build.gradle.kts and client/native/windows/build.sh say the same.
     let name = get("name").as_str().unwrap().to_string();

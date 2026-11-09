@@ -546,8 +546,8 @@ fn push_bindings(settings: &Settings) -> Vec<Binding> {
         plain("RELAY", "service:relay"),
         plain("ADDRESS", settings.address.clone()),
         plain("NAME", crate::config::NAME),
-        // The Apple apps' bundle ids (client/native/iphone/project.yml, mac/build.sh), which their pushes go to.
-        plain("APNS_TOPICS", json!([format!("app.{cli}.phone"), format!("app.{cli}.mac")]).to_string()),
+        // The Apple apps' bundle ids (the iPhone's is config.toml's `iphone`, the Mac's is client/native/mac/build.sh's), which their pushes go to.
+        plain("APNS_TOPICS", json!([crate::config::IPHONE, format!("app.{cli}.mac")]).to_string()),
     ];
     out.extend(settings.push.iter().map(|(name, value)| secret(name, value.clone())));
     out

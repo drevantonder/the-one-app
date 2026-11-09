@@ -28,7 +28,7 @@ that connection (so only while it's open); the node checks who may, as for its o
 
 Each keeps the old app's identity, so it installed over it in place and kept its sign-in: the Mac's `app.<cli>.mac`
 (Developer ID team, same designated requirement, its Keychain items), the
-iPhone's `app.<cli>.phone` with `.widgets`, `.notifications` and the App Group `group.app.<cli>.phone` (also its
+iPhone's `app.<cli>.phone` (or the build's `iphone`) with `.widgets`, `.notifications` and the App Group `group.<its id>` (also its
 Keychain group), Android's `app.<cli>.android` signed with the debug key it was signed with, Windows'
 package `TheOneApp_ah4xyz62b3km4` (`windows_package()`). Don't change them: a device would sign in again as a new one.
 
@@ -52,7 +52,7 @@ colour on what's tapped, a Mac build with push.
 
 - Pushes on every platform: built as the old apps', never received. The One App has no APNs key, Firebase project or WNS
   app (Andre, top #87); then notification taps, Approve / Not Me with no window, the iPhone's count and banner.
-- TestFlight (`iphone/build.sh testflight`): waits on an App Store Connect app for `app.ptc.phone` (Andre, top #87);
+- TestFlight (`iphone/build.sh testflight`): waits on an App Store Connect app for the build's iPhone id (Andre, top #87);
   then Google sign-in, receipt scan and photo upload in Claims there.
 - Seen on a Mac: the window, the dock's count and the app menu's keys (⌘\, ⌘⇧I, ⌘⇧J). Built and checked by its build; the
   Mac's screen has been locked each time.

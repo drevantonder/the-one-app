@@ -26,7 +26,10 @@ fn main() {
     // instance and Keychain items, never the user's.
     println!("cargo:rerun-if-env-changed=THROWAWAY");
     let throwaway = std::env::var("THROWAWAY").is_ok_and(|v| !v.is_empty());
-    let identifier = |platform: &str| format!("app.{}.{platform}{}", one::config::CLI, if throwaway { ".throwaway" } else { "" });
+    let identifier = |platform: &str| {
+        let id = if platform == "phone" { one::config::IPHONE.to_string() } else { format!("app.{}.{platform}", one::config::CLI) };
+        format!("{id}{}", if throwaway { ".throwaway" } else { "" })
+    };
     let platform = match std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default().as_str() {
         "macos" => "mac",
         "ios" => "phone",

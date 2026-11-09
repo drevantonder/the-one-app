@@ -45,7 +45,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: ${CONFIG_NAME}
-        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.phone
+        PRODUCT_BUNDLE_IDENTIFIER: ${CONFIG_IPHONE}
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # The intents call the app's Rust as C, which Swift 6's checks can't follow.
         SWIFT_VERSION: "5.0"
@@ -57,7 +57,7 @@ targets:
     entitlements:
       path: ../target/iphone/Phone.entitlements
       properties:
-        com.apple.security.application-groups: ["group.app.${CONFIG_CLI}.phone"]
+        com.apple.security.application-groups: ["group.${CONFIG_IPHONE}"]
     info:
       path: ../target/iphone/Phone-Info.plist
       properties:
@@ -67,9 +67,9 @@ targets:
         CLI: ${CONFIG_CLI}
         Yours: ${CONFIG_YOURS}
         BuildCommit: ${BUILD_COMMIT}
-        AppGroup: group.app.${CONFIG_CLI}.phone
+        AppGroup: group.${CONFIG_IPHONE}
         # Where its device keys are kept (src/secrets.rs), which its notification extension reads too.
-        KeychainGroup: group.app.${CONFIG_CLI}.phone
+        KeychainGroup: group.${CONFIG_IPHONE}
         # <cli>://open?…, the links it takes (web.js `opened`); <cli>://signed-in/ is auth's, the sheet's own.
         CFBundleURLTypes:
           - CFBundleURLName: app.${CONFIG_CLI}.join
@@ -93,13 +93,13 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Widgets
-        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.phone.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: ${CONFIG_IPHONE}.widgets
         # It draws buttons, toggles and links as intents and links, and images from the App Group.
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGET
     entitlements:
       path: ../target/iphone/Widgets.entitlements
       properties:
-        com.apple.security.application-groups: ["group.app.${CONFIG_CLI}.phone"]
+        com.apple.security.application-groups: ["group.${CONFIG_IPHONE}"]
     info:
       path: ../target/iphone/Widgets-Info.plist
       properties:
@@ -108,6 +108,6 @@ targets:
         CFBundleVersion: "${BUILD_NUMBER}"
         CFBundleDisplayName: ${CONFIG_NAME}
         CLI: ${CONFIG_CLI}
-        AppGroup: group.app.${CONFIG_CLI}.phone
+        AppGroup: group.${CONFIG_IPHONE}
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

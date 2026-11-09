@@ -65,7 +65,7 @@ if [ -n "$PUSH" ]; then
 fi
 xcodegen generate --quiet --spec iphone/project.yml
 
-name=$CONFIG_NAME id=app.$CONFIG_CLI.phone
+name=$CONFIG_NAME id=$CONFIG_IPHONE
 # Over SSH the keychain, which signing needs, is the logged-in session's.
 signed() { if [ -n "${SSH_CONNECTION:-}" ]; then session "$@"; else "$@"; fi; }
 # Xcode registers the App IDs, App Group and profiles it signs with; with App Store Connect's key, without an Apple

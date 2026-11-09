@@ -25,11 +25,11 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Notifications
-        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.phone.notifications
+        PRODUCT_BUNDLE_IDENTIFIER: ${CONFIG_IPHONE}.notifications
     entitlements:
       path: ../target/iphone/Notifications.entitlements
       properties:
-        com.apple.security.application-groups: ["group.app.${CONFIG_CLI}.phone"]
+        com.apple.security.application-groups: ["group.${CONFIG_IPHONE}"]
     info:
       path: ../target/iphone/Notifications-Info.plist
       properties:
@@ -37,7 +37,7 @@ targets:
         CFBundleVersion: "${BUILD_NUMBER}"
         CFBundleDisplayName: ${CONFIG_NAME}
         CLI: ${CONFIG_CLI}
-        KeychainGroup: group.app.${CONFIG_CLI}.phone
+        KeychainGroup: group.${CONFIG_IPHONE}
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService

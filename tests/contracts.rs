@@ -1052,3 +1052,18 @@ fn the_macs_job_takes_only_what_the_record_signs() {
     assert_eq!(installed(), new_app);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// The iPhone's build scripts (`client/native/apple.sh`) make its bundle id as build.rs does (`config::IPHONE`): from the
+/// same config.toml, which can name it.
+#[test]
+fn the_iphone_build_scripts_name_the_app_as_the_build_does() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let out = std::process::Command::new("bash")
+        .args(["-c", ". client/native/apple.sh && echo $CONFIG_IPHONE"])
+        .current_dir(root)
+        .env("CONFIG", root.join(option_env!("CONFIG").unwrap_or("config.toml")))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), one::config::IPHONE);
+}

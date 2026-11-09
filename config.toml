@@ -41,6 +41,9 @@ logo = "icons/Logo.png"
 firebase = ""
 wns_app = ""
 wns_object = ""
+# The iPhone app's bundle id, for a custom build that already has an app at Apple: its App Store Connect record, TestFlight
+# testers and builds stay bound to the id they began with. Empty, app.<cli>.phone.
+iphone = ""
 
 # A network's settings until its admins change them in Settings (`setting` entries). Every network has store, the app
 # the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.add).
