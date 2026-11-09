@@ -47,7 +47,7 @@ export function PathBar({ d, file = false }) {
       <BranchButton d={d} open={branches} />
       {!d.branch && <Button variant="outline" size="sm" onClick={() => go("repo", { repo: d.repo })}>Back to Main</Button>}
       <nav aria-label="Path" className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm">
-        <Crumb onClick={() => go("repo", { repo: d.repo, ref })}>{d.repo}</Crumb>
+        <Crumb onClick={() => go("repo", { repo: d.repo, ref })}>{d.repo.split("/").pop()}</Crumb>
         {parts.map((p, k) => {
           const last = k === parts.length - 1
           return (
@@ -82,24 +82,35 @@ function BranchButton({ d, open }) {
 export function CommitCard({ c, d }) {
   const wide = useWide()
   const history = () => go("history", { repo: d.repo, ref: refOf(d), path: d.path || "" })
+  const commit = () => go("commit", { repo: d.repo, sha: c.sha })
+  if (!wide) {
+    return (
+      <div className="flex min-w-0 items-center gap-1">
+        <button type="button" onClick={commit} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left text-sm outline-none focus-visible:bg-accent/50">
+          <Avatar name={c.author} size={20} />
+          <span className="min-w-0 flex-1 truncate">{c.subject}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{one.ago(Date.parse(c.time))}</span>
+        </button>
+        <Button variant="ghost" size="icon-sm" aria-label="History" onClick={history}><Icon name="clock-counter-clockwise" /></Button>
+      </div>
+    )
+  }
   const when = <><code>{short(c.sha)}</code> · {ago(c.time)}</>
   const row = "flex cursor-pointer items-center gap-3 px-3 py-2.5 text-left text-sm outline-none hover:bg-accent/50 focus-visible:bg-accent/50"
   return (
-    <div className={`overflow-hidden rounded-xl border bg-card text-card-foreground ${wide ? "flex items-stretch divide-x" : "divide-y"}`}>
-      <button type="button" onClick={() => go("commit", { repo: d.repo, sha: c.sha })} className={`${row} min-w-0 ${wide ? "flex-1" : "w-full"}`}>
+    <div className="flex items-stretch divide-x overflow-hidden rounded-xl border bg-card text-card-foreground">
+      <button type="button" onClick={commit} className={`${row} min-w-0 flex-1`}>
         <Avatar name={c.author} size={20} />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
             <span className="shrink-0 font-medium">{c.author}</span>
             <span className="min-w-0 flex-1 truncate text-muted-foreground">{c.subject}</span>
           </span>
-          {!wide && <span className="block text-xs text-muted-foreground">{when}</span>}
         </span>
-        {wide && <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{when}</span>}
+        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{when}</span>
       </button>
-      <button type="button" onClick={history} className={`${row} gap-2 font-medium ${wide ? "shrink-0" : "w-full"}`}>
+      <button type="button" onClick={history} className={`${row} shrink-0 gap-2 font-medium`}>
         <Icon name="clock-counter-clockwise" />History
-        {!wide && <Icon name="caret-right" className="ml-auto text-muted-foreground" />}
       </button>
     </div>
   )

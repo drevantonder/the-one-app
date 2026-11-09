@@ -1,7 +1,7 @@
 // A repo's branches, the default first and then the newest: each opens the repo on it.
 import { useEffect } from "react"
 import { createRoot } from "react-dom/client"
-import { Badge, Empty, Icon, List, ListRow, Pending, useCall } from "@one/ui"
+import { Badge, Empty, Grid, GridRow, Icon, Pending, useCall } from "@one/ui"
 import { Frame, ago, go, short, useAddress, where } from "../lib/use.jsx"
 
 const P = one.params
@@ -23,9 +23,9 @@ function Branches() {
   }
   const sorted = [...call.data].sort((a, b) => (b.branch === "main") - (a.branch === "main") || Date.parse(b.time) - Date.parse(a.time))
   return (
-    <List>
+    <Grid min="22rem" max={4} gap="0.25rem">
         {sorted.map((b) => (
-          <ListRow
+          <GridRow
             key={b.branch}
             leading={<Icon name="git-branch" className="size-5 text-muted-foreground" />}
             title={<span className="flex items-center gap-2"><span className="truncate">{b.branch}</span>{b.branch === "main" && <Badge variant="secondary">Default</Badge>}</span>}
@@ -34,7 +34,7 @@ function Branches() {
             onClick={() => go("repo", { repo: P.repo, ref: b.branch, path: P.path || "" })}
           />
         ))}
-    </List>
+    </Grid>
   )
 }
 

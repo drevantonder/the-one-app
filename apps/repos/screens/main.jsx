@@ -1,7 +1,7 @@
 // Repos: this network's repos, GitHub's beside them (connected, not copied), and Recently Deleted; searchable.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Grid, LargeTitle, List, ListRow, ListSkeleton, Pending, Problem, SearchInput, Section, useCall } from "@one/ui"
+import { Button, Empty, Grid, GridRow, LargeTitle, List, ListRow, ListSkeleton, Pending, Problem, SearchInput, Section, useCall } from "@one/ui"
 import { RepoIcon } from "../lib/parts.jsx"
 import { Frame, ago, go, plural, said, useAddress, where } from "../lib/use.jsx"
 
@@ -17,14 +17,11 @@ function Gone({ r, restore }) {
   )
 }
 
-// A repo that's here: no chevron, since the grid's rows sit side by side where there's room.
 function Tile({ r }) {
   const owner = r.repo.slice(0, -r.name.length)
   const sub = [r.github?.private && "Private", r.branch, ago(r.updated || r.created), r.from && "fork of " + r.from, r.open_issues && plural(r.open_issues, "open issue", "open issues")].filter(Boolean).join(" · ")
   return (
-    <button type="button" className="min-w-0 cursor-pointer rounded-xl text-left outline-none hover:bg-accent/50 focus-visible:bg-accent/50" onClick={() => go("repo", { repo: r.repo })}>
-      <ListRow leading={<RepoIcon repo={r.repo} github={!!r.github} className="size-5 text-muted-foreground" />} title={<><span className="font-normal text-muted-foreground">{owner}</span>{r.name}</>} sub={sub} />
-    </button>
+    <GridRow title={<><span className="font-normal text-muted-foreground">{owner}</span>{r.name}</>} sub={sub} onClick={() => go("repo", { repo: r.repo })} />
   )
 }
 

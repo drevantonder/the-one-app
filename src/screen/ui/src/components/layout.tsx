@@ -90,7 +90,7 @@ function List({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 /// A row of a List: what it starts with (an app's icon, say), its title and one grey line, and what it ends with. With
-/// `onClick` it's a button, with a chevron, and `selected` marks the one open beside it. Its title and line are cut
+/// `onClick` it's a button, with a chevron unless it opens in place, which `selected` says and marks the one open. Its title and line are cut
 /// to one line each; with `wrap` they run on to as many as they need.
 function ListRow({ leading, title, sub, trailing, selected, wrap, onClick, className }: {
   leading?: React.ReactNode
@@ -121,7 +121,24 @@ function ListRow({ leading, title, sub, trailing, selected, wrap, onClick, class
         {sub && <span className={cn("block text-muted-foreground", cut)}>{sub}</span>}
       </span>
       {trailing}
-      {onClick && <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />}
+      {onClick && selected === undefined && <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />}
+    </Row>
+  )
+}
+
+/// A row of a Grid, for what would be a long List where the room allows many columns: a ListRow on its own, with no box
+/// or chevron, side by side with others.
+function GridRow({ onClick, selected, ...row }: Omit<React.ComponentProps<typeof ListRow>, "selected"> & { selected?: boolean }) {
+  const Row = onClick ? "button" : "div"
+  return (
+    <Row
+      type={onClick ? "button" : undefined}
+      data-slot="grid-row"
+      data-selected={selected || undefined}
+      onClick={onClick}
+      className={cn("min-w-0 rounded-xl text-left", onClick && "cursor-pointer outline-none hover:bg-accent/50 focus-visible:bg-accent/50 data-[selected]:bg-accent")}
+    >
+      <ListRow {...row} />
     </Row>
   )
 }
@@ -233,4 +250,4 @@ function Split({ list, detail, title, onClose, wide = 720, size = "26rem", class
   )
 }
 
-export { Grid, Hint, LargeTitle, List, ListAdd, ListNote, ListRow, SearchInput, Section, Split, useWidth }
+export { Grid, GridRow, Hint, LargeTitle, List, ListAdd, ListNote, ListRow, SearchInput, Section, Split, useWidth }

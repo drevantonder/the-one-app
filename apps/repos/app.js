@@ -22,10 +22,8 @@ import fileScreen from "./dist/file.html" with { type: "text" };
 import historyScreen from "./dist/history.html" with { type: "text" };
 import commitScreen from "./dist/commit.html" with { type: "text" };
 import branchesScreen from "./dist/branches.html" with { type: "text" };
-import collaboratorsScreen from "./dist/collaborators.html" with { type: "text" };
 import issuesScreen from "./dist/issues.html" with { type: "text" };
 import issueScreen from "./dist/issue.html" with { type: "text" };
-import labelsScreen from "./dist/labels.html" with { type: "text" };
 import repoSettingsScreen from "./dist/repo-settings.html" with { type: "text" };
 import settingsScreen from "./dist/settings.html" with { type: "text" };
 
@@ -597,10 +595,8 @@ const app = {
     history: { title: "History", html: historyScreen },
     commit: { title: "Commit", html: commitScreen },
     branches: { title: "Branches", html: branchesScreen },
-    collaborators: { title: "Collaborators", html: collaboratorsScreen },
     issues: { title: "Issues", html: issuesScreen },
     issue: { title: "Issue", html: issueScreen },
-    labels: { title: "Labels", html: labelsScreen },
     repo_settings: { title: "Settings", html: repoSettingsScreen },
     settings: { title: "Settings", html: settingsScreen },
     // Where GitHub sends an admin back once the network's GitHub App is made: Settings, finishing that.

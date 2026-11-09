@@ -10,7 +10,7 @@ function Issue() {
   useEffect(() => {
     one.title(`#${P.number}`)
   }, [])
-  return <div className="max-w-3xl"><IssueView repo={P.repo} number={P.number} onGone={() => one.close()} /></div>
+  return <div className="max-w-5xl"><IssueView repo={P.repo} number={P.number} onGone={() => one.close()} /></div>
 }
 
 createRoot(document.getElementById("root")).render(<Frame><Issue /></Frame>)

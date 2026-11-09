@@ -5,13 +5,14 @@ import { Avatar, Button, Empty, List, Pending, Section, Split, useCall } from "@
 import { CommitView } from "../lib/commit-view.jsx"
 import { PathBar } from "../lib/frame.jsx"
 import { SmallCopy } from "../lib/parts.jsx"
-import { WIDE_BESIDE, Frame, ago, go, short, useBeside } from "../lib/use.jsx"
+import { WIDE_BESIDE, Frame, ago, go, short, useBeside, useWide } from "../lib/use.jsx"
 
 const P = one.params
 const at = { repo: P.repo, ref: P.ref, path: P.path || "" }
 const day = (ms) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
 
 function Row({ c, selected, open }) {
+  const wide = useWide()
   return (
     <div
       role="button"
@@ -28,10 +29,12 @@ function Row({ c, selected, open }) {
           <span className="truncate">{c.author} · {ago(c.time)}</span>
         </div>
       </div>
-      <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-        <code className="text-xs">{short(c.sha)}</code>
-        <span onClick={(e) => e.stopPropagation()}><SmallCopy text={c.sha} /></span>
-      </span>
+      {wide && (
+        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+          <code className="text-xs">{short(c.sha)}</code>
+          <span onClick={(e) => e.stopPropagation()}><SmallCopy text={c.sha} /></span>
+        </span>
+      )}
     </div>
   )
 }

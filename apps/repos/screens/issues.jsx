@@ -6,7 +6,7 @@ import { Avatar, Button, Empty, Icon, Input, List, ListRow, Pending, Problem, Re
 import { RepoTabs } from "../lib/frame.jsx"
 import { IssueView } from "../lib/issue-view.jsx"
 import { LabelChip, MarkdownField, StateIcon } from "../lib/parts.jsx"
-import { WIDE_BESIDE, Frame, ago, go, plural, said, useBeside } from "../lib/use.jsx"
+import { WIDE_BESIDE, Frame, ago, go, plural, said, useBeside, useWide } from "../lib/use.jsx"
 
 const P = one.params
 
@@ -64,7 +64,8 @@ function Row({ i, selected, open }) {
   )
 }
 
-function Filter({ title, value, choices, set, also }) {
+function Filter({ title, icon, value, choices, set, also }) {
+  const wide = useWide()
   const now = choices.find((c) => c.value === value)
   const pick = async (e) => {
     const items = [{ title: `Any ${title.toLowerCase()}`, checked: !value }, ...choices.map((c) => ({ title: c.title, checked: c.value === value })), ...(also ? [{ title: also.title, section: true }] : [])]
@@ -73,6 +74,7 @@ function Filter({ title, value, choices, set, also }) {
     if (also && i === items.length - 1) return also.run()
     set(i === 0 ? "" : choices[i - 1].value)
   }
+  if (!wide) return <Button variant={value ? "secondary" : "outline"} size="icon" onClick={pick} aria-label={value ? `${title}: ${now?.title || value}` : title}><Icon name={icon} /></Button>
   return (
     <Button variant="outline" size="sm" onClick={pick} aria-label={title}>
       <span className="max-w-32 truncate">{value ? now?.title || value : title}</span>
@@ -149,11 +151,11 @@ function Issues() {
         </Tabs>
         <Button variant={beside ? "secondary" : "default"} onClick={() => setCreating(true)}>New Issue</Button>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <SearchInput className="min-w-48 flex-1" placeholder="Search" value={typed} onChange={(e) => setTyped(e.target.value)} />
-        <Filter title="Author" value={f.author} choices={names} set={(v) => set("author", v)} />
-        <Filter title="Label" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} also={{ title: "Edit Labels", run: () => go("labels", { repo: P.repo }) }} />
-        <Filter title="Assignee" value={f.assignee} choices={[{ value: "none", title: "Assigned to no one" }, ...names]} set={(v) => set("assignee", v)} />
+      <div className="flex items-center gap-2">
+        <SearchInput className="min-w-0 flex-1" placeholder="Search" value={typed} onChange={(e) => setTyped(e.target.value)} />
+        <Filter title="Author" icon="user" value={f.author} choices={names} set={(v) => set("author", v)} />
+        <Filter title="Label" icon="tag" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} also={{ title: "Edit Labels", run: () => go("repo_settings", { repo: P.repo }) }} />
+        <Filter title="Assignee" icon="user-check" value={f.assignee} choices={[{ value: "none", title: "Assigned to no one" }, ...names]} set={(v) => set("assignee", v)} />
       </div>
       {list.error && !list.moving && <Problem title={said(list.error).title} />}
       <Swap call={list} rows={4}>

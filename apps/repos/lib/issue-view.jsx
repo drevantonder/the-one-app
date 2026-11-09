@@ -2,7 +2,7 @@
 // Reopen, its assignees and labels (beside it where there's room, above it where there isn't), and for its repo's
 // owners, Delete. It's the Issue screen, and what Issues shows beside its list where there's room.
 import { useState } from "react"
-import { Avatar, Button, Card, cn, Hint, Icon, Input, Markdown, Problem, ResponsiveDialog, Spinner, Swap, useCall, useWidth } from "@one/ui"
+import { Avatar, Button, cn, Hint, Icon, Input, Markdown, Problem, ResponsiveDialog, Spinner, Swap, useCall, useWidth } from "@one/ui"
 import { LabelChip, MarkdownField, StateIcon } from "./parts.jsx"
 import { ago, go, plural, said } from "./use.jsx"
 
@@ -28,15 +28,17 @@ function Comment({ d, c, body = false, editing, edit, done, menu, reload, fail }
   }
   const shown = !body && (c.yours || d.can.delete)
   return (
-    <Card id={body ? undefined : `c-${c.id}`} className="gap-0 overflow-hidden py-0">
-      <div className="flex items-center gap-2 border-b bg-muted/40 py-1.5 pr-1.5 pl-3 text-sm">
-        <Avatar name={c.author.name} size={20} />
-        <span className="min-w-0 flex-1 truncate">
-          <strong className="font-semibold">{c.author.name}</strong> <span className="text-muted-foreground">{body ? "opened" : "commented"} {ago(c.created)}{!body && c.updated !== c.created ? " · edited" : ""}</span>
-        </span>
-        {shown && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={(e) => menu(c, e.currentTarget)}><Icon name="dots-three" /></Button>}
-      </div>
-      <div className="px-4 py-3">
+    <article id={body ? undefined : `c-${c.id}`} className="flex min-w-0 flex-col gap-2 border-t pt-3 first:border-t-0 first:pt-0">
+      {!body && (
+        <div className="flex min-h-8 items-center gap-2 text-sm">
+          <Avatar name={c.author.name} size={20} />
+          <span className="min-w-0 flex-1 truncate">
+            <strong className="font-semibold">{c.author.name}</strong> <span className="text-muted-foreground">commented {ago(c.created)}{c.updated !== c.created ? " · edited" : ""}</span>
+          </span>
+          {shown && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={(e) => menu(c, e.currentTarget)}><Icon name="dots-three" /></Button>}
+        </div>
+      )}
+      <div>
         {editing ? (
           <div className="flex flex-col gap-3">
             <MarkdownField value={text} onChange={setText} rows={5} label="Comment" />
@@ -50,7 +52,7 @@ function Comment({ d, c, body = false, editing, edit, done, menu, reload, fail }
           <Markdown text={c.body} />
         )}
       </div>
-    </Card>
+    </article>
   )
 }
 
@@ -209,8 +211,10 @@ function Issue({ d, repo, reload, onGone }) {
     }
   }
 
+  const actions = [...(d.can.edit ? [{ title: "Edit", icon: "pencil-simple", run: () => setDialog("edit") }] : []), ...(d.can.delete ? [{ title: "Delete Issue", icon: "trash", danger: true, run: remove }] : [])]
   const menu = async (e) => {
-    if ((await one.menu([{ title: "Delete Issue", icon: "trash", danger: true }], e.currentTarget)) === 0) remove()
+    const i = await one.menu(actions, e.currentTarget)
+    if (i != null) actions[i].run()
   }
   const state = d.state === "open" ? "Open" : reason(d) === "not planned" ? "Closed as not planned" : "Closed"
   const timeline = []
@@ -225,14 +229,14 @@ function Issue({ d, repo, reload, onGone }) {
   const side = (what, title, value, open) => {
     const Row = triage ? "button" : "div"
     return (
-      <Row type={triage ? "button" : undefined} onClick={triage ? open : undefined} className={cn("flex w-full flex-col gap-1.5 px-3 py-2.5 text-left text-sm", triage && "cursor-pointer outline-none hover:bg-accent/50 focus-visible:bg-accent/50")}>
+      <Row type={triage ? "button" : undefined} onClick={triage ? open : undefined} className={cn("flex w-full flex-col gap-1.5 rounded-md py-1.5 text-left text-sm", triage && "cursor-pointer outline-none hover:bg-accent/50 focus-visible:bg-accent/50")}>
         <span className="flex items-center justify-between font-medium text-muted-foreground">{title}{triage && <Icon name="gear-six" />}</span>
         <span className="flex flex-wrap gap-1.5">{value}</span>
       </Row>
     )
   }
   const sidebar = (
-    <div className="divide-y overflow-hidden rounded-xl border bg-card text-card-foreground">
+    <div className="flex flex-col gap-2">
       {side("assign", "Assignees", d.assignees.length ? d.assignees.map((a) => <span key={a.handle} className="flex items-center gap-1.5"><Avatar name={a.name} size={18} />{a.name}</span>) : <span className="text-muted-foreground">No one</span>, assign)}
       {side("label", "Labels", d.labels.length ? d.labels.map((l) => <LabelChip key={l.name} l={l} />) : <span className="text-muted-foreground">None yet</span>, label)}
     </div>
@@ -244,10 +248,7 @@ function Issue({ d, repo, reload, onGone }) {
       <div className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
           <h1 className={cn("font-semibold break-words", withSide ? "text-xl" : "text-lg leading-snug")}>{d.title} <span className="font-normal text-muted-foreground">#{d.number}</span></h1>
-          <div className="flex shrink-0 items-center gap-1">
-            {d.can.edit && <Button variant="outline" size="sm" onClick={() => setDialog("edit")}>Edit</Button>}
-            {d.can.delete && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={menu}><Icon name="dots-three" /></Button>}
-          </div>
+          {!!actions.length && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={menu}><Icon name="dots-three" /></Button>}
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <span className="inline-flex items-center gap-1.5 font-medium text-foreground"><StateIcon issue={d} />{state}</span>
@@ -291,7 +292,7 @@ function Issue({ d, repo, reload, onGone }) {
           chosen={d.labels.map((l) => l.name)}
           save={(keys) => one.call("edit_issue", { repo, number: d.number, labels: keys })}
           empty="This repo has no labels."
-          extra={<Button variant="outline" className="self-start" onClick={() => go("labels", { repo })}>Edit Labels</Button>}
+          extra={<Button variant="outline" className="self-start" onClick={() => go("repo_settings", { repo })}>Edit Labels</Button>}
           done={() => (setDialog(null), reload())}
         />
       )}

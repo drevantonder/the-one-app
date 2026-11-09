@@ -139,7 +139,7 @@ function CodeView({ text, path = "", wrap, header = true, className }: {
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b py-1.5 pr-1.5 pl-3 text-sm text-muted-foreground">
         {header && (
-          <span className="flex min-h-8 basis-full items-center font-mono text-xs whitespace-nowrap @md:basis-auto @md:flex-1">
+          <span className="hidden min-h-8 flex-1 items-center font-mono text-xs whitespace-nowrap @md:flex">
             {lines.length.toLocaleString()} {lines.length === 1 ? "line" : "lines"} · {fileSize(bytes)}
           </span>
         )}
@@ -150,7 +150,7 @@ function CodeView({ text, path = "", wrap, header = true, className }: {
               ref={find}
               type="text"
               value={typed}
-              placeholder="Find in file"
+              placeholder={width && width < 448 && header ? `Find in ${lines.length.toLocaleString()} ${lines.length === 1 ? "line" : "lines"}` : "Find in file"}
               aria-label="Find in file"
               enterKeyHint="search"
               autoComplete="off"

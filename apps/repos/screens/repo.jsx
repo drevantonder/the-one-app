@@ -83,16 +83,6 @@ function Clone({ d }) {
   return <CopyButton variant="outline" text={`git clone ${d.clone || address(d.repo)}`} label="Clone" />
 }
 
-// On a phone there are no tabs, so a repo's other pages are rows above its files.
-function Pages({ d }) {
-  return (
-    <List className="max-w-none">
-      <ListRow leading={<Icon name="record" className="size-5 text-muted-foreground" />} title="Issues" trailing={d.open_issues ? <span className="text-muted-foreground">{d.open_issues.toLocaleString()}</span> : undefined} onClick={() => go("issues", { repo: d.repo })} />
-      {d.yours && !d.github && <ListRow leading={<Icon name="gear" className="size-5 text-muted-foreground" />} title="Settings" onClick={() => go("repo_settings", { repo: d.repo })} />}
-    </List>
-  )
-}
-
 function Forks({ d }) {
   if (!d.forks?.length) return null
   return (
@@ -172,6 +162,8 @@ function Code({ d }) {
         <PathBar d={d} />
         {!at && (
           <div className="flex items-center gap-2">
+            {!wide && <Button variant="outline" size="sm" onClick={() => go("issues", { repo: d.repo })}><Icon name="record" />Issues{!!d.open_issues && <span className="text-muted-foreground">{d.open_issues.toLocaleString()}</span>}</Button>}
+            {!wide && d.yours && !d.github && <Button variant="outline" size="icon-sm" aria-label="Settings" onClick={() => go("repo_settings", { repo: d.repo })}><Icon name="gear" /></Button>}
             {d.github && <Button variant="outline" size="sm" onClick={() => one.link(d.github.url)}><GitHubMark />GitHub{d.github.private ? " · Private" : ""}</Button>}
             <Clone d={d} />
           </div>
@@ -182,7 +174,6 @@ function Code({ d }) {
           Forked from <button type="button" className="underline underline-offset-4 hover:text-foreground" onClick={() => go("repo", { repo: d.from })}>{d.from}</button>
         </Hint>
       )}
-      {!at && !wide && <Pages d={d} />}
       <CommitCard c={d.latest} d={d} />
       <Files d={d} />
       {!at && <Forks d={d} />}
