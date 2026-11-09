@@ -189,6 +189,9 @@ export function browser() {
     appearance() {},
     copy: (text) => navigator.clipboard.writeText(text),
     open: (href) => window.open(href, "_blank", "noopener,noreferrer"),
+    /// The address gives only the icons asked for. Asked for last, so that on a first visit the client's WebAssembly,
+    /// which the first answer from the user's machines waits for, gets the connection first.
+    icons: (names, v) => fetch(`/icons?${new URLSearchParams({ names: [...names].sort().join(","), v })}`, { priority: "low" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))),
     bridge: () => ({}),
     look: () => ({}),
     fit() {},

@@ -14,6 +14,8 @@ export function app(native) {
   let isIn = false;
   /// Whether the app may show notifications, as it last said.
   let notify = null;
+  /// Every icon, read once.
+  let allIcons = null;
   const query = new URLSearchParams(location.search);
   const panel = query.has("panel");
 
@@ -214,6 +216,8 @@ export function app(native) {
     appearance: (value) => native.appearance(value),
     copy: (text) => native.copy(String(text)),
     open: (href) => native.open(href).catch(() => {}),
+    /// The app's files are on this device, so every icon's one read.
+    icons: (names, v) => (allIcons ||= fetch(`/icons.json?v=${v}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))).catch((err) => ((allIcons = null), Promise.reject(err)))),
     notify: async (ask) => (notify = await native.notify(ask).catch(() => null)),
     /// What a screen's bridge may ask of the app beyond a page: copying, saving or previewing a file, a phone's haptic;
     /// an iPhone's document camera, and its menu for what a touch and hold lifted, shown with it.

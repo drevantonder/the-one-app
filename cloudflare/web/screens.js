@@ -25,14 +25,16 @@ export const whenTitled = (fn) => titled.push(fn);
 const files = Object.fromEntries((document.querySelector('meta[name="one-files"]')?.content || "").split(" ").filter(Boolean).map((f) => f.split("=")));
 const asset = (name) => (files[name] ? `/${name}?v=${files[name]}` : `/${name}`);
 
-/// Phosphor's icons, from the address once (and then the browser's cache), for those the bridge asks for: on this
-/// page, and in screens' frames. Asked for last, so that on a first visit the client's WebAssembly, which the first
-/// answer from the user's machines waits for, gets the connection first.
-let icons;
+/// Phosphor's icons, each asked of the platform once (and then the browser's cache), for those the bridge asks for: on
+/// this page, and in screens' frames.
+const icons = {};
 export async function iconPaths(names = []) {
-  icons ||= fetch(asset("icons.json"), { priority: "low" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))).catch((err) => ((icons = null), Promise.reject(err)));
-  const all = await icons;
-  return Object.fromEntries(names.map((n) => [n, all[n]]));
+  const unasked = names.filter((n) => !icons[n]);
+  if (unasked.length) {
+    const got = platform.icons(unasked, files["icons.json"]);
+    for (const n of unasked) icons[n] = got.then((all) => all[n], (err) => (delete icons[n], Promise.reject(err)));
+  }
+  return Object.fromEntries(await Promise.all(names.map(async (n) => [n, await icons[n]])));
 }
 
 /// Whether the window's own screen (not a sheet's) is showing.
