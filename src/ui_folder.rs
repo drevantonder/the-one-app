@@ -12,12 +12,12 @@ pub fn text(path: &str, built: &'static str) -> Cow<'static, str> {
 }
 
 /// The files of `config::CLOUDFLARE`: as a checkout has them, every one that's there now, when there is one to read,
-/// else as this build holds them. The logo and icon stay this build's, since its config names them.
+/// else as this build holds them. The logo and icons stay this build's, since its config names them.
 pub fn cloudflare() -> Vec<(String, Vec<u8>)> {
     let built = crate::config::CLOUDFLARE.iter().map(|(name, bytes)| (name.to_string(), bytes.to_vec()));
     let Some(root) = folder() else { return built.collect() };
     let mut files: Vec<(String, Vec<u8>)> = crate::ui_files::list(&root).into_iter().filter_map(|(name, path)| Some((name, std::fs::read(path).ok()?))).collect();
-    files.extend(built.filter(|(name, _)| name == "web/logo.png" || name == "web/icon.png"));
+    files.extend(built.filter(|(name, _)| ["web/logo.png", "web/icon.png", "web/icon-full.png"].contains(&name.as_str())));
     files.sort();
     files
 }

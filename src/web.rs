@@ -25,7 +25,10 @@ pub fn files() -> Vec<(String, Vec<u8>)> {
     let manifest = json!({
         "name": crate::config::NAME, "short_name": crate::config::NAME, "id": "/", "start_url": "/", "scope": "/", "display": "standalone",
         "background_color": "#ffffff", "theme_color": "#ffffff",
-        "icons": [{ "src": "/icon.png", "sizes": "192x192 512x512 1024x1024", "type": "image/png", "purpose": "any" }],
+        "icons": [
+            { "src": "/icon.png", "sizes": "192x192 512x512 1024x1024", "type": "image/png", "purpose": "any" },
+            { "src": "/icon-full.png", "sizes": "192x192 512x512 1024x1024", "type": "image/png", "purpose": "maskable" },
+        ],
     });
     files.push(("manifest.webmanifest".into(), manifest.to_string().into_bytes()));
     // The service worker shows a note it can't open with the custom build's name.

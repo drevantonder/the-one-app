@@ -102,6 +102,8 @@ hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true
 
 [build-dependencies]
 toml = "0.9"
+# The custom build's icon drawn out to its edges (build.rs): already built for the node.
+image = { version = "0.24", default-features = false, features = ["png"] }
 
 # Crypto, CBOR and SQLite are unbearably slow unoptimized, even while developing. Named, not `"*"`: that would optimize every
 # proc macro and build script too (cargo gives a package override precedence over build-override), most of a cold build.

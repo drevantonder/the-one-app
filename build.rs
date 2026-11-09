@@ -122,6 +122,11 @@ fn main() {
     let icon = std::path::Path::new(&path).parent().unwrap().join(get("icon").as_str().unwrap());
     println!("cargo:rerun-if-changed={}", icon.display());
     files.push(("web/icon.png".into(), std::fs::canonicalize(&icon).unwrap_or_else(|e| panic!("{}: {e}", icon.display())).to_string_lossy().into()));
+    // Home screens round an icon and fill what's behind it themselves, so one with margins shows as a small tile in a black
+    // or white square: the same icon, drawn out to its edges, for the manifest's maskable icon and the apple-touch-icon.
+    let full = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("icon-full.png");
+    full_bleed(&icon).save(&full).unwrap_or_else(|e| panic!("{}: {e}", icon.display()));
+    files.push(("web/icon-full.png".into(), full.to_string_lossy().into()));
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
@@ -208,4 +213,26 @@ fn wasm_constant(var: &str, default: &str, names: [&str; 2]) -> String {
         vec![]
     };
     format!("pub const {var}: &[(&str, &[u8])] = &[{}];\n", held.join(", "))
+}
+
+/// `icon` without its margins: the plate (what's opaque) cut out, its rounded corners filled with the colour next to them in
+/// their row, and the whole at 1024 px.
+fn full_bleed(icon: &std::path::Path) -> image::RgbaImage {
+    use image::imageops;
+    let img = image::open(icon).unwrap_or_else(|e| panic!("{}: {e}", icon.display())).to_rgba8();
+    let solid: Vec<(u32, u32)> = img.enumerate_pixels().filter(|(_, _, p)| p[3] == 255).map(|(x, y, _)| (x, y)).collect();
+    let (Some(x0), Some(x1), Some(y0), Some(y1)) = (solid.iter().map(|p| p.0).min(), solid.iter().map(|p| p.0).max(), solid.iter().map(|p| p.1).min(), solid.iter().map(|p| p.1).max()) else {
+        panic!("{} has no opaque pixel", icon.display());
+    };
+    let mut plate = imageops::crop_imm(&img, x0, y0, x1 - x0 + 1, y1 - y0 + 1).to_image();
+    for y in 0..plate.height() {
+        let row: Vec<u32> = (0..plate.width()).filter(|&x| plate.get_pixel(x, y)[3] == 255).collect();
+        let (Some(&first), Some(&last)) = (row.first(), row.last()) else { continue };
+        for x in (0..first).chain(last + 1..plate.width()) {
+            let mut from = *plate.get_pixel(if x < first { first } else { last }, y);
+            from[3] = 255;
+            plate.put_pixel(x, y, from);
+        }
+    }
+    imageops::resize(&plate, 1024, 1024, imageops::FilterType::Lanczos3)
 }
