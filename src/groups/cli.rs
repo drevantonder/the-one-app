@@ -1,0 +1,43 @@
+//! Groups' commands besides its tools: making and joining groups.
+
+use anyhow::Result;
+use serde_json::json;
+
+use crate::cli::{Command, Given};
+
+/// Making and joining groups, which aren't tools yet: Settings › Groups does them.
+pub fn commands() -> Command {
+    Command {
+        help: vec![
+            ("group create <name>".into(), "a group, with you as its admin".into()),
+            ("group invite <group> <user> [--admin]".into(), "".into()),
+            ("group accept <group>".into(), "".into()),
+            ("group remove <group> <user>".into(), "or leave it, giving yourself".into()),
+        ],
+        run: cli,
+    }
+}
+
+fn cli(g: &Given) -> Result<bool> {
+    use crate::config::CLI;
+    match g.words().as_slice() {
+        ["group", "create", name @ ..] if !name.is_empty() => {
+            let r = g.node.post("/v1/group", json!({ "name": name.join(" ") }))?;
+            println!("Created {} ({}).", name.join(" "), r["group"].as_str().unwrap_or(""));
+        }
+        ["group", "invite", group, user] => {
+            g.node.post("/v1/invite", json!({ "group": group, "user": user, "role": if g.has("admin") { "admin" } else { "member" } }))?;
+            println!("Invited {user}; they join with {CLI} group accept {group}.");
+        }
+        ["group", "accept", group] => {
+            g.node.post("/v1/accept", json!({ "group": group }))?;
+            println!("You're in {group}.");
+        }
+        ["group", "remove", group, user] => {
+            g.node.post("/v1/member", json!({ "group": group, "user": user, "role": null }))?;
+            println!("{user} is no longer in {group}.");
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}

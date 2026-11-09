@@ -15,7 +15,6 @@ use serde_json::{Map, Value, json};
 pub mod apps;
 pub mod backups;
 pub mod devices;
-pub mod groups;
 pub mod widgets;
 
 /// What a tool that needs the user's yes does, wherever it's said.
@@ -213,7 +212,7 @@ impl Feature {
 
 /// Every feature's, in the order they're listed.
 pub fn all() -> Vec<Feature> {
-    vec![apps::add_feature(), apps::remove_feature(), crate::vault::tools::feature(), backups::feature(), groups::feature(), devices::feature(), widgets::feature(), crate::push::tools::feature(), crate::logs::feature()]
+    vec![apps::add_feature(), apps::remove_feature(), crate::vault::tools::feature(), backups::feature(), crate::groups::tools::feature(), devices::feature(), widgets::feature(), crate::push::tools::feature(), crate::logs::feature()]
 }
 
 /// The feature with the tool `name` (as MCP names it), and the tool's place in it.

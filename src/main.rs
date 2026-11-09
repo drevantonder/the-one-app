@@ -16,11 +16,10 @@ use one::core_tools::SENDS;
 
 /// Every built-in command, each feature's, in the order they're tried: the first that takes what was typed runs it.
 fn commands() -> Vec<Command> {
-    use one::core_tools::groups;
     use one::node::{apps, blobs, services, storage, vault};
     vec![
         network::commands(),
-        groups::commands(),
+        one::groups::cli::commands(),
         apps::cli::commands(),
         vault::cli::commands(),
         one::cloudflare::cli::commands(),

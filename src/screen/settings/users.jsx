@@ -211,7 +211,7 @@ function Handle({ was, open, setOpen, saved }) {
     setBusy(true)
     setError("")
     try {
-      await api("POST", "/v1/handle", { handle: value })
+      await api("POST", "/v1/groups/handle", { handle: value })
       setOpen(false)
       one.tap("success")
       saved()

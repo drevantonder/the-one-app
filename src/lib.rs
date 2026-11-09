@@ -82,6 +82,7 @@ pub mod mcp;
 #[cfg(feature = "node")]
 pub mod tools;
 pub mod core_tools;
+pub mod groups;
 pub mod app;
 #[cfg(feature = "node")]
 pub mod git_wire;

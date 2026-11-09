@@ -288,7 +288,7 @@ function N(t) {
 		if (_ && !p) {
 			h(!0), f("");
 			try {
-				await w("POST", "/v1/handle", { handle: l }), s(!1), one.tap("success"), c();
+				await w("POST", "/v1/groups/handle", { handle: l }), s(!1), one.tap("success"), c();
 			} catch (e) {
 				f(E(e)), h(!1);
 			}
