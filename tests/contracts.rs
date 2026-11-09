@@ -610,7 +610,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
                 },
             }],
             devices_at: 1,
-            clients: vec![Client { key: "k".into(), seal: "s".into(), name: "n".into(), user: "u".into(), roles: [Kind::Client].into(), passkey: Some("p".into()), device: Some("d".into()), since: 1, place: Some("p".into()), me: true, sign_in: Some(one::sign_in_proof::Account::Passkey { credential: "c".into(), public_key: "k".into() }) }],
+            clients: vec![Client { key: "k".into(), seal: "s".into(), name: "n".into(), user: "u".into(), roles: [Kind::Client].into(), platform: None, passkey: Some("p".into()), device: Some("d".into()), since: 1, place: Some("p".into()), me: true, sign_in: Some(one::sign_in_proof::Account::Passkey { credential: "c".into(), public_key: "k".into() }) }],
             app_schedules: vec![AppSchedule { endpoint: "e".into(), scope: "s".into(), app: "a".into(), until: 1, by: "u".into(), keys: Default::default() }],
             steps: 1,
             settings: [("address".to_string(), "a".to_string())].into(),

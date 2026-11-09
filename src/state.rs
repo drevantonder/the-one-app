@@ -317,6 +317,8 @@ pub struct Client {
     pub user: String,
     pub roles: BTreeSet<Kind>,
     pub passkey: Option<String>,
+    /// What it said it's built for, once it has: "browser", "iphone" and the like.
+    pub platform: Option<String>,
     /// The device it's on, when it's a native app's sign-in.
     pub device: Option<String>,
     pub since: u64,
@@ -498,6 +500,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
             user: c.user.clone(),
             roles: c.roles.clone(),
             passkey: c.passkey.clone(),
+            platform: c.platform.clone(),
             device: c.device.as_ref().map(hex),
             since: c.since,
             place: c.place.clone(),

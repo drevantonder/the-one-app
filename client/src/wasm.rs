@@ -222,11 +222,12 @@ impl Keyring {
         Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace: traced, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
     }
 
-    /// As each start of a client does: its user's own things it settles if they aren't (`Keyring::settle_own`).
-    pub async fn settle(&self) -> Result<(), Failed> {
+    /// As each start of a client does: its user's own things it settles if they aren't (`Keyring::settle_own`). A
+    /// browser says `platform`; an app's window leaves it to the app around it, which says its own.
+    pub async fn settle(&self, platform: Option<String>) -> Result<(), Failed> {
         self.keyring.load(&self.on).await.map_err(Failed::of)?;
         let client = self.client.borrow().clone().ok_or_else(|| Failed::of(crate::keyring::refused()))?;
-        self.keyring.settle_own(&client, &self.on, None).await.map_err(Failed::of)
+        self.keyring.settle_own(&client, &self.on, None, platform.as_deref()).await.map_err(Failed::of)
     }
 
     /// Renews its user's app schedules of `app` as they use it (`Keyring::renew_app_schedules`).

@@ -224,28 +224,23 @@ fn status(node: &Client, state: &State) {
         };
         println!("  ● {}  the Cloudflare node, run priority {at}", one::rank::CLOUDFLARE);
     }
-    // A device that's only a client, a phone or a computer, is listed with them; a browser is a sign-in, not a device.
-    let (browsers, clients): (Vec<&one::state::Client>, Vec<&one::state::Client>) = i.clients.iter().partition(|c| c.passkey.is_some() || is_browser(&c.name));
+    // A device that's only a client (a phone, a computer, a browser) is listed with them; a passkey isn't one.
+    let (passkeys, clients): (Vec<&one::state::Client>, Vec<&one::state::Client>) = i.clients.iter().partition(|c| c.passkey.is_some());
     let this = |c: &one::state::Client| if client_device::me().is_some_and(|(_, key)| c.key == key) { " (this one)" } else { "" };
     for c in &clients {
-        let glyph = if is_phone(&c.name) { "▯" } else { "▭" };
+        let glyph = if is_phone(c) { "▯" } else { "▭" };
         println!("  {glyph} {}{}  {}'s", c.name, this(c), name(&c.user));
     }
-    if !browsers.is_empty() {
-        println!("\nBrowsers");
-        for c in &browsers {
+    if !passkeys.is_empty() {
+        println!("\nPasskeys");
+        for c in &passkeys {
             println!("  {}{}  {}", c.name, this(c), name(&c.user));
         }
     }
 }
 
-/// What a client's name says it is, as our own apps name themselves ("iPhone", "The One App on Andre’s MacBook Air",
-/// "Chrome on Mac"): Settings reads them the same way.
-fn is_browser(name: &str) -> bool {
-    ["Chrome", "Safari", "Firefox", "Edge", "A browser"].iter().any(|b| name.strip_prefix(b).is_some_and(|rest| rest.is_empty() || rest.starts_with(" on ")))
-}
-
-fn is_phone(name: &str) -> bool {
-    let name = name.to_lowercase();
-    ["phone", "ipad", "tablet", "android", "pixel", "galaxy"].iter().any(|w| name.contains(w))
+/// Whether a client is a phone, as it says, or for one that hasn't yet, as its name does.
+fn is_phone(c: &one::state::Client) -> bool {
+    let name = c.name.to_lowercase();
+    matches!(c.platform.as_deref(), Some("iphone" | "android")) || (c.platform.is_none() && ["phone", "ipad", "tablet", "android", "pixel", "galaxy"].iter().any(|w| name.contains(w)))
 }

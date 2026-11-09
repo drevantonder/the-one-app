@@ -230,8 +230,8 @@ export const net = {
   },
 
   /// As each start of a client does: this user's own things, settled by this device if they aren't.
-  async settle() {
-    if (net.has) await ask({ op: "settle" });
+  async settle(platform) {
+    if (net.has) await ask({ op: "settle", platform });
   },
 
   /// What `app`'s `tool` answered last for `input` here, if it only reads: `{ answer, at }`, or null.

@@ -179,7 +179,7 @@ export function browser() {
     },
     nodes: (state) => net.ordered(state),
     /// Once it's in: its user's own things' first key and where they run, made by the first of their devices.
-    settle: () => net.settle().catch((err) => console.warn("making this user's own keys:", err)),
+    settle: () => net.settle("browser").catch((err) => console.warn("making this user's own keys:", err)),
     kept: (app, tool, input) => net.kept(auth.user(), app, tool, input),
     renew: async (app) => device && net.renew(app),
     forget: () => net.forget(auth.user()),

@@ -582,17 +582,18 @@ async fn group(m: &impl Me, name: &str) -> Result<Value> {
 }
 
 /// As each start of a device does: says where its user's own things run (the machines that run everyone's), if they
-/// haven't; names the device it's on in its listing, if it was listed before sign-ins named it (`on_device`); and makes
+/// haven't; names the device it's on in its listing, if it was listed before sign-ins named it (`on_device`), and says
+/// what it's built for, if it hasn't (`platform`, for a client); and makes
 /// their own scope's first epoch, if it has none. What's to do is looked at again in what it reads fresh, as another
 /// device of theirs may have done it.
-pub async fn settle_own(m: &impl Me, on_device: Option<&str>) -> Result<()> {
+pub async fn settle_own(m: &impl Me, on_device: Option<&str>, platform: Option<&str>) -> Result<()> {
     let me = m.public();
     let todo = || {
         m.who(|who| {
             let mine = who.machine(&me)?;
             let user = mine.as_ref().map(|d| d.user.clone()).unwrap_or_default();
             let runs = who.runs_until_chosen(&user)?;
-            let unnamed = mine.filter(|d| d.device.is_none() && d.passkey.is_none() && on_device.is_some()).map(|d| (d.name, d.roles.into_iter().collect::<Vec<_>>()));
+            let unnamed = mine.filter(|d| d.passkey.is_none() && (d.device.is_none() && on_device.is_some() || d.platform.is_none() && platform.is_some())).map(|d| (d.name, d.roles.into_iter().collect::<Vec<_>>(), d.device));
             let first = who.epoch(&Scope::User(user.clone()))? == 0;
             Ok((!runs.is_empty() || unnamed.is_some() || first).then_some((user, runs, unnamed, first)))
         })
@@ -602,9 +603,14 @@ pub async fn settle_own(m: &impl Me, on_device: Option<&str>) -> Result<()> {
     }
     m.read().await?;
     let Some((user, runs, unnamed, first)) = todo()? else { return Ok(()) };
-    if let (Some(device), Some((name, roles))) = (on_device, unnamed) {
+    if let Some((name, roles, device)) = unnamed {
         let mut listed = content::device(&Endpoint { key: me, seal: m.seal() }, &user, &name, &roles, None);
-        listed.data["device"] = json!(device);
+        if let Some(device) = device.as_ref().map(hex).as_deref().or(on_device) {
+            listed.data["device"] = json!(device);
+        }
+        if let Some(platform) = platform {
+            listed.data["platform"] = json!(platform);
+        }
         m.write(listed).await?;
     }
     if !runs.is_empty() {

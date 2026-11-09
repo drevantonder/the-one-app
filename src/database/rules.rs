@@ -208,7 +208,13 @@ impl Rule<'_> {
             // named no device, naming the one it's on.
             let part = was.is(Kind::Service) && was.roles == machine.roles && was.service == machine.service;
             let part = part || (was.is(Kind::Client) && was.roles == machine.roles && was.device.is_none() && machine.device.is_some() && was.passkey == machine.passkey);
+            // Or a sign-in saying what it is, once, which changes nothing else about it.
+            let says = was.is(Kind::Client) && was.roles == machine.roles && was.passkey == machine.passkey && was.platform.is_none() && machine.platform.is_some() && (was.device.is_none() || was.device == machine.device);
+            let part = part || says;
             ensure!(!was.removed && was.user == user && theirs && (was.by != user || part) && was.seal == machine.seal, "that key is listed already");
+            if says {
+                (machine.since, machine.place, machine.sign_in) = (was.since, was.place, was.sign_in);
+            }
         } else if self.who.user_ever(&user)?.is_some() {
             let verb = if machine.is(Kind::Client) || machine.is(Kind::Service) { "add-devices" } else { "add-machines" };
             let lists = self.who.user(&user)?.is_some() && self.may_make(verb, &user_principal(&user), &user_principal(&user), "owner", &super::scopes::device(&machine.key));
@@ -667,7 +673,7 @@ fn pick_handle(out: &Connection, name: &str, fallback: &str) -> Result<String> {
 
 fn put(out: &Connection, d: &Machine) -> Result<()> {
     out.execute(
-        "INSERT OR REPLACE INTO devices VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO devices VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             hex(&d.key),
             hex(&d.seal),
@@ -683,7 +689,8 @@ fn put(out: &Connection, d: &Machine) -> Result<()> {
             int(d.since),
             d.sign_in.as_ref().map(|a| json!(a).to_string()),
             d.place,
-            d.removed
+            d.removed,
+            d.platform
         ],
     )?;
     Ok(())
@@ -704,6 +711,8 @@ fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
     let service = data["service"].as_str().map(str::to_string);
     ensure!(service.as_deref().is_none_or(valid_app_name), "a service's name is lowercase words joined by -");
     ensure!(service.is_some() == roles.contains(&Kind::Service), "a service endpoint names the service it offers, and only it does");
+    let platform = data["platform"].as_str().map(str::to_string);
+    ensure!(platform.as_deref().is_none_or(|p| PLATFORMS.contains(&p)), "a client's platform is one of {PLATFORMS:?}");
     Ok(Machine {
         key: unhex(text("key")?)?,
         seal: unhex(text("seal")?)?,
@@ -711,6 +720,7 @@ fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
         name,
         roles,
         passkey: data["passkey"].as_str().map(str::to_string),
+        platform,
         shared: service.is_some() && data["shared"] == true,
         service,
         device: data["device"].as_str().map(unhex).transpose().context("device is the key of the device it's part of")?,
@@ -721,6 +731,9 @@ fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
         removed: false,
     })
 }
+
+/// What a client can say it's built for.
+const PLATFORMS: [&str; 6] = ["mac", "windows", "linux", "iphone", "android", "browser"];
 
 #[cfg(test)]
 mod tests {
@@ -913,6 +926,26 @@ mod tests {
         // Nor is anything but a service listed again by its user.
         assert!(!net.step(&mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None)));
         assert_eq!(net.db.machine(&linux_id)?.unwrap().roles.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn a_client_says_what_it_is_once_and_keeps_what_it_was_let_in_with() -> anyhow::Result<()> {
+        let (mac, mut net) = setup();
+        let phone = Dev::new(3);
+        let mut listing = device(&phone.endpoint(), ANDRE, "iPhone", &[Kind::Client], None);
+        listing.data["place"] = json!("Melbourne");
+        net.step(&mac, ANDRE, listing);
+        let says = |platform: &str| {
+            let mut c = device(&phone.endpoint(), ANDRE, "iPhone", &[Kind::Client], None);
+            c.data["platform"] = json!(platform);
+            c
+        };
+        assert!(!net.step(&phone, ANDRE, says("toaster")));
+        assert!(net.step(&phone, ANDRE, says("iphone")));
+        let listed = net.db.machine(&phone.id())?.unwrap();
+        assert_eq!((listed.platform.as_deref(), listed.place.as_deref()), (Some("iphone"), Some("Melbourne")));
+        assert!(!net.step(&phone, ANDRE, says("android")), "it says once");
         Ok(())
     }
 

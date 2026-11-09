@@ -1,5 +1,5 @@
 // This user's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add a Device, their
-// browsers), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
+// passkeys), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
 // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping;
 // under Devices, where this device holds its own keys (`device.keys`, the web client), which of their devices run
 // which apps' schedules, and a passkey to get back in with.
@@ -47,6 +47,13 @@ const iconByName = (name) => {
   const [browsing, browser, , on] = name.match(BROWSER) || []
   return browsing ? glyph({ Chrome: "google-chrome-logo", Safari: "compass" }[browser] || "browser", osOf("", on || "")) : glyph(typeOf(name), osOf("", name))
 }
+// A client's picture, from what it says it is; one that hasn't yet, from its name.
+const OS = { mac: "apple-logo", iphone: "apple-logo", windows: "windows-logo", linux: "linux-logo", android: "android-logo" }
+const iconOf = (c) => {
+  if (c.platform === "browser") return BROWSER.test(c.name) ? iconByName(c.name) : glyph("browser")
+  const type = typeOf(c.name)
+  return glyph(type === "desktop" && /iphone|android/.test(c.platform || "") ? "device-mobile" : type, OS[c.platform] || osOf("", c.name))
+}
 const CLOUDFLARE = { cloud: true }
 
 // What a device signed in with, as a grey line says it: "a@example.com · Google", or "Passkey".
@@ -67,7 +74,7 @@ const asked = {}
 // Try Again's restart can come and go between two draws, so the same problem a few seconds on is its answer.
 const LATE = 30_000, AGAIN = 10_000
 
-// What the screen knows of the devices, from what the node says: each of theirs with what's on it, their browsers, and
+// What the screen knows of the devices, from what the node says: each of theirs with what's on it, their passkeys, and
 // what each part of a device is doing. `again` gives what Try Again runs.
 function model(x, again) {
   const { state, device, apps, seen, seenRead } = x
@@ -78,13 +85,13 @@ function model(x, again) {
   const holds = (s) => (s.runs_for || []).includes(`user:${me}`)
   const userName = (id) => state.network?.users.find((u) => u.id === id)?.name || "someone"
 
-  // What exists, grouped by the device it's on, as each says by its key: a machine's oned, the sign-ins of its apps,
-  // and each browser on its own.
+  // What exists, grouped by the device it's on, as each says by its key: a machine's oned and the sign-ins of its
+  // apps; a client with no device link, such as a browser, is a device of its own.
   function grouped() {
     // This device, as its node says, or by its own key: a browser's, which signs in, or the one asking.
     const mark = (e) => ({ ...e, me: e.me || [device.key, state.me?.key].includes(e.key) })
     const devices = (state.network?.devices || []).map(mark), clients = (state.network?.clients || []).map(mark)
-    const cards = [], browsers = [], stale = []
+    const cards = [], passkeys = [], stale = []
     const card = (user, name) => {
       const c = { user, name: shown(name), node: null, clients: [] }
       cards.push(c)
@@ -93,13 +100,13 @@ function model(x, again) {
     const byKey = new Map()
     for (const d of devices.filter((d) => (d.roles || []).includes("compute"))) byKey.set(d.key, Object.assign(card(d.user, d.name), { node: d }))
     for (const c of clients) {
-      if (c.passkey || BROWSER.test(c.name)) {
-        browsers.push(c)
+      if (c.passkey) {
+        passkeys.push(c)
         continue
       }
       // One listed before sign-ins named their device names it itself when its app next runs: one that hasn't been
       // let in for a week never will, and folds into one row.
-      if (!c.device && !c.me && seenRead && Date.now() - Math.max(seen[c.key] || 0, c.since || 0) > 7 * 86_400_000) {
+      if (!c.device && !c.platform && !c.me && seenRead && Date.now() - Math.max(seen[c.key] || 0, c.since || 0) > 7 * 86_400_000) {
         stale.push(c)
         continue
       }
@@ -123,14 +130,12 @@ function model(x, again) {
       c.seen = Math.max(0, ...c.keys.map((k) => seen[k] || 0))
       c.icon = c.node
         ? glyph(c.node.kind === "laptop" ? "laptop" : /apple|windows/.test(c.node.target || "") ? "desktop" : "hard-drives", osOf(c.node.target, c.name), !c.online)
-        : c.runs
-          ? glyph("hard-drives", "", !c.online)
-          : glyph(typeOf(c.signIn?.name || c.name), osOf("", c.signIn?.name || c.name))
+        : iconOf({ ...c.signIn, name: c.signIn?.name || c.name })
     }
     // Theirs, and others' that run their apps: all of those for an admin, who sets where things run.
     const shownCards = cards.filter((c) => c.user === me || (c.node && (admin || holds(c.node))))
     shownCards.sort((a, b) => (a.runs ? rank(a.priority) : 2000) - (b.runs ? rank(b.priority) : 2000) || a.name.localeCompare(b.name))
-    return { cards: shownCards, browsers: browsers.filter((b) => b.user === me), stale: stale.filter((c) => c.user === me) }
+    return { cards: shownCards, passkeys: passkeys.filter((p) => p.user === me), stale: stale.filter((c) => c.user === me) }
   }
   const drawn = grouped()
 
@@ -377,10 +382,10 @@ function Devices() {
   latest.current = { place: (...a) => place(...a), moveMenu: (...a) => moveMenu(...a) }
 
   /// A device's ⋯: Rename, its sign-ins, Remove (or Sign Out, for this one).
-  async function menu(item, browser, at) {
-    const items = browser ? [] : [{ title: "Rename", icon: "pencil-simple" }]
+  async function menu(item, passkey, at) {
+    const items = passkey ? [] : [{ title: "Rename", icon: "pencil-simple" }]
     // What its sign-ins were let in with, which a new device's sign-in is checked against.
-    const signedIn = (browser ? [item] : item.clients).filter((c) => c.sign_in)
+    const signedIn = (passkey ? [item] : item.clients).filter((c) => c.sign_in)
     if (signedIn.length) items.push({ title: "Sign-ins…", icon: "key" })
     items.push(item.me ? { title: "Sign Out", icon: "sign-out", danger: true } : { title: "Remove…", icon: "minus-circle", danger: true })
     const i = await one.menu(items, at).catch(() => null)
@@ -388,7 +393,7 @@ function Devices() {
     if (items[i].title === "Rename") show({ rename: item })
     else if (items[i].title === "Sign-ins…") show({ signIns: signedIn })
     else if (item.me) signOut()
-    else remove(item.name, browser ? [item.key] : item.keys, !browser && item.node && item.online ? item.node.key : null)
+    else remove(item.name, passkey ? [item.key] : item.keys, !passkey && item.node && item.online ? item.node.key : null)
   }
 
   /// Removes a device, everything on it: it opens nothing new. One that runs oned and is on can also erase what it
@@ -618,7 +623,7 @@ function Scanned({ scan, done, cancel }) {
 
 function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, schedule, act }) {
   const { device, state, passkey } = data
-  const { cards, browsers, stale } = m.drawn
+  const { cards, passkeys, stale } = m.drawn
   const mine = cards.filter((c) => c.user === m.me)
   // App schedules, only for someone with some running, or an app that runs on its own: an app's screen asks for the
   // rest.
@@ -630,7 +635,7 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
     const r = state.network.recovery_used
     recovery.push(`The recovery key last let in a device of ${r.user === m.me ? "yours" : `${m.userName(r.user)}’s`}, ${day(r.time)}.`)
   }
-  const side = scheduling || (!!device.keys && passkey) || recovery.length > 0
+  const side = scheduling || (!!device.keys && passkey) || passkeys.length > 0 || recovery.length > 0
   return (
     <div className={cn("grid max-w-5xl items-start gap-x-8 gap-y-8", side && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]")}>
       <div className="flex min-w-0 flex-col gap-4">
@@ -668,26 +673,10 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
         )}
         {!!stale.length && <List><OldSignIns c={{ old: stale }} remove={() => removeOld({ old: stale })} /></List>}
         {/* A device that isn't listed yet still signs out. */}
-        {device.signOut && ![...cards, ...browsers].some((c) => c.me) && (
+        {device.signOut && !cards.some((c) => c.me) && (
           <Button variant="ghost" className="self-start text-destructive" onClick={signOut}>Sign Out</Button>
         )}
         <Button variant="outline" className="self-start" onClick={add}><Icon name="plus" />Add a Device</Button>
-        {!!browsers.length && (
-          <Section title="Browsers" className="mt-2">
-            <List>
-              {browsers.map((b) => {
-                const sub = b.me ? "This browser" : data.seen[b.key] && Date.now() - data.seen[b.key] > 3_600_000 ? ago(data.seen[b.key]) : ""
-                return (
-                  <div key={b.key} onContextMenu={(e) => (e.preventDefault(), menu(b, true, { x: e.clientX, y: e.clientY }))}>
-                    <DeviceRow icon={b.passkey ? glyph("key") : iconByName(b.name)} title={b.name} sub={sub}>
-                      <More name={b.name} onClick={(e) => menu(b, true, e.currentTarget)} />
-                    </DeviceRow>
-                  </div>
-                )
-              })}
-            </List>
-          </Section>
-        )}
         {/* This browser, or the app, gets notifications once its user says so here: asked only when they tap it. */}
         {device.notify === "default" && (
           <Button variant="ghost" className="self-start" onClick={() => act(async () => (device.notify = await one.notify()))}>
@@ -722,6 +711,19 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
             <List>
               <ActionRow icon="key" onClick={() => act(() => api("POST", "/v1/devices/passkey", {}))}>Use this passkey to get back in if you lose your devices</ActionRow>
             </List>
+          )}
+          {!!passkeys.length && (
+            <Section title="Passkeys">
+              <List>
+                {passkeys.map((p) => (
+                  <div key={p.key} onContextMenu={(e) => (e.preventDefault(), menu(p, true, { x: e.clientX, y: e.clientY }))}>
+                    <DeviceRow icon={glyph("key")} title={p.name} sub={data.seen[p.key] && Date.now() - data.seen[p.key] > 3_600_000 ? ago(data.seen[p.key]) : ""}>
+                      <More name={p.name} onClick={(e) => menu(p, true, e.currentTarget)} />
+                    </DeviceRow>
+                  </div>
+                ))}
+              </List>
+            </Section>
           )}
           {recovery.length > 0 && <div className="flex flex-col gap-2">{recovery.map((line) => <Note key={line}>{line}</Note>)}</div>}
         </div>

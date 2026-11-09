@@ -70,7 +70,8 @@ CREATE TABLE devices (
   -- What it signed in with, as JSON (`sign_in_proof::Account`), when that was checked as it was let in.
   sign_in TEXT,
   place TEXT,
-  removed INTEGER NOT NULL
+  removed INTEGER NOT NULL,
+  platform TEXT
 ) STRICT;
 CREATE TABLE runs (
   principal TEXT NOT NULL,

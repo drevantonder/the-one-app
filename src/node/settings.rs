@@ -158,7 +158,7 @@ impl Node {
                 if node.with(|i| i.r.db().epoch(&own))? == 0 {
                     node.epoch_keys(&own, true).await?;
                 }
-                crate::settings::settle_own(&node, None).await
+                crate::settings::settle_own(&node, None, None).await
             };
             if let Err(err) = settled.await {
                 tracing::warn!("settling this user's own things: {err:#}");

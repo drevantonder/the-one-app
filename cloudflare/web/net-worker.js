@@ -397,7 +397,7 @@ export function server(version, givenHost) {
           // As each start of a client does: its user's own things, settled if they aren't.
           case "settle": {
             const s = await session?.ready;
-            if (s) await s.keyring.settle();
+            if (s) await s.keyring.settle(m.platform);
             return post({ id });
           }
           // Its user's app schedules of `app`, renewed as they use it.

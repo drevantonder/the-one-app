@@ -163,8 +163,8 @@ impl<O: Opens> Keyring<O> {
     }
 
     /// As each start of a client does (`one::settings::settle_own`).
-    pub async fn settle_own(&self, client: &Client, on: &(impl Address + Keep + Signs), on_device: Option<&str>) -> Result<(), Error> {
-        one::settings::settle_own(&self.mine(client, on), on_device).await.map_err(of_one)
+    pub async fn settle_own(&self, client: &Client, on: &(impl Address + Keep + Signs), on_device: Option<&str>, platform: Option<&str>) -> Result<(), Error> {
+        one::settings::settle_own(&self.mine(client, on), on_device, platform).await.map_err(of_one)
     }
 
     /// Takes this device out of its user's devices, as it signs out, so signing in again makes a new one that

@@ -57,6 +57,19 @@ enum Stage {
     Out,
 }
 
+/// What this client is built for, as it says in its listing.
+const PLATFORM: &str = if cfg!(target_os = "ios") {
+    "iphone"
+} else if cfg!(target_os = "android") {
+    "android"
+} else if cfg!(target_os = "macos") {
+    "mac"
+} else if cfg!(windows) {
+    "windows"
+} else {
+    "linux"
+};
+
 /// A device's way in: its keys, the network it's in, and what it has opened.
 pub struct Device {
     key: SigningKey,
@@ -208,7 +221,7 @@ impl Device {
         }
         if let Some(client) = self.client().await {
             let on = self.on.lock().unwrap().clone();
-            if let Err(err) = self.keyring.settle_own(&client, self, on.as_deref()).await {
+            if let Err(err) = self.keyring.settle_own(&client, self, on.as_deref(), Some(PLATFORM)).await {
                 eprintln!("settling this user's own things: {err}");
             }
         }

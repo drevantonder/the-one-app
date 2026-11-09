@@ -65,7 +65,7 @@ pub fn owner_object(p: &Principal) -> String {
 }
 
 const MACHINE: &str = "SELECT d.key, d.seal, d.principal, d.name, d.client, d.compute, d.service, d.shared, d.passkey, d.device, d.listed_by, d.listed_at,
-    d.removed OR coalesce(p.removed, 1), d.sign_in, d.place FROM devices d LEFT JOIN principals p ON p.id = d.principal";
+    d.removed OR coalesce(p.removed, 1), d.sign_in, d.place, d.platform FROM devices d LEFT JOIN principals p ON p.id = d.principal";
 
 fn machine(r: &rusqlite::Row) -> rusqlite::Result<Machine> {
     let mut roles = BTreeSet::new();
@@ -90,6 +90,7 @@ fn machine(r: &rusqlite::Row) -> rusqlite::Result<Machine> {
         removed: r.get(12)?,
         sign_in: r.get::<_, Option<String>>(13)?.and_then(|a| serde_json::from_str(&a).ok()),
         place: r.get(14)?,
+        platform: r.get(15)?,
     })
 }
 
@@ -937,6 +938,8 @@ pub struct Machine {
     pub roles: BTreeSet<Kind>,
     /// A passkey listed as a device: its credential id.
     pub passkey: Option<String>,
+    /// What a client said it's built for (GLOSSARY's platform), once it has: `rules::PLATFORMS`.
+    pub platform: Option<String>,
     /// For a service endpoint, the service it offers (`whatsapp`): what calls naming it reach.
     pub service: Option<String>,
     /// For a service endpoint, whether it serves everyone its user's listing lets it (a push sender, say), not only
