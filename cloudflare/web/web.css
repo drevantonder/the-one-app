@@ -1,6 +1,9 @@
 /* The web client's own, around what @one/ui draws (src/screen/ui: its window, sheets, menus and alerts): where screens'
    frames go, Developer's panel under them. */
 html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+/* Pulling a screen past its top is the screen's, not the browser's reload of the whole window (a phone's Chrome) or its
+   bounce; and a second tap is a second press, not a zoom (Safari's), which pinching still does. */
+html { overscroll-behavior: none; touch-action: manipulation; }
 #root { height: 100%; }
 
 /* The empty top of a window whose title bar lies over the page (the native shell sets --titlebar-area-height), over what's

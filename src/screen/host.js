@@ -97,7 +97,7 @@ window.oneHost = (() => {
     const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { Object.assign(window, ${JSON.stringify(shell).replace(/</g, "\\u003c")}); ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} ${shell.__oneApp ? `(${appBehaviour})();` : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance)}; const apply = () => scheme(document, now); if (now !== "automatic") document.documentElement.style.colorScheme = now;
       addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
       addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()<\/script>`;
-    const style = `<style>html, body { background: transparent !important; }
+    const style = `<style>html, body { background: transparent !important; } html { touch-action: manipulation; }
       @media (pointer: fine) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; } }
       ${shell.__oneApp ? APP_RULES : ""}</style>`;
     return html.includes("</head>") ? html.replace("</head>", `${style}${looks}</head>`) : style + looks + html;
