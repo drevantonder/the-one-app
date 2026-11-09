@@ -52,6 +52,8 @@
     const text = (r.content || []).map((c) => c.text || "").join("");
     try { return JSON.parse(text); } catch { return text; }
   };
+  // An app's tool, as a screen or widget calls it: pressing it there is the user agreeing to it.
+  const run = async (app, tool, input) => (await call("screens_call", { app, tool, input, confirm: true }))?.ok ?? null;
   const looks = oneHost.scheme();
   const React = OneUI.react, { createRoot } = OneUI["react-dom/client"], ui = OneUI["@one/ui"], h = React.createElement;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -147,7 +149,7 @@
   // are; → the error's text.
   async function act(app, tool, input, w) {
     try {
-      await call(`${app}_${tool}`, input);
+      await run(app, tool, input);
       await redraw(top(), w);
     } catch (err) {
       return err.message;
@@ -184,6 +186,19 @@
     el?.classList.remove("wait");
   }
 
+  // A chat's default policy for a view (MCP Apps' `script-src 'self' 'unsafe-inline'`) refuses the data: modules a
+  // screen's import map gives, and a frame takes its page's policy: so a screen's first imports read what ui.js has
+  // already put on the page.
+  const fromGlobals = (html) => html.replace(/(<script\b[^>]*\btype="module"[^>]*>)((?:\s*import\b[^;"']*?\bfrom\s*"[^"]+"\s*;?)+)/g, (_, tag, imports) =>
+    tag + imports.replace(/import\s+([^;"']*?)\s*from\s*"([^"]+)"\s*;?/g, (_, what, from) => {
+      const mod = `OneUI[${JSON.stringify(from)}]`, [, dflt, ns, names] = what.match(/^(?:([\w$]+)\s*,?\s*)?(?:\*\s*as\s+([\w$]+))?(?:\{([^}]*)\})?$/) || [];
+      return [
+        dflt && `const ${dflt} = ${mod}.default ?? ${mod};`,
+        ns && `const ${ns} = ${mod};`,
+        names !== undefined && `const { ${names.replace(/\bas\b/g, ":")} } = ${mod};`,
+      ].filter(Boolean).join("");
+    }));
+
   // An app's screen, in a sandboxed frame of its own, so it reaches nothing here and acts only as its app, through
   // its bridge (src/screen/bridge.js): `sheet` when it's in one.
   function mount(s, sheet) {
@@ -193,7 +208,7 @@
     const frame = document.createElement("iframe");
     frame.setAttribute("sandbox", "allow-scripts allow-forms");
     frame.__screen = { s, sheet, frame };
-    frame.srcdoc = oneHost.look(s.html, appearance, !!sheet).replace("<head>", "<head>" + shim);
+    frame.srcdoc = oneHost.look(fromGlobals(s.html), appearance, !!sheet).replace("<head>", "<head>" + shim);
     box.append(frame);
     // Shown once it draws something, or a moment after it loads if it draws little.
     frame.onload = () => setTimeout(() => ready(box), 2000);
@@ -242,7 +257,7 @@
     try {
       reply(await oneHost.answer(m.one, {
         frame,
-        call: (tool, input) => call(`${s.app}_${tool}`, input),
+        call: (tool, input) => run(s.app, tool, input),
         open: async (msg) => {
           const scope = msg.scope || s.scope;
           const to = await call("screens_open", { app: msg.app || s.app, screen: msg.screen || "main", params: msg.params || {}, ...(scope ? { scope } : {}) });

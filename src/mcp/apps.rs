@@ -1,6 +1,6 @@
 //! Apps' widgets and screens as MCP Apps, so chat clients that support them draw them inline: one `ui://` view, and
-//! two tools that fill it, `widgets_show` and `screens_open` (and `screens_icons` and `screens_changes`, which only the
-//! view calls). Clients without MCP Apps get text from both.
+//! two tools that fill it, `widgets_show` and `screens_open` (and `screens_icons`, `screens_call` and `screens_changes`,
+//! which only the view calls). Clients without MCP Apps get text from both.
 
 use serde_json::{Value, json};
 
@@ -71,6 +71,19 @@ pub fn tools() -> Vec<Value> {
             "annotations": crate::skills::hints(true, false),
             "_meta": { "ui": { "visibility": ["app"] } },
         }),
+        // Only the view calls it, for each call a screen or widget makes.
+        json!({
+            "name": "screens_call",
+            "description": "For the view that draws screens and widgets in a chat, not for you: runs one of an app's tools for what's on screen.",
+            "inputSchema": { "type": "object", "required": ["app", "tool"], "properties": {
+                "app": { "type": "string", "description": "the app's name" },
+                "tool": { "type": "string", "description": "the tool's name in the app" },
+                "input": { "type": "object", "description": "the tool's input" },
+                "confirm": { "type": "boolean", "description": "the user pressed it, for a tool that sends or can't be undone" },
+            } },
+            "annotations": crate::skills::hints(false, false),
+            "_meta": { "ui": { "visibility": ["app"] } },
+        }),
         // Only the view calls it, again and again while it's on screen, so what it shows keeps up: a chat sends a view
         // nothing it isn't asked for.
         json!({
@@ -91,6 +104,7 @@ pub fn call(node: &Client, name: &str, input: &Value) -> Option<Value> {
         "widgets_show" => shown(node, input),
         "screens_open" => screen(node, input),
         "screens_icons" => icons(input),
+        "screens_call" => for_screen(node, input),
         "screens_changes" => changes(node, input),
         _ => return None,
     };
@@ -131,6 +145,21 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
         "content": [{ "type": "text", "text": format!("Opened {app}'s {screen} screen for the user.") }],
         "structuredContent": { "app": app, "screen": screen, "scope": input["scope"], "title": title, "web": web, "html": html },
     }))
+}
+
+/// A call a screen or widget makes, answered as on every client with the tool's own answer, not what an agent reads of it
+/// (cut to a budget, its pictures taken out, an empty list in words). It reaches the tools only screens use, which a chat
+/// won't let a view call unless they're listed for it, and what's still refused without `confirm` here is refused
+/// unless the view says the user pressed it.
+fn for_screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
+    let (app, tool) = (input["app"].as_str().unwrap_or_default(), input["tool"].as_str().unwrap_or_default());
+    let found = crate::tools::find(node, app, tool);
+    let mut arguments = input["input"].as_object().cloned().unwrap_or_default();
+    if input["confirm"] == true && found.as_ref().is_some_and(|(_, spec)| spec["confirm"] == true) {
+        arguments.insert("confirm".into(), true.into());
+    }
+    let ok = crate::tools::dispatch(node, &format!("{app}_{tool}"), arguments, crate::core_tools::Reader::Mcp, None, found).ok?;
+    Ok(json!({ "content": [{ "type": "text", "text": "Done." }], "structuredContent": { "ok": ok } }))
 }
 
 /// The node's next event that changes what the view shows of `apps` (their data, or which apps there are), within 25
