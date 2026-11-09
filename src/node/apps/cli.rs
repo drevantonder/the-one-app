@@ -1,4 +1,4 @@
-//! Apps on the command line: listing, deploying, their code, adding, forking and retiring them, and their schedules.
+//! Apps on the command line: listing, deploying, their code, adding and forking them, and their schedules.
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -19,7 +19,6 @@ pub fn commands() -> Command {
             ("add <app> [--scope user|global|<group>] [--node <device>]".into(), "add an app, and the apps it uses, for you, a group you admin or everyone; --node is the device that runs its service, when it has one and you have more than one".into()),
             ("remove <app> [--scope s]".into(), "".into()),
             ("fork <app> <name> [--owner <owner>]".into(), "a new app from <app>'s code, with data of its own".into()),
-            ("app delete|restore|erase <app>".into(), "delete an app you own (to Recently Deleted), restore it, or erase it for good".into()),
             ("schedules".into(), "every schedule of the apps added for you: when, as whom, and how it last went".into()),
             ("schedule on|off <app> <name> [--scope user|global|<group>]".into(), "switch an app's schedule on (it then runs as you) or off".into()),
         ],
@@ -83,11 +82,6 @@ pub fn commands() -> Command {
                     let scope = g.flag("scope").unwrap_or("user");
                     g.node.post("/v1/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?;
                     println!("{app} is added to {scope}.");
-                }
-                ["app", how @ ("delete" | "restore" | "erase"), app] => {
-                    let past = match *how { "delete" => "deleted", "restore" => "restored", _ => "erased" };
-                    g.node.post("/v1/retire", json!({ "app": app, "how": past }))?;
-                    println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
                 }
                 ["schedules"] => {
                     for app in &g.node.apps()? {
