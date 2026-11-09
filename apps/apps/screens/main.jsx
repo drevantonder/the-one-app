@@ -18,29 +18,26 @@ function Tile({ a, list, selected, open, add, restore }) {
   useEffect(() => {
     if (selected) me.current.scrollIntoView({ block: "nearest" })
   }, [selected])
-  const stop = (run) => (e) => (e.stopPropagation(), run())
-  const small = (label, run) => <Button size="sm" variant="secondary" onClick={stop(run)}>{label}</Button>
+  const small = (label, run) => <Button size="sm" variant="secondary" onClick={run}>{label}</Button>
   const action = a.deleted
     ? a.mine && small("Restore", () => restore(a))
     : onAPage(a, places)
       ? a.opens ? small("Open", () => openApp(a, places)) : a.signs_in ? small("Add Account", () => addAccount(a, places)) : <span className="text-sm text-muted-foreground">Added</span>
       : (a.deployed || admin) && small("Add", () => add(a))
-  // The tile opens the app and its button does its own thing, so the tile is not a button itself (a button has none inside).
+  // The app is a button and its Add or Open another, side by side: one button never holds another.
   return (
     <div
       ref={me}
-      role="button"
-      tabIndex={0}
       data-selected={selected || undefined}
-      className="flex min-w-0 cursor-pointer items-center gap-3 rounded-xl p-2 outline-none hover:bg-accent/50 focus-visible:bg-accent/50 data-[selected]:bg-accent"
-      onClick={() => open(a)}
-      onKeyDown={(e) => e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), open(a))}
+      className="flex min-w-0 items-center gap-3 rounded-xl p-2 hover:bg-accent/50 data-[selected]:bg-accent"
     >
-      <AppIcon app={a} size={56} />
-      <div className="min-w-0 flex-1 text-sm">
-        <div className="truncate font-medium">{a.title}</div>
-        <div className="truncate text-muted-foreground">{a.tagline || a.description}</div>
-      </div>
+      <button type="button" className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" onClick={() => open(a)}>
+        <AppIcon app={a} size={56} />
+        <div className="min-w-0 flex-1 text-sm">
+          <div className="truncate font-medium">{a.title}</div>
+          <div className="truncate text-muted-foreground">{a.tagline || a.description}</div>
+        </div>
+      </button>
       {action}
     </div>
   )
