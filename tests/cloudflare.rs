@@ -465,6 +465,54 @@ fn an_invited_email_signs_in_and_only_who_may_answer_reads_its_proof() {
     assert_eq!(listed_to(&member)["name"], "Sam's phone", "though it sees the request");
 }
 
+/// Only a request's user's own device, or an admin's, answers it: any other device of the network marks it approved or
+/// forgets it no more, whether auth knows whose it is or not; and auth knows whose a device is only from who may say.
+#[test]
+fn only_its_users_own_device_or_an_admins_answers_a_request() {
+    use data_encoding::HEXLOWER;
+    let (admin, admin_hex) = endpoint();
+    let (stranger, stranger_hex) = endpoint();
+    let (sams_box, sams_box_hex) = endpoint();
+    let k = Workers::google(vec![admin_hex]);
+    for hex in [&stranger_hex, &sams_box_hex] {
+        assert_eq!(post(&format!("{}/relay/tell", k.address), &[], one::keys::signed_request(&admin, "one/relay", json!({ "add": hex, "role": "client" }), now())).0, 204);
+    }
+    let (_, sam) = invited(&k, &admin, "Sam", Some("sam@test.example"));
+    let (_, lee) = invited(&k, &admin, "Lee", Some("lee@test.example"));
+    let mut sams = k.browser();
+    google_callback(&mut sams, "/", "/", "sam@test.example");
+    let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let key = HEXLOWER.encode(&device.key);
+    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": key, "seal": HEXLOWER.encode(&device.seal), "name": "Sam's phone", "reads": one::database::READS })).0, 200);
+
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let answer = |by: &ed25519_dalek::SigningKey, query: &str| -> u16 {
+        let asked = B64U.encode(signed(by, &format!("DELETE /api/auth/devices/requests/{key}"), json!({})).to_string().as_bytes());
+        agent.delete(format!("{}/api/auth/devices/requests/{key}{query}", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16()
+    };
+    let theirs = |by: &ed25519_dalek::SigningKey, key: &str, user: &str| post(&format!("{}/api/auth/devices/theirs", k.address), &[], signed(by, "POST /api/auth/devices/theirs", json!({ "key": key, "user": user }))).0;
+
+    assert_eq!(answer(&sams_box, "?approved"), 403, "a device auth knows no user of answered someone's request");
+    assert_eq!(answer(&stranger, ""), 403, "and forgot it");
+    assert_eq!(theirs(&stranger, &stranger_hex, &sam), 403, "a device said it's someone's, without being theirs or an admin's");
+    assert_eq!(theirs(&admin, &stranger_hex, &lee), 200);
+    assert_eq!(answer(&stranger, "?approved"), 403, "another user's device answered it");
+    assert_eq!(theirs(&admin, &sams_box_hex, &sam), 200);
+    assert_eq!(answer(&sams_box, "?approved"), 200, "their own device answers it");
+    assert_eq!(theirs(&sams_box, &stranger_hex, &sam), 200, "and says what else is theirs, as it pairs a computer");
+
+    // Whoever signed in can name any key: it doesn't change whose one already is.
+    let mut lees = k.browser();
+    google_callback(&mut lees, "/", "/", "lee@test.example");
+    let (status, _) = lees.post("/api/auth/devices/requests", json!({ "key": sams_box_hex, "seal": HEXLOWER.encode(&device.seal), "name": "Mine now", "reads": one::database::READS }));
+    assert_eq!(status, 200);
+    let second = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let second_key = HEXLOWER.encode(&second.key);
+    assert_eq!(sams.post("/api/auth/devices/requests", json!({ "key": second_key, "seal": HEXLOWER.encode(&second.seal), "name": "Sam's laptop", "reads": one::database::READS })).0, 200);
+    let asked = B64U.encode(signed(&sams_box, &format!("DELETE /api/auth/devices/requests/{second_key}"), json!({})).to_string().as_bytes());
+    assert_eq!(agent.delete(format!("{}/api/auth/devices/requests/{second_key}", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16(), 200, "still Sam's");
+}
+
 /// A passkey belongs to an account. An invite that names a provider's account can't be taken up by making a passkey, and
 /// someone with no email is never matched by one a provider says.
 #[test]
@@ -733,10 +781,15 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
         let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&d.key), "seal": HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "reads": one::database::READS }));
         assert_eq!(status, 200, "{out}");
     };
+    let approved = |key: &str| {
+        let asked = B64U.encode(signed(&admin, &format!("DELETE /api/auth/devices/requests/{key}"), json!({})).to_string().as_bytes());
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        agent.delete(format!("{}/api/auth/devices/requests/{key}?approved", k.address)).header("x-one-request", asked).call().unwrap().status().as_u16()
+    };
     // Their phone joined as theirs, and gets pushes.
     let phone_at = one::keys::Endpoint::of(&phone);
     ask(&mut andre, &phone_at);
-    assert_eq!(andre.delete(&format!("/api/auth/devices/requests/{phone_hex}?approved")).0, 200);
+    assert_eq!(approved(&phone_hex), 200);
     let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
     let register = |sub: &Subscription| {
         let body = one::push::register_request(&phone, &phone_at.seal, &sub.address(endpoint), None, now()).unwrap();
@@ -778,7 +831,7 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
     // Approved: it joined.
     let sub = Subscription::new();
     register(&sub);
-    assert_eq!(andre.delete(&format!("/api/auth/devices/requests/{}?approved", HEXLOWER.encode(&mac.key))).0, 200);
+    assert_eq!(approved(&HEXLOWER.encode(&mac.key)), 200);
     let notes = pushed(sub);
     assert_eq!(notes.iter().map(|n| (n.title.as_str(), n.screen.as_str(), n.action.is_none())).collect::<Vec<_>>(), [("MacBook Pro joined", "devices", true)]);
 }

@@ -190,6 +190,13 @@ impl Node {
         if self.address().is_ok() {
             let admin = self.with(|i| Ok(i.r.db().may(&user, "invite", scopes::NETWORK)))?;
             crate::settings::tell(self, self, json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.with_context(|| format!("{YOURS}'s network didn't take this machine: try again with the same code"))?;
+            // Auth learns whose it is only here, as it never signs in to ask: without this it just can't answer that
+            // user's requests yet, so a refusal (a pairing device auth doesn't know either) doesn't stop the join.
+            if user == pairing.user
+                && let Err(err) = crate::settings::ask_auth(self, "POST", "/api/auth/devices/theirs", json!({ "key": hex(&key), "user": user })).await
+            {
+                tracing::warn!("telling auth whose computer this is: {err:#}");
+            }
         }
         Ok(JoinReply { root, user, bucket })
     }

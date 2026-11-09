@@ -430,8 +430,11 @@ export class Auth extends DurableObject {
       return json({});
     }
     if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
+    const invited = path.match(/^\/api\/auth\/invites\/([0-9a-f]{16})$/);
+    if (invited && method === "DELETE") return json(await this.withdrawInvite(request, invited[1]));
     if (path === "/api/auth/devices/proof" && method === "GET") return json(await this.proofsFor(request));
     if (path === "/api/auth/devices/forget-sign-in" && method === "POST") return json(await this.forgetSignIn(request));
+    if (path === "/api/auth/devices/theirs" && method === "POST") return json(await this.pairedAs(request));
     if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
@@ -509,6 +512,14 @@ export class Auth extends DurableObject {
     return { until, user: invited };
   }
 
+  /// Withdraws the invite naming `user`, not taken up yet, for an admin's device: its email signs no one in now.
+  async withdrawInvite(request, user) {
+    const signed = await this.signed(request);
+    if (!signed?.admin) refuse(403, "Only an admin's device withdraws an invite.");
+    this.ctx.storage.sql.exec("delete from invites where user = ? and used is null", user);
+    return {};
+  }
+
   expire() {
     // An approved one is kept as long again from its approval, for its device to see.
     this.ctx.storage.sql.exec("delete from requests where coalesce(approved, made) <= ?", Date.now() - REQUEST);
@@ -538,7 +549,7 @@ export class Auth extends DurableObject {
     const signed = (await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")))) || refuse(401, "Sign in first.");
     const { user, account } = signed.fields;
     const sql = this.ctx.storage.sql;
-    if (!signed.admin && !sql.exec("select 1 from devices where key = ? and user = ?", signed.by, user).toArray().length) refuse(403, "Only their own device, or an admin's, forgets it.");
+    if (!signed.admin && this.ownerOf(signed.by) !== user) refuse(403, "Only their own device, or an admin's, forgets it.");
     const left = sql.exec("select (select count(*) from account where userId = ?1) + (select count(*) from passkey where userId = ?1) as n", user).one().n;
     if (left <= 1) return { kept: true };
     if (account?.passkey) {
@@ -681,13 +692,30 @@ export class Auth extends DurableObject {
     // Asked again while it waits: its user isn't pushed again.
     const told = had && had.user === user && had.seal === seal ? had.told : null;
     sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link, told, platform) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1, told, platform ?? null);
-    this.theirs(key, user);
+    // Whoever asks names any key, so this never changes whose one already is.
+    sql.exec("insert or ignore into devices (key, user, at) values (?, ?, ?)", key, user, made);
     if (!told) await this.wantsInBy(made + WANTS_IN);
     return { until: made + REQUEST };
   }
 
   theirs(key, user) {
     this.ctx.storage.sql.exec("insert or replace into devices (key, user, at) values (?, ?, ?)", key, user, Date.now());
+  }
+
+  /// Whose device `key` is, as far as auth knows: it asked to join as them, or was paired by one of their own.
+  ownerOf(key) {
+    return this.ctx.storage.sql.exec("select user from devices where key = ?", key).toArray()[0]?.user;
+  }
+
+  /// A computer let in with a pairing code, as the device that paired it says, which asks nothing here itself:
+  /// `{ key, user }`, from an admin's device or one of that user's own.
+  async pairedAs(request) {
+    const signed = (await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")))) || refuse(401, "Sign in first.");
+    const { key, user } = signed.fields;
+    if (!isKey(key) || !USER.test(user || "")) refuse(400, "a key is 64 hex characters and a user 16");
+    if (!signed.admin && this.ownerOf(signed.by) !== user) refuse(403, "Only their own device, or an admin's, says a computer is theirs.");
+    this.theirs(key, user);
+    return {};
   }
 
   async wantsInBy(at) {
@@ -753,11 +781,11 @@ export class Auth extends DurableObject {
     return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", theirs).toArray()) };
   }
 
-  /// Which requests' sign-ins a device of the network may read: every one, for an admin's; its own user's, as it asked
-  /// to join as them, for any other.
+  /// Which requests a device of the network may answer and read the sign-ins of: every one, for an admin's; its own
+  /// user's (`ownerOf`), for any other.
   entitled(signed) {
-    const [mine] = this.ctx.storage.sql.exec("select user from devices where key = ?", signed.by).toArray();
-    return (r) => signed.admin || r.user === mine?.user;
+    const mine = this.ownerOf(signed.by);
+    return (r) => signed.admin || r.user === mine;
   }
 
   async mayTouch(request, key) {
@@ -778,10 +806,12 @@ export class Auth extends DurableObject {
   /// Forgets a request, refused; or one `approved`, marked so until it would have expired, for its device to see, with
   /// the network's `root` (hex) it was let into and its `welcome`, if the approving device said.
   async unask(request, key, approved, root, welcome) {
-    const { row } = await this.mayTouch(request, key);
+    const { row, signed } = await this.mayTouch(request, key);
+    if (signed ? !this.entitled(signed)(row) : approved) refuse(403, "Only its user's own device, or an admin's, answers that request.");
     // Approved again (a retry, or a second approving device): marked once, never forgotten by it.
     if (approved) {
       if (!row.approved) {
+        this.theirs(key, row.user);
         const welcomed = /^\d{1,16}\.\d{1,16}\.[0-9a-f]{64}$/.test(welcome || "") ? welcome : null;
         this.ctx.storage.sql.exec("update requests set approved = ?, root = ?, welcome = ? where key = ?", Date.now(), isKey(root) ? root : null, welcomed, key);
         await this.push(row, { title: `${row.name} joined${row.place ? ` · ${row.place}` : ""}` });
