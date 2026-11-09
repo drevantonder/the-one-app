@@ -14,7 +14,7 @@ function v({ title: e, blurb: v }) {
 		try {
 			t = (await one.call("sign_in", e ? { account: e } : {})).url;
 		} catch (t) {
-			if (/No Google sign-in/.test(t.message) && one.vault) try {
+			if (t.code === "no_client" && one.vault) try {
 				if (await one.vault("client")) return M(e);
 			} catch (e) {
 				t = e;
@@ -36,7 +36,7 @@ function v({ title: e, blurb: v }) {
 			let t = await one.call("finish_sign_in", { code: e });
 			if (t?.signed_in === !1) throw Error(t.why);
 		} catch (e) {
-			return /no sign-in is waiting/.test(e.message) ? (j(), w()) : E({
+			return e.code === "not_waiting" ? (j(), w()) : E({
 				why: m(e),
 				retry: () => M()
 			});
