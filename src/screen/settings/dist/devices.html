@@ -271,12 +271,12 @@ function J() {
 		V().then((t) => {
 			if (!t) return;
 			let n = String(one.params?.approve || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
-			n && !t.waiting.some((e) => e.code.replace(" ", "") === n) && U(n), e && t.device.keys ? N({ schedules: e }) : one.params?.add && N({ add: !0 });
+			n && !t.waiting.some((e) => n.startsWith(e.code.replaceAll(" ", ""))) && U(n), e && t.device.keys ? N({ schedules: e }) : one.params?.add && N({ add: !0 });
 		}), one.on("changed", () => V());
 	}, []);
 	async function U(e) {
 		let t = String(e).toUpperCase().replace(/[^A-Z2-7]/g, "");
-		if (t.length === 8) try {
+		try {
 			let e = await A("POST", "/v1/devices/approve", { code: t });
 			x({
 				code: t,
@@ -645,7 +645,7 @@ function Z(t) {
 	}), n[9] = o, n[10] = s, n[11] = u, n[12] = d) : d = n[12], d;
 }
 function ae(t) {
-	let n = e(47), { r, busy: i, answer: a } = t, s = r.yours ? "" : r.lost ? `${r.user}, with no device left` : `${r.user}’s first device`, c;
+	let n = e(57), { r, busy: i, answer: a } = t, s = r.yours ? "" : r.lost ? `${r.user}, with no device left` : `${r.user}’s first device`, c;
 	n[0] !== r.place || n[1] !== s ? (c = [s, r.place].filter(Boolean), n[0] = r.place, n[1] = s, n[2] = c) : c = n[2];
 	let l = c.join(" · "), u = `${r.device} wants to join`, d;
 	n[3] !== r.device || n[4] !== r.platform ? (d = W({
@@ -670,64 +670,76 @@ function ae(t) {
 		children: K(r.sign_in)
 	}), n[12] = r.sign_in, n[13] = h);
 	let g;
-	n[14] !== p || n[15] !== m || n[16] !== h ? (g = /* @__PURE__ */ k("span", {
+	n[14] === r.replaces ? g = n[15] : (g = r.replaces && /* @__PURE__ */ k("span", {
+		className: "block break-words text-muted-foreground",
+		children: ["Replaces ", r.replaces.join(", ")]
+	}), n[14] = r.replaces, n[15] = g);
+	let _;
+	n[16] !== p || n[17] !== m || n[18] !== h || n[19] !== g ? (_ = /* @__PURE__ */ k("span", {
 		className: "min-w-0 flex-1",
 		children: [
 			p,
 			m,
-			h
+			h,
+			g
 		]
-	}), n[14] = p, n[15] = m, n[16] = h, n[17] = g) : g = n[17];
-	let _;
-	n[18] !== f || n[19] !== g ? (_ = /* @__PURE__ */ k("div", {
-		className: "flex min-w-0 flex-1 items-center gap-3 text-sm",
-		children: [f, g]
-	}), n[18] = f, n[19] = g, n[20] = _) : _ = n[20];
+	}), n[16] = p, n[17] = m, n[18] = h, n[19] = g, n[20] = _) : _ = n[20];
 	let v;
-	n[21] === r.code ? v = n[22] : (v = /* @__PURE__ */ O("div", {
-		className: "text-center font-mono text-3xl font-semibold tracking-widest select-all",
-		children: r.code
-	}), n[21] = r.code, n[22] = v);
+	n[21] !== _ || n[22] !== f ? (v = /* @__PURE__ */ k("div", {
+		className: "flex min-w-0 flex-1 items-center gap-3 text-sm",
+		children: [f, _]
+	}), n[21] = _, n[22] = f, n[23] = v) : v = n[23];
 	let y;
-	n[23] !== a || n[24] !== r.code ? (y = () => a(r.code, () => A("POST", "/v1/devices/refuse", { code: r.code })), n[23] = a, n[24] = r.code, n[25] = y) : y = n[25];
-	let x = r.yours ? "Not Me" : "Not Them", S;
-	n[26] !== i || n[27] !== y || n[28] !== x ? (S = /* @__PURE__ */ O(o, {
+	n[24] === r.code ? y = n[25] : (y = r.code.slice(0, 9), n[24] = r.code, n[25] = y);
+	let x;
+	n[26] === y ? x = n[27] : (x = /* @__PURE__ */ O("div", { children: y }), n[26] = y, n[27] = x);
+	let S;
+	n[28] === r.code ? S = n[29] : (S = r.code.length > 9 && /* @__PURE__ */ O("div", { children: r.code.slice(10) }), n[28] = r.code, n[29] = S);
+	let C;
+	n[30] !== x || n[31] !== S ? (C = /* @__PURE__ */ k("div", {
+		className: "text-center font-mono text-3xl font-semibold tracking-widest select-all",
+		children: [x, S]
+	}), n[30] = x, n[31] = S, n[32] = C) : C = n[32];
+	let w;
+	n[33] !== a || n[34] !== r.code ? (w = () => a(r.code, () => A("POST", "/v1/devices/refuse", { code: r.code })), n[33] = a, n[34] = r.code, n[35] = w) : w = n[35];
+	let T = r.yours ? "Not Me" : "Not Them", E;
+	n[36] !== i || n[37] !== w || n[38] !== T ? (E = /* @__PURE__ */ O(o, {
 		variant: "outline",
 		className: "flex-1 @xl:flex-none",
 		disabled: i,
-		onClick: y,
-		children: x
-	}), n[26] = i, n[27] = y, n[28] = x, n[29] = S) : S = n[29];
-	let C;
-	n[30] !== a || n[31] !== r.code ? (C = () => a(r.code, () => A("POST", "/v1/devices/approve", {
+		onClick: w,
+		children: T
+	}), n[36] = i, n[37] = w, n[38] = T, n[39] = E) : E = n[39];
+	let D;
+	n[40] !== a || n[41] !== r.code ? (D = () => a(r.code, () => A("POST", "/v1/devices/approve", {
 		code: r.code,
 		confirm: !0
-	})), n[30] = a, n[31] = r.code, n[32] = C) : C = n[32];
-	let w;
-	n[33] === i ? w = n[34] : (w = i && /* @__PURE__ */ O(b, { className: "text-primary-foreground" }), n[33] = i, n[34] = w);
-	let T;
-	n[35] !== i || n[36] !== C || n[37] !== w ? (T = /* @__PURE__ */ k(o, {
+	})), n[40] = a, n[41] = r.code, n[42] = D) : D = n[42];
+	let j;
+	n[43] === i ? j = n[44] : (j = i && /* @__PURE__ */ O(b, { className: "text-primary-foreground" }), n[43] = i, n[44] = j);
+	let M;
+	n[45] !== i || n[46] !== D || n[47] !== j ? (M = /* @__PURE__ */ k(o, {
 		className: "flex-1 @xl:flex-none",
 		disabled: i,
-		onClick: C,
-		children: [w, "Approve"]
-	}), n[35] = i, n[36] = C, n[37] = w, n[38] = T) : T = n[38];
-	let E;
-	n[39] !== S || n[40] !== T ? (E = /* @__PURE__ */ k("div", {
+		onClick: D,
+		children: [j, "Approve"]
+	}), n[45] = i, n[46] = D, n[47] = j, n[48] = M) : M = n[48];
+	let N;
+	n[49] !== E || n[50] !== M ? (N = /* @__PURE__ */ k("div", {
 		className: "flex gap-2 @xl:justify-end",
-		children: [S, T]
-	}), n[39] = S, n[40] = T, n[41] = E) : E = n[41];
-	let D;
-	return n[42] !== _ || n[43] !== v || n[44] !== E || n[45] !== u ? (D = /* @__PURE__ */ k("div", {
+		children: [E, M]
+	}), n[49] = E, n[50] = M, n[51] = N) : N = n[51];
+	let P;
+	return n[52] !== v || n[53] !== C || n[54] !== N || n[55] !== u ? (P = /* @__PURE__ */ k("div", {
 		role: "group",
 		"aria-label": u,
 		className: "flex w-full max-w-2xl flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground @xl:flex-row @xl:items-center",
 		children: [
-			_,
 			v,
-			E
+			C,
+			N
 		]
-	}), n[42] = _, n[43] = v, n[44] = E, n[45] = u, n[46] = D) : D = n[46], D;
+	}), n[52] = v, n[53] = C, n[54] = N, n[55] = u, n[56] = P) : P = n[56], P;
 }
 function oe(t) {
 	let n = e(14), { c: r, remove: i } = t, a;
@@ -753,7 +765,7 @@ function oe(t) {
 	}) }), n[9] = a, n[10] = s, n[11] = d, n[12] = f, n[13] = m) : m = n[13], m;
 }
 function se(t) {
-	let n = e(32), { scan: i, done: a, cancel: s } = t, { code: c, r: l } = i, [u, d] = r(!1), [f, p] = r(""), m;
+	let n = e(35), { scan: i, done: a, cancel: s } = t, { code: c, r: l } = i, [u, d] = r(!1), [f, p] = r(""), m;
 	n[0] !== c || n[1] !== a ? (m = async function() {
 		one.tap(), d(!0), p("");
 		try {
@@ -785,44 +797,50 @@ function se(t) {
 		children: K(l.sign_in)
 	}), n[7] = l.sign_in, n[8] = S);
 	let C;
-	n[9] !== v || n[10] !== x || n[11] !== S ? (C = /* @__PURE__ */ k("div", { children: [
+	n[9] === l.replaces ? C = n[10] : (C = l.replaces && /* @__PURE__ */ k("div", {
+		className: "text-sm text-muted-foreground",
+		children: ["Replaces ", l.replaces.join(", ")]
+	}), n[9] = l.replaces, n[10] = C);
+	let w;
+	n[11] !== v || n[12] !== x || n[13] !== S || n[14] !== C ? (w = /* @__PURE__ */ k("div", { children: [
 		v,
 		x,
-		S
-	] }), n[9] = v, n[10] = x, n[11] = S, n[12] = C) : C = n[12];
-	let w;
-	n[13] === f ? w = n[14] : (w = f && /* @__PURE__ */ O(_, { title: f }), n[13] = f, n[14] = w);
+		S,
+		C
+	] }), n[11] = v, n[12] = x, n[13] = S, n[14] = C, n[15] = w) : w = n[15];
 	let T;
-	n[15] !== u || n[16] !== s ? (T = /* @__PURE__ */ O(o, {
+	n[16] === f ? T = n[17] : (T = f && /* @__PURE__ */ O(_, { title: f }), n[16] = f, n[17] = T);
+	let E;
+	n[18] !== u || n[19] !== s ? (E = /* @__PURE__ */ O(o, {
 		variant: "outline",
 		disabled: u,
 		onClick: s,
 		children: "Cancel"
-	}), n[15] = u, n[16] = s, n[17] = T) : T = n[17];
-	let E;
-	n[18] === u ? E = n[19] : (E = u && /* @__PURE__ */ O(b, { className: "text-primary-foreground" }), n[18] = u, n[19] = E);
+	}), n[18] = u, n[19] = s, n[20] = E) : E = n[20];
 	let D;
-	n[20] !== h || n[21] !== u || n[22] !== E ? (D = /* @__PURE__ */ k(o, {
+	n[21] === u ? D = n[22] : (D = u && /* @__PURE__ */ O(b, { className: "text-primary-foreground" }), n[21] = u, n[22] = D);
+	let N;
+	n[23] !== h || n[24] !== u || n[25] !== D ? (N = /* @__PURE__ */ k(o, {
 		disabled: u,
 		onClick: h,
-		children: [E, "Approve"]
-	}), n[20] = h, n[21] = u, n[22] = E, n[23] = D) : D = n[23];
-	let N;
-	n[24] !== D || n[25] !== T ? (N = /* @__PURE__ */ k("div", {
-		className: "flex justify-end gap-2",
-		children: [T, D]
-	}), n[24] = D, n[25] = T, n[26] = N) : N = n[26];
+		children: [D, "Approve"]
+	}), n[23] = h, n[24] = u, n[25] = D, n[26] = N) : N = n[26];
 	let P;
-	return n[27] !== N || n[28] !== g || n[29] !== C || n[30] !== w ? (P = /* @__PURE__ */ k("div", {
+	n[27] !== E || n[28] !== N ? (P = /* @__PURE__ */ k("div", {
+		className: "flex justify-end gap-2",
+		children: [E, N]
+	}), n[27] = E, n[28] = N, n[29] = P) : P = n[29];
+	let F;
+	return n[30] !== P || n[31] !== g || n[32] !== w || n[33] !== T ? (F = /* @__PURE__ */ k("div", {
 		role: "group",
 		"aria-label": g,
 		className: "flex w-full max-w-2xl flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground",
 		children: [
-			C,
 			w,
-			N
+			T,
+			P
 		]
-	}), n[27] = N, n[28] = g, n[29] = C, n[30] = w, n[31] = P) : P = n[31], P;
+	}), n[30] = P, n[31] = g, n[32] = w, n[33] = T, n[34] = F) : F = n[34], F;
 }
 function ce(t) {
 	let n = e(43), { m: r, data: i, opened: a, flag: s, menu: c, removeOld: u, signOut: d, schedule: f, act: h } = t, { device: g, state: _, passkey: v } = i, { cards: b, passkeys: x, stale: S } = r.drawn, C;
