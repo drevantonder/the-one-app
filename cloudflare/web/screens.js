@@ -141,6 +141,14 @@ function frameFor(r, into, { sheet } = {}) {
   // A spinner only for a wait that's long enough to notice.
   into.innerHTML = "";
   setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status"><span class="spinner"></span></div>`), 400);
+  // A screen that's nothing yet after 5 seconds: the spinner gives way to one problem, which goes as the screen loads.
+  setTimeout(() => {
+    if (f.loaded || f.page || f.still || !into.isConnected) return;
+    $(".screen-status", into)?.remove();
+    const status = Object.assign(document.createElement("div"), { className: "screen-status" });
+    into.prepend(status);
+    OneUI["react-dom/client"].createRoot(status).render(h(ui.Problem, { quiet: true, title: "Not Opening Yet", text: UNANSWERED, className: "m-6" }));
+  }, 5000);
   const written = (page) => linkedIn(page).catch(() => page).then((html) => oneHost.look(html, appearance(), !!sheet, platform.look()));
   const draw = async (page) => {
     f.page = page;
@@ -328,9 +336,11 @@ addEventListener("message", async (e) => {
     const got = mine ? null : await platform.kept(r.app, String(m.tool || ""), m.input ?? {}).catch(() => null);
     return void f.frame.contentWindow?.postMessage({ oneReply: id, ok: got }, "*");
   }
+  // What's here needs no node: the icons, and what this device keeps for its own screens (`one.cache`, the home's last
+  // pages), so a screen offline starts from them.
   f.busy++;
   watch(f);
-  await joined;
+  if (m.type !== "icons" && !(mine && m.type === "cache")) await joined;
   const answered = () => ((f.busy = Math.max(0, f.busy - 1)), (f.quiet = Date.now()));
   const reply = (ok) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*"));
   const fail = (err) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err), code: err?.code }, "*"));

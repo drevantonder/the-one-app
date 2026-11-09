@@ -70,13 +70,15 @@ async function start() {
   }
   // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
   const away = setTimeout(() => windowShowing() || showUnreachable(), 15000);
+  // What it showed last, with the devices still not answering: said so, as a failed ask is.
+  const slow = setTimeout(() => windowShowing() && offline.add("state", () => refreshState(), lastAt()), 4000);
   for (let misses = 1; ; misses++) {
     try {
       await refreshState();
       offline.done("state");
       break;
     } catch (err) {
-      if (err.signedOut) return clearTimeout(away), err.removed ? undefined : showSignedOut();
+      if (err.signedOut) return clearTimeout(away), clearTimeout(slow), err.removed ? undefined : showSignedOut();
       // What it showed last stays, as a screen whose node is restarting does, saying so.
       if (!windowShowing()) (console.warn("starting:", err.message), showUnreachable());
       else offline.add("state", () => refreshState(), lastAt());
@@ -84,6 +86,7 @@ async function start() {
     }
   }
   clearTimeout(away);
+  clearTimeout(slow);
   if (network() && me()) {
     await platform.settle();
     await refreshState().catch(() => {});
