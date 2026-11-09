@@ -419,7 +419,8 @@ fn web_bundle(dir: &Path) -> Result<PathBuf> {
 fn publish_web(binary: &Path, key: &ssh_key::PrivateKey, version: &Version, config: &str) -> Result<()> {
     let dir = cache().join("web");
     let _ = std::fs::remove_dir_all(&dir);
-    let out = Command::new(binary).args(["web", "bundle", "--out"]).arg(&dir).output().context("run the new build")?;
+    // The one-dev built beside it, from the same build of the library, holds the same web client.
+    let out = Command::new(binary.with_file_name("one-dev")).args(["web", "bundle", "--out"]).arg(&dir).output().context("run the new build")?;
     ensure!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr).trim());
     let packed = std::fs::read(dir.join(format!("{}.bundle", version.commit)))?;
     let last = cache().join("published-web");
