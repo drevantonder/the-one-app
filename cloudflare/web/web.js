@@ -21,6 +21,7 @@ window.__one = { host: async (m) => (m.type === "copy" ? platform.copy(m.text) :
 async function start() {
   schemed(document, appearance());
   document.documentElement.style.visibility = "";
+  document.documentElement.style.background = "";
   const problem = await platform.start({
     look: appearance(),
     route,

@@ -88,7 +88,7 @@ window.oneHost = (() => {
   function look(html, appearance, raised = false, shell = {}) {
     // With the nonce of a page that runs only its own scripts (the client's own screens), as one of them.
     const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
-    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { Object.assign(window, ${JSON.stringify(shell).replace(/</g, "\\u003c")}); ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} ${shell.__oneApp ? `(${appBehaviour})();` : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance)}; const apply = () => scheme(document, now);
+    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { Object.assign(window, ${JSON.stringify(shell).replace(/</g, "\\u003c")}); ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} ${shell.__oneApp ? `(${appBehaviour})();` : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance)}; const apply = () => scheme(document, now); if (now !== "automatic") document.documentElement.style.colorScheme = now;
       addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
       addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()<\/script>`;
     const style = `<style>html, body { background: transparent !important; }

@@ -123,13 +123,16 @@ async function linkedIn(page) {
 /// A screen that couldn't open: the problem, where it would be.
 const failed = (into, text) => OneUI["react-dom/client"].createRoot(into).render(h(ui.Unavailable, { title: "Can’t Open This", text }));
 
+/// What a frame loads, told the window's appearance so its empty page is the window's colour (frame.html).
+const framePage = () => `${asset("frame.html")}#${appearance()}`;
+
 /// A sandboxed frame for a page this window writes in (frame.html takes it).
 function sandboxed(r) {
   const frame = document.createElement("iframe");
   frame.className = "screen-frame";
   frame.setAttribute("sandbox", "allow-scripts allow-forms");
   frame.setAttribute("referrerpolicy", "no-referrer");
-  frame.src = asset("frame.html");
+  frame.src = framePage();
   frame.setAttribute("aria-label", titleOf(r));
   return frame;
 }
@@ -180,7 +183,7 @@ function frameFor(r, into, { sheet } = {}) {
     const html = await written(page);
     if (f.page !== page) return;
     f.html = html;
-    frame.src = asset("frame.html");
+    frame.src = framePage();
   };
   // A kept page whose fresh one is slow to come (its devices gone quiet, not refusing) is the window's being offline too.
   let came = false;

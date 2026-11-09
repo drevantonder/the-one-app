@@ -8,6 +8,8 @@
   if (look === "light" || look === "dark") {
     const root = document.documentElement;
     root.style.colorScheme = look;
+    // The body's background is the system's until then, and a hidden page still paints it.
+    root.style.background = "Canvas";
     root.style.visibility = "hidden";
     setTimeout(() => (root.style.visibility = ""), 1000);
   }
