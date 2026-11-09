@@ -22,8 +22,11 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 
 ## Machines
 
-- **Device**: a machine a user owns: a phone or a computer. It runs clients, a node, or both. Cloudflare is not a
-  device.
+- **Device**: where a user's clients and node are, listed as theirs: a machine they own (a phone or a computer), a
+  browser they signed in on, or a remote MCP client's place in the remote MCP server. It has clients, a node, or both:
+  a computer can have both; a phone, a browser and a remote MCP client's device have only a client. A browser's
+  sign-in is its device: nothing ties it to the computer it's on, so it's never part of that computer's. The Cloudflare
+  node is not a device.
 - **Client**: where a user or their agent uses the network, and the only place keys are opened: the native apps (Mac,
   iPhone, Android, Windows), the web client in a browser, the CLI and the local MCP server on a computer, and the remote
   MCP server. Each has its own key, never shared.
