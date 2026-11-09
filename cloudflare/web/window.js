@@ -172,7 +172,7 @@ export function showSignedOut(error, note) {
   document.title = config().name;
   windowShown = false;
   const signIn = () => platform.signIn().catch((err) => showSignedOut(err.message));
-  show(platform.welcome({ key: Math.random(), logo: "/logo.png", name: config().name, action: { label: "Sign In", run: signIn }, note, problem: error }));
+  show(platform.welcome({ key: Math.random(), logo: "/logo.png", title: config().name, action: { label: "Sign In", run: signIn }, note, problem: error }));
 }
 // Taken out, or signed out with why: its events stop, and the sign-in says why.
 whenSignedOut((why) => (events?.abort(), showSignedOut(why)));
@@ -197,7 +197,7 @@ export function showBack(app, screen, params) {
   const { name, cli } = config();
   const link = `${cli}://open?${new URLSearchParams({ app, screen, params, scope: "user" })}`;
   document.title = name;
-  show(h(ui.Welcome, { logo: "/logo.png", name, action: { label: `Open ${name}`, href: link } }));
+  show(h(ui.Welcome, { logo: "/logo.png", title: name, action: { label: `Open ${name}`, href: link } }));
   location.href = link;
 }
 

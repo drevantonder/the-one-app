@@ -365,6 +365,22 @@ fn the_service_worker_opens_notes_as_rust_does() {
     assert!(push::open_note(&secret, &keys::seal_to(&public, &serde_json::to_vec(&forged).unwrap()).unwrap()).is_err(), "Rust refuses the same");
 }
 
+/// Auth's pages drawn by hand (`cloudflare/auth/draw.js`) call the network what this build does (`config::YOURS`, from
+/// build.rs), from the same config.toml.
+#[test]
+fn auth_pages_drawn_by_hand_name_the_network_as_the_build_does() {
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+    let dir = crate::temp("drawn");
+    let out = std::process::Command::new(one::build::bun().unwrap())
+        .arg(root.join("cloudflare/auth/draw.js"))
+        .arg(root.join(option_env!("CONFIG").unwrap_or("config.toml")))
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(std::fs::read_to_string(dir.join("joined.html")).unwrap().contains(&format!("You&#x27;ve joined {}", one::config::YOURS)));
+}
+
 /// A service answers its node in the words of `service/wire.json`, in whatever language it's written: started as its
 /// endpoint starts it, registering what's about its machine, taking calls and answering with `ok`, `error` or
 /// `elsewhere`, registering again when its endpoint forgets it, always with the token in its home. What it talks to is

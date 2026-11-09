@@ -46,13 +46,13 @@ if (command === "picture") {
 }
 if (invite) {
   await send("Page.navigate", { url: invite });
-  await until(`!!document.querySelector("#go:not([disabled])")`, "the invite page didn't open");
+  await until(`!!document.querySelector("button[data-slot=welcome-action]:not([disabled])")`, "the invite page didn't open");
   await sleep(300);
   await shoot(named("invite"));
-  await evaluate(`document.querySelector("#go").click()`);
-  await until(`!document.querySelector("#done").hidden`, "joining didn't work");
+  await evaluate(`document.querySelector("[data-slot=welcome-action]").click()`);
+  await until(`!!document.querySelector("a[data-slot=welcome-action]")`, "joining didn't work");
   await shoot(named("joined"));
-  await evaluate(`document.querySelector("#done a").click()`);
+  await evaluate(`document.querySelector("a[data-slot=welcome-action]").click()`);
   await sleep(500);
 }
 if (!(await evaluate("location.href")).startsWith(address)) await send("Page.navigate", { url: address });

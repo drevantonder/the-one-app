@@ -66,8 +66,12 @@ import { b64u, behind, checkRequest, hex, isKey, joinChallenge, joinCode, joinNo
 import { json } from "../shared/http.js";
 import { AUTH_DOMAIN, HEADER, updateRefusal } from "../shared/protocol.js";
 import { bearer, verify } from "../shared/token.js";
-import { codePage, invitePage, passkeysPage, signInPage, throwawayPage } from "./pages.js";
+import { pages } from "./pages.js";
+import css from "../web/screen/ui/auth.css" with { type: "text" };
+import drawn from "../web/screen/ui/auth.json";
 import { DurableObjectDialect } from "./sql.js";
+
+const { codePage, invitePage, passkeysPage, signInPage, throwawayPage } = pages({ css, ...drawn });
 
 const hex16 = () => hex.encode(random(8));
 /// Where a client's sign-in goes, in words: the site it goes back to, or an app on the user's device (one listening on
@@ -330,7 +334,7 @@ export class Auth extends DurableObject {
       }
       const name = this.auth.options.appName;
       // What its pages say: the custom build's name, and what a user joins ("your One App network").
-      const look = { name, yours: this.env.YOURS };
+      const look = { name, yours: this.env.YOURS, logo: "/logo.png" };
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const throwaway = this.env.SIGN_IN === "throwaway";
       if (path === "/sign-in" && request.method === "GET") return html(throwaway ? throwawayPage({ ...look, user: this.env.THROWAWAY_NAME }) : signInPage({ ...look, google }));

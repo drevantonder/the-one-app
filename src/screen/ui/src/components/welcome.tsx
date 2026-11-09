@@ -5,48 +5,64 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
-// What a client shows before its window: signing in, waiting to be let in, starting, and its devices not answering.
+// What a client shows before its window, and auth's pages: signing in, waiting to be let in, starting, and its devices
+// not answering.
 
 function Centered({ className, children }: { className?: string; children: React.ReactNode }) {
   return <div className={cn("flex h-full flex-col items-center justify-center gap-3 overflow-auto p-10 text-center", className)}>{children}</div>
 }
 
-/// Its logo and name, and the one thing to do (Sign In; Open, back from another site), as a button that runs or a link;
-/// `field`, what to type first (a native app's address), with a line under it, which the button runs with, named
-/// `invite` instead when what's typed is an invite link; `note`, a grey line under the button; `other`, a second way in
-/// (a Mac's Join with a Pairing Code), or back from it; `problem`, why the last try didn't work.
-function Welcome({ logo, name, action, field, note, other, problem }: {
+/// The first screen, and every page of auth's (cloudflare/auth/pages.tsx, drawn to HTML when this kit is built): its logo
+/// and `title`; `text`, a grey line under it; `field`, what to type first (a native app's address, a sign-in code), with
+/// a line under it, which the button runs with; `children`, what the page lists; `callout`, what to know before going on;
+/// `action`, the one thing to do, if any, as a button that runs or a link, named `invite` instead when what's typed is an invite
+/// link; `other`, a second way in (a Mac's Join with a Pairing Code), or back from it; `note`, a grey line under them;
+/// `problem`, why the last try didn't work. Near the top, not centred: what comes in later (a problem, a client's name)
+/// grows it down, never moving what's already there. A callout and a problem have their places even when empty, for a
+/// page's script to fill.
+function Welcome({ logo, title, text, field, callout, children, action, other, note, problem }: {
   logo?: string
-  name: string
-  action: { label: string; invite?: string; run?: (typed?: string) => unknown; href?: string }
+  title: string
+  text?: string
   field?: { label: string; placeholder?: string; note?: string }
+  callout?: string
+  children?: React.ReactNode
+  action?: { label: string; invite?: string; run?: (typed?: string) => unknown; href?: string }
+  other?: { label: string; run?: () => unknown; href?: string }
   note?: string
-  other?: { label: string; run: () => unknown }
   problem?: string
 }) {
   const [typed, setTyped] = React.useState("")
   const [busy, setBusy] = React.useState(false)
-  const run = () => (setBusy(true), action.run?.(field ? typed : undefined))
+  const run = () => (setBusy(true), action?.run?.(field ? typed : undefined))
+  const wide = "mt-2 min-w-56"
   return (
-    <Centered>
-      {logo && <img src={logo} alt="" className="size-28" />}
-      <h1 className="mt-2 mb-4 text-3xl font-semibold tracking-tight">{name}</h1>
-      {field && (
-        <form className="w-full max-w-xs" onSubmit={(e) => (e.preventDefault(), typed.trim() && !busy && run())}>
-          <Input aria-label={field.label} placeholder={field.placeholder} value={typed} onChange={(e) => setTyped(e.target.value)}
-            autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url" />
-          {field.note && <p className="mt-2 text-sm text-muted-foreground">{field.note}</p>}
-        </form>
-      )}
-      {action.href ? (
-        <Button size="lg" data-slot="welcome-action" asChild><a href={action.href}>{action.label}</a></Button>
-      ) : (
-        <Button size="lg" data-slot="welcome-action" disabled={busy || (!!field && !typed.trim())} onClick={run}>{action.invite && typed.includes("/invite#") ? action.invite : action.label}</Button>
-      )}
-      {note && <p className="text-sm text-muted-foreground">{note}</p>}
-      {other && <Button variant="ghost" onClick={() => other.run()}>{other.label}</Button>}
-      {problem && <Problem title={problem} className="mt-4 w-full max-w-md text-left" />}
-    </Centered>
+    <div data-slot="welcome" className="flex h-full flex-col items-center overflow-auto px-6 pt-[max(40px,14vh)] pb-10">
+      <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
+        {logo && <img data-slot="welcome-logo" src={logo} alt="" className="size-28" />}
+        <h1 data-slot="welcome-title" className="mt-2 text-3xl font-semibold tracking-tight text-balance">{title}</h1>
+        {text && <p data-slot="welcome-text" className="text-sm text-balance text-muted-foreground">{text}</p>}
+        {field && (
+          <form className="mt-2 w-full max-w-xs" onSubmit={(e) => (e.preventDefault(), typed.trim() && !busy && run())}>
+            <Input data-slot="welcome-field" aria-label={field.label} placeholder={field.placeholder} value={typed} onChange={(e) => setTyped(e.target.value)}
+              autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url" />
+            {field.note && <p className="mt-2 text-sm text-muted-foreground">{field.note}</p>}
+          </form>
+        )}
+        {children}
+        <p data-slot="welcome-callout" className="w-full text-left text-sm empty:hidden">{callout}</p>
+        {action && (action.href ? (
+          <Button size="lg" data-slot="welcome-action" className={wide} asChild><a href={action.href}>{action.label}</a></Button>
+        ) : (
+          <Button size="lg" data-slot="welcome-action" className={wide} disabled={busy || (!!field && !typed.trim())} onClick={run}>{action.invite && typed.includes("/invite#") ? action.invite : action.label}</Button>
+        ))}
+        {other && (other.href
+          ? <Button variant="ghost" data-slot="welcome-other" asChild><a href={other.href}>{other.label}</a></Button>
+          : <Button variant="ghost" data-slot="welcome-other" onClick={() => other.run?.()}>{other.label}</Button>)}
+        {note && <p data-slot="welcome-note" className="text-sm text-balance text-muted-foreground">{note}</p>}
+        <div data-slot="welcome-problem" className="mt-3 w-full text-left empty:hidden">{problem && <Problem title={problem} />}</div>
+      </div>
+    </div>
   )
 }
 

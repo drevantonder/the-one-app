@@ -1,5 +1,5 @@
 // After Vite's builds (package.json's build): the import map every page that opts in gets (src/screen.rs), the
-// auth pages' small stylesheet, the client's own Settings screens written in React (../settings/<name>.jsx into
+// auth pages, drawn, and their small stylesheet, the client's own Settings screens written in React (../settings/<name>.jsx into
 // ../settings/dist/<name>.html, built as an app's screens are), and the sources' hash, which `cargo test` checks the
 // built files were made from.
 import { createHash } from "node:crypto"
@@ -7,6 +7,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import path from "node:path"
 import vm from "node:vm"
 import tailwindcss from "@tailwindcss/vite"
+import react from "@vitejs/plugin-react"
 import { build } from "vite"
 import { buildScreens } from "./screens.mjs"
 import { shared } from "./vite.config.ts"
@@ -30,13 +31,40 @@ for (const name of shared) {
 const map = JSON.stringify({ imports })
 writeFileSync(dist("importmap.json"), map + "\n")
 
-// The auth Worker's pages (../../../cloudflare/auth/pages.js) are plain HTML, not React: this theme and the utilities
-// their class names use, as one stylesheet (src/auth.css), which the Worker imports as text.
+// The auth Worker's pages (../../../cloudflare/auth/pages.tsx): each drawn from @one/ui's components to HTML here, as
+// dist/auth.json, so no React reaches a browser before it's signed in; and this theme with the utilities their class
+// names use, as one stylesheet (src/auth.css, written as dist/auth.css). The Worker imports both.
 const scratch = path.join(here, `run-${process.pid}`)
 mkdirSync(scratch, { recursive: true })
 try {
+  const draw = path.join(scratch, "draw.jsx")
+  writeFileSync(draw, `import { renderToStaticMarkup } from "react-dom/server"
+import { pages, parts } from ${JSON.stringify(path.join(here, "..", "..", "..", "cloudflare", "auth", "pages.tsx"))}
+// React puts a preload of each image ahead of what it draws, for a page it streams; these are whole, the image in them.
+const draw = (all) => Object.fromEntries(Object.entries(all).map(([name, page]) => [name, renderToStaticMarkup(page).replace(/<link rel="preload" as="image"[^>]*>/g, "")]))
+export default { pages: draw(pages), parts: draw(parts) }
+`)
+  await build({
+    configFile: false,
+    root: here,
+    publicDir: false,
+    logLevel: "warn",
+    plugins: [react()],
+    // pages.tsx is outside this folder: React is this folder's.
+    resolve: { alias: { "@": path.join(here, "src") }, dedupe: ["react", "react-dom"] },
+    define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    ssr: { noExternal: true },
+    build: { ssr: draw, outDir: scratch, emptyOutDir: false, reportCompressedSize: false, rolldownOptions: { output: { entryFileNames: "drawn.mjs" } } },
+  })
+  const drawn = (await import(path.join(scratch, "drawn.mjs"))).default
+  writeFileSync(dist("auth.json"), JSON.stringify(drawn, null, 1) + "\n")
+  // Their class names, as the browser reads them, for Tailwind to find.
+  const unescape = (s) => s.replace(/&(amp|quot|#x27|lt|gt);/g, (_, e) => ({ amp: "&", quot: '"', "#x27": "'", lt: "<", gt: ">" })[e])
+  const html = Object.values(drawn).flatMap(Object.values).join("")
+  writeFileSync(path.join(scratch, "classes.txt"), [...html.matchAll(/class="([^"]*)"/g)].map((m) => unescape(m[1])).join("\n"))
+  writeFileSync(path.join(scratch, "auth.css"), `@import ${JSON.stringify(path.join(here, "src", "auth.css"))};\n@source "./classes.txt";\n`)
   const entry = path.join(scratch, "auth.js")
-  writeFileSync(entry, `import ${JSON.stringify(path.join(here, "src", "auth.css"))};\n`)
+  writeFileSync(entry, `import ${JSON.stringify(path.join(scratch, "auth.css"))};\n`)
   const out = await build({
     configFile: false,
     root: here,
@@ -70,8 +98,8 @@ const walk = (dir, root = here, prefix = "") => {
 }
 walk(here)
 walk(home, home, "../home/")
-// The auth pages, whose class names auth.css is made of.
-sources.push("../../../cloudflare/auth/pages.js")
+// The auth pages, which auth.json is drawn from.
+sources.push("../../../cloudflare/auth/pages.tsx")
 const hash = createHash("sha256")
 for (const file of sources.sort()) hash.update(file).update("\0").update(readFileSync(path.join(here, file))).update("\0")
 writeFileSync(dist("sources.txt"), hash.digest("hex") + "\n")

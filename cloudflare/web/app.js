@@ -79,7 +79,7 @@ export function app(native) {
       }
     };
     const field = { label: "Pairing Code", placeholder: "Pairing code", note: "Paste the pairing code another device shows. Each code works once." };
-    show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name: "Join with a Pairing Code", field, action: { label: "Join", run: join }, other: { label: "Cancel", run: () => welcome() }, problem: error }));
+    show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", title: "Join with a Pairing Code", field, action: { label: "Join", run: join }, other: { label: "Cancel", run: () => welcome() }, problem: error }));
   }
 
   /// This device as its user's, where this page has the client (`net.has`, a bundle or build with its WebAssembly): the
