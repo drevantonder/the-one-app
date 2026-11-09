@@ -6,7 +6,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, useDialog } from "@one/ui"
+import { Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, useDialog } from "@one/ui"
 
 const api = one.api
 const yours = one.config.yours
@@ -54,6 +54,16 @@ function Users() {
     load()
   }
 
+  async function withdraw(i) {
+    setError("")
+    try {
+      await api("POST", "/v1/devices/invite/withdraw", { user: i.user })
+    } catch (e) {
+      setError(said(e))
+    }
+    load()
+  }
+
   const me = state?.user?.id
   const admin = state?.user?.role === "admin"
   // Them first, then everyone by name.
@@ -88,6 +98,15 @@ function Users() {
             )
           })}
         </List>
+        {!!state.network?.email_invites?.length && (
+          <Section title="Invited">
+            <List>
+              {state.network.email_invites.map((i) => (
+                <ListRow key={i.user} title={i.name} sub={i.email} trailing={<Button variant="ghost" size="sm" onClick={() => withdraw(i)}>Cancel Invite</Button>} />
+              ))}
+            </List>
+          </Section>
+        )}
         {error && <Problem title={error} />}
         {admin && domain && <p className="max-w-2xl text-sm text-muted-foreground">Anyone else at {domain} can sign in and ask.</p>}
       </>

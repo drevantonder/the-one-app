@@ -85,7 +85,10 @@ function Welcome({ logo, title, text, field, callout, children, action, other, n
 function Join({ logo, code, qr, text, onSignOut }: { logo?: string; code: string; qr: string; text: string; onSignOut: () => void }) {
   return (
     <Welcome logo={logo} title="Waiting for Approval" text={text} other={{ label: "Sign Out", run: onSignOut }} note="The owner of this network can see everything in it.">
-      <div aria-label="Code" data-slot="join-code" className="my-3 font-mono text-4xl font-semibold tracking-widest select-all">{code}</div>
+      <div aria-label="Code" data-slot="join-code" className="my-3 text-center font-mono select-all">
+        <div className="text-4xl font-semibold tracking-widest">{code.slice(0, 9)}</div>
+        <div className="mt-1 text-xl tracking-widest text-muted-foreground">{code.slice(10)}</div>
+      </div>
       <div className="overflow-hidden rounded-lg [&_svg]:block [&_svg]:size-44" dangerouslySetInnerHTML={{ __html: qr }} />
     </Welcome>
   )

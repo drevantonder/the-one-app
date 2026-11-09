@@ -87,6 +87,7 @@ enum Route {
     Retire,
     ForgetSignIn,
     InviteLink,
+    WithdrawInvite,
     RunSchedules,
     StopSchedules,
     Requests,
@@ -118,6 +119,7 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/devices/link-sign-in", Route::LinkSignIn, true),
     ("POST", "/v1/devices/record-sign-in", Route::RecordSignIn, true),
     ("POST", "/v1/devices/invite", Route::InviteLink, false),
+    ("POST", "/v1/devices/invite/withdraw", Route::WithdrawInvite, true),
     ("POST", "/v1/devices/run_schedules", Route::RunSchedules, false),
     ("POST", "/v1/devices/stop_schedules", Route::StopSchedules, false),
     ("POST", "/v1/devices/requests", Route::Requests, false),
@@ -150,6 +152,7 @@ fn about(route: Route) -> (&'static str, Value) {
         Route::LinkSignIn => ("Where this device links a further sign-in", of::<body::Nothing>()),
         Route::RecordSignIn => ("What this device just linked, and with confirm, record it", of::<body::Confirm>()),
         Route::InviteLink => ("", of::<body::InviteLink>()),
+        Route::WithdrawInvite => ("Withdraw an invite by email", of::<body::WithdrawInvite>()),
         Route::RunSchedules => ("", of::<body::RunSchedules>()),
         Route::StopSchedules => ("", of::<body::StopSchedules>()),
         Route::Requests => ("", of::<body::Nothing>()),
@@ -191,7 +194,7 @@ pub struct Asked {
     endpoint: Endpoint,
     user: String,
     name: String,
-    /// "ABCD EFGH", as the device asking shows it.
+    /// All of the code the device asking shows (`keys::join_code`).
     code: String,
 }
 
@@ -199,8 +202,7 @@ impl Asked {
     /// A request as auth lists it: `{ key, seal, user, name, user?, proof?, device?, made?, place?, sign_in? }`.
     pub fn of(r: &Value) -> Option<Asked> {
         let endpoint = Endpoint { key: keys::unhex(r["key"].as_str()?).ok()?, seal: keys::unhex(r["seal"].as_str()?).ok()? };
-        let code = keys::join_code(&endpoint);
-        Some(Asked { said: r.clone(), endpoint, user: text(r, "user"), name: text(r, "name"), code: format!("{} {}", &code[..4], &code[4..]) })
+        Some(Asked { said: r.clone(), endpoint, user: text(r, "user"), name: text(r, "name"), code: keys::join_code(&endpoint) })
     }
 
     pub fn endpoint(&self) -> &Endpoint {
@@ -371,6 +373,12 @@ mod body {
         pub email: Option<String>,
     }
 
+    #[derive(Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct WithdrawInvite {
+        pub user: String,
+    }
+
     /// `device` by its name or key; `scope` user (theirs, the default), global, or a group by its name or id; `days`, 30
     /// at most.
     #[derive(Deserialize, schemars::JsonSchema)]
@@ -530,6 +538,12 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             let mut invited = invite(m, &body.name, if body.admin { Role::Admin } else { Role::Member }, body.user.as_deref(), body.email.as_deref()).await?;
             invited["said"] = json!(said_invited(body.name.trim(), &invited));
             invited
+        }
+        Route::WithdrawInvite => {
+            let body: body::WithdrawInvite = read(path, raw)?;
+            m.write(content::withdraw_invite(&body.user)).await?;
+            ask_auth(m, "DELETE", &format!("/api/auth/invites/{}", body.user), json!({})).await?;
+            done
         }
         Route::RunSchedules => {
             let body: body::RunSchedules = read(path, raw)?;
@@ -924,8 +938,9 @@ async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: 
 
 /// Who a device waiting is, and so who may say yes.
 pub enum Joining {
-    /// One of this user's own.
-    Own,
+    /// One of this user's own: `proved` if its sign-in, checked here, is one they've signed in with, which only they
+    /// could have made for that key. One that isn't is checked by its whole code, which can't be found to match.
+    Own { proved: bool },
     /// Someone new, from an invite link this device made.
     Link(Invited),
     /// Someone new an admin may let in: named by an invite, or asking from the network's domain. `invite` is what lets
@@ -949,14 +964,16 @@ async fn waiting(m: &impl Me) -> Result<Vec<(Asked, Joining)>> {
     let admin = m.who(|who| Ok(who.may(&user, "invite", scopes::NETWORK)))?;
     let asked = asked(m).await?;
     let invites = invites(m).await?;
+    let accounts = m.who(|who| who.sign_ins_ever(&user))?;
     let mut out = Vec::new();
     for r in asked {
-        let gone = m.who(|who| Ok(who.machine_ever(&r.endpoint.key)?.is_some_and(|d| d.removed)))?;
+        let gone = m.who(|who| Ok(who.key_for(&r.endpoint.key, &r.user)?.is_some_and(|d| d.removed)))?;
         if r.endpoint.key == m.public() || r.said["service"].is_string() || gone {
             continue;
         }
         if r.user == user {
-            out.push((r, Joining::Own));
+            let proved = vouched(m, &r, &accounts).await;
+            out.push((r, Joining::Own { proved }));
         } else if let Some(invite) = invites.get(&r.user).filter(|i| r.said["proof"].as_str() == Some(&keys::invite_proof(i.secret.as_bytes(), &r.endpoint))) {
             let invite = invite.clone();
             out.push((r, Joining::Link(invite)));
@@ -965,6 +982,13 @@ async fn waiting(m: &impl Me) -> Result<Vec<(Asked, Joining)>> {
         }
     }
     Ok(out)
+}
+
+/// Whether `r`'s sign-in, checked here, is one of `accounts` and names its key.
+async fn vouched(m: &impl Me, r: &Asked, accounts: &[Account]) -> bool {
+    let Ok(proof) = serde_json::from_value::<Proof>(r.said["sign_in"].clone()) else { return false };
+    let Some((network, jwks)) = checked_against(m, &proof).await else { return false };
+    sign_in_proof::vouches(&proof, &r.endpoint, &network, jwks.as_ref(), accounts).is_ok()
 }
 
 /// Who `r` is to an admin, if their sign-in, checked here, shows they may ask at all: anyone else is no one's to answer.
@@ -1001,10 +1025,29 @@ async fn asked(m: &impl Me) -> Result<Vec<Asked>> {
     Ok(asked["requests"].as_array().into_iter().flatten().filter_map(Asked::of).collect())
 }
 
-/// The one of `found` whose code is `code`, as typed: none if two are, as a device made to show another's code would be.
-fn the_one<T>(found: impl IntoIterator<Item = T>, code_of: impl Fn(&T) -> &str, code: &str) -> Result<T> {
-    let code: String = code.to_uppercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    let mut found: Vec<T> = found.into_iter().filter(|r| code_of(r).replace(' ', "") == code).collect();
+/// A code as typed: its letters and digits.
+fn typed(code: &str) -> String {
+    code.to_uppercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect()
+}
+
+/// The first of a whole code, compared where a sign-in names its device.
+fn short_code(whole: &str) -> &str {
+    &whole[..keys::JOIN_CODE_SHORT]
+}
+
+/// What of a waiting device's code has to match to let it in.
+fn code_needed<'a>(r: &'a Asked, joining: &Joining) -> &'a str {
+    match joining {
+        Joining::Own { proved: false } => &r.code,
+        _ => short_code(&r.code),
+    }
+}
+
+/// The one of `found` whose code is `code`, as typed, or `needed`, as much of it as counts: none if two are, as a device
+/// made to show another's code would be.
+fn the_one<T>(found: impl IntoIterator<Item = T>, whole: impl Fn(&T) -> &str, needed: impl Fn(&T) -> &str, code: &str) -> Result<T> {
+    let code = typed(code);
+    let mut found: Vec<T> = found.into_iter().filter(|r| code == whole(r) || code == needed(r)).collect();
     match found.len() {
         0 => bail!("No device is waiting with that code. Check it, or start again on that device."),
         1 => Ok(found.remove(0)),
@@ -1014,12 +1057,14 @@ fn the_one<T>(found: impl IntoIterator<Item = T>, code_of: impl Fn(&T) -> &str, 
 
 /// The one waiting with `code` that this device may let in.
 async fn waiting_with(m: &impl Me, code: &str) -> Result<(Asked, Joining)> {
-    the_one(waiting(m).await?, |(r, _)| &r.code, code)
+    let found = waiting(m).await?;
+    ensure!(!found.iter().any(|(r, j)| matches!(j, Joining::Own { proved: false }) && short_code(&r.code) == typed(code)), "That device's sign-in doesn't show it's yours, so it needs every letter of the code it shows.");
+    the_one(found, |(r, _)| &r.code, |(r, j)| code_needed(r, j), code)
 }
 
 /// The one asking with `code`, whoever's it is: for the network's recovery key, which lets in anyone's.
 pub async fn asked_with(m: &impl Me, code: &str) -> Result<Asked> {
-    the_one(asked(m).await?, |r| &r.code, code)
+    the_one(asked(m).await?, |r| &r.code, |r| &r.code, code)
 }
 
 /// Marks a request approved at auth, for the device waiting on it to see, with the network it's in (its root), the
@@ -1035,7 +1080,7 @@ fn who_joins(r: &Asked, joining: &Joining) -> Value {
     match joining {
         Joining::Link(i) => json!(i.name),
         Joining::New { name, .. } => json!(name),
-        Joining::Own | Joining::Lost => r.said["user_name"].clone(),
+        Joining::Own { .. } | Joining::Lost => r.said["user_name"].clone(),
     }
 }
 
@@ -1050,9 +1095,13 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
                 Err(err) => tracing::warn!("letting {} in by their invite: {err:#}", r.name),
             }
         }
-        let mut shown = json!({ "device": r.name, "user": who_joins(&r, &joining), "code": r.code, "made": r.said["made"], "place": r.said["place"], "platform": r.said["platform"] });
+        let mut shown = json!({ "device": r.name, "user": who_joins(&r, &joining), "code": keys::spaced_code(code_needed(&r, &joining)), "made": r.said["made"], "place": r.said["place"], "platform": r.said["platform"] });
+        let replaces = replaced(m.who(|who| who.clients())?, &r);
+        if !replaces.is_empty() {
+            shown["replaces"] = json!(replaces.iter().map(|c| &c.name).collect::<Vec<_>>());
+        }
         shown[match joining {
-            Joining::Own => "yours",
+            Joining::Own { .. } => "yours",
             Joining::Lost => "lost",
             Joining::Link(_) | Joining::New { .. } => "new",
         }] = json!(true);
@@ -1062,6 +1111,18 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
         out.push(shown);
     }
     Ok(json!(out))
+}
+
+/// The sign-ins letting `r` in takes out: its user's others on the device it says it's on. Auth passes that on unchecked,
+/// so every card that can let it in names them.
+fn replaced(clients: Vec<scopes::Machine>, r: &Asked) -> Vec<scopes::Machine> {
+    let on = device_of(r);
+    clients.into_iter().filter(|c| on.is_some() && c.user == r.user && c.device == on && c.key != r.endpoint.key && c.passkey.is_none()).collect()
+}
+
+/// The device `r` says it's on, if it says.
+fn device_of(r: &Asked) -> Option<[u8; 32]> {
+    r.said["device"].as_str().and_then(|d| keys::unhex(d).ok())
 }
 
 /// What `r`'s sign-in shows it signed in with, checked here (`sign_in_proof`). None if it shows nothing that checks out.
@@ -1091,8 +1152,8 @@ async fn record_sign_in(m: &impl Me, confirm: bool) -> Result<Value> {
     Ok(json!({ "linked": true }))
 }
 
-/// Forgets an account a device of this user's signed in with: on every client of theirs that has it, so it counts for
-/// nothing any more, and at auth, so it signs no one in. Auth keeps someone's last way to sign in.
+/// Forgets an account a device of this user's signed in with: on every client they've ever had that has it, so it counts
+/// for nothing any more, and at auth, so it signs no one in. Auth keeps someone's last way to sign in.
 async fn forget_sign_in(m: &impl Me, device: &str, account: Option<&Account>) -> Result<()> {
     let user = m.user()?;
     let (account, forgets) = m.who(|db| {
@@ -1104,7 +1165,7 @@ async fn forget_sign_in(m: &impl Me, device: &str, account: Option<&Account>) ->
         };
         let account = account.filter(|_| mine.is_some()).ok_or_else(|| anyhow!("That isn't one of your devices with a sign-in to forget."))?;
         let mut forgets = Vec::new();
-        for c in db.clients()?.into_iter().filter(|c| c.user == user) {
+        for c in db.clients_ever(&user)? {
             if c.sign_in.as_ref().is_some_and(|a| a.same(&account)) {
                 forgets.push((c.key, None));
             }
@@ -1145,7 +1206,8 @@ async fn approve_code(m: &impl Me, code: &str, confirm: bool) -> Result<Value> {
     let (r, joining) = waiting_with(m, code).await?;
     if !confirm {
         let sign_in = signed_in_with(m, &r).await;
-        return Ok(json!({ "device": r.name, "user": who_joins(&r, &joining), "new": matches!(joining, Joining::Link(_) | Joining::New { .. }), "sign_in": sign_in }));
+        let replaces: Vec<String> = replaced(m.who(|who| who.clients())?, &r).into_iter().map(|c| c.name).collect();
+        return Ok(json!({ "device": r.name, "user": who_joins(&r, &joining), "new": matches!(joining, Joining::Link(_) | Joining::New { .. }), "sign_in": sign_in, "replaces": replaces }));
     }
     approve(m, &r, &joining).await
 }
@@ -1158,16 +1220,16 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
     m.read().await?;
     let user = m.user()?;
     let e = &r.endpoint;
-    let device = r.said["device"].as_str().map(keys::unhex).transpose().map_err(|_| anyhow!("The device it's on is 64 hex characters."))?;
+    let device = device_of(r);
     let (removed, listed, may_invite) = m.who(|who| {
-        let removed = who.machine_ever(&e.key)?.is_some_and(|d| d.removed);
+        let removed = who.key_for(&e.key, &r.user)?.is_some_and(|d| d.removed);
         let listed = who.client(&e.key)?.is_some_and(|c| c.user == r.user && c.seal == e.seal);
         Ok((removed, listed, who.may(&user, "invite", scopes::NETWORK)))
     })?;
     // Taken out, or turned down: never sealed anything again, whatever a node says.
     ensure!(!removed, "{} was turned down or taken out, so it isn’t let in again. Start again on it, for a new code.", r.name);
     let new_user = match joining {
-        Joining::Own => {
+        Joining::Own { .. } => {
             ensure!(r.user == user, "{} is someone else's: only their own devices approve one of theirs.", r.name);
             None
         }
@@ -1207,14 +1269,11 @@ pub async fn approve(m: &impl Me, r: &Asked, joining: &Joining) -> Result<Value>
     }
     // Someone new's own scope is theirs: their device makes its first epoch. Someone with no device left opens theirs
     // again only with what restores them (docs/plan-auth.md, step 6): an admin holds no key to it.
-    let own_too = matches!(joining, Joining::Own);
+    let own_too = matches!(joining, Joining::Own { .. });
     let (scopes, admin, before) = m.who(|who| {
         let own = Scope::User(r.user.clone());
         let scopes = who.scopes()?.into_iter().filter(|s| who.may(&r.user, "use", &scopes::object(s)) && (own_too || *s != own)).collect::<Vec<_>>();
-        let before: Vec<[u8; 32]> = match device {
-            Some(d) => who.clients()?.into_iter().filter(|c| c.user == r.user && c.device == Some(d) && c.key != e.key && c.passkey.is_none()).map(|c| c.key).collect(),
-            None => Vec::new(),
-        };
+        let before: Vec<[u8; 32]> = replaced(who.clients()?, r).into_iter().map(|c| c.key).collect();
         Ok((scopes, who.may(&r.user, "invite", scopes::NETWORK), before))
     })?;
     let (mut sealed, mut not_sealed) = (Vec::new(), Vec::new());
@@ -1263,8 +1322,9 @@ async fn seal_held(m: &impl Me, scope: &Scope, to: &Endpoint) -> Result<()> {
 /// Turns down the device waiting with `code`: one of this user's own by a step, so none of their devices lets it in
 /// after; either way its request is forgotten at auth. → which it was.
 async fn refuse(m: &impl Me, code: &str) -> Result<Value> {
-    let (r, joining) = waiting_with(m, code).await?;
-    if matches!(joining, Joining::Own) {
+    // By its short code too: a refusal lets no one in.
+    let (r, joining) = the_one(waiting(m).await?, |(r, _)| &r.code, |(r, _)| short_code(&r.code), code)?;
+    if matches!(joining, Joining::Own { .. }) {
         m.write(content::refuse(&r.endpoint, &r.name)).await?;
     }
     ask_auth(m, "DELETE", &format!("/api/auth/devices/requests/{}", hex(&r.endpoint.key)), json!({})).await?;
@@ -1390,7 +1450,8 @@ pub fn said_approved(r: &Value) -> String {
             Account::Provider { subject, .. } => format!(", signed in as {subject}"),
             Account::Passkey { .. } => ", signed in with a passkey".to_string(),
         });
-        return format!("{} is {}'s device{new}{with}. Approve it only if they say it's theirs.", s("device"), s("user"));
+        let replaces = r["replaces"].as_array().filter(|l| !l.is_empty()).map_or(String::new(), |l| format!(" It replaces {}.", l.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")));
+        return format!("{} is {}'s device{new}{with}. Approve it only if they say it's theirs.{replaces}", s("device"), s("user"));
     }
     let mut out = format!("{} is in.", s("device"));
     if r["recovery"] == true {
@@ -1421,4 +1482,53 @@ fn said_invited(name: &str, r: &Value) -> String {
     }
     let how = if crate::config::JOIN_DOMAIN.is_empty() { "they join" } else { "they sign in and join" };
     format!("Send {name} this link. It works once, for {days} days: opening it, {how}. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use serde_json::json;
+
+    use super::{Asked, Joining, code_needed, replaced, short_code, the_one};
+    use crate::database::scopes::{Kind, Machine};
+    use crate::keys::{self, hex};
+
+    fn asked(key: u8, user: &str, device: Option<[u8; 32]>) -> Asked {
+        let mut r = json!({ "key": hex(&[key; 32]), "seal": hex(&[key + 1; 32]), "user": user, "name": "MacBook Pro" });
+        if let Some(on) = device {
+            r["device"] = json!(hex(&on));
+        }
+        Asked::of(&r).unwrap()
+    }
+
+    fn client(key: u8, user: &str, device: Option<[u8; 32]>, passkey: Option<&str>) -> Machine {
+        let roles = BTreeSet::from([Kind::Client]);
+        Machine { key: [key; 32], seal: [key; 32], user: user.into(), name: format!("device {key}"), roles, passkey: passkey.map(str::to_string), platform: None, service: None, shared: false, device, by: user.into(), since: 0, sign_in: None, place: None, removed: false }
+    }
+
+    /// 40 bits can be found to match offline, so a device whose sign-in shows nothing is let in only by every letter of its
+    /// code, and one whose sign-in names it by the short code; a note's code, cut to the short one, can't let in the first.
+    #[test]
+    fn a_device_that_cant_show_its_yours_needs_its_whole_code() {
+        let r = asked(1, "a", None);
+        let (whole, short) = (keys::join_code(r.endpoint()), short_code(&keys::join_code(r.endpoint())).to_string());
+        assert_eq!(whole.len(), 16, "80 bits");
+        let one = |joining: Joining, code: &str| the_one([(asked(1, "a", None), joining)], |(r, _)| r.code.as_str(), |(r, j)| code_needed(r, j), code).is_ok();
+        assert!(one(Joining::Own { proved: true }, &short));
+        assert!(one(Joining::Own { proved: true }, &whole));
+        assert!(!one(Joining::Own { proved: false }, &short), "a short code is no check on one that shows nothing");
+        assert!(one(Joining::Own { proved: false }, &whole));
+        assert!(one(Joining::Lost, &short), "someone with no device left is checked by their sign-in");
+    }
+
+    /// Letting a device in takes out only its user's other sign-ins on the device it says it's on, each named on its card.
+    #[test]
+    fn only_that_users_sign_ins_on_that_device_are_replaced() {
+        let (on, other) = ([7; 32], [8; 32]);
+        let r = asked(1, "a", Some(on));
+        let clients = vec![client(2, "a", Some(on), None), client(3, "a", Some(other), None), client(4, "b", Some(on), None), client(5, "a", Some(on), Some("cred")), client(6, "a", None, None), client(1, "a", Some(on), None)];
+        assert_eq!(replaced(clients.clone(), &r).iter().map(|c| c.key[0]).collect::<Vec<_>>(), vec![2]);
+        assert!(replaced(clients, &asked(1, "a", None)).is_empty(), "one that says nothing replaces nothing");
+    }
 }

@@ -161,7 +161,7 @@ export async function watchWaiting() {
   }
 }
 async function waitingNow() {
-  const now = (await api("/v1/devices/requests", { method: "POST", body: {} })).map((r) => ({ ...r, key: r.code.replace(" ", "") })).filter((r) => !notMine.has(r.key));
+  const now = (await api("/v1/devices/requests", { method: "POST", body: {} })).map((r) => ({ ...r, key: r.code.replaceAll(" ", "") })).filter((r) => !notMine.has(r.key));
   if (setWaiting(now)) tell({ oneEvent: { type: "devices" } });
   const fresh = now.filter((r) => !seen.has(r.key));
   fresh.forEach((r) => seen.add(r.key));
@@ -187,7 +187,7 @@ whenSignedOut((why) => (events?.abort(), showSignedOut(why)));
 /// phone that scans it.
 export function showJoin(code, invited) {
   document.title = "Waiting for Approval";
-  const link = `${platform.address()}/approve#${code.replace(" ", "")}`;
+  const link = `${platform.address()}/approve#${code.replaceAll(" ", "")}`;
   windowShown = false;
   show(h(ui.Join, {
     logo,

@@ -550,29 +550,46 @@ impl ScopeDb {
         Ok(out)
     }
 
-    /// Every account `user` signed in with that their own devices recorded, of clients taken out too: what someone with
-    /// no device left is checked against, since taking the lost ones out took their records.
+    /// What `k` is, as far as `user` goes: a key taken out or turned down counts only against the user it was, so one
+    /// user's Not Me never stops another's device.
+    pub fn key_for(&self, k: &Key, user: &str) -> Result<Option<Machine>> {
+        Ok(self.machine_ever(k)?.filter(|m| !m.removed || m.user == user))
+    }
+
+    /// Every client `user` has had, taken out too.
+    pub fn clients_ever(&self, user: &str) -> Result<Vec<Machine>> {
+        Ok(self.machines()?.into_iter().filter(|m| m.user == user && m.is(Kind::Client)).collect())
+    }
+
+    /// Every account `user` signed in with on any client they've had, as recorded when it was let in or linked, taken out
+    /// too: what a new device's sign-in is checked against, always beside someone's approval. Forgetting one takes it off
+    /// all of them (`settings::forget_sign_in`).
     pub fn sign_ins_ever(&self, user: &str) -> Result<Vec<crate::onboarding::sign_in_proof::Account>> {
-        let keys: Vec<String> = self.conn().prepare("SELECT key FROM devices WHERE principal = ? AND client = 1")?.query_map([user_principal(user)], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let mut out = Vec::new();
-        for key in keys {
-            let key = crate::keys::unhex(&key)?;
-            out.extend(self.machine_ever(&key)?.filter(|m| m.by == user).and_then(|m| m.sign_in));
-            out.extend(self.linked_sign_ins(&key)?);
+        for c in self.clients_ever(user)? {
+            out.extend(self.linked_sign_ins(&c.key)?);
+            out.extend(c.sign_in);
         }
         Ok(out)
     }
 
-    /// The invite naming `user` by the email they sign in with, if there is one.
+    /// The invite naming `user` by the email they sign in with, if there is one and whoever made it is still an admin.
     pub fn email_invite(&self, user: &str) -> Result<Option<EmailInvite>> {
-        Ok(self
+        Ok(self.email_invites()?.into_iter().find(|i| i.user == user))
+    }
+
+    /// The invites by email that still count, used or not: each of an admin still.
+    pub fn email_invites(&self) -> Result<Vec<EmailInvite>> {
+        let rows: Vec<(String, String, String, String, i64, Option<String>, Option<String>)> = self
             .conn()
-            .query_row("SELECT email, name, role, until, used FROM email_invites WHERE user = ?", [user], |r| {
-                let role: String = r.get(2)?;
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, role, r.get::<_, i64>(3)?, r.get::<_, Option<String>>(4)?))
-            })
-            .optional()?
-            .and_then(|(email, name, role, until, used)| Some(EmailInvite { email, name, role: serde_json::from_value(json!(role)).ok()?, until: until as u64, used: used.is_some() })))
+            .prepare("SELECT user, email, name, role, until, used, invited_by FROM email_invites ORDER BY user")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(rows
+            .into_iter()
+            .filter(|(.., by)| by.as_deref().is_some_and(|by| self.may(by, "invite", NETWORK)))
+            .filter_map(|(user, email, name, role, until, used, _)| Some(EmailInvite { user, email, name, role: serde_json::from_value(json!(role)).ok()?, until: until as u64, used: used.is_some() }))
+            .collect())
     }
 
     /// What its user linked from client `key`.
@@ -979,6 +996,7 @@ impl Kind {
 /// Someone new an admin named by the email they sign in with (`email_invites`).
 #[derive(Clone, Debug)]
 pub struct EmailInvite {
+    pub user: String,
     pub email: String,
     pub name: String,
     pub role: Role,

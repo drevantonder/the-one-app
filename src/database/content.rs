@@ -72,6 +72,8 @@ pub enum Change {
     Invite,
     /// Names someone new by the email they sign in with, as an admin's yes in advance: `{ user, email, name, role, until }`.
     InviteEmail,
+    /// Withdraws an invite by email not taken up yet: `{ user }`.
+    WithdrawInvite,
     Accept,
     Member,
     Rename,
@@ -91,7 +93,7 @@ pub enum Change {
     Arrange,
 }
 
-const NAMES: [(Change, &str); 33] = [
+const NAMES: [(Change, &str); 34] = [
     (Change::Freeze, "freeze"),
     (Change::Start, "start"),
     (Change::Defaults, "defaults"),
@@ -108,6 +110,7 @@ const NAMES: [(Change, &str); 33] = [
     (Change::Group, "group"),
     (Change::Invite, "invite"),
     (Change::InviteEmail, "invite-email"),
+    (Change::WithdrawInvite, "withdraw-invite"),
     (Change::Accept, "accept"),
     (Change::Member, "member"),
     (Change::Rename, "rename"),
@@ -198,6 +201,10 @@ pub fn invite(group: &str, user: &str, role: Role) -> Content {
 /// Says someone new may join as `user` by signing in as `email`, until `until` (ms): an admin's yes, given in advance.
 pub fn invite_email(user: &str, email: &str, name: &str, role: Role, until: u64) -> Content {
     node(Change::InviteEmail, json!({ "user": user, "email": email, "name": name, "role": role, "until": until }))
+}
+
+pub fn withdraw_invite(user: &str) -> Content {
+    node(Change::WithdrawInvite, json!({ "user": user }))
 }
 
 pub fn accept(group: &str) -> Content {

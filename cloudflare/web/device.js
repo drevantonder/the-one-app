@@ -47,7 +47,7 @@ export async function passkeyKeysOf(prf) {
 }
 
 /// The code this browser shows to be approved: its key's, as 4 and 4.
-export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
+export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/(.{4})(?=.)/g, "$1 ");
 
 /// What the user's devices call this browser: "Chrome on Mac".
 export function browserName() {

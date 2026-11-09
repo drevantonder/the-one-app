@@ -280,7 +280,7 @@ function Devices() {
       if (!first) return
       // One it already asks about at the top is answered there.
       const typed = String(one.params?.approve || "").toUpperCase().replace(/[^A-Z2-7]/g, "")
-      if (typed && !first.waiting.some((r) => r.code.replace(" ", "") === typed)) approveScanned(typed)
+      if (typed && !first.waiting.some((r) => typed.startsWith(r.code.replaceAll(" ", "")))) approveScanned(typed)
       if (schedulesAsked && first.device.keys) show({ schedules: schedulesAsked })
       else if (one.params?.add) show({ add: true })
     })
@@ -290,7 +290,6 @@ function Devices() {
   /// A device's code from its QR, not waiting at the top: which device it is, and Approve.
   async function approveScanned(typed) {
     const code = String(typed).toUpperCase().replace(/[^A-Z2-7]/g, "")
-    if (code.length !== 8) return
     try {
       const r = await api("POST", "/v1/devices/approve", { code })
       setScan({ code, r })
@@ -550,9 +549,13 @@ function Waiting({ r, busy, answer }) {
           <span className="block font-medium break-words">{r.device}</span>
           {sub && <span className="block break-words text-muted-foreground">{sub}</span>}
           {signInLabel(r.sign_in) && <span className="block break-words text-muted-foreground">{signInLabel(r.sign_in)}</span>}
+          {r.replaces && <span className="block break-words text-muted-foreground">Replaces {r.replaces.join(", ")}</span>}
         </span>
       </div>
-      <div className="text-center font-mono text-3xl font-semibold tracking-widest select-all">{r.code}</div>
+      <div className="text-center font-mono text-3xl font-semibold tracking-widest select-all">
+        <div>{r.code.slice(0, 9)}</div>
+        {r.code.length > 9 && <div>{r.code.slice(10)}</div>}
+      </div>
       <div className="flex gap-2 @xl:justify-end">
         <Button variant="outline" className="flex-1 @xl:flex-none" disabled={busy} onClick={() => answer(r.code, () => api("POST", "/v1/devices/refuse", { code: r.code }))}>{r.yours ? "Not Me" : "Not Them"}</Button>
         <Button className="flex-1 @xl:flex-none" disabled={busy} onClick={() => answer(r.code, () => api("POST", "/v1/devices/approve", { code: r.code, confirm: true }))}>
@@ -597,6 +600,7 @@ function Scanned({ scan, done, cancel }) {
         <div className="font-medium">Approve {r.device}?</div>
         <div className="text-sm text-muted-foreground">{r.new ? `${r.user}’s first device. They join ${yours}.` : r.user === undefined || r.yours ? "It can open everything you can." : `${r.user}’s device.`}</div>
         {signInLabel(r.sign_in) && <div className="text-sm text-muted-foreground">{signInLabel(r.sign_in)}</div>}
+        {r.replaces && <div className="text-sm text-muted-foreground">Replaces {r.replaces.join(", ")}</div>}
       </div>
       {error && <Problem title={error} />}
       <div className="flex justify-end gap-2">

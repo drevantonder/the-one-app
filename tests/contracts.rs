@@ -643,6 +643,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
             recovery_set: 1,
             member: true,
             users: vec![NetworkUser { id: "u".into(), name: "n".into(), handle: "h".into(), role: Role::Admin, me: true, recovery_holder: false }],
+            email_invites: Vec::new(),
             groups: vec![Group { id: "g".into(), name: "n".into(), handle: "h".into(), role: Some(Role::Admin), members: vec![Member { user: "u".into(), role: Role::Admin }], invited: vec![] }],
             devices: vec![Device {
                 key: "k".into(),

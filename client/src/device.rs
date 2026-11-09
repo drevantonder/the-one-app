@@ -172,10 +172,9 @@ impl Device {
         format!("{}{}", self.key(), hex(&self.me.seal))
     }
 
-    /// The code it shows to be approved: "ABCD EFGH".
+    /// The code it shows to be approved: "ABCD EFGH IJKL MNOP".
     pub fn code(&self) -> String {
-        let code = keys::join_code(&self.me);
-        format!("{} {}", &code[..4], &code[4..])
+        keys::spaced_code(&keys::join_code(&self.me))
     }
 
     /// Asks auth to let it in, as the user signed in with `token`, calling it `name` (and with someone new's invite

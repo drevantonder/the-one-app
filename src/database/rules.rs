@@ -73,6 +73,7 @@ pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Res
         Some(Change::Group) => c.group(),
         Some(Change::Invite) => c.invite(),
         Some(Change::InviteEmail) => c.invite_email(),
+        Some(Change::WithdrawInvite) => c.withdraw_invite(),
         Some(Change::Accept) => c.accept(),
         Some(Change::Member) => c.member(),
         Some(Change::Rename) => c.rename(),
@@ -190,7 +191,7 @@ impl Rule<'_> {
         let machine = listed(self.data, &user, self.step.time())?;
         ensure!(user == self.w && self.who.user(&user)?.is_some(), "the recovery key lets in a device of someone already in");
         ensure!(machine.roles == BTreeSet::from([Kind::Client]) && machine.passkey.is_none(), "the recovery key lets in a device users use");
-        ensure!(self.who.machine_ever(&machine.key)?.is_none(), "that key is listed already");
+        ensure!(self.who.key_for(&machine.key, &user)?.is_none(), "that key is listed already");
         put(self.out, &machine)?;
         self.devices_changed()?;
         self.out.execute("UPDATE network SET recovery_used_at = ?, recovery_used_by = ?", params![self.time(), user_principal(&user)])?;
@@ -206,7 +207,7 @@ impl Rule<'_> {
         ensure!(!machine.is(Kind::Service) || theirs, "only a user's own device lists their services");
         // A machine an admin listed for someone is listed again by that user's own device to be theirs: then it runs
         // their own scope too.
-        if let Some(was) = self.who.machine_ever(&machine.key)? {
+        if let Some(was) = self.who.key_for(&machine.key, &user)? {
             // Or a service of theirs listed again by their own device, to name the device it's part of; or a sign-in that
             // named no device, naming the one it's on.
             let part = was.is(Kind::Service) && was.roles == machine.roles && was.service == machine.service;
@@ -266,11 +267,11 @@ impl Rule<'_> {
         Ok(invite.name)
     }
 
-    /// A device its user said isn't theirs ("Not Me"), before it was ever listed: its key is taken out now, so no
-    /// device of theirs lets it in, and nothing it writes counts.
+    /// A device its user said isn't theirs ("Not Me"), before it was ever listed: its key is taken out now, so no device
+    /// of theirs lets it in, and nothing it writes counts. It counts only against who said it (`ScopeDb::key_for`).
     fn refuse(&self) -> Result<()> {
         let key = self.key("key")?;
-        ensure!(self.who.machine_ever(&key)?.is_none(), "that key is listed already: take it out instead");
+        ensure!(self.who.key_for(&key, self.w)?.is_none(), "that key is listed already: take it out instead");
         let data = json!({ "key": self.data["key"], "seal": self.data["seal"], "name": self.data["name"], "roles": [Kind::Client] });
         let mut machine = listed(&data, self.w, self.step.time())?;
         machine.removed = true;
@@ -278,11 +279,11 @@ impl Rule<'_> {
         self.devices_changed()
     }
 
-    /// What one of their devices signed in with, forgotten by its user's own device: a new device's sign-in is no
-    /// longer checked against it.
+    /// What one of their clients, taken out or not, signed in with, forgotten by its user's own device: a new device's
+    /// sign-in is no longer checked against it.
     fn forget_sign_in(&self) -> Result<()> {
         let key = self.key("key")?;
-        ensure!(self.who.machine(&key)?.context("no such device")?.user == self.w, "only its user's own device forgets what it signed in with");
+        ensure!(self.who.machine_ever(&key)?.context("no such device")?.user == self.w, "only its user's own device forgets what it signed in with");
         match self.data.get("account") {
             Some(account) => self.out.execute("DELETE FROM linked_sign_ins WHERE device = ? AND account = ?", [hex(&key), account_text(account)?])?,
             None => self.out.execute("UPDATE devices SET sign_in = NULL WHERE key = ?", [hex(&key)])?,
@@ -444,7 +445,7 @@ impl Rule<'_> {
         Ok(())
     }
 
-    /// Someone new, named by the email they'll sign in with: only by who may add them.
+    /// Someone new, named by the email they'll sign in with: only by who may add them, for the days an invite lasts.
     fn invite_email(&self) -> Result<()> {
         let (user, to) = (self.id("user")?, self.role_of("role")?);
         allowed!(self.who.may_give(self.w, &user, role(to), NETWORK), "only admins invite someone new");
@@ -452,7 +453,16 @@ impl Rule<'_> {
         let (email, name) = (self.text("email")?.to_lowercase(), self.text("name")?);
         ensure!(email.contains('@') && !name.trim().is_empty(), "an invite names an email and a name");
         let until = self.data["until"].as_u64().context("no until")?;
-        self.out.execute("INSERT OR REPLACE INTO email_invites VALUES (?, ?, ?, ?, ?, NULL)", params![user, email, name.trim(), role(to), int(until)])?;
+        ensure!(until <= self.step.time() + crate::onboarding::sign_in_proof::INVITE_DAYS * 86_400_000, "an invite lasts {} days at most", crate::onboarding::sign_in_proof::INVITE_DAYS);
+        self.out.execute("INSERT OR REPLACE INTO email_invites VALUES (?, ?, ?, ?, ?, NULL, ?)", params![user, email, name.trim(), role(to), int(until), self.w])?;
+        Ok(())
+    }
+
+    /// An invite by email not taken up yet, withdrawn by an admin: whoever it named can't join by it.
+    fn withdraw_invite(&self) -> Result<()> {
+        let user = self.id("user")?;
+        allowed!(self.may("invite", NETWORK), "only an admin withdraws an invite");
+        ensure!(self.out.execute("DELETE FROM email_invites WHERE user = ? AND used IS NULL", [&user])? == 1, "no such invite");
         Ok(())
     }
 
@@ -988,6 +998,73 @@ mod tests {
         assert!(net.db.machine(&stranger.id())?.is_none() && net.db.machine_ever(&stranger.id())?.unwrap().removed);
         // One listed already is taken out instead, as Remove does.
         assert!(!net.step(&mac, ANDRE, refuse(&phone.endpoint(), "phone")));
+        Ok(())
+    }
+
+    /// A Not Me counts only against who said it: anyone in the network can write one, for any key they read at auth, and
+    /// it must never stop another user's device.
+    #[test]
+    fn someone_elses_not_me_doesnt_stop_your_device() -> anyhow::Result<()> {
+        let (mac, mut net) = setup();
+        let (bobs, waiting) = (Dev::new(5), Dev::new(9));
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        assert!(net.step(&bobs, BOB, refuse(&waiting.endpoint(), "MacBook Pro")), "anyone may say it");
+        assert!(net.db.key_for(&waiting.id(), BOB)?.is_some_and(|d| d.removed), "it stops it for them");
+        assert!(net.db.key_for(&waiting.id(), ANDRE)?.is_none(), "and not for anyone else");
+        assert!(net.step(&mac, ANDRE, device(&waiting.endpoint(), ANDRE, "MacBook Pro", &[Kind::Client], None)), "so its user's own device lets it in");
+        assert!(!net.step(&bobs, BOB, refuse(&waiting.endpoint(), "MacBook Pro")), "one listed now isn't refused, by anyone");
+        Ok(())
+    }
+
+    /// A sign-in forgotten stops counting everywhere it was recorded, on clients taken out too; and one an admin's device
+    /// recorded as it let someone in counts for them, or an admin could never let them back in.
+    #[test]
+    fn a_forgotten_sign_in_counts_nowhere_and_an_admin_recorded_one_counts() -> anyhow::Result<()> {
+        let (mac, mut net) = setup();
+        let account = |s: &str| json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": s } });
+        let (phone, laptop, bobs) = (Dev::new(3), Dev::new(4), Dev::new(5));
+        let mut listed = device(&laptop.endpoint(), ANDRE, "laptop", &[Kind::Client], None);
+        listed.data["sign_in"] = account("1");
+        net.step(&mac, ANDRE, listed);
+        net.step(&mac, ANDRE, device(&phone.endpoint(), ANDRE, "phone", &[Kind::Client], None));
+        net.step(&mac, ANDRE, remove_device(&laptop.id()));
+        assert_eq!(net.db.sign_ins_ever(ANDRE)?.len(), 1, "a client taken out still says what they sign in with");
+        assert!(net.step(&phone, ANDRE, forget_sign_in(&laptop.id(), None)), "forgotten on a client taken out");
+        assert!(net.db.sign_ins_ever(ANDRE)?.is_empty(), "so it counts for nothing");
+
+        let mut bob = device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member)));
+        bob.data["sign_in"] = account("2");
+        net.step(&mac, ANDRE, bob);
+        assert_eq!(net.db.sign_ins_ever(BOB)?.len(), 1, "their only device was listed by the admin who let them in");
+        net.step(&mac, ANDRE, remove_device(&bobs.id()));
+        assert_eq!(net.db.sign_ins_ever(BOB)?.len(), 1, "so an admin can check them once it's gone");
+        Ok(())
+    }
+
+    /// An invite by email counts only while whoever made it may still invite; an admin can withdraw it; and it lasts only
+    /// as long as an invite does.
+    #[test]
+    fn an_email_invite_ends_with_its_admin_or_when_withdrawn() -> anyhow::Result<()> {
+        const SAM: &str = "c000000000000003";
+        let (mac, mut net) = setup();
+        let (second, bobs) = (Dev::new(3), Dev::new(5));
+        net.step(&mac, ANDRE, device(&second.endpoint(), BOB, "bob's mac", &[Kind::Client], Some(("Bob", Role::Admin))));
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), "d000000000000004", "dee's phone", &[Kind::Client], Some(("Dee", Role::Member))));
+        let invite = |until| invite_email(SAM, "sam@example.com", "Sam", Role::Member, until);
+        assert!(!net.step(&second, BOB, invite(9 * 86_400_000)), "it can't outlast what an invite lasts");
+        assert!(net.step(&second, BOB, invite(2_000_000)));
+        assert!(net.db.email_invite(SAM)?.is_some());
+        assert!(!net.step(&bobs, "d000000000000004", withdraw_invite(SAM)), "only an admin withdraws one");
+        net.step(&mac, ANDRE, role(BOB, Role::Member));
+        assert!(net.db.email_invite(SAM)?.is_none(), "whoever made it isn't an admin now");
+        net.step(&mac, ANDRE, role(BOB, Role::Admin));
+        assert!(net.db.email_invite(SAM)?.is_some());
+        assert!(net.step(&mac, ANDRE, withdraw_invite(SAM)), "any admin withdraws it");
+        assert!(net.db.email_invite(SAM)?.is_none());
+        assert!(!net.step(&mac, ANDRE, withdraw_invite(SAM)), "there's none to withdraw now");
+        assert!(net.step(&second, BOB, invite(3_000_000)), "and it can be made again");
+        net.step(&mac, ANDRE, remove_user(BOB));
+        assert!(net.db.email_invite(SAM)?.is_none(), "nor once they're out of the network");
         Ok(())
     }
 

@@ -147,6 +147,9 @@ pub struct Network {
     /// Whether the node answering is one of the network's devices.
     pub member: bool,
     pub users: Vec<NetworkUser>,
+    /// For an admin: who's invited by email and hasn't joined yet.
+    #[serde(default)]
+    pub email_invites: Vec<EmailInvited>,
     pub groups: Vec<Group>,
     pub devices: Vec<Device>,
     pub devices_at: u64,
@@ -184,6 +187,13 @@ pub struct NetworkUser {
     /// Whether an admin named them as holding the recovery key.
     #[serde(default)]
     pub recovery_holder: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmailInvited {
+    pub user: String,
+    pub name: String,
+    pub email: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -555,6 +565,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
         recovery_set: m.recovery_set()?,
         member: here.member,
         users,
+        email_invites: if m.may(me, "invite", scopes::NETWORK) { m.email_invites()?.into_iter().filter(|i| !i.used && i.until > m.now()).map(|i| EmailInvited { user: i.user, name: i.name, email: i.email }).collect() } else { Vec::new() },
         groups,
         devices,
         devices_at: m.devices_at()?,

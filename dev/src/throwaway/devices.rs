@@ -104,9 +104,9 @@ pub(crate) fn didnt_sign_in(what: &str, said: &[(&str, String)], elsewhere: &str
     anyhow::anyhow!(message)
 }
 
-/// Whether text is the code a new device shows to be approved: "ABCD EFGH".
+/// Whether text is the code a new device shows to be approved: "ABCD EFGH IJKL MNOP".
 pub(crate) fn is_code(text: &str) -> bool {
-    text.len() == 9 && text.char_indices().all(|(i, c)| if i == 4 { c == ' ' } else { c.is_ascii_uppercase() || ('2'..='7').contains(&c) })
+    text.len() == 19 && text.char_indices().all(|(i, c)| if i % 5 == 4 { c == ' ' } else { c.is_ascii_uppercase() || ('2'..='7').contains(&c) })
 }
 
 /// A native client's code, approved by the throwaway network's machine, as its user's device: then it's let in.

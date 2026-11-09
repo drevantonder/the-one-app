@@ -274,7 +274,7 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
 
     // Andre's new laptop, approved from his machine, opens global.
     let laptop = new_key();
-    one::settings::approve(&a, &asks(&laptop, &me.user, None), &one::settings::Joining::Own).await.unwrap();
+    one::settings::approve(&a, &asks(&laptop, &me.user, None), &one::settings::Joining::Own { proved: true }).await.unwrap();
     assert_eq!(opens(&laptop, &global).await, vec![1]);
 
     // Sam is let in only with the proof of the secret Andre's invite made.
@@ -287,7 +287,7 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
     assert_eq!(opens(&sams, &global).await, vec![1]);
 
     // Sam's next device is his to approve, not Andre's.
-    let refused = one::settings::approve(&a, &asks(&new_key(), &sam, None), &one::settings::Joining::Own).await.unwrap_err();
+    let refused = one::settings::approve(&a, &asks(&new_key(), &sam, None), &one::settings::Joining::Own { proved: true }).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only their own devices"), "{refused:#}");
 
     // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the notes go on.
@@ -318,7 +318,7 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
         let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
         let e = Endpoint::of(&key);
         let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": platform, "user": me.user, "platform": platform })).unwrap();
-        one::settings::approve(&a, &asked, &one::settings::Joining::Own).await.unwrap();
+        one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
         key
     };
     let sealed_for = |key: &ed25519_dalek::SigningKey| B64U.encode(&seal_to(&Endpoint::of(key).seal, &secret).unwrap());

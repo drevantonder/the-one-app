@@ -780,11 +780,21 @@ pub fn waited(status: u16, said: &Value) -> Waited {
     }
 }
 
-/// The code a new device shows, which a device of its user types or scans to approve it: the first 8 base32
-/// characters of the sha256 of its key and seal key, so whoever passes on its request can swap neither.
+/// The code a new device shows, which a device of its user types, scans or compares to approve it: the first 16 base32
+/// characters (80 bits) of the sha256 of its key and seal key, so whoever passes on its request can't make another key
+/// that shows it.
 pub fn join_code(device: &Endpoint) -> String {
-    BASE32_NOPAD.encode(&sha256(&[device.key, device.seal].concat()))[..8].to_string()
+    BASE32_NOPAD.encode(&sha256(&[device.key, device.seal].concat()))[..16].to_string()
 }
+
+/// A join code in fours, as it's read.
+pub fn spaced_code(code: &str) -> String {
+    code.as_bytes().chunks(4).map(|c| String::from_utf8_lossy(c)).collect::<Vec<_>>().join(" ")
+}
+
+/// How much of a join code is compared where the request's own sign-in names its key (`settings::Joining`): the rest is
+/// there for one that can't show that, as 40 bits alone can be found to match, offline, in minutes.
+pub const JOIN_CODE_SHORT: usize = 8;
 
 /// A newcomer's proof that their invite's secret was theirs: HKDF-SHA256(secret, "one/invite\0" ‖ their device's
 /// key ‖ its seal key), hex.

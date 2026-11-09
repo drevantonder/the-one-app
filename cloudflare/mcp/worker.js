@@ -258,7 +258,7 @@ export class Client extends DurableObject {
       const device = await this.ctx.storage.get("device");
       if (!secret || !device) return { signIn: "this sign-in opens nothing here: sign in again" };
       const me = { seed: secret.slice(0, 32), seal: { secret: secret.slice(32), public: hex.decode(device.seal) }, key: device.key, user: device.user, until };
-      const approve = `Approve ${device.name} on one of your devices: in Settings › Devices, enter ${device.code.slice(0, 4)} ${device.code.slice(4)}.`;
+      const approve = `Approve ${device.name} on one of your devices: in Settings › Devices, enter ${device.code.replace(/(.{4})(?=.)/g, "$1 ")}.`;
       if (!(await this.approved(device))) {
         await this.join(device, token);
         return answerAll(body, approve);

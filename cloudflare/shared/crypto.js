@@ -270,12 +270,12 @@ export async function checkCertificate(certificate, now = Date.now()) {
 
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-/// The code a new device shows: the first 8 base32 characters of the sha256 of its key and seal key.
+/// The code a new device shows (`keys::join_code`): the first 16 base32 characters of the sha256 of its key and seal key.
 export async function joinCode(key, seal) {
   const h = await sha256(concat(bytes(key), bytes(seal)));
   let bits = "";
-  for (const b of h.slice(0, 5)) bits += b.toString(2).padStart(8, "0");
-  return Array.from({ length: 8 }, (_, i) => BASE32[parseInt(bits.slice(i * 5, i * 5 + 5), 2)]).join("");
+  for (const b of h.slice(0, 10)) bits += b.toString(2).padStart(8, "0");
+  return Array.from({ length: 16 }, (_, i) => BASE32[parseInt(bits.slice(i * 5, i * 5 + 5), 2)]).join("");
 }
 
 /// The OIDC nonce a sign-in for a device in the network whose root is `root` asks its provider for
