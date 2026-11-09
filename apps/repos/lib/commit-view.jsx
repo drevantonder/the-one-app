@@ -133,7 +133,7 @@ function Commit({ d, repo, sha, files }) {
       ) : (
         <>
           {files && (
-            <Grid min="24rem" max={4} gap="0">
+            <Grid min="24rem" max={4} gap="0px">
               {d.files.map((f, k) => (
                 <GridRow
                   key={k}
