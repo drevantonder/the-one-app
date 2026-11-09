@@ -5,9 +5,9 @@ setups (mcp: the MCP server only; cli: the CLI only; both), against throwaway ne
     python3 tools/agents/run.py [--setups mcp,cli,both] [--prompts id,...] [--repeat N] [--model M] [--one PATH] [--out DIR]
 
 Each setup gets its own network: a node run with HOME set to a sandbox and its own port (ONE_ADDR), and the node itself
-writes the harness's AGENTS.md, skills, board plugin and MCP entry there, exactly as on a real device (src/agents.rs).
+writes the harness's AGENTS.md, skills, prompt hooks and MCP entry there, exactly as on a real device (src/agents.rs).
 The setups differ only in what the agent can reach: mcp takes the CLI off PATH, cli switches the MCP entry off. Seeded
-with the real network's AGENTS.md and skills (read only), made-up board posts, two repos and a group; no Google,
+with the real network's AGENTS.md and skills (read only), made-up memories, two repos and a group; no Google,
 WhatsApp or Messenger account, so nothing reaches a real person.
 
 It all runs inside a network and mount namespace of its own (pasta, unshare): the internet and Ollama, but not the
@@ -108,32 +108,26 @@ class Network:
                     "messenger", "models", "shell", "imessage", "reminders", "calendar", "contacts"]:
             self.run("add", app, "--scope", "global")
         self.run("group", "create", "Family")
-        self.run("add", "board", "--scope", "Family")
-        t = now_ms()
-        # The posts name only this network's own device, so what agents find on the board matches what they can reach.
+        self.run("add", "memory", "--scope", "Family")
+        # The memories name only this network's own device, so what agents remember matches what they can reach.
         here = next(l.split("●", 1)[1].split("(this one)")[0].strip() for l in self.run("status").splitlines() if "(this one)" in l)
-        topics = [
-            {"path": "the-one-app", "description": "The One App: Andre's hub of apps and agents across his devices"},
-            {"path": "claims-review", "description": "Reviewing the insurance claims backlog for the ops team"},
-            {"path": "home-lab", "description": f"The home device, {here}: backups and the network"},
+        memories = [
+            (9, f"Andre's device: {here} (always-on Linux box)."),
+            (8, "Andre: show, don't tell. Keep text short; pictures of UI work."),
+            (6, "Never ask Andre to paste a secret into chat: send a Vault request link instead."),
+            (5, "Claims review started: 214 open claims, oldest from March."),
+            (4, f"Home lab: {here}'s disk at 71% after the container images; pruned 20 GB."),
+            (3, "The One App: started the Vault sheet on iPhone so requests open as a sheet, not a page."),
+            (2.5, "The One App: decided secrets an app keeps itself are marked apart from ones a user gave."),
+            (2, "Claims review half done: 120 reviewed, 9 flagged for a second look."),
+            (1.2, "The One App: fixed Mac sidebar sections staying open when you press a page's name."),
+            (1, f"Home lab: backups to the bucket run nightly at 02:00 from {here}."),
+            (0.6, "The One App: released v0.9.4: devices say 'Not updated yet' instead of build hashes."),
+            (0.2, f"The One App: working on WhatsApp move between devices; {here} keeps the session for now."),
         ]
-        posts = [
-            ("", f"Andre's device: {here} (always-on Linux box).", "Claude Code", 9),
-            ("", "Andre: show, don't tell. Keep text short; pictures of UI work.", "Codex", 8),
-            ("", "Never ask Andre to paste a secret into chat: send a Vault request link instead.", "Claude Code", 6),
-            ("the-one-app", "Started: Vault sheet on iPhone so requests open as a sheet, not a page.", "Claude Code", 3),
-            ("the-one-app", "Decided: secrets an app keeps itself are marked apart from ones a user gave.", "Codex", 2.5),
-            ("the-one-app", "Fixed: Mac sidebar sections stay open when you press a page's name.", "Claude Code", 1.2),
-            ("the-one-app", "Released v0.9.4: devices say 'Not updated yet' instead of build hashes.", "OpenCode", 0.6),
-            ("the-one-app", f"Working on: WhatsApp move between devices; {here} keeps the session for now.", "Codex", 0.2),
-            ("claims-review", "Started the claims review: 214 open claims, oldest from March.", "Claude Code", 5),
-            ("claims-review", "Half done: 120 reviewed, 9 flagged for a second look.", "Claude Code", 2),
-            ("home-lab", f"{here}'s disk at 71% after the container images; pruned 20 GB.", "Codex", 4),
-            ("home-lab", f"Backups to the bucket run nightly at 02:00 from {here}.", "Claude Code", 1),
-        ]
-        # As repeated flags: the CLI drops list inputs given as JSON on stdin.
-        self.run("board", "import", *[a for tp in topics for a in ("--topics", json.dumps(tp))],
-                 *[a for tp, tx, by, d in posts for a in ("--posts", json.dumps({"topic": tp, "text": tx, "by": by, "at": int(t - d * DAY)}))])
+        t = now_ms()
+        day = lambda d: time.strftime("%Y-%m-%d", time.gmtime((t - d * DAY) / 1000))
+        self.run("memory", "import", "--scope", "Family", "\n".join(f"{day(d)} {text}" for d, text in memories))
         self.run("agents", "set", "--confirm", input=json.dumps({"text": agents_md}))
         for name, files in skills.items():
             self.call("agents", "skill_set", name=name, files=files)
@@ -176,9 +170,9 @@ class Network:
     def checks(self, check, forbidden, events):
         """What the network says after a run, against what the prompt should have done."""
         out = {}
-        if "board_recall" in check:
-            r = self.run("board", "recall", check["board_recall"], check=False)
-            out["board_recall"] = "No posts match" not in r and bool(r.strip())
+        if "memory_recall" in check:
+            r = self.run("memory", "recall", "--scope", "Family", check["memory_recall"], check=False)
+            out["memory_recall"] = "No match" not in r and bool(r.strip())
         if "repo_file" in check:
             repo, path = check["repo_file"]
             r = subprocess.run([self.one, "repos", "file", repo, path], env=self.env(), capture_output=True, text=True)
@@ -192,8 +186,6 @@ class Network:
             out["vault_request"] = bool(self.run("vault", "requests").strip())
         if "no_vault_value" in check:
             out["no_vault_value"] = not re.search(r"github|token", self.run("vault", "list"), re.I)
-        if "topic_like" in check:
-            out["topic_like"] = check["topic_like"] in self.run("board", "topics")
         if "skill_like" in check:
             out["skill_like"] = check["skill_like"] in self.run("agents", "skills").lower()
         if forbidden:

@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """How fast work on The One App goes from started to done, and where the time goes, for the last day.
 
-Reads this machine's Claude Code sessions in the repo and its worktrees, the board's the-one-app topic and git, and
-writes a report to ~/one-export/iteration/<date>.md. With --post, also posts its headline to the-one-app/speed.
-Sessions on other machines and other harnesses aren't in it; the board and git are everyone's.
+Reads this machine's Claude Code sessions in the repo and its worktrees, Agent Memory and git, and writes a report
+to ~/one-export/iteration/<date>.md. Sessions on other machines and other harnesses aren't in it; Agent Memory and
+git are everyone's. Memories have a date and no time, so it reads whole days.
 
-    python3 -I tools/iteration/report.py [--days 1] [--post]
+    python3 -I tools/iteration/report.py [--days 1]
 """
 
-import argparse, datetime as dt, glob, json, os, re, statistics, subprocess, sys, time
+import argparse, datetime as dt, glob, json, os, re, subprocess, sys, time
 from collections import Counter
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SESSIONS = os.path.expanduser("~/.claude/projects/*the-one-app*/*.jsonl")
 OUT = os.path.expanduser("~/one-export/iteration")
-WHO = "iteration report (tools/iteration/report.py, personal)"
 
 
 def when(s):
@@ -45,8 +44,8 @@ def phase(name, inp):
         return "editing"
     if "computer_" in name or "agent-devices_" in name or "preview_" in name:
         return "checking it works"
-    if "board_" in name or name.startswith("mcp__t3-code__") or name in ("Agent", "SendMessage", "ToolSearch", "AskUserQuestion"):
-        return "board and delegating"
+    if "memory_" in name or name.startswith("mcp__t3-code__") or name in ("Agent", "SendMessage", "ToolSearch", "AskUserQuestion"):
+        return "memory and delegating"
     if name != "Bash":
         return "other"
     c = inp.get("command", "")
@@ -60,8 +59,8 @@ def phase(name, inp):
         return "shipping"
     if re.search(r"one (try|throwaway)|ssh mac|simctl|idb |screencapture|curl|adb |one (status|version)", c):
         return "checking it works"
-    if re.search(r"one board|t3 thread", c):
-        return "board and delegating"
+    if re.search(r"one memory|t3 thread", c):
+        return "memory and delegating"
     return "reading code" if re.match(r"(cd [^&]*&& )?(grep|rg|sed -n|cat|head|tail|ls|find|wc|git (log|show|diff|status|blame))", c) else "other"
 
 
@@ -122,7 +121,7 @@ def sessions(since):
                     text = json.dumps(c.get("content"))[:2000]
                     if c.get("is_error"):
                         errors += 1
-                    if "too long" in text and "board" in name:
+                    if "too long" in text and "memory" in name:
                         bounced += 1
                     cmd = inp.get("command", "") if name == "Bash" else ""
                     if p == "waiting" and not inp.get("run_in_background"):
@@ -136,52 +135,19 @@ def sessions(since):
                 bounced=bounced, steps=steps)
 
 
-POST = re.compile(r"#(\d+) (\d{4}-\d\d-\d\d \d\d:\d\d)Z (.*)$")
+MEMORY = re.compile(r"#(\d+) (\d{4}-\d\d-\d\d) (.*)$")
 
 
-def board(topic, since):
-    """The topic's posts since then, oldest first: (n, time, who, text)."""
-    posts, before = {}, None
-    while True:
-        text = one("board", "read", "--topic", topic, *(["--before", str(before)] if before else []))
-        page = []
-        for line in text.splitlines():
-            m = POST.match(line.strip())
-            if m:
-                who, _, said = m.group(3).partition(": ")
-                page.append((int(m.group(1)), dt.datetime.strptime(m.group(2), "%Y-%m-%d %H:%M").replace(tzinfo=dt.timezone.utc), who, said))
-        if not page:
-            break
-        for p in page:
-            posts[p[0]] = p
-        oldest = min(p[0] for p in page)
-        if min(p[1] for p in page) < since or oldest <= 1 or oldest == before:
-            break
-        before = oldest
-    return [p for _, p in sorted(posts.items()) if p[1] >= since]
-
-
-def tasks(posts, now):
-    """Started work: how long each took to its end, and those with no word since."""
-    took, open_ = [], []
-    for i, (n, t, who, said) in enumerate(posts):
-        if not re.match(r"Starting", said):
-            continue
-        tid = re.search(r"t3-[0-9a-f]{8}", who + " " + said)
-        end = next((q for q in posts[i + 1:] if re.match(r"(Done|Fixed|Stopped|Gave up|Parked)", q[3])
-                    and (f"#{n}" in q[3] or q[2] == who or (tid and tid.group(0) in q[2] + q[3]))), None)
-        if end:
-            took.append((end[1] - t).total_seconds() / 60)
-        else:
-            later = [q for q in posts[i + 1:] if q[2] == who]
-            if (now - (later[-1][1] if later else t)).total_seconds() > 3 * 3600:
-                open_.append((n, t, who, said))
-    return took, open_
+def memories(since):
+    """Agent Memory's memories from since's day on, oldest first: (id, date, text)."""
+    days = [since.date() + dt.timedelta(days=i) for i in range((dt.datetime.now(dt.timezone.utc).date() - since.date()).days + 1)]
+    out = one("memory", "recall", "^#\\d+ (" + "|".join(f"{d:%Y-%m-%d}" for d in days) + ") ")
+    return [(int(m.group(1)), m.group(2), m.group(3)) for m in map(MEMORY.match, out.splitlines()) if m]
 
 
 def broken(posts):
-    """Posts saying something that went out was broken, found after."""
-    return [p for p in posts if re.search(r"\bBug since\b|\bbroke\b|\bdidn't (build|parse|load|start) since\b|\bfailed since\b|\bsince [0-9a-f]{7}\b.*\b(fail|broke|didn't)", p[3], re.I)]
+    """Memories saying something that went out was broken, found after."""
+    return [p for p in posts if re.search(r"\bBug since\b|\bbroke\b|\bdidn't (build|parse|load|start) since\b|\bfailed since\b|\bsince [0-9a-f]{7}\b.*\b(fail|broke|didn't)", p[2], re.I)]
 
 
 def git(*args):
@@ -223,30 +189,23 @@ def hours(s):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=float, default=1)
-    ap.add_argument("--post", action="store_true")
     a = ap.parse_args()
     now = dt.datetime.now(dt.timezone.utc)
     since = now - dt.timedelta(days=a.days)
 
     s = sessions(since)
-    posts = board("the-one-app", since)
-    took, open_ = tasks(posts, now)
+    posts = memories(since)
     bad = broken(posts)
-    friction = board("the-one-app/friction", since)
+    friction = [p for p in posts if p[2].lower().startswith("friction:")]
     commits, added, removed = code(since)
     day = (now - dt.timedelta(days=3)).replace(hour=0, minute=0, second=0, microsecond=0)
     kept = survival(day)
     total = sum(s["split"].values()) or 1
 
     lines = [f"# Iteration, {since:%Y-%m-%d %H:%M} to {now:%Y-%m-%d %H:%M} UTC", ""]
-    lines += ["## Started to done", ""]
-    if took:
-        lines.append(f"{len(took)} pieces of work: median {statistics.median(took):.0f} min, p90 {pct(took, .9):.0f} min.")
-    lines.append(f"{len(open_)} started with no word for 3 hours or more (a start's end is found by its number, its t3 id, or the same who):" if open_ else "Nothing started is without word for 3 hours.")
-    lines += [f"- #{n} {t:%H:%M} {who}: {said[:160]}" for n, t, who, said in open_]
-    lines += ["", f"## Where agents' time went ({s['n']} sessions on this machine, {hours(total)})", ""]
+    lines += [f"## Where agents' time went ({s['n']} sessions on this machine, {hours(total)})", ""]
     lines += [f"- {k}: {hours(v)} ({100 * v / total:.0f}%)" for k, v in s["split"].most_common()]
-    lines.append(f"- steps: {s['steps']}, {s['steps'] // max(s['n'], 1)} a session; {s['errors']} of {s['calls']} tool calls failed ({100 * s['errors'] / max(s['calls'], 1):.0f}%); {s['bounced']} board posts bounced as too long")
+    lines.append(f"- steps: {s['steps']}, {s['steps'] // max(s['n'], 1)} a session; {s['errors']} of {s['calls']} tool calls failed ({100 * s['errors'] / max(s['calls'], 1):.0f}%); {s['bounced']} memories bounced as too long")
     lines += ["", "Waiting, for:", ""] + [f"- {k}: {hours(v)}" for k, v in s["waits"].most_common()]
     t = s["tests"]
     lines += ["", "## Builds", "", f"- cargo test: {len(t)} runs, median {pct(t, .5) or 0:.0f}s, p90 {pct(t, .9) or 0:.0f}s",
@@ -255,22 +214,14 @@ def main():
     lines += ["", "## Code", "", f"- {commits} commits, +{added} −{removed}"]
     if kept:
         lines.append(f"- of {day:%b %d}'s {kept[1]} lines, {kept[0]} ({100 * kept[0] / kept[1]:.0f}%) are still in main")
-    lines += ["", f"## Broken, found after it went out ({len(bad)})", ""] + [f"- #{n} {who}: {said[:200]}" for n, _, who, said in bad]
-    lines += ["", f"## Friction ({len(friction)})", ""] + [f"- {who}: {said}" for _, _, who, said in friction]
+    lines += ["", f"## Broken, found after it went out ({len(bad)})", ""] + [f"- #{n} {text[:200]}" for n, _, text in bad]
+    lines += ["", f"## Friction ({len(friction)})", ""] + [f"- #{n} {text}" for n, _, text in friction]
     report = "\n".join(lines) + "\n"
 
     os.makedirs(OUT, exist_ok=True)
     path = os.path.join(OUT, f"{now:%Y-%m-%d}.md")
     open(path, "w").write(report)
     print(report)
-    if a.post:
-        top = ", ".join(f"{k} {100 * v / total:.0f}%" for k, v in s["split"].most_common(3))
-        head = (f"Last {a.days:g}d: {len(took)} done, median {statistics.median(took) if took else 0:.0f} min (p90 {pct(took, .9) or 0:.0f}); "
-                f"{len(open_)} starts silent 3h+; {len(bad)} broken found later; {len(friction)} friction. Time: {top}. "
-                f"cargo test median {pct(t, .5) or 0:.0f}s. {path}")
-        while len(head.encode()) > 280:
-            head = head[: -(len(head.encode()) - 278)] + "…"
-        one("board", "post", "--topic", "the-one-app/speed", "--who", WHO, head)
 
 
 if __name__ == "__main__":
