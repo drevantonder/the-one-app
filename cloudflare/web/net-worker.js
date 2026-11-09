@@ -27,9 +27,24 @@ const UNTAKEN = 10_000;
 /// is made), for its next ask: iroh's WebSocket is this one, and what came before it listened is kept for it.
 let opened = null;
 const Socket = self.WebSocket;
+
+/// The relay's sockets that are open, and each tab, told as the last goes or the first comes: until the connection's own
+/// timeout, half a minute on, this is the only sign the way to every node has gone.
+const relays = new Set();
+const tabs = new Set();
+let relayed = false;
+function relaySocket(url, protocols) {
+  const ws = new Socket(url, protocols);
+  const told = () => tabs.forEach((post) => post({ relay: relays.size > 0 }));
+  ws.addEventListener("open", () => ((relayed = true), relays.add(ws), relays.size === 1 && told()));
+  ws.addEventListener("close", () => relays.delete(ws) && !relays.size && told());
+  return ws;
+}
+
 self.WebSocket = function (url, protocols) {
   const socket = opened;
-  if (!socket || new URL(url).pathname !== "/relay") return new Socket(url, protocols);
+  if (new URL(url).pathname !== "/relay") return new Socket(url, protocols);
+  if (!socket) return relaySocket(url, protocols);
   opened = null;
   clearTimeout(socket.untaken);
   return socket.face;
@@ -39,7 +54,7 @@ self.WebSocket.prototype = Socket.prototype;
 
 function early(address, token) {
   opened?.face.close();
-  const ws = new Socket(`${address.replace(/^http/, "ws")}/relay?token=${token}`, "iroh-relay-v2");
+  const ws = relaySocket(`${address.replace(/^http/, "ws")}/relay?token=${token}`, "iroh-relay-v2");
   ws.binaryType = "arraybuffer";
   const on = {};
   const queued = [];
@@ -338,6 +353,8 @@ export function server(version, givenHost) {
 
   function connect(post) {
     const reading = new Map();
+    tabs.add(post);
+    if (relayed) post({ relay: relays.size > 0 });
     return async (m) => {
       const { id } = m;
       try {

@@ -2,6 +2,7 @@
 // every screen showing its kept page, and the window's state, each with how it's asked again (`retry`) and when what
 // it shows was kept. Asked again by itself, and at Try Again; the banner goes once all have answered. The window draws
 // it again as it changes (`whenChanged`).
+import { net } from "./net.js";
 import { retryWait } from "./request.js";
 import { h, ui } from "./view.js";
 
@@ -12,6 +13,7 @@ export const late = () => (navigator.onLine ? 12_000 : 1000);
 const changes = [];
 const redraw = () => changes.forEach((fn) => fn());
 addEventListener("online", () => offline.waiting.size && offline.now());
+net.whenRelay((up) => (up ? offline.done("relay") : offline.add("relay", () => net.still())));
 
 export const offline = {
   waiting: new Map(),

@@ -21,7 +21,11 @@ const waiting = new Map();
 let n = 0;
 const tab = crypto.getRandomValues(new Uint32Array(2)).join("-");
 
+/// What's told as the way to every node goes and comes back (`net.whenRelay`).
+const relayChanges = [];
+
 function received(m) {
+  if (m.relay !== undefined) return relayChanges.forEach((fn) => fn(m.relay));
   const w = waiting.get(m.id);
   if (!w) return;
   if (m.error !== undefined) {
@@ -261,6 +265,9 @@ export const net = {
   reconnect() {
     if (net.has) send({ op: "reconnect" });
   },
+
+  /// `fn` is told whether the relay can be reached, each time that changes once it has been.
+  whenRelay: (fn) => relayChanges.push(fn),
 };
 
 started.net = net;
