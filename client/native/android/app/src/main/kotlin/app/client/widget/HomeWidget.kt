@@ -278,7 +278,7 @@ private fun Broken(colors: Colors, title: String, text: String, tap: Action) {
 @Composable
 private fun Waiting(colors: Colors, text: String, tap: Action) {
     Column(GlanceModifier.fillMaxSize().clickable(tap), horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Alignment.CenterVertically) {
-        Image(ImageProvider(app.client.R.drawable.logo), null, GlanceModifier.size(44.dp).cornerRadius(10.dp))
+        Image(ImageProvider(app.client.R.drawable.logo), null, GlanceModifier.size(44.dp))
         Spacer(GlanceModifier.height(8.dp))
         Text(text, style = TextStyle(color = colors.of { it.secondary }, fontSize = 12.sp, textAlign = TextAlign.Center))
     }

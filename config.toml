@@ -31,7 +31,7 @@ join_domain = ""
 # wherever its first request came from.
 relay_location = "oc"
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),
-# and the logo the apps show inside themselves.
+# and the logo the apps show inside themselves: the mark by itself, transparent, with no tile.
 icon = "icons/AppIcon.png"
 menubar = "icons/MenuBarIcon.png"
 logo = "icons/Logo.png"
