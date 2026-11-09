@@ -83,6 +83,7 @@ pub(super) fn deploy_cloudflare(build: Option<&str>) -> Result<()> {
         let away = if away.is_empty() { String::new() } else { format!(" ({} offline: deploy again when it's back)", away.join(", ")) };
         println!("  no device deployed to Cloudflare: none of the online ones has the settings{away}");
     }
-    ensure!(deployed && !failed, "it isn't deployed to Cloudflare");
+    // Another device deploying after one failed is deployed: what one couldn't do is above.
+    ensure!(deployed, "it isn't deployed to Cloudflare");
     Ok(())
 }

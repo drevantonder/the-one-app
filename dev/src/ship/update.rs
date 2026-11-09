@@ -76,11 +76,7 @@ impl At {
 
     /// As builds are named: what a device says it runs, and its folder is called.
     pub(super) fn build_name(&self) -> String {
-        let code = &self.commit[..12];
-        match &self.config {
-            Some(config) => format!("{code}-{}", &config[..8.min(config.len())]),
-            None => code.to_string(),
-        }
+        build_name_of(&self.marked())
     }
 
     pub(super) fn config_commit(&self) -> &str {
@@ -95,6 +91,13 @@ impl At {
     pub(super) fn build(&self) -> Option<PathBuf> {
         Some(cache().join("builds").join(self.build_name())).filter(|dir| dir.join("config").is_file())
     }
+}
+
+/// The build a marker holds (`At::marked`), as builds are named.
+fn build_name_of(marked: &str) -> String {
+    let (code, config) = marked.split_once(' ').unwrap_or((marked, ""));
+    let code = &code[..12.min(code.len())];
+    if config.is_empty() { code.to_string() } else { format!("{code}-{}", &config[..8.min(config.len())]) }
 }
 
 /// What `part` has to send since it was last sent, as of `at`.
@@ -140,6 +143,11 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<()> {
     match part {
         Some(Part::Workers) => attempt("workers", front(&at, true, false)),
         Some(Part::Web) => attempt("web", front(&at, false, true)),
+        Some(Part::Node) => {
+            attempt("node", send(Part::Node, &at, release));
+            // What went out with the node is only the node; its Workers and web client follow it, as a plain update has them.
+            attempt("workers and web", front(&at, true, true));
+        }
         Some(part) => attempt(part.name(), send(part, &at, release)),
         None => {
             for part in ORDER.into_iter().filter(|p| !matches!(p, Part::Workers | Part::Web | Part::Dev)) {
@@ -150,7 +158,7 @@ pub(super) fn update(part: Option<&str>, release: bool) -> Result<()> {
             attempt("dev", send(Part::Dev, &at, release));
         }
     }
-    ensure!(failed.is_empty(), "{} didn't go out: run {CLI}-dev update again to retry what's left", failed.join(", "));
+    ensure!(failed.is_empty(), "{} didn't go out: {CLI}-dev update again sends what's still due", failed.join(", "));
     println!("Done in {}s.", started.elapsed().as_secs());
     Ok(())
 }
@@ -188,8 +196,8 @@ fn send(part: Part, at: &At, release: bool) -> Result<()> {
     Ok(())
 }
 
-/// Builds the node and everything in it, and sends all of it: the node, the Cloudflare node and the Workers (their home
-/// device deploys what it was built with, once it runs this build), and the web client.
+/// Builds the node and everything in it, publishes it and waits for this device to run it; the built-in apps are then
+/// deployed from its build. It is sent once all that is done, so a retry does what didn't happen.
 fn send_node(at: &At) -> Result<()> {
     let key = release_key()?;
     let folder = match at.build() {
@@ -199,20 +207,16 @@ fn send_node(at: &At) -> Result<()> {
     let binary = folder.join("one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
     println!("{}", build::published_said(&build::publish(&crate::node(), &binary, &key, &version, None)?, None));
-    sent(Part::Node, at)?;
     let here = devices().into_iter().find(|d| d["here"] == true).and_then(|d| d["name"].as_str().map(str::to_string)).context("this device isn't listed")?;
     wait_until(&version.commit, &[here], Duration::from_secs(600))?;
     deploy_built_in()?;
-    deploy_cloudflare(Some(&version.commit))?;
-    sent(Part::Workers, at)?;
-    publish_web(&folder, &key)?;
-    sent(Part::Web, at)?;
     Ok(())
 }
 
 /// Sends the Workers and the web client, each if asked and anything of it changed, with one deploy from their home device.
-/// Without Rust in the change, this program puts them together from the checkout, with no build, and the home device deploys
-/// them from the record whatever it runs. With Rust in it, only the build for it can, and only once that device runs it.
+/// If the node went out at this very commit, they go with its build, which holds both as they are. Otherwise this program
+/// puts them together from the checkout, with no build, and the home device deploys them from the record; Rust in the change
+/// is then in the node last sent, which that device has to run first. Rust the node hasn't gone out with waits for it.
 fn front(at: &At, workers: bool, web: bool) -> Result<()> {
     let started = Instant::now();
     let (w, b) = (workers && due(Part::Workers, at).workers, web && due(Part::Web, at).web);
@@ -221,25 +225,30 @@ fn front(at: &At, workers: bool, web: bool) -> Result<()> {
         return Ok(());
     }
     let rust = (w && due(Part::Workers, at).node) || (b && due(Part::Web, at).node);
-    let key = release_key()?;
     if rust {
         ensure!(!due(Part::Node, at).node, "there's Rust in this change, and the node hasn't gone out with it: {CLI}-dev update node sends this with it");
-        let folder = at.build().with_context(|| format!("there's Rust in this change, so it needs its build: {CLI}-dev update node sends this with it"))?;
-        let version = Version::of(&folder.join("one")).context("ask the build what it is")?;
-        deploy_cloudflare(Some(&version.commit))?;
-        if b {
-            publish_web(&folder, &key)?;
+    }
+    let key = release_key()?;
+    let node = Part::Node.last_sent();
+    match at.build().filter(|_| node.as_deref() == Some(at.marked().as_str())) {
+        Some(folder) => {
+            let version = Version::of(&folder.join("one")).context("ask the build what it is")?;
+            deploy_cloudflare(Some(&version.commit))?;
+            if b {
+                publish_web(&folder, &key)?;
+            }
         }
-    } else {
-        same_rust(at)?;
-        one::ui_folder::read_from(&at.src);
-        if w {
-            publish_workers(at, &key)?;
+        None => {
+            same_rust(at)?;
+            one::ui_folder::read_from(&at.src);
+            if w {
+                publish_workers(at, &key)?;
+            }
+            if b {
+                publish_assembled_web(at, &key)?;
+            }
+            deploy_cloudflare(rust.then(|| build_name_of(node.as_deref().unwrap_or(""))).as_deref())?;
         }
-        if b {
-            publish_assembled_web(at, &key)?;
-        }
-        deploy_cloudflare(None)?;
     }
     for (part, wanted) in [(Part::Workers, w), (Part::Web, b)] {
         if wanted {
@@ -256,7 +265,8 @@ fn same_rust(at: &At) -> Result<()> {
     let (code, built_config) = one::config::BUILD.split('+').next().unwrap_or("").split_once('-').map_or((one::config::BUILD.split('+').next().unwrap_or(""), None), |(c, d)| (c, Some(d)));
     let stale = || format!("{CLI}-dev is from {}, and what's built into it has changed since: {CLI}-dev update dev", one::config::BUILD);
     let files = git(&at.src, &["diff", "--name-only", code, &at.commit]).with_context(stale)?;
-    ensure!(!Parts::of(files.lines()).node && built_config.is_none_or(|c| at.config.as_deref().is_some_and(|d| d.starts_with(c))), "{}", stale());
+    // What `update dev` sends: so whatever makes this program stale, it has something to send.
+    ensure!(!Parts::of(files.lines()).dev && built_config.is_none_or(|c| at.config.as_deref().is_some_and(|d| d.starts_with(c))), "{}", stale());
     Ok(())
 }
 
