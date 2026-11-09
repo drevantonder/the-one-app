@@ -336,7 +336,7 @@ fn canonical(db: &Connection) -> Result<()> {
     db.execute("INSERT INTO network SELECT 0, NULL, '', 0, NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM network)", [])?;
     let signed: Vec<(String, String)> = db.prepare("SELECT key, sign_in FROM devices WHERE sign_in IS NOT NULL")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
     for (key, sign_in) in signed {
-        let known = serde_json::from_str::<crate::sign_in_proof::Account>(&sign_in).ok().map(|a| json!(a).to_string());
+        let known = serde_json::from_str::<crate::onboarding::sign_in_proof::Account>(&sign_in).ok().map(|a| json!(a).to_string());
         if known.as_deref() != Some(sign_in.as_str()) {
             db.execute("UPDATE devices SET sign_in = ? WHERE key = ?", params![known, key])?;
         }

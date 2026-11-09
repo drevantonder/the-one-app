@@ -27,6 +27,9 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   a computer can have both; a phone, a browser and a remote MCP client's device have only a client. A browser's
   sign-in is its device: nothing ties it to the computer it's on, so it's never part of that computer's. The Cloudflare
   node is not a device.
+- **Onboarding**: what someone sees on a device before they're in the network, first time or coming back: the first
+  screen, proving who they are, waiting for a device of theirs to approve it, and starting. Our word for the journey and
+  for its folder (`src/onboarding/`); users see Sign In, Join and Waiting for Approval.
 - **Client**: where a user or their agent uses the network, and the only place keys are opened: the native apps (Mac,
   iPhone, Android, Windows), the web client in a browser, the CLI and the local MCP server on a computer, and the remote
   MCP server. Each has its own key, never shared.

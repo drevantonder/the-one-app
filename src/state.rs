@@ -326,7 +326,7 @@ pub struct Client {
     pub me: bool,
     /// What it signed in with, for its own user only: their Sign-ins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sign_in: Option<crate::sign_in_proof::Account>,
+    pub sign_in: Option<crate::onboarding::sign_in_proof::Account>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

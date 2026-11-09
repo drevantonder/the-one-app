@@ -143,7 +143,7 @@ fn invited_said(input: &Map<String, Value>, r: Value) -> Result<Value> {
 }
 
 pub fn invited(name: &str, r: &Value) -> String {
-    let days = crate::sign_in_proof::INVITE_DAYS;
+    let days = crate::onboarding::sign_in_proof::INVITE_DAYS;
     let how = if crate::config::SIGN_IN == crate::config::SignIn::Google { "they sign in with Google and join" } else { "they join" };
     format!("Send {name} this link. It works once, for {days} days: opening it, {how}. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
 }

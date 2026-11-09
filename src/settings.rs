@@ -785,7 +785,7 @@ async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: 
     let secret = B64U.encode(&rand::random::<[u8; 32]>());
     let new = user.is_none();
     let user = user.map(str::to_string).unwrap_or_else(scopes::new_id);
-    let until = m.now() + crate::sign_in_proof::INVITE_DAYS * DAY;
+    let until = m.now() + crate::onboarding::sign_in_proof::INVITE_DAYS * DAY;
     let mut fields = json!({ "id": hex(&keys::sha256(secret.as_bytes())), "name": name, "user": user, "until": until });
     if let Some(email) = email {
         fields["email"] = json!(email);
@@ -882,18 +882,18 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
 /// What `r`'s sign-in shows it signed in with, checked here (`sign_in_proof`): against `accounts`, its user's as
 /// their devices record them, for one let in by it, or with none, for one approved by its code. None if it shows
 /// nothing that checks out.
-async fn signed_in_with(m: &impl Me, r: &Asked, accounts: Option<&[crate::sign_in_proof::Account]>) -> Option<crate::sign_in_proof::Account> {
-    let proof: crate::sign_in_proof::Proof = serde_json::from_value(r.said["sign_in"].clone()).ok()?;
+async fn signed_in_with(m: &impl Me, r: &Asked, accounts: Option<&[crate::onboarding::sign_in_proof::Account]>) -> Option<crate::onboarding::sign_in_proof::Account> {
+    let proof: crate::onboarding::sign_in_proof::Proof = serde_json::from_value(r.said["sign_in"].clone()).ok()?;
     let address = m.address()?;
-    let (root, clients) = m.who(|who| Ok((who.root()?, who.setting(crate::sign_in_proof::CLIENTS)?))).ok()?;
-    let network = crate::sign_in_proof::Network::new(&address, *root?.as_bytes(), clients.as_deref());
-    let jwks = match proof.issuer().and_then(|i| crate::sign_in_proof::keys_at(&i, &address)) {
+    let (root, clients) = m.who(|who| Ok((who.root()?, who.setting(crate::onboarding::sign_in_proof::CLIENTS)?))).ok()?;
+    let network = crate::onboarding::sign_in_proof::Network::new(&address, *root?.as_bytes(), clients.as_deref());
+    let jwks = match proof.issuer().and_then(|i| crate::onboarding::sign_in_proof::keys_at(&i, &address)) {
         Some(at) => Some(m.issuer_keys(&at).await?),
         None => None,
     };
     match accounts {
-        Some(theirs) => crate::sign_in_proof::vouches(&proof, &r.endpoint, &network, jwks.as_ref(), theirs, m.now()).ok(),
-        None => crate::sign_in_proof::check(&proof, &r.endpoint, &network, jwks.as_ref(), m.now()).ok(),
+        Some(theirs) => crate::onboarding::sign_in_proof::vouches(&proof, &r.endpoint, &network, jwks.as_ref(), theirs, m.now()).ok(),
+        None => crate::onboarding::sign_in_proof::check(&proof, &r.endpoint, &network, jwks.as_ref(), m.now()).ok(),
     }
 }
 

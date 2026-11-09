@@ -189,8 +189,13 @@ mod tests {
         let mut shared = Vec::new();
         walk(&home, &home, &mut shared);
         files.extend(shared.into_iter().map(|f| format!("../home/{f}")));
-        // And the auth pages, which auth.json is drawn from.
-        files.push("../../../cloudflare/auth/pages.tsx".into());
+        // And onboarding's screens, which auth.json is drawn from and Welcome is @one/ui's.
+        for entry in std::fs::read_dir(root.join("../../onboarding")).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".tsx") {
+                files.push(format!("../../onboarding/{name}"));
+            }
+        }
         files.sort();
         let mut hash = sha2::Sha256::new();
         for file in &files {

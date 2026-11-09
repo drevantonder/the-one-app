@@ -58,7 +58,7 @@ pub mod backups;
 pub mod bucket;
 pub mod call;
 pub mod database;
-pub mod sign_in_proof;
+pub mod onboarding;
 #[cfg(feature = "node")]
 pub mod skills;
 pub mod files;

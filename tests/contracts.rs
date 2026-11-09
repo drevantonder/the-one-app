@@ -95,8 +95,8 @@ fn a_device_signs_and_proves_as_the_nodes_read_it() {
     assert!(keys::check_request("one/urls", &out["signed"], 1_000_000).is_ok(), "Rust checks one JavaScript signed");
     assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
     let asking = keys::Endpoint { key: device, seal: device_seal };
-    assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
-    assert_eq!(b(&out["challenge"]), one::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
+    assert_eq!(out["nonce"], one::onboarding::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its network");
+    assert_eq!(b(&out["challenge"]), one::onboarding::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
     let (passkey, seal_secret) = keys::passkey_keys(&prf);
     assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
     assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
@@ -365,14 +365,14 @@ fn the_service_worker_opens_notes_as_rust_does() {
     assert!(push::open_note(&secret, &keys::seal_to(&public, &serde_json::to_vec(&forged).unwrap()).unwrap()).is_err(), "Rust refuses the same");
 }
 
-/// Auth's pages drawn by hand (`cloudflare/auth/draw.js`) call the network what this build does (`config::YOURS`, from
+/// Auth's pages drawn by hand (`src/onboarding/draw.js`) call the network what this build does (`config::YOURS`, from
 /// build.rs), from the same config.toml.
 #[test]
 fn auth_pages_drawn_by_hand_name_the_network_as_the_build_does() {
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let dir = crate::temp("drawn");
     let out = std::process::Command::new(one::build::bun().unwrap())
-        .arg(root.join("cloudflare/auth/draw.js"))
+        .arg(root.join("src/onboarding/draw.js"))
         .arg(root.join(option_env!("CONFIG").unwrap_or("config.toml")))
         .arg(&dir)
         .output()
@@ -626,7 +626,7 @@ fn what_the_screens_read_of_the_state_is_what_the_node_says() {
                 },
             }],
             devices_at: 1,
-            clients: vec![Client { key: "k".into(), seal: "s".into(), name: "n".into(), user: "u".into(), roles: [Kind::Client].into(), platform: None, passkey: Some("p".into()), device: Some("d".into()), since: 1, place: Some("p".into()), me: true, sign_in: Some(one::sign_in_proof::Account::Passkey { credential: "c".into(), public_key: "k".into() }) }],
+            clients: vec![Client { key: "k".into(), seal: "s".into(), name: "n".into(), user: "u".into(), roles: [Kind::Client].into(), platform: None, passkey: Some("p".into()), device: Some("d".into()), since: 1, place: Some("p".into()), me: true, sign_in: Some(one::onboarding::sign_in_proof::Account::Passkey { credential: "c".into(), public_key: "k".into() }) }],
             app_schedules: vec![AppSchedule { endpoint: "e".into(), scope: "s".into(), app: "a".into(), until: 1, by: "u".into(), keys: Default::default() }],
             steps: 1,
             settings: [("address".to_string(), "a".to_string())].into(),

@@ -12,7 +12,7 @@ function Centered({ className, children }: { className?: string; children: React
   return <div className={cn("flex h-full flex-col items-center justify-center gap-3 overflow-auto p-10 text-center", className)}>{children}</div>
 }
 
-/// The first screen, and every page of auth's (cloudflare/auth/pages.tsx, drawn to HTML when this kit is built): its logo
+/// The first screen, and every page of auth's (pages.tsx, drawn to HTML when this kit is built): its logo
 /// and `title`; `text`, a grey line under it; `field`, what to type first (a native app's address, a sign-in code), with
 /// a line under it, which the button runs with; `children`, what the page lists; `callout`, what to know before going on;
 /// `action`, the one thing to do, if any, as a button that runs or a link, named `invite` instead when what's typed is an invite

@@ -25,7 +25,7 @@ default = ["node"]
 node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "sign-in-proof", "web-bundle"]
 # `web-bundle`, the native apps' signed web client (src/web/bundle.rs): nodes sign them, apps open them.
 web-bundle = ["dep:ssh-key", "dep:flate2"]
-# `sign-in-proof`, checking a new device's sign-in (src/sign_in_proof.rs), which nodes and every client have; the
+# `sign-in-proof`, checking a new device's sign-in (src/onboarding/sign_in_proof.rs), which nodes and every client have; the
 # Cloudflare node approves no one, so it goes without.
 sign-in-proof = ["dep:ring"]
 
@@ -51,7 +51,7 @@ serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 serde_json = "1"
 # The push Worker's VAPID key is made with ring (src/cloudflare/workers.rs), and devices check a provider's RS256 ID tokens and
-# a passkey's ES256 or RS256 assertion with it (src/sign_in_proof.rs): rustls and iroh build it already, browsers' client too.
+# a passkey's ES256 or RS256 assertion with it (src/onboarding/sign_in_proof.rs): rustls and iroh build it already, browsers' client too.
 ring = { version = "0.17", optional = true }
 tracing = "0.1"
 

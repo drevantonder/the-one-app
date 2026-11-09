@@ -124,7 +124,7 @@ fn create(dir: &Path) -> Result<String> {
     node.post("/v1/settings", json!({ "name": "address", "value": &settings.address }))?;
     // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its users sign in with.
     let clients = format!("{}/api/auth one-throwaway", settings.address);
-    node.post("/v1/settings", json!({ "name": one::sign_in_proof::CLIENTS, "value": clients }))?;
+    node.post("/v1/settings", json!({ "name": one::onboarding::sign_in_proof::CLIENTS, "value": clients }))?;
     // Its data moves to the throwaway bucket, which its node reaches only through its URL signer from then on.
     let moved = node.post("/v1/storage", json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" }))?;
     anyhow::ensure!(moved["kept"] == true, "the throwaway network's node couldn't reach its bucket through the URL signer: {moved}");

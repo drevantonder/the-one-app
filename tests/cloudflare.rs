@@ -7,7 +7,7 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use one::cloudflare::{self, Served};
 use serde_json::{Value, json};
 
-/// The Workers' files as they are in this checkout, tests and all, with the screens' design kit where build.rs puts it.
+/// The Workers' files as they are in this checkout, tests and all, with the screens' design kit and onboarding's pages where build.rs puts them.
 fn files() -> Vec<(String, Vec<u8>)> {
     fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
         for entry in std::fs::read_dir(dir).unwrap().flatten() {
@@ -34,6 +34,7 @@ fn files() -> Vec<(String, Vec<u8>)> {
         None => Some((path, bytes)),
     });
     out.extend(kit.map(|(path, bytes)| (format!("web/screen/{path}"), bytes)));
+    out.push(("onboarding/pages.js".into(), std::fs::read(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/onboarding/pages.js"))).unwrap()));
     out
 }
 
@@ -398,12 +399,12 @@ fn an_admin_signs_in_only_with_a_passkey() {
 }
 
 /// A sign-in for a device names it, and auth passes what it showed on with that device's request to join, unchanged,
-/// for the user's devices to check themselves (src/sign_in_proof.rs): a passkey's assertion signs a challenge naming
+/// for the user's devices to check themselves (src/onboarding/sign_in_proof.rs): a passkey's assertion signs a challenge naming
 /// the device and when, which checks; a sign-in for no device, or one for another device, lets nothing in; and with
 /// Google, the ID token asked for names the device.
 #[test]
 fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
-    use one::sign_in_proof::{self, Account, Proof};
+    use one::onboarding::sign_in_proof::{self, Account, Proof};
     let (admin, admin_hex) = endpoint();
     let k = Workers::for_devices(vec![admin_hex.clone()]);
     let (secret, andre) = invited(&k, &admin, "Andre", None);
@@ -466,7 +467,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
 /// with when the user taps Approve but lets nothing in by itself.
 #[test]
 fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
-    use one::sign_in_proof::{self, Proof};
+    use one::onboarding::sign_in_proof::{self, Proof};
     use sha2::Digest;
     let (admin, admin_hex) = endpoint();
     let k = Workers::for_devices(vec![admin_hex]);

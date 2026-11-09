@@ -127,6 +127,10 @@ fn main() {
         None => Some((rel, abs)),
     });
     files.extend(kit.map(|(rel, abs)| (format!("web/screen/{rel}"), abs)));
+    // Onboarding's auth pages, which the auth Worker imports as ../onboarding/pages.js.
+    let pages = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/onboarding/pages.js");
+    println!("cargo:rerun-if-changed={}", pages.display());
+    files.push(("onboarding/pages.js".into(), pages.to_string_lossy().into()));
     // And the formats devices hold keys in, which the web client imports as ../shared/crypto.js.
     files.push(("web/shared/crypto.js".into(), cloudflare.join("shared/crypto.js").to_string_lossy().into()));
     // The custom build's logo, which the web client shows where the apps show it.

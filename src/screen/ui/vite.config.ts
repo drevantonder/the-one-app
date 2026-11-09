@@ -9,7 +9,8 @@ export const shared = ["react", "react/jsx-runtime", "react/compiler-runtime", "
 
 export default defineConfig({
   plugins: [react({ compiler: true }), tailwindcss()],
-  resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
+  // Welcome (../../onboarding) is outside this folder: React is this folder's.
+  resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") }, dedupe: ["react", "react-dom"] },
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
   build: {
     outDir: "dist",

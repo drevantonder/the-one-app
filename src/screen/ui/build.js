@@ -31,7 +31,7 @@ for (const name of shared) {
 const map = JSON.stringify({ imports })
 writeFileSync(dist("importmap.json"), map + "\n")
 
-// The auth Worker's pages (../../../cloudflare/auth/pages.tsx): each drawn from @one/ui's components to HTML here, as
+// The auth Worker's pages (../../onboarding/pages.tsx): each drawn from @one/ui's components to HTML here, as
 // dist/auth.json, so no React reaches a browser before it's signed in; and this theme with the utilities their class
 // names use, as one stylesheet (src/auth.css, written as dist/auth.css). The Worker imports both.
 const scratch = path.join(here, `run-${process.pid}`)
@@ -39,7 +39,7 @@ mkdirSync(scratch, { recursive: true })
 try {
   const draw = path.join(scratch, "draw.jsx")
   writeFileSync(draw, `import { renderToStaticMarkup } from "react-dom/server"
-import { pages, parts } from ${JSON.stringify(path.join(here, "..", "..", "..", "cloudflare", "auth", "pages.tsx"))}
+import { pages, parts } from ${JSON.stringify(path.join(here, "..", "..", "onboarding", "pages.tsx"))}
 // React puts a preload of each image ahead of what it draws, for a page it streams; these are whole, the image in them.
 const draw = (all) => Object.fromEntries(Object.entries(all).map(([name, page]) => [name, renderToStaticMarkup(page).replace(/<link rel="preload" as="image"[^>]*>/g, "")]))
 export default { pages: draw(pages), parts: draw(parts) }
@@ -50,7 +50,7 @@ export default { pages: draw(pages), parts: draw(parts) }
     publicDir: false,
     logLevel: "warn",
     plugins: [react()],
-    // pages.tsx is outside this folder: React is this folder's.
+    // pages.tsx and Welcome (../../onboarding) are outside this folder: React is this folder's.
     resolve: { alias: { "@": path.join(here, "src") }, dedupe: ["react", "react-dom"] },
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
     ssr: { noExternal: true },
@@ -87,7 +87,7 @@ await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name=
 await buildScreens(home, path.join(home, "dist"), home, `<meta name="@one/ui">`, shared)
 
 // What the built files were made from: every source file, by path and content, in order: @one/ui's, the Settings
-// screens' and what they share, everything in the pages' folder but its dist/, and the auth pages.
+// screens' and what they share, everything in the pages' folder but its dist/, and onboarding's screens.
 const sources = readdirSync(settings).filter((f) => /\.([jt]sx|js)$/.test(f)).map((f) => `../settings/${f}`)
 const walk = (dir, root = here, prefix = "") => {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -98,8 +98,9 @@ const walk = (dir, root = here, prefix = "") => {
 }
 walk(here)
 walk(home, home, "../home/")
-// The auth pages, which auth.json is drawn from.
-sources.push("../../../cloudflare/auth/pages.tsx")
+// Onboarding's screens, which auth.json is drawn from and Welcome is @one/ui's.
+const onboarding = path.join(here, "..", "..", "onboarding")
+sources.push(...readdirSync(onboarding).filter((f) => f.endsWith(".tsx")).map((f) => `../../onboarding/${f}`))
 const hash = createHash("sha256")
 for (const file of sources.sort()) hash.update(file).update("\0").update(readFileSync(path.join(here, file))).update("\0")
 writeFileSync(dist("sources.txt"), hash.digest("hex") + "\n")

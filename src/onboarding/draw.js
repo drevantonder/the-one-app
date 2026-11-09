@@ -1,7 +1,7 @@
 // Every one of auth's pages (pages.tsx's), as the auth Worker serves them (pages.js) but with no script, in a custom
 // build's look (its config.toml's name and logo), each an HTML file that opens as it is in a browser, to look at:
 //
-//   bun cloudflare/auth/draw.js [config.toml] [folder]
+//   bun src/onboarding/draw.js [config.toml] [folder]
 //
 // This repo's config.toml and a folder in /tmp unless given. It draws what @one/ui's build last drew: after changing
 // pages.tsx or @one/ui, `bun run build` in src/screen/ui first.

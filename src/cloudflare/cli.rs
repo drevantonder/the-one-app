@@ -143,11 +143,11 @@ pub fn commands() -> Command {
                     // only for it (`sign_in_proof::CLIENTS`), whatever auth says.
                     if let Some((id, _)) = &settings.google {
                         let clients = format!("https://accounts.google.com {id}");
-                        let had = node.state().ok().and_then(|s| s.network?.settings.get(crate::sign_in_proof::CLIENTS).cloned());
+                        let had = node.state().ok().and_then(|s| s.network?.settings.get(crate::onboarding::sign_in_proof::CLIENTS).cloned());
                         if had.as_deref() != Some(clients.as_str())
-                            && let Err(err) = node.post("/v1/settings", json!({ "name": crate::sign_in_proof::CLIENTS, "value": clients }))
+                            && let Err(err) = node.post("/v1/settings", json!({ "name": crate::onboarding::sign_in_proof::CLIENTS, "value": clients }))
                         {
-                            eprintln!("A new device's Google sign-in won't let it in by itself until an admin's device runs {CLI} settings {} {clients}: {err:#}", crate::sign_in_proof::CLIENTS);
+                            eprintln!("A new device's Google sign-in won't let it in by itself until an admin's device runs {CLI} settings {} {clients}: {err:#}", crate::onboarding::sign_in_proof::CLIENTS);
                         }
                     }
                     print!("Deployed.\n{}", cloudflare_said(&settings));

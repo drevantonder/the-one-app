@@ -5,7 +5,7 @@ import { Problem } from "@/components/problem"
 import { List, ListRow } from "@/components/layout"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Welcome } from "@/components/welcome"
+import { Welcome } from "./welcome"
 
 const logo = "{{logo}}"
 const signIn = "Sign in to {{name}}"

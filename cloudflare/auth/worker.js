@@ -21,7 +21,7 @@
 // its device's oned lists it.
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
-// hex), so a device of the user's can check it themselves (src/sign_in_proof.rs) and let the device in with no one
+// hex), so a device of the user's can check it themselves (src/onboarding/sign_in_proof.rs) and let the device in with no one
 // tapping: with Google, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
 // and keeps the token Google gave; with a passkey, the prompt's challenge names it, the network and when
 // (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
@@ -66,7 +66,7 @@ import { b64u, behind, checkRequest, hex, isKey, joinChallenge, joinCode, joinNo
 import { json } from "../shared/http.js";
 import { AUTH_DOMAIN, HEADER, updateRefusal } from "../shared/protocol.js";
 import { bearer, verify } from "../shared/token.js";
-import { pages } from "./pages.js";
+import { pages } from "../onboarding/pages.js";
 import css from "../web/screen/ui/auth.css" with { type: "text" };
 import drawn from "../web/screen/ui/auth.json";
 import { DurableObjectDialect } from "./sql.js";

@@ -37,6 +37,7 @@ mod databases;
 pub mod devices;
 mod sync;
 mod net;
+#[path = "onboarding/pairing.rs"]
 mod pairing;
 pub(crate) mod push;
 pub(crate) mod releases;

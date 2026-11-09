@@ -519,7 +519,7 @@ impl ScopeDb {
 
     /// What `user` signs in with, as their own devices recorded it of their clients listed now: what a new device's
     /// sign-in is checked against. Not what an admin's device recorded, of a machine or of their first device.
-    pub fn sign_ins(&self, user: &str) -> Result<Vec<crate::sign_in_proof::Account>> {
+    pub fn sign_ins(&self, user: &str) -> Result<Vec<crate::onboarding::sign_in_proof::Account>> {
         let mut out: Vec<_> = self.machines()?.into_iter().filter(|m| !m.removed && m.user == user && m.by == user && m.is(Kind::Client)).filter_map(|m| m.sign_in).collect();
         out.dedup();
         Ok(out)
@@ -954,7 +954,7 @@ pub struct Machine {
     pub since: u64,
     /// What it signed in with, when that was checked as it was let in (`sign_in_proof`): one of its user's accounts,
     /// which their next device's sign-in is checked against. None for a shape this release doesn't know.
-    pub sign_in: Option<crate::sign_in_proof::Account>,
+    pub sign_in: Option<crate::onboarding::sign_in_proof::Account>,
     /// The city it asked to join from, as its request said.
     pub place: Option<String>,
     pub removed: bool,
