@@ -62,6 +62,7 @@ pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Res
         Some(Change::Device) => c.device(),
         Some(Change::Refuse) => c.refuse(),
         Some(Change::ForgetSignIn) => c.forget_sign_in(),
+        Some(Change::LinkSignIn) => c.link_sign_in(),
         Some(Change::Role) => c.role(),
         Some(Change::Remove) => c.remove(),
         Some(Change::Epoch) => c.epoch(),
@@ -245,7 +246,19 @@ impl Rule<'_> {
     fn forget_sign_in(&self) -> Result<()> {
         let key = self.key("key")?;
         ensure!(self.who.machine(&key)?.context("no such device")?.user == self.w, "only its user's own device forgets what it signed in with");
-        self.out.execute("UPDATE devices SET sign_in = NULL WHERE key = ?", [hex(&key)])?;
+        match self.data.get("account") {
+            Some(account) => self.out.execute("DELETE FROM linked_sign_ins WHERE device = ? AND account = ?", [hex(&key), account_text(account)?])?,
+            None => self.out.execute("UPDATE devices SET sign_in = NULL WHERE key = ?", [hex(&key)])?,
+        };
+        self.devices_changed()
+    }
+
+    /// One more account their device `key` checked is theirs, which their other devices then let a new one in by.
+    fn link_sign_in(&self) -> Result<()> {
+        let key = self.key("key")?;
+        let device = self.who.machine(&key)?.context("no such device")?;
+        ensure!(device.user == self.w && device.is(Kind::Client), "only its user's own client links a sign-in");
+        self.out.execute("INSERT OR IGNORE INTO linked_sign_ins VALUES (?, ?)", [hex(&key), account_text(&self.data["account"])?])?;
         self.devices_changed()
     }
 
@@ -696,6 +709,12 @@ fn put(out: &Connection, d: &Machine) -> Result<()> {
     Ok(())
 }
 
+/// An account as `linked_sign_ins` keeps it: this release's shape, or it doesn't count.
+fn account_text(account: &Value) -> Result<String> {
+    let account: crate::onboarding::sign_in_proof::Account = serde_json::from_value(account.clone()).context("that isn't a sign-in")?;
+    Ok(json!(account).to_string())
+}
+
 fn epoch_hash_of(hash: &Value) -> Result<String> {
     let hash = hash.as_str().context("an epoch names its key's hash")?;
     ensure!(hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "an epoch's hash is 64 hex characters");
@@ -838,6 +857,24 @@ mod tests {
     /// What a device signed in with is forgotten only by its user's own device; and a device they said isn't theirs
     /// ("Not Me") is never listed after, by them or anyone, and nothing it writes counts.
     #[test]
+    fn a_linked_sign_in_counts_from_its_users_own_device_until_forgotten() -> anyhow::Result<()> {
+        use crate::onboarding::sign_in_proof::Account;
+        let (mac, mut net) = setup();
+        let (phone, bobs) = (Dev::new(3), Dev::new(5));
+        net.step(&mac, ANDRE, device(&phone.endpoint(), ANDRE, "phone", &[Kind::Client], None));
+        net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        let google = Account::Provider { issuer: "https://accounts.google.com".into(), audience: "ours".into(), subject: "1".into(), email: None };
+        assert!(!net.step(&bobs, BOB, link_sign_in(&phone.id(), &google)), "only its own user links from a device");
+        assert!(net.step(&phone, ANDRE, link_sign_in(&phone.id(), &google)));
+        assert_eq!(net.db.sign_ins(ANDRE)?, vec![google.clone()]);
+        assert!(net.db.sign_ins(BOB)?.is_empty());
+        assert!(!net.step(&bobs, BOB, forget_sign_in(&phone.id(), Some(&google))), "only its user forgets it");
+        assert!(net.step(&phone, ANDRE, forget_sign_in(&phone.id(), Some(&google))));
+        assert!(net.db.sign_ins(ANDRE)?.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn a_sign_in_is_forgotten_and_a_device_turned_down_stays_out() -> anyhow::Result<()> {
         let (mac, mut net) = setup();
         let google = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
@@ -846,8 +883,8 @@ mod tests {
         c.data["sign_in"] = google;
         net.step(&mac, ANDRE, c);
         net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        assert!(!net.step(&bobs, BOB, forget_sign_in(&phone.id())), "only its user forgets it");
-        assert!(net.step(&phone, ANDRE, forget_sign_in(&phone.id())));
+        assert!(!net.step(&bobs, BOB, forget_sign_in(&phone.id(), None)), "only its user forgets it");
+        assert!(net.step(&phone, ANDRE, forget_sign_in(&phone.id(), None)));
         assert_eq!(net.db.machine(&phone.id())?.unwrap().sign_in, None);
 
         let stranger = Dev::new(9);
@@ -1218,7 +1255,7 @@ mod tests {
             ("bob's box listed again", device(&box_.endpoint(), BOB, "bob's box", &[Kind::Compute], None)),
             ("bob's phone listed again", device(&phone.endpoint(), BOB, "bob's phone", &[Kind::Client], None)),
             ("refuse a stranger", refuse(&stranger.endpoint(), "a stranger")),
-            ("forget bob's phone's sign-in", forget_sign_in(&phone.id())),
+            ("forget bob's phone's sign-in", forget_sign_in(&phone.id(), None)),
             ("bob made admin", role(BOB, Role::Admin)),
             ("bob made member (no change)", role(BOB, Role::Member)),
             ("andre made admin (no change)", role(ANDRE, Role::Admin)),

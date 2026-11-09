@@ -87,9 +87,9 @@ const webauthn = `
     keepPrf(c);
     return { credential: c.id, id: made.id };
   }
-  async function withPasskey() {
+  async function withPasskey(only) {
     const o = await options(ASK.in);
-    const publicKey = { ...o, challenge: b64u.decode(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })),
+    const publicKey = { ...o, challenge: b64u.decode(o.challenge), allowCredentials: only ? [{ type: "public-key", id: b64u.decode(only) }] : (o.allowCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })),
       extensions: { prf: { eval: { first: await PRF_SALT } } } };
     const c = await navigator.credentials.get({ publicKey });
     await api("/api/auth/passkey/verify-authentication", { response: credentialJSON(c) });
@@ -342,6 +342,59 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
     return page("invite", look, script, ["joined"]);
   }
 
+  /// Linking one more identity from a device (`join`, in the query), only just signed in: a provider's account, or a new
+  /// passkey, then tapped once more so what it signs names the device.
+  function linkPage(look) {
+    const { providers = [] } = look;
+    const script = `
+      const providers = ${json(providers)};
+      const params = new URLSearchParams(location.search);
+      const here = "/sign-in/link?join=" + JOIN;
+      const done = () => transition(() => {
+        const linked = part("linked");
+        document.querySelector("[data-slot=welcome]").replaceWith(linked);
+        rise(linked.querySelector("[data-slot=welcome-stack]"));
+      });
+      if (params.get("error")) say("That account can't be linked. It may be someone else's, or not at this network's domain.");
+      if (params.get("linked")) (async () => {
+        try {
+          await api("/sign-in/link/done", { join: JOIN, provider: params.get("linked") });
+          history.replaceState(null, "", here);
+          done();
+        } catch (err) { say(err.message); }
+      })();
+      const link = (provider) => async (e) => {
+        say();
+        const undo = busy(e.currentTarget, "Opening " + provider.name + "…");
+        try {
+          await api("/sign-in/provider", { oauth_query: "join=" + JOIN, provider: provider.id });
+          location.href = (await api("/api/auth/link-social", { provider: provider.id, callbackURL: here + "&linked=" + provider.id, errorCallbackURL: here })).url;
+        } catch (err) {
+          undo();
+          say(err.message);
+        }
+      };
+      for (const provider of providers) {
+        const button = part("provider");
+        button.textContent = "Link " + provider.name;
+        button.onclick = link(provider);
+        slot("action").after(button);
+      }
+      slot("action").onclick = async (e) => {
+        say();
+        const undo = busy(e.currentTarget, "Adding…");
+        try {
+          const { credential } = await newPasskey();
+          await withPasskey(credential);
+          done();
+        } catch (err) {
+          undo();
+          quietly(err);
+        }
+      };`;
+    return page("link", look, script, ["linked"]);
+  }
+
   /// A user's passkeys: each one, with Remove while there's another, and Add a Passkey; or, signed out, signing in.
   function passkeysPage(look) {
     const script = `
@@ -433,5 +486,5 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
     return page("code", look, script);
   }
 
-  return { page, signInPage, throwawayPage, invitePage, passkeysPage, codePage };
+  return { page, signInPage, throwawayPage, invitePage, linkPage, passkeysPage, codePage };
 }

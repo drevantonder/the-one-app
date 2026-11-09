@@ -463,6 +463,60 @@ fn a_passkey_belongs_to_an_account_and_no_email_is_matched() {
     assert_eq!(signed_in_as(&mut other).as_deref(), Some(sam.as_str()), "the passkey still signs them in");
 }
 
+/// One more identity is linked from a session just signed in with what they already had, however different its email:
+/// its token names the device, for that device to check and record, and it signs them in afterwards; and it's only theirs.
+#[test]
+fn a_further_identity_is_linked_only_from_someone_signed_in() {
+    let (admin, admin_hex) = endpoint();
+    let k = Workers::provider(vec![admin_hex]);
+    let (secret, sam) = invited(&k, &admin, "Sam", None);
+    let (mut sams, passkey) = (k.browser(), k.passkey());
+    let (_, options, _) = sams.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
+    assert_eq!(sams.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
+    let device = one::keys::Endpoint::of(&admin);
+    let join = format!("{}{}", data_encoding::HEXLOWER.encode(&device.key), data_encoding::HEXLOWER.encode(&device.seal));
+    let claims = json!({ "sub": "sams-google", "email": "sam@anywhere.example", "email_verified": true, "name": "Sam" });
+
+    let link = |b: &mut Browser, claims: Value| {
+        assert_eq!(b.post("/sign-in/provider", json!({ "oauth_query": format!("join={join}"), "provider": "google" })).0, 200);
+        let (status, out) = b.post("/api/auth/link-social", json!({ "provider": "google", "callbackURL": format!("/sign-in/link?join={join}&linked=google"), "errorCallbackURL": format!("/sign-in/link?join={join}") }));
+        assert_eq!(status, 200, "{out}");
+        let query = url_query(out["url"].as_str().unwrap());
+        assert_eq!(query.get("nonce"), Some(&one::onboarding::sign_in_proof::nonce(&ROOT, &device)), "its token will name the device");
+        b.get(&format!("/api/auth/callback/google?code={}&state={}", B64U.encode(claims.to_string().as_bytes()), query["state"])).2
+    };
+    assert_eq!(sams.get(&format!("/sign-in/link?join={join}")).0, 200);
+    assert!(link(&mut sams, claims.clone()).is_some_and(|to| to.ends_with("&linked=google")));
+    assert_eq!(sams.post("/sign-in/link/done", json!({ "join": join, "provider": "google" })).0, 200);
+
+    // What the device takes to check and record.
+    let shown = |key: &ed25519_dalek::SigningKey| {
+        let asked = B64U.encode(serde_json::to_string(&signed(key, "GET /api/auth/devices/proof", json!({}))).unwrap().as_bytes());
+        let mut resp = ureq::agent().get(format!("{}/api/auth/devices/proof", k.address)).header("x-one-request", asked).call().unwrap();
+        (resp.status().as_u16(), resp.body_mut().read_json::<Value>().unwrap())
+    };
+    let (status, out) = shown(&admin);
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(out["proofs"][0]["user"], json!(sam));
+    assert!(out["proofs"][0]["proof"]["id_token"].is_string(), "{out}");
+
+    // It signs them in now, in any browser.
+    let mut elsewhere = k.browser();
+    provider_callback(&mut elsewhere, "/", "/", claims.clone());
+    assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(sam.as_str()));
+
+    // Someone else, also just signed in, can't link it to themselves.
+    let (secret, _) = invited(&k, &admin, "Lee", None);
+    let (mut lees, lee_passkey) = (k.browser(), k.passkey());
+    let (_, options, _) = lees.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
+    assert_eq!(lees.post("/api/auth/passkey/verify-registration", json!({ "response": lee_passkey.create(&options), "createSession": true })).0, 200);
+    assert!(link(&mut lees, claims).is_some_and(|to| to.contains("error=")), "someone else's identity was linked");
+
+    // And no one signed out links anything.
+    let (status, _) = k.browser().post("/api/auth/link-social", json!({ "provider": "google", "callbackURL": "/" }));
+    assert!(status == 401 || status == 403, "{status}");
+}
+
 /// A sign-in for a device names it, and auth passes what it showed on with that device's request to join, unchanged,
 /// for the user's devices to check themselves (src/onboarding/sign_in_proof.rs): a passkey's assertion signs a challenge naming
 /// the device and when, which checks; a sign-in for no device, or one for another device, lets nothing in; and with

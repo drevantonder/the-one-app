@@ -521,8 +521,18 @@ impl ScopeDb {
     /// sign-in is checked against. Not what an admin's device recorded, of a machine or of their first device.
     pub fn sign_ins(&self, user: &str) -> Result<Vec<crate::onboarding::sign_in_proof::Account>> {
         let mut out: Vec<_> = self.machines()?.into_iter().filter(|m| !m.removed && m.user == user && m.by == user && m.is(Kind::Client)).filter_map(|m| m.sign_in).collect();
-        out.dedup();
+        for m in self.machines()?.into_iter().filter(|m| !m.removed && m.user == user && m.is(Kind::Client)) {
+            out.extend(self.linked_sign_ins(&m.key)?);
+        }
+        let mut seen = Vec::new();
+        out.retain(|a| !seen.contains(a) && { seen.push(a.clone()); true });
         Ok(out)
+    }
+
+    /// What its user linked from client `key`.
+    pub fn linked_sign_ins(&self, key: &Key) -> Result<Vec<crate::onboarding::sign_in_proof::Account>> {
+        let accounts: Vec<String> = self.conn().prepare("SELECT account FROM linked_sign_ins WHERE device = ? ORDER BY account")?.query_map([crate::keys::hex(key)], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        Ok(accounts.iter().filter_map(|a| serde_json::from_str(a).ok()).collect())
     }
 
     pub fn clients(&self) -> Result<Vec<Machine>> {

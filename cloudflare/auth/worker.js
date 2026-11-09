@@ -71,7 +71,7 @@ import css from "../web/screen/ui/auth.css" with { type: "text" };
 import drawn from "../web/screen/ui/auth.json";
 import { DurableObjectDialect } from "./sql.js";
 
-const { codePage, invitePage, passkeysPage, signInPage, throwawayPage } = pages({ css, ...drawn });
+const { codePage, invitePage, linkPage, passkeysPage, signInPage, throwawayPage } = pages({ css, ...drawn });
 
 const hex16 = () => hex.encode(random(8));
 /// Better Auth's users all have an email, unique and never empty, and a user whose only identity is a passkey has none:
@@ -294,6 +294,11 @@ export class Auth extends DurableObject {
             const scopes = String(ctx.query.scope || "").split(" ").filter(Boolean);
             if (!scopes.includes("offline_access")) ctx.query.scope = [...scopes, "offline_access"].join(" ");
           }
+          // One more identity is linked only just after signing in, so a session taken from someone adds none.
+          if (ctx.path === "/link-social") {
+            const session = await getSessionFromCtx(ctx);
+            if (!session || !fresh(session)) refuse(403, "Sign in again, then link it.");
+          }
           if (ctx.path === "/oauth2/token" && ctx.body) ctx.body.resource = await self.audience(ctx.body.client_id || basicClient(ctx.headers));
         }),
       },
@@ -363,7 +368,7 @@ export class Auth extends DurableObject {
       if (path === "/api/auth/oauth2/register" && request.method === "POST") await this.notNamedAsUs(await request.clone().json().catch(() => ({})));
       if (path === "/api/auth/passkey/generate-register-options") return await this.namedAsUser(request, await this.auth.handler(request));
       if (path === "/api/auth/passkey/generate-authenticate-options") return await this.namingDevice(await this.auth.handler(request), url.searchParams.get("join"));
-      if (path === "/api/auth/sign-in/social" && request.method === "POST") return await this.withNonce(request, await this.auth.handler(request));
+      if ((path === "/api/auth/sign-in/social" || path === "/api/auth/link-social") && request.method === "POST") return await this.withNonce(request, await this.auth.handler(request));
       if (path.startsWith("/api/auth/")) return await this.auth.handler(request);
       if (path.startsWith("/.well-known/oauth-authorization-server") || path.startsWith("/.well-known/openid-configuration")) {
         const which = path.includes("openid") ? "/.well-known/openid-configuration" : "/.well-known/oauth-authorization-server";
@@ -377,6 +382,8 @@ export class Auth extends DurableObject {
       const signIn = { ...look, providers, provider: providers[0]?.name, domain: this.env.JOIN_DOMAIN };
       const throwaway = this.env.SIGN_IN === "throwaway";
       if (path === "/sign-in" && request.method === "GET") return html(throwaway ? throwawayPage({ ...look, user: this.env.THROWAWAY_NAME }) : signInPage(signIn));
+      if (path === "/sign-in/link" && request.method === "GET" && !throwaway) return await this.linkOpened(request, url, signIn);
+      if (path === "/sign-in/link/done" && request.method === "POST") return json(await this.linkDone(request, await request.json()));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
       if (path === "/sign-in/provider" && request.method === "POST" && providers.length) return await this.startProvider(request, await request.json());
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
@@ -409,6 +416,7 @@ export class Auth extends DurableObject {
       return json({});
     }
     if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
+    if (path === "/api/auth/devices/proof" && method === "GET") return json(await this.proofsFor(request));
     if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
@@ -492,6 +500,34 @@ export class Auth extends DurableObject {
 
   keepProof(join, user, proof) {
     this.ctx.storage.sql.exec("insert or replace into proofs (key, user, proof, made) values (?, ?, ?, ?)", join.slice(0, 64), user, JSON.stringify(proof), Date.now());
+  }
+
+  /// What a sign-in for the device asking (by its signature) showed, by whose it was: how it checks one more identity it
+  /// has just linked.
+  async proofsFor(request) {
+    const signed = (await this.signed(request)) || refuse(401, "Sign in first.");
+    this.expire();
+    return { proofs: this.ctx.storage.sql.exec("select user, proof from proofs where key = ?", signed.by).toArray().map((p) => ({ user: p.user, proof: JSON.parse(p.proof) })) };
+  }
+
+  /// Linking one more identity, for the device `join` names: the sign-in page first, and then this, only just signed in.
+  async linkOpened(request, url, look) {
+    const join = url.searchParams.get("join");
+    if (!JOIN.test(join || "")) return new Response("not found", { status: 404 });
+    const session = await this.auth.api.getSession({ headers: request.headers });
+    return html(session && fresh(session) ? linkPage(look) : signInPage({ ...look, back: `/sign-in/link?join=${join}` }));
+  }
+
+  /// A provider's account just linked for the device `join` names: the ID token it gave, kept for that device to check
+  /// and record.
+  async linkDone(request, { join, provider }) {
+    this.fromOurPages(request);
+    const session = await this.session(request);
+    if (!JOIN.test(join || "") || !providersOf(this.env).some((p) => p.id === provider)) refuse(400, "That link isn't whole.");
+    const [account] = this.ctx.storage.sql.exec("select idToken from account where userId = ? and providerId = ?", session.user.id, provider).toArray();
+    if (!account?.idToken) refuse(404, "That account wasn't linked. Try again.");
+    this.keepProof(join, session.user.id, { id_token: account.idToken });
+    return {};
   }
 
   /// A passkey's options for a sign-in for the device `join` names (128 hex): its challenge is that device's, and when,

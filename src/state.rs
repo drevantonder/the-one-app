@@ -327,6 +327,9 @@ pub struct Client {
     /// What it signed in with, for its own user only: their Sign-ins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sign_in: Option<crate::onboarding::sign_in_proof::Account>,
+    /// What else they sign in with, linked from this device, for its own user only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked: Vec<crate::onboarding::sign_in_proof::Account>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -506,6 +509,7 @@ fn network(m: &ScopeDb, me: &str, settings: &BTreeMap<String, String>, here: &He
             place: c.place.clone(),
             me: Some(c.key) == here.looking,
             sign_in: c.sign_in.clone().filter(|_| c.user == me),
+            linked: if c.user == me { m.linked_sign_ins(&c.key).unwrap_or_default() } else { Vec::new() },
         })
         .collect();
     let users = m.users()?.iter().filter(|u| !u.removed).map(|u| NetworkUser { id: u.id.clone(), name: u.name.clone(), handle: u.handle.clone(), role: u.role, me: u.id == me }).collect();

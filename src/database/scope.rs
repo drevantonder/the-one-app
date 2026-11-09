@@ -73,6 +73,12 @@ CREATE TABLE devices (
   removed INTEGER NOT NULL,
   platform TEXT
 ) STRICT;
+-- What a user also signs in with, linked from their device `device`, which checked it (`sign_in_proof::Account`, JSON).
+CREATE TABLE linked_sign_ins (
+  device TEXT NOT NULL,
+  account TEXT NOT NULL,
+  PRIMARY KEY (device, account)
+) STRICT;
 CREATE TABLE runs (
   principal TEXT NOT NULL,
   device TEXT NOT NULL,

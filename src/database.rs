@@ -14,7 +14,7 @@ pub mod stored;
 /// that reads less is told to update, by nodes (`protocol::header::READS`), the relay, auth and the URL signer (`reads` in what it
 /// asks them, `cloudflare/shared/protocol.js`'s `READS`, which `protocol::javascript` writes from this). A release that changes
 /// `scope::SCHEMA`, `permissions::SCHEMA` or `permissions::DEFAULTS`, or takes away a route older devices use, reads one more.
-pub const READS: u32 = 10;
+pub const READS: u32 = 11;
 
 /// What a client said it reads, in `protocol::header::READS`' value: its first number, 0 for nothing.
 pub fn reads_of(said: Option<&str>) -> u32 {

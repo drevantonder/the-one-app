@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use crate::keys::{Key, hex};
 
 use crate::database::scopes::Scope;
+use crate::onboarding::sign_in_proof::Account;
 
 use super::scopes::{APP, Kind, Role};
 
@@ -60,6 +61,7 @@ pub enum Change {
     Device,
     Refuse,
     ForgetSignIn,
+    LinkSignIn,
     Role,
     Remove,
     Epoch,
@@ -87,13 +89,14 @@ pub enum Change {
     Arrange,
 }
 
-const NAMES: [(Change, &str); 31] = [
+const NAMES: [(Change, &str); 32] = [
     (Change::Freeze, "freeze"),
     (Change::Start, "start"),
     (Change::Defaults, "defaults"),
     (Change::Device, "device"),
     (Change::Refuse, "refuse"),
     (Change::ForgetSignIn, "forget-sign-in"),
+    (Change::LinkSignIn, "link-sign-in"),
     (Change::Role, "role"),
     (Change::Remove, "remove"),
     (Change::Epoch, "epoch"),
@@ -204,9 +207,18 @@ pub fn refuse(endpoint: &crate::keys::Endpoint, name: &str) -> Content {
     node(Change::Refuse, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "name": name }))
 }
 
-/// Forgets what one of this user's devices signed in with (`Machine::sign_in`).
-pub fn forget_sign_in(key: &Key) -> Content {
-    node(Change::ForgetSignIn, json!({ "key": hex(key) }))
+/// Forgets what one of this user's devices signed in with (`Machine::sign_in`), or with `account`, one it linked.
+pub fn forget_sign_in(key: &Key, account: Option<&Account>) -> Content {
+    let mut data = json!({ "key": hex(key) });
+    if let Some(account) = account {
+        data["account"] = json!(account);
+    }
+    node(Change::ForgetSignIn, data)
+}
+
+/// Records `account` as also signing in as this user, linked from their device `key`, which checked it.
+pub fn link_sign_in(key: &Key, account: &Account) -> Content {
+    node(Change::LinkSignIn, json!({ "key": hex(key), "account": account }))
 }
 
 /// Renames a device (`key`), a user (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
@@ -375,7 +387,8 @@ mod tests {
             ("member", member(g, other, Some(Role::Admin))),
             ("member out", member(g, other, None)),
             ("refuse", refuse(&endpoint, "stranger")),
-            ("forget sign-in", forget_sign_in(&[5; 32])),
+            ("forget sign-in", forget_sign_in(&[5; 32], None)),
+            ("link sign-in", link_sign_in(&[5; 32], &Account::Passkey { credential: "c".into(), public_key: "p".into() })),
             ("rename device", rename("key", &hex(&[5; 32]), "laptop")),
             ("rename user", rename("user", other, "Robert")),
             ("rename group", rename("group", g, "The Band")),
@@ -435,6 +448,7 @@ member: {"app":"node","kind":"member","data":{"group":"c000000000000003","role":
 member out: {"app":"node","kind":"member","data":{"group":"c000000000000003","role":null,"user":"b000000000000002"}}
 refuse: {"app":"node","kind":"refuse","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"stranger","seal":"0202020202020202020202020202020202020202020202020202020202020202"}}
 forget sign-in: {"app":"node","kind":"forget-sign-in","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505"}}
+link sign-in: {"app":"node","kind":"link-sign-in","data":{"account":{"passkey":{"credential":"c","public_key":"p"}},"key":"0505050505050505050505050505050505050505050505050505050505050505"}}
 rename device: {"app":"node","kind":"rename","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505","name":"laptop"}}
 rename user: {"app":"node","kind":"rename","data":{"name":"Robert","user":"b000000000000002"}}
 rename group: {"app":"node","kind":"rename","data":{"group":"c000000000000003","name":"The Band"}}

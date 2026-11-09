@@ -386,13 +386,13 @@ function Devices() {
   async function menu(item, passkey, at) {
     const items = passkey ? [] : [{ title: "Rename", icon: "pencil-simple" }]
     // What its sign-ins were let in with, which a new device's sign-in is checked against.
-    const signedIn = (passkey ? [item] : item.clients).filter((c) => c.sign_in)
-    if (signedIn.length) items.push({ title: "Sign-ins…", icon: "key" })
+    const signedIn = (passkey ? [item] : item.clients).filter((c) => c.sign_in || c.linked?.length)
+    if (signedIn.length || item.me) items.push({ title: "Sign-ins…", icon: "key" })
     items.push(item.me ? { title: "Sign Out", icon: "sign-out", danger: true } : { title: "Remove…", icon: "minus-circle", danger: true })
     const i = await one.menu(items, at).catch(() => null)
     if (i == null) return
     if (items[i].title === "Rename") show({ rename: item })
-    else if (items[i].title === "Sign-ins…") show({ signIns: signedIn })
+    else if (items[i].title === "Sign-ins…") show({ signIns: signedIn, me: item.me })
     else if (item.me) signOut()
     else remove(item.name, passkey ? [item.key] : item.keys, !passkey && item.node && item.online ? item.node.key : null)
   }
@@ -492,7 +492,7 @@ function Devices() {
       {body}
       {data && dialog.for?.rename && <Rename key={dialog.n} card={dialog.for.rename} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.remove && <RemoveDevice key={dialog.n} {...dialog.for.remove} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
-      {data && dialog.for?.signIns && <SignIns key={dialog.n} clients={dialog.for.signIns} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
+      {data && dialog.for?.signIns && <SignIns key={dialog.n} clients={dialog.for.signIns} me={dialog.for.me} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {data && dialog.for?.add && <AddDevice key={dialog.n} data={data} open={dialog.open} setOpen={setDialogOpen} />}
       {data && dialog.for?.schedules && <AppSchedules key={dialog.n} m={m} asked={dialog.for.schedules} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
     </div>
@@ -1029,16 +1029,21 @@ function RemoveDevice({ name, keys, erasable, open, setOpen, done }) {
   )
 }
 
-/// What a device's sign-ins signed in with, as recorded when each was let in: a new device that signs in with one is
-/// let in by itself. Each can be removed, by a change every device of theirs takes.
-function SignIns({ clients, open, setOpen, done }) {
+/// What a device's sign-ins signed in with, and what its user linked from it: a new device that signs in with one is
+/// let in by itself. Each can be removed, by a change every device of theirs takes. This device links another in a
+/// page at the network's address, in a browser; what it linked is recorded when they come back here.
+function SignIns({ clients, me, open, setOpen, done }) {
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState("")
-  async function forget(i) {
-    setBusy(i)
+  const rows = clients.flatMap((c) => [
+    ...(c.sign_in ? [{ id: `${c.key}.`, key: c.key, label: signInLabel(c.sign_in) }] : []),
+    ...(c.linked || []).map((a, n) => ({ id: `${c.key}.${n}`, key: c.key, account: a, label: signInLabel(a) })),
+  ])
+  async function forget(r) {
+    setBusy(r.id)
     setError("")
     try {
-      await api("POST", "/v1/devices/forget-sign-in", { key: clients[i].key })
+      await api("POST", "/v1/devices/forget-sign-in", { key: r.key, ...(r.account ? { account: r.account } : {}) })
       one.tap("success")
       done()
     } catch (e) {
@@ -1046,17 +1051,34 @@ function SignIns({ clients, open, setOpen, done }) {
       setBusy(null)
     }
   }
+  const record = async () => {
+    try {
+      if ((await api("POST", "/v1/devices/record-sign-in", {})).linked) done()
+    } catch (e) { setError(said(e)) }
+  }
+  useEffect(() => {
+    if (!me || !open) return
+    const back = () => document.visibilityState === "visible" && record()
+    document.addEventListener("visibilitychange", back)
+    return () => document.removeEventListener("visibilitychange", back)
+  }, [me, open])
+  // Asked for as the dialog opens, so the button is a plain link, which every browser and app opens.
+  const [url, setUrl] = useState("")
+  useEffect(() => {
+    if (me && open) api("POST", "/v1/devices/link-sign-in", {}).then((r) => setUrl(r.url), (e) => setError(said(e)))
+  }, [me, open])
   return (
-    <ResponsiveDialog open={open} onOpenChange={setOpen} title="Sign-Ins" action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>}>
+    <ResponsiveDialog open={open} onOpenChange={setOpen} title="Sign-Ins" action={<Button variant="secondary" size="sm" onClick={() => (me ? record() : null, setOpen(false))}>Done</Button>}>
       <div className="flex flex-col gap-4 overflow-y-auto p-4">
-        <List>
-          {clients.map((c, i) => (
-            <div key={c.key} className="flex items-center gap-3 px-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate font-medium">{signInLabel(c.sign_in)}</span>
-              <Button variant="ghost" size="sm" className="text-destructive" disabled={busy !== null} onClick={() => forget(i)}>Remove</Button>
+        {!!rows.length && <List>
+          {rows.map((r) => (
+            <div key={r.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 truncate font-medium">{r.label}</span>
+              <Button variant="ghost" size="sm" className="text-destructive" disabled={busy !== null} onClick={() => forget(r)}>Remove</Button>
             </div>
           ))}
-        </List>
+        </List>}
+        {me && url && <Button variant="secondary" asChild><a href={url} target="_blank" rel="noopener">Link a Sign-In</a></Button>}
         <Note>A new device that signs in with one of these is let in without asking.</Note>
         {error && <Problem title={error} />}
       </div>

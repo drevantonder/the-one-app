@@ -70,6 +70,8 @@ pub trait Me: Signs {
 /// What a device answers itself of a node's routes, signing what they change.
 #[derive(Clone, Copy)]
 enum Route {
+    LinkSignIn,
+    RecordSignIn,
     Role,
     Remove,
     Settings,
@@ -110,6 +112,8 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     ("POST", "/v1/service", Route::Service, false),
     ("POST", "/v1/retire", Route::Retire, true),
     ("POST", "/v1/devices/forget-sign-in", Route::ForgetSignIn, true),
+    ("POST", "/v1/devices/link-sign-in", Route::LinkSignIn, true),
+    ("POST", "/v1/devices/record-sign-in", Route::RecordSignIn, true),
     ("POST", "/v1/devices/invite", Route::InviteLink, false),
     ("POST", "/v1/devices/run_schedules", Route::RunSchedules, false),
     ("POST", "/v1/devices/stop_schedules", Route::StopSchedules, false),
@@ -138,7 +142,9 @@ fn about(route: Route) -> (&'static str, Value) {
         Route::Name => ("Rename a device", of::<body::Name>()),
         Route::Service => ("Switch a service on or off on a device", of::<body::Service>()),
         Route::Retire => ("Delete, restore or erase an app", of::<body::Retire>()),
-        Route::ForgetSignIn => ("Forget a device's sign-in", of::<body::Key>()),
+        Route::ForgetSignIn => ("Forget a device's sign-in", of::<body::ForgetSignIn>()),
+        Route::LinkSignIn => ("Where this device links a further sign-in", of::<body::Nothing>()),
+        Route::RecordSignIn => ("Record the sign-in this device just linked", of::<body::Nothing>()),
         Route::InviteLink => ("", of::<body::InviteLink>()),
         Route::RunSchedules => ("", of::<body::RunSchedules>()),
         Route::StopSchedules => ("", of::<body::StopSchedules>()),
@@ -335,8 +341,10 @@ mod body {
 
     #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
-    pub struct Key {
+    pub struct ForgetSignIn {
         pub key: String,
+        /// One it linked; none forgets what it was let in with.
+        pub account: Option<crate::onboarding::sign_in_proof::Account>,
     }
 
     /// `user` invites someone in the network already; `email` is the account a newcomer signs up with.
@@ -483,15 +491,28 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             done
         }
         Route::ForgetSignIn => {
-            let body: body::Key = read(path, raw)?;
+            let body: body::ForgetSignIn = read(path, raw)?;
             let user = m.user()?;
             let key = m.who(|db| {
                 let key = db.find_machine(&body.key)?;
-                ensure!(db.machine(&key)?.is_some_and(|d| d.user == user && d.sign_in.is_some()), "That isn't one of your devices with a sign-in to forget.");
+                let has = match &body.account {
+                    Some(account) => db.linked_sign_ins(&key)?.contains(account),
+                    None => db.machine(&key)?.is_some_and(|d| d.sign_in.is_some()),
+                };
+                ensure!(has && db.machine(&key)?.is_some_and(|d| d.user == user), "That isn't one of your devices with a sign-in to forget.");
                 Ok(key)
             })?;
-            m.write(content::forget_sign_in(&key)).await?;
+            m.write(content::forget_sign_in(&key, body.account.as_ref())).await?;
             done
+        }
+        Route::LinkSignIn => {
+            let _: body::Nothing = read(path, raw)?;
+            let address = m.address().ok_or_else(|| anyhow!("{YOURS} has no address yet, so it has no sign-ins."))?;
+            json!({ "url": format!("{address}/sign-in/link?join={}{}", hex(&m.public()), hex(&m.seal())) })
+        }
+        Route::RecordSignIn => {
+            let _: body::Nothing = read(path, raw)?;
+            record_sign_in(m).await?
         }
         Route::InviteLink => {
             let body: body::InviteLink = read(path, raw)?;
@@ -945,7 +966,28 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
 /// their devices record them, for one let in by it, or with none, for one approved by its code. None if it shows
 /// nothing that checks out.
 async fn signed_in_with(m: &impl Me, r: &Asked, accounts: Option<&[crate::onboarding::sign_in_proof::Account]>) -> Option<crate::onboarding::sign_in_proof::Account> {
-    let proof: crate::onboarding::sign_in_proof::Proof = serde_json::from_value(r.said["sign_in"].clone()).ok()?;
+    let proof = serde_json::from_value(r.said["sign_in"].clone()).ok()?;
+    proved(m, &proof, &r.endpoint, accounts).await
+}
+
+/// A further identity this device linked: what auth kept of the sign-in that named it, checked here as any is, and
+/// written where the user's own devices count it. → whether there was one to record.
+async fn record_sign_in(m: &impl Me) -> Result<Value> {
+    m.read().await?;
+    let user = m.user()?;
+    let said = ask_auth(m, "GET", "/api/auth/devices/proof", json!({})).await?;
+    let Some(shown) = said["proofs"].as_array().into_iter().flatten().find(|p| p["user"].as_str() == Some(&user)) else { return Ok(json!({ "linked": false })) };
+    let proof = serde_json::from_value(shown["proof"].clone()).map_err(|_| anyhow!("That sign-in can't be read."))?;
+    let me = Endpoint { key: m.public(), seal: m.seal() };
+    let account = proved(m, &proof, &me, None).await.ok_or_else(|| anyhow!("That sign-in couldn't be checked. Link it again."))?;
+    if !m.who(|who| who.sign_ins(&user))?.iter().any(|a| a.same(&account)) {
+        m.write(content::link_sign_in(&me.key, &account)).await?;
+    }
+    Ok(json!({ "linked": true }))
+}
+
+/// What `proof` shows `device` signed in with, checked here.
+async fn proved(m: &impl Me, proof: &crate::onboarding::sign_in_proof::Proof, device: &Endpoint, accounts: Option<&[crate::onboarding::sign_in_proof::Account]>) -> Option<crate::onboarding::sign_in_proof::Account> {
     let address = m.address()?;
     let (root, clients) = m.who(|who| Ok((who.root()?, who.setting(crate::onboarding::sign_in_proof::CLIENTS)?))).ok()?;
     let network = crate::onboarding::sign_in_proof::Network::new(&address, *root?.as_bytes(), clients.as_deref());
@@ -954,8 +996,8 @@ async fn signed_in_with(m: &impl Me, r: &Asked, accounts: Option<&[crate::onboar
         None => None,
     };
     match accounts {
-        Some(theirs) => crate::onboarding::sign_in_proof::vouches(&proof, &r.endpoint, &network, jwks.as_ref(), theirs, m.now()).ok(),
-        None => crate::onboarding::sign_in_proof::check(&proof, &r.endpoint, &network, jwks.as_ref(), m.now()).ok(),
+        Some(theirs) => crate::onboarding::sign_in_proof::vouches(proof, device, &network, jwks.as_ref(), theirs, m.now()).ok(),
+        None => crate::onboarding::sign_in_proof::check(proof, device, &network, jwks.as_ref(), m.now()).ok(),
     }
 }
 
