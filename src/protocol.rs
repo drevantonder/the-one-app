@@ -240,6 +240,7 @@ pub fn javascript() -> String {
          export const SESSION = {session};\n\
          export const SOCKET_FRESH = {socket_fresh};\n\
          export const READS = {reads};\n\
+         export const ID_TOKEN_ALGS = {id_token_algs};\n\
          export const PAIRING_LIFE = {pairing_life};\n\
          export const MOST_URLS = {most_urls};\n\
          export const MOST_NEEDED = {most_needed};\n\
@@ -284,6 +285,7 @@ pub fn javascript() -> String {
         session = crate::keys::SESSION,
         socket_fresh = SOCKET_FRESH,
         reads = crate::database::READS,
+        id_token_algs = json!(crate::onboarding::sign_in_proof::ID_TOKEN_ALGS),
         pairing_life = PAIRING_LIFE,
         most_urls = MOST_URLS,
         most_needed = crate::keys::MOST_NEEDED,

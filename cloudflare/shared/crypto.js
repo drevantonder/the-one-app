@@ -297,3 +297,6 @@ export async function passkeyKeys(prf) {
   return { sign: await hkdf(prf, "one/passkey-device/sign"), seal: await hkdf(prf, "one/passkey-device/seal") };
 }
 
+
+/// Where an OIDC issuer says which keys it signs with: as `sign_in_proof::discovery` says, a slash at its end or none.
+export const discoveryUrl = (issuer) => `${String(issuer).replace(/\/+$/, "")}/.well-known/openid-configuration`;

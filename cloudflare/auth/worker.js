@@ -62,9 +62,9 @@ import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx }
 import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import { genericOAuth, jwt } from "better-auth/plugins";
-import { b64u, behind, checkRequest, hex, isKey, joinChallenge, joinCode, joinNonce, random, sha256 } from "../shared/crypto.js";
+import { b64u, behind, checkRequest, discoveryUrl, hex, isKey, joinChallenge, joinCode, joinNonce, random, sha256 } from "../shared/crypto.js";
 import { json } from "../shared/http.js";
-import { AUTH_DOMAIN, HEADER, updateRefusal } from "../shared/protocol.js";
+import { AUTH_DOMAIN, HEADER, ID_TOKEN_ALGS, updateRefusal } from "../shared/protocol.js";
 import { bearer, verify } from "../shared/token.js";
 import { pages } from "../onboarding/pages.js";
 import css from "../web/screen/ui/auth.css" with { type: "text" };
@@ -152,7 +152,7 @@ function oidcProvider(provider, domain) {
     name: provider.name,
     clientId: provider.client_id,
     clientSecret: provider.client_secret,
-    discoveryUrl: `${provider.issuer}/.well-known/openid-configuration`,
+    discoveryUrl: discoveryUrl(provider.issuer),
     requireIdTokenVerification: true,
     // A sign-in for a device sends a `nonce` naming it (`withNonce`), which only the user's devices check.
     disableIdTokenNonceBinding: true,
@@ -162,6 +162,8 @@ function oidcProvider(provider, domain) {
     // From the ID token itself: what its userinfo says isn't signed.
     getUserInfo: async ({ idToken }) => {
       if (!idToken) return null;
+      // Devices check only these: one signed otherwise would sign someone in whom no device can check.
+      if (!ID_TOKEN_ALGS.includes(JSON.parse(new TextDecoder().decode(b64u.decode(idToken.split(".")[0]))).alg)) return null;
       const claims = JSON.parse(new TextDecoder().decode(b64u.decode(idToken.split(".")[1])));
       if (!claims.sub || !atDomain(domain, provider, claims)) return null;
       return { ...claims, id: claims.sub, emailVerified: claims.email_verified === true, image: claims.picture };

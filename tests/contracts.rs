@@ -263,6 +263,16 @@ fn a_client_takes_only_a_network_and_a_welcome_that_are_one() {
 /// The bucket's names as the Workers (the URL signer, the web client) make them, the refusal of a device that reads less,
 /// and the codes answers carry.
 #[test]
+fn auth_and_devices_find_a_providers_keys_at_the_same_place() {
+    use one::onboarding::sign_in_proof::{Network, discovery};
+    let formats = Formats::start();
+    for issuer in ["https://login.example", "https://login.example/", "https://login.example/tenant/v2.0"] {
+        let network = Network::new("https://one.example", [1; 32], Some(&format!("{issuer} ours")));
+        assert_eq!(formats.js(json!({ "op": "discoveryUrl", "issuer": issuer }))["url"].as_str(), discovery(issuer, &network).as_deref(), "{issuer}");
+    }
+}
+
+#[test]
 fn the_workers_name_the_buckets_objects_as_nodes_do() {
     let formats = Formats::start();
     let js = |body: Value| formats.js(body);

@@ -64,6 +64,9 @@ pub fn challenge(root: &[u8; 32], device: &Endpoint, at: u64) -> Vec<u8> {
 /// admin's (`cloudflare deploy`, and `one-dev throwaway` for its own).
 pub const CLIENTS: &str = "sign_in_clients";
 
+/// What an ID token may be signed with: only these are checked here, and auth takes no others (`protocol::javascript`).
+pub const ID_TOKEN_ALGS: [&str; 3] = ["RS256", "ES256", "EdDSA"];
+
 /// How many days an invite link works.
 pub const INVITE_DAYS: u64 = 3;
 
@@ -79,7 +82,7 @@ pub struct Network {
 
 impl Network {
     pub fn new(address: &str, root: [u8; 32], setting: Option<&str>) -> Network {
-        let clients = setting.unwrap_or("").lines().filter_map(|l| l.trim().split_once(char::is_whitespace)).map(|(i, a)| (i.trim().to_string(), a.trim().to_string())).collect();
+        let clients = setting.unwrap_or("").lines().filter_map(|l| l.trim().split_once(char::is_whitespace)).map(|(i, a)| (i.trim().trim_end_matches('/').to_string(), a.trim().to_string())).collect();
         Network { address: address.trim_end_matches('/').to_string(), root, clients }
     }
 }
@@ -142,9 +145,10 @@ impl Proof {
 /// network's admins named (`CLIENTS`), over https or, for a throwaway network (`one-dev throwaway`), at the loopback
 /// address only it has. None for any other.
 pub fn discovery(issuer: &str, network: &Network) -> Option<String> {
+    let issuer = issuer.trim_end_matches('/');
     let own = format!("{}/api/auth", network.address);
     let reachable = issuer.starts_with("https://") || (network.address.starts_with("http://127.0.0.1:") && issuer == own);
-    (reachable && network.clients.iter().any(|(i, _)| i == issuer)).then(|| format!("{}/.well-known/openid-configuration", issuer.trim_end_matches('/')))
+    (reachable && network.clients.iter().any(|(i, _)| i == issuer)).then(|| format!("{issuer}/.well-known/openid-configuration"))
 }
 
 /// What `proof` shows `device` signed in with, checked: an ID token against its issuer's keys `jwks` and the network's
@@ -219,7 +223,7 @@ fn id_token(token: &str, device: &Endpoint, network: &Network, jwks: &Value, now
     let (Some(head), Some(body), Some(sig), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { bail!("that isn't a JWT") };
     let header: Value = serde_json::from_slice(&b64(head)?).context("its header isn't JSON")?;
     let claims: Value = serde_json::from_slice(&b64(body)?).context("its claims aren't JSON")?;
-    let issuer = claims["iss"].as_str().context("it names no issuer")?;
+    let issuer = claims["iss"].as_str().context("it names no issuer")?.trim_end_matches('/');
     ensure!(discovery(issuer, network).is_some(), "{issuer} isn't a provider a device takes sign-ins from");
     let kid = header["kid"].as_str();
     let alg = header["alg"].as_str().unwrap_or("");
@@ -233,6 +237,11 @@ fn id_token(token: &str, device: &Endpoint, network: &Network, jwks: &Value, now
             let (n, e) = (b64(jwk["n"].as_str().context("no n")?)?, b64(jwk["e"].as_str().context("no e")?)?);
             ring::signature::RsaPublicKeyComponents { n, e }.verify(&ring::signature::RSA_PKCS1_2048_8192_SHA256, signed.as_bytes(), &sig).ok().context("its signature isn't its issuer's")?;
         }
+        "ES256" => {
+            ensure!(jwk["kty"] == "EC" && jwk["crv"] == "P-256", "its key isn't a P-256 key");
+            let point = [&[4u8][..], &b64(jwk["x"].as_str().context("no x")?)?, &b64(jwk["y"].as_str().context("no y")?)?].concat();
+            ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_FIXED, point).verify(signed.as_bytes(), &sig).ok().context("its signature isn't its issuer's")?;
+        }
         "EdDSA" => {
             ensure!(jwk["kty"] == "OKP" && jwk["crv"] == "Ed25519", "its key isn't an Ed25519 key");
             ed25519(&b64(jwk["x"].as_str().context("no x")?)?, signed.as_bytes(), &sig).context("its signature isn't its issuer's")?;
@@ -241,7 +250,10 @@ fn id_token(token: &str, device: &Endpoint, network: &Network, jwks: &Value, now
     }
     let audience = match &claims["aud"] {
         Value::String(a) => a.clone(),
-        Value::Array(a) if a.len() == 1 => a[0].as_str().context("its audience isn't text")?.to_string(),
+        Value::Array(a) if !a.is_empty() => {
+            let said: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
+            said.iter().find(|a| network.clients.iter().any(|(i, c)| i == issuer && c == *a)).or(said.first()).context("its audience isn't text")?.to_string()
+        }
         _ => bail!("it's for no one audience"),
     };
     let subject = claims["sub"].as_str().filter(|s| !s.is_empty()).context("it names no one")?.to_string();

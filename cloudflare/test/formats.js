@@ -1,5 +1,5 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { b64u, canonical, certify, checkCertificate, checkRequest, ed25519Public, hex, idOf, joinChallenge, joinCode, joinNonce, openNote, openUnder, passkeyKeys, sealTo, sealUnder, signedRequest, x25519Public } from "../shared/crypto.js";
+import { b64u, canonical, certify, checkCertificate, checkRequest, discoveryUrl, ed25519Public, hex, idOf, joinChallenge, joinCode, joinNonce, openNote, openUnder, passkeyKeys, sealTo, sealUnder, signedRequest, x25519Public } from "../shared/crypto.js";
 import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { AGENTS } from "../screen/agents.js";
 
@@ -47,6 +47,9 @@ const ops = {
       refusal: updateRefusal(yours),
       codes: CODES,
     };
+  },
+  async discoveryUrl({ issuer }) {
+    return { url: discoveryUrl(issuer) };
   },
   async openUnder({ secret, sealed }) {
     return { plain: b64u.encode(await openUnder(secret, b64u.decode(sealed))) };
