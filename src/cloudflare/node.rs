@@ -1,19 +1,19 @@
 //! The Cloudflare node (`cloudflare/node/`) on Cloudflare: a node of the network as a Worker in the account of its other Workers, with
 //! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
-//! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the network's
+//! WebAssembly (`update node` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the network's
 //! bucket, each at its latest deploy.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::cloudflare::{Cloudflare, NODE, Settings, Uploaded, Worker};
+use crate::cloudflare::{Cloudflare, Files, NODE, Settings, Worker, upload_hash};
 
 /// The Cloudflare node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
 /// in (the apps themselves it reads from the bucket, each at its latest deploy).
 pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
     let built = |name: &str| {
         let found = crate::config::CLOUDFLARE_NODE.iter().find(|(n, _)| *n == name).map(|(_, b)| b.to_vec());
-        found.with_context(|| format!("this build of {} has no Cloudflare node: {} update builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
+        found.with_context(|| format!("this build of {} has no Cloudflare node: {}-dev update node builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
     };
     Ok(modules_from(built("one_cloudflare_node.js")?, built("one_cloudflare_node_bg.wasm")?))
 }
@@ -63,8 +63,8 @@ pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&s
 }
 
 /// Puts the Cloudflare node in the Cloudflare account of the network's Workers, with no address, and
-/// the relay again, which hands it the datagrams sent to its endpoint once it's there.
-pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
+/// the relay again, from `sources`, which hands it the datagrams sent to its endpoint once it's there.
+pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files) -> Result<()> {
     anyhow::ensure!(settings.throwaway_user.is_none(), "a throwaway network's Workers run only beside its throwaway network");
     anyhow::ensure!(settings.cloudflare_node_endpoint().is_some(), "the Cloudflare node has no key: cloudflare node deploy makes one");
     let modules = modules()?;
@@ -73,14 +73,12 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     let meta = metadata(settings, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
     let mut what = vec![meta.to_string().into_bytes()];
     what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
-    let what = Uploaded::hash(&what);
-    let uploaded = Uploaded::load();
-    if !uploaded.same(cf, &name, &what) {
+    let what = upload_hash(&what);
+    if !(scripts.contains_key(&name) && cf.runs(&name, &what)?) {
         let modules: Vec<(&str, &str, &[u8])> = modules.iter().map(|(n, k, b)| (n.as_str(), *k, b.as_slice())).collect();
-        let version = cf.upload(&name, &modules, &meta)?;
-        uploaded.record(vec![(name.clone(), what, version)])?;
+        cf.upload(&name, &modules, &meta, &what)?;
     }
     // Its address may have been turned on by hand.
     cf.hide(&name)?;
-    crate::cloudflare::deploy_some(cf, settings, &[], &[Worker::named("relay")])
+    crate::cloudflare::deploy_some(cf, settings, sources, &[], &[Worker::named("relay")])
 }

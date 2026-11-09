@@ -1,4 +1,7 @@
 // Turns config.toml (or the one CONFIG names) into constants, so the code never names the product.
+#[path = "src/ui_files.rs"]
+mod ui_files;
+
 fn main() {
     let path = std::env::var("CONFIG").unwrap_or_else(|_| "config.toml".into());
     println!("cargo:rerun-if-changed={path}");
@@ -82,8 +85,8 @@ fn main() {
     for dir in &dirs {
         println!("cargo:rerun-if-changed={}", dir.display());
         let mut files = Vec::new();
-        collect(dir, dir, &mut files);
-        // Its service's source is built apart (`one-dev publish services`), and its tests run with ours: neither ships in its bundle.
+        files.extend(ui_files::collect(dir).into_iter().map(|(rel, abs)| (rel, abs.to_string_lossy().to_string())));
+        // Its service's source is built apart (`one-dev update services`), and its tests run with ours: neither ships in its bundle.
         files.retain(|(rel, _)| !rel.starts_with("service/") && !rel.starts_with("tests/"));
         files.sort();
         let name = dir.file_name().unwrap().to_string_lossy().to_string();
@@ -109,30 +112,12 @@ fn main() {
     }
     let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\npub const CLOUDFLARE_SERVICES: &[(&str, &[u8])] = &[{on_cloudflare}];\n");
     // The Workers' sources, built with the pinned Bun when they're run or deployed (src/cloudflare.rs), so a
-    // release deploys exactly the Workers it was signed with. Their tests stay in the repo.
-    let cloudflare = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("cloudflare");
-    println!("cargo:rerun-if-changed={}", cloudflare.display());
-    let mut files = Vec::new();
-    collect(&cloudflare, &cloudflare, &mut files);
-    // The relay's WebAssembly is built from relay/protos/ by hand (relay/build.sh), so only what it built ships; the
-    // Cloudflare node (node/) is Rust, which ships built (CLOUDFLARE_NODE, below).
-    files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("relay/protos/") && rel != "relay/build.sh" && !rel.starts_with("node/"));
-    // The gateway serves the screens' design kit beside the web client, the same files nodes put in screens.
-    let screen = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/screen");
-    println!("cargo:rerun-if-changed={}", screen.display());
-    let mut kit = Vec::new();
-    collect(&screen, &screen, &mut kit);
-    let kit = kit.into_iter().filter_map(|(rel, abs)| match rel.strip_prefix("ui/") {
-        Some(ui) => ui.strip_prefix("dist/").map(|built| (format!("ui/{built}"), abs)),
-        None => Some((rel, abs)),
-    });
-    files.extend(kit.map(|(rel, abs)| (format!("web/screen/{rel}"), abs)));
-    // Onboarding's auth pages, which the auth Worker imports as ../onboarding/pages.js.
-    let pages = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/onboarding/pages.js");
-    println!("cargo:rerun-if-changed={}", pages.display());
-    files.push(("onboarding/pages.js".into(), pages.to_string_lossy().into()));
-    // And the formats devices hold keys in, which the web client imports as ../shared/crypto.js.
-    files.push(("web/shared/crypto.js".into(), cloudflare.join("shared/crypto.js").to_string_lossy().into()));
+    // release deploys exactly the Workers it was signed with. Which files they are is `ui_files`.
+    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    for watched in ["cloudflare", "src/screen", "src/onboarding/pages.js"] {
+        println!("cargo:rerun-if-changed={}", root.join(watched).display());
+    }
+    let mut files: Vec<(String, String)> = ui_files::list(&root).into_iter().map(|(rel, abs)| (rel, abs.to_string_lossy().into())).collect();
     // The custom build's logo, which the web client shows where the apps show it.
     let logo = std::path::Path::new(&path).parent().unwrap().join(get("logo").as_str().unwrap());
     println!("cargo:rerun-if-changed={}", logo.display());
@@ -142,14 +127,11 @@ fn main() {
     println!("cargo:rerun-if-changed={}", icon.display());
     files.push(("web/icon.png".into(), std::fs::canonicalize(&icon).unwrap_or_else(|e| panic!("{}: {e}", icon.display())).to_string_lossy().into()));
     files.sort();
-    let root = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let sources: Vec<String> = files.iter().filter_map(|(rel, abs)| Some(format!("({rel:?}, {:?})", abs.strip_prefix(&root)?.trim_start_matches('/')))).collect();
-    let out = format!("{out}pub const CLOUDFLARE_SOURCES: &[(&str, &str)] = &[{}];\n", sources.join(", "));
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
-    // The Cloudflare node's WebAssembly (cloudflare/node/) and the client's, for browsers (client/src/wasm.rs), which `update`
+    // The Cloudflare node's WebAssembly (cloudflare/node/) and the client's, for browsers (client/src/wasm.rs), which `one-dev update node`
     // builds into CLOUDFLARE_NODE and CLIENT where Rust builds for WebAssembly, so a release carries them to devices with no
-    // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update`, `throwaway cloudflare
+    // Rust to deploy it from, and the address serves the web client. With neither set, the ones `update node`, `throwaway cloudflare
     // node deploy` and `throwaway client web` build into target/, if they're there, so every build of a checkout is the same one,
     // with or without them, but not their own (they're built with `one` in them, which would hold itself). Only a file that
     // exists is watched: cargo reruns a build for one that doesn't.
@@ -204,21 +186,6 @@ fn main() {
     let out = format!("{out}pub const COMMITTED: u64 = {committed};\npub const BUILD: &str = {commit:?};\npub const TARGET: &str = {:?};\n", std::env::var("TARGET").unwrap());
     let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("config.rs");
     std::fs::write(dest, out).unwrap();
-}
-
-fn collect(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, String)>) {
-    for entry in std::fs::read_dir(dir).unwrap().flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') || name == "node_modules" {
-            continue;
-        }
-        let path = entry.path();
-        if path.is_dir() {
-            collect(root, &path, out);
-        } else {
-            out.push((path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"), path.to_string_lossy().to_string()));
-        }
-    }
 }
 
 /// `pub const <var>: &[(&str, &[u8])]` holding `names`, which are in the folder the environment variable `var` names or, with

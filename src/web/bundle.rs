@@ -36,6 +36,18 @@ impl Bundle {
         Bundle { commit: commit.to_string(), committed, shell: super::SHELL, files: super::with_client() }
     }
 
+    /// What says whether two are the same web client: their files, whatever commit each was made at.
+    #[cfg(feature = "node")]
+    pub fn files_hash(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        for (path, bytes) in &self.files {
+            hash.update(format!("{path}\0{}\0", bytes.len()));
+            hash.update(bytes);
+        }
+        data_encoding::HEXLOWER.encode(&hash.finalize())
+    }
+
     /// As gzip, to sign and send.
     #[cfg(feature = "node")]
     pub fn packed(&self) -> Result<Vec<u8>> {
@@ -50,8 +62,9 @@ impl Bundle {
         Ok(gz.finish()?)
     }
 
-    /// What `packed` made, whose signature was already checked: never call this on bytes the release key hasn't signed.
-    fn unpacked(packed: &[u8]) -> Result<Bundle> {
+    /// What `packed` made, whose signature was already checked, or whose hash the signed record names: never call this
+    /// on bytes the release key hasn't vouched for.
+    pub fn unpacked(packed: &[u8]) -> Result<Bundle> {
         let mut all = Vec::new();
         flate2::read::GzDecoder::new(packed).read_to_end(&mut all).context("it isn't a bundle")?;
         let at = all.iter().position(|&b| b == b'\n').context("it isn't a bundle")?;

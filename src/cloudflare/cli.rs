@@ -31,7 +31,7 @@ fn devices_here(node: &Client, settings: crate::cloudflare::Settings, needed: bo
 }
 
 
-/// Makes this device the Workers' home, or refuses (exit 3, which `one-dev deploy workers` passes over) where it isn't.
+/// Makes this device the Workers' home, or refuses (exit 3, which `one-dev update workers` passes over) where it isn't.
 fn at_home(settings: &mut crate::cloudflare::Settings) -> Result<()> {
     settings.at_home().map_err(|err| match err.downcast::<crate::cloudflare::NotHome>() {
         Ok(not) => Failed::Refused(not.0).into(),
@@ -100,6 +100,7 @@ pub fn commands() -> Command {
                 }
                 ["cloudflare", "deploy"] => {
                     let loaded = crate::cloudflare::Settings::load();
+                    let first = loaded.is_err();
                     let cf = cloudflare(g, loaded.as_ref().ok())?;
                     let settings = match loaded {
                         Ok(settings) => settings,
@@ -132,11 +133,14 @@ pub fn commands() -> Command {
                     let mut settings = settings;
                     at_home(&mut settings)?;
                     let settings = devices_here(g.node, settings, !g.has("new"))?;
-                    let mut web = settings.web();
+                    // A first deploy has nothing at its address yet to read.
+                    let newest = if first { crate::cloudflare::Newest::built() } else { crate::cloudflare::Newest::read(&settings.address)? };
+                    println!("{}", newest.said);
+                    let mut web = settings.web_with(newest.web);
                     web.extend(crate::cloudflare::precompressed(&web)?);
-                    crate::cloudflare::deploy(&cf, &settings, &web)?;
+                    crate::cloudflare::deploy(&cf, &settings, &newest.workers, &web)?;
                     if settings.cloudflare_node {
-                        crate::cloudflare::node::deploy(&cf, &settings)?;
+                        crate::cloudflare::node::deploy(&cf, &settings, &newest.workers)?;
                     }
                     // The Google client its users sign in with, signed by this admin's device: a new device's sign-in counts
                     // only for it (`sign_in_proof::CLIENTS`), whatever auth says.
@@ -162,7 +166,7 @@ pub fn commands() -> Command {
                     }
                     // The relay it deploys again binds the Cloudflare node's endpoint only for a network that has one.
                     let was = std::mem::replace(&mut settings.cloudflare_node, true);
-                    crate::cloudflare::node::deploy(&cf, &settings)?;
+                    crate::cloudflare::node::deploy(&cf, &settings, &crate::cloudflare::Newest::read(&settings.address)?.workers)?;
                     if !was {
                         settings.save()?;
                     }

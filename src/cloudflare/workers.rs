@@ -68,8 +68,8 @@ impl Worker {
 
     /// Its modules besides its own, (name, bytes): its WebAssembly, and, for the remote MCP server, the Cloudflare node's
     /// build (`node`), which runs its devices' endpoints. None if it needs that and there's none.
-    pub fn modules(&self, node: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
-        let mut out = wasm(self.entry);
+    pub fn modules(&self, files: &Files, node: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
+        let mut out = wasm(files, self.entry);
         if self.node_build {
             out.extend(node?.iter().filter(|(name, _, _)| name.starts_with("one_cloudflare_node")).map(|(name, _, bytes)| (name.clone(), bytes.clone())));
         }
@@ -81,17 +81,20 @@ impl Worker {
     }
 }
 
-/// A Worker's WebAssembly modules, (name, bytes): the `.wasm` files in its module's folder, as this release has them.
-fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
+/// A Worker's WebAssembly modules, (name, bytes): the `.wasm` files in its module's folder.
+fn wasm(files: &Files, entry: &str) -> Vec<(String, Vec<u8>)> {
     let dir = entry.rsplit_once('/').map_or("", |(dir, _)| dir);
-    crate::config::CLOUDFLARE
+    files
         .iter()
         .filter_map(|(path, bytes)| {
             let name = path.strip_prefix(dir)?.strip_prefix('/')?;
-            (name.ends_with(".wasm") && !name.contains('/')).then(|| (name.to_string(), bytes.to_vec()))
+            (name.ends_with(".wasm") && !name.contains('/')).then(|| (name.to_string(), bytes.clone()))
         })
         .collect()
 }
+
+/// Files by their path: the Workers' (in `cloudflare/`), or the web client's.
+pub type Files = Vec<(String, Vec<u8>)>;
 
 pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
 
@@ -613,7 +616,7 @@ pub fn served_with(settings: &Settings, web: &Path, cloudflare_node: Option<Modu
     // A build without the Cloudflare node's WebAssembly has no remote MCP server, and nothing binds one.
     let mut served = Vec::new();
     for worker in WORKERS {
-        let Some(modules) = worker.modules(cloudflare_node.as_ref()) else { continue };
+        let Some(modules) = worker.modules(&crate::ui_folder::cloudflare(), cloudflare_node.as_ref()) else { continue };
         served.push(Served {
             name: worker.name.to_string(),
             module: module(worker.entry)?,
@@ -644,7 +647,11 @@ impl Settings {
     /// (`.well-known/assetlinks.json`) and Windows' web links file (`.well-known/windows-app-web-link`), which let the
     /// apps open links to the address, and the guide to connecting an AI (`llms.txt`).
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
-        let mut files = crate::web::with_client();
+        self.web_with(crate::web::with_client())
+    }
+
+    /// `web`, with the web client's files as `files` has them.
+    pub fn web_with(&self, mut files: Files) -> Files {
         if !self.android.is_empty() {
             let links = json!([{
                 "relation": ["delegate_permission/common.handle_all_urls"],
@@ -1022,17 +1029,22 @@ impl Cloudflare {
         Ok(list.as_array().into_iter().flatten().filter_map(|s| Some((s["id"].as_str()?.to_string(), script(s)))).collect())
     }
 
-    /// The versions a Worker's active deployment runs, as one string, if it has one: without hyphens, as `upload`
-    /// gives them.
-    pub(crate) fn active(&self, name: &str) -> Result<Option<String>> {
+    /// Whether the Worker `name` runs what `what` names (`upload_hash`), as Cloudflare says of the one version it serves:
+    /// a Worker that would get the same isn't uploaded again, which would restart its Durable Objects, and whatever
+    /// else put a version there (an edit, a rollback) counts as what it is.
+    pub(crate) fn runs(&self, name: &str, what: &str) -> Result<bool> {
         let list = self.call("GET", &format!("/accounts/{}/workers/scripts/{name}/deployments", self.account), None)?;
-        let versions = list["deployments"][0]["versions"].as_array().into_iter().flatten().filter_map(|v| Some(v["version_id"].as_str()?.replace('-', ""))).collect::<Vec<_>>();
-        Ok((!versions.is_empty()).then(|| versions.join(",")))
+        let versions = list["deployments"][0]["versions"].as_array().cloned().unwrap_or_default();
+        let [only] = versions.as_slice() else { return Ok(false) };
+        let version = self.call("GET", &format!("/accounts/{}/workers/scripts/{name}/versions/{}", self.account, only["version_id"].as_str().context("Cloudflare named no version")?), None)?;
+        Ok(version["annotations"]["workers/message"] == what)
     }
 
     /// Uploads a Worker: its modules (name, type, bytes), the first its main one, and its bindings and Durable Object
-    /// class: → the version it deployed, if Cloudflare says.
-    pub(crate) fn upload(&self, name: &str, modules: &[(&str, &str, &[u8])], metadata: &Value) -> Result<Option<String>> {
+    /// class, with what names them (`what`) kept on the version, and checks Cloudflare then serves it.
+    pub(crate) fn upload(&self, name: &str, modules: &[(&str, &str, &[u8])], metadata: &Value, what: &str) -> Result<()> {
+        let mut metadata = metadata.clone();
+        metadata["annotations"] = json!({ "workers/message": what });
         let boundary = format!("cloudflare-{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 12]>()));
         let mut body = Vec::new();
         body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes());
@@ -1042,8 +1054,9 @@ impl Cloudflare {
             body.extend(b"\r\n");
         }
         body.extend(format!("--{boundary}--\r\n").as_bytes());
-        let done = self.call("PUT", &format!("/accounts/{}/workers/scripts/{name}", self.account), Some((format!("multipart/form-data; boundary={boundary}"), body)))?;
-        Ok(done["deployment_id"].as_str().map(str::to_string))
+        self.call("PUT", &format!("/accounts/{}/workers/scripts/{name}", self.account), Some((format!("multipart/form-data; boundary={boundary}"), body)))?;
+        ensure!(self.runs(name, what)?, "Cloudflare took the upload of {name}, but serves another version");
+        Ok(())
     }
 
     /// Uploads `files` (path, bytes) as a Worker's static assets, those Cloudflare hasn't already: → the token its
@@ -1158,22 +1171,20 @@ pub fn metadata(settings: &Settings, worker: &Worker, migration: Option<&str>, e
     (meta, complete)
 }
 
-/// Deploys the network's Workers to Cloudflare, each with its Durable Object, built from this release, the
-/// gateway with the web client's files (`web`) as its static assets, which it serves itself. A service whose binding
-/// names one not deployed yet goes up without it, and again once that one is.
-pub fn deploy(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)]) -> Result<()> {
-    deploy_some(cf, settings, web, &WORKERS.iter().collect::<Vec<_>>())
+/// Deploys the network's Workers to Cloudflare, each with its Durable Object, built from `sources`, the gateway with
+/// the web client's files (`web`) as its static assets, which it serves itself. A service whose binding names one not
+/// deployed yet goes up without it, and again once that one is.
+pub fn deploy(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(String, Vec<u8>)]) -> Result<()> {
+    deploy_some(cf, settings, sources, web, &WORKERS.iter().collect::<Vec<_>>())
 }
 
-pub fn deploy_some(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
+pub fn deploy_some(cf: &Cloudflare, settings: &Settings, sources: &Files, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
     ensure!(settings.throwaway_user.is_none(), "a throwaway network's auth lets in anyone who reaches it, so its Workers run only beside its throwaway network");
     if workers.iter().any(|w| w.serves_web) {
         parses(web)?;
     }
     let mut left = workers.to_vec();
     let mut scripts = cf.scripts()?;
-    let uploaded = Uploaded::load();
-    let mut sent = Vec::new();
     for _ in 0..2 {
         let mut again = Vec::new();
         for worker in left {
@@ -1181,20 +1192,20 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>
             let migration = scripts.get(&name).and_then(|s| s.migration.clone());
             let (mut meta, complete) = metadata(settings, worker, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
             let url = worker.place(settings).map(|(url, _)| url);
-            let Some(wasm) = worker.modules(crate::cloudflare::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {} Worker runs: {} update builds one", worker.name, crate::config::CLI) };
-            let module = module(worker.entry)?;
+            let Some(wasm) = worker.modules(sources, crate::cloudflare::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {} Worker runs: {}-dev update node builds one", worker.name, crate::config::CLI) };
+            let module = module_from(sources.clone(), worker.entry)?;
             let mut what = vec![meta.to_string().into_bytes(), module.clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
             if worker.serves_web {
                 what.extend(web.iter().flat_map(|(path, bytes)| [path.as_bytes().to_vec(), bytes.clone()]));
             }
-            let what = Uploaded::hash(&what);
+            let what = upload_hash(&what);
             // Its address may have been changed by hand; one with none is reached only by binding.
             let reach = || match url {
                 Some(url) => cf.reach(&name, url),
                 None => cf.hide(&name),
             };
-            if complete && uploaded.same(cf, &name, &what) {
+            if complete && scripts.contains_key(&name) && cf.runs(&name, &what)? {
                 reach()?;
                 continue;
             }
@@ -1205,20 +1216,18 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>
             }
             let mut parts: Vec<(&str, &str, &[u8])> = vec![("worker.js", "application/javascript+module", &module)];
             parts.extend(wasm.iter().map(|(name, bytes)| (name.as_str(), if name.ends_with(".js") { "application/javascript+module" } else { "application/wasm" }, bytes.as_slice())));
-            let version = cf.upload(&name, &parts, &meta)?;
+            cf.upload(&name, &parts, &meta, &what)?;
             reach()?;
             // Later services' bindings to it resolve in this pass, and it has had its migration.
             let migration = meta["migrations"]["new_tag"].as_str().map(str::to_string).or(migration);
             scripts.insert(name.clone(), Script { migration });
-            if complete {
-                sent.push((name, what, version));
-            } else {
+            if !complete {
                 again.push(worker);
             }
         }
         left = again;
         if left.is_empty() {
-            return uploaded.record(sent);
+            return Ok(());
         }
     }
     bail!("some services' bindings never resolved")
@@ -1229,49 +1238,13 @@ pub struct Script {
     pub migration: Option<String>,
 }
 
-/// What this machine last uploaded to each of the network's Workers: a hash of everything it sent (the secrets in its
-/// bindings too), and the version Cloudflare made of it. A Worker that would get the same, and still runs that
-/// version (no other upload, edit or rollback since), isn't uploaded again: an update deploys the Workers each time the node changes, and most of
-/// its changes leave every Worker as it was.
-pub(crate) struct Uploaded(serde_json::Map<String, Value>);
-
-impl Uploaded {
-    fn path() -> PathBuf {
-        Settings::path().with_file_name("uploaded.json")
+/// What names everything a Worker would be sent (the secrets in its bindings too), which its version keeps on
+/// Cloudflare (`Cloudflare::upload`, `Cloudflare::runs`).
+pub(crate) fn upload_hash(parts: &[Vec<u8>]) -> String {
+    let mut hash = Sha256::new();
+    for part in parts {
+        hash.update((part.len() as u64).to_le_bytes());
+        hash.update(part);
     }
-
-    pub(crate) fn load() -> Uploaded {
-        let read = std::fs::read(Uploaded::path()).ok().and_then(|b| serde_json::from_slice(&b).ok());
-        Uploaded(read.unwrap_or_default())
-    }
-
-    pub(crate) fn hash(parts: &[Vec<u8>]) -> String {
-        let mut hash = Sha256::new();
-        for part in parts {
-            hash.update((part.len() as u64).to_le_bytes());
-            hash.update(part);
-        }
-        data_encoding::HEXLOWER.encode(&hash.finalize())
-    }
-
-    /// Whether `name` runs `what`, as this machine uploaded it, and nothing has deployed it since.
-    pub(crate) fn same(&self, cf: &Cloudflare, name: &str, what: &str) -> bool {
-        let Some(was) = self.0.get(name).filter(|was| was["hash"] == what) else { return false };
-        cf.active(name).ok().flatten().is_some_and(|active| was["version"].as_str() == Some(active.as_str()))
-    }
-
-    /// Keeps what was uploaded to each of `sent` (name, hash, the version Cloudflare made of it).
-    pub(crate) fn record(mut self, sent: Vec<(String, String, Option<String>)>) -> Result<()> {
-        if sent.is_empty() {
-            return Ok(());
-        }
-        for (name, what, version) in sent {
-            match version {
-                Some(version) => self.0.insert(name, json!({ "hash": what, "version": version })),
-                None => self.0.remove(&name),
-            };
-        }
-        std::fs::write(Uploaded::path(), Value::Object(self.0).to_string())?;
-        Ok(())
-    }
+    data_encoding::HEXLOWER.encode(&hash.finalize())
 }

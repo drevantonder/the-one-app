@@ -1,5 +1,5 @@
 //! The signed "latest" record: one small file, `<address>/updates/newest`, that says what's newest of everything a device
-//! takes from `one-dev publish`, so a device takes its own updates with nothing else of the network working: not the protocol,
+//! takes from `one-dev update`, so a device takes its own updates with nothing else of the network working: not the protocol,
 //! READS, the relay or a node. Each thing it names has its file beside it, `<address>/updates/<sha256>`, unsealed.
 //!
 //! THIS FORMAT MUST NEVER BREAK. A device too old to speak anything else still reads it, and only by reading it does it
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! `name` is `node/<target>`, `app/<target>` (a Mac's zip), `service/<name>/<target>`, `web` (the web client's signed
-//! bundle), or `source` (what a Mac with nothing published builds itself, whose `sha256` is `-`); `committed` is seconds
+//! bundle), `workers` (the Workers' sources, which only their home device reads), or `source` (what a Mac with nothing published builds itself, whose `sha256` is `-`); `committed` is seconds
 //! since 1970; `config` is the custom build's config commit, `-` if it has none. The signature (the release key's, as
 //! `ssh-keygen -Y sign -n release-latest` makes it) is over everything before its first line.
 
@@ -59,6 +59,9 @@ impl Thing {
     pub fn node_name(target: &str) -> String {
         format!("node/{target}")
     }
+
+    pub const WORKERS: &str = "workers";
+    pub const WEB: &str = "web";
 
     pub fn app_name(target: &str) -> String {
         format!("app/{target}")
