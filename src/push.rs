@@ -10,6 +10,8 @@
 //! Each device that gets pushes registers its address with the Worker itself (`register_request`). A node pushes for any
 //! caller (`node::push`): it seals a note to each of the caller's devices and hands them to the Worker.
 
+pub mod tools;
+
 use anyhow::{Result, anyhow, ensure};
 use data_encoding::{BASE64URL_NOPAD as B64U, HEXLOWER};
 use ed25519_dalek::SigningKey;

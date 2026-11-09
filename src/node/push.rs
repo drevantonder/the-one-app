@@ -1,8 +1,6 @@
 //! Push (`crate::push`), which every node does itself for any caller, through the network's push Worker: never a
 //! service a device runs.
 
-pub(crate) mod routes;
-
 use crate::config::YOURS;
 use super::*;
 use data_encoding::BASE64URL_NOPAD as B64U;
@@ -11,7 +9,7 @@ use crate::push;
 
 impl Node {
     /// The caller's devices that get pushes, as the push Worker has them registered.
-    pub(super) async fn push_devices(&self, user: &str) -> Result<Value> {
+    pub async fn push_devices(&self, user: &str) -> Result<Value> {
         let mine = self.devices_of(user)?;
         let said = self.ask_push("/push/devices", json!({ "user": user, "keys": mine.iter().map(|(k, _, _)| hex(k)).collect::<Vec<_>>() })).await?;
         let name = |key: &str| mine.iter().find(|(k, _, _)| hex(k) == key).map(|(_, _, n)| n.clone()).unwrap_or_default();
@@ -20,7 +18,7 @@ impl Node {
     }
 
     /// Which push services the network's push Worker sends through.
-    pub(super) async fn push_status(&self) -> Result<Value> {
+    pub async fn push_status(&self) -> Result<Value> {
         let address = self.address()?;
         let said = tokio::task::spawn_blocking(move || -> Result<Value> { Ok(agent().get(format!("{address}/push/key")).call()?.body_mut().read_json()?) }).await??;
         Ok(json!({ "via": said["via"] }))
@@ -28,7 +26,7 @@ impl Node {
 
     /// Pushes `note` to each of `user`'s devices, sealed to each: → how many it went to, and how many of their devices
     /// get pushes.
-    pub(super) async fn push_note(&self, user: &str, note: &push::Note) -> Result<Value> {
+    pub async fn push_note(&self, user: &str, note: &push::Note) -> Result<Value> {
         let key = self.signing_key();
         let now = now_ms();
         let notes: Vec<Value> = self
