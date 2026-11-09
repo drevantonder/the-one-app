@@ -54,7 +54,7 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(format!("{}\n{host}\n{script}", dir.display()).as_bytes()).into();
     let control = 30_000 + u16::from_le_bytes([hash[2], hash[3]]) % 20_000;
     eprintln!("Building client/native on {host} (dev profile; the first time takes minutes)…");
-    let said = ssh(&format!("cd {there} && PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH client/native/{script}/throwaway.sh '{address}' {control}"))?;
+    let said = ssh(&format!("cd {there} && PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH client/native/{script}/throwaway.sh '{address}' {control} {}", shell_quote(&simulator_name(dir))))?;
     // The iPhone's says its simulator too.
     let (sim, log) = match said.lines().last().unwrap_or_default().rsplit_once(' ') {
         Some((sim, log)) if iphone => (sim.to_string(), log.to_string()),
@@ -119,6 +119,12 @@ pub(crate) fn apple(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     Ok(())
 }
 
+/// The name of the iPhone simulator this throwaway network made, which no other has (its folder's name is its checkout's, and
+/// a hash of its path): what `stop` finds it by, so it never takes down another's.
+fn simulator_name(dir: &Path) -> String {
+    format!("{CLI} throwaway {}", dir.file_name().unwrap_or_default().to_string_lossy())
+}
+
 /// Takes down what `client mac` and `client iphone` started on the Mac: the Mac app, and the iPhone app's simulator, and
 /// with `delete`, the copy of this checkout they were built from.
 pub(crate) fn stop(dir: &Path, delete: bool) {
@@ -129,10 +135,15 @@ pub(crate) fn stop(dir: &Path, delete: bool) {
         if delete && let Some(there) = words.next() {
             command += &format!("; rm -rf {}", shell_quote(there));
         }
-        let _ = std::process::Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, &command]).output();
+        match std::process::Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, &command]).output() {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => eprintln!("Couldn't take down the {file} client on {host}: {}", String::from_utf8_lossy(&out.stderr).trim()),
+            Err(err) => eprintln!("Couldn't take down the {file} client on {host}: {err}"),
+        }
         let _ = std::fs::remove_file(dir.join(file));
     };
     on("mac", format!("launchctl bootout gui/$(id -u)/app.{CLI}.mac.throwaway"));
-    let sim = format!("'{CLI}-dev throwaway'");
-    on("iphone", format!("xcrun simctl shutdown {sim}; xcrun simctl delete {sim}"));
+    // Every simulator of that name (a run that stopped before it said which): by its id, as a name is only what's shown.
+    let name = shell_quote(&simulator_name(dir));
+    on("iphone", format!("PATH=/opt/homebrew/bin:$PATH; for sim in $(xcrun simctl list devices -j | jq -r --arg n {name} '.devices[][] | select(.name == $n) | .udid'); do xcrun simctl shutdown $sim; xcrun simctl delete $sim; done"));
 }

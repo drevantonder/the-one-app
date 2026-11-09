@@ -1,15 +1,14 @@
 #!/bin/bash
 # `one-dev throwaway client iphone`'s half on the Mac: builds this checkout's iPhone app for the simulator, on a simulator
-# of its own ("<CLI> throwaway", made the first time, booted now), and starts it signed in to ADDRESS, with what it says
+# of its own (named NAME, which no other throwaway's has: made the first time, booted now), and starts it signed in to ADDRESS, with what it says
 # in target/iphone-throwaway.log here. Started again each time; `one-dev throwaway stop` shuts the simulator down and deletes
 # it. The simulator's look is a phone's, not its defaults (light, the usual text size): dark, and the text a size smaller
 # (Andre's phone), as a page that only draws at the defaults would show nothing there, as one did when Dynamic Type zoomed it.
-#   throwaway.sh <address> <control port>
+#   throwaway.sh <address> <control port> <simulator name>
 set -euo pipefail
 . "$(dirname "$0")/../apple.sh"
 cd "$native"
-address=$1 control=$2
-name="$CONFIG_CLI throwaway"
+address=$1 control=$2 name=$3
 sim=$(xcrun simctl list devices -j | jq -r --arg n "$name" '[.devices[][] | select(.name == $n)][0].udid // empty')
 if [ -z "$sim" ]; then
 	# An iPhone like one the Mac already simulates, on a runtime it has.
