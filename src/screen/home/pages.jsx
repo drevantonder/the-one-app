@@ -550,7 +550,7 @@ function Tile({ name, icon, size, badge, onClick, children }) {
         {children || <AppIcon app={icon} size={size} />}
         {badge > 0 && <Badge variant="destructive" className="absolute -right-2 -top-2 h-6 min-w-6 px-1.5 text-sm font-semibold tabular-nums dark:bg-destructive">{badge > 99 ? "99+" : badge}</Badge>}
       </span>
-      <span className="line-clamp-2 max-w-full text-center text-[13px] leading-tight [overflow-wrap:anywhere]">{name}</span>
+      <span className="line-clamp-2 w-[calc(100%+0.75rem)] text-center text-[13px] leading-tight [overflow-wrap:anywhere]">{name}</span>
     </button>
   )
 }
