@@ -622,37 +622,35 @@ const app = {
         },
       },
       async render(ctx) {
-        if (!ctx.global) return { t: "col", c: [] };
+        if (!ctx.global) return { t: "text", text: "No repos here.", tone: "muted" };
         const many = { small: 1, medium: 2, large: 4, xl: 6 }[ctx.size] || 2;
         const { commits, week, left } = await recent(ctx, many, ctx.options.repo);
-        const problem = left.length ? { t: "text", text: `Couldn't read ${left.join(", ")}`, size: "xs", tone: "danger", lines: 1 } : null;
+        const problem = left.length ? { t: "text", text: `Couldn't read ${left.join(", ")}`, size: "xs", tone: "bad", lines: 1 } : null;
         if (!commits.length) {
           const any = (await ctx.global.query("select 1 from repos where deleted is null limit 1")).length;
-          return problem || { t: "text", text: any ? "No commits yet." : "No repos yet.", size: "sm", tone: "muted" };
+          return problem || { t: "text", text: any ? "No commits yet." : "No repos yet.", tone: "muted" };
         }
         const total = week.reduce((a, n) => a + n, 0);
         const now = ctx.now(), DAY = 86400000;
         const days = week.map((_, i) => new Date(now - (6 - i) * DAY).toLocaleDateString("en-US", { weekday: "narrow" }));
         const link = (c) => ({ screen: "commit", params: { repo: c.repo, sha: c.sha } });
-        const muted = (text, extra = {}) => ({ t: "text", text, size: "xs", tone: "muted", lines: 1, ...extra });
-        const commit = (c, lines, small = false) => ({
-          t: "col", gap: 2, link: link(c),
-          c: [
-            { t: "text", text: c.subject, size: "sm", weight: "medium", lines },
-            { t: "row", gap: 5, c: [{ t: "icon", name: "git-commit", tone: "muted", w: 11 }, muted(small ? c.repo : `${c.repo} · ${c.author}`), { t: "col", grow: true, c: [] }, { t: "time", at: c.time, size: "xs", tone: "muted" }] },
-          ],
-        });
-        const activity = (w = 64) => ({ t: "row", gap: 8, c: [muted(`${total} this week`, { weight: "medium" }), { t: "col", grow: true, c: [] }, { t: "spark", values: week, tone: "muted", w, h: 14, alt: "Commits a day this week" }] });
+        const muted = (text, extra = {}) => ({ t: "text", text, size: "sm", tone: "muted", lines: 1, ...extra });
+        const subject = (c, lines) => ({ t: "text", text: c.subject, weight: "medium", lines });
+        const about = (c, who) => ({ t: "row", gap: 6, c: [muted(who), { t: "col", grow: true, c: [] }, { t: "time", at: c.time, size: "sm", tone: "muted" }] });
+        const commit = (c, lines) => ({ t: "col", gap: 2, link: link(c), c: [subject(c, lines), about(c, `${c.repo} · ${c.author}`)] });
+        const activity = { t: "row", gap: 8, c: [muted(`${total} this week`), { t: "col", grow: true, c: [] }, { t: "spark", values: week, tone: "muted", w: 64, h: 14, alt: "Commits a day this week" }] };
         const spacer = { t: "col", grow: true, gap: 0, c: [] };
         const spread = (nodes) => nodes.flatMap((n, i) => (i ? [spacer, n] : [n]));
         const shown = (tree) => (problem ? { ...tree, c: [...tree.c, problem] } : tree);
-        if (ctx.size === "small") return shown({ t: "col", gap: 4, c: [commit(commits[0], 3, true), spacer, activity(44)] });
-        if (ctx.size === "medium") return shown({ t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 1)), activity()]) });
+        // Small is one fact: the latest commit.
+        if (ctx.size === "small") return shown({ t: "col", gap: 4, link: link(commits[0]), c: [subject(commits[0], 4), spacer, about(commits[0], commits[0].repo)] });
+        if (ctx.size === "medium") return shown({ t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 1)), activity]) });
         const chart = { t: "chart", values: week, labels: days, tone: "muted", h: 36, alt: "Commits a day this week" };
-        if (ctx.size === "large") return shown({ t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), { t: "col", gap: 4, c: [muted(`${total} commits this week`, { weight: "medium" }), chart] }]) });
-        // Extra large: the rows of medium and large, wider and taller, spread to fill the card (a row at the top of a
-        // tree doesn't take the card's height on every client; a column does).
-        return shown({ t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), activity(160)]) });
+        const summary = { t: "col", gap: 4, c: [muted(`${total} commits this week`), chart] };
+        if (ctx.size === "large") return shown({ t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), summary]) });
+        // Extra large: the commits beside the week. The row grows inside a column: a row at the top of a tree doesn't
+        // take the card's height on every client.
+        return shown({ t: "col", gap: 4, c: [{ t: "row", grow: true, gap: 24, c: [{ t: "col", grow: true, gap: 8, c: commits.map((c) => commit(c, 1)) }, { t: "col", w: 260, gap: 4, c: [muted(`${total} commits this week`), { ...chart, h: 160 }] }] }] });
       },
     },
   },
