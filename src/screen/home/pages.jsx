@@ -2,16 +2,16 @@
 // Settings is a page of its items. With `scope`, that page alone (a window whose sidebar picks it; "settings" for
 // Settings); with `swipe`, every page side by side then Settings, opened at `scope`, to swipe between (a phone's shell),
 // under a pill of dots.
-// Touch and hold, or right-click, for what an icon or widget offers: its sizes, its settings, taking it off, and
-// arranging the page, where everything jiggles and drags anywhere. Holding something and moving starts arranging
-// with it in hand; holding empty space starts it too.
+// Touch and hold, or right-click, for what an icon or widget offers: its sizes, its settings, arranging the page, and
+// taking it off. Arranging, everything that can move jiggles and drags anywhere. Holding something and moving starts
+// arranging with it in hand; holding or right-clicking empty space starts it too.
 //
 // A client's own screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into dist/pages.html,
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Badge, Button, Empty, Icon, Label, Problem, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, Tabs, TabsList, TabsTrigger, cn, useWidth, WidgetCard } from "@one/ui"
+import { AppIcon, Badge, Button, Empty, Icon, Label, Problem, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, cn, useWidth, WidgetCard } from "@one/ui"
 import { home } from "./lib/model.js"
 
 const { scope: chosen, swipe } = one.params || {}
@@ -20,15 +20,18 @@ const CELLS = { small: [2, 2], medium: [4, 2], large: [4, 4], xl: [8, 4] }
 const NAMES = { small: "Small", medium: "Medium", large: "Large", xl: "Extra Large" }
 const SHAPES = { small: "square", medium: "rectangle", large: "squares-four", xl: "columns" }
 const HOLD = 450
+// How long arranging takes to die away once it's ended.
+const LEAVING = 200
 // Whether the shell lifts what a finger holds itself (the iPhone's), and answers its own `contextmenu`.
 const lifts = !!window.__oneLifts
 const editHomePage = { title: "Edit Home Page", icon: "dots-nine", run: () => edit(true) }
 
-// What the screen is doing: the pages' view, arranging (`editing`), the page shown (`at`, swiping), what a drag has
-// reordered or a corner has resized before it's kept (`order`, `sizes`), the widgets whose new options are being drawn
-// (`refreshing`), each grid's columns and cell, and the dialogs over it.
+// What the screen is doing: the pages' view, arranging (`editing`, and `leaving` as it dies away), the page shown (`at`,
+// swiping), what a drag has reordered or a corner has resized before it's kept (`order`, `sizes`), what Undo puts back
+// (`undo`), the widgets whose new options are being drawn (`refreshing`), each grid's columns and cell, and the dialogs
+// over it.
 // Drawn from a snapshot of it (`snapshot`), so what's drawn is always that and no more.
-const S = { editing: false, at: chosen || "user", order: {}, sizes: {}, refreshing: new Set(), geometry: {}, dialog: null, phase: "loading", problem: null, render: () => {}, view: [] }
+const S = { editing: false, leaving: false, undo: [], at: chosen || "user", order: {}, sizes: {}, refreshing: new Set(), geometry: {}, dialog: null, phase: "loading", problem: null, render: () => {}, view: [] }
 // What a finger or the mouse is doing: holding something (`held`), or carrying it (`drag`).
 let held = null, drag = null, quietUntil = 0, redrawLater = false, flipNext = false
 /// Just after a hold or a drag, the tap it ends in isn't a tap.
@@ -43,12 +46,14 @@ function draw() {
 }
 /// What's drawn: the pages as they are now, and the state of the screen around them.
 const snapshot = () => ({
-  phase: S.phase, problem: S.problem, editing: S.editing, at: S.at, dialog: S.dialog, refreshing: [...S.refreshing],
+  phase: S.phase, problem: S.problem, editing: S.editing, leaving: S.leaving, undo: S.undo.length > 0, at: S.at, dialog: S.dialog, refreshing: [...S.refreshing],
   view: S.phase === "ready" ? viewOf() : [],
   attention: S.phase === "ready" && (home.data.state?.settings_items || []).some((i) => i.badge),
 })
 const positions = () => (swipe ? [...home.pages().map((p) => p.scope), SETTINGS] : [chosen || "user"])
 const titleOf = (scope) => (scope === SETTINGS ? "Settings" : home.page(scope)?.title || "")
+/// Whether a page has anything to arrange: someone who may arrange it, and an app on it.
+const arrangeable = (scope) => !!home.page(scope) && home.canArrange(scope) && !S.view.find((v) => v.scope === scope)?.empty
 
 // MARK: What each page shows
 
@@ -89,7 +94,7 @@ function widgetItem(w, kept, p) {
 function pendingItem(kept, p) {
   const key = `widget:${kept.id}`
   const size = CELLS[S.sizes[key] || kept.size] ? S.sizes[key] || kept.size : "medium"
-  const menu = home.canArrange(p.scope) ? (e) => home.menu([{ ...editHomePage, section: true }, { title: "Remove Widget", icon: "minus-circle", danger: true, section: true, run: () => remove(p, { key }) }], e) : undefined
+  const menu = home.canArrange(p.scope) ? (e) => home.menu([editHomePage, { title: "Remove Widget", icon: "minus-circle", danger: true, section: true, run: () => remove(p, { key }) }], e) : undefined
   return { slot: key, key, kind: "pending", kept, size, name: home.label(home.app(kept.app)) || kept.widget, menu }
 }
 
@@ -101,10 +106,10 @@ function pageView(p) {
   let list = home.items(p).map((item) => {
     if (item.pending) return pendingItem(item.kept, p)
     if (item.widget) return widgetItem(item.widget, item.kept, p)
-    const a = item.app, page = home.page(p.scope) || p
+    const a = item.app, actions = home.actions(a, home.page(p.scope) || p)
     return tile(`app:${a.name}`, {
       key: `app:${a.name}`, kept: { app: a.name }, name: home.label(a), icon: a, badge: home.badge(a.name, p), open: home.open(a, p),
-      menu: (e) => home.menu([...(arrange ? [{ ...editHomePage, section: true }] : []), ...addActions(page, a), ...home.actions(a, page)], e),
+      menu: (e) => home.menu([...actions.filter((x) => !x.danger), ...(arrange ? [{ ...editHomePage, section: true }] : []), ...actions.filter((x) => x.danger)], e),
     })
   })
   const order = S.order[p.scope]
@@ -112,10 +117,12 @@ function pageView(p) {
   // Accounts once, on the first page: every page's, listed together, opened as a page.
   if (first) {
     const apps = [...new Map(home.pages().flatMap(home.accountsOn).map((a) => [a.name, a])).values()]
-    list.push({ slot: "accounts", kind: "accounts", name: "Accounts", apps, open: () => one.open("accounts"), menu: arrange ? (e) => home.menu([editHomePage], e) : undefined })
+    list.push({ slot: "accounts", kind: "accounts", name: "Accounts", apps, open: () => one.open("accounts") })
   }
   return {
     scope: p.scope, p, title: p.title, subtitle: p.subtitle, arrange, empty, store: !!home.store(), list,
+    addable: !!home.store() || home.widgetsOn(p).length > 0 || hiddenApps(p).length > 0,
+    groups: home.allPages().some((x) => x.scope.startsWith("group:")),
     said: empty ? (arrange ? (p.scope === "user" ? "No apps yet." : `No apps on ${p.title} yet.`) : `When its admins add apps to ${p.title}, they show up here.`) : "",
   }
 }
@@ -156,9 +163,18 @@ function pack(list, columns) {
 
 // MARK: Changing a page
 
-const keptOf = (p) => home.items(p).map((i) => (i.app ? { app: i.app.name } : i.kept))
 const hiddenOf = (p) => home.data.state.arrangements?.[p.scope]?.hidden || []
 const keyOf = (kept) => (kept.widget ? `widget:${kept.id}` : `app:${kept.app}`)
+/// The apps taken off a page that can go back on it.
+const hiddenApps = (p) => hiddenOf(p).map(home.app).filter((a) => a && home.appsOn(p).includes(a))
+/// A page as it's kept: `shown`, in its order, with each app taken off it still in the place it had, to come back to.
+function keptOf(p, shown = home.items(p).map((i) => (i.app ? { app: i.app.name } : i.kept))) {
+  const out = [...shown], hidden = hiddenOf(p)
+  ;(home.data.state.arrangements?.[p.scope]?.items || []).forEach((k, i) => {
+    if (!k.widget && hidden.includes(k.app) && !out.some((o) => keyOf(o) === keyOf(k))) out.splice(Math.min(i, out.length), 0, k)
+  })
+  return out
+}
 let keeping
 /// What was drawn last, kept by the shell, so the next time the pages open they're drawn at once, then brought up to date.
 const keep = () => {
@@ -180,7 +196,8 @@ async function save(p, items, hidden = hiddenOf(p), { reload = false } = {}) {
     keep()
   } catch (err) {
     // Unless something newer was drawn meanwhile.
-    if (home.data.state.arrangements === after) home.data.state.arrangements = before, home.data.state.pages = listed, draw()
+    if (home.data.state.arrangements === after) home.data.state.arrangements = before, draw()
+    S.undo = []
     home.failed(err)
   }
 }
@@ -204,48 +221,59 @@ function shrinkAway(key) {
   ghost.animate([{ scale: 1, opacity: 1 }, { scale: 0.4, opacity: 0 }], { duration: 180, easing: "ease-in", fill: "forwards" }).finished.then(() => ghost.remove())
 }
 
-/// Takes a widget off a page, or an app's icon: the app stays added there, under Edit's Taken Off This Page.
+/// Takes a widget off a page, or an app's icon: the app stays added there and keeps its place, for Undo, or the Add
+/// sheet, to put it back in.
 function remove(p, item) {
   one.tap("medium")
   shrinkAway(item.key)
-  const kept = keptOf(p).filter((k) => keyOf(k) !== item.key)
-  const app = item.key.startsWith("app:") && item.key.slice(4)
-  save(p, kept, app && !hiddenOf(p).includes(app) ? [...hiddenOf(p), app] : hiddenOf(p))
+  const kept = keptOf(p), at = kept.findIndex((k) => keyOf(k) === item.key)
+  S.undo.push({ p, gone: kept[at], at })
+  if (kept[at]?.widget) save(p, kept.filter((_, i) => i !== at))
+  else save(p, kept, [...new Set([...hiddenOf(p), kept[at]?.app || item.key.slice(4)])])
+}
+
+/// Puts back what was last taken off, in the place it had.
+function undo() {
+  const { p, gone, at } = S.undo.pop()
+  one.tap()
+  flipNext = true
+  if (gone.widget) save(p, keptOf(p).toSpliced(Math.min(at, keptOf(p).length), 0, gone))
+  else putBack(p, gone.app)
+}
+
+/// An app taken off a page goes back on it, where it was; one that has no place kept, where you are.
+function putBack(p, app) {
+  flipNext = true
+  const kept = keptOf(p)
+  save(p, kept.some((k) => k.app === app) ? kept : kept.toSpliced(hereIn(p, kept), 0, { app }), hiddenOf(p).filter((n) => n !== app))
+}
+
+/// Where in a page's `kept` something new goes: before the first thing showing, as the page is scrolled now.
+function hereIn(p, kept) {
+  const top = document.querySelector(`[data-page="${CSS.escape(p.scope)}"]`).getBoundingClientRect().top
+  const el = cellsOf(p.scope).find((c) => c.dataset.cell !== "accounts" && c.getBoundingClientRect().top >= top)
+  const at = el ? kept.findIndex((k) => keyOf(k) === el.dataset.cell) : -1
+  return at < 0 ? kept.length : at
 }
 
 /// What touching and holding a widget offers, as the Home Screen's: its sizes in a row, then Edit Widget (its
-/// options), Edit Home Page, Copy What Went Wrong if it broke, and Remove Widget.
+/// options) and Copy What Went Wrong if it broke, then Edit Home Page, then Remove Widget.
 function widgetActions(w, kept, p, size, columns) {
   // On a page they can't arrange, only what's there: no sizes, options or removing.
   const arrange = home.canArrange(p.scope)
   const sizes = arrange ? home.supported(w).filter((s) => CELLS[s][0] <= columns) : []
   const out = sizes.length > 1 ? sizes.map((s) => ({ title: NAMES[s], icon: SHAPES[s], row: true, checked: s === size, run: () => s !== size && resize(p, kept, s) })) : []
   if (arrange && (w.options || []).length) out.push({ title: "Edit Widget", icon: "info", section: out.length > 0, run: () => (S.dialog = { kind: "options", w, kept, p }, S.render()) })
-  if (arrange) out.push({ ...editHomePage, section: !out.length || out.at(-1).row })
-  if (w.error) out.push({ title: "Copy What Went Wrong", icon: "copy", run: () => one.copy(w.error) })
+  if (w.error) out.push({ title: "Copy What Went Wrong", icon: "copy", section: out.at(-1)?.row, run: () => one.copy(w.error) })
+  if (arrange) out.push({ ...editHomePage, section: true })
   if (arrange) out.push({ title: "Remove Widget", icon: "minus-circle", danger: true, section: true, run: () => remove(p, { key: `widget:${kept.id}` }) })
   return out
 }
 
-/// Adding one of a page's widgets, where it offers one (only `a`'s, for an app's menu).
-const addActions = (p, a) => (home.canArrange(p.scope) && home.widgetsOn(p).some((w) => !a || w.app === a.name) ? [{ title: "Add Widget…", icon: "plus-square", run: () => (S.dialog = { kind: "add", p, only: a, columns: columnsOf(p.scope) }, S.render()) }] : [])
-
-/// While arranging, Edit's menu: Add Widget…, and the apps taken off the page, to put back.
-function editMenu(p, at) {
-  const hidden = hiddenOf(p).map(home.app).filter((a) => a && home.appsOn(p).includes(a))
-  const out = addActions(p)
-  hidden.forEach((a, i) => out.push({ title: `Put Back ${home.label(a)}`, icon: "plus-circle", section: i === 0 && out.length > 0, run: () => save(p, [...keptOf(p), { app: a.name }], hiddenOf(p).filter((n) => n !== a.name)) }))
-  // With nothing of its own to add, where apps come from.
-  if (!out.length) out.push(home.store() ? { title: "App Store", icon: "squares-four", run: home.openStore } : { title: "Nothing to Add", run: () => {} })
-  home.menu(out, at)
-}
-
-/// Edit Pages…: the groups' pages, dragged into an order of your own, each switched off to hide it; yours first and
+/// Edit Pages: the groups' pages, dragged into an order of your own, each switched off to hide it; yours first and
 /// everyone's last stay. Kept with how you arrange your own page, so it follows you to every device.
 function editPages() {
-  const groups = home.allPages().filter((p) => p.scope.startsWith("group:"))
-  if (!groups.length) return void one.alert({ title: "No Groups’ Pages", text: "When you’re in a group, its page shows up here, to move or hide." })
-  S.dialog = { kind: "pages", groups }
+  S.dialog = { kind: "pages", groups: home.allPages().filter((p) => p.scope.startsWith("group:")) }
   S.render()
 }
 
@@ -266,11 +294,24 @@ function keepPages(pages) {
 
 // MARK: Arranging
 
-/// Starts or ends arranging.
+let dying
+/// Starts or ends arranging, which dies away as it ends.
 function edit(on) {
   if (S.editing === on) return
   S.editing = on
+  clearTimeout(dying)
+  S.leaving = !on && !calm()
   if (on) one.tap("medium")
+  else S.undo = []
+  if (S.leaving) dying = setTimeout(() => { S.leaving = false; S.render() }, LEAVING)
+  S.render()
+}
+
+/// Swiping, the page shown is `scope`: arranging ends where the page it was on is left, as it does in a window.
+function arrive(scope) {
+  S.at = scope
+  S.editing = S.leaving = false
+  S.undo = []
   S.render()
 }
 
@@ -424,7 +465,7 @@ function drop() {
     const order = view.list.filter((i) => i.key)
     const changed = order.map((i) => i.key).join(" ") !== d.before.filter((s) => s !== "accounts").join(" ")
     delete S.order[d.scope]
-    if (changed) save(d.p, order.map((i) => i.kept))
+    if (changed) save(d.p, keptOf(d.p, order.map((i) => i.kept)))
     else S.render()
     redrawLater = false
   }, 220)
@@ -450,13 +491,14 @@ window.__oneDrag = (phase, x, y) => {
 }
 
 function pointerDown(e) {
+  // Undo is there until anything else is done.
+  if (S.undo.length && !S.editing && !e.target.closest("[data-undo]")) (S.undo = []), S.render()
   if (e.button !== 0 || drag || held || e.target.closest("[data-ctl]")) return
   const scope = e.target.closest("[data-page]")?.dataset.page
   if (!scope || scope === SETTINGS || !home.page(scope)) return
-  const found = itemAt(e.target)
-  if (found && !found.item.key && !found.item.menu) return
-  // On a page they can't arrange, a hold only opens what's held's menu.
-  if (!home.canArrange(scope) && !found?.item.menu) return
+  // What has no menu and can't move (Accounts) is held as the page is.
+  const at = itemAt(e.target), found = at?.item.key || at?.item.menu ? at : undefined
+  if (!found?.item.menu && !arrangeable(scope)) return
   // Arranging, an item moves as soon as it's moved.
   if (S.editing) {
     if (found?.item.key) held = { ...found, x: e.clientX, y: e.clientY, id: e.pointerId, ready: true }
@@ -471,7 +513,7 @@ function pointerDown(e) {
   held.timer = setTimeout(() => lift(), HOLD)
 }
 
-// A right-click (or a long press the browser calls one) opens an item's menu, or Edit Home Page on empty space.
+// A right-click (or a long press the browser calls one) opens an item's menu, or on empty space starts arranging.
 // (Set as a property, not a listener: the iPhone's shell lifts whatever listens for it.)
 function contextMenu(e) {
   if (!e.target.closest("[data-page]") || e.target.closest("[data-ctl]")) return
@@ -484,11 +526,14 @@ function contextMenu(e) {
     one.tap("medium")
     return found.item.menu(found.el)
   }
-  const scope = e.target.closest("[data-page]")?.dataset.page
-  if (scope && scope !== SETTINGS && home.page(scope)) home.menu([...addActions(home.page(scope)), ...(home.canArrange(scope) ? [editHomePage] : [])], e)
+  if (arrangeable(e.target.closest("[data-page]")?.dataset.page)) edit(true)
 }
 
 // MARK: Drawing
+
+// What arranging brings, easing in; and easing out as it dies away.
+const COMES = "motion-safe:animate-[comes_200ms_ease-out]"
+const GOES = "pointer-events-none motion-safe:animate-[goes_200ms_ease-in_forwards]"
 
 /// An icon and its name; badged with what needs attention.
 function Tile({ name, icon, size, badge, onClick, children }) {
@@ -518,7 +563,7 @@ function Folder({ apps, size }) {
 }
 
 /// One place on a grid: its item, and while arranging its − badge, and a widget's corner to resize it.
-function Cell({ page, at, editing, refreshing, nth, icon }) {
+function Cell({ page, at, editing, leaving, refreshing, nth, icon }) {
   const { item, size, col, row, w, h } = at
   const el = useRef(null)
   // A widget that was a grey card a moment ago fades in over where the card was.
@@ -526,7 +571,9 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
   const arrived = wasPending.current || item.kind === "pending"
   wasPending.current = arrived
   const wide = item.kind === "widget" || item.kind === "pending"
-  const arrange = editing && !!item.key
+  // What can't move stays still and sits back, while all else jiggles.
+  const movable = !!item.key
+  const arrange = (editing || leaving) && movable
   const resizable = arrange && item.kind === "widget" && home.supported(item.w).length > 1
   let body
   if (item.kind === "widget") {
@@ -535,7 +582,7 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
         w={item.w}
         host={item.host}
         tree={home.tree(item.w, size)}
-        className={cn("h-full", item.open && "cursor-pointer active:opacity-80", refreshing && "opacity-50 transition-opacity", arrived && "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-[160ms]")}
+        className={cn("h-full", item.open && "cursor-pointer active:opacity-80", refreshing && "opacity-50 transition-opacity", arrived && "motion-safe:animate-[appears_160ms]")}
         onClick={item.open ? (e) => !S.editing && !quiet() && !e.defaultPrevented && !e.target.closest("button, input, label, a") && item.open() : undefined}
       />
     )
@@ -553,12 +600,17 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
       ref={el}
       data-cell={item.slot}
       data-one-held={lifts && !editing && !!item.menu ? "" : undefined}
-      className={cn("relative grid min-h-0 min-w-0 transition-[scale] duration-200", editing && "cursor-grab touch-none motion-safe:animate-[jiggle_0.28s_ease-in-out_infinite] [&>*]:pointer-events-none [&>[data-ctl]]:pointer-events-auto")}
+      className={cn(
+        "relative grid min-h-0 min-w-0 [transition:scale_200ms,opacity_200ms,--wobble_200ms]",
+        arrange && "motion-safe:animate-[jiggle_0.28s_ease-in-out_infinite]",
+        editing && "[&>*]:pointer-events-none [&>[data-ctl]]:pointer-events-auto",
+        editing && (movable ? "cursor-grab touch-none" : "opacity-50"),
+      )}
       style={{
         gridColumn: `${col} / span ${w}`,
         gridRow: `${row} / span ${h}`,
-        "--wobble": wide ? "0.5deg" : "1.6deg",
-        ...(editing ? { animationDuration: nth % 3 === 0 ? "0.26s" : nth % 2 === 0 ? "0.31s" : "0.28s", animationDelay: nth % 2 === 0 ? "-0.12s" : "0s" } : {}),
+        "--wobble": !editing ? "0deg" : wide ? "0.5deg" : "1.6deg",
+        ...(arrange ? { animationDuration: nth % 3 === 0 ? "0.26s" : nth % 2 === 0 ? "0.31s" : "0.28s", animationDelay: nth % 2 === 0 ? "-0.12s" : "0s" } : {}),
       }}
     >
       {body}
@@ -568,7 +620,7 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
           variant="outline"
           size="icon-xs"
           aria-label={`Remove ${item.name}`}
-          className="absolute -top-2 z-10 size-6 rounded-full shadow-md"
+          className={cn("absolute -top-2 z-10 size-6 rounded-full shadow-md", editing ? COMES : GOES)}
           style={{ left: wide ? -8 : `calc(50% - ${icon / 2}px - 8px)` }}
           onClick={(e) => { e.stopPropagation(); remove(page.p, item) }}
         >
@@ -580,7 +632,7 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
           data-ctl
           type="button"
           aria-label="Resize"
-          className="absolute -bottom-1.5 -right-1.5 z-10 size-[30px] cursor-nwse-resize touch-none"
+          className={cn("absolute -bottom-1.5 -right-1.5 z-10 size-[30px] cursor-nwse-resize touch-none", editing ? COMES : GOES)}
           onPointerDown={(e) => resizing(e, item, page.p, el.current)}
         >
           <span className="absolute bottom-1.5 right-1.5 size-3.5 rounded-br-[10px] border-b-[3px] border-r-[3px] border-foreground/55" />
@@ -603,7 +655,7 @@ function columnsFor(width, gap) {
 
 /// A grid as a home screen's: cells as many as the room has, their size filling it, four across a phone's width; each
 /// item in the first place it fits.
-function Grid({ page, editing, refreshing }) {
+function Grid({ page, editing, leaving, refreshing }) {
   const [ref, width] = useWidth()
   const narrow = width < 500
   const gap = narrow ? 14 : 18
@@ -628,7 +680,7 @@ function Grid({ page, editing, refreshing }) {
       el.style.transition = "none"
       el.style.translate = `${dx}px ${dy}px`
       el.getBoundingClientRect()
-      el.style.transition = "translate 0.25s ease, scale 0.2s"
+      el.style.transition = "translate 0.25s ease, scale 0.2s, opacity 0.2s, --wobble 0.2s"
       el.style.translate = ""
     }
     was.current = next
@@ -636,14 +688,15 @@ function Grid({ page, editing, refreshing }) {
   })
   return (
     <div ref={ref} className="relative grid" style={{ gap, gridAutoRows: cell > 0 ? cell : undefined, gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, "--icon": `${icon}px` }}>
-      {placed.map((at, nth) => <Cell key={at.item.slot} page={page} at={at} editing={editing} nth={nth} icon={icon} refreshing={refreshing.includes(at.item.kept?.id)} />)}
+      {placed.map((at, nth) => <Cell key={at.item.slot} page={page} at={at} editing={editing} leaving={leaving} nth={nth} icon={icon} refreshing={refreshing.includes(at.item.kept?.id)} />)}
     </div>
   )
 }
 
 /// A page: its title, with Edit Home Page beside it (while arranging, Add and Done), then one grid, as a home screen's.
-function Page({ page, editing, refreshing, bottom }) {
+function Page({ page, editing, leaving, undone, refreshing, bottom }) {
   const { scope, title, subtitle, arrange } = page
+  const changing = editing || leaving
   return (
     <section
       data-page={scope}
@@ -655,15 +708,16 @@ function Page({ page, editing, refreshing, bottom }) {
           <h1 className="large-title text-3xl font-bold tracking-tight">{title}</h1>
           {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
         </div>
-        {arrange && (
+        {arrange && !page.empty && (
           <div data-ctl className="mt-1.5 flex shrink-0 gap-2">
-            {editing ? (
+            {undone && <Button data-undo variant="ghost" size="sm" className={COMES} onClick={undo}>Undo</Button>}
+            {changing ? (
               <>
-                <Button variant="outline" size="sm" onClick={(e) => editMenu(home.page(scope), e.currentTarget)}>Add</Button>
-                <Button size="sm" onClick={() => edit(false)}>Done</Button>
+                {page.addable && <Button variant="outline" size="sm" className={editing ? COMES : GOES} onClick={() => (S.dialog = { kind: "add", p: home.page(scope) }, S.render())}>Add</Button>}
+                <Button size="sm" className={editing ? COMES : GOES} onClick={() => edit(false)}>Done</Button>
               </>
             ) : (
-              <Button variant="ghost" size="icon-sm" aria-label={editHomePage.title} onClick={() => edit(true)}><Icon name={editHomePage.icon} /></Button>
+              <Button variant="ghost" size="icon-sm" className={COMES} aria-label={editHomePage.title} onClick={() => edit(true)}><Icon name={editHomePage.icon} /></Button>
             )}
           </div>
         )}
@@ -672,8 +726,13 @@ function Page({ page, editing, refreshing, bottom }) {
         <Empty>This device can't open this page. Sign out and in again to choose it.</Empty>
       ) : (
         <>
-          <Grid page={page} editing={editing && !!arrange} refreshing={refreshing} />
+          <Grid page={page} editing={editing && !!arrange} leaving={leaving && !!arrange} refreshing={refreshing} />
           {page.empty && <Empty className="py-6" action={page.arrange && page.store ? { label: "Open the App Store", run: home.openStore } : undefined}>{page.said}</Empty>}
+          {changing && page.groups && (
+            <div data-ctl className="flex justify-center pt-8">
+              <Button variant="ghost" size="sm" className={editing ? COMES : GOES} onClick={editPages}>Edit Pages</Button>
+            </div>
+          )}
         </>
       )}
     </section>
@@ -686,9 +745,8 @@ function Dots({ scopes, at, strip, attention }) {
   const go = (scope, now = false) => {
     const el = strip.current, i = scopes.indexOf(scope)
     if (now) {
-      S.at = scope
       el.scrollTo({ left: i * el.clientWidth, behavior: "instant" })
-      S.render()
+      arrive(scope)
     } else el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" })
   }
   // A finger sliding along the dots changes page, one for every 40 points, as an iPhone's page dots do.
@@ -720,11 +778,7 @@ function Dots({ scopes, at, strip, attention }) {
           type="button"
           aria-label={`${titleOf(at)}, page ${page} of ${scopes.length}`}
           className="flex h-11 items-center gap-1.5 pl-[18px] pr-1.5"
-          onClick={(e) => !quiet() && home.menu([
-            ...scopes.map((s) => ({ title: titleOf(s), checked: s === at, run: () => go(s) })),
-            { title: "Edit Pages…", icon: "list-bullets", section: true, run: editPages },
-            ...(at !== SETTINGS && home.canArrange(at) ? [editHomePage] : []),
-          ], e.currentTarget.parentElement)}
+          onClick={(e) => !quiet() && home.menu(scopes.map((s) => ({ title: titleOf(s), checked: s === at, run: () => go(s) })), e.currentTarget.parentElement)}
         >
           {scopes.slice(0, -1).map((s) => <i key={s} className={cn("block h-[7px] rounded-full bg-muted-foreground/40 transition-[width]", s === at ? "w-4 bg-foreground" : "w-[7px]")} />)}
         </button>
@@ -778,54 +832,70 @@ function Options({ w, kept, p, close }) {
   )
 }
 
-/// Add Widget: each widget once, as it would look on the page at the size chosen, with Add Widget, which puts it at the
-/// page's end.
-function AddWidget({ p, only, columns, close }) {
-  const widgets = home.widgetsOn(p).filter((w) => !only || w.app === only.name)
-  const shown = widgets.map((w) => ({ w, sizes: home.supported(w).filter((s) => CELLS[s][0] <= columns) })).filter((x) => x.sizes.length)
+/// Add, one sheet: the apps taken off this page to put back, each widget it can have as it would look on the page (a
+/// tap puts it there, where you are; a corner resizes it once it's there), and the way to more apps.
+function Add({ p, close }) {
+  const store = home.store(), hidden = hiddenApps(p)
+  const widgets = home.widgetsOn(p).map((w) => ({ w, sizes: home.supported(w).filter((s) => CELLS[s][0] <= columnsOf(p.scope)) })).filter((x) => x.sizes.length)
+  const putOn = (work) => (one.tap("success"), close(), work())
+  const add = (w, size) => putOn(() => {
+    const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join(""), kept = keptOf(p)
+    flipNext = true
+    save(p, kept.toSpliced(hereIn(p, kept), 0, { app: w.app, widget: w.widget, id, size }))
+  })
+  const heading = "px-1 pb-2 text-sm font-medium text-muted-foreground"
   return (
-    <ResponsiveDialog open onOpenChange={(open) => !open && close()} title={only ? `Add Widget · ${home.label(only)}` : `Add Widget · ${p.title}`} action={<Button size="sm" variant="ghost" onClick={close}>Cancel</Button>}>
-      <div className="flex flex-col divide-y overflow-y-auto">
-        {shown.length ? shown.map(({ w, sizes }) => <Addable key={`${w.app}:${w.widget}`} w={w} sizes={sizes} p={p} close={close} />) : <Empty>{`No app on ${p.title} has a widget.`}</Empty>}
+    <ResponsiveDialog open onOpenChange={(open) => !open && close()} title="Add" action={<Button size="sm" variant="ghost" onClick={close}>Cancel</Button>}>
+      <div className="flex flex-col gap-6 overflow-y-auto p-4">
+        {hidden.length > 0 && (
+          <section>
+            <h3 className={heading}>Put Back</h3>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(76px,1fr))] gap-y-3">
+              {hidden.map((a) => <Tile key={a.name} name={home.label(a)} icon={a} size={56} onClick={() => putOn(() => putBack(p, a.name))} />)}
+            </div>
+          </section>
+        )}
+        {widgets.length > 0 && (
+          <section>
+            <h3 className={heading}>Widgets</h3>
+            <Choices scope={p.scope} widgets={widgets} add={add} />
+          </section>
+        )}
+        {store && (
+          <Button variant="ghost" className="-mx-1 justify-start gap-2.5 px-1" onClick={() => (close(), home.openStore())}>
+            <AppIcon app={store} size={28} />
+            <span className="flex-1 text-left">{home.label(store)}</span>
+            <Icon name="caret-right" className="text-muted-foreground" />
+          </Button>
+        )}
       </div>
     </ResponsiveDialog>
   )
 }
 
-function Addable({ w, sizes, p, close }) {
-  const a = home.app(w.app), title = w.title || home.label(a) || w.widget
-  const [size, setSize] = useState(sizes.includes(w.size) ? w.size : sizes[0])
+const quietHost = { run: async () => {}, follow: () => {} }
+
+/// The widgets to add, as they'd look on the page, shrunk to two columns of the sheet's width.
+function Choices({ scope, widgets, add }) {
   const [ref, room] = useWidth()
-  // As big as on the page: its cells, as that grid has them, drawn at that size and no larger than the room there is.
-  const { cell = 80, gap = 14 } = S.geometry[p.scope] || {}, [cw, ch] = CELLS[size]
-  const width = cw * cell + (cw - 1) * gap, height = ch * cell + (ch - 1) * gap, fit = Math.min(1, Math.max(0, room - 32) / width || 1)
-  const quietHost = { run: async () => {}, follow: () => {} }
-  const add = () => {
-    const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("")
-    one.tap("success")
-    close()
-    save(p, [...keptOf(p), { app: w.app, widget: w.widget, id, size }])
-  }
+  const { cell = 80, gap = 14 } = S.geometry[scope] || {}, column = (room - 12) / 2
   return (
-    <section ref={ref} className="flex flex-col gap-3 p-4">
-      <div className="flex items-center gap-2.5">
-        {a && <AppIcon app={a} size={28} />}
-        <b className="text-sm font-medium">{title}</b>
-      </div>
-      {sizes.length > 1 && (
-        <Tabs value={size} onValueChange={(s) => (one.tap(), setSize(s))}>
-          <TabsList className="w-full">{sizes.map((s) => <TabsTrigger key={s} value={s}>{NAMES[s]}</TabsTrigger>)}</TabsList>
-        </Tabs>
-      )}
-      <div className="pointer-events-none mx-auto py-1" style={{ width: width * fit, height: height * fit + 8 }}>
-        <WidgetCard w={{ ...w, title }} host={quietHost} tree={home.tree(w, size)} style={{ width, height, transform: `scale(${fit})`, transformOrigin: "0 0" }} />
-      </div>
-      <Button variant="secondary" className="w-full" onClick={add}>Add Widget</Button>
-    </section>
+    <div ref={ref} className="grid grid-cols-2 gap-3 [grid-auto-flow:dense]">
+      {room > 0 && widgets.map(({ w, sizes }) => {
+        const size = sizes.includes(w.size) ? w.size : sizes[0], [cw, ch] = CELLS[size], title = w.title || home.label(home.app(w.app)) || w.widget
+        const width = cw * cell + (cw - 1) * gap, height = ch * cell + (ch - 1) * gap, span = Math.min(2, cw / 2)
+        const fit = Math.min(1, (span * column + (span - 1) * 12) / width)
+        return (
+          <button key={`${w.app}:${w.widget}`} type="button" aria-label={`Add ${title}`} className="rounded-3xl text-left outline-none [-webkit-tap-highlight-color:transparent] focus-visible:ring-[3px] focus-visible:ring-ring/50 active:opacity-70" style={{ gridColumn: `span ${span}`, height: height * fit }} onClick={() => add(w, size)}>
+            <WidgetCard className="pointer-events-none" w={{ ...w, title }} host={quietHost} tree={home.tree(w, size)} style={{ width, height, transform: `scale(${fit})`, transformOrigin: "0 0" }} />
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
-/// Edit Pages…'s rows: dragged into order by their grips, each switched off to hide it.
+/// Edit Pages' rows: dragged into order by their grips, each switched off to hide it.
 function EditPages({ groups, close }) {
   const [order, setOrder] = useState(() => groups.map((p) => p.scope))
   const [hidden, setHidden] = useState(() => new Set(groups.filter((p) => p.hidden).map((p) => p.scope)))
@@ -891,7 +961,7 @@ function Dialogs({ dialog: d }) {
   if (!d) return null
   const close = () => (S.dialog = null, S.render())
   if (d.kind === "options") return <Options key={d.kept.id} w={d.w} kept={d.kept} p={d.p} close={close} />
-  if (d.kind === "add") return <AddWidget p={d.p} only={d.only} columns={d.columns} close={close} />
+  if (d.kind === "add") return <Add p={d.p} close={close} />
   return <EditPages groups={d.groups} close={close} />
 }
 
@@ -908,13 +978,12 @@ function Pages() {
   const [snap, setSnap] = useState({ phase: "loading", view: [], refreshing: [] })
   const [slow, setSlow] = useState(false)
   const strip = useRef(null)
-  const { view, phase, editing, at, dialog, refreshing, attention } = snap
+  const { view, phase, editing, leaving, undo: undone, at, dialog, refreshing, attention } = snap
   const scopes = view.map((v) => v.scope)
 
   // What draws the screen again: with `now`, at once, for what a finger is carrying.
   useLayoutEffect(() => {
     S.render = (now) => {
-      if (swipe && S.editing && S.at === SETTINGS) S.editing = false
       const next = snapshot()
       // The bar names the page only once its own title has scrolled away.
       if (!swipe && next.phase === "ready" && !S.named) S.named = true, one.largeTitle(titleOf(S.at))
@@ -997,16 +1066,16 @@ function Pages() {
   if (phase !== "ready") return slow ? <Waiting /> : null
   return (
     <div className="fixed inset-0 select-none overflow-hidden [-webkit-touch-callout:none] [-webkit-user-select:none]">
-      <style>{"@keyframes jiggle { 0% { rotate: calc(var(--wobble) * -1); } 50% { rotate: var(--wobble); } 100% { rotate: calc(var(--wobble) * -1); } }"}</style>
+      <style>{"@property --wobble { syntax: '<angle>'; inherits: true; initial-value: 0deg; } @keyframes jiggle { 0% { rotate: calc(var(--wobble) * -1); } 50% { rotate: var(--wobble); } 100% { rotate: calc(var(--wobble) * -1); } } @keyframes comes { from { opacity: 0; scale: 0.9; } } @keyframes goes { to { opacity: 0; scale: 0.9; } } @keyframes appears { from { opacity: 0; } }"}</style>
       <div
         ref={strip}
         className="flex h-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onScroll={swipe ? (e) => {
           const i = Math.round(e.currentTarget.scrollLeft / Math.max(1, e.currentTarget.clientWidth))
-          if (scopes[i] && scopes[i] !== S.at) { S.at = scopes[i]; S.render() }
+          if (scopes[i] && scopes[i] !== S.at) arrive(scopes[i])
         } : undefined}
       >
-        {view.map((page) => <Page key={page.scope} page={page} editing={editing && page.scope !== SETTINGS} refreshing={refreshing} bottom={swipe ? "calc(88px + env(safe-area-inset-bottom))" : 20} />)}
+        {view.map((page) => <Page key={page.scope} page={page} editing={editing && page.scope === at && !page.empty} leaving={leaving && page.scope === at} undone={undone && page.scope === at} refreshing={refreshing} bottom={swipe ? "calc(88px + env(safe-area-inset-bottom))" : 20} />)}
       </div>
       {swipe && <Dots scopes={scopes} at={at} strip={strip} attention={attention} />}
       <Dialogs dialog={dialog} />
