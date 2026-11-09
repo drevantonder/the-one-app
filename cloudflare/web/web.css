@@ -29,6 +29,8 @@ body[data-dimmed] :is([data-slot=sidebar-container], [data-slot=shell-bar], [dat
 .screen-tile-icon { position: fixed; z-index: 40; pointer-events: none; line-height: 0; }
 /* What stood before the window (signing in, starting), over it until its first screen has drawn. */
 .window-cover { position: fixed; inset: 0; z-index: 40; background: var(--background); color: var(--foreground); }
+/* A second element of one name makes the browser abort any transition. */
+.window-cover [data-slot=welcome-logo] { view-transition-name: none; }
 .screen-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; }
 .devtools { flex: none; position: relative; height: min(440px, 50%); border-top: 1px solid var(--border); }
 .devtools-edge { position: absolute; z-index: 1; left: 0; right: 0; top: -4px; height: 8px; cursor: ns-resize; }

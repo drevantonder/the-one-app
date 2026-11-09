@@ -18,6 +18,7 @@ export function appear(el: Element) {
 
 /// Goes from one screen to another: `update` draws the new one, a moment later, the old one fading over it.
 export function transition(update: () => void) {
-  if (still() || !document.startViewTransition) update()
-  else document.startViewTransition(update)
+  if (still() || !document.startViewTransition) return update()
+  // The browser rejects this when it drops the move (another began, the tab is hidden); `update` still runs.
+  document.startViewTransition(update).ready.catch(() => {})
 }
