@@ -8,7 +8,7 @@ import { CODES } from "../shared/protocol.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
 import { back, go, home, listed, own, route } from "./routes.js";
 import { appearance, ownAnswers, setAppearance } from "./settings.js";
-import { KEPT_SCREENS, app, config, here, joined, reads, settingAt, settingsItems, titleOf } from "./store.js";
+import { KEPT_SCREENS, app, config, here, joined, keeping, reads, settingAt, settingsItems, titleOf } from "./store.js";
 import { $, h, reveal, ui } from "./view.js";
 
 let frames = [];
@@ -49,7 +49,7 @@ export const tell = (m) => {
 const kept = {
   // An https URL of its own, which the cache takes on any page's origin (the app's tauri:// one too, where it
   // takes only http and https).
-  url: (kind, key) => `https://kept.invalid/${kind}/${encodeURIComponent(key)}`,
+  url: (kind, key) => `https://kept.invalid/${encodeURIComponent(platform.user())}/${kind}/${encodeURIComponent(key)}`,
   /// What was kept, if it was drawn at `width` (a still is, as a page isn't; at another it would show squashed).
   async get(kind, key, width) {
     try {
@@ -60,7 +60,7 @@ const kept = {
     }
   },
   put(kind, key, html, width) {
-    if (typeof html !== "string" || html.length > 2_000_000) return;
+    if (!keeping() || typeof html !== "string" || html.length > 2_000_000) return;
     const headers = { "x-kept-at": String(Date.now()), ...(width ? { "x-kept-width": String(width) } : {}) };
     window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html, { headers }))).catch(() => {});
   },

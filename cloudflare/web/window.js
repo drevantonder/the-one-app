@@ -9,7 +9,7 @@ import { api, developer, fresh, retryWait, sleep } from "./request.js";
 import { back, go, home, linked, own, route, sidebar, whenMoved } from "./routes.js";
 import { detail, devtools, hasScreen, openSheet, overWindow, replacing, screen, setBarStart, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
-import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, store, titleOf, whenChanged, whenSignedOut } from "./store.js";
+import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, signOut, store, titleOf, whenChanged } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
 
 /// The bar's title over the screen, as the screen in it last said; and whether it offers Back, as the screen it's over
@@ -128,7 +128,7 @@ export async function listen() {
         }
       }
     } catch (err) {
-      if (err.signedOut) return err.removed ? undefined : showSignedOut();
+      if (err.signedOut) return err.removed ? undefined : void signOut();
     }
     if (Date.now() - started > 10_000) misses = 0;
     if (!mine.signal.aborted) await sleep(retryWait(misses++));
@@ -180,9 +180,6 @@ export function showSignedOut(error, note) {
   const signIn = () => platform.signIn().catch((err) => showSignedOut(err.message));
   show(platform.welcome({ logo, title: config().name, action: { label: "Sign In", run: signIn }, note, problem: error }));
 }
-// Taken out, or signed out with why: its events stop, and the sign-in says why.
-whenSignedOut((why) => (events?.abort(), showSignedOut(why)));
-
 /// "Waiting for Approval": its code, and the code as a QR, a link that opens Approve with it in the browser of a
 /// phone that scans it.
 export function showJoin(code, invited) {

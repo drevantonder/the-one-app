@@ -12,7 +12,7 @@ import { api, retryWait, sleep } from "./request.js";
 import { go, href, own, route } from "./routes.js";
 import { ask, iconPaths, openRequest } from "./screens.js";
 import { appearance, schemed } from "./settings.js";
-import { forgetScreens, joined, lastAt, lastWindow, me, network, refreshApps, refreshState, setJoining } from "./store.js";
+import { forgetScreens, joined, lastAt, lastWindow, me, network, refreshApps, refreshState, setJoining, signOut, whySignedOut } from "./store.js";
 import { h, logo, message, show, ui } from "./view.js";
 import { hardwareBack, listen, render, showBack, showJoin, showSignedOut, showUnreachable, watchWaiting, windowShowing } from "./window.js";
 
@@ -44,7 +44,11 @@ async function start() {
     else if (platform.signedIn()) history.replaceState(null, "", href({ kind: "screen", app, screen, params }));
     else return showBack(app, screen, params);
   }
-  if (!platform.signedIn()) return showSignedOut();
+  if (!platform.signedIn()) {
+    // However the sign-in ended (it ran out, another tab signed out), nothing of who it was stays for the next person.
+    forgetScreens().catch(() => {});
+    return showSignedOut(whySignedOut());
+  }
   // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.
   let request = null;
   if (location.pathname === "/vault") {
@@ -66,8 +70,7 @@ async function start() {
   } catch (err) {
     if (!err.signedOut) return void show(message("Can’t Let This Device In", err.message));
     if (err.removed) return;
-    await forgetScreens();
-    return showSignedOut();
+    return signOut();
   }
   // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
   const away = setTimeout(() => windowShowing() || showUnreachable(), 15000);
@@ -79,7 +82,7 @@ async function start() {
       offline.done("state");
       break;
     } catch (err) {
-      if (err.signedOut) return clearTimeout(away), clearTimeout(slow), err.removed ? undefined : showSignedOut();
+      if (err.signedOut) return clearTimeout(away), clearTimeout(slow), err.removed ? undefined : void signOut();
       // What it showed last stays, as a screen whose node is restarting does, saying so.
       if (!windowShowing()) (console.warn("starting:", err.message), showUnreachable());
       else offline.add("state", () => refreshState(), lastAt());

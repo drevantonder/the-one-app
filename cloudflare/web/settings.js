@@ -4,7 +4,7 @@
 // bridges with these, and with what opens over the window.
 import { platform } from "./platform.js";
 import { api, developer, shared } from "./request.js";
-import { SCREENS, leave, network, refreshState, withWaiting } from "./store.js";
+import { keeping, leave, network, refreshState, screensKey, withWaiting } from "./store.js";
 
 /// `one.api` for a client's own screen: the node's /v1 at this origin, as this user; nothing else here. What
 /// changes who can do what, and letting devices in, this device answers itself, as its keyring signs it
@@ -67,10 +67,10 @@ export const ownAnswers = {
   device: () => platform.device(),
   notify: () => platform.notify(true),
   cache: (m) => {
-    const key = SCREENS + String(m.key || "");
+    const key = screensKey(String(m.key || ""));
     if (!("value" in m)) return JSON.parse(localStorage.getItem(key) || "null");
     try {
-      localStorage.setItem(key, JSON.stringify(m.value));
+      if (keeping()) localStorage.setItem(key, JSON.stringify(m.value));
     } catch {}
     return null;
   },

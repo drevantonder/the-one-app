@@ -64,16 +64,23 @@ export function titleOf(r) {
   return a?.screens?.find((s) => s.name === r.screen)?.title || label(a) || r.app;
 }
 
-/// The window as it was last (and when), drawn before the node answers.
+/// The window as it was last (and when), drawn before the node answers, its user's alone.
 const LAST = "one.last.window";
+const lastKey = () => `${LAST}.${platform.user()}`;
 /// What the client's own screens keep between visits (`one.cache`).
-export const SCREENS = "one.screens.";
+const SCREENS = "one.screens.";
+export const screensKey = (key) => `${SCREENS}${platform.user()}.${key}`;
 /// The screens' pages and stills this device kept (screens.js), in the browser's cache.
 export const KEPT_SCREENS = "one.screens";
+
+/// Whether the user has gone: what's still running in this page keeps nothing more, for whoever signs in next to find.
+let forgotten = false;
+export const keeping = () => !forgotten;
 
 /// What the client's own screens keep between visits, the window as it was last, the screens it showed and what their
 /// calls answered (the device's, one-client's `answers`): all forgotten with the sign-in.
 export function forgetScreens() {
+  forgotten = true;
   Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k.startsWith(LAST)).forEach((k) => localStorage.removeItem(k));
   window.caches?.delete(KEPT_SCREENS).catch(() => {});
   return platform.forget();
@@ -82,7 +89,7 @@ export function forgetScreens() {
 /// The window as it was last, drawn before the node answers: → whether there was one.
 export function lastWindow() {
   try {
-    const kept = JSON.parse(localStorage.getItem(LAST) || "null");
+    const kept = JSON.parse(localStorage.getItem(lastKey()) || "null");
     if (!kept?.state?.pages) return false;
     Object.assign(store, kept);
     return true;
@@ -91,12 +98,13 @@ export function lastWindow() {
   }
 }
 const keepWindow = () => {
+  if (forgotten) return;
   try {
-    localStorage.setItem(LAST, JSON.stringify(store));
-    localStorage.setItem(`${LAST}.at`, String(Date.now()));
+    localStorage.setItem(lastKey(), JSON.stringify(store));
+    localStorage.setItem(`${lastKey()}.at`, String(Date.now()));
   } catch {}
 };
-export const lastAt = () => Number(localStorage.getItem(`${LAST}.at`)) || null;
+export const lastAt = () => Number(localStorage.getItem(`${lastKey()}.at`)) || null;
 
 /// While this device waits to be let in, the window isn't drawn: its join screen is.
 let joining = false;
@@ -145,21 +153,29 @@ async function badges() {
   keepWindow();
 }
 
-/// What shows once it's signed out (`whenSignedOut`), with why.
-const signedOut = [];
-export const whenSignedOut = (fn) => signedOut.push(fn);
-
-/// Signs out, back at the sign-in screen, which says `why` if given.
-export async function signOut(why) {
-  await forgetScreens();
-  await platform.signOut();
-  if (!why) return location.replace("/");
-  signedOut.forEach((fn) => fn(why));
+/// Why it was signed out, for the sign-in screen the page starts again on.
+const WHY = "one.signedOut";
+export function whySignedOut() {
+  const why = sessionStorage.getItem(WHY);
+  sessionStorage.removeItem(WHY);
+  return why || undefined;
 }
-whenRemoved(signOut);
+
+/// Signs out and starts the page again at the sign-in screen, which says `why` if given, so nothing of this user stays
+/// in its memory.
+export async function signOut(why) {
+  await forgetScreens().catch(() => {});
+  await platform.signOut();
+  if (why) sessionStorage.setItem(WHY, why);
+  location.replace(platform.panel ? location.href : "/");
+}
+/// Signing out as a device takes it out of the user's devices, which isn't being taken out by someone else.
+let leaving = false;
+whenRemoved((why) => leaving || signOut(why));
 
 /// Signs out as a device: out of its user's devices first, so signing in again replaces it, then its tokens go.
 export async function leave() {
+  leaving = true;
   await platform.leave(api);
   return signOut();
 }
