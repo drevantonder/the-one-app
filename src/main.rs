@@ -1,5 +1,5 @@
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use one::config::{CLI, NAME, YOURS};
 use one::cli::{Command, Given};
 use one::api;
@@ -39,20 +39,14 @@ fn commands() -> Vec<Command> {
     ]
 }
 
-/// Every built-in command, with what it takes, then the core's tools as commands: `help all`.
+/// Every built-in command, with what it takes, then the network's own tools as commands: `help all`.
 fn every_command() -> String {
     let core = tools::forms(&one::core_tools::listed());
     format!(
-        "Usage:\n{}\nThe core's own tools, each a command as an app's tools are (--help after one says what it takes):\n{}\n{NAME} holds one network. For another context, run that context's own app.",
+        "Usage:\n{}\n{NAME}'s own tools, each a command as an app's tools are (--help after one says what it takes):\n{}\n{NAME} holds one network. For another context, run that context's own app.",
         one::cli::help(commands().iter().flat_map(|c| &c.help)),
         one::cli::help(&core)
     )
-}
-
-fn command_words() -> Vec<String> {
-    let mut out: Vec<String> = commands().iter().flat_map(|c| &c.help).filter_map(|(usage, _)| usage.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase() || c == '-')).map(String::from).collect();
-    out.dedup();
-    out
 }
 
 /// What `help` and the bare command say: what an agent needs to start, and where the rest is.
@@ -64,17 +58,17 @@ fn help(node: &Client) -> String {
         false => format!("\nYour apps: {}.\n", names.join(", ")),
     };
     format!(
-        "{NAME}: your machines, and your team's, as one place for apps and agents.
+        "{NAME}: your devices, and your team's, as one place for apps and agents.
 
-  {CLI} search <words>        the tools for a task in every app, each with how to call it
-  {CLI} <app>                 an app's tools and its guide
-  {CLI} <app> <tool> --help     what a tool takes
-  {CLI} <app> <tool> [words] [--input value]
-                             run one, like {CLI} repos list
-  {CLI} run <file>            a script that calls several tools; {CLI} search gives each call
-  {CLI} skills                the guides agents load
-  {CLI} status                who you are, and your devices
-  {CLI} mcp [--code]          the local MCP server, for agents
+  {CLI} search <words>         the tools for a task in every app, each with how to call it
+  {CLI} <app>                  an app's tools and its guide
+  {CLI} <app> <tool> --help    what a tool takes
+  {CLI} <app> <tool> [words] [--<input> <value>]
+                             run a tool, like {CLI} repos list
+  {CLI} run <file>             a script that calls several tools; {CLI} search gives each call
+  {CLI} skills                 the guides agents load
+  {CLI} status                 who you are, and your devices
+  {CLI} mcp [--code]           the local MCP server, for agents
 {yours}
 A tool's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
 from stdin. --file <input>=<path> gives a file, --out <path> saves what comes back, --device <name> runs it there,
@@ -130,10 +124,11 @@ fn run(args: Vec<String>) -> Result<()> {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
         unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     }
-    let (agent, node, words) = (one::mcp::agent_from_env(), node(), command_words());
-    let given = Given { words: &positional, flags: &flags, args: &args, node: &node, agent: agent.as_deref(), json, trace, commands: &words };
-    // --help shows help, whatever the command: never runs it. An app's tool's is the app's own.
-    if flags.contains_key("help") || flags.contains_key("h") {
+    let (agent, node, forms) = (one::mcp::agent_from_env(), node(), commands().into_iter().flat_map(|c| c.help).collect::<Vec<_>>());
+    let given = Given { words: &positional, flags: &flags, args: &args, node: &node, agent: agent.as_deref(), json, trace, commands: &forms };
+    // --help shows help, whatever the command: never runs it. An app's tool's is the app's own, and with no command
+    // it's what the bare command says (`own`).
+    if !positional.is_empty() && (flags.contains_key("help") || flags.contains_key("h")) {
         match command_help(&node, &positional) {
             Some(text) => print!("{text}"),
             None => _ = (tools::commands().run)(&given)?,
@@ -161,7 +156,7 @@ fn own() -> Command {
                 ["help", "all"] => println!("{}", every_command()),
                 ["help", rest @ ..] => match command_help(g.node, &rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
                     Some(text) => print!("{text}"),
-                    None => bail!("{}", tools::unknown(g.node, rest[0], None, Some(g.commands))?),
+                    None => return Err(one::cli::Failed::Typed(tools::unknown(g.node, rest[0], None, Some(g.commands))?).into()),
                 },
                 ["version"] if g.json => println!("{}", one::release::Version::this().json()),
                 ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
@@ -172,10 +167,10 @@ fn own() -> Command {
     }
 }
 
-/// A built-in command's help, for --help after it: its forms, as `help all` has them, or help() when none are. None for
-/// a tool, and for an app that isn't a built-in command too, whose help is their own.
+/// A built-in command's help, for --help after it: its forms, as `help all` has them. None for a tool, for an app that
+/// isn't a built-in command too, whose help is their own, and for what's neither, which says what was mistyped.
 fn command_help(node: &Client, words: &[String]) -> Option<String> {
-    let first = words.first().filter(|w| *w != "-h")?;
+    words.first()?;
     let typed: Vec<&str> = words.iter().take_while(|w| !w.starts_with('-')).map(String::as_str).collect();
     if let [set, tool, ..] = typed[..]
         && tools::find(node, set, tool).is_some()
@@ -187,12 +182,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     // The forms for the most words given that have any: vault answer's, else every vault form.
     let starts = |n: usize| -> Vec<&(String, String)> { forms.iter().copied().filter(|(usage, _)| usage.split_whitespace().take(n).eq(typed[..n].iter().copied())).collect() };
     let these = (1..=typed.len()).rev().map(starts).find(|f| !f.is_empty()).unwrap_or_default();
-    let set = one::core_tools::and_apps(node).unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
-    match (set, these.is_empty()) {
-        (true, true) => None,
-        (false, true) => Some(format!("{}\n", help(node))),
-        (_, false) => Some(format!("Usage:\n{}", one::cli::help(these))),
-    }
+    (!these.is_empty()).then(|| format!("Usage:\n{}", one::cli::help(these)))
 }
 
 fn connection(node: &Client) -> String {
@@ -202,7 +192,7 @@ fn connection(node: &Client) -> String {
         Err(_) => return format!("{}.", client_device::not_here()),
     };
     if let Some(said) = client_device::said(&state) {
-        return format!("Connected as {said}. {CLI} status shows your devices; {CLI} apps what you can run.");
+        return format!("{said}.");
     }
     let device = &state.device.name;
     let Some(network) = &state.network else {
@@ -210,7 +200,7 @@ fn connection(node: &Client) -> String {
     };
     let network = if network.name.is_empty() { format!("{YOURS} (still joining)") } else { network.name.clone() };
     let ready = if state.device.ready { "" } else { ", catching up" };
-    format!("Connected to {network} as {}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.", state.looking())
+    format!("You're {} in {network}, on {device}{ready}.", state.looking())
 }
 
 /// How the CLI asks this machine's node (`agent()`): as whom this machine is signed in as, when `signed_in`.
@@ -279,6 +269,7 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
 fn unreached(err: ureq::Error) -> anyhow::Error {
     match client_device::active() {
         true => anyhow::anyhow!("{err}"),
+        false if matches!(&err, ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::ConnectionRefused) => anyhow::anyhow!(client_device::not_here()),
         false => anyhow::Error::new(err).context(client_device::not_here()),
     }
 }

@@ -46,7 +46,7 @@ fn folder() -> Option<(PathBuf, PathBuf)> {
 /// the command as one of its programs, by the `one` program built with this one (`Throwaway::tell`).
 pub fn run(rest: &[String]) -> Result<()> {
     let (build, ui, rest) = chosen(rest)?;
-    if matches!(rest.first().map(String::as_str), Some("--help" | "-h" | "help")) || (rest.len() > 1 && matches!(rest[0].as_str(), "stop" | "client" | "sign-in") && rest.iter().any(|a| a == "--help" || a == "-h")) {
+    if matches!(rest.first().map(String::as_str), Some("--help" | "-h")) || (rest.len() == 1 && rest[0] == "help") || (rest.len() > 1 && matches!(rest[0].as_str(), "stop" | "client" | "sign-in") && rest.iter().any(|a| a == "--help" || a == "-h")) {
         println!("{}", usage());
         return Ok(());
     }
@@ -216,7 +216,7 @@ fn usage() -> String {
         },
         None => mcp_anywhere(),
     };
-    format!("Usage:\n{}", one::cli::help(&commands(&mcp).help))
+    format!("Usage:\n{}", one::cli::help_as(&dev(), &commands(&mcp).help))
 }
 
 fn mcp_anywhere() -> String {

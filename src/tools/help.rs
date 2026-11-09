@@ -52,7 +52,7 @@ pub(super) fn help(app: &Value, tool: &Value, call: bool) -> String {
     let required = required(schema);
     let mut usage = usage(a, tool);
     if !optional(tool).is_empty() {
-        usage.push_str(" [--input value]...");
+        usage.push_str(" [--<input> <value>]...");
     }
     let mut rows: Vec<(String, String)> = Vec::new();
     let mut names: Vec<&String> = required.iter().filter(|r| props.contains_key(*r)).collect();
@@ -101,18 +101,24 @@ pub(super) fn help(app: &Value, tool: &Value, call: bool) -> String {
         (_, true) => format!("{} At a terminal, it asks first.\n", crate::core_tools::Reader::Cli.needs_confirm()),
         _ => String::new(),
     });
-    if !props.is_empty() {
-        text.push_str(&format!("Required inputs not given are asked for at a terminal, else read as JSON from stdin: {CLI} {a} {o} < input.json; a last word - reads stdin anyway: {CLI} {a} {o} - < input.json\n"));
+    if !required.is_empty() {
+        text.push_str(&format!("Inputs not given are read as JSON from stdin: {CLI} {a} {o} < input.json\n"));
     }
     text
 }
 
-fn first_sentence(text: &str) -> &str {
+/// How much of a tool's description a list of tools shows; `--help` has the rest.
+const LIST_LENGTH: usize = 90;
+
+/// A description's first sentence, at most about `LIST_LENGTH` characters, ending at a word.
+fn first_sentence(text: &str) -> String {
     let line = text.lines().next().unwrap_or("");
-    match line.find(". ") {
-        Some(i) => &line[..=i],
-        None => line,
+    let line = line.find(". ").map_or(line, |i| &line[..=i]);
+    if line.chars().count() <= LIST_LENGTH {
+        return line.to_string();
     }
+    let cut: String = line.chars().take(LIST_LENGTH).collect();
+    format!("{}…", cut.rsplit_once(' ').map_or(cut.as_str(), |(head, _)| head))
 }
 
 /// What a tool does, in a line: its description's first sentence, and whether it needs --confirm.

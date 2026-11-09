@@ -38,8 +38,8 @@ pub struct Given<'a> {
     pub json: bool,
     /// A call prints what it did, and where, after its answer (`--trace`).
     pub trace: bool,
-    /// The command line's own words, for what was mistyped.
-    pub commands: &'a [String],
+    /// The command line's own commands (`Command.help`), for what was mistyped.
+    pub commands: &'a [(String, String)],
 }
 
 impl Given<'_> {
@@ -81,6 +81,13 @@ pub struct Command {
 const ABOUT_AT: usize = 39;
 /// How wide `help all` is.
 const WIDTH: usize = 118;
+
+/// The words that begin commands' forms: what the command line takes before any app's name.
+pub fn words(forms: &[(String, String)]) -> Vec<String> {
+    let mut out: Vec<String> = forms.iter().filter_map(|(usage, _)| usage.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase() || c == '-')).map(String::from).collect();
+    out.dedup();
+    out
+}
 
 /// Commands' forms (`Command.help`) as `help all` lays them out.
 pub fn help<'a>(forms: impl IntoIterator<Item = &'a (String, String)>) -> String {

@@ -26,7 +26,7 @@ pub fn commands() -> Command {
             ("pair [--user <name>]".into(), "a pairing code for another of your machines (or, for admins, someone else's)".into()),
             ("join <code>".into(), format!("join {YOURS} with a pairing code")),
             ("rename <name>".into(), "rename this device".into()),
-            ("role <user> admin|member".into(), "(admins)".into()),
+            ("role <user> admin|member".into(), "make someone an admin or a member (admins)".into()),
             ("settings [<name> <value>|--default]".into(), "the network's settings (admins set them)".into()),
         ],
         run: |g| {
@@ -80,6 +80,7 @@ pub fn commands() -> Command {
                     g.node.post("/v1/settings", json!({ "name": name, "value": value }))?;
                     println!("Set {name}.");
                 }
+                ["role", _, role] if !matches!(*role, "admin" | "member") => return Err(one::cli::Failed::Typed(format!("a role is admin or member, not {role}")).into()),
                 ["role", user, role] => {
                     g.node.post("/v1/role", json!({ "user": user, "role": role }))?;
                     println!("{user} is now {role}.");

@@ -121,7 +121,7 @@ pub fn input(schema: &Value, places: &[String], words: Vec<String>, flags: Flags
         "{} isn't an input: {} (see --help)",
         rest.join(" "),
         match unset.as_slice() {
-            few if !few.is_empty() && few.len() <= 3 => format!("did you mean {}?", few.iter().map(|p| format!("--{} {first}", kebab(p))).collect::<Vec<_>>().join(" or ")),
+            few if rest.len() == 1 && !few.is_empty() && few.len() <= 3 => format!("did you mean {}?", few.iter().map(|p| format!("--{} {first}", kebab(p))).collect::<Vec<_>>().join(" or ")),
             _ => "give inputs as --flags".to_string(),
         }
     );

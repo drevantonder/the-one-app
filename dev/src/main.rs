@@ -54,22 +54,29 @@ fn run(args: Vec<String>) -> Result<()> {
     }
     let (positional, flags) = tools::split(&args);
     let node = node();
-    let words: Vec<String> = commands().iter().flat_map(|c| &c.help).filter_map(|(usage, _)| usage.split_whitespace().next().map(String::from)).collect();
-    let given = one::cli::Given { words: &positional, flags: &flags, args: &args, node: &node, agent: None, json: false, trace: false, commands: &words };
-    if !(positional.is_empty() || positional[0] == "help" || flags.contains_key("help") || flags.contains_key("h")) {
+    let forms: Vec<(String, String)> = commands().into_iter().flat_map(|c| c.help).collect();
+    let given = one::cli::Given { words: &positional, flags: &flags, args: &args, node: &node, agent: None, json: false, trace: false, commands: &forms };
+    let asked_help = positional.is_empty() || positional[0] == "help" || flags.contains_key("help") || flags.contains_key("h");
+    if !asked_help {
         for command in commands() {
             if (command.run)(&given)? {
                 return Ok(());
             }
         }
-        if !words.contains(&positional[0]) {
-            return Err(one::cli::Failed::Typed(format!("{} isn't a command of {}: {} help lists them", positional[0], dev(), dev())).into());
-        }
+    }
+    let first = positional.first().filter(|w| *w != "help");
+    let these: Vec<&(String, String)> = forms.iter().filter(|(usage, _)| first.is_some_and(|w| usage.split_whitespace().next() == Some(w))).collect();
+    if first.is_some() && these.is_empty() {
+        return Err(one::cli::Failed::Typed(format!("{} isn't a command of {}: {} help lists them", positional[0], dev(), dev())).into());
+    }
+    if !these.is_empty() {
+        print!("Usage:\n{}", one::cli::help_as(&dev(), these));
+        return Ok(());
     }
     println!(
-        "{}: for whoever builds {NAME} from its repo. The people a network serves, and their agents, use {CLI}.\n\nUsage:\n{}",
+        "{}: for whoever builds {NAME} from its repo. Users of a network, and their agents, use {CLI}.\n\nUsage:\n{}",
         dev(),
-        one::cli::help_as(&dev(), commands().iter().flat_map(|c| &c.help))
+        one::cli::help_as(&dev(), &forms)
     );
     Ok(())
 }

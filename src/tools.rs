@@ -59,7 +59,7 @@ fn typed(err: anyhow::Error) -> anyhow::Error {
     }
 }
 
-/// `<CLI> <app> <tool> [words] [--input value]...`: runs it and prints what it gives back.
+/// `<CLI> <app> <tool> [words] [--<input> <value>]...`: runs it and prints what it gives back.
 pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Result<()> {
     let node = g.node;
     let (mut words, mut flags) = split(args);
@@ -91,9 +91,9 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
         let missing = self::missing(&schema, &input);
         if !missing.is_empty() {
             return Err(Failed::Typed(format!(
-                "missing {}: give {} as flags, or pipe the inputs as JSON: {CLI} {app} {tool} < input.json. See {CLI} {app} {tool} --help.",
+                "missing {}: {}. Inputs can also come as JSON on stdin; --help says more.",
                 missing.join(", "),
-                if missing.len() == 1 { "it" } else { "them" }
+                usage(app, o)
             ))
             .into());
         }
@@ -187,8 +187,8 @@ pub fn none_said(node: &Client, app: &Value, tool: &Value, ok: &Value, reader: R
 
 /// What to say for an app or tool nobody here lists, with the nearest names: `gmail has no tool serch:
 /// did you mean search?`, `no app gmial: did you mean gmail?`. On the command line, built-in commands are names too.
-/// `commands` are the command line's own words, when it asks.
-pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[String]>) -> Result<String> {
+/// `commands` are the command line's own commands' forms, when it asks.
+pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[(String, String)]>) -> Result<String> {
     let cli = commands.is_some();
     let apps = crate::core_tools::and_apps(node)?;
     let tools_of = |a: &Value| -> Vec<String> { a["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
@@ -209,8 +209,10 @@ pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[
             });
         }
         let (tool, tools) = (tool.unwrap_or(""), tools_of(a));
-        let guess = nearest(tool, &tools.iter().map(String::as_str).collect::<Vec<_>>()).first().map(|n| format!(": did you mean {n}?")).unwrap_or_else(|| ".".into());
-        return Ok(format!("{app} has no tool {tool}{guess} Its tools: {}", tools.join(", ")));
+        return Ok(match nearest(tool, &tools.iter().map(String::as_str).collect::<Vec<_>>()).first() {
+            Some(n) => format!("{app} has no tool {tool}: did you mean {n}?"),
+            None => format!("{app} has no tool {tool}. Its tools: {}", tools.join(", ")),
+        });
     }
     // A tool's name as a command, one repos_create notes: the command is one repos create notes.
     let as_command = app.match_indices('_').find_map(|(i, _)| {
@@ -218,14 +220,15 @@ pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[
         apps.iter().find(|x| x["name"] == a).is_some_and(|x| tools_of(x).iter().any(|x| x == o)).then(|| format!("{a} {o}"))
     });
     if let Some(command) = as_command.filter(|_| cli) {
-        return Ok(format!("no app {app}: did you mean {CLI} {command}{}?", tool.map(|o| format!(" {o}")).unwrap_or_default()));
+        return Ok(format!("that's an MCP tool's name: did you mean {CLI} {command}{}?", tool.map(|o| format!(" {o}")).unwrap_or_default()));
     }
     let names: Vec<String> = apps.iter().filter(|a| a["deleted"].is_null()).filter_map(|a| a["name"].as_str()).map(String::from).collect();
-    let commands = commands.unwrap_or_default();
+    let forms = commands.unwrap_or_default();
+    let commands = crate::cli::words(forms);
     let all: Vec<&str> = names.iter().chain(commands.iter()).map(String::as_str).collect();
     Ok(match nearest(app, &all).first() {
-        Some(n) if *n == app && commands.contains(n) => format!("{CLI} {app} takes more than that: {CLI} {app} --help says what"),
-        Some(n) if commands.contains(n) && !names.contains(n) => format!("no command {app}: did you mean {CLI} {n}? {CLI} help says the rest"),
+        Some(n) if *n == app && commands.iter().any(|c| c == n) => format!("usage:\n{}", crate::cli::help(forms.iter().filter(|(usage, _)| usage.split_whitespace().next() == Some(app))).trim_end()),
+        Some(n) if commands.iter().any(|c| c == n) && !names.contains(&n.to_string()) => format!("no command {app}: did you mean {CLI} {n}? {CLI} help says the rest"),
         Some(n) => format!("no app {app}: did you mean {n}?"),
         None if cli => format!("no command or app {app}: {CLI} help says the commands, {CLI} search <words> finds tools"),
         None => format!("no app {app}: search finds the tools for a task"),
@@ -258,14 +261,14 @@ pub fn commands() -> crate::cli::Command {
     crate::cli::Command {
         help: vec![
             ("<app>".into(), "an app's tools".into()),
-            ("<app> <tool> [words] [--input value]".into(), format!("run a tool, e.g. {CLI} repos list; --help says what it takes. Words fill its main inputs in order (--help shows which), lists repeat a flag, required inputs not given are asked for at a terminal, else read as JSON from stdin (a last word - reads it anyway), --file <input>=<path> gives a file and --out <path> saves what it gives back. --device <name> runs it on that device; --trace prints, after its answer (or why it failed), what it did: the devices tried, the one that ran it, each wait in ms, where its data came from, and the total")),
+            ("<app> <tool> [words] [--<input> <value>]".into(), format!("run a tool, e.g. {CLI} repos list; --help says what it takes. Words fill its main inputs in order (--help shows which), lists repeat a flag, required inputs not given are asked for at a terminal, else read as JSON from stdin (a last word - reads it anyway), --file <input>=<path> gives a file and --out <path> saves what it gives back. --device <name> runs it on that device; --trace prints, after its answer (or why it failed), what it did: the devices tried, the one that ran it, each wait in ms, where its data came from, and the total")),
         ],
         run: |g| {
             let args = g.args;
             match g.words().as_slice() {
                 [app] if !app.starts_with('-') => {
                     let apps = crate::core_tools::and_apps(g.node)?;
-                    let Some(found) = apps.iter().find(|a| a["name"] == *app) else { anyhow::bail!("{}", unknown(g.node, app, None, Some(g.commands))?) };
+                    let Some(found) = apps.iter().find(|a| a["name"] == *app) else { return Err(Failed::Typed(unknown(g.node, app, None, Some(g.commands))?).into()) };
                     println!("{} ({app})", found["title"].as_str().unwrap_or(app));
                     if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                         println!("\n{i}\n");
@@ -277,7 +280,7 @@ pub fn commands() -> crate::cli::Command {
                     let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
                     run(g, app, tool, &args[at(tool, at(app, 0))..])?
                 }
-                [first, ..] => anyhow::bail!("{}", unknown(g.node, first, None, Some(g.commands))?),
+                [first, ..] => return Err(Failed::Typed(unknown(g.node, first, None, Some(g.commands))?).into()),
                 _ => return Ok(false),
             }
             Ok(true)
