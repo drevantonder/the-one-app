@@ -501,17 +501,7 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
         }
         Route::ForgetSignIn => {
             let body: body::ForgetSignIn = read(path, raw)?;
-            let user = m.user()?;
-            let key = m.who(|db| {
-                let key = db.find_machine(&body.key)?;
-                let has = match &body.account {
-                    Some(account) => db.linked_sign_ins(&key)?.contains(account),
-                    None => db.machine(&key)?.is_some_and(|d| d.sign_in.is_some()),
-                };
-                ensure!(has && db.machine(&key)?.is_some_and(|d| d.user == user), "That isn't one of your devices with a sign-in to forget.");
-                Ok(key)
-            })?;
-            m.write(content::forget_sign_in(&key, body.account.as_ref())).await?;
+            forget_sign_in(m, &body.key, body.account.as_ref()).await?;
             done
         }
         Route::LinkSignIn => {
@@ -1064,6 +1054,36 @@ async fn record_sign_in(m: &impl Me, confirm: bool) -> Result<Value> {
     }
     m.write(content::link_sign_in(&me.key, &account)).await?;
     Ok(json!({ "linked": true }))
+}
+
+/// Forgets an account a device of this user's signed in with: on every client of theirs that has it, so it counts for
+/// nothing any more, and at auth, so it signs no one in. Auth keeps someone's last way to sign in.
+async fn forget_sign_in(m: &impl Me, device: &str, account: Option<&Account>) -> Result<()> {
+    let user = m.user()?;
+    let (account, forgets) = m.who(|db| {
+        let key = db.find_machine(device)?;
+        let mine = db.machine(&key)?.filter(|d| d.user == user);
+        let account = match account {
+            Some(account) => db.linked_sign_ins(&key)?.into_iter().find(|a| a == account),
+            None => mine.as_ref().and_then(|d| d.sign_in.clone()),
+        };
+        let account = account.filter(|_| mine.is_some()).ok_or_else(|| anyhow!("That isn't one of your devices with a sign-in to forget."))?;
+        let mut forgets = Vec::new();
+        for c in db.clients()?.into_iter().filter(|c| c.user == user) {
+            if c.sign_in.as_ref().is_some_and(|a| a.same(&account)) {
+                forgets.push((c.key, None));
+            }
+            forgets.extend(db.linked_sign_ins(&c.key)?.into_iter().filter(|a| a.same(&account)).map(|a| (c.key, Some(a))));
+        }
+        Ok((account, forgets))
+    })?;
+    for (key, linked) in &forgets {
+        m.write(content::forget_sign_in(key, linked.as_ref())).await?;
+    }
+    if let Err(err) = ask_auth(m, "POST", "/api/auth/devices/forget-sign-in", json!({ "user": user, "account": account })).await {
+        tracing::warn!("forgetting a sign-in at auth: {err:#}");
+    }
+    Ok(())
 }
 
 /// The network as this device reads it, and for an ID token, its issuer's keys: none if they can't be fetched now.

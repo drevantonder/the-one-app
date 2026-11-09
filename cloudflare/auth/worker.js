@@ -431,6 +431,7 @@ export class Auth extends DurableObject {
     }
     if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
     if (path === "/api/auth/devices/proof" && method === "GET") return json(await this.proofsFor(request));
+    if (path === "/api/auth/devices/forget-sign-in" && method === "POST") return json(await this.forgetSignIn(request));
     if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
@@ -529,6 +530,25 @@ export class Auth extends DurableObject {
   /// The ID token an account at `provider` last gave `user`: of two at one provider, the one just signed in with.
   lastIdToken(user, provider) {
     return this.ctx.storage.sql.exec("select idToken from account where userId = ? and providerId = ? order by updatedAt desc limit 1", user, provider).toArray()[0]?.idToken;
+  }
+
+  /// Takes an identity a user removed off their account: `{ user, account }`, asked by one of their devices or an
+  /// admin's. Someone's last way to sign in stays, or they could never ask again.
+  async forgetSignIn(request) {
+    const signed = (await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")))) || refuse(401, "Sign in first.");
+    const { user, account } = signed.fields;
+    const sql = this.ctx.storage.sql;
+    if (!signed.admin && !sql.exec("select 1 from devices where key = ? and user = ?", signed.by, user).toArray().length) refuse(403, "Only their own device, or an admin's, forgets it.");
+    const left = sql.exec("select (select count(*) from account where userId = ?1) + (select count(*) from passkey where userId = ?1) as n", user).one().n;
+    if (left <= 1) return { kept: true };
+    if (account?.passkey) {
+      sql.exec("delete from passkey where userId = ? and credentialID = ?", user, String(account.passkey.credential));
+      return {};
+    }
+    const provider = providersOf(this.env).find((p) => p.issuer.replace(/\/+$/, "") === String(account?.provider?.issuer || "").replace(/\/+$/, ""));
+    if (!provider) refuse(404, "No such sign-in.");
+    sql.exec("delete from account where userId = ? and providerId = ? and accountId = ?", user, provider.id, String(account.provider.subject));
+    return {};
   }
 
   /// Linking one more identity, for the device `join` names: the sign-in page first, and then this, only just signed in.
