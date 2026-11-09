@@ -299,6 +299,9 @@ export class Auth extends DurableObject {
             const session = await getSessionFromCtx(ctx);
             if (!session || !fresh(session)) refuse(403, "Sign in again, then link it.");
           }
+          // An ID token only ever comes from the provider, by its own redirect: these routes would otherwise take one
+          // from anyone holding it and sign them in as its account.
+          if ((ctx.path === "/sign-in/social" || ctx.path === "/link-social") && ctx.body?.idToken) refuse(403, "Sign in at the provider.");
           if (ctx.path === "/oauth2/token" && ctx.body) ctx.body.resource = await self.audience(ctx.body.client_id || basicClient(ctx.headers));
         }),
       },
@@ -510,6 +513,11 @@ export class Auth extends DurableObject {
     return { proofs: this.ctx.storage.sql.exec("select user, proof from proofs where key = ?", signed.by).toArray().map((p) => ({ user: p.user, proof: JSON.parse(p.proof) })) };
   }
 
+  /// The ID token an account at `provider` last gave `user`: of two at one provider, the one just signed in with.
+  lastIdToken(user, provider) {
+    return this.ctx.storage.sql.exec("select idToken from account where userId = ? and providerId = ? order by updatedAt desc limit 1", user, provider).toArray()[0]?.idToken;
+  }
+
   /// Linking one more identity, for the device `join` names: the sign-in page first, and then this, only just signed in.
   async linkOpened(request, url, look) {
     const join = url.searchParams.get("join");
@@ -524,9 +532,8 @@ export class Auth extends DurableObject {
     this.fromOurPages(request);
     const session = await this.session(request);
     if (!JOIN.test(join || "") || !providersOf(this.env).some((p) => p.id === provider)) refuse(400, "That link isn't whole.");
-    const [account] = this.ctx.storage.sql.exec("select idToken from account where userId = ? and providerId = ?", session.user.id, provider).toArray();
-    if (!account?.idToken) refuse(404, "That account wasn't linked. Try again.");
-    this.keepProof(join, session.user.id, { id_token: account.idToken });
+    const token = this.lastIdToken(session.user.id, provider) || refuse(404, "That account wasn't linked. Try again.");
+    this.keepProof(join, session.user.id, { id_token: token });
     return {};
   }
 
@@ -683,11 +690,12 @@ export class Auth extends DurableObject {
     }
   }
 
-  shown(rows) {
+  /// Each request as a device reads it: what its sign-in showed only to `entitled`, as an ID token is a bearer's.
+  shown(rows, entitled = () => true) {
     const sql = this.ctx.storage.sql;
     return rows.map((r) => {
       const user_name = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
-      const [signed] = sql.exec("select proof from proofs where key = ? and user = ?", r.key, r.user).toArray();
+      const [signed] = entitled(r) ? sql.exec("select proof from proofs where key = ? and user = ?", r.key, r.user).toArray() : [];
       const signIn = signed && (r.by_link ? { by_link: JSON.parse(signed.proof) } : JSON.parse(signed.proof));
       return { key: r.key, seal: r.seal, name: r.name, user: r.user, user_name, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.root ? { root: r.root } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), ...(r.platform ? { platform: r.platform } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
     });
@@ -703,11 +711,18 @@ export class Auth extends DurableObject {
     const user = bearer(request) ? await this.user(request) : null;
     const signed = user ? await this.signed(request).catch(() => null) : await this.signed(request);
     if (signed && !user) {
-      return { requests: this.shown(sql.exec("select * from requests where approved is null order by made").toArray()) };
+      return { requests: this.shown(sql.exec("select * from requests where approved is null order by made").toArray(), this.entitled(signed)) };
     }
     if (signed) this.theirs(signed.by, user);
     const theirs = user || (await this.user(request)) || refuse(401, "Sign in first.");
     return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", theirs).toArray()) };
+  }
+
+  /// Which requests' sign-ins a device of the network may read: every one, for an admin's; its own user's, as it asked
+  /// to join as them, for any other.
+  entitled(signed) {
+    const [mine] = this.ctx.storage.sql.exec("select user from devices where key = ?", signed.by).toArray();
+    return (r) => signed.admin || r.user === mine?.user;
   }
 
   async mayTouch(request, key) {
@@ -717,18 +732,18 @@ export class Auth extends DurableObject {
     const [row] = sql.exec("select * from requests where key = ?", key).toArray();
     const ok = row && (signed || row.user === ((await this.user(request)) || refuse(401, "Sign in first.")));
     if (!ok) refuse(404, "No request waits with that key: it was approved, refused or waited too long.");
-    return row;
+    return { row, signed };
   }
 
   async request(request, key) {
-    const row = await this.mayTouch(request, key);
-    return this.shown([row])[0];
+    const { row, signed } = await this.mayTouch(request, key);
+    return this.shown([row], signed ? this.entitled(signed) : undefined)[0];
   }
 
   /// Forgets a request, refused; or one `approved`, marked so until it would have expired, for its device to see, with
   /// the network's `root` (hex) it was let into and its `welcome`, if the approving device said.
   async unask(request, key, approved, root, welcome) {
-    const row = await this.mayTouch(request, key);
+    const { row } = await this.mayTouch(request, key);
     // Approved again (a retry, or a second approving device): marked once, never forgotten by it.
     if (approved) {
       if (!row.approved) {
@@ -950,8 +965,8 @@ export class Auth extends DurableObject {
       // Back from a provider for a device: the ID token it just gave, its nonce that device's, is kept for its request.
       const join = joinOf(oauth_query);
       if (started && join) {
-        const [account] = this.ctx.storage.sql.exec("select idToken from account where userId = ? and providerId = ?", signedIn.user.id, started.provider).toArray();
-        if (account?.idToken) this.keepProof(join, signedIn.user.id, { id_token: account.idToken });
+        const token = this.lastIdToken(signedIn.user.id, started.provider);
+        if (token) this.keepProof(join, signedIn.user.id, { id_token: token });
       }
     }
     const client = await this.client(query.get("client_id"));

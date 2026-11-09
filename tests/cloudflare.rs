@@ -578,6 +578,11 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": "/", "errorCallbackURL": "/" }));
     assert_eq!(status, 200, "{out}");
     assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&ROOT, &device)), "Google is asked for an ID token naming the device in this network");
+    // An ID token handed to auth directly signs no one in, nor links, whoever holds one.
+    let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "idToken": { "token": "a.b.c" } }));
+    assert_eq!(status, 403, "{out}");
+    let (status, out) = browser.post("/api/auth/link-social", json!({ "provider": "google", "idToken": { "token": "a.b.c" } }));
+    assert_eq!(status, 403, "{out}");
 }
 
 /// A device is let in by its sign-in only when it signed in itself: one whose sign-in was finished from a link opened
