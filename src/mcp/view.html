@@ -57,7 +57,7 @@
   // An app's tool, as a screen or widget calls it: pressing it there is the user agreeing to it.
   const run = async (app, tool, input) => (await call("screens_call", { app, tool, input, confirm: true }))?.ok ?? null;
   const looks = oneHost.scheme();
-  const React = OneUI.react, { createRoot } = OneUI["react-dom/client"], ui = OneUI["@one/ui"], h = React.createElement;
+  const React = OneUI.react, { createRoot } = OneUI["react-dom/client"], { flushSync } = OneUI["react-dom"], ui = OneUI["@one/ui"], h = React.createElement;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // What's shown: tools' results, widgets or an app's screen, each opened from the one under it, as layers kept as
@@ -160,7 +160,8 @@
     bar();
   }
 
-  // A widget's card, drawn by @one/ui as the pages draw it, in an element of its own that's drawn again in place.
+  // A widget's card, drawn by @one/ui as the pages draw it, in an element of its own that's drawn again in place, at
+  // once, so the placeholder gives way to it without the view shrinking first.
   function card(w) {
     const el = document.createElement("div");
     el.__root = createRoot(el);
@@ -169,7 +170,7 @@
   }
   function draw(el, w) {
     el.__w = w;
-    el.__root.render(h(ui.WidgetCard, { w, host: { run: act, follow }, className: "h-full" }));
+    flushSync(() => el.__root.render(h(ui.WidgetCard, { w, host: { run: act, follow }, className: "h-full" })));
   }
   const cardOf = (w) => [...(top()?.el.children || [])].find((el) => el.__w === w);
 
