@@ -19,7 +19,7 @@ export const detail = Object.assign(document.createElement("div"), { className: 
 const titled = [];
 export const whenTitled = (fn) => titled.push(fn);
 
-/// This release's files by their content (`/web.js?v=…`), as the gateway's index.html names them: kept for good.
+/// The web client's files by their content (`/web.js?v=…`), as the gateway's index.html names them: kept for good.
 const files = Object.fromEntries((document.querySelector('meta[name="one-files"]')?.content || "").split(" ").filter(Boolean).map((f) => f.split("=")));
 const asset = (name) => (files[name] ? `/${name}?v=${files[name]}` : `/${name}`);
 
