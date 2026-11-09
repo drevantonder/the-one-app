@@ -46,3 +46,7 @@ body.dragging iframe { pointer-events: none; }
 .panel-screen { flex: 1; min-height: 0; display: flex; }
 .panel-note { flex: 1; margin: 0; padding: 8px 16px; color: var(--muted-foreground); font-size: 13px; }
 .panel-rows { flex: none; display: flex; flex-direction: column; padding: 4px 8px 8px; border-top: 1px solid var(--border); }
+
+/* The logo, in the page as it arrives on a slow connection: only if it's been a moment, so a quick start shows nothing before the window. */
+[data-late] { animation: late 0.15s 0.8s backwards; }
+@keyframes late { from { opacity: 0; } }

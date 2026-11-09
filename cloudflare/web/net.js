@@ -26,7 +26,7 @@ function received(m) {
   if (!w) return;
   if (m.error !== undefined) {
     waiting.delete(m.id);
-    const err = Object.assign(new Error(m.error), { trace: m.trace, notLetIn: m.notLetIn, signedOut: m.signedOut, code: m.code });
+    const err = Object.assign(new Error(m.error), { trace: m.trace, notLetIn: m.notLetIn, signedOut: m.signedOut, unreachable: m.unreachable, code: m.code });
     if (w.body) w.body.error(err);
     else w.reject(err);
   } else if (m.status !== undefined) {

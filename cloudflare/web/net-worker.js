@@ -76,12 +76,21 @@ function browserHost(keptJs) {
 
 export function server(version, givenHost) {
   const base = `/client/${version}/`;
-  const compiled = WebAssembly.compileStreaming(fetch(`${base}one_client_bg.wasm`));
-  const glue = import(`${base}one_client.js`).then(async (g) => (await g.default({ module_or_path: await compiled }), g));
-  glue.catch(() => {});
+  /// What's fetched once: if the connection drops while it comes, whoever asks next fetches it again, as `unreachable` says.
+  const fetched = (get) => {
+    let got = null;
+    return () => (got ||= get().catch((err) => ((got = null), Promise.reject(Object.assign(err, { unreachable: true })))));
+  };
+  const glue = fetched(async () => {
+    const compiled = WebAssembly.compileStreaming(fetch(`${base}one_client_bg.wasm`));
+    const g = await import(`${base}one_client.js`);
+    await g.default({ module_or_path: await compiled });
+    return g;
+  });
+  glue().catch(() => {});
   // Imported here, not above, so the WebAssembly is fetched first.
-  const code = Promise.all([import("/shared/crypto.js"), import("/shared/protocol.js"), import("/kept.js")]);
-  const host = givenHost || browserHost(code.then((c) => c[2]));
+  const code = fetched(() => Promise.all([import("/shared/crypto.js"), import("/shared/protocol.js"), import("/kept.js")]));
+  const host = givenHost || browserHost(code().then((c) => c[2]));
   /// Of `keys`, the nodes the network's signed steps, as `device` last read them, list as running something of its
   /// user's: all of them before it's read any. A node the relay or a node names besides isn't asked.
   function theirs(device, keys) {
@@ -94,7 +103,7 @@ export function server(version, givenHost) {
   /// `memory` for one asked as for a while; whether the relay still lets it in (`still`); its key's signature, and the secret
   /// its seal key agrees with another's, neither key read.
   async function reaches(user, me, still, memory) {
-    const [{ signBytes }] = await code;
+    const [{ signBytes }] = await code();
     const text = new TextEncoder();
     const kept = memory ? { get: async (k) => memory.get(k), put: async (k, v) => void memory.set(k, v), del: async (k) => void memory.delete(k) } : host.keep(user);
     return {
@@ -186,14 +195,14 @@ export function server(version, givenHost) {
   /// Each user's answers kept in this browser (`Answers`), made the first time they're asked for.
   const answering = new Map();
   const answersOf = async (user) => {
-    const { Answers } = await glue;
+    const { Answers } = await glue();
     if (!answering.has(user)) answering.set(user, new Answers(shelf(user)));
     return answering.get(user);
   };
 
   /// `user`'s device asking to be let in, before it's one: its keyring, which reaches auth and keeps what it's told.
   async function asking(user) {
-    const { Keyring } = await glue;
+    const { Keyring } = await glue();
     const device = await host.device(user);
     if (!device) throw new Error("This browser has no keys yet. Sign in again.");
     return new Keyring(device.key, device.sealKey, await reaches(user, device, () => true, null));
@@ -208,14 +217,14 @@ export function server(version, givenHost) {
     const took = {};
     let mark = performance.now();
     const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
-    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { getAll, put }] = await code;
+    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken }, { FRESH, RELAY, SESSION, Yours }, { getAll, put }] = await code();
     const [mine, [nodes]] = await Promise.all([host.device(user), getAll([`nodes:${user}`])]);
     const device = as || mine;
     if (!device) return null;
     // Its keyring, made while the session's key is: this browser's, or another device's of its user's asked as while
     // it lets this one in (a passkey's), which keeps nothing.
     let made = null;
-    const making = glue.then(async ({ Keyring }) => {
+    const making = glue().then(async ({ Keyring }) => {
       const k = new Keyring(device.key, device.sealKey, await reaches(user, device, () => made?.still() ?? true, as ? new Map() : null));
       if (!as) k.keeping(await answersOf(user));
       await k.restore();
@@ -261,7 +270,7 @@ export function server(version, givenHost) {
       return null;
     }
     if (!known.length) put(`nodes:${user}`, first).catch(() => {});
-    const { Client } = await glue;
+    const { Client } = await glue();
     step("code");
     const [client, keyring] = await Promise.all([Client.start(secret, certificate, host.address, known.length ? first : order(first)), making]);
     keyring.connect(client);
@@ -302,7 +311,7 @@ export function server(version, givenHost) {
     const s = await session?.ready.catch(() => null);
     if (s?.client !== client) return;
     try {
-      const [{ certify, hex }, { FRESH, SESSION }] = await code;
+      const [{ certify, hex }, { FRESH, SESSION }] = await code();
       const device = await host.device(user);
       if (!device) return;
       const until = Date.now() + SESSION - FRESH;
@@ -347,7 +356,7 @@ export function server(version, givenHost) {
           case "nodes": {
             const s = await session?.ready;
             const nodes = theirs(s?.keyring, m.nodes);
-            await (await code)[2].put(`nodes:${m.user}`, nodes);
+            await (await code())[2].put(`nodes:${m.user}`, nodes);
             // Each one's run priority, where the state said it: those on the same one are raced at once.
             const ranks = nodes.filter((k) => Number.isInteger(m.ranks?.[k]));
             if (ranks.length) s?.client.ranks(ranks, ranks.map((k) => m.ranks[k]));
@@ -358,7 +367,7 @@ export function server(version, givenHost) {
           // `name`, coming back to `back`) unless it has its `client` id, and an authorization asked for (`start`); what
           // came back exchanged for tokens (`finish`); its refresh token exchanged for new ones (`refresh`), or revoked.
           case "auth": {
-            const { SignIn } = await glue;
+            const { SignIn } = await glue();
             const http = {
               async send(method, url, type, body) {
                 const r = await fetch(url, { method, headers: type ? { "content-type": type } : {}, body: body ?? undefined });
@@ -438,7 +447,7 @@ export function server(version, givenHost) {
           }
         }
       } catch (err) {
-        post({ id, error: String(err?.message || err), trace: err?.trace || "", notLetIn: !!err?.notLetIn, signedOut: !!err?.signedOut, code: err?.code || undefined });
+        post({ id, error: String(err?.message || err), trace: err?.trace || "", notLetIn: !!err?.notLetIn, signedOut: !!err?.signedOut, unreachable: !!err?.unreachable, code: err?.code || undefined });
       }
     };
   }

@@ -14,7 +14,7 @@
     setTimeout(() => (root.style.visibility = ""), 1000);
   }
   // A page that draws nothing is a problem, not a black or white screen: if no text, image or control is on it a few seconds
-  // after it starts (web.js never ran, or a frame was laid out at no size), it says so, with the way out, and the app's log
+  // after it's loaded (web.js never ran, or a frame was laid out at no size), it says so, with the way out, and the app's log
   // (`one logs`) gets a line. This is the page's first script and needs nothing else of it.
   // Arriving from another of a network's own pages with its logo (a View Transition, onboarding.css): the logo stays where
   // it was until web.js draws what's under it.
@@ -31,6 +31,7 @@
     return false;
   };
   const blank = () => {
+    if (document.getElementById("one-blank")) return;
     if (document.hidden) return addEventListener("visibilitychange", () => setTimeout(blank, 3000), { once: true });
     if (drawn()) return;
     const root = document.documentElement;
@@ -52,7 +53,10 @@
     const watching = new MutationObserver(() => drawn() && (box.remove(), watching.disconnect()));
     watching.observe(document.body, { childList: true, subtree: true });
   };
-  setTimeout(blank, 6000);
+  // Counted from when the page finished loading: on a slow connection it's still coming. A page that never finishes
+  // says so too.
+  addEventListener("load", () => setTimeout(blank, 6000));
+  setTimeout(blank, 30_000);
   const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.content || "";
   const client = meta("one-client");
   const named = meta("one-files").split(" ").find((f) => f.startsWith("net-worker.js="));

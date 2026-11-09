@@ -2,7 +2,7 @@
 // sandboxed frame whose bridge (src/screen/bridge.js) this page answers: an app's acting only as that app, and only the
 // client's own as the user (settings.js).
 import { move, settle } from "./moves.js";
-import { offline } from "./offline.js";
+import { late, offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { CODES } from "../shared/protocol.js";
 import { UNANSWERED, api, call, developer } from "./request.js";
@@ -212,14 +212,14 @@ function frameFor(r, into, { sheet, kitted } = {}) {
   // A spinner only for a wait that's long enough to notice.
   if (!kitted) into.innerHTML = "";
   setTimeout(() => f.loaded || f.shown || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status"><span class="spinner"></span></div>`), 400);
-  // A screen that's nothing yet after 5 seconds: the spinner gives way to one problem, which goes as the screen loads.
+  // A screen that's nothing yet once it's late: the spinner gives way to one problem, which goes as the screen loads.
   setTimeout(() => {
     if (f.loaded || f.page || f.still || !into.isConnected) return;
     $(".screen-status", into)?.remove();
     const status = Object.assign(document.createElement("div"), { className: "screen-status" });
     into.prepend(status);
     OneUI["react-dom/client"].createRoot(status).render(h(ui.Problem, { quiet: true, title: "Not opening yet", text: UNANSWERED, className: "m-6" }));
-  }, 5000);
+  }, late());
   const written = (page, kit) => linkedIn(page, kit).catch(() => page).then((html) => oneHost.look(html, appearance(), !!sheet, platform.look()));
   const draw = async (page) => {
     f.page = page;
@@ -256,11 +256,12 @@ function frameFor(r, into, { sheet, kitted } = {}) {
   // A kept page whose fresh one is slow to come (its devices gone quiet, not refusing) is the window's being offline too.
   let came = false;
   const away = async () => offline.add(f.key, async () => update(await screenPage(r)), await kept.when("page", f.key));
-  setTimeout(() => came || tried.then(() => !came && f.page && f.into.isConnected && away()), 5000);
+  setTimeout(() => came || tried.then(() => !came && f.page && f.into.isConnected && away()), late());
   fresh.then((page) => ((came = true), offline.done(f.key), update(page)), async (err) => {
     await tried;
     if (err.code === CODES.appDeleted) return (came = true), offline.done(f.key), deleted(f, r);
-    if (f.page) return away();
+    // No node answered: it opens by itself once one does.
+    if (f.page || err.unanswered) return away();
     screenDrew(f);
     failed(into, one.plain(err).title);
   });
@@ -578,7 +579,7 @@ addEventListener("message", async (e) => {
   if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill, f.frame.clientWidth));
   if (e.data?.oneShown) return void ((f.shown = true), $(".screen-status", f.into)?.remove(), f.frame.contentWindow?.postMessage({ oneOffline: !!offline.banner() }, "*"));
   if (e.data?.oneDimmed !== undefined) return void (f.sheet || ((f.dimmed = !!e.data.oneDimmed), showing === f && dimmed()));
-  if (e.data?.oneDrawn) return void screenDrew(f);
+  if (e.data?.oneDrawn) return void (e.data.early && f.still ? null : screenDrew(f));
   const { one: m, id } = e.data || {};
   if (!m || typeof m !== "object") return;
   /// Where this screen's `one.open` goes.

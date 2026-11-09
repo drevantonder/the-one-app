@@ -6,7 +6,7 @@
 // imports' names in it (src/web.rs): view, platform, request, store, routes, offline, settings, moves, screens, window, web.
 //
 // The bridge (src/screen/), loaded after this, gives `one`; this page answers it for its own use (`__one.host`).
-import { offline } from "./offline.js";
+import { late, offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { api, retryWait, sleep } from "./request.js";
 import { go, href, own, route } from "./routes.js";
@@ -62,20 +62,28 @@ async function start() {
   if (lastWindow()) render();
   else show(h(ui.Starting, { logo }));
   setJoining(true);
-  try {
-    // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
-    let waited = false;
-    await platform.join((code, invited) => ((waited = true), showJoin(code, invited)), api);
-    if (waited) show(h(ui.Starting, { logo }));
-  } catch (err) {
-    if (!err.signedOut) return void show(message("Can’t Let This Device In", err.message));
-    if (err.removed) return;
-    return signOut();
+  for (let misses = 1; ; misses++) {
+    try {
+      // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
+      let waited = false;
+      await platform.join((code, invited) => ((waited = true), showJoin(code, invited)), api);
+      if (waited) show(h(ui.Starting, { logo }));
+      break;
+    } catch (err) {
+      if (err.unreachable) {
+        if (!windowShowing()) showUnreachable();
+        await sleep(retryWait(misses));
+        continue;
+      }
+      if (!err.signedOut) return void show(message("Can’t Let This Device In", err.message));
+      if (err.removed) return;
+      return signOut();
+    }
   }
   // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
   const away = setTimeout(() => windowShowing() || showUnreachable(), 15000);
   // What it showed last, with the devices still not answering: said so, as a failed ask is.
-  const slow = setTimeout(() => windowShowing() && offline.add("state", () => refreshState(), lastAt()), 4000);
+  const slow = setTimeout(() => windowShowing() && offline.add("state", () => refreshState(), lastAt()), late());
   for (let misses = 1; ; misses++) {
     try {
       await refreshState();

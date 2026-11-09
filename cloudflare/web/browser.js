@@ -88,7 +88,7 @@ export function browser() {
     navigator.serviceWorker?.register("/sw.js", { type: "module" }).catch(() => {});
     const user = auth.user();
     const keys = await browserKeys(user);
-    if (await net.start(user).catch(() => false)) return (device = keys);
+    if (await net.start(user).catch((err) => (err.unreachable ? Promise.reject(err) : false))) return (device = keys);
     const invite = sessionStorage.getItem("one.invite");
     const ask = async () => net.ask(user, await auth.token(), browserName(), "browser", invite);
     await ask();

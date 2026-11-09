@@ -5,8 +5,13 @@
 import { retryWait } from "./request.js";
 import { h, ui } from "./view.js";
 
+/// How long an answer may take on a connection that's only slow (a phone through the relay), before the window says
+/// its devices aren't answering; and with no network at all, which the browser knows at once.
+export const late = () => (navigator.onLine ? 12_000 : 1000);
+
 const changes = [];
 const redraw = () => changes.forEach((fn) => fn());
+addEventListener("online", () => offline.waiting.size && offline.now());
 
 export const offline = {
   waiting: new Map(),
