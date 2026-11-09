@@ -54,9 +54,18 @@ function Groups() {
 
   const me = state?.user?.id
   const groups = state?.network?.groups || []
-  const invited = groups.filter((g) => g.invited.some((m) => m.user === me))
+  const invited = groups.filter((g) => g.invited.some((m) => m.user === me) && pending[`${g.id}:${me}`] !== null)
   const mine = groups.filter((g) => g.role)
   const selected = openId && groups.find((g) => g.id === openId && (g.role || g.invited.some((m) => m.user === me)))
+
+  // Taking someone out, or themselves leaving, once they say so.
+  async function remove(g, user) {
+    const name = userName(state, user)
+    const sure = await one.alert(user === me
+      ? { title: `Leave ${g.name}?`, text: g.members.length === 1 ? "No one else is in it." : "", action: "Leave", danger: true }
+      : { title: `Remove ${name} from ${g.name}?`, action: "Remove", danger: true })
+    if (sure) change(g.id, user, null)
+  }
 
   // Changes a member's role, or with none removes them: shown at once, and undone with why if it fails.
   async function change(group, user, role) {
@@ -114,7 +123,7 @@ function Groups() {
   } else {
     body = (
       <>
-        {openId && !selected && <Problem title="You're not in this group." />}
+        {openId && openId === one.params?.group && !selected && <Problem title="You're not in this group." />}
         {!!invited.length && (
           <Section title="Invited">
             <List>
@@ -124,7 +133,12 @@ function Groups() {
                   leading={<AppIcon app={GROUPS} size={36} />}
                   title={g.name}
                   sub={names(state, g.members)}
-                  trailing={<Button variant="secondary" size="sm" disabled={!!joining} onClick={() => accept(g.id)}>{joining === g.id ? "Joining…" : "Join"}</Button>}
+                  trailing={
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" disabled={!!joining} onClick={() => change(g.id, me, null)}>Decline</Button>
+                      <Button variant="secondary" size="sm" disabled={!!joining} onClick={() => accept(g.id)}>{joining === g.id ? "Joining…" : "Join"}</Button>
+                    </div>
+                  }
                 />
               ))}
             </List>
@@ -176,6 +190,7 @@ function Groups() {
             sent={sent.filter((s) => s.group === selected.id)}
             error={error}
             change={(user, role) => change(selected.id, user, role)}
+            remove={(user) => remove(selected, user)}
             invite={() => startInvite(selected.id)}
             handle={() => startHandle(selected.id)}
           />
@@ -188,23 +203,27 @@ function Groups() {
   )
 }
 
-// A heading over a group of rows.
-const Section = ({ title, children }) => (
+// A heading over a group of rows, with what it ends with.
+const Section = ({ title, action, children }) => (
   <section className="flex flex-col gap-2">
-    {title && <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>}
+    {(title || action) && (
+      <div className="flex min-h-8 items-center justify-between gap-3">
+        <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+        {action}
+      </div>
+    )}
     {children}
   </section>
 )
 
-// One group: its handle, its members, its invites, and inviting or leaving.
-function Group({ g, state, me, pending, sent, error, change, invite, handle }) {
+// One group: its members, who's invited, its handle, and leaving it.
+function Group({ g, state, me, pending, sent, error, change, remove, invite, handle }) {
   const admin = g.role === "admin"
   const admins = g.members.filter((m) => m.role === "admin").map((m) => m.user)
   const lastAdmin = admins.length === 1 && admins[0] === me
   const members = g.members.filter((m) => pending[`${g.id}:${m.user}`] !== null).sort((x, y) => (y.user === me) - (x.user === me) || userName(state, x.user).localeCompare(userName(state, y.user)))
-  const waiting = [...g.invited, ...sent.filter((s) => !g.invited.some((m) => m.user === s.user))]
+  const waiting = [...g.invited, ...sent.filter((s) => !g.invited.some((m) => m.user === s.user))].filter((m) => pending[`${g.id}:${m.user}`] !== null)
   const stuck = lastAdmin && g.members.length > 1
-  const note = admin ? (admins.length === 1 ? "Make someone else an admin before you step down." : "") : "Only its admins change who's in it."
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-4 pr-8">
@@ -212,39 +231,43 @@ function Group({ g, state, me, pending, sent, error, change, invite, handle }) {
         <h2 className="min-w-0 text-xl font-semibold break-words select-text">{g.name}</h2>
       </div>
 
+      <Section title="Members" action={admin && <Button variant="secondary" size="sm" onClick={invite}><Icon name="plus" />Invite Someone</Button>}>
+        <List>
+          {members.map((m) => {
+            const role = pending[`${g.id}:${m.user}`] || m.role
+            const name = userName(state, m.user)
+            const trailing = admin && !(role === "admin" && admins.length === 1)
+              ? <Role name={name} role={role} remove={m.user === me ? `Leave ${g.name}` : `Remove from ${g.name}`} change={(r) => (r === null ? remove(m.user) : r !== role && change(m.user, r))} />
+              : <span className="text-sm text-muted-foreground">{roleName(role)}</span>
+            return <ListRow key={m.user} leading={<Avatar id={m.user} name={name} size={36} />} title={`${name}${m.user === me ? " (you)" : ""}`} trailing={trailing} />
+          })}
+        </List>
+        {error && <Problem title={error} />}
+      </Section>
+
+      {!!waiting.length && (
+        <Section title="Invited">
+          <List>
+            {waiting.map((m) => (
+              <ListRow
+                key={m.user}
+                leading={<Avatar id={m.user} name={userName(state, m.user)} size={36} />}
+                title={userName(state, m.user)}
+                trailing={admin ? <Button variant="ghost" size="sm" onClick={() => change(m.user, null)}>Cancel Invite</Button> : <span className="text-sm text-muted-foreground">Invited</span>}
+              />
+            ))}
+          </List>
+        </Section>
+      )}
+
       {g.handle && (
         <List>
           <ListRow title="Handle" trailing={<span className="text-sm text-muted-foreground">@{g.handle}</span>} onClick={admin ? handle : undefined} />
         </List>
       )}
 
-      <Section title="Members">
-        <List>
-          {members.map((m) => {
-            const role = pending[`${g.id}:${m.user}`] || m.role
-            const name = userName(state, m.user)
-            const trailing = admin && !(role === "admin" && admins.length === 1)
-              ? <Role name={name} role={role} remove={m.user === me ? `Leave ${g.name}` : `Remove from ${g.name}`} change={(r) => r !== role && change(m.user, r)} />
-              : <span className="text-sm text-muted-foreground">{roleName(role)}</span>
-            return <ListRow key={m.user} leading={<Avatar id={m.user} name={name} size={36} />} title={`${name}${m.user === me ? " (you)" : ""}`} trailing={trailing} />
-          })}
-        </List>
-        {error ? <Problem title={error} /> : note && <p className="text-sm text-muted-foreground">{note}</p>}
-      </Section>
-
-      {!!waiting.length && (
-        <Section title="Invited">
-          <List>
-            {waiting.map((m) => <ListRow key={m.user} leading={<Avatar id={m.user} name={userName(state, m.user)} size={36} />} title={userName(state, m.user)} trailing={<span className="text-sm text-muted-foreground">Waiting</span>} />)}
-          </List>
-        </Section>
-      )}
-
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          {admin && <Button variant="secondary" onClick={invite}><Icon name="plus" />Invite Someone</Button>}
-          <Button variant="destructive" disabled={stuck} onClick={() => change(me, null)}>Leave {g.name}</Button>
-        </div>
+      <div className="flex flex-col items-start gap-1">
+        <Button variant="ghost" className="-ml-4 text-destructive" disabled={stuck} onClick={() => remove(me)}>Leave {g.name}</Button>
         {stuck && <p className="text-sm text-muted-foreground">Make someone else an admin before you leave.</p>}
       </div>
     </div>
@@ -293,7 +316,6 @@ function NewGroup({ open, setOpen, made }) {
     <ResponsiveDialog open={open} onOpenChange={setOpen} title="New Group" action={<Button size="sm" disabled={!name.trim() || busy} onClick={save}>Create</Button>}>
       <form className="flex flex-col gap-4 p-4" onSubmit={(e) => (e.preventDefault(), save())}>
         <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="Name" autoComplete="off" enterKeyHint="done" />
-        <p className="text-sm text-muted-foreground">You'll be its first admin.</p>
         {error && <Problem title={error} />}
       </form>
     </ResponsiveDialog>
@@ -311,46 +333,50 @@ function Invite({ g, state, sent, open, setOpen, send }) {
   return (
     <ResponsiveDialog open={open} onOpenChange={setOpen} title={`Invite to ${g.name}`} action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>}>
       <div className="flex flex-col gap-4 overflow-y-auto p-4">
-        <Tabs value={role} onValueChange={setRole}>
-          <TabsList className="w-full">
-            <TabsTrigger value="member">Member</TabsTrigger>
-            <TabsTrigger value="admin">Admin</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <label className="relative block">
-          <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            autoFocus
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && matches[0] && pick(matches[0].id)}
-            placeholder="Find users"
-            aria-label="Find users"
-            enterKeyHint="search"
-            autoComplete="off"
-            {...quiet}
-            className="pl-9 [&::-webkit-search-cancel-button]:hidden"
-          />
-        </label>
-        {matches.length ? (
-          <List className="max-w-none">
-            {matches.map((u) => (
-              <ListRow
-                key={u.id}
-                leading={<Avatar id={u.id} name={u.name} size={36} />}
-                title={u.name}
-                sub={u.role === "admin" ? `Admin of ${one.config.yours}` : undefined}
-                trailing={<Icon name="plus-circle" className="size-5 text-muted-foreground" />}
-                className="[&>svg:last-child]:hidden"
-                onClick={() => pick(u.id)}
+        {!others.length ? <Empty className="py-6">{state.network.users.length > 1 ? "Everyone is in this group already." : `No one else is in ${one.config.yours} yet.`}</Empty> : (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">Invite as</span>
+              <Tabs value={role} onValueChange={setRole}>
+                <TabsList>
+                  <TabsTrigger value="member">Member</TabsTrigger>
+                  <TabsTrigger value="admin">Admin</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+            <label className="relative block">
+              <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                autoFocus
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && matches[0] && pick(matches[0].id)}
+                placeholder="Find users"
+                aria-label="Find users"
+                enterKeyHint="search"
+                autoComplete="off"
+                {...quiet}
+                className="pl-9 [&::-webkit-search-cancel-button]:hidden"
               />
-            ))}
-          </List>
-        ) : others.length ? (
-          <p className="text-center text-sm text-muted-foreground">No one called “{query.trim()}”.</p>
-        ) : null}
-        <p className="text-sm text-muted-foreground">{others.length ? "They join once they accept." : "Everyone is in this group already."}</p>
+            </label>
+            {matches.length ? (
+              <List className="max-w-none">
+                {matches.map((u) => (
+                  <ListRow
+                    key={u.id}
+                    leading={<Avatar id={u.id} name={u.name} size={36} />}
+                    title={u.name}
+                    sub={u.role === "admin" ? `Admin of ${one.config.yours}` : undefined}
+                    trailing={<Icon name="plus-circle" className="size-5 text-muted-foreground" />}
+                    className="[&>svg:last-child]:hidden"
+                    onClick={() => pick(u.id)}
+                  />
+                ))}
+              </List>
+            ) : <p className="text-center text-sm text-muted-foreground">No one called “{query.trim()}”.</p>}
+          </>
+        )}
       </div>
     </ResponsiveDialog>
   )
