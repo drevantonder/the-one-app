@@ -101,7 +101,7 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
         }
         let program = out.join(platform.target);
         if rust {
-            let o = Command::new(cargo())
+            let o = cargo()
                 .current_dir(&source)
                 .env("ONE_BUILD", built)
                 .args(["build", "--release", "--message-format=json-render-diagnostics", "--manifest-path"])
@@ -189,7 +189,7 @@ impl Wasm<'_> {
     /// wasm-bindgen of the version it's built with. Its glue is only made again for what cargo built again: a build that
     /// holds it (`CLOUDFLARE_NODE`, `CLIENT`) watches these files, so rewriting them would have that build done again.
     fn build(&self, src: &Path, config: &Path) -> Result<PathBuf> {
-        quietly(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(self.cargo)).with_context(|| format!("build the {} (rustup target add wasm32-unknown-unknown)", self.what))?;
+        quietly(cargo().current_dir(src).env("CONFIG", config).args(self.cargo)).with_context(|| format!("build the {} (rustup target add wasm32-unknown-unknown)", self.what))?;
         let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
         let glued = self.out.join(self.glued);
         if modified(&glued).is_some_and(|glued| modified(&self.wasm).is_some_and(|built| glued > built)) {
@@ -226,9 +226,32 @@ fn tool(name: &str, probe: &str, kept: &str) -> PathBuf {
     if succeeds(Command::new(name).arg(probe)) || !kept.exists() { name.into() } else { kept }
 }
 
-/// Cargo, also where rustup puts it.
-pub fn cargo() -> PathBuf {
-    tool("cargo", "--version", ".cargo/bin/cargo")
+/// Cargo, also where rustup puts it, with sccache findable too: `.cargo/config.toml` names it bare, and a shell without it on
+/// its PATH (the ssh that runs a Linux device's update) gets it where mise's shims put it.
+pub fn cargo() -> Command {
+    cargo_behind(None)
+}
+
+/// `cargo()` at a lower priority.
+pub fn nice_cargo() -> Command {
+    cargo_behind(Some("nice"))
+}
+
+fn cargo_behind(wrapper: Option<&str>) -> Command {
+    let cargo = tool("cargo", "--version", ".cargo/bin/cargo");
+    let mut command = match wrapper {
+        Some(wrapper) => {
+            let mut command = Command::new(wrapper);
+            command.arg(cargo);
+            command
+        }
+        None => Command::new(cargo),
+    };
+    if let Some(dir) = tool("sccache", "--version", ".local/share/mise/shims/sccache").parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        command.env("PATH", std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&path))).unwrap_or(path));
+    }
+    command
 }
 
 /// Go, also where mise's shims put it.

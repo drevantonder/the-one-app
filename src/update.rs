@@ -139,7 +139,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let key = release_key()?;
     // Its commits were tested before they were pushed.
     println!("Building {short}");
-    let mut node = Command::new(cargo());
+    let mut node = cargo();
     node.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
     // Every release carries the Cloudflare node: one without it couldn't deploy to Cloudflare.
     node.env("CLOUDFLARE_NODE", timed("built the Cloudflare node", || build::cloudflare_node(&src, &config, "release")).context("couldn't build the Cloudflare node, so nothing was sent out")?);
@@ -191,7 +191,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if cfg!(target_os = "linux") {
         println!("Building the Linux app");
         let native = src.join("client/native");
-        match quietly(Command::new(cargo()).current_dir(&native).env("CONFIG", &config).args(["build", "--release"])) {
+        match quietly(cargo().current_dir(&native).env("CONFIG", &config).args(["build", "--release"])) {
             Ok(()) => {
                 let name = format!("{CLI}-app-{TARGET}");
                 std::fs::copy(native.join("target/release/one-native"), dir.join(&name))?;

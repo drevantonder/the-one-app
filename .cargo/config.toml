@@ -3,3 +3,9 @@
 # built with these instead, and the few functions declared in src/database/stored.rs, need nothing more.
 [env]
 LIBSQLITE3_FLAGS = "-DSQLITE_ENABLE_SESSION -DSQLITE_ENABLE_PREUPDATE_HOOK"
+
+# Every worktree has its own target/ (a shared one would break `target/debug/one throwaway` in each), so each would
+# compile every dependency again: sccache keeps one copy of each compiled crate, shared by all of them. src/build.rs's
+# cargo() finds it for a shell without it on its PATH.
+[build]
+rustc-wrapper = "sccache"

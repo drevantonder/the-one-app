@@ -53,7 +53,7 @@ pub(crate) fn rebuilt(checkout: &Path, rest: &[String], what: &str) -> Result<()
     anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again and doesn't hold what it was built with: {what}");
     eprintln!("Building {what} (dev profile, not release)…");
     std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
-    crate::build::quietly(std::process::Command::new("nice").arg(crate::build::cargo()).current_dir(checkout).env_remove("CLIENT").env_remove("CLOUDFLARE_NODE").arg("build"))?;
+    crate::build::quietly(crate::build::nice_cargo().current_dir(checkout).env_remove("CLIENT").env_remove("CLOUDFLARE_NODE").arg("build"))?;
     use std::os::unix::process::CommandExt;
     Err(std::process::Command::new(&own).arg("throwaway").args(rest).env(&again, "1").exec().into())
 }

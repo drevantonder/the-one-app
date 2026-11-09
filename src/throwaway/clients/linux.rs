@@ -21,7 +21,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
     let home = dir.join(&name);
     std::fs::create_dir_all(&home)?;
     eprintln!("Building client/native (dev profile; the first time takes minutes)…");
-    crate::build::quietly(std::process::Command::new("nice").arg(crate::build::cargo()).arg("build").current_dir(checkout.join("client/native")))?;
+    crate::build::quietly(crate::build::nice_cargo().arg("build").current_dir(checkout.join("client/native")))?;
     // Its own display and control port, the same each time for this throwaway network and user.
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(home.to_string_lossy().as_bytes()).into();
     let display = format!(":{}", 200 + u16::from_le_bytes([hash[0], hash[1]]) % 600);
