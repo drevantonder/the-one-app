@@ -5,6 +5,7 @@
 //     link, its user first opens it and joins, pictured as <picture>-invite. Prints the code it shows to
 //     be approved (pictured as <picture>-approve), or nothing if it's a device of its user's already.
 //   picture <devtools port> <address> <picture>: once the web client's window is drawn, a picture of it.
+//   approve <devtools port> <address> <picture> <code>: this browser, one of its user's devices, lets in their device showing <code>.
 const [command, port, address, picture, invite] = process.argv.slice(2);
 const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
 const page = pages.find((p) => p.type === "page" && p.url.startsWith(address)) || pages.find((p) => p.type === "page");
@@ -41,6 +42,14 @@ if (command === "picture") {
   await until(`!!document.querySelector("[data-slot=shell-screen]")`, "the web client wasn't let in");
   await sleep(2500);
   await shoot(picture);
+  ws.close();
+  process.exit(0);
+}
+if (command === "approve") {
+  await until(`!!self.oneNet?.net?.fetch && !!document.querySelector("[data-slot=shell-screen]")`, "this browser isn't let in");
+  const asked = JSON.stringify(JSON.stringify({ code: invite.replaceAll(" ", ""), confirm: true }));
+  const said = await evaluate(`self.oneNet.net.fetch("POST", "/v1/devices/approve", { "content-type": "application/json" }, ${asked}).then(async (r) => ({ ok: r.ok, text: await r.text() }))`);
+  if (!said?.ok) throw new Error(`it wasn't let in: ${said?.text}`);
   ws.close();
   process.exit(0);
 }

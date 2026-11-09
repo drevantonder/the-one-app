@@ -12,7 +12,7 @@ use crate::agent;
 
 /// The native app (client/native) as this checkout builds it, on this machine in a display of its own (Xvfb), signed in
 /// to the throwaway network as its first user or `user` as a user would: its Sign In pressed, the sign-in it would
-/// open in a browser approved as them, and the code it then shows approved by the throwaway network's machine. What it
+/// open in a browser approved as them, and the code it then shows approved by the throwaway network's machine, or `user`'s browser. What it
 /// keeps (its folder, and its key in the Secret Service by the throwaway network's address) stays with the throwaway network, so a
 /// new build is still signed in; it's started again each time.
 pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, user: Option<&str>) -> Result<()> {
@@ -84,7 +84,14 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
         if let Some(code) = said.lines().rev().find_map(|l| l.strip_prefix("Code: "))
             && !approved
         {
-            approve_code(dir, code)?;
+            match user {
+                // Someone else's device is let in by one of theirs: their browser, which joined first.
+                Some(name) => {
+                    let port = super::web::browser(dir, settings, Some(name))?.to_string();
+                    super::web::web_script(dir, &["approve", &port, address, "", code])?;
+                }
+                None => approve_code(dir, code)?,
+            }
             approved = true;
         }
     }
