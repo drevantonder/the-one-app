@@ -768,12 +768,13 @@ export class Auth extends DurableObject {
 
   /// The Google sign-in this browser started for the authorization `query`, if it's back from it just now: → its id.
   async started(request, session, query) {
-    if (!session || !fresh(session)) return null;
+    if (!session || !fresh(session)) { console.log("DEBUG started: session", !!session, session ? session.session.createdAt : null); return null; }
     const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
-    if (!secret) return null;
+    if (!secret) { console.log("DEBUG started: no start cookie"); return null; }
     const id = await hash(secret);
     const [row] = this.ctx.storage.sql.exec("select query, made from google_starts where id = ? and made > ?", id, Date.now() - STARTED).toArray();
     const signedIn = new Date(session.session.createdAt).getTime();
+    console.log("DEBUG started", JSON.stringify({ row: !!row, same: row ? row.query === (await hash(query.toString())) : null, made: row?.made, signedIn, now: Date.now() }));
     return row && row.query === (await hash(query.toString())) && row.made <= signedIn ? id : null;
   }
 
