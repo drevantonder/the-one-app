@@ -6,7 +6,7 @@ import { offline } from "./offline.js";
 import { platform } from "./platform.js";
 import { qrSvg } from "./qr.js";
 import { api, developer, fresh, retryWait, sleep } from "./request.js";
-import { back, closeTop, go, home, linked, own, route, sidebar, whenMoved } from "./routes.js";
+import { back, closeTop, go, home, linked, own, route, setSection, sidebar, whenMoved } from "./routes.js";
 import { detail, devtools, hasScreen, openSheet, replacing, screen, setBarStart, tabWaiting, tell, whenTitled } from "./screens.js";
 import { notMine } from "./settings.js";
 import { config, isJoining, leave, network, refreshApps, refreshState, setWaiting, signOut, store, titleOf, whenChanged } from "./store.js";
@@ -48,7 +48,7 @@ const SIDEBAR = "one.sidebar";
 /// then only when it changes.
 let badged = -1;
 function countBadges(drawn) {
-  const total = [...drawn.pages, drawn.settings].reduce((n, p) => n + Math.max(0, p.badge || 0), 0);
+  const total = drawn.reduce((n, s) => n + Math.max(0, s.badge || 0), 0);
   if (total === badged) return;
   platform.badge((badged = total));
   tabWaiting(total);
@@ -67,12 +67,13 @@ function drawWindow() {
   const banner = appBehind() || offline.banner();
   if (platform.phone()) return void show(h(ui.Shell, { phone: true, title: barTitle, back: barBack, onBack: back, screen: detail, banner }));
   show(h(ui.Shell, {
-    ...drawn,
+    sections: drawn,
     title: barTitle,
     back: barBack,
     onBack: back,
     onGo: (to) => linked(to) && go(linked(to)),
     onPress: (to) => linked(to) && screen.ready(detail, linked(to)),
+    onSection: (key, open) => (setSection(key, open), drawWindow()),
     onBarStart: setBarStart,
     developer: developer.on(),
     onDeveloper: () => devtools.toggle(),

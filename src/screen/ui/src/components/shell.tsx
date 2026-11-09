@@ -1,16 +1,17 @@
 import * as React from "react"
-import { CaretLeftIcon, CodeIcon, GearSixIcon } from "@phosphor-icons/react"
+import { ArrowUpRightIcon, CaretLeftIcon, CaretRightIcon, CodeIcon } from "@phosphor-icons/react"
+import { Collapsible } from "radix-ui"
 import { AppIcon, type App } from "@/components/app-icon"
 import { Kept } from "@/components/kept"
 import { Button } from "@/components/ui/button"
 import {
-  Sidebar, SidebarContent, SidebarGroup, SidebarInset, SidebarMenu, SidebarMenuBadge,
+  Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarInset, SidebarMenu, SidebarMenuBadge,
   SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 
-/// A row of the sidebar: an app, or the Accounts folder (`folder`, the icons of the apps that keep accounts). `href` is where it goes, a real
-/// link for a new tab.
+/// A row of the sidebar: an app, a Settings item, or the Accounts folder (`folder`, the icons of the apps that keep accounts). `href` is
+/// where it goes, a real link for a new tab; `external` opens another site.
 type ShellItem = {
   key: string
   title: string
@@ -19,30 +20,32 @@ type ShellItem = {
   folder?: App[]
   badge?: number
   selected?: boolean
+  external?: boolean
 }
 
-/// A page's row (You, a group's, Everyone), and under it `items`, the apps of the page the window is on; with none under
-/// it, `badge` is what its apps count. Settings is one too, at the sidebar's foot.
 /// A count as a badge says it.
 export const badgeCount = (n: number) => (n > 99 ? "99+" : String(n))
 
-type ShellPage = { key: string; title: string; href: string; selected?: boolean; badge?: number; items: ShellItem[] }
+/// A part of the sidebar: a page (You, a group's, Everyone) or Settings, its name going there and `items` under it unless
+/// it's collapsed (`open`), when `badge`, what they count, shows on its name.
+type ShellSection = { key: string; title: string; href: string; selected?: boolean; open: boolean; badge?: number; items: ShellItem[] }
 
-/// The window every client shows screens in: the sidebar of pages, the current one's apps under it and Settings at its
-/// foot, and beside it a bar with the title over what's open (`children`, or `screen`, an element the client keeps its
-/// screens' frames in, put here as it is). Where its room is narrow, the sidebar is a sheet behind the bar's button. `onGo`
-/// is told of a plain click on a row (a click with a modifier opens the link as the browser does), and `onPress` as a plain press comes down on one, before it lets go; `back`, a Back button
+/// The window every client shows screens in: the sidebar of sections, and beside it a bar with the title over what's open
+/// (`children`, or `screen`, an element the client keeps its screens' frames in, put here as it is). Where its room is
+/// narrow, the sidebar is a sheet behind the bar's button. `onGo` is told of a plain click on a row or a section's name (a
+/// click with a modifier opens the link as the browser does), `onPress` as a plain press comes down on one, before it lets
+/// go, and `onSection` as a section is collapsed or opened; `back`, a Back button
 /// before the title; `onBarStart`, how far along the bar its own buttons reach. A `phone`'s has no sidebar: its home is the
 /// pages side by side (their own titles, no bar), and what's opened from them has a bar with Back, as the native phone apps
 /// had. `banner`, what's wrong with the whole window (being offline), once, at the top of what it shows.
-function Shell({ pages = [], settings, title, back, onBack, onGo, onPress, onBarStart, developer, onDeveloper, open, onOpenChange, screen, children, className, phone, banner }: {
-  pages?: ShellPage[]
-  settings?: ShellPage
+function Shell({ sections = [], title, back, onBack, onGo, onPress, onSection, onBarStart, developer, onDeveloper, open, onOpenChange, screen, children, className, phone, banner }: {
+  sections?: ShellSection[]
   title?: string
   back?: boolean
   onBack?: () => void
   onGo?: (href: string) => void
   onPress?: (href: string) => void
+  onSection?: (key: string, open: boolean) => void
   onBarStart?: (px: number) => void
   developer?: boolean
   onDeveloper?: () => void
@@ -100,31 +103,11 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onPress, onBar
       </div>
       <Sidebar>
         <div className="h-(--shell-bar) shrink-0" />
-        <SidebarContent role="navigation" aria-label="Pages" className="relative">
-          <Selected rows={pages} />
-          <SidebarGroup>
-            <SidebarMenu>
-              {pages.map((p) => (
-                <React.Fragment key={p.key}>
-                  <ShellRow row={p.items.length ? { ...p, badge: 0 } : p} onGo={onGo} onPress={onPress} className="font-medium" />
-                  {p.items.map((item) => (
-                    <ShellRow key={item.key} row={item} onGo={onGo} onPress={onPress}>
-                      {item.folder ? <Folder apps={item.folder} /> : item.app && <AppIcon app={item.app} size={20} />}
-                    </ShellRow>
-                  ))}
-                </React.Fragment>
-              ))}
-            </SidebarMenu>
-          </SidebarGroup>
-          {settings && (
-            <SidebarGroup className="sticky bottom-0 mt-auto bg-sidebar has-data-[active=true]:bg-transparent">
-              <SidebarMenu>
-                <ShellRow row={settings} onGo={onGo} onPress={onPress} className="font-medium">
-                  <GearSixIcon />
-                </ShellRow>
-              </SidebarMenu>
-            </SidebarGroup>
-          )}
+        <SidebarContent role="navigation" aria-label="Pages" className="[scrollbar-width:none]">
+          <div className="relative pb-2">
+            <Selected sections={sections} />
+            {sections.map((section) => <ShellGroup key={section.key} section={section} onGo={onGo} onPress={onPress} onSection={onSection} />)}
+          </div>
         </SidebarContent>
       </Sidebar>
       {/* Where the bar starts: past the window’s buttons while the sidebar’s away, as the sidebar goes. */}
@@ -156,47 +139,101 @@ function BarStart({ back, onChange }: { back?: boolean; onChange?: (px: number) 
   return <span ref={ref} aria-hidden="true" className={cn("invisible absolute", back ? "w-[calc(var(--shell-bar-start)+2.25rem)]" : "w-(--shell-bar-start)")} />
 }
 
-/// The highlight behind the selected row, one element that slides from row to row, placed again as `rows` change.
-function Selected({ rows }: { rows: ShellPage[] }) {
+/// The highlight behind what's selected, a row or a section's name: one element that slides between them as `sections`
+/// change, and keeps to what it's behind as a section above opens or collapses.
+function Selected({ sections }: { sections: ShellSection[] }) {
   const ref = React.useRef<HTMLSpanElement>(null)
-  React.useLayoutEffect(() => {
+  const scrolledTo = React.useRef<Element | null>(null)
+  const place = React.useCallback(() => {
     const el = ref.current!, list = el.parentElement!
-    const place = () => {
-      const row = list.querySelector<HTMLElement>('[data-sidebar="menu-button"][data-active="true"]')
-      el.style.visibility = row ? "" : "hidden"
-      if (!row) return
-      const box = list.getBoundingClientRect(), at = row.getBoundingClientRect()
-      el.style.width = `${at.width}px`
-      el.style.height = `${at.height}px`
-      el.style.translate = `${at.left - box.left}px ${at.top - box.top + list.scrollTop}px`
-      if (!el.dataset.placed) requestAnimationFrame(() => (el.dataset.placed = ""))
-    }
-    place()
-    // Settings stays at the foot as the rows scroll under it.
-    list.addEventListener("scroll", place, { passive: true })
-    return () => list.removeEventListener("scroll", place)
-  }, [rows])
+    const row = list.querySelector<HTMLElement>('[data-active="true"]')
+    el.style.visibility = row ? "" : "hidden"
+    if (!row) return
+    const box = list.getBoundingClientRect(), at = row.getBoundingClientRect()
+    el.style.width = `${at.width}px`
+    el.style.height = `${at.height}px`
+    el.style.translate = `${at.left - box.left}px ${at.top - box.top}px`
+    if (!el.dataset.placed) requestAnimationFrame(() => (el.dataset.placed = ""))
+    if (row !== scrolledTo.current) row.scrollIntoView({ block: "nearest" })
+    scrolledTo.current = row
+  }, [])
+  React.useLayoutEffect(place, [sections, place])
+  React.useLayoutEffect(() => {
+    const el = ref.current!
+    const follow = new ResizeObserver(() => {
+      const sliding = el.getAnimations().length > 0
+      if (!sliding) el.style.transition = "none"
+      place()
+      if (!sliding) {
+        el.getBoundingClientRect()
+        el.style.transition = ""
+      }
+    })
+    follow.observe(el.parentElement!)
+    return () => follow.disconnect()
+  }, [place])
   return <span ref={ref} aria-hidden="true" className="absolute top-0 left-0 rounded-md bg-sidebar-accent data-[placed]:transition-[translate] data-[placed]:duration-(--move-settle) data-[placed]:ease-(--ease-settle) motion-reduce:transition-none" />
 }
 
-function ShellRow({ row, onGo, onPress, className, children }: { row: ShellItem; onGo?: (href: string) => void; onPress?: (href: string) => void; className?: string; children?: React.ReactNode }) {
+/// What a row or a section's name does when pressed: a plain click goes in place and closes the sidebar's sheet, any other
+/// is the browser's (a new tab), as is all of a link to another site.
+function useRowLink(row: Pick<ShellItem, "href" | "external">, onGo?: (href: string) => void, onPress?: (href: string) => void) {
   const { isMobile, setOpenMobile } = useSidebar()
-  // A plain click goes in place, and closes the sidebar's sheet; any other is the browser's (a new tab).
-  const go = (e: React.MouseEvent) => {
-    if (!onGo || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return
-    e.preventDefault()
-    onGo(row.href)
-    if (isMobile) setOpenMobile(false)
+  if (row.external) return { href: row.href, target: "_blank", rel: "noopener" }
+  const plain = (e: React.MouseEvent) => !e.button && !e.metaKey && !e.ctrlKey && !e.shiftKey
+  return {
+    href: row.href,
+    onClick: (e: React.MouseEvent) => {
+      if (!onGo || !plain(e)) return
+      e.preventDefault()
+      onGo(row.href)
+      if (isMobile) setOpenMobile(false)
+    },
+    onPointerDown: (e: React.PointerEvent) => plain(e) && onPress?.(row.href),
   }
+}
+
+const redBadge = "rounded-full bg-destructive text-white peer-data-[active=true]/menu-button:text-white"
+
+/// A section: its name in quiet type, going to its page all across the row; beside the name the caret that collapses what's
+/// under it, there on a hover, where nothing can hover, or while it's collapsed.
+function ShellGroup({ section, onGo, onPress, onSection }: { section: ShellSection; onGo?: (href: string) => void; onPress?: (href: string) => void; onSection?: (key: string, open: boolean) => void }) {
+  const link = useRowLink(section, onGo, onPress)
+  return (
+    <SidebarGroup className="py-1.5">
+      <Collapsible.Root open={section.open} onOpenChange={(open) => onSection?.(section.key, open)}>
+        <SidebarGroupLabel data-active={section.selected} className={cn("group/section relative gap-0.5 hover:text-sidebar-foreground data-[active=true]:text-sidebar-foreground", !section.open && !!section.badge && "pr-7")}>
+          <a {...link} className="min-w-0 truncate rounded-sm ring-sidebar-ring outline-hidden after:absolute after:inset-0 focus-visible:ring-2">{section.title}</a>
+          {section.items.length > 0 && (
+            <Collapsible.Trigger aria-label={section.title} className="group/caret relative grid size-5 shrink-0 place-items-center rounded-sm opacity-0 ring-sidebar-ring outline-hidden group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 data-[state=closed]:opacity-100 [@media(hover:none)]:opacity-100">
+              <CaretRightIcon className="size-3 transition-transform duration-(--move-quick) ease-(--ease-quick) group-data-[state=open]/caret:rotate-90" />
+            </Collapsible.Trigger>
+          )}
+          {!section.open && !!section.badge && <SidebarMenuBadge className={cn(redBadge, "top-1.5")}>{badgeCount(section.badge)}</SidebarMenuBadge>}
+        </SidebarGroupLabel>
+        {/* Its padding, taken back by its margin, is room for a row's focus ring inside what clips it as it slides. */}
+        <Collapsible.Content className="-m-1 overflow-hidden p-1 duration-(--move-quick) ease-(--ease-quick) data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+          <SidebarMenu>
+            {section.items.map((item) => <ShellRow key={item.key} row={item} onGo={onGo} onPress={onPress} />)}
+          </SidebarMenu>
+        </Collapsible.Content>
+      </Collapsible.Root>
+    </SidebarGroup>
+  )
+}
+
+function ShellRow({ row, onGo, onPress }: { row: ShellItem; onGo?: (href: string) => void; onPress?: (href: string) => void }) {
+  const link = useRowLink(row, onGo, onPress)
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild isActive={row.selected} className={cn("data-[active=true]:bg-transparent", className)}>
-        <a href={row.href} onClick={go} onPointerDown={(e) => !e.button && !e.metaKey && !e.ctrlKey && !e.shiftKey && onPress?.(row.href)}>
-          {children}
+      <SidebarMenuButton asChild isActive={row.selected} className="data-[active=true]:bg-transparent">
+        <a {...link}>
+          {row.folder ? <Folder apps={row.folder} /> : row.app && <AppIcon app={row.app} size={20} />}
           <span className="truncate">{row.title}</span>
+          {row.external && <ArrowUpRightIcon className="ml-auto text-muted-foreground" />}
         </a>
       </SidebarMenuButton>
-      {!!row.badge && <SidebarMenuBadge className="rounded-full bg-destructive text-white peer-data-[active=true]/menu-button:text-white">{badgeCount(row.badge)}</SidebarMenuBadge>}
+      {!!row.badge && <SidebarMenuBadge className={redBadge}>{badgeCount(row.badge)}</SidebarMenuBadge>}
     </SidebarMenuItem>
   )
 }
@@ -217,4 +254,4 @@ function Folder({ apps, size = 20 }: { apps: App[]; size?: number }) {
   )
 }
 
-export { Shell, Folder, type ShellItem, type ShellPage }
+export { Shell, Folder, type ShellItem, type ShellSection }
