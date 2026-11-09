@@ -9,9 +9,11 @@ export default {
   description: "Says hello",
   tools: {
     hello: {
+      title: "Say hello",
       reads: true,
       description: "Says hello to whoever asks. Gives { text }.",
       input: { type: "object", properties: {} },
+      output: { type: "object", required: ["text"], properties: { text: { type: "string" } } },
       run: (ctx) => ({ text: `Hello, ${ctx.me.user_name}` }),
     },
   },

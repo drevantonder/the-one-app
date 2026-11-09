@@ -101,9 +101,11 @@ export default {
   tools: {
     ...signIn,
     read: {
+      title: "Read a document",
       reads: true,
       description: "A document (Docs' documents.get) as text: its title, address and body, as markdown (headings, lists, tables, bold, italic, links) or plain text.",
       input: withAccount({ documentId: docInput, format: { type: "string", enum: ["markdown", "text"], description: "markdown (the default) or text" } }, ["documentId"]),
+      output: { type: "string", description: "the title, address and body of the document, as markdown or text" },
       async run(ctx, { account: a, documentId: document, format }) {
         const d = await api(ctx, await account(ctx, a), "GET", `documents/${encodeURIComponent(docId(document))}`, { missing: noDoc(document) });
         const text = render(d, format !== "text");
@@ -111,9 +113,15 @@ export default {
       },
     },
     create: {
+      title: "Make a document",
       reads: false,
       description: "Make a document in the user's Drive (in My Drive; Docs' documents.create), with text if given. Gives { id, title, url }.",
       input: withAccount({ title: str("its title, like Meeting notes 2026-11-03"), text: str("its first text, as plain text: markdown stays as typed") }, ["title"]),
+      output: {
+        type: "object",
+        required: ["id", "title", "url"],
+        properties: { id: { type: "string" }, title: { type: "string" }, url: { type: "string" } },
+      },
       async run(ctx, { account: a, title, text }) {
         const email = await account(ctx, a);
         const d = await api(ctx, email, "POST", "documents", { json: { title } });
@@ -122,9 +130,11 @@ export default {
       },
     },
     append: {
+      title: "Add text to the end of a document",
       reads: false,
       description: "Add text at the end of a document, as a new paragraph (a batchUpdate insertText). This changes the user's document: do it only when they asked.",
       input: withAccount({ documentId: docInput, text: str("the text, as plain text: markdown stays as typed") }, ["documentId", "text"]),
+      output: { type: "string", description: "that it was added, with the document's address" },
       async run(ctx, { account: a, documentId: document, text }) {
         const id = encodeURIComponent(docId(document));
         await api(ctx, await account(ctx, a), "POST", `documents/${id}:batchUpdate`, { json: { requests: [{ insertText: { text: `\n${text}`, endOfSegmentLocation: {} } }] }, missing: noDoc(document) });
@@ -132,6 +142,7 @@ export default {
       },
     },
     replace: {
+      title: "Replace text in a document",
       reads: false,
       confirm: true,
       description: "Replace every match of some text in a document (a batchUpdate replaceAllText); says how many changed. Do it only when the user asked.",
@@ -139,6 +150,7 @@ export default {
         documentId: docInput, find: str("the text to find, exactly as docs_read gives it as text"), replace: str("what to put instead, as plain text (empty removes it)"),
         matchCase: { type: "boolean", description: "match capitals exactly (default false)" },
       }, ["documentId", "find"]),
+      output: { type: "string", description: "how many matches changed, in words" },
       async run(ctx, { account: a, documentId: document, find, replace = "", matchCase }) {
         const id = encodeURIComponent(docId(document));
         const r = await api(ctx, await account(ctx, a), "POST", `documents/${id}:batchUpdate`,

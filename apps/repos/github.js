@@ -9,6 +9,8 @@
 // a JWT the Vault signs with the App's key), unless their own sign-in reaches the repo, which is used instead.
 // Nothing GitHub gives is kept but those sign-ins and which organizations are connected for which group.
 
+import { PERSON, STEP, TEXT } from "./shapes.js";
+
 export const PREFIX = "github.com/";
 const PAGE = 25;
 const PREVIEW = 1 << 20;
@@ -528,10 +530,19 @@ export function tools({ global }) {
   const ACCOUNT = { type: "string", description: "a GitHub username, as repos_accounts lists them" };
   return {
     accounts: {
+      title: "The GitHub accounts signed in",
       reads: true,
       accounts: true,
       description: "The GitHub accounts you've signed in to Repos, the first used first: [{ account, ok }], with why when ok is false (repos_sign_in fixes it). Their repos show in repos_list as github.com/<owner>/<repo>.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["account", "ok"],
+          properties: { account: { type: "string" }, ok: { type: "boolean" }, why: { type: "string", description: "when ok is false, what to do" } },
+        },
+      },
       async run(ctx) {
         const app = await appItem(ctx);
         return Promise.all((await accountItems(ctx)).map(async (item) => {
@@ -542,9 +553,11 @@ export function tools({ global }) {
       },
     },
     sign_in: {
+      title: "Start signing a GitHub account in",
       reads: false,
       description: "Start signing a GitHub account in to Repos, so its repos show beside the network's own: gives { url, then }. The user opens url, lets the network's GitHub App act for them, and GitHub sends them back to finish.",
       input: { type: "object", properties: { account: { type: "string", description: "a GitHub username to suggest to GitHub, like one that needs signing in again" } } },
+      output: STEP,
       async run(ctx, { account }) {
         if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
         const app = await appItem(ctx);
@@ -554,9 +567,15 @@ export function tools({ global }) {
       },
     },
     finish_sign_in: {
+      title: "Finish signing a GitHub account in",
       reads: false,
       description: "Finish signing in to GitHub with the address the browser came back to after repos_sign_in's url (Repos' Settings does it by itself). Gives { signed_in: true, account } or { signed_in: false, why }.",
       input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address the browser came back to, like https://…/back?code=…&state=…, or just its code" } } },
+      output: {
+        type: "object",
+        required: ["signed_in"],
+        properties: { signed_in: { type: "boolean" }, account: { type: "string", description: "when signed in" }, why: { type: "string", description: "when not" } },
+      },
       async run(ctx, { code: given }) {
         const app = await appItem(ctx);
         if (!app) throw noApp(ctx);
@@ -583,9 +602,11 @@ export function tools({ global }) {
       },
     },
     sign_out: {
+      title: "Sign a GitHub account out",
       reads: false,
       description: "Sign a GitHub account out of Repos: its repos no longer show for you. repos_sign_in signs it in again.",
       input: { type: "object", required: ["account"], properties: { account: ACCOUNT } },
+      output: TEXT("that it's signed out, in words"),
       async run(ctx, { account }) {
         const item = (await accountItems(ctx)).find((i) => i.fields.login.value.toLowerCase() === String(account || "").replace(/^@/, "").toLowerCase());
         if (!item) throw new Error(`${account} isn't signed in to Repos: repos_accounts lists those that are`);
@@ -595,12 +616,14 @@ export function tools({ global }) {
       },
     },
     create_github_app: {
+      title: "Start making the network's GitHub App",
       reads: false,
       description: "For an admin, once for everyone: start making the network's GitHub App, with which users sign in to GitHub and groups connect organizations. Gives { url }: the admin opens it and confirms on GitHub, which sends them back to Repos' Settings to finish.",
       input: { type: "object", properties: {
         org: { type: "string", description: "a GitHub organization to own the App, by its login; omit for the admin's own account" },
         github: { type: "string", description: "GitHub's address if it isn't https://github.com (GitHub Enterprise)" },
       } },
+      output: STEP,
       async run(ctx, { org, github = "https://github.com" }) {
         if (ctx.me.role !== "admin") throw new Error("only an admin makes the network's GitHub App: ask them");
         const web = String(github).replace(/\/+$/, "");
@@ -617,9 +640,11 @@ export function tools({ global }) {
       },
     },
     finish_github_app: {
+      title: "Finish making the network's GitHub App",
       reads: false,
       description: "Finish making the network's GitHub App with the address GitHub sent the admin back to (Repos' Settings does it by itself).",
       input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address GitHub sent the browser back to, or its code" } } },
+      output: { type: "object", required: ["made", "app"], properties: { made: { type: "boolean" }, app: { type: "string", description: "its slug on GitHub" } } },
       async run(ctx, { code: given }) {
         if (ctx.me.role !== "admin") throw new Error("only an admin makes the network's GitHub App");
         const s = String(given || "");
@@ -643,9 +668,11 @@ export function tools({ global }) {
       },
     },
     connect_org: {
+      title: "Start connecting a GitHub organization",
       reads: false,
       description: "For a group's admins: connect a GitHub organization, so its repos show for everyone in the group, read and written as the network's GitHub App. Gives { url }, where they install the App on the organization; GitHub sends them back to Repos' Settings to finish.",
       input: { type: "object", required: ["group"], properties: { group: { type: "string", description: "the group, by handle, from groups_list" } } },
+      output: STEP,
       async run(ctx, { group }) {
         const g = (ctx.handles || []).find((h) => h.id.startsWith("group:") && h.handle === String(group || "").replace(/^@/, ""));
         if (!g) throw new Error(`no group has the handle ${group}: groups_list has them`);
@@ -657,9 +684,11 @@ export function tools({ global }) {
       },
     },
     finish_connect_org: {
+      title: "Finish connecting a GitHub organization",
       reads: false,
       description: "Finish connecting an organization with the address GitHub sent the browser back to after installing the App (Repos' Settings does it by itself).",
       input: { type: "object", required: ["back"], properties: { back: { type: "string", description: "the whole address GitHub sent the browser back to, with installation_id" } } },
+      output: { type: "object", required: ["connected", "org"], properties: { connected: { type: "boolean" }, org: { type: "string" }, group: { type: "string", description: "the group it's connected for" } } },
       async run(ctx, { back }) {
         const installation = Number(new URL(back).searchParams.get("installation_id"));
         if (!installation) throw new Error("That address has no installation_id: install the App from Repos › Settings again");
@@ -680,10 +709,12 @@ export function tools({ global }) {
       },
     },
     disconnect_org: {
+      title: "Disconnect a GitHub organization",
       reads: false,
       confirm: true,
       description: "For a group's admins: stop showing a connected GitHub organization's repos to the group. The App stays installed on GitHub until its owners uninstall it there.",
       input: { type: "object", required: ["org"], properties: { org: { type: "string", description: "the organization's login, as repos_github lists it" }, confirm: { type: "boolean", description: "true once the user agreed" } } },
+      output: TEXT("that it's disconnected, in words"),
       async run(ctx, { org }) {
         const g = global(ctx);
         const rows = (await g.query("select * from github_orgs where lower(org) = lower(?)", [String(org || "")])).filter((o) => adminOf(ctx, o.owner));
@@ -693,9 +724,21 @@ export function tools({ global }) {
       },
     },
     github: {
+      title: "How GitHub is connected",
       reads: true,
       description: "How GitHub is connected: the network's GitHub App (null until an admin makes it), your GitHub accounts, the organizations connected for groups you're in (and for each whether you're its group's admin), and the groups you may connect one for.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "object",
+        required: ["admin", "accounts", "orgs", "groups"],
+        properties: {
+          app: { type: ["object", "null"], description: "the network's GitHub App, { slug, url }; null until an admin makes it", additionalProperties: true },
+          admin: { type: "boolean" },
+          accounts: { type: "array", items: { type: "string" } },
+          orgs: { type: "array", items: { type: "object", required: ["org", "yours"], additionalProperties: true }, description: "each { org, group, yours, time }" },
+          groups: { type: "array", items: PERSON, description: "the groups you may connect an organization for" },
+        },
+      },
       async run(ctx) {
         const app = await appItem(ctx);
         const rows = ctx.global ? await ctx.global.query("select installation, org, owner, user, time from github_orgs order by org") : [];

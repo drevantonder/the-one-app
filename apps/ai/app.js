@@ -55,12 +55,25 @@ export default {
 
   tools: {
     settings: {
+      title: "Which AI answers",
       reads: true,
       description: "Which AI answers ai_read and ai_decide for you: { provider, local_device, read_model, decide_model, gemini_model }, your own settings over everyone's, over the defaults. provider is local (models on local_device, or any of your devices when it's null) or gemini.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "object",
+        required: ["provider", "read_model", "decide_model", "gemini_model"],
+        properties: {
+          provider: { type: "string", enum: ["local", "gemini"] },
+          local_device: { type: ["string", "null"], description: "the device whose local models answer; null for any of yours" },
+          read_model: { type: "string" },
+          decide_model: { type: "string" },
+          gemini_model: { type: "string" },
+        },
+      },
       run: (ctx) => settings(ctx),
     },
     set: {
+      title: "Change which AI answers",
       reads: false,
       description: "Change which AI answers ai_read and ai_decide, for you, or with scope global for everyone (admins only): only the settings given change. Gemini needs a Gemini key in the Vault first: vault_request with app ai and need gemini. Says Saved.",
       input: {
@@ -74,6 +87,7 @@ export default {
           scope: { type: "string", enum: ["user", "global"], description: "user, for you (the default), or global, for everyone" },
         },
       },
+      output: { type: "string", description: "Saved." },
       async run(ctx, input) {
         const s = input.scope === "global" ? ctx.global : ctx.user;
         if (!s) throw new Error(input.scope === "global" ? "AI isn't added for everyone: an admin adds it with add, app ai and scope global" : "AI isn't added for you: add with app ai and scope user adds it");
@@ -84,6 +98,7 @@ export default {
       },
     },
     read: {
+      title: "Read photos and PDFs",
       reads: true,
       description: "Read photos or PDFs with a prompt, with the AI ai_settings names, for text out of a receipt, a form or a scan. Gives { text, provider, cut }: the answer, which AI gave it, and cut when it hit max_tokens. Local models read photos only. Fails with \"AI limit: minute\" or \"AI limit: day\" when a limit stops it: try again then. For a question with no file, models_chat.",
       input: {
@@ -95,6 +110,15 @@ export default {
           files: { type: "array", items: { type: "object", description: "{ type, data }: a MIME type (image/jpeg, image/png, application/pdf) and the file's bytes in base64" }, description: "the photos or PDFs to read, as { type, data }" },
           max_tokens: { type: "number", description: "the longest answer, in tokens; default 8192" },
           json_schema: { type: "object", description: "a JSON schema the answer's text must match, like { type: \"object\", properties: { total: { type: \"number\" } } }" },
+        },
+      },
+      output: {
+        type: "object",
+        required: ["text", "provider", "cut"],
+        properties: {
+          text: { type: "string", description: "the answer" },
+          provider: { type: "string", enum: ["local", "gemini"], description: "which AI gave it" },
+          cut: { type: "boolean", description: "whether it hit max_tokens" },
         },
       },
       async run(ctx, { prompt, system, files = [], max_tokens = 8192, json_schema }) {
@@ -126,6 +150,7 @@ export default {
       },
     },
     decide: {
+      title: "Ask a decision model",
       reads: true,
       description: "Ask the decision model ai_settings names typed questions about something, for fast labels and scores rather than prose. Each question is a choice (one of criteria), noul (yes or no) or score (one of levels, lowest first). Gives { answers: { <question>: { choice, probabilities, confidence } }, usage }. To pick the model yourself, models_decide.",
       input: {
@@ -135,6 +160,14 @@ export default {
           state: { type: "object", description: "what to decide about, as named fields: { subject: \"...\", body: \"...\" }" },
           questions: { type: "object", description: "named questions, each { type: choice, noul or score, instructions, criteria: { option: what it means } for choice, levels: [lowest, ..., highest] for score }" },
           images: { type: "array", items: { type: "object" }, description: "images as { content_type, base64 } (or base64 strings), which state names as image 1, image 2..." },
+        },
+      },
+      output: {
+        type: "object",
+        required: ["answers"],
+        properties: {
+          answers: { type: "object", description: "each question's name to { choice, probabilities, confidence }", additionalProperties: true },
+          usage: { type: "object", description: "what the model spent", additionalProperties: true },
         },
       },
       async run(ctx, { state = {}, questions, images }) {

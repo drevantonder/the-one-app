@@ -617,10 +617,19 @@ export default {
 
   tools: {
     accounts: {
+      title: "The browser profiles Messenger reads",
       reads: true,
       accounts: true,
       description: "The browser profiles Messenger reads, the default first: each { account, ok }, account the profile's name, with why when ok is false and it needs signing in again. Give account to the others to pick one.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["account", "ok"],
+          properties: { account: { type: "string", description: "the profile's name" }, ok: { type: "boolean" }, why: { type: "string", description: "when ok is false, what to do" } },
+        },
+      },
       async run(ctx) {
         const s = await load(ctx);
         await keep(ctx, s.linked).catch(() => {}); // a call that only reads lists them all the same
@@ -628,24 +637,31 @@ export default {
       },
     },
     chats: {
+      title: "Recent chats",
       reads: true,
       description: "The recent Messenger chats messenger.com shows, newest first, to see what's new or find a chat to read: one a line, \"Sam (unread), <time>: last message\", the time as Messenger shows it. Older chats aren't reached.",
       input: { type: "object", properties: { account: ACCOUNT, unread: { type: "boolean", description: "only chats with unread messages" } } },
+      output: { type: "string", description: "a line for each chat: its name, unread or not, the time and its last message" },
       run: (ctx, input) => browse(ctx, input, "chats", (b) => b.chats(input.unread === true)),
     },
     read: {
+      title: "Read a chat",
       reads: false,
       description: "A recent chat's latest messages, as messenger.com shows them when it opens, newest last: one a line, \"[time] Sam: text\", the time as Messenger shows it. Opening a chat marks it read, so one that was unread is marked unread again afterwards, but the sender may see it as seen.",
       input: { type: "object", required: ["chat"], properties: { account: ACCOUNT, chat: { type: "string", description: CHAT } } },
+      output: { type: "string", description: "a line for each message: [time] sender: text, newest last" },
       run: (ctx, input) => browse(ctx, input, "read", (b) => b.read(text(input.chat))),
     },
     search: {
+      title: "Search messages",
       reads: true,
       description: "Messages containing some words, across every chat, as Messenger's search finds them: to find something said when you don't know which chat. One a line: the chat and the message when it has one match (\"Sam, <time>: text\"), or how many (\"Family: 3 matching messages\"), for messenger_read.",
       input: { type: "object", required: ["query"], properties: { account: ACCOUNT, query: { type: "string", description: "words to find, as you'd type them in Messenger's search" } } },
+      output: { type: "string", description: "a line for each chat with a match: the chat and the message, or how many match" },
       run: (ctx, input) => browse(ctx, input, "search", (b) => b.search(text(input.query))),
     },
     send: {
+      title: "Send a Messenger message",
       reads: false,
       confirm: true,
       description: "Send a Messenger message, as the user, to a recent chat or to someone by their exact name. It sends a real message to a real person and can't be taken back: only what the user asked to send, to whom they asked. Says to whom it went.",
@@ -658,12 +674,25 @@ export default {
           text: { type: "string", description: "the message, exactly as the user approved it" },
         },
       },
+      output: { type: "string", description: "to whom it was sent, in words" },
       run: (ctx, input) => browse(ctx, input, "send", (b) => b.send(text(input.chat), text(input.text))),
     },
     sign_in: {
+      title: "Link Messenger to a browser profile",
       reads: false,
       description: "For the user: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, for them to sign in there themselves; never sign in for them. Signs the default profile in again when none is given.",
       input: { type: "object", properties: { profile: { type: "string", description: "the browser profile's name, like Personal or Work; agent-devices_profiles lists them" } } },
+      output: {
+        type: "object",
+        required: ["profile", "url", "text"],
+        properties: {
+          profile: { type: "string" },
+          url: { type: "string", description: "the link for the user to sign in at" },
+          device: { type: "string", description: "the agent device it opens on" },
+          on: { type: "string", description: "the device of yours that device runs on" },
+          text: { type: "string", description: "what to tell the user, in words" },
+        },
+      },
       async run(ctx, input) {
         const s = await load(ctx);
         const profile = text(input.profile).trim() || text(input.account).trim() || s.linked[0] || "default";
@@ -688,9 +717,11 @@ export default {
       },
     },
     sign_out: {
+      title: "Stop reading a browser profile",
       reads: false,
       description: "Stop reading a browser profile's Messenger. The profile, and its sign-ins to messenger.com and other sites, stay, so messenger_sign_in links it again.",
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the browser profile's name, as messenger_accounts lists them" } } },
+      output: { type: "string", description: "that it's no longer read, in words" },
       async run(ctx, input) {
         const s = await load(ctx);
         const account = text(input.account);
@@ -709,15 +740,22 @@ export default {
       },
     },
     _profiles: {
+      title: "The browser profiles (for settings)",
       reads: true,
       description: "The browser profiles, for the settings screen to pick one.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "array",
+        items: { type: "object", required: ["profile", "sites"], properties: { profile: { type: "string" }, sites: { type: "string" }, saved: { type: "string" } } },
+      },
       run: (ctx) => use(ctx, "agent-devices", "profiles", {}),
     },
     _save: {
+      title: "The settings screen's Done",
       reads: false,
       description: "The settings screen's Done: saves the browser profile signed in.",
       input: { type: "object", properties: { profile: { type: "string" } } },
+      output: { type: "string", description: "that it's saved, in words" },
       async run(ctx, input) {
         const profile = text(input.profile);
         await use(ctx, "agent-devices", "save_profile", { profile });
@@ -726,9 +764,11 @@ export default {
       },
     },
     _idle: {
+      title: "Give back devices left idle",
       reads: false,
       description: "The schedule's: gives back the devices left idle for 5 minutes.",
       input: { type: "object", properties: {} },
+      output: { type: "object", required: ["gave_back"], properties: { gave_back: { type: "integer", description: "how many devices were given back" } } },
       async run(ctx) {
         const idle = await ctx.user.query("select profile, device from browsers where used < ?", [Date.now() - IDLE]);
         for (const b of idle) {

@@ -298,15 +298,18 @@ export default {
   tools: {
     ...signIn,
     profile: {
+      title: "The account's address and size",
       reads: true,
       description: "The account's address and how many messages and threads it has.",
       input: withAccount({}),
+      output: { type: "string", description: "the address and how many messages and threads, in words" },
       async run(ctx, { account: a }) {
         const p = await api(ctx, await account(ctx, a), "GET", "profile");
         return `${p.emailAddress}: ${p.messagesTotal} messages in ${p.threadsTotal} threads.`;
       },
     },
     search: {
+      title: "Find messages",
       reads: true,
       description: "Find messages (Gmail's messages.list), newest first, as text: each message's id, when it came (ISO 8601, UTC), sender, subject, label names and a snippet; with no q, all mail but spam and trash. Read one with gmail_read, its conversation with gmail_thread. A long list ends with More: give pageToken <token>.",
       input: withAccount({
@@ -314,6 +317,7 @@ export default {
         labelIds: ids("only messages with all these labels: label ids, as gmail_labels lists them, like INBOX or Label_12"),
         maxResults: maxResults(20, 100), pageToken: pageToken("search"),
       }),
+      output: { type: "string", description: "a line for each message: id, when, sender, subject, labels and a snippet; then how to get more" },
       async run(ctx, { account: a, q, labelIds, maxResults, pageToken }) {
         const email = await account(ctx, a);
         const r = await api(ctx, email, "GET", "messages", { query: { maxResults: Math.min(Number(maxResults) || 20, 100), q, labelIds: list(labelIds), pageToken } });
@@ -330,9 +334,11 @@ export default {
       },
     },
     read: {
+      title: "Read one message",
       reads: true,
       description: "One message in full: its headers, when it came, labels, attachments (numbered, for gmail_attachment) and its text. For the replies around it, gmail_thread gives the whole conversation.",
       input: withAccount({ id: str("the message's id, from gmail_search") }, ["id"]),
+      output: { type: "string", description: "the message's headers, labels, attachments and text" },
       async run(ctx, { account: a, id }) {
         const email = await account(ctx, a);
         id = need(id, "id: a message's id, from gmail_search");
@@ -341,9 +347,11 @@ export default {
       },
     },
     thread: {
+      title: "Read a conversation",
       reads: true,
       description: "A whole conversation, oldest first, each message as gmail_read gives it. Use it to see a message with its replies; gmail_read gives just the one.",
       input: withAccount({ id: str("the thread's id, or the id of any message in it, from gmail_search") }, ["id"]),
+      output: { type: "string", description: "each message as gmail_read gives it, oldest first" },
       async run(ctx, { account: a, id }) {
         const email = await account(ctx, a);
         id = need(id, "id: a message's id, from gmail_search");
@@ -360,12 +368,18 @@ export default {
       },
     },
     attachment: {
+      title: "One attachment, as a file",
       reads: true,
       description: "One of a message's attachments, as a file: { name, type, size, base64 }. MCP gives it back as a file id other tools take; the CLI saves it with --out.",
       input: withAccount({
         id: str("the message's id, from gmail_search"), name: str("the attachment's file name, or a part of it, as gmail_read lists them; or give number"),
         number: { type: "integer", description: "which attachment, as gmail_read numbers them (1 is the first); the first when neither is given" },
       }, ["id"]),
+      output: {
+        type: "object",
+        required: ["name", "type", "size", "base64"],
+        properties: { name: { type: "string" }, type: { type: "string", description: "its MIME type" }, size: { type: "integer", description: "bytes" }, base64: { type: "string" } },
+      },
       async run(ctx, { account: a, id, name, number }) {
         const email = await account(ctx, a);
         id = need(id, "id: a message's id, from gmail_search");
@@ -380,9 +394,11 @@ export default {
       },
     },
     labels: {
+      title: "The account's labels",
       reads: true,
       description: "The account's labels, Gmail's own (INBOX, UNREAD, STARRED, ...) first, then the user's: each its name, and its id where that differs. gmail_label and gmail_search's labelIds take either.",
       input: withAccount({}),
+      output: { type: "string", description: "a line for each label: its name, and its id where that differs" },
       async run(ctx, { account: a }) {
         const { labels = [] } = await api(ctx, await account(ctx, a), "GET", "labels");
         labels.sort((x, y) => x.type.localeCompare(y.type) || x.name.toLowerCase().localeCompare(y.name.toLowerCase()));
@@ -390,6 +406,7 @@ export default {
       },
     },
     label: {
+      title: "Add or remove labels",
       reads: false,
       description: "Add labels to and remove labels from messages (Gmail's messages.batchModify). Archive: remove INBOX. Mark read: remove UNREAD. Star: add STARRED. Says what changed.",
       input: withAccount({
@@ -397,6 +414,7 @@ export default {
         addLabelIds: ids("labels to add: ids or names, as gmail_labels lists them, like STARRED or Receipts"),
         removeLabelIds: ids("labels to remove: ids or names, like INBOX or UNREAD"),
       }, ["ids"]),
+      output: { type: "string", description: "what changed, in words" },
       async run(ctx, { account: a, ids: given, addLabelIds: add, removeLabelIds: remove }) {
         const email = await account(ctx, a);
         const which = list(given);
@@ -418,9 +436,11 @@ export default {
       },
     },
     trash: {
+      title: "Move messages to the trash",
       reads: false,
       description: "Move messages to the trash. They stay there 30 days, where the user can take them out again in Gmail.",
       input: withAccount({ ids: ids("the messages' ids, from gmail_search") }, ["ids"]),
+      output: { type: "string", description: "how many moved, in words" },
       async run(ctx, { account: a, ids: given }) {
         const email = await account(ctx, a);
         const which = list(given);
@@ -432,9 +452,11 @@ export default {
       },
     },
     drafts: {
+      title: "The account's drafts",
       reads: true,
       description: "The account's drafts (Gmail's drafts.list), newest first, as text: each draft's id, when it was saved (ISO 8601, UTC), who it's to and its subject. A long list ends with More: give pageToken <token>.",
       input: withAccount({ maxResults: maxResults(20, 100), pageToken: pageToken("drafts") }),
+      output: { type: "string", description: "a line for each draft: id, when, to and subject; then how to get more" },
       async run(ctx, { account: a, maxResults, pageToken }) {
         const email = await account(ctx, a);
         const r = await api(ctx, email, "GET", "drafts", { query: { maxResults: Math.min(Number(maxResults) || 20, 100), pageToken } });
@@ -445,9 +467,11 @@ export default {
       },
     },
     draft: {
+      title: "Save a draft",
       reads: false,
       description: "Save an email as a draft (text, HTML or both, with files if given) for the user to check and send, or replace a draft. Use it rather than gmail_send unless the user asked you to send. Gives the draft's id.",
       input: withAccount({ ...writing, id: str("a draft's id, from gmail_drafts, to replace that draft") }),
+      output: { type: "string", description: "the draft's id, in words" },
       async run(ctx, input) {
         const email = await account(ctx, input.account);
         const d = await compose(ctx, email, input);
@@ -462,10 +486,12 @@ export default {
       },
     },
     send_draft: {
+      title: "Send a draft",
       reads: false,
       confirm: true,
       description: "Send a draft as it is. This sends real email to real people: only when the user asked to send this one.",
       input: withAccount({ id: str("the draft's id, from gmail_drafts or gmail_draft") }, ["id"]),
+      output: { type: "string", description: "the sent message's id, in words" },
       async run(ctx, { account: a, id }) {
         id = need(id, "id: a draft's id, from gmail_drafts");
         const sent = await api(ctx, await account(ctx, a), "POST", "drafts/send", { json: { id }, missing: noDraft(id) });
@@ -473,10 +499,12 @@ export default {
       },
     },
     delete_draft: {
+      title: "Delete a draft",
       reads: false,
       confirm: true,
       description: "Delete a draft for good: it doesn't go to the trash.",
       input: withAccount({ id: str("the draft's id, from gmail_drafts") }, ["id"]),
+      output: { type: "string", description: "that it is deleted, in words" },
       async run(ctx, { account: a, id }) {
         id = need(id, "id: a draft's id, from gmail_drafts");
         await api(ctx, await account(ctx, a), "DELETE", `drafts/${encodeURIComponent(id)}`, { missing: noDraft(id) });
@@ -484,10 +512,12 @@ export default {
       },
     },
     send: {
+      title: "Send an email",
       reads: false,
       confirm: true,
       description: "Send an email (text, HTML or both, with files if given), or a reply. This sends real email to real people: only what the user asked to send; otherwise gmail_draft. Gives the sent message's id.",
       input: withAccount(writing),
+      output: { type: "string", description: "the sent message's id, in words" },
       async run(ctx, input) {
         const email = await account(ctx, input.account);
         const d = await compose(ctx, email, input);

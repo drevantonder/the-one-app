@@ -29,6 +29,8 @@ import labelsScreen from "./dist/labels.html" with { type: "text" };
 import repoSettingsScreen from "./dist/repo-settings.html" with { type: "text" };
 import settingsScreen from "./dist/settings.html" with { type: "text" };
 
+import { BRANCH_HEAD, COMMIT, FILE_CHANGE, PERSON, REPO_LINE, TEXT } from "./shapes.js";
+
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const BRANCH = /^(?!\/)(?!.*(\.\.|\/\/|\/$|\.lock$|@\{))[A-Za-z0-9._\/@+-]{1,200}$/;
 
@@ -241,9 +243,11 @@ const app = {
 
   tools: {
     list: {
+      title: "Every repo",
       reads: true,
       description: "Every repo, the latest moved first: its <owner>/<name>, its owner's handle and name, where it was forked from, its default branch (main, or else its first), how many branches it has, when it last moved, how many open issues it has, and whether you push to it. Deleted ones say when, and wait in Recently Deleted for repos_restore. Then GitHub's that you see, as github.com/<owner>/<name>, with github: { url, private, fork }; source github lists only those, and says what GitHub refused.",
       input: { type: "object", properties: { source: { type: "string", enum: ["one", "github"], description: "one: only this network's own repos; github: only GitHub's; omit for both" } } },
+      output: { type: "array", items: REPO_LINE, description: "the latest moved first" },
       async run(ctx, { source } = {}) {
         if (source === "github") return github.list(ctx);
         const own = await ownList(ctx);
@@ -252,9 +256,30 @@ const app = {
       },
     },
     get: {
+      title: "A repo",
       reads: true,
       description: "A repo: its address for git clone and push, the same on every computer, its owner, its branches with their heads, its forks, its last 30 pushes, and the packs that hold its objects, oldest first.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
+      output: {
+        type: "object",
+        required: ["repo", "name", "branches"],
+        properties: {
+          repo: { type: "string", description: "<owner>/<name>, or github.com/<owner>/<name>" },
+          name: { type: "string" },
+          address: { type: ["string", "null"], description: "for git clone and push; null in a network with no address yet" },
+          owner: PERSON,
+          from: { type: ["string", "null"] },
+          created: { type: "string", description: "ISO 8601" },
+          yours: { type: "boolean" },
+          push: { type: "boolean" },
+          branches: { type: "array", items: { type: "object", required: ["branch", "head"], additionalProperties: true } },
+          packs: { type: "array", items: { type: "string" } },
+          forks: { type: "array", items: { type: "string" } },
+          pushes: { type: "array", items: { type: "object", additionalProperties: true }, description: "the last 30" },
+          github: { type: "object", additionalProperties: true },
+        },
+        additionalProperties: true,
+      },
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
@@ -266,9 +291,33 @@ const app = {
       },
     },
     tree: {
+      title: "A folder of a repo",
       reads: true,
       description: "A folder of a repo at a branch or commit: its files and folders, its README, the latest commit, the repo's forks and how many open issues it has. repos_file reads a file.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "a folder's path, like src; omit for the top" } } },
+      output: {
+        type: "object",
+        required: ["repo", "entries"],
+        properties: {
+          repo: { type: "string" },
+          name: { type: "string" },
+          branches: { type: "array", items: { type: "string" } },
+          ref: { type: ["string", "null"] },
+          branch: { type: ["string", "null"] },
+          path: { type: "string" },
+          sha: { type: "string" },
+          commit: COMMIT,
+          latest: COMMIT,
+          entries: { type: "array", items: { type: "object", required: ["name", "type"], properties: { name: { type: "string" }, type: { type: "string", enum: ["blob", "tree", "commit"] }, mode: { type: ["string", "null"] }, sha: { type: "string" } } } },
+          readme: { type: ["object", "null"], description: "{ name, text }", additionalProperties: true },
+          forks: { type: "array", items: { type: "string" } },
+          open_issues: { type: "integer" },
+          empty: { type: "boolean", description: "true when the repo has no code yet" },
+          file: { type: "boolean", description: "true when path is a file, not a folder" },
+          deleted: { type: ["object", "null"], additionalProperties: true },
+        },
+        additionalProperties: true,
+      },
       async run(ctx, input) {
         const g = global(ctx);
         const r = (await repoAt(ctx, g, input.repo)) || (await named(ctx, input.repo));
@@ -280,45 +329,110 @@ const app = {
       },
     },
     file: {
+      title: "A file of a repo",
       reads: true,
       description: "A file of a repo at a branch or commit: its text, or whether it's binary or too big to show (then git clone it).",
       input: { type: "object", required: ["repo", "path"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "the file's path, from repos_tree, like src/app.js" } } },
+      output: {
+        type: "object",
+        required: ["repo", "path"],
+        properties: {
+          repo: { type: "string" },
+          ref: { type: ["string", "null"] },
+          branch: { type: ["string", "null"] },
+          sha: { type: "string" },
+          path: { type: "string" },
+          branches: { type: "array", items: { type: "string" } },
+          mode: { type: ["string", "null"] },
+          latest: COMMIT,
+          size: { type: "integer", description: "bytes" },
+          text: { type: "string", description: "its text, unless it is binary or too big" },
+          binary: { type: "boolean" },
+          too_big: { type: "boolean" },
+          submodule: { type: "string", description: "the commit it points to, for a submodule" },
+        },
+      },
       run: async (ctx, input) => iso(await browse.file(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     log: {
+      title: "A repo's history",
       reads: true,
       description: "A repo's history, as git log gives it: newest first, 25 commits a page, of the whole repo or of one path, each with its sha, subject, author and time; more says whether there's another page.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: PATH, page: { type: "integer", description: "which 25: 0 (the default) for the newest, 1 for the 25 before them, and on while more is true" } } },
+      output: {
+        type: "object",
+        required: ["repo", "commits", "more"],
+        properties: {
+          repo: { type: "string" },
+          ref: { type: ["string", "null"] },
+          branch: { type: ["string", "null"] },
+          sha: { type: "string" },
+          path: { type: "string" },
+          page: { type: "integer" },
+          commits: { type: "array", items: COMMIT },
+          more: { type: "boolean", description: "whether there is another page" },
+        },
+      },
       run: async (ctx, input) => iso(await browse.log(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     commit: {
+      title: "A commit",
       reads: true,
       description: "A commit: its message, author, time, parents, and each file it changed with +/- counts and diff hunks (a big file's diff is left for repos_diff).",
       input: { type: "object", required: ["repo", "sha"], properties: { repo: REPO, sha: SHA } },
+      output: {
+        type: "object",
+        required: ["repo", "sha", "subject", "files"],
+        properties: { ...COMMIT.properties, repo: { type: "string" }, files: { type: "array", items: FILE_CHANGE } },
+      },
       run: async (ctx, input) => iso(await browse.commit(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     diff: {
+      title: "One file's whole diff in a commit",
       reads: true,
       description: "One file's whole diff in a commit, against its first parent, as hunks with + and - lines: for a file repos_commit left out as too big.",
       input: { type: "object", required: ["repo", "sha", "path"], properties: { repo: REPO, sha: SHA, path: { type: "string", description: "the file's path, from repos_commit's files, like src/app.js" } } },
+      output: FILE_CHANGE,
       run: async (ctx, input) => browse.diff(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) }),
     },
     latest: {
+      title: "The last commit that changed each entry",
       reads: true,
       description: "The last commit that changed each entry of a folder, by the entry's name: its sha, subject, author and time.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "a folder's path, like src; omit for the top" } } },
+      output: {
+        type: "object",
+        description: "each entry's name → its last commit",
+        additionalProperties: { type: "object", required: ["sha", "subject"], properties: { sha: { type: "string" }, subject: { type: "string" }, time: { type: "string" }, author: { type: "string" } } },
+      },
       run: async (ctx, input) => iso(await browse.latest(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     branches: {
+      title: "A repo's branches",
       reads: true,
       description: "A repo's branches, each with its head commit's sha, subject, author and time, and who pushed it when.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
+      output: { type: "array", items: BRANCH_HEAD },
       run: async (ctx, input) => iso(await browse.branches(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     collaborators: {
+      title: "Who pushes to a repo",
       reads: true,
       description: "Who pushes to a repo: its owner; for a group's, its members (its admins own it); and the collaborators its owners added, each with who added them when. yours says whether you own it, to add and remove them; users, whom you could add.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
+      output: {
+        type: "object",
+        required: ["repo", "owner", "yours"],
+        properties: {
+          repo: { type: "string" },
+          owner: PERSON,
+          group: { type: "boolean", description: "whether a group owns it" },
+          members: { type: "array", items: { type: "object", additionalProperties: true }, description: "a group's members, each { handle, name, role }" },
+          collaborators: { type: "array", items: { type: "object", additionalProperties: true }, description: "the collaborators its owners added, each { handle, name, by, time }" },
+          yours: { type: "boolean", description: "whether you may add and remove collaborators" },
+          users: { type: "array", items: PERSON, description: "whom you could add" },
+        },
+      },
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
@@ -333,10 +447,12 @@ const app = {
       },
     },
     add_collaborator: {
+      title: "Let someone push to a repo",
       reads: false,
       confirm: true,
       description: "Let someone push to a repo you own (a group's you're an admin of, or yours), by their handle.",
       input: { type: "object", required: ["repo", "user"], properties: { repo: REPO, user: USER, confirm: CONFIRM } },
+      output: TEXT("that they push now, in words"),
       async run(ctx, { repo, user }) {
         const r = await owned(ctx, repo);
         const h = byHandle(ctx, user);
@@ -349,10 +465,12 @@ const app = {
       },
     },
     remove_collaborator: {
+      title: "Stop someone pushing to a repo",
       reads: false,
       confirm: true,
       description: "Stop a collaborator you added pushing to a repo you own, by their handle. A group's members stay its collaborators while they're in it.",
       input: { type: "object", required: ["repo", "user"], properties: { repo: REPO, user: USER, confirm: CONFIRM } },
+      output: TEXT("that they no longer push, in words"),
       async run(ctx, { repo, user }) {
         const g = global(ctx);
         const r = await owned(ctx, repo);
@@ -368,9 +486,11 @@ const app = {
       },
     },
     create: {
+      title: "Create a repo",
       reads: false,
       description: "Create an empty repo, owned by you (the default) or a group you're in, and give the git push that fills it. Pushing to an address that isn't a repo yet makes one too.",
       input: { type: "object", required: ["name"], properties: { name: { type: "string", description: "lowercase letters, digits, ., _ and -, like notes" }, owner: OWNER } },
+      output: TEXT("the repo's path, and the git push that fills it"),
       async run(ctx, { name, owner }) {
         const g = global(ctx);
         const id = ownerFor(ctx, owner);
@@ -382,9 +502,11 @@ const app = {
       },
     },
     fork: {
+      title: "Fork a repo",
       reads: false,
       description: "Fork a repo as a new one of yours (or a group's you're in), to push changes you'd suggest to its owner: its branches as they are now, and its history. By default it's <you>/<the same name>.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO, name: { type: "string", description: "the fork's name, by default the repo's: lowercase letters, digits, ., _ and -" }, owner: OWNER } },
+      output: TEXT("the fork's path, and the git clone of it"),
       async run(ctx, { repo, name, owner }) {
         const g = global(ctx);
         const from = await named(ctx, repo);
@@ -398,10 +520,12 @@ const app = {
       },
     },
     delete: {
+      title: "Delete a repo",
       reads: false,
       confirm: true,
       description: "Delete a repo you own: no one can read, clone or push to it, and it waits in Recently Deleted, where its owners restore it (repos_restore) or erase it for good.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
+      output: TEXT("that it's in Recently Deleted, in words"),
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
         if (r.deleted) throw new Error(`${r.path} is already in Recently Deleted`);
@@ -410,9 +534,11 @@ const app = {
       },
     },
     restore: {
+      title: "Restore a deleted repo",
       reads: false,
       description: "Restore a repo you own from Recently Deleted, as it was.",
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string", description: "a deleted repo as <owner>/<name>, from repos_list" } } },
+      output: TEXT("that it's restored, in words"),
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
         if (!r.deleted) throw new Error(`${r.path} isn't deleted`);
@@ -421,10 +547,12 @@ const app = {
       },
     },
     erase: {
+      title: "Erase a deleted repo for good",
       reads: false,
       confirm: true,
       description: "Erase a deleted repo you own for good: its branches, history and the packs no other repo shares are gone, and its name is free again.",
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string", description: "a deleted repo as <owner>/<name>, from repos_list" } } },
+      output: TEXT("that it's erased, in words"),
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await owned(ctx, repo);
@@ -442,15 +570,22 @@ const app = {
     ...issues.tools({ global, named, object, rights, who, byHandle, handles, randomId, iso, REPO }),
     ...github.tools({ global }),
     _address: {
+      title: "Where git reaches repos (for the screens)",
       reads: true,
       description: "Where git reaches repos, for the screens: base, <address>/repos/ (null in a network with no address yet), and the caller's handle.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "object",
+        properties: { base: { type: ["string", "null"], description: "<address>/repos/, null in a network with no address yet" }, handle: { type: ["string", "null"], description: "the caller's handle" } },
+      },
       run: (ctx) => ({ base: ctx.address ? `${ctx.address}/repos/` : null, handle: ctx.me.handle || null }),
     },
     _http: {
+      title: "Git over HTTP (for the node)",
       reads: false,
       description: "Git over HTTP, as the node passes it on: clone, fetch and push with stock git.",
       input: { type: "object", required: ["method", "path"], properties: { method: { type: "string" }, path: { type: "string" }, query: { type: "string" }, body: { type: ["string", "null"] } } },
+      output: { type: "object", description: "the response git is given: status, headers and body", additionalProperties: true },
       run: (ctx, input) => http.serve(ctx, global(ctx), git, input),
     },
   },

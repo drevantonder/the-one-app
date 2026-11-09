@@ -129,16 +129,20 @@ export default {
 
   tools: {
     get: {
+      title: "The AGENTS.md every harness gets",
       reads: true,
       description: "The AGENTS.md every harness on every device gets, as { text }. Read it before agents_set, which replaces all of it.",
       input: { properties: {}, type: "object" },
+      output: { type: "object", required: ["text"], properties: { text: { type: "string", description: "the whole AGENTS.md, as markdown" } } },
       run: async (ctx) => ({ text: state(await records(ctx)).text }),
     },
     set: {
+      title: "Replace AGENTS.md",
       reads: false,
       confirm: true,
       description: "Replace the AGENTS.md every harness on every device gets: all of it, so start from agents_get's text. agents_history keeps the old one.",
       input: { properties: { text: { description: "the whole new AGENTS.md, as markdown", type: "string" } }, required: ["text"], type: "object" },
+      output: { type: "string", description: "that it is set, in words" },
       run: async (ctx, input) => {
         if (typeof input.text !== "string") throw new Error("give the text");
         await records(ctx);
@@ -147,24 +151,37 @@ export default {
       },
     },
     skills: {
+      title: "Every skill",
       reads: true,
       description: "Every skill on every device: its name and description. agents_skill reads one's files.",
       input: { properties: {}, type: "object" },
+      output: {
+        type: "array",
+        items: { type: "object", required: ["name", "description"], properties: { name: { type: "string" }, description: { type: "string" } } },
+      },
       run: async (ctx) => [...state(await records(ctx)).skills].map(([name, files]) => {
         const front = frontmatter(files["SKILL.md"]);
         return { name, description: (typeof front === "object" && front.description) || "" };
       }),
     },
     skill: {
+      title: "One skill's files",
       reads: true,
       description: "One skill's files, as { name, files: { path: text } }.",
       input: { properties: { name: SKILL }, required: ["name"], type: "object" },
+      output: {
+        type: "object",
+        required: ["name", "files"],
+        properties: { name: { type: "string" }, files: { type: "object", description: "each file's path within the skill → its text", additionalProperties: { type: "string" } } },
+      },
       run: async (ctx, input) => ({ name: input.name, files: named(state(await records(ctx)).skills, input.name) }),
     },
     skill_set: {
+      title: "Add or replace a skill",
       reads: false,
       description: "Add or replace a skill on every device: all of its files, SKILL.md among them, starting with frontmatter giving its name and description (what it's for, and when to use it).",
       input: { properties: { files: { description: "each file's path within the skill → its text, like { \"SKILL.md\": \"---\\nname: writing-for-agents\\ndescription: ...\\n---\\n...\" }", type: "object" }, name: { description: "the skill's folder name: lowercase words joined by -, like writing-for-agents", type: "string" } }, required: ["name", "files"], type: "object" },
+      output: { type: "string", description: "that it is set, in words" },
       run: async (ctx, input) => {
         const why = invalid(input.name, input.files) || unintroduced(input.name, input.files);
         if (why) throw new Error(why);
@@ -174,10 +191,12 @@ export default {
       },
     },
     skill_remove: {
+      title: "Remove a skill",
       reads: false,
       confirm: true,
       description: "Remove a skill from every device. agents_history with its name, then agents_restore, brings it back.",
       input: { properties: { name: SKILL }, required: ["name"], type: "object" },
+      output: { type: "string", description: "that it is removed, in words" },
       run: async (ctx, input) => {
         named(state(await records(ctx)).skills, input.name);
         keep(ctx, "skill_removed", { name: input.name });
@@ -185,16 +204,35 @@ export default {
       },
     },
     history: {
+      title: "Revisions of AGENTS.md or a skill",
       reads: true,
       description: "Every revision of AGENTS.md, or of a skill if given its name, newest first: each one's id (for agents_restore), when (ISO 8601), who from which device, its size and its first changed line.",
       input: { properties: { name: { description: "a skill's name, from agents_skills, like writing-for-agents; omit for AGENTS.md", type: "string" } }, type: "object" },
+      output: {
+        type: "array",
+        description: "newest first",
+        items: {
+          type: "object",
+          required: ["id", "time", "by", "device", "size", "change"],
+          properties: {
+            id: { type: "string", description: "for agents_restore" },
+            time: { type: "string", description: "ISO 8601" },
+            by: { type: "string", description: "who made it" },
+            device: { type: "string", description: "the device it was made from" },
+            size: { type: "integer", description: "bytes; 0 for a removal" },
+            change: { type: "string", description: "its first changed line, + or - then the line; removed for a removal" },
+          },
+        },
+      },
       run: async (ctx, input) => history(await records(ctx), input.name),
     },
     restore: {
+      title: "Make an older revision current",
       reads: false,
       confirm: true,
       description: "Make an older revision of AGENTS.md or a skill the current one again, on every device. The one it replaces stays in agents_history.",
       input: { properties: { id: { description: "the revision's id, from agents_history", type: "string" } }, required: ["id"], type: "object" },
+      output: { type: "string", description: "which is current again, in words" },
       run: async (ctx, input) => {
         const r = (await records(ctx)).find((r) => r.id === String(input.id));
         if (!r) throw new Error(`no revision ${input.id}: ids come from agents_history`);
@@ -210,9 +248,15 @@ export default {
       },
     },
     _files: {
+      title: "AGENTS.md and every skill's files",
       reads: true,
       description: "AGENTS.md and every skill's files, for the service to write.",
       input: { properties: {}, type: "object" },
+      output: {
+        type: "object",
+        required: ["text", "skills"],
+        properties: { text: { type: "string" }, skills: { type: "object", description: "each skill's name → its files, each path → its text", additionalProperties: { type: "object", additionalProperties: { type: "string" } } } },
+      },
       run: async (ctx) => {
         const { text, skills } = state(await records(ctx));
         return { text, skills: Object.fromEntries(skills) };

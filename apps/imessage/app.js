@@ -17,6 +17,21 @@ const SINCE = { type: "string", description: "only messages after this: an ISO 8
 const LIMIT = { type: "integer", description: "at most this many; default 30" };
 const MESSAGE = "{ time, from, text, attachments }, time ISO 8601 in the Mac's time zone, from the sender's name from Contacts (or their number), or me for the user, and attachments the files' names";
 
+const MESSAGES = {
+  type: "array",
+  items: {
+    type: "object",
+    required: ["time", "from", "text"],
+    properties: {
+      time: { type: "string", description: "ISO 8601, in the Mac's time zone" },
+      from: { type: "string", description: "the sender's name from Contacts, or their number; me for the user" },
+      text: { type: "string" },
+      attachments: { type: "string", description: "the attached files' names" },
+      chat: { type: "string", description: "the chat's name, in imessage_search" },
+    },
+  },
+};
+
 export default {
   name: "imessage",
   title: "iMessage",
@@ -31,6 +46,7 @@ export default {
 
   tools: {
     chats: {
+      title: "Recent chats",
       reads: true,
       description: "Recent chats, most recent first, to see what's new or find a chat to read: each { chat, id, with, last, from, text, unread }, chat its name, id for imessage_read, with the people in a group, and last (an ISO 8601 time), from and text its last message. Page back with skip.",
       input: {
@@ -41,9 +57,26 @@ export default {
           skip: { type: "integer", description: "leave out this many of the most recent, to page back: 30 for the second page of 30" },
         },
       },
+      output: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["chat", "id", "last", "text"],
+          properties: {
+            chat: { type: "string", description: "its name" },
+            id: { type: "string", description: "for imessage_read" },
+            with: { type: "array", items: { type: "string" }, description: "the people in a group chat" },
+            last: { type: "string", description: "when its last message was sent, ISO 8601" },
+            from: { type: "string", description: "who sent its last message" },
+            text: { type: "string", description: "its last message" },
+            unread: { type: "integer", description: "how many are unread; absent when none" },
+          },
+        },
+      },
       run: (ctx, input) => service(ctx, "chats", input),
     },
     read: {
+      title: "Read a chat",
       reads: true,
       description: `One chat's messages, newest last, without marking them read: each ${MESSAGE}. Page back with skip.`,
       input: {
@@ -56,9 +89,11 @@ export default {
           skip: { type: "integer", description: "leave out this many of the newest, to read further back: 30 for the 30 before the latest 30" },
         },
       },
+      output: MESSAGES,
       run: (ctx, input) => service(ctx, "read", input),
     },
     search: {
+      title: "Search messages",
       reads: true,
       description: `Messages containing some text, across every chat or in one, newest last: to find something said when you don't know which chat. Each is as imessage_read gives them, with chat, its chat's name. Page back with skip.`,
       input: {
@@ -72,9 +107,11 @@ export default {
           skip: { type: "integer", description: "leave out this many of the newest matches, to page back" },
         },
       },
+      output: MESSAGES,
       run: (ctx, input) => service(ctx, "search", input),
     },
     send: {
+      title: "Send an iMessage",
       reads: false,
       confirm: true,
       description: "Send an iMessage from the user's account to a chat, a phone number or an email address. It sends a real message to a real person and can't be taken back: only what the user asked to send, to whom they asked. Says to whom it went.",
@@ -86,6 +123,7 @@ export default {
           text: { type: "string", description: "the message, exactly as the user approved it" },
         },
       },
+      output: { type: "string", description: "to whom it was sent, in words" },
       run: (ctx, input) => service(ctx, "send", input),
     },
   },

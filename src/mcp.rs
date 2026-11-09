@@ -276,6 +276,8 @@ fn deploy_said(app: &str, r: &Value, added: bool) -> String {
             if tools.is_empty() { String::new() } else { format!(" ({})", tools.join(", ")) }
         )),
     }
+    let lacking: Vec<String> = r["lacking"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect();
+    out.extend(crate::app::deploy::lacking_said(&lacking));
     out.push(match &r["before"] {
         b if *b == r["bundle"] => "It ran this version already.".into(),
         Value::String(_) => format!("To undo, deploy {{ app: \"{app}\", version: \"{}\" }}.", short(&r["before"])),

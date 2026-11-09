@@ -521,3 +521,47 @@ async fn a_client_devices_mcp_runs_as_its_user() {
     assert_eq!(status, 428, "{needs}");
     assert!(needs["need"].as_array().is_some_and(|n| !n.is_empty()), "{needs}");
 }
+
+/// A tool that gives an `output` is held to it: an answer that keeps to it goes through, and one that doesn't (a wrong type,
+/// a missing field, a field it doesn't list) fails, naming the tool, rather than drifting from what the API's document
+/// says. A tool that says nothing of its answer is let through, and a deploy says so.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tool_answers_what_its_output_says() {
+    let a = start("answers").await;
+    create(&a, "Home", "Andre").await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("answers/app.js").to_vec())]).unwrap()).unwrap();
+    let deployed = a.deploy_making(&me, "answers", &bundle, Some("admins"), true).await.unwrap();
+    assert_eq!(deployed["lacking"], json!(["unsaid"]), "the deploy names the tool that says nothing of its answer: {deployed}");
+    let schema = &one::api::openapi::document(&[], true)["paths"]["/v1/deploy"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
+    one::tools::check(schema, &deployed).unwrap_or_else(|err| panic!("a deploy answers what the document doesn't say: {err:#}\n{deployed}"));
+    a.add(&me, "answers", &one::database::scopes::Scope::Global, true, None).await.unwrap();
+    let call = |tool: &str| CallRequest { app: "answers".into(), tool: tool.into(), input: json!({}), ..Default::default() };
+    eventually("answers to run", &a, async || a.call(call("keeps")).await.is_ok()).await;
+    assert_eq!(a.call(call("keeps")).await.unwrap(), json!({ "n": 1 }));
+    assert!(a.call(call("unsaid")).await.is_ok(), "a tool with no output is let through");
+    for tool in ["wrong_type", "missing", "extra"] {
+        let err = format!("{:#}", a.call(call(tool)).await.unwrap_err());
+        assert!(err.contains(&format!("answers {tool} answered what its output schema doesn't say")), "{tool}: {err}");
+    }
+}
+
+/// Every built-in app's tools say what they are and what they answer (a title and an `output`), the ones for its own
+/// screens (`_`) aside, as the OpenAPI document and the agents that read them go by.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_built_in_apps_tools_say_what_they_answer() {
+    let a = start("built-in-outputs").await;
+    create(&a, "Home", "Andre").await;
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let mut lacking = Vec::new();
+    let mut seen = 0;
+    let all = a.catalog(&me, true).await.unwrap();
+    for app in all.iter().filter(|app| app["built_in"].is_string()) {
+        let name = app["name"].as_str().unwrap();
+        let described = a.described(name).await.unwrap_or_else(|err| panic!("{name}: {err:#}"));
+        seen += described["tools"].as_array().map_or(0, Vec::len);
+        lacking.extend(one::app::deploy::lacking(&described).into_iter().map(|tool| format!("{name}_{tool}")));
+    }
+    assert!(seen > 150, "the built-in apps' tools were found: {seen}");
+    assert!(lacking.is_empty(), "these tools give no title or no output: {}", lacking.join(", "));
+}

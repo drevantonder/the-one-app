@@ -91,6 +91,18 @@ fn bundle(dir: &Path, files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
     crate::app::bundle::pack(&packed)
 }
 
+/// The tools of a described app that don't say what they are (`title`) or what they answer (`output`, a JSON Schema),
+/// each by name: the ones for its own screens (`_`) aren't asked to.
+pub fn lacking(described: &serde_json::Value) -> Vec<String> {
+    let tools = described["tools"].as_array().into_iter().flatten();
+    tools.filter(|t| t["title"].is_null() || t["output"].is_null()).filter_map(|t| t["name"].as_str()).filter(|n| !n.starts_with('_')).map(str::to_string).collect()
+}
+
+/// What a deploy says when `lacking` names any, or nothing.
+pub fn lacking_said(names: &[String]) -> Option<String> {
+    (!names.is_empty()).then(|| format!("{} {} no title or no output: give each a title, and an output, the JSON Schema of its answer ({{ \"type\": \"string\" }} for text). The API's document and agents read them, and a tool that answers what its output doesn't say fails.", names.join(", "), if names.len() == 1 { "has" } else { "have" }))
+}
+
 /// Whether an app's files, by path, have a React screen: `screens/<name>.jsx` or `.tsx`, which `screens` builds.
 pub fn has_screens<'a>(paths: impl IntoIterator<Item = &'a str>) -> bool {
     paths.into_iter().any(|p| p.strip_prefix("screens/").is_some_and(screen_name))

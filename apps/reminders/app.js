@@ -5,6 +5,20 @@ const ID = { type: "string", description: "the reminder's id, as reminders_list 
 const PRIORITY = { type: "string", enum: ["high", "medium", "low", "none"], description: "high, medium, low or none" };
 const REMINDER = "{ id, title, list, due, priority, notes, completed }, due a date or, with a time, an ISO 8601 date-time in the Mac's time zone, and completed when it was done";
 
+const REMINDER_SCHEMA = {
+  type: "object",
+  required: ["id", "title"],
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+    list: { type: "string", description: "the list's name" },
+    due: { type: "string", description: "an ISO 8601 date, or with a time a date-time in the Mac's time zone" },
+    priority: { type: "string", enum: ["high", "medium", "low"], description: "absent when there's none" },
+    notes: { type: "string" },
+    completed: { type: "string", description: "when it was done, an ISO 8601 date-time; absent when it isn't" },
+  },
+};
+
 export default {
   name: "reminders",
   title: "Reminders",
@@ -19,12 +33,22 @@ export default {
 
   tools: {
     lists: {
+      title: "Every reminder list",
       reads: true,
       description: "Every reminder list: each { name, id, account, default }, account being where it syncs (iCloud, Exchange). Use a name as list in reminders_list or reminders_create.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["name", "id"],
+          properties: { name: { type: "string" }, id: { type: "string" }, account: { type: "string", description: "where it syncs: iCloud, Exchange" }, default: { type: "boolean", description: "true only for the list new reminders go to" } },
+        },
+      },
       run: (ctx, input) => ctx.services.reminders.lists(input),
     },
     list: {
+      title: "Reminders, soonest due first",
       reads: true,
       description: `Reminders not yet done, soonest due first and those with no due date last, from every list or one; completed ones too if asked. Gives each ${REMINDER}.`,
       input: {
@@ -37,9 +61,11 @@ export default {
           limit: { type: "integer", description: "at most this many, the soonest due; default 100. For more, narrow by list, until or query" },
         },
       },
+      output: { type: "array", items: REMINDER_SCHEMA, description: "the reminders, soonest due first" },
       run: (ctx, input) => ctx.services.reminders.list(input),
     },
     create: {
+      title: "Add a reminder",
       reads: false,
       description: "Add a reminder to a list, which syncs to the user's other Apple devices; a due time alerts them then. Gives back the new reminder as reminders_list gives them, with its id for reminders_update or reminders_delete.",
       input: {
@@ -53,9 +79,11 @@ export default {
           priority: PRIORITY,
         },
       },
+      output: REMINDER_SCHEMA,
       run: (ctx, input) => ctx.services.reminders.create(input),
     },
     update: {
+      title: "Change or complete a reminder",
       reads: false,
       description: "Change a reminder, or mark it done with completed: only the fields given change. Gives back the reminder as it is now.",
       input: {
@@ -71,13 +99,16 @@ export default {
           completed: { type: "boolean", description: "true marks it done; false makes it not done again" },
         },
       },
+      output: REMINDER_SCHEMA,
       run: (ctx, input) => ctx.services.reminders.update(input),
     },
     delete: {
+      title: "Delete a reminder",
       reads: false,
       confirm: true,
       description: "Delete a reminder from its list, on every Apple device. It can't be undone; to tick one off instead, reminders_update with completed.",
       input: { type: "object", required: ["id"], properties: { id: ID } },
+      output: { type: "string", description: "that it was deleted, in words" },
       run: (ctx, input) => ctx.services.reminders.delete(input),
     },
   },

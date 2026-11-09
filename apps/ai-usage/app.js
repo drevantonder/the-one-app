@@ -297,6 +297,7 @@ export default {
 
   tools: {
     status: {
+      title: "Every AI plan's limits",
       words: ["provider", "format"],
       reads: false,
       description: "Every AI plan's limits (or one provider's), each Claude account apart: what's left, the pace, and whether it lasts to reset, in the providers' own words, plus which pool to spend. Fresh when older than 5 minutes, else the last read with its age.",
@@ -307,6 +308,43 @@ export default {
           format: { type: "string", enum: ["text", "json"], description: "text (the default) to read, json for screens" },
           device: { type: "string", description: "one machine to read, by name; omit for every machine's" },
         },
+      },
+      output: {
+        type: ["string", "object"],
+        description: "in words by default; with format json, { at, problem, marks, providers } for screens",
+        properties: {
+          at: { type: "integer", description: "when it was read, in milliseconds since 1970" },
+          problem: { type: "string", description: "why no machine could be asked; absent otherwise" },
+          marks: { type: "object", description: "each provider's logo, { image, kind }", additionalProperties: true },
+          providers: {
+            type: "array",
+            description: "each plan, each Claude account apart",
+            items: {
+              type: "object",
+              required: ["id", "title", "devices", "session", "weekly", "models"],
+              properties: {
+                id: { type: "string", enum: ["claude", "codex", "opencodego"] },
+                title: { type: "string" },
+                account: { type: "string" },
+                active: { type: "boolean", description: "the account in use" },
+                disabled: { type: "boolean", description: "out of rotation" },
+                alarm: { type: "object", description: "{ tone: danger or warn, text } when it's out or will run out before it resets", additionalProperties: true },
+                plan: { type: "string" },
+                source: { type: "string" },
+                devices: { type: "array", items: { type: "string" }, description: "the machines that keep its sign-in" },
+                updatedAgo: { type: "string" },
+                stale: { type: "string", description: "why the last read is old" },
+                session: { type: "object", description: "{ used, left, resets, countdown, pace, willLast } in percent, as the provider counts", additionalProperties: true },
+                weekly: { type: "object", description: "{ used, left, resets, countdown, pace, willLast } in percent", additionalProperties: true },
+                monthly: { type: "object", description: "{ used, left, resets, countdown } in percent; absent when the plan has none", additionalProperties: true },
+                models: { type: "array", items: { type: "object", additionalProperties: true }, description: "each model pool, { name, used, left, countdown }" },
+                extra: { type: "object", description: "extra usage, { used, limit }", additionalProperties: true },
+                steer: { type: "string", description: "which pool to spend" },
+              },
+            },
+          },
+        },
+        additionalProperties: true,
       },
       async run(ctx, { provider = "all", format = "text", device } = {}) {
         const b = ctx.user;

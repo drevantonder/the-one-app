@@ -75,28 +75,47 @@ export default {
 
   tools: {
     accounts: {
+      title: "The linked WhatsApp accounts",
       reads: true,
       accounts: true,
       description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, account its number and device where it's linked, with why when ok is false. Give account to the others to pick one.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["account", "ok", "device"],
+          properties: {
+            account: { type: "string", description: "its number" },
+            ok: { type: "boolean", description: "whether it's connected" },
+            device: { type: "string", description: "where it's linked" },
+            why: { type: "string", description: "when it isn't connected, why" },
+          },
+        },
+      },
       async run(ctx, input) {
         if (!(await running(ctx)).length) return [];
         return listAndKeep(ctx, input);
       },
     },
     status: {
+      title: "Whether WhatsApp is linked here",
       reads: true,
       description: "Whether WhatsApp is linked and connected on this device, as which number, and how many messages it keeps here; or on which of your devices it's linked instead. For why chats are missing; whatsapp_accounts lists every account.",
       input: { type: "object", properties: {} },
+      output: { type: "string", description: "which number is linked and connected, how many messages it keeps, in words" },
       run: (ctx, input) => service(ctx, "status", input),
     },
     sign_in: {
+      title: "Link a WhatsApp account to a device",
       reads: false,
       description: "For the user: link a WhatsApp account to this device, as WhatsApp Desktop is linked. Gives a QR code to scan on their phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code shows on the phone itself. Chats arrive over the next few minutes.",
       input: { type: "object", properties: { phone: { type: "string", description: "the account's number with its country code, like +61 400 000 000, for a code to type on the phone" }, device: DEVICE } },
+      output: { type: "string", description: "how to link it from the phone, in words" },
       run: (ctx, input) => service(ctx, "sign_in", input),
     },
     chats: {
+      title: "Recent chats",
       reads: true,
       description: "Recent WhatsApp chats, most recent first, to see what's new or find a chat to read: one a line, \"Sam (2 unread), 09:00: You: last message\", the time in the time zone of the device it's linked on. Page back with skip.",
       input: {
@@ -108,9 +127,11 @@ export default {
           skip: { type: "integer", description: "leave out this many of the most recent, to page back: 30 for the second page of 30" },
         },
       },
+      output: { type: "string", description: "a line for each chat: its name, unread count, the time and its last message" },
       run: (ctx, input) => service(ctx, "chats", input),
     },
     read: {
+      title: "Read a chat",
       reads: true,
       description: `One WhatsApp chat's messages, newest last, ${LINES}. WhatsApp isn't told they were read: the sender sees no blue ticks, and the chat stays unread on the phone. Page back with skip.`,
       input: {
@@ -123,9 +144,11 @@ export default {
           skip: { type: "integer", description: "leave out this many of the newest, to read further back: 30 for the 30 before the latest 30" },
         },
       },
+      output: { type: "string", description: "a line for each message: [time] sender: text, newest last" },
       run: (ctx, input) => service(ctx, "read", input),
     },
     search: {
+      title: "Search messages",
       reads: true,
       description: "WhatsApp messages containing some text, across every chat or in one, newest last: to find something said when you don't know which chat. One a line, \"[3 Nov 2026 09:00] Sam in Family: text\", the chat only when it isn't Sam's own and \"You to Sam\" for the user's, times in the time zone of the device it's linked on. Page back with skip.",
       input: {
@@ -139,9 +162,11 @@ export default {
           skip: { type: "integer", description: "leave out this many of the newest matches, to page back" },
         },
       },
+      output: { type: "string", description: "a line for each message that matches" },
       run: (ctx, input) => service(ctx, "search", input),
     },
     send: {
+      title: "Send a WhatsApp message",
       reads: false,
       confirm: true,
       description: "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. It sends a real message to a real person and can't be taken back: only what the user asked to send, to whom they asked. Says to whom it went.",
@@ -154,19 +179,24 @@ export default {
           text: { type: "string", description: "the message, exactly as the user approved it" },
         },
       },
+      output: { type: "string", description: "to whom it was sent, in words" },
       run: (ctx, input) => service(ctx, "send", input),
     },
     move: {
+      title: "Move a WhatsApp link to another device",
       reads: false,
       description: "Move a WhatsApp link, with its kept messages, from the device it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted from the first device once the other has it. Says where it went.",
       input: { type: "object", required: ["to"], properties: { account: ACCOUNT, to: { type: "string", description: "the device to move it to, by its name as whatsapp_status or the App Store's WhatsApp page shows" } } },
+      output: { type: "string", description: "where it went, in words" },
       run: (ctx, input) => service(ctx, "move", input),
     },
     sign_out: {
+      title: "Unlink a WhatsApp account",
       reads: false,
       confirm: true,
       description: "Unlink a WhatsApp account: removes this device from the phone's linked devices and deletes the messages kept here. It can't be undone: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
       input: { type: "object", properties: { account: { type: "string", description: "the account's number, as whatsapp_accounts lists them; needed when several are linked here" }, device: { type: "string", description: "the device it's linked on, as whatsapp_accounts lists it: for an account linked on several" } } },
+      output: { type: "string", description: "that it's unlinked, in words" },
       async run(ctx, input) {
         const out = await service(ctx, "sign_out", input);
         await listAndKeep(ctx, {});
@@ -174,15 +204,31 @@ export default {
       },
     },
     _pairing: {
+      title: "The QR code while a phone is linking",
       reads: true,
       description: "The QR code and phone code while a phone is linking, for the settings screen.",
       input: { type: "object", properties: { device: DEVICE } },
+      output: {
+        type: "object",
+        description: "empty when nothing is pairing",
+        properties: {
+          qr: { type: "string", description: "a PNG data: URL" },
+          code: { type: "string", description: "the code to type on the phone" },
+          error: { type: "string" },
+        },
+      },
       run: (ctx, input) => service(ctx, "_pairing", input),
     },
     _running: {
+      title: "Where WhatsApp runs",
       reads: true,
       description: "Which of your devices it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "object",
+        required: ["devices"],
+        properties: { devices: { type: "array", items: { type: "string" }, description: "the online devices that run it" } },
+      },
       run: async (ctx) => ({ devices: await running(ctx) }),
     },
   },

@@ -18,6 +18,8 @@ export const LABELS = [
   ["wontfix", "ffffff", "This will not be worked on"],
 ];
 
+import { COMMENT, ISSUE, LABEL, PERSON, TEXT } from "./shapes.js";
+
 const PAGE = 25;
 const COLOR = /^#?([0-9a-f]{6})$/i;
 const REASONS = ["completed", "not_planned"];
@@ -119,6 +121,7 @@ export function tools(R) {
 
   return {
     issues: {
+      title: "A repo's issues",
       reads: true,
       description: "A repo's issues, as GitHub lists them: newest first, 25 a page, open ones unless state says otherwise, each with its number, title, state (and state_reason once closed: completed or not_planned), author, labels, assignees, how many comments it has, and when it was opened, last updated and closed. open_issues and closed_issues count those that match the rest of the filters; more says whether there's another page; push, whether you label, assign and close any of them; yours, whether you own the repo. repos_issue reads one with its body and comments.",
       input: {
@@ -131,6 +134,19 @@ export function tools(R) {
           author: { type: "string", description: "only issues this user opened, by handle, from groups_list" },
           q: { type: "string", description: "words to find in issues' titles, bodies and comments, or a number like 12 or #12" },
           page: { type: "integer", description: "which 25: 0 (the default) for the newest, 1 for the 25 before them, and on while more is true" },
+        },
+      },
+      output: {
+        type: "object",
+        required: ["repo", "open_issues", "closed_issues", "issues", "more"],
+        properties: {
+          repo: { type: "string" },
+          open_issues: { type: "integer" },
+          closed_issues: { type: "integer" },
+          issues: { type: "array", items: ISSUE },
+          more: { type: "boolean", description: "whether there is another page" },
+          yours: { type: "boolean" },
+          push: { type: "boolean" },
         },
       },
       async run(ctx, { repo, state = "open", label, assignee, author, q, page = 0 }) {
@@ -175,9 +191,19 @@ export function tools(R) {
       },
     },
     issue: {
+      title: "One issue",
       reads: true,
       description: "One issue: its title, body (Markdown), state and state_reason, author, labels, assignees, times, and its comments, oldest first, each with its id, author, body and times (yours says it's yours to edit and delete). can says what you may do to it: edit its title and body, close or reopen it, triage it (labels and assignees), and delete it.",
       input: { type: "object", required: ["repo", "number"], properties: { repo: REPO, number: NUMBER } },
+      output: {
+        type: "object",
+        required: [...ISSUE.required, "repo", "body", "can"],
+        properties: {
+          ...ISSUE.properties,
+          comments: { type: "array", items: COMMENT, description: "oldest first" },
+          can: { type: "object", description: "what you may do to it: { edit, close, triage, delete }", additionalProperties: true },
+        },
+      },
       async run(ctx, { repo, number: n }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
@@ -196,12 +222,14 @@ export function tools(R) {
       },
     },
     open_issue: {
+      title: "Open an issue",
       reads: false,
       description: "Open an issue in a repo, as anyone may: a title and a body, and if you push to the repo, its labels and assignees. Gives the issue, with its number.",
       input: {
         type: "object", required: ["repo", "title"],
         properties: { repo: REPO, title: { type: "string", description: "one line, up to 256 characters" }, body: BODY("what it's about"), labels: LABEL_NAMES, assignees: ASSIGNEES },
       },
+      output: ISSUE,
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
@@ -223,12 +251,14 @@ export function tools(R) {
       },
     },
     edit_issue: {
+      title: "Change an issue",
       reads: false,
       description: "Change an issue: its title and body (its author, and those who push to the repo), and its labels and assignees (those who push to the repo), each replaced by what you give; leave out what stays. repos_close_issue and repos_reopen_issue change its state.",
       input: {
         type: "object", required: ["repo", "number"],
         properties: { repo: REPO, number: NUMBER, title: { type: "string", description: "its new title, one line, up to 256 characters" }, body: BODY("its new body"), labels: LABEL_NAMES, assignees: ASSIGNEES },
       },
+      output: ISSUE,
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
@@ -258,6 +288,7 @@ export function tools(R) {
       },
     },
     close_issue: {
+      title: "Close an issue",
       reads: false,
       description: "Close an issue, as completed (the default) or not planned, with a comment if you give one: its author closes it, and those who push to the repo close any. Closing a closed one changes its reason.",
       input: {
@@ -268,6 +299,7 @@ export function tools(R) {
           comment: BODY("a comment to leave as it closes"),
         },
       },
+      output: TEXT("that it's closed, in words"),
       async run(ctx, { repo, number: n, state_reason = "completed", comment }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
@@ -281,9 +313,11 @@ export function tools(R) {
       },
     },
     reopen_issue: {
+      title: "Reopen an issue",
       reads: false,
       description: "Reopen a closed issue, with a comment if you give one: its author reopens it, and those who push to the repo reopen any.",
       input: { type: "object", required: ["repo", "number"], properties: { repo: REPO, number: NUMBER, comment: BODY("a comment to leave as it reopens") } },
+      output: TEXT("that it's open again, in words"),
       async run(ctx, { repo, number: n, comment }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
@@ -296,10 +330,12 @@ export function tools(R) {
       },
     },
     delete_issue: {
+      title: "Delete an issue",
       reads: false,
       confirm: true,
       description: "Delete an issue for good, with its comments, as only the repo's owners may. Its number isn't given again.",
       input: { type: "object", required: ["repo", "number"], properties: { repo: REPO, number: NUMBER, confirm: CONFIRM } },
+      output: TEXT("that it's deleted, in words"),
       async run(ctx, { repo, number: n }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
@@ -310,9 +346,11 @@ export function tools(R) {
       },
     },
     comment: {
+      title: "Comment on an issue",
       reads: false,
       description: "Comment on an issue, as anyone may. Gives the comment, with its id.",
       input: { type: "object", required: ["repo", "number", "body"], properties: { repo: REPO, number: NUMBER, body: BODY("the comment") } },
+      output: COMMENT,
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
@@ -325,9 +363,11 @@ export function tools(R) {
       },
     },
     edit_comment: {
+      title: "Change a comment",
       reads: false,
       description: "Change the text of a comment of yours.",
       input: { type: "object", required: ["repo", "id", "body"], properties: { repo: REPO, id: COMMENT_ID, body: BODY("its new text") } },
+      output: COMMENT,
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
@@ -340,10 +380,12 @@ export function tools(R) {
       },
     },
     delete_comment: {
+      title: "Delete a comment",
       reads: false,
       confirm: true,
       description: "Delete a comment for good: your own, or anyone's on a repo you own.",
       input: { type: "object", required: ["repo", "id"], properties: { repo: REPO, id: COMMENT_ID, confirm: CONFIRM } },
+      output: TEXT("that it's deleted, in words"),
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
@@ -354,9 +396,11 @@ export function tools(R) {
       },
     },
     labels: {
+      title: "A repo's labels",
       reads: true,
       description: "A repo's labels, by name: each with its colour (hex, as GitHub's: d73a4a), description, and how many open issues have it. A new repo starts with GitHub's.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
+      output: { type: "array", items: LABEL },
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
@@ -370,6 +414,7 @@ export function tools(R) {
       },
     },
     set_label: {
+      title: "Make or change a label",
       reads: false,
       description: "Make a label in a repo, or change one (its name, colour or description), as those who push to it may; a renamed label stays on its issues.",
       input: {
@@ -382,6 +427,7 @@ export function tools(R) {
           description: { type: "string", description: "what it's for, up to 100 characters" },
         },
       },
+      output: LABEL,
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
@@ -409,10 +455,12 @@ export function tools(R) {
       },
     },
     delete_label: {
+      title: "Delete a label",
       reads: false,
       confirm: true,
       description: "Delete a label from a repo, and from every issue that has it, as those who push to it may.",
       input: { type: "object", required: ["repo", "name"], properties: { repo: REPO, name: { type: "string", description: "the label's name, from repos_labels" }, confirm: CONFIRM } },
+      output: TEXT("that it's deleted, in words"),
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
@@ -424,9 +472,11 @@ export function tools(R) {
       },
     },
     _users: {
+      title: "Everyone, by handle (for the screens)",
       reads: true,
       description: "Everyone in the network, by handle and name, for the screens' assignee and author pickers; for a GitHub repo, those GitHub lets its issues be assigned to.",
       input: { type: "object", properties: { repo: REPO } },
+      output: { type: "array", items: PERSON },
       run: (ctx) => handles(ctx).filter((h) => h.id.startsWith("user:") && !h.removed).map((h) => ({ handle: h.handle, name: h.name })).sort((a, b) => a.name.localeCompare(b.name)),
     },
   };

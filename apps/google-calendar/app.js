@@ -112,9 +112,11 @@ export default {
   tools: {
     ...signIn,
     calendars: {
+      title: "The account's calendars",
       reads: true,
       description: "The account's calendars (Calendar's calendarList.list), the primary first, as text: each one's id (what calendarId takes elsewhere), name, your access (owner, writer or reader) and time zone.",
       input: withAccount({}),
+      output: { type: "string", description: "a line for each calendar: its id, name, your access and time zone" },
       async run(ctx, { account: a }) {
         const email = await account(ctx, a);
         const { items = [] } = await api(ctx, email, "GET", "users/me/calendarList", { query: { maxResults: 250 } });
@@ -123,6 +125,7 @@ export default {
       },
     },
     events: {
+      title: "Events in a time range",
       reads: true,
       description: `Events in a time range (Calendar's events.list, each repeat on its own, soonest first), as text: each event's id, start – end (RFC 3339, or a date for a whole day), summary, and where. Default: the coming week of the primary calendar. ${APP}_event gives one event's guests, link and notes. A long list ends with More: give pageToken <token>.`,
       input: withAccount({
@@ -133,6 +136,7 @@ export default {
         maxResults: { type: "integer", description: "at most this many; default 50, at most 250" },
         pageToken: str("the next page: the token the last events ended with (\"More: give pageToken …\"), with the same calendarId, timeMin and timeMax"),
       }),
+      output: { type: "string", description: "a line for each event: its id, start – end, summary and where; then how to get more" },
       async run(ctx, { account: a, calendarId, timeMin: from, timeMax: to, q, maxResults, pageToken }) {
         const email = await account(ctx, a);
         const zone = from || to ? await zoneOf(ctx, email, calendarId) : undefined;
@@ -148,17 +152,21 @@ export default {
       },
     },
     event: {
+      title: "One event",
       reads: true,
       description: "One event (Calendar's events.get), as text: its summary, when, how it repeats, where, organizer, guests and their answers, its Meet link, its link in Google Calendar and its notes.",
       input: withAccount({ eventId, calendarId }, ["eventId"]),
+      output: { type: "string", description: "the event's summary, when, repeats, place, organizer, guests, links and notes" },
       async run(ctx, { account: a, eventId, calendarId }) {
         return whole(await api(ctx, await account(ctx, a), "GET", `calendars/${cal(calendarId)}/events/${encodeURIComponent(eventId)}`, { missing: noEvent(eventId, calendarId) }));
       },
     },
     create_event: {
+      title: "Add an event",
       reads: false,
       description: "Add an event to a calendar (Calendar's events.insert). This changes the user's calendar: do it only when they asked. Guests are told only with sendUpdates. Gives its id and link.",
       input: withAccount(eventFields, ["summary", "start"]),
+      output: { type: "string", description: "that it was added, with its id and link" },
       async run(ctx, input) {
         const email = await account(ctx, input.account);
         const e = await api(ctx, email, "POST", `calendars/${cal(input.calendarId)}/events`, { json: await eventBody(ctx, email, input), query: { sendUpdates: input.sendUpdates || "none" }, missing: noCalendar(input.calendarId) });
@@ -166,9 +174,11 @@ export default {
       },
     },
     update_event: {
+      title: "Change an event",
       reads: false,
       description: "Change an event (Calendar's events.patch): only what's given changes; attendees and recurrence, given, replace the whole list. A repeating event's id changes every repeat; one repeat's id changes just that one. This changes the user's calendar: do it only when they asked. Guests are told only with sendUpdates.",
       input: withAccount({ eventId, ...eventFields }, ["eventId"]),
+      output: { type: "string", description: "that it was changed, in words" },
       async run(ctx, input) {
         const email = await account(ctx, input.account);
         const e = await api(ctx, email, "PATCH", `calendars/${cal(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`, { json: await eventBody(ctx, email, input, true), query: { sendUpdates: input.sendUpdates || "none" }, missing: noEvent(input.eventId, input.calendarId) });
@@ -176,10 +186,12 @@ export default {
       },
     },
     delete_event: {
+      title: "Delete an event",
       reads: false,
       confirm: true,
       description: "Delete an event for good (Calendar's events.delete): a repeating event's id deletes every repeat, one repeat's id just that one. Do it only when the user asked. Guests are told only with sendUpdates.",
       input: withAccount({ eventId, calendarId, sendUpdates }, ["eventId"]),
+      output: { type: "string", description: "that it was deleted, in words" },
       async run(ctx, { account: a, eventId, calendarId, sendUpdates }) {
         const email = await account(ctx, a);
         const e = await api(ctx, email, "GET", `calendars/${cal(calendarId)}/events/${encodeURIComponent(eventId)}`, { missing: noEvent(eventId, calendarId) });

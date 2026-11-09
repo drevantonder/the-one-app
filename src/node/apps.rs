@@ -71,6 +71,12 @@ impl Node {
         Ok(out)
     }
 
+    /// What `app` says it is and does, as its own code describes it: one added here, or a built-in no one has added,
+    /// which touches no data.
+    pub async fn described(&self, app: &str) -> Result<Value> {
+        self.0.apps.describe_any(app).await
+    }
+
     /// Every lab in the network, for an admin's Settings › Labs (`src/labs.rs`): each app's, then each
     /// service's, each `{ setting, title, description, on }`, an app's or service's with `app` or `service`, its
     /// `name`, `title`, `icon` and `color`.
@@ -457,7 +463,10 @@ impl Node {
         let mut out = json!({ "bundle": bundle, "made": before.is_none(), "before": before.flatten(), "here": here });
         if here {
             match self.0.apps.describe(app).await {
-                Ok(d) => out["tools"] = json!(d["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).collect::<Vec<_>>()),
+                Ok(d) => {
+                    out["tools"] = json!(d["tools"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).collect::<Vec<_>>());
+                    out["lacking"] = json!(crate::app::deploy::lacking(&d));
+                }
                 Err(e) => out["failed"] = json!(format!("{e:#}")),
             }
         }

@@ -123,8 +123,11 @@ fn deploy(g: &Given, dir: &std::path::Path) -> Result<()> {
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
     let (blob, service) = build::built_with_service(node, dir)?;
-    let here = node.post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?["here"] == true;
-    println!("{}", deployed_said(node, &format!("Deployed {name} ({}).{service}", &blob[..12]), here));
+    let deployed = node.post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": g.flag("owner"), "wait": true }))?;
+    println!("{}", deployed_said(node, &format!("Deployed {name} ({}).{service}", &blob[..12]), deployed["here"] == true));
+    if let Some(said) = crate::app::deploy::lacking_said(&deployed["lacking"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect::<Vec<_>>()) {
+        println!("{said}");
+    }
     Ok(())
 }
 

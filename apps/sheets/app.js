@@ -41,9 +41,28 @@ export default {
   tools: {
     ...signIn,
     spreadsheet: {
+      title: "A spreadsheet's sheets",
       reads: true,
       description: "A spreadsheet's title, address, time zone and sheets (tabs), each with its size (Sheets' spreadsheets.get, trimmed): { id, title, url, time_zone, sheets: [{ title, id, rows, columns }] }. Sheet titles are what ranges start with.",
       input: withAccount({ spreadsheetId: sheetInput }, ["spreadsheetId"]),
+      output: {
+        type: "object",
+        required: ["id", "title", "url", "sheets"],
+        properties: {
+          id: { type: "string" },
+          title: { type: "string" },
+          url: { type: "string" },
+          time_zone: { type: "string" },
+          sheets: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["title", "id"],
+              properties: { title: { type: "string" }, id: { type: "integer" }, rows: { type: "integer" }, columns: { type: "integer" } },
+            },
+          },
+        },
+      },
       async run(ctx, { account: a, spreadsheetId: spreadsheet }) {
         const s = await api(ctx, await account(ctx, a), "GET", ss(spreadsheet), { query: { fields: "spreadsheetId,spreadsheetUrl,properties(title,timeZone,locale),sheets.properties(sheetId,title,index,gridProperties)" }, missing: noSheet(spreadsheet) });
         return {
@@ -53,6 +72,7 @@ export default {
       },
     },
     read: {
+      title: "Read a range",
       reads: true,
       description: "The values in a range (Sheets' values.get): { range, values }, values a row per array, with the range they came from. Over limit rows, it says how many more.",
       input: withAccount({
@@ -60,6 +80,15 @@ export default {
         valueRenderOption: { type: "string", enum: ["FORMATTED_VALUE", "UNFORMATTED_VALUE", "FORMULA"], description: "FORMATTED_VALUE: as shown (the default); UNFORMATTED_VALUE: numbers unformatted; FORMULA: formulas, like =SUM(B2:B9)" },
         limit: { type: "integer", description: "at most this many rows; default 500 (the rest are left out, and more says how many)" },
       }, ["spreadsheetId"]),
+      output: {
+        type: "object",
+        required: ["range", "values"],
+        properties: {
+          range: { type: "string", description: "the range the values came from, in A1 notation" },
+          values: { type: "array", items: { type: "array" }, description: "a row per array" },
+          more: { type: "string", description: "how many rows were left out, when there are more than limit" },
+        },
+      },
       async run(ctx, { account: a, spreadsheetId: spreadsheet, range, valueRenderOption, limit }) {
         const email = await account(ctx, a);
         const r = await api(ctx, email, "GET", `${ss(spreadsheet)}/values/${encodeURIComponent(await rangeOr(ctx, email, spreadsheet, range))}`,
@@ -70,9 +99,11 @@ export default {
       },
     },
     append: {
+      title: "Add rows after a table",
       reads: false,
       description: "Add rows after the table in a range (or the first sheet) (Sheets' values.append); says where they went. This changes the user's spreadsheet: do it only when they asked.",
       input: withAccount({ spreadsheetId: sheetInput, range: str("the table's range or sheet, like Expenses or Expenses!A:E; the first sheet when left out"), values: valuesInput }, ["spreadsheetId", "values"]),
+      output: { type: "string", description: "how many rows were added and where, in words" },
       async run(ctx, { account: a, spreadsheetId: spreadsheet, range, values: rows }) {
         const email = await account(ctx, a);
         const r = await api(ctx, email, "POST", `${ss(spreadsheet)}/values/${encodeURIComponent(await rangeOr(ctx, email, spreadsheet, range))}:append`,
@@ -81,10 +112,12 @@ export default {
       },
     },
     update: {
+      title: "Write over a range",
       reads: false,
       confirm: true,
       description: "Write rows over a range, from its top-left cell, replacing what was there (Sheets' values.update); says which cells changed. Do it only when the user asked.",
       input: withAccount({ spreadsheetId: sheetInput, range: str("where to write, in A1 notation, like Budget!B2 or Budget!B2:D5"), values: valuesInput }, ["spreadsheetId", "range", "values"]),
+      output: { type: "string", description: "how many cells changed and where, in words" },
       async run(ctx, { account: a, spreadsheetId: spreadsheet, range, values: rows }) {
         const r = await api(ctx, await account(ctx, a), "PUT", `${ss(spreadsheet)}/values/${encodeURIComponent(String(range))}`,
           { query: { valueInputOption: "USER_ENTERED" }, json: { values: rows }, missing: noSheet(spreadsheet), hint: RANGE_HINT });
@@ -92,12 +125,18 @@ export default {
       },
     },
     create: {
+      title: "Make a spreadsheet",
       reads: false,
       description: "Make a spreadsheet in the user's Drive (in My Drive; Sheets' spreadsheets.create), with sheets and first rows if given. Gives { id, title, url }.",
       input: withAccount({
         title: str("its title, like Budget 2026"), sheets: { type: "array", items: { type: "string" }, description: "its sheets' (tabs') titles, like [\"Income\", \"Expenses\"]; default one, Sheet1" },
         values: { ...valuesInput, description: `rows to put in the first sheet, from A1, ${valuesInput.description.slice(6)}` },
       }, ["title"]),
+      output: {
+        type: "object",
+        required: ["id", "title", "url"],
+        properties: { id: { type: "string" }, title: { type: "string" }, url: { type: "string" } },
+      },
       async run(ctx, { account: a, title, sheets: tabs, values: rows }) {
         const email = await account(ctx, a);
         const s = await api(ctx, email, "POST", "spreadsheets", { json: { properties: { title }, ...(tabs?.length ? { sheets: tabs.map((t) => ({ properties: { title: t } })) } : {}) } });

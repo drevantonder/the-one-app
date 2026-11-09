@@ -57,6 +57,14 @@ const TARGET = { description: "the browser's target_id, from computer_get_browse
 const REF = { description: "the thing's ref on the page, like p3:12, from the latest computer_get_browser_state: a new read or a navigation replaces them", type: "string" };
 const FOREGROUND = { default: "background", description: "background (the default) refuses where acting would bring the browser window to the front; foreground allows it, as on an agent device nobody is watching", enum: ["background", "foreground"], type: "string" };
 
+// What a tool of a device gives, as MCP gives it: text, and pictures as base64.
+const CONTENT = {
+  type: ["object", "string"],
+  description: "{ content }, a list of { type: text, text } and { type: image, mimeType, data }; text on an own device",
+  properties: { content: { type: "array", items: { type: "object", required: ["type"], additionalProperties: true } } },
+  additionalProperties: true,
+};
+
 export default {
   name: "computer",
   title: "Computer Use",
@@ -81,9 +89,37 @@ export default {
 
   tools: {
     list: {
+      title: "Every device agents can act on",
       reads: true,
       description: "Every device agents can act on: the agent devices on all of your devices, and your own devices you let agents use (own: true, like your Mac). Each with its kind, the device it's on, whether it's running, paused or stopped, and who has borrowed it and what for. Borrow one with agent-devices_borrow; act on it with computer_screen, computer_use and the browser tools.",
       input: {"properties": {"here": {"description": "only the agent devices on the device you call from", "type": "boolean"}}, "type": "object"},
+      output: {
+        type: "object",
+        required: ["devices"],
+        properties: {
+          devices: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["name", "on"],
+              properties: {
+                name: { type: "string", description: "for the device argument of the other tools" },
+                kind: { type: "string" },
+                title: { type: "string", description: "the kind, in words" },
+                on: { type: "string", description: "the device of yours it runs on" },
+                own: { type: "boolean", description: "true for one of your own devices you let agents use" },
+                of: { type: "string", description: "for a throwaway copy, the device it copies" },
+                state: { type: "string", description: "running, paused or stopped" },
+                use: { type: "string", description: "who has it and what for, in words" },
+                size: { type: "string" },
+                memory: { type: "string" },
+              },
+            },
+          },
+          note: { type: "string" },
+          unreachable: { description: "the devices that couldn't be asked, and why" },
+        },
+      },
       run: async (ctx, input) => {
         const [listed, devs] = await Promise.all([act(ctx, "list", input).catch((err) => err), input.here ? [] : devices(ctx)]);
         const on = devs.filter((d) => d.on).map(asListed);
@@ -96,9 +132,11 @@ export default {
       },
     },
     view: {
+      title: "A link to watch a device",
       reads: false,
       description: "A link for the user to watch and use an agent device in their browser: to solve a challenge or sign in, or to see what an agent is doing. Gives the link and when it stops working. Not for your own devices: the user sees those on the Computer Use page.",
       input: {"properties": {"device": DEVICE, "minutes": {"description": "how long the link works; default 60, at most 1440", "type": "integer"}}, "type": "object"},
+      output: { type: "string", description: "the link, and when it stops working" },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (d) throw new Error(`${d} is the user's own device: they watch it on the Computer Use page and on the device itself, and stop agents there.`);
@@ -106,9 +144,11 @@ export default {
       },
     },
     screen: {
+      title: "A device's screen",
       reads: true,
       description: "A picture of a device's screen as it is now: an agent device or your own device. To read a web page, computer_get_browser_state gives its text.",
       input: {"properties": {"device": DEVICE, "width": {"description": "the picture's width in pixels; default 640, at most 1920", "type": "integer"}}, "type": "object"},
+      output: CONTENT,
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (d) return ctx.services.computer._screen({ width: input.width }, { device: d });
@@ -116,9 +156,11 @@ export default {
       },
     },
     tools: {
+      title: "What a device's tools can do",
       reads: true,
       description: "What computer_use can do on a device, a line each (like list_windows, click, type_text); with name, that tool's full description and input.",
       input: {"properties": {"device": DEVICE, "name": {"description": "a tool's name, from computer_tools without name", "type": "string"}}, "type": "object"},
+      output: { type: "string", description: "a line for each tool; with name, its full description and input" },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (d) return ctx.services.computer._tools(input.name ? { name: input.name } : {}, { device: d });
@@ -126,15 +168,19 @@ export default {
       },
     },
     refresh_tools: {
+      title: "Read the devices' tools again",
       reads: false,
       description: "Read the agent devices' tools again from a running one, as after it was updated, when computer_tools seems out of date.",
       input: {"properties": {}, "type": "object"},
+      output: { type: "string", description: "how many tools were read, in words" },
       run: (ctx, input) => act(ctx, "refresh_tools", input),
     },
     use: {
+      title: "Run a device's tool",
       reads: false,
       description: "Run one of a device's tools, as computer_tools lists them (list_windows, launch_app, click, type_text, press_key, get_guide...), on an agent device or your own device, and give what it answers. For web pages, the browser tools are quicker.",
       input: {"properties": {"args": {"description": "the tool's input, as computer_tools with its name describes it, like { \"x\": 120, \"y\": 300 }", "type": "object"}, "device": DEVICE, "tool": {"description": "the tool's name, from computer_tools", "type": "string"}}, "required": ["tool"], "type": "object"},
+      output: CONTENT,
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) return act(ctx, "use", input);
@@ -142,6 +188,7 @@ export default {
       },
     },
     get_browser_state: {
+      title: "Read a web page",
       reads: true,
       description: "Read the web page in a browser window: its text, and a ref for each thing to click, type in or select. First call it with pid and window_id (from computer_use list_windows) to get target_id and tab_id; after that, with those. If the browser isn't ready, it says which computer_browser_prepare call makes it so.",
       input: {"additionalProperties": true, "properties": {
@@ -157,9 +204,11 @@ export default {
         "target_id": TARGET,
         "window_id": {"description": "the browser window's id, from computer_use list_windows: with pid, on the first call", "type": "integer"},
       }, "type": "object"},
+      output: CONTENT,
       run: (ctx, input) => act(ctx, "get_browser_state", input),
     },
     browser_prepare: {
+      title: "Start or attach a browser",
       reads: false,
       description: "Start the browser the browser tools act on, or attach them to one that's open. On an agent device: allow_launch true and profile { mode: \"isolated_named\", name: <the profile agent-devices_borrow gave> }. In a browser open on your own device: pid, window_id and strategy { kind: \"existing_profile\" }, when computer_get_browser_state asks for it. It says why if it can't, having changed nothing. A browser it started closes after 5 minutes idle; prepare it again.",
       input: {"additionalProperties": true, "properties": {
@@ -172,15 +221,19 @@ export default {
         "strategy": {"additionalProperties": false, "description": "{ kind: \"existing_profile\" } attaches to the browser open at pid and window_id", "properties": {"kind": {"enum": ["existing_profile"], "type": "string"}}, "required": ["kind"], "type": "object"},
         "window_id": {"description": "the browser window's id, from computer_use list_windows; needed with strategy", "type": "integer"},
       }, "required": [], "type": "object"},
+      output: CONTENT,
       run: (ctx, input) => act(ctx, "browser_prepare", input),
     },
     browser_navigate: {
+      title: "Open a web address in a tab",
       reads: false,
       description: "Open a web address in a browser tab. Refs from earlier reads stop working: read the page again with computer_get_browser_state.",
       input: {"additionalProperties": true, "properties": {"device": DEVICE, "session": SESSION, "tab_id": TAB, "target_id": TARGET, "url": {"description": "an http, https or about address, like https://example.com", "type": "string"}}, "required": ["target_id", "tab_id", "url"], "type": "object"},
+      output: CONTENT,
       run: (ctx, input) => act(ctx, "browser_navigate", input),
     },
     browser_click: {
+      title: "Click on a web page",
       reads: false,
       description: "Click something on a web page, by its ref or at a point. On an agent device give input_route \"dom_event\", or delivery_mode \"foreground\". Read the page again to see that it worked.",
       input: {"additionalProperties": true, "properties": {
@@ -191,9 +244,11 @@ export default {
         "x": {"description": "instead of ref: a point in the tab, in CSS pixels from its left", "type": "number"},
         "y": {"description": "instead of ref: a point in the tab, in CSS pixels from its top", "type": "number"},
       }, "required": ["target_id", "tab_id"], "type": "object"},
+      output: CONTENT,
       run: (ctx, input) => act(ctx, "browser_click", input),
     },
     browser_type: {
+      title: "Type into a web page",
       reads: false,
       description: "Type text into a field on a web page, by its ref. It adds to what the field holds; replace true sets it instead (with \"\", clears it). \"\\n\" with mode keystrokes presses Enter.",
       input: {"additionalProperties": true, "properties": {
@@ -204,9 +259,11 @@ export default {
         "session": SESSION, "tab_id": TAB, "target_id": TARGET,
         "text": {"description": "what to type", "type": "string"},
       }, "required": ["target_id", "tab_id", "ref", "text"], "type": "object"},
+      output: CONTENT,
       run: (ctx, input) => act(ctx, "browser_type", input),
     },
     browser_select: {
+      title: "Pick a drop-down option",
       reads: false,
       description: "Pick an option of a drop-down on a web page, by its ref, without opening it: give label or value, which exactly one option must match. Read the page again to see the page took it.",
       input: {"additionalProperties": false, "properties": {
@@ -215,9 +272,11 @@ export default {
         "ref": REF, "session": SESSION, "tab_id": TAB, "target_id": TARGET,
         "value": {"description": "instead of label: the option's value", "type": "string"},
       }, "required": ["target_id", "tab_id", "ref"], "type": "object"},
+      output: CONTENT,
       run: (ctx, input) => act(ctx, "browser_select", input),
     },
     browser_dialog: {
+      title: "See or answer a page's dialog",
       reads: false,
       description: "See or answer a web page's own alert, confirm or prompt: inspect gives its text and dialog_id, then accept or dismiss it with that id. On an agent device, accept and dismiss need delivery_mode \"foreground\".",
       input: {"additionalProperties": true, "properties": {
@@ -228,9 +287,11 @@ export default {
         "prompt_text": {"description": "what to answer a prompt with, when accepting it", "type": "string"},
         "session": SESSION, "tab_id": TAB, "target_id": TARGET,
       }, "required": ["target_id", "tab_id", "action"], "type": "object"},
+      output: CONTENT,
       run: (ctx, input) => act(ctx, "browser_dialog", input),
     },
     browser_pointer: {
+      title: "Hover, scroll or drag on a web page",
       reads: false,
       description: "Hover, right-click, double-click, scroll or drag on a web page, at a ref or a point. On an agent device give input_route \"dom_event\", or delivery_mode \"foreground\".",
       input: {"additionalProperties": true, "properties": {
@@ -249,20 +310,32 @@ export default {
         "x": {"description": "where to start, in CSS pixels from the tab's left", "type": "number"},
         "y": {"description": "where to start, in CSS pixels from the tab's top", "type": "number"},
       }, "required": ["target_id", "tab_id", "session", "action"], "type": "object"},
+      output: CONTENT,
       run: (ctx, input) => act(ctx, "browser_pointer", input),
     },
     _devices: {
+      title: "Your devices agents may use (for the page)",
       description: "The user's devices that agents may use once they let them, each with whether they do and who is using it now.",
       input: { type: "object", properties: {} },
+      output: {
+        type: "object",
+        required: ["devices"],
+        properties: {
+          devices: { type: "array", items: { type: "object", required: ["device"], additionalProperties: true }, description: "each { device, on, title, kind, using, permissions, missing }, or { device, on: false, why } for one that didn't answer" },
+          mirroring: { type: "boolean", description: "whether the iPhone Mirroring lab is on" },
+        },
+      },
       run: async (ctx) => ({
         devices: (await devices(ctx)).map(({ mirroring, ...d }) => (ctx.labs.mirroring ? { ...d, mirroring } : d)),
         mirroring: ctx.labs.mirroring,
       }),
     },
     _mirror_status: {
+      title: "Whether iPhone Mirroring is open",
       lab: "mirroring",
       description: "Whether iPhone Mirroring is open on a Mac, as { running, title, bounds }.",
       input: { type: "object", properties: { device: DEVICE } },
+      output: { type: "object", description: "{ running, title, bounds }", additionalProperties: true },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
@@ -270,9 +343,11 @@ export default {
       },
     },
     _mirror_launch: {
+      title: "Open iPhone Mirroring",
       lab: "mirroring",
       description: "Opens iPhone Mirroring on a Mac (pairing happens on the phone).",
       input: { type: "object", properties: { device: DEVICE } },
+      output: { type: "object", description: "{ running, title, bounds }", additionalProperties: true },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
@@ -280,9 +355,11 @@ export default {
       },
     },
     _mirror_screen: {
+      title: "A picture of iPhone Mirroring",
       lab: "mirroring",
       description: "A picture of the iPhone Mirroring window as it is now.",
       input: { type: "object", properties: { device: DEVICE, width: { type: "integer", description: "the picture's width in pixels; default 640, at most 1920" } } },
+      output: CONTENT,
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
@@ -290,9 +367,11 @@ export default {
       },
     },
     _mirror_use: {
+      title: "Run a tool on iPhone Mirroring",
       lab: "mirroring",
       description: "Runs one of a device's tools scoped to the iPhone Mirroring window.",
       input: { type: "object", properties: { device: DEVICE, tool: { type: "string" }, args: { type: "object" } }, required: ["tool"] },
+      output: CONTENT,
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
@@ -300,8 +379,10 @@ export default {
       },
     },
     _allow: {
+      title: "Let agents use a device",
       description: "Lets agents use one of the user's devices, or stops them. Turning it on asks the user at the device first.",
       input: { type: "object", properties: { device: { type: "string" }, on: { type: "boolean" } }, required: ["device", "on"] },
+      output: { type: "object", description: "the device's status, as the computer service gives it", additionalProperties: true },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) throw new Error(`Agents can't use ${input.device} yet: no computer service runs there.`);

@@ -173,10 +173,23 @@ export function google({ app, title, scopes, base }) {
 
   const tools = {
     accounts: {
+      title: "Signed-in accounts",
       reads: true,
       accounts: true,
       description: `The Google accounts ${title} can use, the default first: [{ account, ok }], with why when ok is false (${app}_sign_in with that account fixes it). Every other tool's account takes one of these.`,
       input: { type: "object", properties: {} },
+      output: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["account", "ok"],
+          properties: {
+            account: { type: "string", description: "its address" },
+            ok: { type: "boolean", description: "whether a call with it works" },
+            why: { type: "string", description: "when ok is false, what to do" },
+          },
+        },
+      },
       async run(ctx) {
         return Promise.all((await accounts(ctx)).map(async (account) => {
           try { await token(ctx, account); return { account, ok: true }; } catch (e) { return { account, ok: false, why: e.message }; }
@@ -184,11 +197,17 @@ export function google({ app, title, scopes, base }) {
       },
     },
     sign_in: {
+      title: "Start signing an account in",
       reads: false,
       description: `Start signing a Google account in to ${title}, or allowing ${title} on one already signed in to another Google app: gives { url, then }. The user opens url and signs in, and Google sends them back to finish.`,
       input: { type: "object", properties: {
         account: { type: "string", description: "the account's address, like someone@gmail.com, to suggest it to Google; for one that needs signing in again, as accounts lists it" },
       } },
+      output: {
+        type: "object",
+        required: ["url", "then"],
+        properties: { url: { type: "string", description: "for the user to open and sign in at" }, then: { type: "string", description: "what happens next, in words" } },
+      },
       async run(ctx, { account }) {
         if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
         return {
@@ -198,15 +217,27 @@ export function google({ app, title, scopes, base }) {
       },
     },
     finish_sign_in: {
+      title: "Finish signing an account in",
       reads: false,
       description: `Finish signing in with the address the browser came back to after ${app}_sign_in's url, when it didn't finish by itself. Gives { signed_in: true, account }, or { signed_in: false, why } when Google didn't sign in.`,
       input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address the browser came back to, like https://…/back?state=…&code=…, or just its code" } } },
+      output: {
+        type: "object",
+        required: ["signed_in"],
+        properties: {
+          signed_in: { type: "boolean" },
+          account: { type: "string", description: "the account's address, when signed in" },
+          why: { type: "string", description: "when not signed in, why" },
+        },
+      },
       run: (ctx, { code }) => finishSignIn(ctx, code),
     },
     sign_out: {
+      title: "Sign an account out",
       reads: false,
       description: `Sign a Google account out of ${title}; it stays signed in to the other Google apps that use it, and ${app}_sign_in signs it in again.`,
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: `the account's address, or a part of it only it has, as ${app}_accounts lists them` } } },
+      output: { type: "string", description: "that it is signed out, in words" },
       async run(ctx, { account: name }) {
         const email = await account(ctx, name);
         const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
