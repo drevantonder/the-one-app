@@ -50,7 +50,6 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
             // What it writes of itself (its launcher entry, open at login, what opens `<cli>://`) stays in its folder.
             .env("XDG_DATA_HOME", home.join("data"))
             .env("XDG_CONFIG_HOME", home.join("config"))
-            .env("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
             .env(env("ADDRESS"), address)
             .env(env("SIGN_IN_PRINT"), "1")
             .env(env("CONTROL"), control.to_string()),
