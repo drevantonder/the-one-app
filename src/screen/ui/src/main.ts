@@ -18,7 +18,7 @@ const guarded = {
       onUncaughtError: (error, info) => {
         console.error(error, info.componentStack)
         const retry = () => render(last)
-        queueMicrotask(() => render(React.createElement("div", { className: "p-5" }, React.createElement(ui.Problem, { title: "This screen stopped working.", text: "Something in it broke.", action: { label: "Try Again", run: retry } }))))
+        queueMicrotask(() => render(React.createElement("div", { className: "p-5" }, React.createElement(ui.Problem, { title: "This screen stopped working", text: `Something in it broke: ${String((error as Error)?.message ?? error)}`, action: { label: "Try Again", run: retry } }))))
       },
       ...options,
     })
