@@ -53,6 +53,10 @@ pub fn run(rest: &[String]) -> Result<()> {
     let Some((dir, checkout)) = folder() else {
         bail!("{} throwaway is for a checkout of The One App, and this folder isn't in one: run it in the checkout, or any folder in it", dev())
     };
+    // These two need what only this checkout's debug build made with them holds; the first time in a checkout there is none.
+    if build.is_none() && (rest.iter().map(String::as_str).eq(["client", "web"]) || rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"])) {
+        rebuild::with_web_client_and_cloudflare_node(&checkout)?;
+    }
     network::choose(&dir, build.as_deref(), ui.as_deref())?;
     match rest.first().map(String::as_str) {
         Some("stop") => {
@@ -188,7 +192,6 @@ fn git(dir: &Path, addr: &str, args: &[String]) -> Result<()> {
 /// Runs the throwaway network's Cloudflare node beside its Workers, in their workerd, as `cloudflare node deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
 fn cloudflare_node(dir: &Path) -> Result<()> {
-    anyhow::ensure!(one::cloudflare::node::modules().is_ok(), "this build has no Cloudflare node: {CLI}-dev build --dev builds it");
     let mut settings = one::cloudflare::Settings::load_in(dir)?;
     if !settings.cloudflare_node {
         settings.cloudflare_node = true;
