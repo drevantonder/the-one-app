@@ -141,7 +141,7 @@ function Accounts() {
   }
   const { withAccounts, may } = view
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8 px-2">
       <h1 className="large-title text-3xl font-bold tracking-tight">Accounts</h1>
       <Grid min="20rem" max={3} gap="2rem" className="items-start">
       {withAccounts.map((item) => {
