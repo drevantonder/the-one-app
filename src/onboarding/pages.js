@@ -65,7 +65,10 @@ const webauthn = `
   /// is used once, and only while it's fresh: auth keeps one challenge, for five minutes.
   // A sign-in for a device (\`join\`, in its client's authorization) has the passkey sign a challenge naming it.
   const JOIN = new URLSearchParams(location.search).get("join");
-  const ASK = { in: "/api/auth/passkey/generate-authenticate-options" + (/^[0-9a-f]{128}$/.test(JOIN || "") ? "?join=" + JOIN : ""), new: "/api/auth/passkey/generate-register-options" };
+  const FOR_DEVICE = /^[0-9a-f]{128}$/.test(JOIN || "") ? "?join=" + JOIN : "";
+  const ASK = { in: "/api/auth/passkey/generate-authenticate-options" + FOR_DEVICE, new: "/api/auth/passkey/generate-register-options" };
+  /// Gives the client this page's authorization names a code, for whoever just signed in: → where it goes on to.
+  const consent = async (oauth_query) => (await api("/api/auth/oauth2/consent", { accept: true, oauth_query })).url;
   let early = null;
   function ready(path) {
     const asked = api(path);
@@ -153,7 +156,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
         const back = busy(e.currentTarget, "Signing In…");
         try {
           await withPasskey();
-          location.href = client_id ? (await api("/sign-in/accept", { oauth_query, passkey: true })).url : ${json(back)};
+          location.href = client_id ? await consent(oauth_query) : ${json(back)};
         } catch (err) {
           back();
           ready(ASK.in);
@@ -191,10 +194,10 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
           document.title = title;
           slot("title").textContent = title;
           if (!about.web) acts(about);
-          // Back from the sign-in started here for this client, just now: on to it.
+          // Signed in since this client asked: on to it.
           if (about.fresh && !failed) {
             waiting ||= busy(button, "Signing You In…");
-            return location.replace((await api("/sign-in/accept", { oauth_query })).url);
+            return location.replace(await consent(oauth_query));
           }
         } catch (err) { say(err.message); }
         waiting?.();
@@ -204,9 +207,8 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
         say();
         const undo = busy(e.currentTarget, "Opening " + provider.name + "…");
         try {
-          await api("/sign-in/provider", { oauth_query, provider: provider.id });
           // Back to this page, with its no, also for the web client, whose sign-in goes on to its own page.
-          const out = await api("/api/auth/sign-in/social", { provider: provider.id, callbackURL: back, errorCallbackURL: here });
+          const out = await api("/api/auth/sign-in/social" + FOR_DEVICE, { provider: provider.id, callbackURL: back, errorCallbackURL: here });
           sessionStorage.setItem("provider", String(Date.now()));
           location.href = out.url;
         } catch (err) {
@@ -226,7 +228,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
         const back_ = busy(e.currentTarget, "Signing In…");
         try {
           await withPasskey();
-          location.href = client_id ? (await api("/sign-in/accept", { oauth_query, passkey: true })).url : back;
+          location.href = client_id ? await consent(oauth_query) : back;
         } catch (err) {
           back_();
           quietly(err);
@@ -254,7 +256,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
             button.textContent = "Sign In as " + user;
             return void (slot("text").textContent = "This browser is signed in here as " + user + ".");
           }
-          location.href = params.get("client_id") ? (await api("/sign-in/accept", { oauth_query })).url : "/";
+          location.href = params.get("client_id") ? await consent(oauth_query) : "/";
         } catch (err) {
           undo();
           say(err.message);
@@ -367,8 +369,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
         say();
         const undo = busy(e.currentTarget, "Opening " + provider.name + "…");
         try {
-          await api("/sign-in/provider", { oauth_query: "join=" + JOIN, provider: provider.id });
-          location.href = (await api("/api/auth/link-social", { provider: provider.id, callbackURL: here + "&linked=" + provider.id, errorCallbackURL: here })).url;
+          location.href = (await api("/api/auth/link-social" + FOR_DEVICE, { provider: provider.id, callbackURL: here + "&linked=" + provider.id, errorCallbackURL: here })).url;
         } catch (err) {
           undo();
           say(err.message);

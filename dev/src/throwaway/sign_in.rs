@@ -50,7 +50,7 @@ pub fn approved_on_throwaway(address: &str, url: &str, user: Option<&str>) -> Re
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         bail!("only a throwaway network signs in with no passkey: {}", said(&out, "this one didn't"));
     }
-    let mut resp = agent.post(format!("{address}/sign-in/accept")).header("origin", address).header("cookie", &cookie).send_json(serde_json::json!({ "oauth_query": oauth_query }))?;
+    let mut resp = agent.post(format!("{address}/api/auth/oauth2/consent")).header("origin", address).header("cookie", &cookie).send_json(serde_json::json!({ "accept": true, "oauth_query": oauth_query }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     let done = out["url"].as_str().with_context(|| said(&out, "signing in didn't work"))?;
     Ok(to(done.to_string()))

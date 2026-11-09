@@ -38,8 +38,8 @@
 // which is approved only by a tap.
 //
 // It pushes (`PUSH`, the push Worker's entrypoint for the network's own Workers) to the user's devices, never the one asking: "<device>
-// wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`, or to the
-// network's admins if the user has no device left to ask; and "<device> joined · <place>" once one is approved, opening
+// wants in · <place>", with the action `{ join: <code> }`, as soon as it asks (`WANTS_IN` for the one a device lets in with
+// no tap), or to the network's admins if the user has no device left to ask; and "<device> joined · <place>" once one is approved, opening
 // Settings › Devices. It knows a user's devices as those that
 // asked to join as them here, or said they're theirs as they asked which wait (`devices`), and those that registered
 // with the push Worker as theirs, by a request each signed (`PUSH.theirs`): only for whom to push to, since a device
@@ -108,26 +108,22 @@ const refuse = (status, message) => {
 const INVITE = 30 * 86_400_000;
 /// How long a request waits for someone to answer it: long enough for an admin who is asleep.
 const REQUEST = 3 * 86_400_000;
-/// How long a request waits for an invite to let it in before anyone is pushed "wants in".
+/// How long an invited newcomer's first device waits for an admin's device that's online to let it in (`node`'s
+/// `invites_loop`, every few seconds) before anyone is pushed "wants in".
 const WANTS_IN = 10_000;
 /// The most devices of one user pushed to, the newest.
 const PUSHED_TO = 20;
 const CODE = 10 * 60_000;
-/// How lately someone signed in for a client to be added as them, or a passkey added.
+/// How lately someone signed in for one more identity to be added to their account: a session taken from them adds none,
+/// since an added identity signs in for good, and a sign-in's token is good at nodes for what its user may do.
 const FRESH = 5 * 60_000;
-/// How long a provider's sign-in started for a client's authorization, or to join, goes on to it once it's back.
-const STARTED = 15 * 60_000;
+/// How long an invite's secret waits in a cookie for a provider to answer.
+const INVITE_COOKIE = 15 * 60;
 /// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 const USER = /^[0-9a-f]{16}$/;
 /// A device a sign-in is for: its key and seal key, hex.
 const JOIN = /^[0-9a-f]{128}$/;
-
-/// The device an authorization's query says it signs in for, if it says: its key ‖ seal key, hex.
-function joinOf(query) {
-  const join = new URLSearchParams(typeof query === "string" ? query : "").get("join");
-  return JOIN.test(join || "") ? join : null;
-}
 
 const endpointOf = (join) => [hex.decode(join.slice(0, 64)), hex.decode(join.slice(64))];
 
@@ -208,10 +204,6 @@ function setCookie(env, name, value, seconds) {
 export class Auth extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    /// Only a test binds `TEST` (tests/cloudflare.rs on the Workers it serves itself; a network's bindings come from its
-    /// settings, which hold none): the wait for "wants in" is judged by a clock a day behind, which `POST /api/auth/test`
-    /// moves on, so it passes when a test says and not by itself.
-    this.skew = env.TEST ? -86_400_000 : 0;
     const sql = ctx.storage.sql;
     // Invites, by their secret's hash, and `by`, the endpoint that made one; kept once used, for the requests of the
     // device its user joined with.
@@ -228,18 +220,11 @@ export class Auth extends DurableObject {
     sql.exec("create table if not exists devices (key text primary key, user text not null, at integer not null)");
     // Devices whose request was turned down, whose user isn't pushed again when they ask again.
     sql.exec("create table if not exists refused (key text primary key, at integer not null)");
-    // A Durable Object keeps this from when an admin signed in only with a passkey, which the scope database's roles
-    // still say.
-    sql.exec("drop table if exists passkey_only");
     // Signed requests taken, until they're too old to take again.
     sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
     sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
-    // A Durable Object keeps its table from before it was every provider's.
-    if (sql.exec("select 1 from sqlite_master where name = 'google_starts'").toArray().length) {
-      sql.exec("alter table google_starts rename to provider_starts");
-      sql.exec("alter table provider_starts add column provider text not null default 'google'");
-    }
-    sql.exec("create table if not exists provider_starts (id text primary key, query text not null, made integer not null, join_for text, provider text not null)");
+    // A Durable Object keeps this from when a provider's sign-in was started here: goes once every network's auth has run this.
+    sql.exec("drop table if exists provider_starts");
     // What a user's sign-in for a device showed (`{ id_token }` or `{ passkey }`), by that device's key and the user,
     // for its request to join to carry.
     sql.exec("create table if not exists proofs (key text not null, user text not null, proof text not null, made integer not null, primary key (key, user))");
@@ -299,6 +284,10 @@ export class Auth extends DurableObject {
       hooks: {
         before: createAuthMiddleware(async (ctx) => {
           if (ctx.path === "/oauth2/authorize" && ctx.query) {
+            // Better Auth then gives a client's authorization a code only for a sign-in made after it was asked for: a
+            // session already open, or taken from someone, gives a client nothing. Not when it runs this again itself
+            // (`authorizeSettings`, which only it sets), having found that sign-in.
+            if (!ctx.authorizeSettings) ctx.query.prompt = "login";
             ctx.query.resource = await self.audience(ctx.query.client_id);
             const scopes = String(ctx.query.scope || "").split(" ").filter(Boolean);
             if (!scopes.includes("offline_access")) ctx.query.scope = [...scopes, "offline_access"].join(" ");
@@ -380,7 +369,7 @@ export class Auth extends DurableObject {
       if (path === "/api/auth/oauth2/register" && request.method === "POST") await this.notNamedAsUs(await request.clone().json().catch(() => ({})));
       if (path === "/api/auth/passkey/generate-register-options") return await this.namedAsUser(request, await this.auth.handler(request));
       if (path === "/api/auth/passkey/generate-authenticate-options") return await this.namingDevice(await this.auth.handler(request), url.searchParams.get("join"));
-      if ((path === "/api/auth/sign-in/social" || path === "/api/auth/link-social") && request.method === "POST") return await this.withNonce(request, await this.auth.handler(request));
+      if ((path === "/api/auth/sign-in/social" || path === "/api/auth/link-social") && request.method === "POST") return await this.withNonce(await this.auth.handler(request), url.searchParams.get("join"));
       if (path.startsWith("/api/auth/")) return await this.auth.handler(request);
       if (path.startsWith("/.well-known/oauth-authorization-server") || path.startsWith("/.well-known/openid-configuration")) {
         const which = path.includes("openid") ? "/.well-known/openid-configuration" : "/.well-known/oauth-authorization-server";
@@ -397,12 +386,10 @@ export class Auth extends DurableObject {
       if (path === "/sign-in/link" && request.method === "GET" && !throwaway) return await this.linkOpened(request, url, signIn);
       if (path === "/sign-in/link/done" && request.method === "POST") return json(await this.linkDone(request, await request.json()));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
-      if (path === "/sign-in/provider" && request.method === "POST" && providers.length) return await this.startProvider(request, await request.json());
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
       if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), look);
       if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ ...look, done: await this.codeDone(url.searchParams) }));
       if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
-      if (path === "/sign-in/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
       if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, throwaway, providers }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (path === "/invite/provider" && request.method === "POST" && providers.length) return await this.joinWithProvider(request, await request.json());
@@ -422,11 +409,10 @@ export class Auth extends DurableObject {
   async route(request, url) {
     const path = url.pathname;
     const method = request.method;
+    // Only a test binds `TEST` (tests/cloudflare.rs; a network's bindings come from its settings, which hold none).
     if (path === "/api/auth/test" && method === "POST" && this.env.TEST) {
-      const { advance, keep_proof: kept } = await request.json();
-      if (kept) this.ctx.storage.sql.exec("insert or replace into proofs (key, user, proof, made) values (?, ?, ?, ?)", kept.key, kept.user, JSON.stringify(kept.proof), Date.now());
-      this.skew += advance;
-      await this.alarm();
+      const { keep_proof: kept } = await request.json();
+      this.ctx.storage.sql.exec("insert or replace into proofs (key, user, proof, made) values (?, ?, ?, ?)", kept.key, kept.user, JSON.stringify(kept.proof), Date.now());
       return json({});
     }
     if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
@@ -639,20 +625,17 @@ export class Auth extends DurableObject {
     this.keepProof(join, row.userId, { passkey: { credential: resp.id, authenticator_data: r.authenticatorData, client_data: r.clientDataJSON, signature: r.signature, public_key: asB64u(row.publicKey) } });
   }
 
-  /// A provider's sign-in started for a client's sign-in for a device (`startProvider`): asks it for an ID token whose
-  /// nonce names that device.
-  async withNonce(request, resp) {
-    const secret = cookieOf(request.headers, cookieName(this.env, "one-provider-start"));
-    const [row] = secret ? this.ctx.storage.sql.exec("select join_for from provider_starts where id = ?", await hash(secret)).toArray() : [];
+  /// A provider's sign-in for the device `join` names (128 hex): asks it for an ID token whose nonce names that device.
+  async withNonce(resp, join) {
     const root = rootOf(this.env);
-    if (!row?.join_for || !resp.ok || !root) return resp;
+    if (!JOIN.test(join || "") || !resp.ok || !root) return resp;
     const out = await resp.clone().json().catch(() => null);
     if (!out) return resp;
     const headers = new Headers(resp.headers);
     headers.delete("content-length");
     if (out.url) {
       const to = new URL(out.url);
-      to.searchParams.set("nonce", await joinNonce(root, ...endpointOf(row.join_for)));
+      to.searchParams.set("nonce", await joinNonce(root, ...endpointOf(join)));
       out.url = to.toString();
       if (headers.has("location")) headers.set("location", out.url);
     }
@@ -694,8 +677,38 @@ export class Auth extends DurableObject {
     sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link, told, platform) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1, told, platform ?? null);
     // Whoever asks names any key, so this never changes whose one already is.
     sql.exec("insert or ignore into devices (key, user, at) values (?, ?, ?)", key, user, made);
-    if (!told) await this.wantsInBy(made + WANTS_IN);
+    await this.keepProviderProof(key, seal, user);
+    if (!told) {
+      if (this.anInviteLetsIn(user, key, here)) await this.wantsInBy(made + WANTS_IN);
+      else await this.wantsIn(sql.exec("select * from requests where key = ?", key).one());
+    }
     return { until: made + REQUEST };
+  }
+
+  /// The ID token a provider last gave `user`, if it names this device: what its request carries for whoever answers it.
+  async keepProviderProof(key, seal, user) {
+    const root = rootOf(this.env);
+    if (!root) return;
+    const nonce = await joinNonce(root, hex.decode(key), hex.decode(seal));
+    const [row] = this.ctx.storage.sql.exec("select idToken from account where userId = ? and idToken is not null order by updatedAt desc limit 1", user).toArray();
+    if (!row) return;
+    const claims = JSON.parse(new TextDecoder().decode(b64u.decode(row.idToken.split(".")[1])));
+    if (claims.nonce === nonce) this.keepProof(key + seal, user, { id_token: row.idToken });
+  }
+
+  /// Whether an admin's device that's online lets this request in by itself, an invite having said yes
+  /// (src/settings.rs's `Joining::New`): an invited email's first device, signed in on itself.
+  anInviteLetsIn(user, key, here) {
+    const sql = this.ctx.storage.sql;
+    return here && sql.exec("select 1 from invites where user = ? and email is not null and used is not null", user).toArray().length > 0 && !sql.exec("select 1 from devices where user = ? and key != ?", user, key).toArray().length;
+  }
+
+  /// Tells a request's user it wants in, once, unless it was turned down before.
+  async wantsIn(r) {
+    const sql = this.ctx.storage.sql;
+    sql.exec("update requests set told = ? where key = ?", Date.now(), r.key);
+    if (sql.exec("select 1 from refused where key = ?", r.key).toArray().length) return;
+    await this.push(r, { title: `${r.name} wants in${r.place ? ` · ${r.place}` : ""}`, action: { join: await joinCode(hex.decode(r.key), hex.decode(r.seal)) } });
   }
 
   theirs(key, user) {
@@ -726,12 +739,7 @@ export class Auth extends DurableObject {
   async alarm() {
     this.expire();
     const sql = this.ctx.storage.sql;
-    const due = Date.now() + this.skew - WANTS_IN;
-    for (const r of sql.exec("select * from requests where approved is null and told is null and made <= ?", due).toArray()) {
-      sql.exec("update requests set told = ? where key = ?", Date.now(), r.key);
-      if (sql.exec("select 1 from refused where key = ?", r.key).toArray().length) continue;
-      await this.push(r, { title: `${r.name} wants in${r.place ? ` · ${r.place}` : ""}`, action: { join: await joinCode(hex.decode(r.key), hex.decode(r.seal)) } });
-    }
+    for (const r of sql.exec("select * from requests where approved is null and told is null and made <= ?", Date.now() - WANTS_IN).toArray()) await this.wantsIn(r);
     const [next] = sql.exec("select min(made) as at from requests where approved is null and told is null").toArray();
     if (next?.at != null) await this.ctx.storage.setAlarm(Math.max(next.at + WANTS_IN, Date.now() + 1000));
   }
@@ -881,8 +889,8 @@ export class Auth extends DurableObject {
 
   /// What signing in to a client (its authorization's `query`) says: its name (the network's, for the web client, which
   /// is at its address), where its sign-in goes (its redirect_uri, if it's one of the client's, else its first), since
-  /// the name is only what it calls itself, the user's, if they're signed in here already, and whether they're back
-  /// from the provider's sign-in this browser started for it, which goes straight on.
+  /// the name is only what it calls itself, the user's, if they're signed in here already, and whether that sign-in was
+  /// made after this authorization was asked for (Better Auth's signed `ba_iat`), which goes straight on.
   async about(request, query) {
     const session = await this.auth.api.getSession({ headers: request.headers });
     const client = await this.client(query.get("client_id"));
@@ -891,40 +899,11 @@ export class Auth extends DurableObject {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
     const goes = web ? null : goesTo(uris.includes(redirect) ? redirect : uris[0], origin);
-    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!(await this.started(request, session, query)) };
-  }
-
-  // Signing in to a client with a provider goes straight on once it says yes, with no second tap, but only for the
-  // authorization this browser started it for: a sign-in with a provider made for another client (the web client's, a
-  // minute ago) gives nothing to a client whose link the user was sent. Starting one keeps a secret in a cookie only
-  // this address sets, with a hash of the authorization's query; coming back, the two must match, once.
-
-  async startProvider(request, { oauth_query, provider }) {
-    this.fromOurPages(request);
-    if (!providersOf(this.env).some((p) => p.id === provider)) refuse(400, "No such provider.");
-    const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
-    if (query.get("client_id")) await this.client(query.get("client_id"));
-    const secret = b64u.encode(crypto.getRandomValues(new Uint8Array(32)));
-    const sql = this.ctx.storage.sql;
-    sql.exec("delete from provider_starts where made <= ?", Date.now() - STARTED);
-    sql.exec("insert into provider_starts (id, query, made, join_for, provider) values (?, ?, ?, ?, ?)", await hash(secret), await hash(query.toString()), Date.now(), joinOf(query.toString()), provider);
-    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-provider-start", secret, STARTED / 1000) } });
+    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!session && query.has("ba_iat") && new Date(session.session.createdAt).getTime() >= Number(query.get("ba_iat")) };
   }
 
   fromOurPages(request) {
     if (request.headers.get("origin") !== new URL(this.env.ADDRESS).origin) refuse(403, "only the sign-in page asks that");
-  }
-
-  /// The provider's sign-in this browser started for the authorization `query`, if it's back from it just now: →
-  /// `{ id, provider }`.
-  async started(request, session, query) {
-    if (!session || !fresh(session)) return null;
-    const secret = cookieOf(request.headers, cookieName(this.env, "one-provider-start"));
-    if (!secret) return null;
-    const id = await hash(secret);
-    const [row] = this.ctx.storage.sql.exec("select query, made, provider from provider_starts where id = ? and made > ?", id, Date.now() - STARTED).toArray();
-    const signedIn = new Date(session.session.createdAt).getTime();
-    return row && row.query === (await hash(query.toString())) && row.made <= signedIn ? { id, provider: row.provider } : null;
   }
 
   // Signing in with a code, for a client with no browser of its own (the CLI on a device with no screen): it makes an authorization
@@ -1013,36 +992,7 @@ export class Auth extends DurableObject {
   async joinWithProvider(request, { secret }) {
     this.fromOurPages(request);
     await this.openInvite(secret);
-    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-invite", secret, STARTED / 1000) } });
-  }
-
-  /// Signing in to a client (`oauth_query`) as whoever just signed in here: by tapping their passkey on its page
-  /// (`passkey`), or back from the provider's sign-in started for it; on a throwaway network, whoever is signed in. → where the
-  /// client goes on to.
-  async accept(request, { oauth_query, passkey }) {
-    this.fromOurPages(request);
-    const signedIn = await this.session(request);
-    const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
-    if (this.env.SIGN_IN !== "throwaway") {
-      const started = await this.started(request, signedIn, query);
-      if (!started && (!fresh(signedIn) || passkey !== true)) refuse(403, "Sign in again.");
-      if (started) this.ctx.storage.sql.exec("delete from provider_starts where id = ?", started.id);
-      // Back from a provider for a device: the ID token it just gave, its nonce that device's, is kept for its request.
-      const join = joinOf(oauth_query);
-      if (started && join) {
-        const token = this.lastIdToken(signedIn.user.id, started.provider);
-        if (token) this.keepProof(join, signedIn.user.id, { id_token: token });
-      }
-    }
-    const client = await this.client(query.get("client_id"));
-    const headers = new Headers(request.headers);
-    headers.set("content-type", "application/json");
-    headers.set("accept", "application/json");
-    const resp = await this.auth.handler(new Request(new URL("/api/auth/oauth2/consent", request.url), { method: "POST", headers, body: JSON.stringify({ accept: true, oauth_query }) }));
-    const out = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw Object.assign(new Error(out.error_description || out.message || "signing in didn't work"), { status: resp.status });
-    this.ctx.storage.sql.exec("delete from oauthConsent where clientId = ? and userId = ?", client.clientId, signedIn.user.id);
-    return { url: out.url };
+    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-invite", secret, INVITE_COOKIE) } });
   }
 }
 
@@ -1094,12 +1044,7 @@ function throwawayNetwork(auth, id, name) {
           if (!row && wanted !== name.toLowerCase()) refuse(404, `Nobody called ${ctx.body.user} has joined.`);
           return signIn(ctx, row ? await adapter.findUserById(row.id) : await first(adapter));
         }
-        const already = await getSessionFromCtx(ctx);
-        if (already) {
-          await tryProof(ctx, already.user);
-          return ctx.json({ user: already.user.name });
-        }
-        return signIn(ctx, await first(adapter));
+        return signIn(ctx, (await getSessionFromCtx(ctx))?.user || (await first(adapter)));
       }),
       joinThrowaway: createAuthEndpoint("/throwaway/join", { method: "POST" }, async (ctx) => {
         const invite = await auth.openInvite(ctx.body?.secret);
@@ -1110,7 +1055,7 @@ function throwawayNetwork(auth, id, name) {
   };
 }
 
-/// Whether a sign-in here was made just now: one a client is added with, or a passkey.
+/// Whether a sign-in here was made just now, as one more identity is only added from one.
 function fresh(session) {
   return Date.now() - new Date(session.session.createdAt).getTime() < FRESH;
 }

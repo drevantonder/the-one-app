@@ -303,12 +303,6 @@ impl Workers {
         Workers { _running: running, address: settings.address, sites: format!("http://127.0.0.1:{sites}"), relay_test: format!("http://127.0.0.1:{relay_test}") }
     }
 
-    /// Moves on the time sign-in judges how long a request has waited by (a day behind until then), so its user is
-    /// pushed "wants in" now.
-    fn wait_for_a_device_to_let_it_in(&self) {
-        assert_eq!(post(&format!("{}/api/auth/test", self.address), &[], json!({ "advance": 2 * 86_400_000 })).0, 200);
-    }
-
     /// The gateway's address, as endpoints reach it.
     fn relay_address(&self) -> String {
         self.address.replace("localhost", "127.0.0.1")
@@ -453,7 +447,7 @@ fn an_invited_email_signs_in_and_only_who_may_answer_reads_its_proof() {
     let (status, out) = sams.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&device.key), "seal": HEXLOWER.encode(&device.seal), "name": "Sam's phone", "reads": one::database::READS }));
     assert_eq!(status, 200, "{out}");
     let proof = "a.proof.kept";
-    assert_eq!(post(&format!("{}/api/auth/test", k.address), &[], json!({ "keep_proof": { "key": HEXLOWER.encode(&device.key), "user": sam, "proof": { "id_token": proof } }, "advance": 0 })).0, 200);
+    assert_eq!(post(&format!("{}/api/auth/test", k.address), &[], json!({ "keep_proof": { "key": HEXLOWER.encode(&device.key), "user": sam, "proof": { "id_token": proof } } })).0, 200);
     let listed_to = |key: &ed25519_dalek::SigningKey| -> Value {
         let asked = B64U.encode(signed(key, "GET /api/auth/devices/requests", json!({})).to_string().as_bytes());
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
@@ -557,8 +551,7 @@ fn a_further_identity_is_linked_only_from_someone_signed_in() {
     let claims = json!({ "sub": "sams-google", "email": "sam@anywhere.example", "email_verified": true, "name": "Sam" });
 
     let link = |b: &mut Browser, claims: Value| {
-        assert_eq!(b.post("/sign-in/provider", json!({ "oauth_query": format!("join={join}"), "provider": "google" })).0, 200);
-        let (status, out) = b.post("/api/auth/link-social", json!({ "provider": "google", "callbackURL": format!("/sign-in/link?join={join}&linked=google"), "errorCallbackURL": format!("/sign-in/link?join={join}") }));
+        let (status, out) = b.post(&format!("/api/auth/link-social?join={join}"), json!({ "provider": "google", "callbackURL": format!("/sign-in/link?join={join}&linked=google"), "errorCallbackURL": format!("/sign-in/link?join={join}") }));
         assert_eq!(status, 200, "{out}");
         let query = url_query(out["url"].as_str().unwrap());
         assert_eq!(query.get("nonce"), Some(&one::onboarding::sign_in_proof::nonce(&ROOT, &device)), "its token will name the device");
@@ -652,11 +645,17 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     let mut browser = g.browser();
     let (status, client) = browser.post("/api/auth/oauth2/register", json!({ "client_name": "Chrome on Mac", "redirect_uris": [format!("{}/callback", g.address)], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
     assert_eq!(status, 201, "{client}");
-    let query = format!("response_type=code&client_id={}&redirect_uri={}/callback&scope=openid&state=s&join={join}", client["client_id"].as_str().unwrap(), g.address);
-    assert_eq!(browser.post("/sign-in/provider", json!({ "oauth_query": query, "provider": "google" })).0, 200);
-    let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": "/", "errorCallbackURL": "/" }));
+    let (status, out) = browser.post(&format!("/api/auth/sign-in/social?join={join}"), json!({ "provider": "google", "callbackURL": "/", "errorCallbackURL": "/" }));
     assert_eq!(status, 200, "{out}");
-    assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&ROOT, &device)), "Google is asked for an ID token naming the device in this network");
+    let google = url_query(out["url"].as_str().unwrap());
+    assert_eq!(google.get("nonce"), Some(&sign_in_proof::nonce(&ROOT, &device)), "Google is asked for an ID token naming the device in this network");
+    // Its token goes with that device's request, and with no other's.
+    let (_, invited_as) = invited(&g, &admin, "Kim", Some("kim@test.example"));
+    let claims = json!({ "sub": "kim", "email": "kim@test.example", "email_verified": true, "hd": "test.example", "name": "Kim", "nonce": google["nonce"] });
+    browser.get(&format!("/api/auth/callback/google?code={}&state={}", B64U.encode(claims.to_string().as_bytes()), google["state"]));
+    assert_eq!(signed_in_as(&mut browser).as_deref(), Some(invited_as.as_str()));
+    assert!(asked(&mut browser, &device)["id_token"].is_string(), "the device it names carries it");
+    assert_eq!(asked(&mut browser, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null, "another carries none");
     // An ID token handed to auth directly signs no one in, nor links, whoever holds one.
     let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "idToken": { "token": "a.b.c" } }));
     assert_eq!(status, 403, "{out}");
@@ -697,9 +696,13 @@ fn a_sign_in_finished_from_a_link_says_so() {
         let oauth_query = page.expect("the authorization goes to the sign-in page").split_once('?').unwrap().1.to_string();
         let (_, options, _) = b.get(&format!("/api/auth/passkey/generate-authenticate-options?join={join}"));
         assert_eq!(b.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
-        let (status, out) = b.post("/sign-in/accept", json!({ "oauth_query": oauth_query, "passkey": true }));
+        let (status, out) = b.post("/api/auth/oauth2/consent", json!({ "accept": true, "oauth_query": oauth_query }));
         assert_eq!(status, 200, "{out}");
         let code = url_query(out["url"].as_str().unwrap())["code"].clone();
+        // A sign-in made before an authorization was asked for gives it nothing, whoever holds that session.
+        let (_, _, again) = b.get(&format!("/api/auth/oauth2/authorize?{query}"));
+        let (_, out) = b.post("/api/auth/oauth2/consent", json!({ "accept": true, "oauth_query": again.expect("it asks for a sign-in").split_once('?').unwrap().1 }));
+        assert!(url_query(out["url"].as_str().unwrap()).get("code").is_none(), "{out}");
         let (status, out, _) = b.send("POST", "/api/auth/oauth2/token", None, Some(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", &redirect), ("client_id", &client), ("code_verifier", &verifier)]));
         assert_eq!(status, 200, "{out}");
         let token = out["access_token"].as_str().unwrap().to_string();
@@ -762,8 +765,8 @@ impl Subscription {
 
 /// What sign-in pushes about a device asking to join is what the apps read (src/push.rs's `Note`): to its user's other
 /// devices, never the one asking, "<device> wants in" with the action `{ join: <code> }` (`keys::join_code`, which the
-/// apps' Approve and Not Me send their node) once nothing let it in within a few seconds, and "<device> joined" once
-/// one did, each opening Settings › Devices. Their devices are those that asked to join as them here, and those that
+/// apps' Approve and Not Me send their node) as it asks, and "<device> joined" once
+/// one let it in, each opening Settings › Devices. Their devices are those that asked to join as them here, and those that
 /// registered for pushes naming them, as a device that joined before sign-in kept whose devices asked does.
 #[test]
 fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
@@ -818,11 +821,9 @@ fn a_device_asking_to_join_is_pushed_to_its_users_other_devices() {
     let old_at = one::keys::Endpoint::of(&old);
     let body = one::push::register_request(&old, &old_at.seal, &old_sub.address(old_endpoint), Some(&user), now()).unwrap();
     assert_eq!(post(&format!("{}/push/register", k.address), &[], body).0, 200);
-    // A new device asks, and nothing lets it in.
+    // A new device asks.
     let mac = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     ask(&mut andre, &mac);
-    assert!(pushed(Subscription::new()).is_empty(), "not before nothing let it in");
-    k.wait_for_a_device_to_let_it_in();
     let [notes, to_old]: [Vec<one::push::Note>; 2] = pushed_to(vec![(endpoint, sub, &phone), (old_endpoint, old_sub, &old)]).try_into().unwrap();
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(to_old.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), ["MacBook Pro wants in"], "the Mac that only registered is pushed too");
