@@ -5,17 +5,17 @@ const text = (description) => ({ type: "string", description });
 const nullable = (schema) => ({ ...schema, type: [].concat(schema.type, "null") });
 
 /// Someone in the network, or on GitHub.
-export const PERSON = { type: "object", required: ["name"], properties: { handle: { type: ["string", "null"] }, name: { type: "string" } } };
+export const PERSON = { type: "object", properties: { handle: { type: ["string", "null"] }, name: { type: "string" } } };
 
 export const LABEL = {
   type: "object",
-  required: ["name", "color", "description"],
+  required: ["name"],
   properties: { name: text("its name"), color: text("hex, like d73a4a"), description: { type: "string" }, open_issues: { type: ["integer", "null"], description: "how many open issues have it" } },
 };
 
 export const ISSUE = {
   type: "object",
-  required: ["number", "title", "state", "labels", "assignees", "comments"],
+  required: ["number", "title", "state"],
   properties: {
     repo: text("<owner>/<name>"),
     number: { type: "integer" },
@@ -37,7 +37,7 @@ export const ISSUE = {
 
 export const COMMENT = {
   type: "object",
-  required: ["id", "body", "yours"],
+  required: ["id", "body"],
   properties: {
     repo: text("<owner>/<name>"),
     number: { type: "integer", description: "its issue's number" },

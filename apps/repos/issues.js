@@ -197,7 +197,7 @@ export function tools(R) {
       input: { type: "object", required: ["repo", "number"], properties: { repo: REPO, number: NUMBER } },
       output: {
         type: "object",
-        required: [...ISSUE.required, "repo", "body", "can"],
+        required: [...ISSUE.required, "repo", "can"],
         properties: {
           ...ISSUE.properties,
           comments: { type: "array", items: COMMENT, description: "oldest first" },
