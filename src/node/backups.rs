@@ -297,7 +297,7 @@ impl Node {
             }
             let mut told = false;
             for admin in &admins {
-                let note = crate::push::Send { title: p.title.clone(), body: format!("{} {}", p.text, p.fix), ..Default::default() }.note("")?;
+                let note = crate::push::Send { title: p.title.clone(), body: p.fix.clone(), app: "settings".into(), screen: "backups".into(), ..Default::default() }.note("")?;
                 match self.push_note(admin, &note).await {
                     Ok(sent) => {
                         told = true;

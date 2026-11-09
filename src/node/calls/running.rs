@@ -267,7 +267,11 @@ impl Node {
             // A push to the caller's devices, from this app, through the network's push Worker.
             Ask::Notify => {
                 let send: crate::push::Send = serde_json::from_slice(&body)?;
-                ok(json!({ "ok": self.push_note(&grant.caller.user, &send.note(&grant.app)?).await? }))
+                let mut note = send.note(&grant.app)?;
+                // Named by the core, so a person sees which app it is and no app can pass for the network's own notes.
+                let about = self.0.apps.describe(&grant.app).await?;
+                note.title = format!("{} · {}", about["title"].as_str().unwrap_or(&grant.app), note.title);
+                ok(json!({ "ok": self.push_note(&grant.caller.user, &note).await? }))
             }
             Ask::Devices => ok(json!(self.state_for(&grant.caller)?.network.map(|n| n.devices).unwrap_or_default())),
             // Run priority's order, as the user the call is for: only an admin changes it.
