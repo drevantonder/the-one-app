@@ -4,7 +4,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/labs.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Empty, LargeTitle, List, ListSkeleton, Problem, Section, Switch } from "@one/ui"
+import { AppIcon, Empty, Hint, LargeTitle, List, ListSkeleton, Problem, Section, Switch } from "@one/ui"
 
 // Labs under each app's (or service's) name, in the order they come.
 function groups(labs, kind) {
@@ -80,7 +80,7 @@ function Labs() {
     <div className="flex max-w-2xl flex-col gap-6">
       <div className="flex flex-col gap-2">
         <LargeTitle>Labs</LargeTitle>
-        <p className="text-sm text-muted-foreground">What you turn on here is on for everyone.</p>
+        <Hint>What you turn on here is on for everyone.</Hint>
       </div>
       {body}
     </div>

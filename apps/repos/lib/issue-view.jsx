@@ -2,7 +2,7 @@
 // Reopen, its assignees and labels (beside it where there's room, above it where there isn't), and for its repo's
 // owners, Delete. It's the Issue screen, and what Issues shows beside its list where there's room.
 import { useState } from "react"
-import { Avatar, Button, Card, Icon, Input, Markdown, ResponsiveDialog, Spinner, Problem, Swap, cn, useCall, useWidth } from "@one/ui"
+import { Avatar, Button, Card, cn, Hint, Icon, Input, Markdown, Problem, ResponsiveDialog, Spinner, Swap, useCall, useWidth } from "@one/ui"
 import { LabelChip, MarkdownField, StateIcon } from "./parts.jsx"
 import { ago, go, plural, said } from "./use.jsx"
 
@@ -89,7 +89,7 @@ function Ticks({ title, items, chosen, save, empty, extra, done }) {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">{empty}</p>
+          <Hint>{empty}</Hint>
         )}
         {extra}
         {error && <Problem title={error} />}
@@ -120,7 +120,7 @@ function EditDialog({ d, act, done }) {
       open
       onOpenChange={(o) => !o && done()}
       title={`Edit #${d.number}`}
-      action={<><Button variant="ghost" size="sm" onClick={done}>Cancel</Button><Button size="sm" disabled={busy || !title.trim()} onClick={save}>{busy && <Spinner />}Save</Button></>}
+      action={<Button size="sm" disabled={busy || !title.trim()} onClick={save}>{busy && <Spinner />}Save</Button>}
     >
       <Form>
         <Input value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Title" maxLength={256} autoFocus />

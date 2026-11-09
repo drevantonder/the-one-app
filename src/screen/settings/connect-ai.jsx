@@ -3,7 +3,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/connect-ai.html.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { CopyButton, LargeTitle, Problem, Skeleton } from "@one/ui"
+import { CopyButton, Hint, LargeTitle, Problem, Skeleton } from "@one/ui"
 
 function ConnectAI() {
   const [text, setText] = useState(null)
@@ -24,12 +24,12 @@ function ConnectAI() {
   return (
     <div className="flex max-w-2xl flex-col gap-4">
       <LargeTitle>Connect Your AI</LargeTitle>
-      <p className="text-sm text-muted-foreground">Send this to Claude, ChatGPT or any other AI.</p>
+      <Hint>Send this to Claude, ChatGPT or any other AI.</Hint>
       {problem && text === null ? (
         <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
       ) : (
         <>
-          <div aria-busy={text === null || undefined} className="min-h-[4.25rem] rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed select-text [overflow-wrap:anywhere]">
+          <div aria-busy={text === null || undefined} className="min-h-[4.25rem] rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed text-pretty select-text [overflow-wrap:anywhere]">
             {text ?? <><Skeleton className="my-1 h-3.5 w-full" /><Skeleton className="my-1 h-3.5 w-2/3" /></>}
           </div>
           {text === null ? <Skeleton className="h-9 w-20" /> : <CopyButton text={text} variant="default" size="default" className="min-w-24 self-start" />}

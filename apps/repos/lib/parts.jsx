@@ -1,7 +1,7 @@
 // Small parts of Repos' pages: GitHub's mark, a user, a label as GitHub draws it, an issue's state, +/− counts, and
 // a Markdown field to write in.
 import { useState } from "react"
-import { CopyButton, Icon, Markdown, Tabs, TabsList, TabsTrigger, Textarea, cn } from "@one/ui"
+import { cn, CopyButton, Hint, Icon, Markdown, Tabs, TabsList, TabsTrigger, Textarea } from "@one/ui"
 import { isGithub } from "./use.jsx"
 
 export function GitHubMark({ className }) {
@@ -54,7 +54,7 @@ export function MarkdownField({ value, onChange, placeholder = "", rows = 6, aut
         </TabsList>
       </Tabs>
       {preview ? (
-        value.trim() ? <Markdown text={value} /> : <p className="text-sm text-muted-foreground">Nothing to preview.</p>
+        value.trim() ? <Markdown text={value} /> : <Hint>Nothing to preview.</Hint>
       ) : (
         <Textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={{ minHeight: `calc(${rows}lh + 1.125rem)` }} className="resize-y" autoFocus={autoFocus} aria-label={label || placeholder || "Text"} />
       )}

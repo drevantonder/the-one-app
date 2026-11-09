@@ -2,7 +2,7 @@
 // isn't (app.jsx): its icon and name, where it runs, its schedules, what it works with, its source, and, for its owners,
 // its activity and deleting it.
 import { useEffect, useRef, useState } from "react"
-import { AppIcon, Button, Empty, Icon, List, ListRow, ListSkeleton, Problem, Section, Switch, useCall } from "@one/ui"
+import { AppIcon, Button, Empty, Hint, Icon, List, ListRow, ListSkeleton, Problem, Section, Switch, useCall } from "@one/ui"
 import { onAPage, openApp, said } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
@@ -222,7 +222,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
         </List>
       )}
 
-      <p className="text-sm text-muted-foreground">Made by {a.owner_name}</p>
+      <Hint>Made by {a.owner_name}</Hint>
       </> : <ListSkeleton rows={3} />}
     </div>
   )

@@ -1,5 +1,6 @@
 import * as React from "react"
-import { CaretRightIcon, PlusIcon } from "@phosphor-icons/react"
+import { CaretRightIcon, MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react"
+import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { bridge } from "@/lib/bridge"
 import { appear, glide, slideColumns } from "@/lib/moves"
@@ -125,18 +126,28 @@ function ListRow({ leading, title, sub, trailing, selected, wrap, onClick, class
   )
 }
 
-/// A row of a List that adds to it: a plus and what it adds, so the list's own place says how to grow it.
-function ListAdd({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+/// A row of a List that adds to it or acts on it: a plus (or its own `icon`) and what it does, so the list's own place says how to grow it.
+function ListAdd({ children, onClick, icon = <PlusIcon /> }: { children: React.ReactNode; onClick: () => void; icon?: React.ReactNode }) {
   return (
     <button
       type="button"
       data-slot="list-add"
       onClick={onClick}
-      className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-sm font-medium outline-none hover:bg-accent/50 focus-visible:bg-accent/50"
+      className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-sm font-medium outline-none hover:bg-accent/50 focus-visible:bg-accent/50 [&>svg]:size-4 [&>svg]:shrink-0"
     >
-      <PlusIcon className="size-4 shrink-0" />
+      {icon}
       {children}
     </button>
+  )
+}
+
+/// A box to search in, its placeholder saying what for and naming it for screen readers.
+function SearchInput({ className, ...props }: React.ComponentProps<"input">) {
+  return (
+    <div data-slot="search-input" className={cn("relative", className)}>
+      <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input aria-label={props.placeholder} {...props} className="pl-8" />
+    </div>
   )
 }
 
@@ -222,4 +233,4 @@ function Split({ list, detail, title, onClose, wide = 720, size = "26rem", class
   )
 }
 
-export { Grid, Hint, LargeTitle, List, ListAdd, ListNote, ListRow, Section, Split, useWidth }
+export { Grid, Hint, LargeTitle, List, ListAdd, ListNote, ListRow, SearchInput, Section, Split, useWidth }

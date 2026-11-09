@@ -2,7 +2,7 @@
 // its README, and its branches and commits. Deleted, it says so, with Restore for its owners, and Erase.
 import { useCallback, useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Card, CardContent, CopyButton, Empty, Icon, List, ListRow, Markdown, Problem, Spinner, Pending, useCall } from "@one/ui"
+import { Button, Card, CardContent, CopyButton, Empty, Hint, Icon, List, ListRow, Markdown, Pending, Problem, Spinner, useCall } from "@one/ui"
 import { CommitCard, PathBar, RepoTabs } from "../lib/frame.jsx"
 import { GitHubMark, RepoIcon } from "../lib/parts.jsx"
 import { Frame, ago, go, refOf, said, short, useAddress, useBeside, useWide, where } from "../lib/use.jsx"
@@ -178,9 +178,9 @@ function Code({ d }) {
         )}
       </div>
       {!at && d.from && (
-        <p className="text-sm text-muted-foreground">
+        <Hint>
           Forked from <button type="button" className="underline underline-offset-4 hover:text-foreground" onClick={() => go("repo", { repo: d.from })}>{d.from}</button>
-        </p>
+        </Hint>
       )}
       {!at && !wide && <Pages d={d} />}
       <CommitCard c={d.latest} d={d} />
@@ -217,7 +217,7 @@ function Repo() {
       <Frame>
         <div className="flex max-w-2xl flex-col gap-6">
           <Deleted d={d} />
-          <p className="text-sm text-muted-foreground">Deleted {ago(d.deleted.time)}</p>
+          <Hint>Deleted {ago(d.deleted.time)}</Hint>
           {d.yours && <Restore />}
           {d.yours && <Erase />}
         </div>

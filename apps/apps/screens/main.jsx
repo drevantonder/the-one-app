@@ -2,7 +2,7 @@
 // room, the app opened beside them.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Grid, Icon, Input, LargeTitle, Pending, Problem, Section, Split, useWidth } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, LargeTitle, Pending, Problem, SearchInput, Section, Split, useWidth } from "@one/ui"
 import { AppPage } from "../lib/app-page.jsx"
 import { onAPage, openApp, said, useApps } from "../lib/store.jsx"
 
@@ -88,10 +88,7 @@ function Main() {
 
   const top = (
     <div className="flex flex-col gap-3">
-      <div className="relative max-w-md">
-        <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-        <Input className="pl-8" placeholder="Search" aria-label="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
-      </div>
+      <SearchInput className="max-w-md" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
       {accounts && (
         <div className="flex items-center gap-2">
           <p className="min-w-0 flex-1 text-sm text-muted-foreground">Apps that sign in to an account</p>

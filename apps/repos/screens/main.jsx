@@ -1,7 +1,7 @@
 // Repos: this network's repos, GitHub's beside them (connected, not copied), and Recently Deleted; searchable.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Grid, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Pending, Problem, Section, useCall } from "@one/ui"
+import { Button, Empty, Grid, LargeTitle, List, ListRow, ListSkeleton, Pending, Problem, SearchInput, Section, useCall } from "@one/ui"
 import { RepoIcon } from "../lib/parts.jsx"
 import { Frame, ago, go, plural, said, useAddress, where } from "../lib/use.jsx"
 
@@ -50,10 +50,7 @@ function Main() {
   }
 
   const find = (
-    <div className="relative max-w-md">
-      <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-      <Input className="pl-8" placeholder="Search" aria-label="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
-    </div>
+    <SearchInput className="max-w-md" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
   )
   const title = <LargeTitle>Repos</LargeTitle>
   if (!own.data) return <Frame><div className="flex flex-col gap-6">{title}{find}<Pending call={own} rows={6} tiles="22rem" icon={20} /></div></Frame>

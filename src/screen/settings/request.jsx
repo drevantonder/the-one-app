@@ -7,7 +7,7 @@
 // A client's own screen written in React (see vault.jsx): built by @one/ui's build into dist/request.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, CopyButton, Input, Label, ListSkeleton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner } from "@one/ui"
+import { Button, CopyButton, Hint, Input, Label, ListSkeleton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner } from "@one/ui"
 import { AGENTS, appNamed, asking } from "./agents.js"
 
 const api = one.api
@@ -102,12 +102,12 @@ function Request() {
   const set = (name, value) => setValues((v) => ({ ...v, [name]: value }))
 
   if (request.state !== "waiting") {
-    return <p className="text-sm text-muted-foreground">{request.state === "set" ? "Allowed." : request.state === "declined" ? "Declined." : `This request expired. Ask ${request.agent || request.by} to ask again.`}</p>
+    return <Hint>{request.state === "set" ? "Allowed." : request.state === "declined" ? "Declined." : `This request expired. Ask ${request.agent || request.by} to ask again.`}</Hint>
   }
 
   return (
     <form className="flex max-w-lg flex-col gap-4" onSubmit={allow}>
-      <p className="text-sm text-muted-foreground">{request.why && <><Why why={request.why} />{" "}</>}{granted(request, apps, matches.find((m) => m.id === picked))}</p>
+      <Hint>{request.why && <><Why why={request.why} />{" "}</>}{granted(request, apps, matches.find((m) => m.id === picked))}</Hint>
       {matches.length > 0 && (
         <Select value={picked} onValueChange={setPicked}>
           <SelectTrigger className="w-full" aria-label="Which item"><SelectValue /></SelectTrigger>

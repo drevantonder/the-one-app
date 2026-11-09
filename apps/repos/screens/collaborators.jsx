@@ -1,7 +1,7 @@
 // Who pushes to a repo: its owner, a group's members, and the collaborators its owners added, whom they add and remove.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, Hint, Icon, Input, List, ListRow, Pending, Problem, ResponsiveDialog, Section, useCall } from "@one/ui"
+import { Avatar, Button, Hint, Icon, List, ListRow, Pending, Problem, ResponsiveDialog, SearchInput, Section, useCall } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
 import { Frame, said } from "../lib/use.jsx"
 
@@ -29,18 +29,15 @@ function Add({ d, done }) {
   return (
     <ResponsiveDialog open onOpenChange={(o) => !o && done(false)} title="Add Collaborator" action={<Button variant="ghost" size="sm" onClick={() => done(false)}>Cancel</Button>}>
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
-        <div className="relative">
-          <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Search" aria-label="Search" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
-        </div>
+        <SearchInput placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
         {!d.users.length ? (
-          <p className="text-sm text-muted-foreground">Everyone pushes to it already.</p>
+          <Hint>Everyone pushes to it already.</Hint>
         ) : found.length ? (
           <List>
             {found.map((p) => <ListRow key={p.handle} leading={<Avatar name={p.name} size={32} />} title={p.name} sub={`@${p.handle}`} trailing={<Icon name="plus-circle" className="size-5 text-muted-foreground" />} onClick={() => add(p)} />)}
           </List>
         ) : (
-          <p className="text-sm text-muted-foreground">No one called “{query.trim()}”.</p>
+          <Hint>No one called “{query.trim()}”.</Hint>
         )}
         <p className="text-xs text-muted-foreground">They push to {d.repo} once you add them.</p>
         {error && <Problem title={error} />}

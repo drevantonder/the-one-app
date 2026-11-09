@@ -44,7 +44,7 @@ function LabelDialog({ l, done }) {
       open
       onOpenChange={(o) => !o && done(false)}
       title={l ? "Edit Label" : "New Label"}
-      action={<><Button variant="ghost" size="sm" onClick={() => done(false)}>Cancel</Button><Button size="sm" disabled={busy || !name.trim()} onClick={save}>{busy && <Spinner />}{l ? "Save" : "Create Label"}</Button></>}
+      action={<Button size="sm" disabled={busy || !name.trim()} onClick={save}>{busy && <Spinner />}{l ? "Save" : "Create Label"}</Button>}
     >
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="Name" maxLength={50} autoFocus />

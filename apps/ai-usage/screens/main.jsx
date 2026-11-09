@@ -2,7 +2,7 @@
 // where there's more of it.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Card, Empty, Grid, LargeTitle, Problem, Progress, Skeleton } from "@one/ui"
+import { AppIcon, Card, Empty, Grid, Hint, LargeTitle, Problem, Progress, Skeleton } from "@one/ui"
 
 function Meter({ label, w }) {
   if (!w || w.used == null) return null
@@ -60,7 +60,7 @@ function Provider({ reads, mark }) {
         {drawn && <AppIcon app={{ name: p.id, title: p.title, image: mark.image, image_kind: mark.kind }} size={32} />}
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">{p.title}</h2>
-          {sub && <p className="text-sm text-muted-foreground">{sub}</p>}
+          {sub && <Hint>{sub}</Hint>}
         </div>
       </div>
       {reads.map((r) => <Account key={r.account || r.id} p={r} several={reads.length > 1} />)}

@@ -150,7 +150,7 @@
     }, () => {});
     return kept.answer;
   }
-  // How old what shows is, while its fresh answer is late: one grey line at the top, gone once it's in.
+  // How old what shows is, while its fresh answer is late: one grey line at its foot, gone once it's in.
   function note() {
     let el = document.getElementById("one-kept");
     if (!old.size) return el?.remove();

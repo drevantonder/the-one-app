@@ -11,7 +11,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Badge, Button, Empty, Icon, Label, Problem, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, cn, useWidth, WidgetCard } from "@one/ui"
+import { AppIcon, Badge, Button, cn, Empty, Hint, Icon, Label, Problem, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, useWidth, WidgetCard } from "@one/ui"
 import { home } from "./lib/model.js"
 
 const { scope: chosen, swipe } = one.params || {}
@@ -724,7 +724,7 @@ function Page({ page, editing, leaving, undone, refreshing, bottom }) {
       <div className="flex items-start gap-3 pb-5">
         <div className="min-w-0 flex-1">
           <h1 ref={heading} className={cn("large-title text-3xl font-bold tracking-tight [overflow-wrap:anywhere]", changing && "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:var(--lines)]")} style={{ "--lines": lines.current }}>{title}</h1>
-          {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+          {subtitle && <Hint>{subtitle}</Hint>}
         </div>
         {arrange && !page.empty && (
           <div data-ctl className="mt-0.5 flex shrink-0 gap-2">

@@ -593,12 +593,7 @@ function NewItem({ pages, scope, open, setOpen, done }) {
       open={open}
       onOpenChange={setOpen}
       title="New Item"
-      action={(
-        <>
-          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button size="sm" disabled={saving} onClick={save}>Save</Button>
-        </>
-      )}
+      action={<Button size="sm" disabled={saving} onClick={save}>Save</Button>}
     >
       <form ref={form} className="flex flex-col gap-4 overflow-y-auto p-4" onSubmit={(e) => (e.preventDefault(), save())}>
         <Input name="title" autoFocus placeholder="Title" aria-label="Title" />
@@ -640,12 +635,7 @@ function MakeItem({ maker, open, setOpen, done }) {
       open={open}
       onOpenChange={setOpen}
       title={`New ${maker.type}`}
-      action={(
-        <>
-          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button size="sm" disabled={adding} onClick={make}>Add</Button>
-        </>
-      )}
+      action={<Button size="sm" disabled={adding} onClick={make}>Add</Button>}
     >
       <div className="flex flex-col gap-4 p-4">
         <Input ref={input} autoFocus placeholder="Name" aria-label="Name" onKeyDown={(e) => e.key === "Enter" && make()} />

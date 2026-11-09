@@ -283,12 +283,7 @@ function AddPlace({ backups, open, setOpen, done }) {
       open={open}
       onOpenChange={setOpen}
       title="Add Place"
-      action={(
-        <>
-          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button size="sm" disabled={!ready || busy} onClick={add}>{busy && <Spinner />}Add</Button>
-        </>
-      )}
+      action={<Button size="sm" disabled={!ready || busy} onClick={add}>{busy && <Spinner />}Add</Button>}
     >
       <form className="flex flex-col gap-4 overflow-y-auto p-4" onSubmit={(e) => (e.preventDefault(), add())}>
         <Tabs value={cloud ? "cloud" : "disk"} onValueChange={(t) => (setCloud(t === "cloud"), setProblem(""))}>

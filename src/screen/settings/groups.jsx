@@ -6,11 +6,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import {
-  Avatar, AppIcon, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
-  DropdownMenuSeparator, DropdownMenuTrigger, Empty, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog,
-  Split, Tabs, TabsList, TabsTrigger, useDialog, LargeTitle, Section,
-} from "@one/ui"
+import { AppIcon, Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Empty, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Split, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
 
 const api = one.api
 const said = (err) => one.plain(err).title
@@ -251,7 +247,7 @@ function Group({ g, state, me, pending, sent, error, change, remove, invite, han
 
       <div className="flex flex-col items-start gap-1">
         <Button variant="ghost" className="-ml-4 text-destructive" disabled={stuck} onClick={() => remove(me)}>Leave {g.name}</Button>
-        {stuck && <p className="text-sm text-muted-foreground">Make someone else an admin before you leave.</p>}
+        {stuck && <Hint>Make someone else an admin before you leave.</Hint>}
       </div>
     </div>
   )
@@ -400,7 +396,7 @@ function Handle({ g, open, setOpen, saved }) {
             {...quiet}
           />
         </div>
-        <p className="text-sm text-muted-foreground">Lowercase letters, numbers and hyphens. Its Repos addresses change with it.</p>
+        <Hint>Lowercase letters, numbers and hyphens. Its Repos addresses change with it.</Hint>
         {error && <Problem title={error} />}
       </form>
     </ResponsiveDialog>

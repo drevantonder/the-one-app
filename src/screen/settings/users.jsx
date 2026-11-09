@@ -6,10 +6,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import {
-  Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
-  DropdownMenuSeparator, DropdownMenuTrigger, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, useDialog, LargeTitle,
-} from "@one/ui"
+import { Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger, Hint, Icon, Input, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, useDialog } from "@one/ui"
 
 const api = one.api
 const yours = one.config.yours
@@ -183,7 +180,7 @@ function Link({ link, days }) {
     <div className="flex flex-col gap-4 p-4">
       <div className="min-w-0">
         <p className="truncate font-mono text-sm select-all">{link}</p>
-        <p className="text-sm text-muted-foreground">It works once, for {days} day{days > 1 ? "s" : ""}.</p>
+        <Hint>It works once, for {days} day{days > 1 ? "s" : ""}.</Hint>
       </div>
       <Button onClick={copy}><Icon name={copied ? "check" : "copy"} />{copied ? "Copied" : "Copy Link"}</Button>
     </div>
@@ -225,7 +222,7 @@ function Handle({ was, open, setOpen, saved }) {
             {...quiet}
           />
         </div>
-        <p className="text-sm text-muted-foreground">Lowercase letters, numbers and hyphens. Your Repos addresses change with it.</p>
+        <Hint>Lowercase letters, numbers and hyphens. Your Repos addresses change with it.</Hint>
         {error && <Problem title={error} />}
       </form>
     </ResponsiveDialog>

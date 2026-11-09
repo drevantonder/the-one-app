@@ -8,7 +8,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, cn, Empty, Icon, Input, Label, LargeTitle, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Spinner, Switch, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
+import { AppIcon, Button, cn, Empty, Hint, Icon, Input, Label, LargeTitle, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Section, Spinner, Switch, Tabs, TabsList, TabsTrigger, useDialog } from "@one/ui"
 
 const api = one.api
 const said = (err) => one.plain(err).title
@@ -503,14 +503,6 @@ const latest = { current: { place() {}, moveMenu() {} } }
 // A heading over a part of the page.
 const Note = ({ children }) => <p className="max-w-2xl text-sm text-muted-foreground">{children}</p>
 
-// A row of a list that does something: a plus or another symbol, and what it does.
-const ActionRow = ({ icon, onClick, children }) => (
-  <button className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium outline-none hover:bg-accent/50 focus-visible:bg-accent/50" onClick={onClick}>
-    <Icon name={icon} className="size-5" />
-    {children}
-  </button>
-)
-
 // Cloudflare's own logo, its orange cloud.
 function Cloudflare({ className }) {
   return (
@@ -697,14 +689,14 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, schedule,
                     </div>
                   )
                 })}
-                <ActionRow icon="arrows-clockwise" onClick={schedule}>Run an App’s Schedules</ActionRow>
+                <ListAdd icon={<Icon name="arrows-clockwise" />} onClick={schedule}>Run an App’s Schedules</ListAdd>
               </List>
               {!!appSchedules.length && <Note>Once one stops, that device can’t open the app’s data.</Note>}
             </Section>
           )}
           {device.keys && passkey && (
             <List>
-              <ActionRow icon="key" onClick={() => act(() => api("POST", "/v1/devices/passkey", {}))}>Use this passkey to get back in if you lose your devices</ActionRow>
+              <ListAdd icon={<Icon name="key" />} onClick={() => act(() => api("POST", "/v1/devices/passkey", {}))}>Use this passkey to get back in if you lose your devices</ListAdd>
             </List>
           )}
           {!!passkeys.length && (
@@ -946,7 +938,7 @@ function Services({ m, cellOpen, tap }) {
         </table>
       </div>
       {open && <Problem warn {...open} />}
-      {asYou.length > 0 && <p className="text-sm text-muted-foreground">{list(asYou)} {asYou.length > 1 ? "run" : "runs"} as you, with your files.</p>}
+      {asYou.length > 0 && <Hint>{list(asYou)} {asYou.length > 1 ? "run" : "runs"} as you, with your files.</Hint>}
     </div>
   )
 }

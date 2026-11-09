@@ -2,7 +2,7 @@
 // there's room.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Avatar, Button, Empty, Icon, Input, List, ListRow, Pending, Problem, ResponsiveDialog, Spinner, Split, Swap, Tabs, TabsList, TabsTrigger, useCall } from "@one/ui"
+import { Avatar, Button, Empty, Icon, Input, List, ListRow, Pending, Problem, ResponsiveDialog, SearchInput, Spinner, Split, Swap, Tabs, TabsList, TabsTrigger, useCall } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
 import { IssueView } from "../lib/issue-view.jsx"
 import { LabelChip, MarkdownField, StateIcon } from "../lib/parts.jsx"
@@ -33,7 +33,7 @@ function NewIssue({ done }) {
       open
       onOpenChange={(o) => !o && done()}
       title="New Issue"
-      action={<><Button variant="ghost" size="sm" onClick={() => done()}>Cancel</Button><Button size="sm" disabled={busy || !title.trim()} onClick={create}>{busy && <Spinner />}Create</Button></>}
+      action={<Button size="sm" disabled={busy || !title.trim()} onClick={create}>{busy && <Spinner />}Create</Button>}
     >
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" aria-label="Title" maxLength={256} autoFocus />
@@ -150,10 +150,7 @@ function Issues() {
         <Button variant={beside ? "secondary" : "default"} onClick={() => setCreating(true)}>New Issue</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-48 flex-1">
-          <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Search" aria-label="Search" value={typed} onChange={(e) => setTyped(e.target.value)} />
-        </div>
+        <SearchInput className="min-w-48 flex-1" placeholder="Search" value={typed} onChange={(e) => setTyped(e.target.value)} />
         <Filter title="Author" value={f.author} choices={names} set={(v) => set("author", v)} />
         <Filter title="Label" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} also={{ title: "Edit Labels", run: () => go("labels", { repo: P.repo }) }} />
         <Filter title="Assignee" value={f.assignee} choices={[{ value: "none", title: "Assigned to no one" }, ...names]} set={(v) => set("assignee", v)} />
