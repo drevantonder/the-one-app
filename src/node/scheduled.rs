@@ -2,6 +2,7 @@
 //! app_schedules.rs), from its node, with their keys alone: each slot once, whichever such machine takes it first,
 //! and none while every one is off.
 
+use crate::protocol::allowed;
 use std::collections::BTreeSet;
 
 use super::*;
@@ -233,7 +234,7 @@ fn runs_as(m: &ScopeDb, state: &ScopeState, scope: &Scope, app: &str, schedule: 
 /// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
 pub(super) fn switch_entry(i: &Network, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
     let name = scope_name(i, &scope.to_string())?;
-    ensure!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
+    allowed!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
     ensure!(i.views.get(&scope.to_string()).is_some_and(|s| s.added.contains(app)), "{title} isn't on {name}.");
     ensure!(i.r.holds(scope), "This device can't open {name} yet.");
     Ok(content::schedule(app, schedule, on))

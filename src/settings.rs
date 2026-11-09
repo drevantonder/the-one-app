@@ -8,6 +8,7 @@
 //! which can't be read, or a node's own. Who may do what is judged by the steps' own rules wherever they're read
 //! (src/database/rules.rs): what's checked here only says why sooner.
 
+use crate::protocol::allowed;
 use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow, bail, ensure};
@@ -561,7 +562,7 @@ async fn vault_grant(m: &impl Me, body: body::VaultGrant) -> Result<Value> {
     let given = body.scope.as_deref().unwrap_or("user");
     let (scope, endpoint, name, current) = m.who(|who| {
         let scope = Scope::parse_for(given, &user).or_else(|_| who.find_group(given).map(Scope::Group))?;
-        ensure!(who.may(&user, "choose-devices", &scopes::object(&scope)), "Only this Vault's user, or its admins, say which machines open it.");
+        allowed!(who.may(&user, "choose-devices", &scopes::object(&scope)), "Only this Vault's user, or its admins, say which machines open it.");
         let endpoint = who.find_node(&body.device)?;
         let current = who.vault(&scope)?.unwrap_or_default();
         Ok((scope, endpoint, who.machine(&endpoint)?.map(|d| d.name).unwrap_or_default(), current))
@@ -604,7 +605,7 @@ pub async fn new_vault_key(m: &impl Me, scope: &Scope, n: u32, to: &[[u8; 32]]) 
 /// the bucket as each node reads the step (`Node::follow_erased`).
 pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> Result<Content> {
     let a = who.app(app)?.ok_or_else(|| anyhow!("no app named {app}"))?;
-    ensure!(who.may(user, "delete", &scopes::app(app)), "Only {title}'s owners can delete, restore or erase it.");
+    allowed!(who.may(user, "delete", &scopes::app(app)), "Only {title}'s owners can delete, restore or erase it.");
     ensure!(how != "erased" || a.deleted.is_some(), "Delete {title} before erasing it.");
     content::retire(app, &a.owner.to_string(), how)
 }
@@ -614,12 +615,12 @@ pub fn retire(who: &ScopeDb, user: &str, app: &str, how: &str, title: &str) -> R
 /// `scope`, which its writer may add apps to.
 pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, scope: Option<&Scope>) -> Result<Content> {
     if let Some(s) = scope.filter(|_| on) {
-        ensure!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
+        allowed!(db.may(user, "add-apps", &scopes::object(s)), "only who may add apps there runs a service for them");
     }
     let managed = |k: &Key| -> Result<bool> { Ok(!on && db.switch(k, name)?.and_then(|s| s.scope).and_then(|s| Scope::parse(&s).ok()).is_some_and(|s| db.may(user, "add-apps", &scopes::object(&s)))) };
     // The Cloudflare node, by its name in run priority or its key: its admins switch its parts.
     if let Some(k) = db.cloudflare_node()?.filter(|k| device.eq_ignore_ascii_case(crate::rank::CLOUDFLARE) || (!device.is_empty() && hex(k).starts_with(device))) {
-        ensure!(managed(&k)? || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
+        allowed!(managed(&k)? || db.may(user, "change-settings", scopes::NETWORK), "only an admin switches what the Cloudflare node runs");
         // It always runs apps; what else it can run is the services built for it that it carries.
         ensure!(!on || crate::config::CLOUDFLARE_SERVICES.iter().any(|(n, _)| *n == name), "the Cloudflare node can't run {name}: it runs apps, and only the services built for Cloudflare");
         return Ok(content::service(&k, name, on, scope));
@@ -637,7 +638,7 @@ pub fn service(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool, sco
             _ => bail!("no device is called {device}, or more than one is"),
         },
     };
-    ensure!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s user switches what it runs");
+    allowed!(managed(&key)? || db.may(user, "switch", &scopes::device(&key)), "only {device}'s user switches what it runs");
     Ok(content::service(&key, name, on, scope))
 }
 
@@ -791,7 +792,7 @@ async fn remove(m: &impl Me, device: &str) -> Result<Value> {
     let user = m.user()?;
     let (name, keys, scopes) = m.who(|who| {
         let it = who.machine(&key)?.filter(|d| !d.removed).ok_or_else(|| anyhow!("That device isn’t listed."))?;
-        ensure!(who.may(&user, "remove", &scopes::device(&key)), "Only its user or an admin takes a device out.");
+        allowed!(who.may(&user, "remove", &scopes::device(&key)), "Only its user or an admin takes a device out.");
         let keys: Vec<[u8; 32]> = std::iter::once(key).chain(who.machines()?.into_iter().filter(|d| d.device == Some(key) && d.key != key && !d.removed).map(|d| d.key)).collect();
         let scopes = who.scopes()?.into_iter().filter(|s| who.may(&it.user, "use", &scopes::object(s))).collect::<Vec<_>>();
         Ok((it.name, keys, scopes))
@@ -812,7 +813,7 @@ async fn remove_user(m: &impl Me, named: &str) -> Result<Value> {
     let (gone, name, keys, scopes) = m.who(|who| {
         let gone = who.find_user(named)?;
         ensure!(gone != user, "You can’t remove yourself. Another admin can.");
-        ensure!(who.may(&user, "remove", scopes::NETWORK), "Only an admin takes someone out.");
+        allowed!(who.may(&user, "remove", scopes::NETWORK), "Only an admin takes someone out.");
         let name = who.user(&gone)?.map(|u| u.name).unwrap_or_default();
         let keys: Vec<[u8; 32]> = who.machines()?.into_iter().filter(|d| d.user == gone && !d.removed).map(|d| d.key).collect();
         ensure!(!keys.contains(&me), "This device is {name}'s: remove them from another.");
@@ -1027,7 +1028,7 @@ pub async fn approve(m: &impl Me, r: &Asked, invite: Option<&Invited>) -> Result
     })?;
     // Taken out, or turned down: never sealed anything again, whatever a node says.
     ensure!(!removed, "{} was turned down or taken out, so it isn’t let in again. Start again on it, for a new code.", r.name);
-    ensure!(invite.is_none() || may_invite, "Only an admin lets someone new in.");
+    allowed!(invite.is_none() || may_invite, "Only an admin lets someone new in.");
     ensure!(invite.is_some() || r.user == user, "{} is someone else's: only their own devices approve one of theirs.", r.name);
     if let Some(i) = invite {
         ensure!(r.said["proof"].as_str() == Some(&keys::invite_proof(i.secret.as_bytes(), e)), "{}'s proof isn't from {}'s invite.", r.name, i.name);

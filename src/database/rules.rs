@@ -8,6 +8,7 @@
 //! the next recovery key, the network's recovery key. So the user a step is written as is always someone in the
 //! network, and each rule asks only what that user may do.
 
+use crate::protocol::allowed;
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -39,7 +40,7 @@ pub fn signed(who: &ScopeDb, scope: &Scope, step: &Step) -> Result<()> {
         ensure!(of_global(step, scope) && matches!(step.content.change(), Some(Change::Device | Change::Recovery)) && who.user(w)?.is_some(), "the recovery key only lets a device in");
         return Ok(());
     }
-    ensure!(who.may(w, "use", &object(scope)), "{w} can't write in {scope}");
+    allowed!(who.may(w, "use", &object(scope)), "{w} can't write in {scope}");
     let theirs = who.client(&author)?.is_some_and(|c| c.user == w);
     ensure!(theirs || (!of_global(step, scope) && who.runs_for(&author, scope)), "{} can't write in {scope} for that user", crate::keys::short(&author));
     Ok(())
@@ -222,7 +223,7 @@ impl Rule<'_> {
             ensure!(lists, "only a user's own device lists their devices; an admin's lists compute and services");
         } else {
             let r = self.role_of("role")?;
-            ensure!(self.who.may_give(w, &user, role(r), NETWORK), "only admins add users");
+            allowed!(self.who.may_give(w, &user, role(r), NETWORK), "only admins add users");
             add_user(self.out, &user, &self.text("user_name")?, r)?;
         }
         put(self.out, &machine)?;
@@ -268,14 +269,14 @@ impl Rule<'_> {
         let (user, to) = (self.id("user")?, self.role_of("role")?);
         let was = self.who.user(&user)?.context("no such user")?.role;
         let gives = self.who.may_give(self.w, &user, role(to), NETWORK);
-        ensure!(gives && (to == was || self.who.may_take(self.w, &user, role(was), NETWORK)), "only admins change roles, and the last admin stays");
+        allowed!(gives && (to == was || self.who.may_take(self.w, &user, role(was), NETWORK)), "only admins change roles, and the last admin stays");
         set_role(self.out, &user_principal(&user), NETWORK, Some(to))
     }
 
     fn remove(&self) -> Result<()> {
         if let Ok(user) = self.id("user") {
             let was = self.who.user(&user)?.context("no such user")?.role;
-            ensure!(self.who.may_take(self.w, &user, role(was), NETWORK), "only admins take someone out, and the last admin stays");
+            allowed!(self.who.may_take(self.w, &user, role(was), NETWORK), "only admins take someone out, and the last admin stays");
             let theirs: Vec<Key> = self.who.machines()?.into_iter().filter(|d| d.user == user).map(|d| d.key).collect();
             self.owe_held_by(&theirs, Some(&Scope::User(user.clone())))?;
             // Everything they held goes with them; what they made stays.
@@ -285,7 +286,7 @@ impl Rule<'_> {
         } else {
             let key = self.key("key")?;
             let gone = self.who.machine(&key)?.context("no such key")?;
-            ensure!(self.may("remove", &super::scopes::device(&key)), "only its user or an admin removes a device");
+            allowed!(self.may("remove", &super::scopes::device(&key)), "only its user or an admin removes a device");
             // A device signing itself out deletes its own keys: signed by it, or, in steps written before devices
             // signed their own, by a node of its user's it asked (`itself`). So does a sign-in before on a device
             // signed in again (`settings::approve`). One removed otherwise may still hold them.
@@ -302,7 +303,7 @@ impl Rule<'_> {
 
     fn epoch(&self) -> Result<()> {
         let scope = Scope::parse(&self.text("scope")?)?;
-        ensure!(self.may("remove", &object(&scope)), "only the scope's admins start its new epoch");
+        allowed!(self.may("remove", &object(&scope)), "only the scope's admins start its new epoch");
         if let Scope::Group(g) = &scope {
             self.who.group(g)?.context("no such group")?;
         }
@@ -350,7 +351,7 @@ impl Rule<'_> {
         for (n, h) in self.data["keys"].as_object().into_iter().flatten() {
             hashes.push((n.parse::<u32>().context("an epoch is a number")?, epoch_hash_of(h)?));
         }
-        ensure!(self.may("choose-devices", &object(&scope)), "only the scope's user, or its group's admins, set app schedules in it");
+        allowed!(self.may("choose-devices", &object(&scope)), "only the scope's user, or its group's admins, set app schedules in it");
         ensure!(until == 0 || self.who.machine(&endpoint)?.is_some(), "no such endpoint");
         let row = params![hex(&endpoint), scope.to_string(), app];
         let had = self.out.execute("DELETE FROM app_schedules WHERE device = ? AND scope = ? AND app = ?", row)? > 0;
@@ -371,7 +372,7 @@ impl Rule<'_> {
     /// Who opens a scope's Vault is its admins' to say, never a member's who can only add to it.
     fn vault(&self) -> Result<()> {
         let scope = Scope::parse(&self.text("scope")?)?;
-        ensure!(self.may("choose-devices", &object(&scope)), "only the scope's user, or its admins, say which machines open its Vault");
+        allowed!(self.may("choose-devices", &object(&scope)), "only the scope's user, or its admins, say which machines open its Vault");
         let n = self.data["n"].as_u64().context("no n")?;
         ensure!(n == u64::from(self.who.vault(&scope)?.map_or(0, |v| v.n)) + 1, "a Vault key follows the one before it");
         let public = self.key("public")?;
@@ -390,7 +391,7 @@ impl Rule<'_> {
 
     /// A new group, its maker its first admin.
     fn group(&self) -> Result<()> {
-        ensure!(self.may("make-groups", NETWORK), "only the network's users make groups");
+        allowed!(self.may("make-groups", NETWORK), "only the network's users make groups");
         let g = self.id("group")?;
         ensure!(self.who.group(&g)?.is_none(), "that group exists");
         let name = self.text("name")?;
@@ -401,7 +402,7 @@ impl Rule<'_> {
     fn invite(&self) -> Result<()> {
         let (g, user, to) = (self.id("group")?, self.id("user")?, self.role_of("role")?);
         self.who.group(&g)?.context("no such group")?;
-        ensure!(self.who.may_give(self.w, &user, role(to), &group(&g)), "only the group's admins invite");
+        allowed!(self.who.may_give(self.w, &user, role(to), &group(&g)), "only the group's admins invite");
         self.who.user(&user)?.context("no such user")?;
         self.out.execute("INSERT OR REPLACE INTO invites VALUES (?, ?, ?)", params![user_principal(&user), group(&g), role(to)])?;
         Ok(())
@@ -423,7 +424,7 @@ impl Rule<'_> {
         let was = self.who.group_role(&user, &g)?.or_else(|| grp.invited.get(&user).copied());
         let took = was.is_none_or(|r| Some(r) == to || self.who.may_take(self.w, &user, role(r), &group(&g)));
         let gives = to.is_none_or(|r| self.who.may_give(self.w, &user, role(r), &group(&g)));
-        ensure!(took && gives, "only the group's admins change its members");
+        allowed!(took && gives, "only the group's admins change its members");
         let member = grp.members.contains_key(&user) && self.who.user(&user)?.is_some();
         ensure!(member || grp.invited.contains_key(&user), "not in the group");
         match to {
@@ -469,7 +470,7 @@ impl Rule<'_> {
     }
 
     fn setting(&self) -> Result<()> {
-        ensure!(self.may("change-settings", NETWORK), "only admins change the network's settings");
+        allowed!(self.may("change-settings", NETWORK), "only admins change the network's settings");
         let name = self.text("name")?;
         ensure!(crate::labs::valid_setting(&name), "setting names are lowercase words joined by _, or a lab's (lab.…)");
         match &self.data["value"] {
@@ -504,7 +505,7 @@ impl Rule<'_> {
                 Principal::Group(g) => format!("{}#admin", group(g)),
                 Principal::Admins => format!("{NETWORK}#admin"),
             };
-            ensure!(self.may_make("add-apps", &owner_object(&to), &holders, "owner", &super::scopes::app(&name)), "only someone acting for an app's owner makes it");
+            allowed!(self.may_make("add-apps", &owner_object(&to), &holders, "owner", &super::scopes::app(&name)), "only someone acting for an app's owner makes it");
             let from = self.data["from"].as_str();
             self.out.execute("INSERT INTO apps VALUES (?, ?, ?, NULL, 0, NULL, NULL, 0, NULL)", params![name, owner(&to), from])?;
             return Ok(());
@@ -528,7 +529,7 @@ impl Rule<'_> {
     fn deploy(&self) -> Result<()> {
         let (name, bundle) = (self.text("app")?, self.text("bundle")?);
         let app = self.who.app(&name)?.context("no such app")?;
-        ensure!(self.may("deploy", &super::scopes::app(&name)), "only someone acting for the app's owner deploys it");
+        allowed!(self.may("deploy", &super::scopes::app(&name)), "only someone acting for the app's owner deploys it");
         ensure!(app.deleted.is_none(), "it was deleted: restore it first");
         ensure!(self.step.content.blobs.contains(&bundle), "a deploy names its bundle among its blobs");
         self.out.execute("UPDATE apps SET bundle = ?, deploys = deploys + 1 WHERE name = ?", params![bundle, name])?;
@@ -551,10 +552,10 @@ impl Rule<'_> {
         let was = self.who.switch(&device, &name)?.and_then(|s| s.scope.as_deref().map(Scope::parse)).and_then(Result::ok);
         let managed = !on && was.as_ref().is_some_and(adds);
         if self.who.cloudflare_node()? == Some(device) {
-            ensure!(managed || self.may("change-settings", NETWORK), "only an admin switches what the Cloudflare node runs");
+            allowed!(managed || self.may("change-settings", NETWORK), "only an admin switches what the Cloudflare node runs");
         } else {
             self.who.machine(&device)?.context("no such device")?;
-            ensure!(managed || self.may("switch", &super::scopes::device(&device)), "only a device's user switches what it runs");
+            allowed!(managed || self.may("switch", &super::scopes::device(&device)), "only a device's user switches what it runs");
         }
         ensure!(!on || scope.as_ref().is_none_or(adds), "only who may add apps there runs its service for it");
         let scope = scope.or(was.filter(|_| !on)).map(|s| s.to_string());

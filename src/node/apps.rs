@@ -1,5 +1,6 @@
 //! Apps: the network's, every one users may add, and adding, deploying, forking and retiring them.
 
+use crate::protocol::allowed;
 use super::*;
 
 pub(crate) mod routes;
@@ -82,7 +83,7 @@ impl Node {
     /// `name`, `title`, `icon` and `color`.
     pub async fn labs(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let on = self.with(|i| {
-            ensure!(i.r.db().may(&viewer.user, "change-settings", scopes::NETWORK), "Only admins change Labs.");
+            allowed!(i.r.db().may(&viewer.user, "change-settings", scopes::NETWORK), "Only admins change Labs.");
             Ok(crate::labs::on_keys(&i.r.db().settings()?))
         })?;
         let lab = |setting: String, name: &str, l: &Value| json!({ "title": l["title"].as_str().unwrap_or(name), "description": l["description"].as_str().unwrap_or(""), "on": on.contains(&setting), "setting": setting });
@@ -353,7 +354,7 @@ impl Node {
         self.with(|i| {
             let m = i.r.db();
             let named = scope_name(i, &scope.to_string())?;
-            ensure!(m.may(&caller.user, "add-apps", &scopes::object(scope)), "You can't add apps to {named}.");
+            allowed!(m.may(&caller.user, "add-apps", &scopes::object(scope)), "You can't add apps to {named}.");
             ensure!(i.r.holds(scope), "This device can't open {named} yet.");
             let here = i.views.get(&scope.to_string()).map(|s| s.added.clone()).unwrap_or_default();
             let mut out = Vec::new();
@@ -438,7 +439,7 @@ impl Node {
         let bundle = self.with(|i| {
             let m = i.r.db();
             let a = m.app(app)?.with_context(|| format!("no app named {app}"))?;
-            ensure!(m.may(&caller.user, "deploy", &scopes::app(app)), "only someone acting for {app}'s owner ({}) deploys it", a.owner);
+            allowed!(m.may(&caller.user, "deploy", &scopes::app(app)), "only someone acting for {app}'s owner ({}) deploys it", a.owner);
             ensure!(a.deleted.is_none(), "{app} is in Recently Deleted: apps_restore {app} brings it back to deploy to, apps_erase {app} frees its name for good, or give this app another name");
             Ok(match a.history.iter().find(|(h, ..)| bundle.len() >= 8 && h.starts_with(bundle)) {
                 Some((h, ..)) => h.clone(),
@@ -467,7 +468,7 @@ impl Node {
             let m = i.r.db();
             Ok(match m.app(app)? {
                 Some(a) => {
-                    ensure!(m.may(&caller.user, "deploy", &scopes::app(app)), "there's already an app called {app}, and it isn't yours: give yours another name, or fork it");
+                    allowed!(m.may(&caller.user, "deploy", &scopes::app(app)), "there's already an app called {app}, and it isn't yours: give yours another name, or fork it");
                     Some(a.bundle)
                 }
                 None => None,

@@ -7,6 +7,7 @@
 //! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
 //! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its user's runs (`/v1/call` on the loopback).
 
+use crate::protocol::allowed;
 use crate::config::YOURS;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -558,7 +559,7 @@ impl Service {
 pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str, signed_in: bool) -> Result<()> {
     let service = m.service(me)?.with_context(|| format!("this service isn't one of {YOURS}'s yet"))?;
     let node = m.compute(remote)?.with_context(|| format!("only {YOURS}'s devices are answered"))?;
-    ensure!(m.may(user, "use", &scopes::service(me)), "{} serves only its own user", service.service.as_deref().unwrap_or("this service"));
+    allowed!(m.may(user, "use", &scopes::service(me)), "{} serves only its own user", service.service.as_deref().unwrap_or("this service"));
     let own = node.user == user && (*key == *remote || m.client(key)?.is_some_and(|c| c.user == user));
     ensure!(own || (service.shared && signed_in && m.serves(remote, user)?), "{} may not call as that user", short(remote));
     Ok(())

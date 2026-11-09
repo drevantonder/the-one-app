@@ -2,6 +2,7 @@
 //! sealed as they are), new keys a scope is owed, a device's services listed as its parts, and erasing what a device
 //! keeps. Letting devices in and taking them out is what this machine signs as its own device (`settings.rs`).
 
+use crate::protocol::allowed;
 use crate::config::YOURS;
 use super::*;
 
@@ -107,7 +108,7 @@ impl Node {
             let (Some(to), None) = (to, app) else { bail!("a Vault key is sealed to a machine, or recovery, and is no app's") };
             self.with(|i| {
                 let db = i.r.db();
-                ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its admins, say which machines open its Vault");
+                allowed!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its admins, say which machines open its Vault");
                 let newest = db.vault(scope)?.filter(|v| v.n == n).with_context(|| format!("{scope}'s newest Vault key isn't {n}"))?;
                 ensure!(to == "recovery" || newest.to.contains(&crate::keys::unhex(to)?), "{scope}'s Vault key {n} doesn't open on that machine");
                 Ok(())
@@ -124,17 +125,17 @@ impl Node {
                 sealed_to(to)?;
                 self.with(|i| {
                     let db = i.r.db();
-                    ensure!(db.may(&caller.user, "use", &scopes::object(scope)), "you don't use {scope}");
+                    allowed!(db.may(&caller.user, "use", &scopes::object(scope)), "you don't use {scope}");
                     ensure!(n >= 1 && n <= newest + 1, "{scope} has no epoch {n}: its newest is {newest}");
-                    ensure!(n <= newest || db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins start its new epoch");
+                    allowed!(n <= newest || db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins start its new epoch");
                     match to {
-                        "recovery" => ensure!(db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins seal its keys to the recovery key"),
+                        "recovery" => allowed!(db.starts_epochs(&caller.user, scope)?, "only {scope}'s admins seal its keys to the recovery key"),
                         to => {
                             let key = crate::keys::unhex(to)?;
                             // A scope's epochs are its users' client devices' alone: a node is handed a call's keys,
                             // and a service holds none, reading nothing and asking its user's node to write.
                             let listed = db.client(&key)?.context("a scope's keys are sealed only to client devices and the recovery key")?;
-                            ensure!(db.may(&listed.user, "use", &scopes::object(scope)), "that endpoint's user doesn't use {scope}");
+                            allowed!(db.may(&listed.user, "use", &scopes::object(scope)), "that endpoint's user doesn't use {scope}");
                             ensure!(db.service(&key)?.is_none(), "a service is sealed no keys");
                         }
                     }
@@ -147,7 +148,7 @@ impl Node {
             }
             (None, Some(app)) => {
                 ensure!(app == scopes::APP || scopes::valid_app_name(app), "{app} isn't an app's name");
-                ensure!(self.with(|i| Ok(i.r.db().may(&caller.user, "use", &scopes::object(scope))))?, "you don't use {scope}");
+                allowed!(self.with(|i| Ok(i.r.db().may(&caller.user, "use", &scopes::object(scope))))?, "you don't use {scope}");
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
                 let key = crate::keys::app_key_name(&name, app, n);
                 let there = match crate::database::stored::created(&bucket, &key, &sealed).await? {
@@ -161,7 +162,7 @@ impl Node {
                 let key = crate::keys::unhex(to)?;
                 self.with(|i| {
                     let db = i.r.db();
-                    ensure!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its group's admins, choose where its apps' schedules run");
+                    allowed!(db.may(&caller.user, "choose-devices", &scopes::object(scope)), "only {scope}'s user, or its group's admins, choose where its apps' schedules run");
                     ensure!(db.machine(&key)?.is_some(), "that endpoint isn't one of the network's");
                     Ok(())
                 })?;
@@ -248,7 +249,7 @@ impl Node {
         }
         self.with(|i| {
             let db = i.r.db();
-            ensure!(caller.key != self.0.id && db.client(&caller.key)?.is_some() && db.may(&caller.user, "remove", &scopes::device(&key)), "only {name}'s user or an admin erases it, from another of their devices");
+            allowed!(caller.key != self.0.id && db.client(&caller.key)?.is_some() && db.may(&caller.user, "remove", &scopes::device(&key)), "only {name}'s user or an admin erases it, from another of their devices");
             Ok(())
         })?;
         tracing::warn!("asked to erase what {name} keeps: its oned does, then stops");

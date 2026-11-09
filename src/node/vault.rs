@@ -4,6 +4,7 @@
 //! (`x-one-keys`), that database's alone; and their secrets, hosts and apps only on a machine its admins granted the
 //! scope's Vault key, which nobody hands.
 
+use crate::protocol::allowed;
 use std::collections::BTreeSet;
 
 use crate::vault::{Items, Lookup};
@@ -307,7 +308,7 @@ impl Node {
     async fn write_item(&self, me: &Caller, scope: &Scope, mut change: impl FnMut(&Items) -> Result<Value>) -> Result<String> {
         let (erased, manages, public, machines) = self.with(|i| {
             let m = i.r.db();
-            ensure!(m.may(&me.user, "use", &scopes::object(scope)), "You don’t use {}.", scope_name(i, &scope.to_string())?);
+            allowed!(m.may(&me.user, "use", &scopes::object(scope)), "You don’t use {}.", scope_name(i, &scope.to_string())?);
             ensure!(i.r.holds(scope), "This device can’t open {} yet.", scope_name(i, &scope.to_string())?);
             let v = m.vault(scope)?;
             let mut machines: Vec<String> = Vec::new();
@@ -330,7 +331,7 @@ impl Node {
                 }
                 let data = change(&items)?;
                 let Some(id) = data["id"].as_str() else { return Ok(String::new()) };
-                ensure!(manages || items.get(id).is_none_or(|it| it.user == me.user), "Only its admins change an item someone else set in {scope_said}’s Vault.");
+                allowed!(manages || items.get(id).is_none_or(|it| it.user == me.user), "Only its admins change an item someone else set in {scope_said}’s Vault.");
                 // Who set an item last is whoever changes it, even when nothing else does.
                 crate::vault::change(c, &data, &me.user, now, |a| !erased.contains(a), &sealing)
             })
@@ -477,7 +478,7 @@ impl Node {
         let id = new_id();
         let why = if said.is_empty() { why } else { &said };
         self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string())?);
+            allowed!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string())?);
             ensure!(i.r.db().app(app)?.is_some_and(|a| !a.erased) || app == scopes::APP || app == scopes::AGENTS, "no app named {app}");
             Ok(())
         })?;
@@ -544,7 +545,7 @@ impl Node {
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
             ensure!(r.answer.is_none(), "that request was already answered");
             ensure!(now_ms().saturating_sub(r.time) <= crate::state::REQUEST_LIFE, "that request has expired: ask for it again");
-            ensure!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string())?);
+            allowed!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string())?);
             Ok(r.clone())
         })?;
         if answer["declined"] == true {

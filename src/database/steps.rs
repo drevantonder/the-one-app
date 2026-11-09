@@ -52,6 +52,7 @@
 //! <prefix>/newest            the newest hint, as a database's
 //! ```
 
+use crate::protocol::allowed;
 use crate::config::YOURS;
 use std::collections::BTreeMap;
 
@@ -1045,7 +1046,7 @@ pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
 fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Step) -> Result<Applied> {
     // Whose it is first: one that doesn't count is passed over, whatever release it names.
     ensure!(who.client(&step.author())?.is_some_and(|c| c.user == step.user()), "only a user's own device writes for them");
-    ensure!(who.may(step.user(), "change-roles", scopes::NETWORK), "only the network's admins say the release's roles");
+    allowed!(who.may(step.user(), "change-roles", scopes::NETWORK), "only the network's admins say the release's roles");
     let reads = u32::try_from(step.content.data["reads"].as_u64().context("a release's roles name its version")?)?;
     ensure!(reads <= READS, Newer);
     ensure!(reads > version(db.conn())?, "a release's roles only ever move on");

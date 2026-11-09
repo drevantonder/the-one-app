@@ -197,6 +197,17 @@ impl Coded {
     }
 }
 
+/// `ensure!` for who may do what: what isn't allowed fails as `refused`, with the same words, which the command line
+/// exits 3 on.
+macro_rules! allowed {
+    ($allowed:expr, $($said:tt)+) => {
+        if !$allowed {
+            return Err($crate::protocol::Coded::refused(format!($($said)+)).into());
+        }
+    };
+}
+pub(crate) use allowed;
+
 impl std::fmt::Display for Coded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)

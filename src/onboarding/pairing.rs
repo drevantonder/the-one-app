@@ -1,5 +1,6 @@
 //! Pairing: a code that lets a new device join the network, and admitting it.
 
+use crate::protocol::allowed;
 use crate::config::YOURS;
 use crate::protocol::{code, Coded, PAIRING_LIFE};
 use super::*;
@@ -70,7 +71,7 @@ impl Node {
             let m = i.r.db();
             ensure!(m.compute(&self.0.id)?.is_some(), "this device isn't in {} yet", crate::config::YOURS);
             let kinds = if user.as_ref().is_none_or(|u| *u == asker.user) { MACHINE } else { &[scopes::Kind::Compute][..] };
-            ensure!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds)?, "only admins pair other users' machines");
+            allowed!(devices::may_list(m, &asker.user, user.as_deref().unwrap_or(&asker.user), kinds)?, "only admins pair other users' machines");
             ensure!(m.serves(&self.0.id, &asker.user)?, "{} doesn't serve you", self.device_name());
             Ok(())
         })?;

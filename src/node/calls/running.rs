@@ -1,6 +1,7 @@
 //! What a running call's app asks the node: its grant, its databases and the node's internal API, its prompt hook, a
 //! service's call, and reading this device's logs.
 
+use crate::protocol::allowed;
 use super::*;
 
 impl Node {
@@ -36,7 +37,7 @@ impl Node {
             None => self.0.id,
         };
         let name = self.name_of(&target);
-        ensure!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s user, or an admin of {}, reads its logs", crate::config::YOURS);
+        allowed!(self.may_read_logs_of(&me.user, &target)?, "only {name}'s user, or an admin of {}, reads its logs", crate::config::YOURS);
         if target == self.0.id {
             return Ok(Reply::Ok(crate::logs::read(&self.0.dir, &crate::logs::Ask::from_json(input)?)?));
         }

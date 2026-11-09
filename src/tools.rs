@@ -108,12 +108,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
         Err(e) => {
             // The trace matters most when it failed.
             print_trace(ran.trace.as_deref());
-            let said = in_cli_words(node, &format!("{e:#}"));
-            return Err(match e.downcast::<Failed>() {
-                Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
-                Ok(Failed::Typed(_)) => Failed::Typed(said).into(),
-                Err(e) => crate::protocol::Coded::or_plain(crate::protocol::Coded::of(&e), said),
-            });
+            return Err(in_cli_error(node, e));
         }
     };
     if let Some(none) = none_said(node, a, o, &ok, Reader::Cli).filter(|_| !g.json) {
@@ -127,6 +122,17 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
     let shown = show(app, tool, &ok, out.as_deref(), g.json);
     print_trace(ran.trace.as_deref());
     shown
+}
+
+/// A failure of a call, as the command line says it (`in_cli_words`), keeping what kind it is, which its exit code
+/// is made from.
+pub fn in_cli_error(node: &Client, e: anyhow::Error) -> anyhow::Error {
+    let said = in_cli_words(node, &format!("{e:#}"));
+    match e.downcast::<Failed>() {
+        Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
+        Ok(Failed::Typed(_)) => Failed::Typed(said).into(),
+        Err(e) => crate::protocol::Coded::or_plain(crate::protocol::Coded::of(&e), said),
+    }
 }
 
 /// Prints a call's trace (`--trace`), after its answer, to stderr, so what's on stdout stays the answer.

@@ -2,6 +2,7 @@
 //! network's recovery key signed, and writing this device's own and those its users' other devices sign. What this
 //! device has read of each it keeps in its folder, checked against its hash when it starts again (`scope-kept/`).
 
+use crate::protocol::allowed;
 use super::*;
 use crate::database::steps;
 use crate::protocol::{Coded, code};
@@ -176,7 +177,7 @@ impl Node {
     pub async fn global_steps(&self, caller: &Caller, from: u64, welcome: Option<steps::Welcome>) -> Result<Value> {
         self.read_steps().await?;
         let read = self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "use", scopes::NETWORK), "you aren't one of this network's users");
+            allowed!(i.r.db().may(&caller.user, "use", scopes::NETWORK), "you aren't one of this network's users");
             Ok(i.r.at())
         })?;
         let read = read.context("global's log isn't frozen")?;

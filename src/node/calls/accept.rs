@@ -1,5 +1,6 @@
 //! Calls from other devices: checking who passed one on, and the keys they handed with it.
 
+use crate::protocol::allowed;
 use super::*;
 
 impl Node {
@@ -100,7 +101,7 @@ impl Node {
         let scopes: Vec<Scope> = named.iter().map(|s| Scope::parse_for(s.as_str().context("a scope is its name")?, user)).collect::<Result<_>>()?;
         self.with(|i| {
             let m = i.r.db();
-            ensure!(scopes.iter().all(|s| m.may(user, "use", &scopes::object(s))), "that call reaches a scope its user may not use");
+            allowed!(scopes.iter().all(|s| m.may(user, "use", &scopes::object(s))), "that call reaches a scope its user may not use");
             ensure!(!machine || scopes.iter().all(|s| m.runs_for(from, s)), "{} doesn't run every scope that call names", short(from));
             Ok(())
         })?;

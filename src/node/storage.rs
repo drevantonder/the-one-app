@@ -4,6 +4,7 @@
 //! device follows: it reaches it through the URL signer, copies there what it reaches of the old one, and keeps its
 //! data there from then on. A folder is only ever a machine's own choice, never taken from what others write.
 
+use crate::protocol::allowed;
 use crate::config::YOURS;
 use super::*;
 
@@ -52,7 +53,7 @@ impl Node {
     /// it can.
     pub async fn set_storage(&self, caller: &Caller, body: &Value) -> Result<Value> {
         self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "change-settings", scopes::NETWORK), "only admins move the network's data");
+            allowed!(i.r.db().may(&caller.user, "change-settings", scopes::NETWORK), "only admins move the network's data");
             Ok(())
         })?;
         let fields: BTreeMap<String, String> = ["endpoint", "bucket", "region"]

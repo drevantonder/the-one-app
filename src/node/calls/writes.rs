@@ -1,6 +1,7 @@
 //! What a call wrote: its appends checked into steps, the blobs they keep put in the bucket first, and its work kept
 //! running after it returns (`ctx.waitUntil`).
 
+use crate::protocol::allowed;
 use super::*;
 
 impl Node {
@@ -151,7 +152,7 @@ pub(in crate::node) fn check_append(i: &Network, append: Append, scopes: &[Scope
         Append::Source { app: name, link } => {
             let db = i.r.db();
             let a = db.app(&name)?.filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
-            ensure!(db.may(&me.user, "deploy", &scopes::app(&name)), "Only {title}'s owners can set where its code is kept.");
+            allowed!(db.may(&me.user, "deploy", &scopes::app(&name)), "Only {title}'s owners can set where its code is kept.");
             let link = scopes::source_link(&json!(link))?;
             (Scope::Global, content::source(&name, &a.owner.to_string(), &link))
         }
