@@ -67,7 +67,7 @@ function h() {
 			let t = E.current;
 			try {
 				let n = ((await one.call("_list", {})).devices || []).find(g);
-				if (!n) return t.shown && O("It’s been given back.");
+				if (!n) return O("It’s been given back.");
 				t.shown = n, _(n), one.title(f(n)), t.framed || await e();
 			} catch (e) {
 				let t = e;

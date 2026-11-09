@@ -65,7 +65,7 @@ function Device() {
     try {
       const all = (await one.call("_list", {})).devices || []
       const c = all.find((c) => c.name === at.device && (!at.on || c.on === at.on))
-      if (!c) return m.shown && say("It’s been given back.")
+      if (!c) return say("It’s been given back.")
       m.shown = c
       setDevice(c)
       one.title(nameOf(c))
