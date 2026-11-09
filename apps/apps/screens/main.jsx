@@ -39,7 +39,7 @@ function Tile({ a, list, selected, open, add, restore }) {
       <AppIcon app={a} size={56} />
       <div className="min-w-0 flex-1 text-sm">
         <div className="truncate font-medium">{a.title}</div>
-        <div className="truncate text-muted-foreground">{a.screens ? a.tagline || a.description : "Used by your AI"}</div>
+        <div className="truncate text-muted-foreground">{a.tagline || a.description}</div>
       </div>
       {action}
     </div>
