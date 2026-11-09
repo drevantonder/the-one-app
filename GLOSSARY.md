@@ -76,7 +76,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   an app reaches only its own databases, its own services, the web, and other apps' tools, through `ctx`. It is our
   wrapper around workerd (Cloudflare's open-source Workers runtime). Avoid: node, app service.
 - **Call**: one run of an app's tool, screen or schedule, on one node, with the keys the caller hands it for that call,
-  which expire with the caller's sign-in.
+  which expire within the hour.
 - **Deploy**: a version of an app put into a scope. **Built-in apps** are the folders in `apps/` with an `app.js`, shipped with every
   release; every other one is made in the network.
 - **App schedules**: a user choosing a node to keep an app running there, holding that app's keys in that scope (for

@@ -14,7 +14,7 @@ use super::guard::Me;
 use super::reply::{Error, Reply};
 use super::{Routes, Who};
 
-/// Every one, asked by whoever signed in; but one a client answers itself (`settings::answered`) only by this
+/// Every one, asked by a client device; but one a client answers itself (`settings::answered`) only by this
 /// machine's own programs, which its node answers as its own device.
 pub(super) fn routes() -> Routes {
     let mut routes = Routes::default();
@@ -22,7 +22,7 @@ pub(super) fn routes() -> Routes {
         for tool in &feature.tools {
             let serves = tool.serves;
             let path = feature.path(&tool.spec);
-            let who = if crate::settings::answered(&path) { Who::ThisMachine } else { Who::SignedIn };
+            let who = if crate::settings::answered(&path) { Who::ThisMachine } else { Who::Clients };
             let (spec, name) = (tool.spec.clone(), feature.mcp_name(&tool.spec));
             routes = routes.route(&path, who, post(move |node: State<Node>, me: Me, headers: HeaderMap, input: Json<Map<String, Value>>| serve(node, me, headers, input, serves, spec, name)));
         }

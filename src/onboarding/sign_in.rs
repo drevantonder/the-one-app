@@ -140,8 +140,8 @@ fn keep_tokens(kept: &mut Kept, tokens: Result<one_client::sign_in::Tokens, one_
     keep(kept)
 }
 
-/// The access token to send this machine's node, good for a minute more, refreshed if it's older: None if this
-/// machine isn't signed in. One process at a time refreshes, since each refresh token works once.
+/// The access token this machine asks auth to be let in with, good for a minute more, refreshed if it's older: None if
+/// this machine isn't signed in. One process at a time refreshes, since each refresh token works once.
 pub fn token() -> Result<Option<String>> {
     let fresh = |k: &Kept| k.access.clone().filter(|_| k.until > now_ms() + 60_000);
     let Some(kept) = kept() else { return Ok(None) };

@@ -331,6 +331,13 @@ fn signed(key: &ed25519_dalek::SigningKey, route: &str, mut fields: Value) -> Va
     one::keys::signed_request(key, "one/auth", fields, now())
 }
 
+/// A device's request to join, as `by`, one of the network's devices, reads it.
+fn request_as_read_by(k: &Workers, by: &ed25519_dalek::SigningKey, device: &[u8; 32]) -> Value {
+    let key = data_encoding::HEXLOWER.encode(device);
+    let asked = data_encoding::BASE64URL_NOPAD.encode(signed(by, &format!("GET /api/auth/devices/requests/{key}"), json!({})).to_string().as_bytes());
+    ureq::agent().get(format!("{}/api/auth/devices/requests/{key}", k.address)).header("x-one-request", asked).call().unwrap().body_mut().read_json().unwrap()
+}
+
 /// An invite `by` an endpoint for `name`, as its device makes one: → its secret and the user id it's for.
 fn invited(k: &Workers, by: &ed25519_dalek::SigningKey, name: &str, email: Option<&str>) -> (String, String) {
     let secret = B64U.encode(&rand::random::<[u8; 32]>());
@@ -615,14 +622,15 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(challenge[..challenge.len() - 8], sign_in_proof::challenge(&ROOT, &device, 0)[..challenge.len() - 8], "the challenge names the device in this network");
     assert_eq!(new.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
     assert_eq!(signed_in_as(&mut new).as_deref(), Some(andre.as_str()));
-    let asked = |b: &mut Browser, d: &one::keys::Endpoint| {
+    let asked = |w: &Workers, b: &mut Browser, d: &one::keys::Endpoint| {
         let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": data_encoding::HEXLOWER.encode(&d.key), "seal": data_encoding::HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "platform": "mac", "reads": one::database::READS }));
         assert_eq!(status, 200, "{out}");
         let (_, out, _) = b.get(&format!("/api/auth/devices/requests/{}", data_encoding::HEXLOWER.encode(&d.key)));
         assert_eq!(out["platform"], "mac", "what a device says it is reaches the devices that approve it");
-        out["sign_in"].clone()
+        assert!(out.get("sign_in").is_none(), "a sign-in alone read what its request carries: {out}");
+        request_as_read_by(w, &admin, &d.key)["sign_in"].clone()
     };
-    let proof: Proof = serde_json::from_value(asked(&mut new, &device)).expect("its request carries the assertion");
+    let proof: Proof = serde_json::from_value(asked(&k, &mut new, &device)).expect("its request carries the assertion");
     let network = sign_in_proof::Network::new(&k.address, ROOT, None);
     let account = sign_in_proof::check(&proof, &device, &network, None).expect("the user's devices check it");
     let Account::Passkey { public_key, .. } = &account else { panic!("{account:?}") };
@@ -633,12 +641,12 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     // Turned down, its request goes, and what its sign-in showed with it: asking again, it carries nothing.
     let key = data_encoding::HEXLOWER.encode(&device.key);
     assert_eq!(new.delete(&format!("/api/auth/devices/requests/{key}")).0, 200);
-    assert_eq!(asked(&mut new, &device), Value::Null, "a refused device's sign-in is forgotten");
+    assert_eq!(asked(&k, &mut new, &device), Value::Null, "a refused device's sign-in is forgotten");
     // Another device asking as them carries none, nor does one signed in for no device.
-    assert_eq!(asked(&mut new, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
+    assert_eq!(asked(&k, &mut new, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
     let mut plain = k.browser();
     assert_eq!(signs_in_with_passkey(&mut plain, &passkey), 200);
-    assert_eq!(asked(&mut plain, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
+    assert_eq!(asked(&k, &mut plain, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
 
     // With Google, the ID token it asks for names the device.
     let g = Workers::google(vec![admin_hex]);
@@ -654,8 +662,8 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     let claims = json!({ "sub": "kim", "email": "kim@test.example", "email_verified": true, "hd": "test.example", "name": "Kim", "nonce": google["nonce"] });
     browser.get(&format!("/api/auth/callback/google?code={}&state={}", B64U.encode(claims.to_string().as_bytes()), google["state"]));
     assert_eq!(signed_in_as(&mut browser).as_deref(), Some(invited_as.as_str()));
-    assert!(asked(&mut browser, &device)["id_token"].is_string(), "the device it names carries it");
-    assert_eq!(asked(&mut browser, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null, "another carries none");
+    assert!(asked(&g, &mut browser, &device)["id_token"].is_string(), "the device it names carries it");
+    assert_eq!(asked(&g, &mut browser, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null, "another carries none");
     // An ID token handed to auth directly signs no one in, nor links, whoever holds one.
     let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "idToken": { "token": "a.b.c" } }));
     assert_eq!(status, 403, "{out}");
@@ -710,7 +718,8 @@ fn a_sign_in_finished_from_a_link_says_so() {
         let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {token}")).send_json(json!({ "key": key, "seal": data_encoding::HEXLOWER.encode(&device.seal), "name": "MacBook Pro", "reads": one::database::READS })).unwrap();
         assert_eq!(resp.status(), 200);
         let mut resp = agent.get(format!("{}/api/auth/devices/requests/{key}", k.address)).header("authorization", format!("Bearer {token}")).call().unwrap();
-        let sign_in = resp.body_mut().read_json::<Value>().unwrap()["sign_in"].clone();
+        assert!(resp.body_mut().read_json::<Value>().unwrap().get("sign_in").is_none(), "a sign-in alone read what its request carries");
+        let sign_in = request_as_read_by(&k, &admin, &device.key)["sign_in"].clone();
         // What the user's devices then do with it, with the passkey recorded as theirs.
         let proof: Proof = serde_json::from_value(sign_in.clone()).expect("a proof");
         sign_in_proof::check(&proof, &device, &network, None).expect("it checks, to be recorded as it's approved by a tap");

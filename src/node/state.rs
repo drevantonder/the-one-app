@@ -38,13 +38,13 @@ impl Node {
 
     /// The same for someone signed in at the network's address through `client` (its name), which is no device: not the
     /// device it reached, as the Cloudflare node says too.
-    pub fn state_for_sign_in(&self, viewer: &Caller, client: &str) -> Result<State> {
+    pub fn state_for_client(&self, viewer: &Caller, client: &str) -> Result<State> {
         self.state_as(viewer, Some(client))
     }
 
-    pub(super) fn state_as(&self, viewer: &Caller, sign_in: Option<&str>) -> Result<State> {
+    pub(super) fn state_as(&self, viewer: &Caller, client: Option<&str>) -> Result<State> {
         // The device looking, if it's one.
-        let device = sign_in.is_none().then_some(viewer.key);
+        let device = client.is_none().then_some(viewer.key);
         let ready = self.ready();
         let waiting = self.waiting_requests(viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
@@ -52,7 +52,7 @@ impl Node {
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { network.as_ref().map(|i| i.r.db().machine(&viewer.key)).transpose()?.flatten().map(|m| m.name.clone()).unwrap_or_default() };
         let backups = network.as_ref().map(|i| self.backup_problem(i, &viewer.user)).transpose()?.flatten();
         let here_parts = network.as_ref().map(|i| self.parts_here(i)).transpose()?;
-        // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
+        // Which device is looking, to say "This device": a client device of the viewer's names itself.
         let looking = match (device, network.as_ref()) {
             (Some(key), _) => Some(key),
             (None, Some(i)) => i.r.db().machine(&viewer.key)?.filter(|d| viewer.key != self.0.id && d.user == viewer.user && d.is(scopes::Kind::Client)).map(|_| viewer.key),
@@ -100,11 +100,11 @@ impl Node {
             })
         };
         let here = crate::state::Here {
-            me: match sign_in {
+            me: match client {
                 None => Viewer { key: hex(&viewer.key), name: viewer_name.clone(), user: viewer.user.clone() },
                 Some(client) => Viewer { key: String::new(), name: client.to_string(), user: viewer.user.clone() },
             },
-            client: (sign_in.is_none() && viewer.key != self.0.id).then(|| ClientHere { key: hex(&viewer.key), name: viewer_name }),
+            client: (client.is_none() && viewer.key != self.0.id).then(|| ClientHere { key: hex(&viewer.key), name: viewer_name }),
             device: Answering { key: hex(&self.0.id), name: self.device_name(), ready, guide: self.guide() },
             looking,
             member: network.as_ref().map(|i| i.r.db().compute(&self.0.id)).transpose()?.flatten().is_some(),

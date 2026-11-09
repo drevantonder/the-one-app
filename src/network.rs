@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use one::api;
 
-use crate::{agent, client_device, request, Http};
+use crate::{agent, client_device, request};
 
 /// Who's in the network and this device: status, signing in and out, making or joining a network, settings.
 pub fn commands() -> Command {
@@ -53,7 +53,7 @@ pub fn commands() -> Command {
                     }
                     match crate::sign_in::sign_out()? || device {
                         true if device => println!("Signed out: this computer is no longer one of your devices, and {CLI} here no longer acts as you."),
-                        true => println!("Signed out: {CLI} on this machine no longer acts as you."),
+                        true => println!("Signed out."),
                         false => println!("This machine isn't signed in."),
                     }
                 }
@@ -61,7 +61,7 @@ pub fn commands() -> Command {
                 ["status"] => status(g.node, &g.node.state()?),
                 ["create", name @ ..] if !name.is_empty() => {
                     let user_name = g.flag("as").context("say what to call you with --as <your name>")?;
-                    let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": g.flag("user") }))?;
+                    let r = g.node.post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": g.flag("user") }))?;
                     println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
                 }
                 ["pair"] => {
@@ -69,7 +69,7 @@ pub fn commands() -> Command {
                     println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
                 }
                 ["join", code] => {
-                    unsigned_post("/v1/join", json!({ "code": code }))?;
+                    g.node.post("/v1/join", json!({ "code": code }))?;
                     println!("Joined. Syncing now; {CLI} status shows progress.");
                 }
                 ["settings"] => {
@@ -151,8 +151,8 @@ fn sign_in(g: &Given) -> Result<()> {
         eprintln!("{err:#}");
     }
     if client_device::node_here() {
-        let me = node.state()?.user.map_or("you".into(), |u| u.name);
-        println!("Signed in as {me}. {CLI} and {CLI} mcp on this machine act as you until {CLI} sign-out.");
+        let me = node.state()?.user.map_or("its user".into(), |u| u.name);
+        println!("Signed in. {NAME} runs on this computer, so {CLI} and {CLI} mcp here act as {me}, whose device it is, whoever signs in.");
         return Ok(());
     }
     match g.flag("recovery-key") {
@@ -162,14 +162,6 @@ fn sign_in(g: &Given) -> Result<()> {
     let me = node.state()?.user.map_or("you".into(), |u| u.name);
     println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", crate::sign_in::hostname());
     Ok(())
-}
-
-/// For a node in no network yet, which no one is signed in to: a sign-in this CLI kept for its address was another
-/// node's there before, so it isn't sent, and once the node is in a network it's let go.
-fn unsigned_post(path: &str, body: Value) -> Result<Value> {
-    let r = Client::new(Http { signed_in: false }, false).post(path, body)?;
-    let _ = crate::sign_in::sign_out();
-    Ok(r)
 }
 
 fn status(node: &Client, state: &State) {

@@ -11,7 +11,7 @@ use crate::node::{CallRequest, Caller, Node};
 
 use super::openapi::Op;
 use super::{Routes, Who};
-use super::guard::{Me, NotJoined};
+use super::guard::Me;
 use super::reply::{Body, Error, Reply, failed};
 
 /// What a client that picks the node it asks itself says with each request (client/src/lib.rs): a call this node can't
@@ -27,10 +27,10 @@ pub fn app_route(path: &str) -> bool {
 
 pub(super) fn routes() -> Routes {
     Routes::default()
-        .route("/v1/call", Who::SignedIn, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
+        .route("/v1/call", Who::Clients, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .says(Op::post("Run one call of an app's tool or a service's function").body::<CallRequest>().answers_as(json!({ "type": "object", "required": ["ok"], "properties": { "ok": { "description": "the tool's or function's answer, as its output schema says" } } })))
         // An app's own requests, run as its tool `_http` for its user, whose checks are the app's: git's, to Repos.
-        .route(APP_ROUTE, Who::SignedIn, any(app_http))
+        .route(APP_ROUTE, Who::Clients, any(app_http))
 }
 
 async fn call(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Body(req): Body<CallRequest>) -> Reply {
@@ -59,18 +59,18 @@ pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::
     };
     let ran = async {
         let user = me["user"].as_str().filter(|u| !u.is_empty()).ok_or_else(|| anyhow::anyhow!("whose call is it?"))?.to_string();
-        anyhow::ensure!(node.is_user(&user), NotJoined);
+        anyhow::ensure!(node.is_user(&user), "{user} isn't in this network");
         let handed = keys.as_ref().and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("a call passed on brings the keys it was handed"))?;
         let credential = node.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
         // As the Cloudflare node's, never this device's own: no service counts it as its user's own node.
-        call_for(node, Me { caller: Caller { key: remote, user, agent: None, credential }, sign_in: Some(client) }, serde_json::from_value(call)?, false).await
+        call_for(node, Me { caller: Caller { key: remote, user, agent: None, credential }, client: Some(client) }, serde_json::from_value(call)?, false).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))
 }
 
 /// A request to `/<app>/<path>`, answered by the app's `_http` tool, run as whoever asked (this machine's user,
-/// a client device's, or a sign-in's), whose checks are the app's own: the body reaches it as a blob, read as it comes
+/// or a client device's), whose checks are the app's own: the body reaches it as a blob, read as it comes
 /// and deleted once it's answered unless something keeps it, and it answers `{ status, type, text }`, or
 /// `{ status, type, blob }` for bytes it keeps.
 async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(String, String)>, req: axum::extract::Request) -> Result<Response, Error> {

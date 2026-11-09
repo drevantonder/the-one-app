@@ -104,13 +104,13 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
     std::thread::spawn(move || {
         let url = format!("http://{}{path}", one::api::addr());
         let asked = if post {
-            let mut r = crate::to_node(crate::agent().post(&url));
+            let mut r = crate::agent().post(&url);
             for (n, v) in &headers {
                 r = r.header(n, v);
             }
             r.send(ureq::SendBody::from_owned_reader(Fed { sent, part: Bytes::new() }))
         } else {
-            let mut r = crate::to_node(crate::agent().get(&url));
+            let mut r = crate::agent().get(&url);
             for (n, v) in &headers {
                 r = r.header(n, v);
             }

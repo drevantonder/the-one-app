@@ -115,7 +115,7 @@ const WANTS_IN = 10_000;
 const PUSHED_TO = 20;
 const CODE = 10 * 60_000;
 /// How lately someone signed in for one more identity to be added to their account: a session taken from them adds none,
-/// since an added identity signs in for good, and a sign-in's token is good at nodes for what its user may do.
+/// since an added identity signs in for good.
 const FRESH = 5 * 60_000;
 /// How long an invite's secret waits in a cookie for a provider to answer.
 const INVITE_COOKIE = 15 * 60;
@@ -352,8 +352,6 @@ export class Auth extends DurableObject {
           // auth rotated) signs no one out; used again after that, it's taken as stolen, and its whole family ends.
           refreshTokenReuseInterval: 60,
           storeTokens: "hashed",
-          // Who a token is for, by name, so a node lets someone new in as who they are.
-          customAccessTokenClaims: ({ user }) => (user ? { name: user.name } : {}),
         }),
       ],
     };
@@ -680,7 +678,7 @@ export class Auth extends DurableObject {
     await this.keepProviderProof(key, seal, user);
     if (!told) {
       if (this.anInviteLetsIn(user, key, here)) await this.wantsInBy(made + WANTS_IN);
-      else await this.wantsIn(sql.exec("select * from requests where key = ?", key).one());
+      else await this.wantsIn({ key, seal, name: name.trim(), user, place });
     }
     return { until: made + REQUEST };
   }
@@ -761,8 +759,9 @@ export class Auth extends DurableObject {
     }
   }
 
-  /// Each request as a device reads it: what its sign-in showed only to `entitled`, as an ID token is a bearer's.
-  shown(rows, entitled = () => true) {
+  /// Each request as a device reads it: what its sign-in showed only to `entitled`, as an ID token is a bearer's, and
+  /// never to a sign-in alone, which only asks.
+  shown(rows, entitled = () => false) {
     const sql = this.ctx.storage.sql;
     return rows.map((r) => {
       const user_name = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
@@ -786,7 +785,7 @@ export class Auth extends DurableObject {
     }
     if (signed) this.theirs(signed.by, user);
     const theirs = user || (await this.user(request)) || refuse(401, "Sign in first.");
-    return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", theirs).toArray()) };
+    return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", theirs).toArray(), signed ? () => true : undefined) };
   }
 
   /// Which requests a device of the network may answer and read the sign-ins of: every one, for an admin's; its own
@@ -841,8 +840,7 @@ export class Auth extends DurableObject {
     return session;
   }
 
-  /// What a client's tokens are for, whatever it asks: the network's address (a sign-in at its nodes, through the
-  /// gateway) only for its own apps, each a client whose every redirect comes back to one of them (`firstParty`);
+  /// What a client's tokens are for, whatever it asks: the network's address (asking auth to be let in) only for its own apps, each a client whose every redirect comes back to one of them (`firstParty`);
   /// any other, a remote MCP client, gets `<address>/mcp`, the remote MCP server's, where it's a device of its user's,
   /// which nodes refuse.
   async audience(clientId) {

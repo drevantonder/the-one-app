@@ -81,9 +81,8 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     }
 
     let client = Caller { key: e.key, user: sam_id.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
-    let signed_in = Caller { key: a.id(), user: sam_id.clone(), agent: None, credential: one::node::Credential::SignIn("Sam's sign-in".into()) };
-    let mut both = Vec::new();
-    for (sam, handed_for) in [(client, one::keys::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
+    {
+        let (sam, handed_for) = (client.clone(), one::keys::hex(&e.key));
         let handoff = one::keys::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
         a.hand(&sam.credential, &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
         let call = |req: CallRequest| a.call_as(req, sam.clone());
@@ -98,9 +97,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
         assert!(format!("{refused:#}").contains("only Andre manage andre/home"), "{refused:#}");
         assert!(call(repos("add_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.is_err());
         assert!(a.call(repos("get", json!({ "repo": "andre/home" }))).await.unwrap()["deleted"].is_null());
-        both.push(sam);
     }
-    let [client, signed_in] = <[Caller; 2]>::try_from(both).unwrap();
     let call = |req: CallRequest, sam: &Caller| a.call_as(req, sam.clone());
 
     let issue = |tool: &str, number: u64, mut input: Value| {
@@ -135,7 +132,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
 
     a.call(repos("add_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.unwrap();
     assert!(sams_push(&client, "andre/home", "sams", false).await);
-    assert!(sams_push(&signed_in, "andre/home", "sams", true).await);
+    assert!(sams_push(&client, "andre/home", "sams", true).await);
     assert!(call(repos("delete", json!({ "repo": "andre/home" })), &client).await.is_err());
     a.call(repos("remove_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.unwrap();
     assert!(!sams_push(&client, "andre/home", "sams", false).await);

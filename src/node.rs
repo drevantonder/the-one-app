@@ -228,7 +228,6 @@ pub struct Inner {
     handing_over: std::sync::atomic::AtomicBool,
     /// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, while this node serves it there (`api::serve_guide`).
     guide: Mutex<Option<String>>,
-    signed_ins: crate::api::SignedIns,
     /// What oned's thread for its parts tells it about them.
     parts: crate::oned::Parts,
 }
@@ -300,7 +299,6 @@ impl Node {
             erased: Default::default(),
             handing_over: Default::default(),
             guide: Default::default(),
-            signed_ins: Default::default(),
             parts: Default::default(),
         }));
         let outbound_router = crate::app::outbound::router(node.clone());
@@ -406,10 +404,6 @@ impl Node {
 
     pub fn parts(&self) -> &crate::oned::Parts {
         &self.0.parts
-    }
-
-    pub(crate) fn signed_ins(&self) -> &crate::api::SignedIns {
-        &self.0.signed_ins
     }
 
     /// The guide's address on the tailnet, if this node serves it there.

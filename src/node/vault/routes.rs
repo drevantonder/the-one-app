@@ -15,12 +15,12 @@ use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
     Routes::default()
-        .route("/v1/vault", Who::SignedIn, get(list).post(set))
+        .route("/v1/vault", Who::Clients, get(list).post(set))
         .says(Op::get("The items the caller may change, in one scope or all").query::<Items>().answers_as(json!({ "type": "array", "items": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } }, "additionalProperties": true } })))
         .says(Op::post("Change an item").body::<Change>().answers_as(json!({ "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the item's" } } })))
-        .route("/v1/vault/requests", Who::SignedIn, get(requests))
+        .route("/v1/vault/requests", Who::Clients, get(requests))
         .says(Op::get("The requests for items the caller may answer, or one").query::<Asked>().answers_as(json!({ "type": "array", "items": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } }, "additionalProperties": true } })))
-        .route("/v1/vault/answer", Who::SignedIn, post(answer))
+        .route("/v1/vault/answer", Who::Clients, post(answer))
         .says(Op::post("Answer a request for an item").body::<Answer>().done())
 }
 

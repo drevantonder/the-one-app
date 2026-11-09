@@ -18,15 +18,15 @@ use crate::settings;
 use super::reply::{Error, error_responses, tagged};
 use super::{Me, Routes, Who};
 
-const ABOUT: &str = "Your network's API, as you can use it now: your apps, the core's tools and routes. Its extensions: `x-one-who`, who may ask (signed-in, clients, this-machine); `x-one-runs: client`, the caller's client answers it itself, with its own keys, and no node runs it; `x-one-keys`, which keys a client may hand a node with it; `x-one-call`, an app's tool, with no route of its own yet: a client asks POST /v1/call with `{ app, tool, input }`, answered `{ ok: <this operation's answer> }`; `x-one-device`, the call can name the device it runs on; `x-one-confirm`, it sends or can't be undone, and each client decides how its user agrees; `x-one-reads`, it only reads; `x-one-words`, the inputs a command line takes as bare words; a tag's `x-one-guide`, how to use it.";
+const ABOUT: &str = "Your network's API, as you can use it now: your apps, the core's tools and routes. Its extensions: `x-one-who`, who may ask (clients, this-machine); `x-one-runs: client`, the caller's client answers it itself, with its own keys, and no node runs it; `x-one-keys`, which keys a client may hand a node with it; `x-one-call`, an app's tool, with no route of its own yet: a client asks POST /v1/call with `{ app, tool, input }`, answered `{ ok: <this operation's answer> }`; `x-one-device`, the call can name the device it runs on; `x-one-confirm`, it sends or can't be undone, and each client decides how its user agrees; `x-one-reads`, it only reads; `x-one-words`, the inputs a command line takes as bare words; a tag's `x-one-guide`, how to use it.";
 
 pub(super) fn routes() -> Routes {
-    Routes::default().route(path::OPENAPI, Who::SignedIn, get(document_for))
+    Routes::default().route(path::OPENAPI, Who::Clients, get(document_for))
 }
 
 async fn document_for(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
     let apps = node.apps(&me.caller).await?;
-    let body = serde_json::to_string(&document(&apps, me.sign_in.is_none()))?;
+    let body = serde_json::to_string(&document(&apps, me.client.is_none()))?;
     let tag = crate::screen::tag(&body);
     Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
 }
@@ -129,7 +129,7 @@ pub fn document(apps: &[Value], this_machine: bool) -> Value {
             let mut op = tool_op(feature.mcp_name(&tool.spec), feature.name, &tool.spec);
             match settings::answered(&at) {
                 true => op["x-one-runs"] = json!("client"),
-                false => (op["x-one-who"], op["x-one-keys"]) = (who(Who::SignedIn), hands(&at)),
+                false => (op["x-one-who"], op["x-one-keys"]) = (who(Who::Clients), hands(&at)),
             }
             add(&at, "post", op);
         }
@@ -212,7 +212,6 @@ fn tag(name: &str, title: &str, description: &str, guide: &str) -> Value {
 
 fn who(by: Who) -> Value {
     json!(match by {
-        Who::SignedIn => "signed-in",
         Who::Clients => "clients",
         Who::ThisMachine => "this-machine",
     })

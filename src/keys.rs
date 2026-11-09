@@ -625,11 +625,6 @@ pub struct Handoff {
     pub keys: Vec<Handed>,
 }
 
-/// The `for` of a handoff with calls that bring `token`.
-pub fn token_id(token: &str) -> String {
-    HEXLOWER.encode(&sha256(token.as_bytes()))
-}
-
 /// A handoff sealed to the node's seal key, as base64url: the `x-one-keys` header's value.
 pub fn seal_handoff(to: &[u8; 32], handoff: &Handoff) -> Result<String> {
     Ok(B64U.encode(&seal_to(to, &serde_json::to_vec(handoff)?)?))
@@ -642,15 +637,14 @@ pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
     serde_json::from_slice(&plain).context("the keys handed aren't a handoff")
 }
 
-/// What a node with no sign-in to pass on (the Cloudflare node, or a machine's passing on a call it was handed keys
+/// What a node (the Cloudflare node, or a machine's passing on a call it was handed keys
 /// for) asks another node to run a call with (`src/node/net.rs`): the call, naming `scopes`, the scopes it reaches,
 /// the user it's for, and the keys of those scopes it was handed, sealed to that node's `seal` key for calls from
-/// its own endpoint (`from`), until `until`. Never a sign-in's token, which whoever runs the node could use as them;
-/// nor keys of a scope the call doesn't name. The other node runs it on those keys alone, and only if `from` may run
+/// its own endpoint (`from`), until `until`. Never keys of a scope the call doesn't name. The other node runs it on those keys alone, and only if `from` may run
 /// every one of `scopes`.
 pub fn forwarded(call: &Value, user: &str, client: &str, from: &[u8; 32], seal: &[u8; 32], until: u64, keys: Vec<Handed>, scopes: &[String]) -> Result<Value> {
     let mut call = call.as_object().cloned().unwrap_or_default();
-    for k in ["me", "keys", "token"] {
+    for k in ["me", "keys"] {
         call.remove(k);
     }
     call.insert("me".into(), json!({ "user": user, "client": client }));
@@ -1070,7 +1064,7 @@ mod tests {
     fn a_handoff_opens_only_for_the_node_it_was_sealed_to() {
         let node = SigningKey::from_bytes(&rand::random());
         let other = SigningKey::from_bytes(&rand::random());
-        let handoff = Handoff { for_: token_id("t"), until: 5, keys: vec![Handed { scope: "global".into(), epoch: 1, app: "tally".into(), database: "main".into(), key: rand::random() }] };
+        let handoff = Handoff { for_: "t".into(), until: 5, keys: vec![Handed { scope: "global".into(), epoch: 1, app: "tally".into(), database: "main".into(), key: rand::random() }] };
         let sealed = seal_handoff(&Endpoint::of(&node).seal, &handoff).unwrap();
         assert_eq!(open_handoff(&seal_secret(&node), &sealed).unwrap(), handoff);
         assert!(open_handoff(&seal_secret(&other), &sealed).is_err());

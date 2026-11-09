@@ -1,5 +1,6 @@
-//! Who asked, decided for every route: the layers `guarded` puts on the routes, and the sign-in tokens, client devices and
-//! this machine's own programs they tell apart.
+//! Who asked, decided for every route: the layers `guarded` puts on the routes, and the client devices and this
+//! machine's own programs they tell apart. A sign-in is never one of them: it only lets its device ask to be let in, at
+//! auth, and a device that isn't let in reaches no node.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -51,37 +52,13 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
 }
 
 /// Only this machine's own programs (`from_this_machine`) drive its node: no web page, an app's screen this node served
-/// included, and no program in a VM or emulator here. A request with an access token from auth, or from a client
-/// device, is someone's instead, for what its route's `Who` lets them ask.
-async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<std::collections::HashMap<String, Who>>)>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+/// included, and no program in a VM or emulator here. A client device's request is someone's instead, for what its
+/// route's `Who` lets them ask.
+async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<std::collections::HashMap<String, Who>>)>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
     let who = routes.get(path.as_str()).copied().unwrap_or(Who::ThisMachine);
     if let Some(FromClient(key, until)) = req.extensions().get::<FromClient>().copied() {
         return from_client(&node, key, until, who, req, next).await;
-    }
-    let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
-    if let Some(token) = token {
-        // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `Who::SignedIn`.
-        if who != Who::SignedIn && !from_this_machine(&node, &req) {
-            return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
-        }
-        return match signed_in(&node, token.clone()).await {
-            // This machine's own programs, signed in as its node's own user, are this device's own client: they
-            // use its keys, as when not signed in.
-            Ok(me) if from_this_machine(&node, &req) && node.user().is_ok_and(|u| u == me.caller.user) => next.run(req).await,
-            Ok(me) => {
-                // The keys its caller hands this device for the token's calls, sealed to it.
-                if let Some(handed) = req.headers().get(crate::protocol::header::KEYS).and_then(|h| h.to_str().ok())
-                    && let Err(err) = node.hand(&me.caller.credential, &me.caller.user, handed, u64::MAX)
-                {
-                    return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
-                }
-                req.extensions_mut().insert(me);
-                next.run(req).await
-            }
-            Err(err) if err.is::<NotJoined>() => refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": NotJoined.to_string() }))).into_response()).await,
-            Err(err) => refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": format!("{err:#}") }))).into_response()).await,
-        };
     }
     if !from_this_machine(&node, &req) {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine() }))).into_response()).await;
@@ -89,11 +66,10 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
     next.run(req).await
 }
 
-/// A client device's request over iroh is its user's, as a sign-in's is, for what `Who::SignedIn` and `Who::Clients`
-/// let in: the device must still be one of the network's, and the keys it hands are for its key, kept no longer than
+/// A client device's request over iroh is its user's, for what `Who::Clients` lets in: the device must still be one of the network's, and the keys it hands are for its key, kept no longer than
 /// `until`.
 async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
-    if !matches!(who, Who::SignedIn | Who::Clients) {
+    if who != Who::Clients {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
     let Some((user, name)) = node.client_now(&key).await else {
@@ -109,7 +85,7 @@ async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, m
     if crate::database::reads_of(req.headers().get(crate::protocol::header::READS).and_then(|h| h.to_str().ok())) < crate::database::READS {
         return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": crate::protocol::update_refusal(YOURS), "code": crate::protocol::code::UPDATE }))).into_response()).await;
     }
-    req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, credential }, sign_in: Some(name) });
+    req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, credential }, client: Some(name) });
     next.run(req).await
 }
 
@@ -144,12 +120,12 @@ async fn sandboxed(mut resp: Response) -> Response {
     resp
 }
 
-/// Who asked: this machine's own user, or someone signed in at the network's address, whom this device acts for.
+/// Who asked: this machine's own user, or a client device of the network, whom this device acts for.
 #[derive(Clone)]
 pub(crate) struct Me {
     pub(crate) caller: Caller,
-    /// A sign-in's client's name; none for this machine's own programs.
-    pub(crate) sign_in: Option<String>,
+    /// A client device's name; none for this machine's own programs.
+    pub(crate) client: Option<String>,
 }
 
 impl axum::extract::FromRequestParts<Node> for Me {
@@ -158,59 +134,7 @@ impl axum::extract::FromRequestParts<Node> for Me {
     async fn from_request_parts(parts: &mut axum::http::request::Parts, node: &Node) -> Result<Me, Error> {
         match parts.extensions.get::<Me>() {
             Some(me) => Ok(me.clone()),
-            None => Ok(Me { caller: Caller::local(node)?, sign_in: None }),
+            None => Ok(Me { caller: Caller::local(node)?, client: None }),
         }
     }
-}
-
-/// Someone signed in who isn't a user of the network yet: they are once one of their devices, or the admin who
-/// invited them, approves one of theirs.
-#[derive(Debug)]
-pub(super) struct NotJoined;
-
-impl std::fmt::Display for NotJoined {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "you haven't joined yet: the user who invited you approves this device with the code it shows")
-    }
-}
-
-impl std::error::Error for NotJoined {}
-
-/// A node's sign-ins checked lately, by their token's hash, until they expire.
-pub(crate) type SignedIns = std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>;
-
-/// Whom an access token from auth is for: one auth at the network's address signed for it, for a user of
-/// the network.
-async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
-    use sha2::Digest;
-    let now = crate::node::now_ms();
-    let hash: [u8; 32] = sha2::Sha256::digest(token.as_bytes()).into();
-    let kept = node.signed_ins().lock().unwrap().get(&hash).filter(|(_, until)| now < *until).map(|(me, _)| me.clone());
-    if let Some(me) = kept {
-        // Someone removed since is signed in no more, whatever their token says.
-        if node.is_user(&me.caller.user) {
-            return Ok(me);
-        }
-        node.signed_ins().lock().unwrap().remove(&hash);
-        anyhow::bail!(NotJoined);
-    }
-    let address = node.address()?;
-    let issuer = node.issuer()?;
-    let asked = token.clone();
-    let claims = tokio::task::spawn_blocking(move || {
-        let claims = issuer.verify(&asked, now)?;
-        // Only the network's own apps sign in for its address; a remote MCP client's token is for `<address>/mcp`, the
-        // remote MCP server, whose device it is, and never a sign-in here.
-        let address = address.trim_end_matches('/');
-        anyhow::ensure!(claims.for_resource(address), "that sign-in isn't for {address}");
-        Ok::<_, anyhow::Error>(claims)
-    })
-    .await??;
-    let (user, until) = (claims.sub.clone(), claims.exp * 1000);
-    anyhow::ensure!(node.is_user(&user), NotJoined);
-    let me = Me { caller: Caller { key: node.id(), user, agent: None, credential: Credential::SignIn(token) }, sign_in: Some(String::new()) };
-    let mut kept = node.signed_ins().lock().unwrap();
-    kept.retain(|_, (_, until)| now < *until);
-    kept.insert(hash, (me.clone(), until));
-    Ok(me)
 }

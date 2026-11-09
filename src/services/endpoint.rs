@@ -92,8 +92,6 @@ struct Inner {
     /// A connection to each node it asks for calls.
     conns: Mutex<HashMap<Key, Connection>>,
     strangers: AtomicUsize,
-    /// The network's auth, whose keys check a sign-in a node passes on to a service that serves everyone.
-    issuer: crate::cloudflare::Issuer,
     /// What its app declares its program may reach, as oned gave it (`declared.json`), if it did.
     declared: Option<crate::services::sandbox::Declared>,
 }
@@ -142,7 +140,6 @@ impl Service {
             }
         };
         let root = Hash::from_hex(&network.root)?;
-        let network_address = network.address.clone();
         let steps = read_steps(&dir.join("steps"));
         let members = placed(root, &steps);
         Ok(Service(Arc::new(Inner {
@@ -156,7 +153,6 @@ impl Service {
             endpoint: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
             strangers: AtomicUsize::new(0),
-            issuer: crate::cloudflare::Issuer::new(&network_address),
             declared: std::fs::read(dir.join(DECLARED)).ok().and_then(|b| serde_json::from_slice(&b).ok()),
         })))
     }
@@ -429,15 +425,10 @@ impl Service {
             (Some(Ok(key)), Some(user)) => (key, user.to_string()),
             _ => return Ok(json!({ "error": "who's asking?" })),
         };
-        // A sign-in a node passed on counts only once this service has checked it's that user's itself.
-        let signed_in = match me["token"].as_str() {
-            Some(token) => self.signed_in(token, &user).await,
-            None => false,
-        };
         let caller = {
             let known = self.0.known.lock().unwrap();
             let m = &*known;
-            if let Err(err) = may_call(m, &self.key(), &remote, &key, &user, signed_in) {
+            if let Err(err) = may_call(m, &self.key(), &remote, &key, &user) {
                 return Ok(json!({ "error": format!("{err:#}") }));
             }
             let member = m.user(&user)?;
@@ -458,13 +449,6 @@ impl Service {
             Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
             Err(err) => json!({ "error": format!("{err:#}") }),
         })
-    }
-
-    /// Whether `token` is an access token the network's auth signed for `user`, unexpired.
-    async fn signed_in(&self, token: &str, user: &str) -> bool {
-        let (service, token) = (self.clone(), token.to_string());
-        let claims = tokio::task::spawn_blocking(move || service.0.issuer.verify(&token, now_ms())).await;
-        matches!(claims, Ok(Ok(c)) if c.sub == user)
     }
 
     /// Asks a node of its user's own to run a call, as them: the first that answers. A service asks only for its own
@@ -554,14 +538,13 @@ impl Service {
 
 /// Whether a node, `remote`, may ask this service (`me`) for a call by `user` from their device `key`: this service
 /// serves them (its own user, or everyone, as its listing says), and the node is one of their own, calling for its
-/// own user; or, for a service that serves everyone, a node that runs their calls bringing their sign-in, which this
-/// service checked (`signed_in`). A node of someone else's, an admin's too, never calls as them otherwise.
-pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str, signed_in: bool) -> Result<()> {
+/// own user. A node of someone else's, an admin's too, never calls as them.
+pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str) -> Result<()> {
     let service = m.service(me)?.with_context(|| format!("this service isn't one of {YOURS}'s yet"))?;
     let node = m.compute(remote)?.with_context(|| format!("only {YOURS}'s devices are answered"))?;
     allowed!(m.may(user, "use", &scopes::service(me)), "{} serves only its own user", service.service.as_deref().unwrap_or("this service"));
     let own = node.user == user && (*key == *remote || m.client(key)?.is_some_and(|c| c.user == user));
-    ensure!(own || (service.shared && signed_in && m.serves(remote, user)?), "{} may not call as that user", short(remote));
+    ensure!(own, "{} may not call as that user", short(remote));
     Ok(())
 }
 

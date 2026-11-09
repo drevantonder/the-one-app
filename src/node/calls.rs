@@ -555,18 +555,10 @@ impl Node {
         req
     }
 
-    /// Asks another device to run a call: a sign-in's with the keys its caller handed this device, sealed to that one.
-    /// → its reply, and what it did, if this request is being traced.
+    /// Asks another device to run a call. → its reply, and what it did, if this request is being traced.
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<(Reply, Option<Value>)> {
-        // A sign-in's token goes along, with the keys it was handed: to a service only if it serves everyone, which
-        // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below), and
-        // app schedules' calls pass on none.
+        // A call handed keys passes on its keys alone (below), and app schedules' calls pass on none.
         let service = self.is_service(&device);
-        let shared = self.with(|i| Ok(i.r.db().service(&device)?.is_some_and(|s| s.shared)))?;
-        let token = match &me.credential {
-            Credential::SignIn(token) if !service || shared => Some(token),
-            _ => None,
-        };
         // A node listed as the caller's own client asks as itself: always for a call it runs with its own keys (one
         // another device of its user passed here as itself, whose key the receiving device would refuse from this
         // connection), and a direct client's call only for a service — never one another node passed on: forwarding
@@ -577,8 +569,8 @@ impl Node {
             _ => false,
         } && self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
-        let mut request = req.named(json!({ "service": req.service, "device": req.device, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } }));
-        // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
+        let mut request = req.named(json!({ "service": req.service, "device": req.device, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent } }));
+        // Keys handed here (a client device's, or with a call passed on) go on to another node sealed
         // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone: only those the
         // device runs, and only the call's app's.
         let resolved = self.resolve(req.clone());
@@ -594,14 +586,6 @@ impl Node {
             request = crate::keys::forwarded(&request, &me.user, req.client.as_deref().unwrap_or(""), &self.0.id, &seal, until, keys, &named)?["body"]["call"].take();
             request["me"]["key"] = json!(hex(&self.0.id));
             request["me"]["agent"] = json!(me.agent);
-        }
-        // A sign-in's keys go on only of the scopes the call reaches that the device runs.
-        if token.is_some()
-            && !service
-            && let Some(seal) = self.with(|i| Ok(i.r.db().seal_key(&device)?))?
-            && let Some(keys) = self.with(|i| Ok(call_scopes(i, &resolved, &me.user)?.into_iter().filter(|s| i.r.db().runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(&me.credential, &seal, &scopes, &resolved.app))?
-        {
-            request["keys"] = json!(keys);
         }
         let carried = self.carried(req)?;
         if !carried.is_empty() {
@@ -739,7 +723,7 @@ impl Node {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
             return Ok(Reply::error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs.")));
         }
-        // A sign-in's call that lacks a key of a scope it names fails here, before it runs or writes anything: its
+        // A call that lacks a key of a scope it names fails here, before it runs or writes anything: its
         // app's database's, and the Vault's there too if it says it uses items.
         let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), scopes::APP_DATABASE)).collect();
         if self.0.apps.describe(&req.app).await?["vault"].is_object() {

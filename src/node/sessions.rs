@@ -14,7 +14,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Session {
     user: String,
-    /// Until when its keys may be used: when its token expires, as its handoff says.
+    /// Until when its keys may be used, as its handoff says.
     pub until: u64,
     /// The database keys it was handed, by (scope, app, database), each by epoch.
     keys: HashMap<(String, String, String), Keys>,
@@ -23,8 +23,6 @@ pub(super) struct Session {
 #[derive(Default)]
 pub(super) struct Sessions {
     pub kept: Mutex<HashMap<Held, Session>>,
-    /// Sign-in at the network's address, whose keys check the tokens calls come with.
-    issuer: Mutex<Option<Arc<crate::cloudflare::Issuer>>>,
     /// The databases opened with keys a caller handed (or app schedules'), each kept open for calls handed
     /// exactly those keys, and forgotten with them: once their last session or app schedules end, or no live session holds
     /// them.
@@ -82,21 +80,18 @@ impl Session {
     }
 }
 
-/// What a caller's session is kept by: a sign-in's by its token's id (`keys::token_id`), a client device's by its key (forgotten once
+/// What a caller's session is kept by: a client device's by its key (forgotten once
 /// that device is removed), a call passed on by the node that passed it and its user.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) enum Held {
-    SignIn(String),
     Client(Key),
     Passed(Key, String),
 }
 
 impl Held {
-    /// The `for` of a handoff with its calls: the sha256 of an access token, a client device's key, or the key of the
-    /// node that passed it on.
+    /// The `for` of a handoff with its calls: a client device's key, or the key of the node that passed it on.
     fn handoff_for(&self) -> String {
         match self {
-            Held::SignIn(id) => id.clone(),
             Held::Client(key) | Held::Passed(key, _) => hex(key),
         }
     }
@@ -106,7 +101,6 @@ impl Credential {
     /// What its session is kept by: none for this device's own keys, or app schedules', which no session holds.
     fn held(&self) -> Option<Held> {
         match self {
-            Credential::SignIn(token) => Some(Held::SignIn(crate::keys::token_id(token))),
             Credential::Client(key) => Some(Held::Client(*key)),
             Credential::Passed { node, user } => Some(Held::Passed(*node, user.clone())),
             Credential::Own | Credential::AppSchedules { .. } => None,
@@ -117,32 +111,13 @@ impl Credential {
 /// How many of a scope database's last steps a key handed for it is checked against, newest first.
 const STEPS_CHECKED: usize = 64;
 
-/// The longest keys handed with no sign-in (a client device's, or with a call passed on) are kept here.
+/// The longest keys handed (a client device's, or with a call passed on) are kept here.
 const CLIENT_KEYS: u64 = 3_600_000;
 
 /// How often, at most, `global` is read for a client device this device doesn't list.
 const CATCH_UP_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl Node {
-    pub fn issuer(&self) -> Result<Arc<crate::cloudflare::Issuer>> {
-        let address = self.address()?;
-        let iss = crate::cloudflare::Issuer::new(&address).iss;
-        let mut kept = self.0.sessions.issuer.lock().unwrap();
-        Ok(match kept.as_ref().filter(|i| i.iss == iss) {
-            Some(issuer) => issuer.clone(),
-            None => kept.insert(Arc::new(crate::cloudflare::Issuer::new(&address))).clone(),
-        })
-    }
-
-    /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the network's auth
-    /// service signed for them, not yet expired.
-    pub(super) async fn token_of(&self, token: &str, user: &str) -> Option<String> {
-        let issuer = self.issuer().ok()?;
-        let asked = token.to_string();
-        let claims = tokio::task::spawn_blocking(move || issuer.verify(&asked, now_ms())).await.ok()?.ok()?;
-        (claims.sub == user).then(|| token.to_string())
-    }
-
     /// Whose client device `key` is, and its name: none if it isn't a device of the network, or was removed.
     pub fn client(&self, key: &Key) -> Option<(String, String)> {
         self.with_or(None, |i| Ok(i.r.db().client(key)?.map(|m| (m.user.clone(), m.name.clone()))))
@@ -172,8 +147,8 @@ impl Node {
     }
 
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for its calls with `credential`, as `user`'s:
-    /// only if they were sealed to it (any others are left), for that credential (`for`: a token's sha256, or a client
-    /// device's or the Cloudflare node's key), and not yet expired; and no longer than `most`, until when its caller's own
+    /// only if they were sealed to it (any others are left), for that credential (`for`: a client device's or the
+    /// Cloudflare node's key), and not yet expired; and no longer than `most`, until when its caller's own
     /// word lasts (a session's certificate's).
     pub fn hand(&self, credential: &Credential, user: &str, sealed: &str, most: u64) -> Result<()> {
         let held = credential.held().context("nothing is handed for this device's own calls, or app schedules'")?;
@@ -187,16 +162,10 @@ impl Node {
                 return Ok(());
             }
         };
-        ensure!(handoff.for_ == held.handoff_for(), "the keys handed are for another sign-in");
+        ensure!(handoff.for_ == held.handoff_for(), "the keys handed are for another device");
         let now = now_ms();
-        // Kept no longer than a sign-in's token lasts, whatever the handoff says (one that doesn't check brings no call
-        // here to use them); with none (a client device's, or a call passed on), an hour at most, as they're handed
-        // again with the calls.
-        let until = match credential {
-            Credential::SignIn(token) => handoff.until.min(self.token_expiry(token).unwrap_or(u64::MAX)),
-            _ => handoff.until.min(now + CLIENT_KEYS),
-        }
-        .min(most);
+        // An hour at most, as they're handed again with the calls.
+        let until = handoff.until.min(now + CLIENT_KEYS).min(most);
         // Keys that have run out are left, not refused: the call goes on and asks for what it needs (428), and its
         // caller hands them again.
         if until <= now {
@@ -230,13 +199,7 @@ impl Node {
         Ok(())
     }
 
-    /// When an access token expires, if the network's auth signed it: milliseconds.
-    fn token_expiry(&self, token: &str) -> Option<u64> {
-        let claims = self.issuer().ok()?.verify(token, now_ms()).ok()?;
-        Some(claims.exp.saturating_mul(1000))
-    }
-
-    /// Keeps the keys another node, `from`, handed with a call it passed on for `user` with no sign-in: sealed here for
+    /// Keeps the keys another node, `from`, handed with a call it passed on for `user`: sealed here for
     /// `from`'s key, and only of `scopes`, those the call names; a service's call (`service`) only with some, since
     /// a node's word alone runs no service. → the call's credential.
     pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope], service: bool) -> Result<Credential> {
@@ -267,14 +230,6 @@ impl Node {
             .map(|(n, key)| crate::keys::Handed { scope: n.scope, epoch: n.epoch, app: n.app, database: n.database, key })
             .collect();
         (keys, session.until)
-    }
-
-    /// The keys of `scopes` a sign-in's calls were handed here, sealed to another device (`to`, its seal key) for a
-    /// call of `app` this one passes on to it, until they're kept here.
-    pub(super) fn hand_on(&self, credential: &Credential, to: &[u8; 32], scopes: &[Scope], app: &str) -> Option<String> {
-        let held = credential.held()?;
-        let (keys, until) = self.passing_on(credential, scopes, app);
-        (until > 0).then(|| crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: held.handoff_for(), until, keys }).ok()).flatten()
     }
 
     /// The keys a caller was handed for a database, by epoch: for app schedules, theirs.
@@ -541,7 +496,7 @@ impl Node {
         }
     }
 
-    /// Forgets the sessions whose tokens expired, and the databases only they had open, with their keys.
+    /// Forgets the sessions that ran out, and the databases only they had open, with their keys.
     pub(super) fn forget_sessions(&self) {
         let now = now_ms();
         self.0.sessions.kept.lock().unwrap().retain(|_, s| s.live(now));

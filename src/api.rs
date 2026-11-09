@@ -1,11 +1,8 @@
 //! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; how a client device
-//! reaches it over iroh (src/node/net.rs), as its user; and how someone signed in at the network's address
-//! (this machine's CLI and MCP, after `sign-in`) reaches it, as themselves, for what their sign-in opens.
+//! reaches it over iroh (src/node/net.rs), as its user. A sign-in reaches no route here, ever: it only lets a device ask
+//! auth to be let in, and a device that's let in is a client device.
 //!
-//! A request with an access token from auth for the network's address (never a remote MCP client's, which is for
-//! `<address>/mcp`) is its user's, and so is its call's; someone it's for who isn't a user of the network yet is
-//! let in as a member by a device whose own user is an admin, since sign-in lets in only those an admin invited
-//! or users at the network's domain. A request without one is this machine's own programs', over its loopback with the
+//! A request that isn't a client device's is this machine's own programs', over its loopback with the
 //! token in the node's home (`local-token`, which only its user reads), or refused. A file put from elsewhere is read back
 //! only by whoever put it or may use a scope that names it, up to 512 MiB each and 2 GiB per user that nothing keeps
 //! yet, deleted an hour on (or once its request is answered) unless something does.
@@ -31,7 +28,7 @@ pub use agents::serve_guide;
 pub use calls::app_route;
 pub(crate) use calls::call_from_cloudflare_node;
 pub use guard::{FromClient, guarded};
-pub(crate) use guard::{Me, SignedIns};
+pub(crate) use guard::Me;
 pub use local::{LOCAL_TOKEN, agent, as_this_machine, local_token};
 pub(crate) use reply::{Body, Error, Reply, done, given, tagged};
 pub use serve::{serve, serve_until};
@@ -48,10 +45,7 @@ pub fn router(node: Node) -> Router {
 /// Who may ask a route. This machine's own programs may ask any; the rest only what its route says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Who {
-    /// Also someone signed in at the network's address, and the network's client devices over iroh, each as their
-    /// user, with what that user may do.
-    SignedIn,
-    /// Also the network's client devices over iroh, as their user, but no sign-in from elsewhere: MCP.
+    /// Also the network's client devices over iroh, each as their user, with what that user may do.
     Clients,
     /// Only this machine's own programs.
     ThisMachine,
@@ -115,11 +109,11 @@ pub fn routes() -> Routes {
         .merge(crate::node::screens::routes::routes())
 }
 
-/// Whether a client device may ask `path` (`Who::SignedIn` or `Who::Clients`), as the node's routes match it.
+/// Whether a client device may ask `path` (`Who::Clients`), as the node's routes match it.
 pub fn clients_may(path: &str) -> bool {
     let asked: Vec<&str> = path.split('/').collect();
     calls::app_route(path)
-        || routes().who().iter().filter(|(r, w)| r != calls::APP_ROUTE && matches!(w, Who::SignedIn | Who::Clients)).any(|(route, _)| {
+        || routes().who().iter().filter(|(r, w)| r != calls::APP_ROUTE && matches!(w, Who::Clients)).any(|(route, _)| {
             let route: Vec<&str> = route.split('/').collect();
             route.len() == asked.len() && route.iter().zip(&asked).all(|(r, a)| r == a || (r.starts_with('{') && !a.is_empty()))
         })
@@ -142,11 +136,11 @@ mod tests {
         Nobody,
         SignIn,
         Client,
-        ThisMachine,
     }
 
-    /// Every route refuses whoever its `Who` doesn't let in, and lets the rest on to who they are: a sign-in to its
-    /// token's check, a client device to whether it's one of the network's, this machine's own programs anywhere.
+    /// Every route refuses whoever its `Who` doesn't let in, and a client device goes on to whether it's one of the
+    /// network's. A sign-in reaches no route at all: if one were ever let through to be checked, its bad token would
+    /// answer 401 here rather than the refusal every other stranger gets.
     #[tokio::test(flavor = "multi_thread")]
     async fn each_route_refuses_whom_its_who_says() {
         let dir = std::env::temp_dir().join(format!("one-routes-{}", rand::random::<u64>()));
@@ -163,14 +157,13 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let at = listener.local_addr().unwrap();
         tokio::spawn(super::serve(listener, router));
-        let token = node.local_token().to_string();
         let asked = tokio::task::spawn_blocking(move || {
             // A refusal can close its connection (`refuse`), so none is kept for the next request.
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_idle_connections(0).build().into();
             let mut asked = Vec::new();
             for (route, who) in who {
                 let path: String = route.split('/').map(|s| if s.starts_with('{') { "x" } else { s }).collect::<Vec<_>>().join("/");
-                for asker in [Asker::Nobody, Asker::SignIn, Asker::Client, Asker::ThisMachine] {
+                for asker in [Asker::Nobody, Asker::SignIn, Asker::Client] {
                     let said: Vec<(u16, serde_json::Value)> = ["GET", "POST"]
                         .into_iter()
                         .filter_map(|method| {
@@ -179,7 +172,6 @@ mod tests {
                                 Asker::Nobody => req,
                                 Asker::SignIn => req.header("authorization", "Bearer not-a-sign-in"),
                                 Asker::Client => req.header("x-test-client", "1"),
-                                Asker::ThisMachine => req.header(crate::protocol::header::LOCAL_TOKEN, &token).header("authorization", "Bearer not-a-sign-in"),
                             };
                             let mut resp = agent.run(req.body("{}".to_string()).unwrap()).unwrap();
                             let status = resp.status().as_u16();
@@ -197,10 +189,8 @@ mod tests {
         for (route, who, asker, status, body) in asked {
             let refused = status == 403 && body["code"] != crate::protocol::code::NOT_LET_IN;
             let (want_refused, then) = match (who, asker) {
-                (_, Asker::Nobody) => (true, None),
-                (Who::SignedIn, Asker::SignIn) | (_, Asker::ThisMachine) => (false, Some(401)),
-                (_, Asker::SignIn) => (true, None),
-                (Who::SignedIn | Who::Clients, Asker::Client) => (false, Some(403)),
+                (_, Asker::Nobody | Asker::SignIn) => (true, None),
+                (Who::Clients, Asker::Client) => (false, Some(403)),
                 (Who::ThisMachine, Asker::Client) => (true, None),
             };
             assert_eq!(refused, want_refused, "{route} ({who:?}) as {asker:?}: {status} {body}");

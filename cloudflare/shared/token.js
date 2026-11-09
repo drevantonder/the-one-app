@@ -1,6 +1,6 @@
 // Access tokens: JWTs auth signs with Ed25519 (EdDSA), its public keys at `<auth>/jwks`. Claims: iss (the
 // auth's URL), sub (the user's id), aud (what it's for), azp and client_id (the client), scope, sid,
-// iat, exp, jti. Nodes check them the same way (src/cloudflare.rs).
+// iat, exp, jti. Only auth and the remote MCP server read them: no node takes a sign-in.
 
 import { b64u } from "./crypto.js";
 

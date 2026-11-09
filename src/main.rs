@@ -203,19 +203,14 @@ fn connection(node: &Client) -> String {
     format!("You're {} in {network}, on {device}{ready}.", state.looking())
 }
 
-/// How the CLI asks this machine's node (`agent()`): as whom this machine is signed in as, when `signed_in`.
-struct Http {
-    signed_in: bool,
-}
+/// How the CLI asks this machine's node (`agent()`).
+struct Http;
 
 impl one::api::client::Via for Http {
     fn send(&self, method: &str, path: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>, wait: Option<std::time::Duration>) -> Result<one::api::client::Answer> {
         let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{}{path}", api::addr()));
         for (name, value) in headers {
             req = req.header(*name, *value);
-        }
-        if self.signed_in && let Some(token) = token() {
-            req = req.header("authorization", format!("Bearer {token}"));
         }
         let agent = agent();
         let req = agent.configure_request(req.body(body.unwrap_or_default())?).timeout_global(wait).build();
@@ -230,27 +225,7 @@ impl one::api::client::Via for Http {
 }
 
 fn node() -> Client {
-    Client::new(Http { signed_in: true }, false)
-}
-
-/// The access token this machine is signed in with, sent with what it asks its node: none as a device, which asks as its
-/// own key, its sign-in only for asking to be let in.
-fn token() -> Option<String> {
-    if client_device::active() {
-        return None;
-    }
-    crate::sign_in::token().unwrap_or_else(|err| {
-        static SAID: std::sync::Once = std::sync::Once::new();
-        SAID.call_once(|| eprintln!("{err:#}"));
-        None
-    })
-}
-
-fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
-    match token() {
-        Some(token) => r.header("authorization", format!("Bearer {token}")),
-        None => r,
-    }
+    Client::new(Http, false)
 }
 
 /// An HTTP client for this machine's node, as one of its own programs; or, where none runs and this computer is a

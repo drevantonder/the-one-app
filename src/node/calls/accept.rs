@@ -4,12 +4,11 @@ use crate::protocol::allowed;
 use super::*;
 
 impl Node {
-    /// Runs a call another device, `remote`, asked for. A sign-in's runs only if its token is its caller's, with the
-    /// keys handed with it, never this device's own: from a node, only in scopes that node runs. One with no token runs
-    /// only from a client device of its caller, as that device's own: only then are this device's keys used, and only
-    /// for its own user, whose device that is.
+    /// Runs a call another device, `remote`, asked for. One passed on with keys runs on those keys alone, never this
+    /// device's own, and only in scopes that node runs. Any other runs only from a client device of its caller, as that
+    /// device's own: only then are this device's keys used, and only for its own user, whose device that is.
     pub(in crate::node) async fn accept_call(&self, remote: Key, request: &Value) -> Reply {
-        match self.accept(remote, request).await {
+        match self.accept(remote, request) {
             Ok((mut req, me)) => {
                 req.puts = match self.take_carried(&me, request) {
                     Ok(puts) => puts,
@@ -44,7 +43,6 @@ impl Node {
     /// service gets no more than its own app's tools for its own user.
     pub(super) fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let me = self.check_caller(remote, request)?;
-        ensure!(request["me"]["token"].is_null(), "a service asks with no sign-in");
         let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote)?.map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this network")?;
         ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own user's node");
         let mut req: CallRequest = serde_json::from_value(crate::services::endpoint::limited(&name, request)?)?;
@@ -54,16 +52,11 @@ impl Node {
         Ok((req, me))
     }
 
-    pub(super) async fn accept(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
+    pub(super) fn accept(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let mut me = self.check_caller(remote, request)?;
-        let passed = request["me"]["token"].is_null() && request["keys"].is_string();
-        if let Some(token) = request["me"]["token"].as_str() {
-            me.credential = Credential::SignIn(self.token_of(token, &me.user).await.context("the sign-in it came with isn't its caller's, or has expired")?);
-            if let Some(keys) = request["keys"].as_str() {
-                self.hand(&me.credential, &me.user, keys, u64::MAX)?;
-            }
-        } else if let Some(keys) = request["keys"].as_str() {
-            // Passed on with no sign-in: run on the keys it was handed alone, never this device's own.
+        let passed = request["keys"].is_string();
+        if let Some(keys) = request["keys"].as_str() {
+            // Passed on: run on the keys it was handed alone, never this device's own.
             me.credential = self.take_passed(&remote, &me.user, request, keys, true)?;
         }
         let mut req = call_in(request)?;
@@ -73,7 +66,7 @@ impl Node {
             (req.from, req.depth) = (None, 0);
         }
         // A service that runs as this device's own user (Shell, say) runs only for a device of theirs, never for a
-        // sign-in a node passes on.
+        // call a node passes on.
         let resolved = self.resolve(req.clone());
         ensure!(own || resolved.service.is_none(), "{} runs only for its user's own devices", resolved.app);
         if !own && req.service.is_none() {
@@ -92,7 +85,7 @@ impl Node {
         Ok((req, me))
     }
 
-    /// The keys a call `from` another node passed on for `user` with no sign-in was handed (`sealed`): sealed here for
+    /// The keys a call `from` another node passed on for `user` was handed (`sealed`): sealed here for
     /// `from`'s key, of the scopes the call names alone, every one of which `user` may use and, for a node on a machine
     /// (`machine`), `from` runs. → its credential.
     pub(crate) fn take_passed(&self, from: &Key, user: &str, call: &Value, sealed: &str, machine: bool) -> Result<Credential> {
@@ -108,21 +101,18 @@ impl Node {
         self.hand_passed(from, user, sealed, &scopes, service)
     }
 
-    /// Who a call another device passed on is for: with a sign-in's token, someone that device's node serves or whose
-    /// client it is; with none, only the user whose client device `remote` is, asking itself; a user's service asks as
-    /// them, as itself.
+    /// Who a call another device passed on is for: only the user whose client device `remote` is, asking itself; a
+    /// node passing on keys it was handed, as itself; a user's service asks as them, as itself.
     pub(in crate::node) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
-        let token = request["me"]["token"].as_str().is_some();
-        // Passed on by another node with no sign-in, the keys it was handed with it, which `take_passed` checks.
-        let passed = !token && request["keys"].is_string();
+        // Passed on by another node, the keys it was handed with it, which `take_passed` checks.
+        let passed = request["keys"].is_string();
         self.with(|i| {
             let m = i.r.db();
             let client = m.client(&remote)?.is_some_and(|c| c.user == user);
             let service = m.service(&remote)?.is_some_and(|s| s.user == user);
             let allowed = match () {
-                _ if token => client || m.serves(&remote, &user)?,
                 _ if passed => remote == key && m.compute(&remote)?.is_some(),
                 _ => (client || service) && remote == key,
             };

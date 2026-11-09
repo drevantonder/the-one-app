@@ -16,14 +16,14 @@ use super::reply::{Body, Reply, done, given};
 pub(super) fn routes() -> Routes {
     use Who::*;
     Routes::default()
-        .route("/v1/state", SignedIn, get(state))
+        .route("/v1/state", Clients, get(state))
         .says(Op::get("Who's who and what this device reads of the network").answers::<crate::state::State>())
-        .route("/v1/keys", SignedIn, get(keys_get).post(keys_post))
+        .route("/v1/keys", Clients, get(keys_get).post(keys_post))
         .route("/v1/create", ThisMachine, post(create))
         .route("/v1/join", ThisMachine, post(join))
         .says(Op::post("Join a network with a pairing code").body::<Join>().done())
-        .route("/v1/steps", SignedIn, post(steps))
-        .route("/v1/steps/global", SignedIn, get(global_steps))
+        .route("/v1/steps", Clients, post(steps))
+        .route("/v1/steps/global", Clients, get(global_steps))
 }
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
@@ -52,9 +52,9 @@ async fn keys_post(State(node): State<Node>, me: Me, Body(body): Body<SealedKey>
     Ok(Json(node.seal_key(&me.caller, &scope, body.n, body.to.as_deref(), body.app.as_deref(), body.vault, given(&body.sealed, "sealed")?).await?))
 }
 
-async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Reply {
-    Ok(Json(json!(match signed_in {
-        Some(me) => node.state_for_sign_in(&me.caller, me.sign_in.as_deref().unwrap_or_default())?,
+async fn state(State(node): State<Node>, client: Option<axum::Extension<Me>>) -> Reply {
+    Ok(Json(json!(match client {
+        Some(me) => node.state_for_client(&me.caller, me.client.as_deref().unwrap_or_default())?,
         None => node.state()?,
     })))
 }

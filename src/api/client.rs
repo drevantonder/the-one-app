@@ -46,7 +46,7 @@ pub struct Called {
 }
 
 impl Client {
-    /// `elsewhere`: it asks for someone who isn't this machine's own user, a device of theirs or a sign-in, whose MCP
+    /// `elsewhere`: it asks for someone who isn't this machine's own user, a device of theirs, whose MCP
     /// request the node answers.
     pub fn new(via: impl Via + 'static, elsewhere: bool) -> Client {
         Client { via: std::sync::Arc::new(via), elsewhere, needed: Mutex::new(None), apps: Mutex::new(None) }
@@ -171,7 +171,7 @@ pub fn answered(status: u16, body: Value) -> Result<Value> {
 }
 
 /// The node's own routes, asked in the node itself as the request its MCP answers asked them: with that request's proof
-/// of who asks (the client device its connection proved, or this machine's own program, signed in or not), which
+/// of who asks (the client device its connection proved, or this machine's own program), which
 /// `only_this_machine` checks for each, as it would over HTTP.
 pub struct InProcess {
     router: axum::Router,

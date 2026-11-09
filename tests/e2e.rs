@@ -580,7 +580,7 @@ async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {
 async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     let a = start("put-from").await;
     create(&a, "Home", "Andre").await;
-    let caller = |user: &str| one::node::Caller { key: a.id(), user: user.into(), agent: None, credential: one::node::Credential::SignIn(format!("{user}'s")) };
+    let caller = |user: &str| one::node::Caller { key: a.id(), user: user.into(), agent: None, credential: one::node::Credential::Client([user.len() as u8; 32]) };
     let (sam, andre) = (caller("sam"), caller(&a.user().unwrap()));
     let (hash, size) = a.put_blob_from(&sam, axum::body::Body::from("Sam's file")).await.unwrap();
     assert_eq!(size, 10);
@@ -667,10 +667,10 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     assert_eq!(a.service_builds().await.get("tiny"), Some(&Build::None));
 
     // Sam may not deploy Andre's app, so names no build of its service.
-    let sam = one::node::Caller { key: a.id(), user: "sam".into(), agent: None, credential: one::node::Credential::SignIn("Sam's".into()) };
+    let sam = one::node::Caller { key: a.id(), user: "sam".into(), agent: None, credential: one::node::Credential::Client([8; 32]) };
     assert!(a.deploy(&sam, "tiny", &named, false).await.is_err());
     // Nor does Andre, from elsewhere, name a build he can't read: one Sam put, by its hash.
-    let away = one::node::Caller { key: [7; 32], credential: one::node::Credential::SignIn("Andre's".into()), ..me.clone() };
+    let away = one::node::Caller { key: [7; 32], credential: one::node::Credential::Client([7; 32]), ..me.clone() };
     let (sams, _) = a.put_blob_from(&sam, axum::body::Body::from("Sam's program")).await.unwrap();
     let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::app::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::app::bundle::SERVICES.to_string(), json!({ one::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
     let refused = a.deploy(&away, "tiny", &his, false).await.unwrap_err();

@@ -14,19 +14,16 @@ pub struct Caller {
 }
 
 /// What a caller came with: this device's own keys, or the keys it was handed for one of these, kept here by it
-/// (sessions.rs) and never this device's own.
+/// (sessions.rs) and never this device's own. A sign-in is none of them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Credential {
     /// None: this device's own programs, or a device or service of its own user asking as itself. Its calls use this
     /// device's own keys, for its own user alone.
     Own,
-    /// An access token the network's sign-in signed, passed on with its calls to another device, with the keys it was
-    /// handed.
-    SignIn(String),
     /// A client device's calls over iroh, by its key, proven by QUIC: never a token anyone sends, so no request reaches
     /// what a device was handed by naming it.
     Client(Key),
-    /// A call another node (`node`, its endpoint key, proven by QUIC) passed on for `user` with no sign-in: it runs only
+    /// A call another node (`node`, its endpoint key, proven by QUIC) passed on for `user`: it runs only
     /// on the keys it was handed, sealed here for that node's key.
     Passed { node: Key, user: String },
     /// App schedules' calls: `app`'s in `scope`, with the keys sealed to this device for them alone. Never passed on.
