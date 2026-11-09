@@ -17,6 +17,9 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Everyone**: what users see for the network-wide scope (`global` in code).
 - **Scope**: whose something is: everyone's, a user's, or a group's. Each has its own keys and its own app databases.
   Our word only: users see a user, a group or everyone.
+- **Identity**: what a user signs in with: a passkey, or their account at a **provider** (an OIDC one the network has
+  registered with, by issuer and subject). A user can have several, each linked from a device already signed in.
+  Avoid: login, for this.
 - **Agent**: an AI acting for a user (Claude Code, Codex, a T3 thread), through one of that user's clients: the CLI,
   MCP or a browser. It acts as that user, never as itself: it has no permissions of its own.
 
@@ -97,7 +100,7 @@ These run on Cloudflare, each named by its job, with no name for them together. 
 
 - **Gateway**: the network's address, the one users use. It sends each request where its path says, and holds and runs
   nothing.
-- **Auth**: who you are, and nothing more (passkey, or Google for a workplace). It opens no key. Users still "sign in" to it; it is never "the sign-in". Avoid: sign-in.
+- **Auth**: who you are, and nothing more (a passkey, or a provider the network has registered with). It opens no key. Users still "sign in" to it; it is never "the sign-in". Avoid: sign-in.
 - **Relay**: carries packets between endpoints that can't reach each other directly, and keeps the list of the network's
   endpoints. It reads nothing.
 - **URL signer**: the only holder of the bucket's credentials. It hands the network's endpoints signed URLs, which open
