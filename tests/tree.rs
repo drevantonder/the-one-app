@@ -40,7 +40,8 @@ fn what_runs_in_wasm_builds() {
 /// because `tauri`'s build script writes the Kotlin that `android/build.sh` compiles only when it runs with `build.sh`'s
 /// environment, and doesn't run again when that changes, so a check without it first would leave the build with no
 /// `TauriActivity`. Cold the two Apple checks took 2½ minutes on an idle machine and 7½ on a busy one; warm, with nothing
-/// changed, the whole test takes 2 seconds. The Apple targets' rust-std is a `rustup target add` away, so a missing one fails here, where a missing
+/// changed, the whole test takes 2 seconds. The Apple checks run rustc without sccache (`RUSTC_WRAPPER` empty): cc-rs puts
+/// it in front of the C compiler too, and sccache refuses the `/bin/true` stand-in ("Compiler not supported"). The Apple targets' rust-std is a `rustup target add` away, so a missing one fails here, where a missing
 /// NDK, a heavy install, only skips Android.
 #[test]
 fn the_native_app_builds() {
