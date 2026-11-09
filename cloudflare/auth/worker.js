@@ -727,15 +727,22 @@ export class Auth extends DurableObject {
   /// from the Google sign-in this browser started for it, which goes straight on.
   async about(request, query) {
     const session = await this.auth.api.getSession({ headers: request.headers });
+    // A browser signing in to the network's own page, with no client: only whether Google said no for an admin.
+    if (!query.get("client_id")) return { admin: await this.refusedAsAdmin(request) };
     const client = await this.client(query.get("client_id"));
     const redirect = query.get("redirect_uri");
     const origin = new URL(this.env.ADDRESS).origin;
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
     const goes = web ? null : goesTo(uris.includes(redirect) ? redirect : uris[0], origin);
-    const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
-    const admin = !!secret && this.ctx.storage.sql.exec("select 1 from google_admins where id = ? and made > ?", await hash(secret), Date.now() - STARTED).toArray().length;
+    const admin = await this.refusedAsAdmin(request);
     return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, user: session?.user.name || null, fresh: !!(await this.started(request, session, query)), admin };
+  }
+
+  /// Whether the Google sign-in this browser started just now was refused because the user is an admin.
+  async refusedAsAdmin(request) {
+    const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
+    return !!secret && this.ctx.storage.sql.exec("select 1 from google_admins where id = ? and made > ?", await hash(secret), Date.now() - STARTED).toArray().length > 0;
   }
 
   // Signing in to a client with Google goes straight on once Google says yes, with no second tap, but only for the
@@ -746,7 +753,7 @@ export class Auth extends DurableObject {
   async startGoogle(request, { oauth_query }) {
     this.fromOurPages(request);
     const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
-    await this.client(query.get("client_id"));
+    if (query.get("client_id")) await this.client(query.get("client_id"));
     const secret = b64u.encode(crypto.getRandomValues(new Uint8Array(32)));
     const sql = this.ctx.storage.sql;
     sql.exec("delete from google_starts where made <= ?", Date.now() - STARTED);

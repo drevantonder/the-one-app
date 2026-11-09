@@ -196,6 +196,9 @@ function googlePage(look) {
     const returning = !failed && Date.now() - Number(sessionStorage.getItem("google") || 0) < 600000;
     sessionStorage.removeItem("google");
     let waiting = returning ? busy(button, "Signing You In…") : null;
+    // Google said no because they're an admin: the way in is the passkey, which is why it's the other button.
+    const admins = (about) => about.admin && !about.fresh && say("You're an admin, so you sign in with your passkey, not Google.");
+    if (!client_id && failed) api("/sign-in/about?").then(admins, () => {});
     if (client_id) (async () => {
       try {
         const about = await api("/sign-in/about?" + oauth_query);
@@ -203,8 +206,7 @@ function googlePage(look) {
         document.title = title;
         document.getElementById("title").textContent = title;
         if (!about.web) acts(about);
-        // Google said no because they're an admin: the way in is the passkey, which is why it's the other button.
-        if (about.admin && !about.fresh) say("You're an admin, so you sign in with your passkey, not Google.");
+        admins(about);
         // Back from the Google sign-in started here for this client, just now: on to it.
         if (about.fresh && !failed) {
           waiting ||= busy(button, "Signing You In…");
@@ -218,8 +220,9 @@ function googlePage(look) {
       say();
       const undo = busy(button, "Opening Google…");
       try {
-        if (client_id) await api("/sign-in/google", { oauth_query });
-        const out = await api("/api/auth/sign-in/social", { provider: "google", callbackURL: back, errorCallbackURL: back });
+        await api("/sign-in/google", { oauth_query });
+        // Back to this page, with Google's no, also for the web client, whose sign-in goes on to its own page.
+        const out = await api("/api/auth/sign-in/social", { provider: "google", callbackURL: back, errorCallbackURL: client_id ? back : "/sign-in" });
         sessionStorage.setItem("google", String(Date.now()));
         location.href = out.url;
       } catch (err) {
