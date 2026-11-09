@@ -7,11 +7,11 @@ import { AppIcon, Card, Empty, Grid, Problem, Progress, Skeleton } from "@one/ui
 function Meter({ label, w }) {
   if (!w || w.used == null) return null
   return (
-    <div className="grid grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem] items-center gap-x-3 gap-y-1 text-sm @sm:grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem_8rem]">
+    <div className="grid grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem] items-center gap-x-3 gap-y-1 text-sm @sm:grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem_10rem]">
       <span className="truncate text-muted-foreground" title={label}>{label}</span>
       <Progress value={w.used} meter />
       <span className="text-right tabular-nums">{w.used}%</span>
-      <span className="col-span-3 -mt-0.5 text-xs text-muted-foreground @sm:col-span-1 @sm:mt-0 @sm:text-right @sm:text-sm @sm:whitespace-nowrap">
+      <span className="col-span-3 -mt-0.5 text-xs text-muted-foreground @sm:col-span-1 @sm:mt-0 @sm:text-right @sm:whitespace-nowrap">
         {w.countdown ? `resets ${w.countdown}` : ""}
       </span>
     </div>

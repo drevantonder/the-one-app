@@ -1,7 +1,7 @@
 // Agent Devices' page: every agent device as a picture, those in use first, each with its name and one short line.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, Grid, Problem } from "@one/ui"
+import { Empty, Grid, Problem, Skeleton } from "@one/ui"
 
 const key = (c) => `${c.on || ""}/${c.name}`
 const at = (c) => (c.on ? { device: c.name, on: c.on } : { device: c.name })
@@ -143,7 +143,7 @@ function Page() {
 
   // Tried again every few seconds, so no button.
   if (problem) return <Problem title={problem.title} text={problem.next} />
-  if (!devices) return <Empty>Loading…</Empty>
+  if (!devices) return <Grid min="16rem" max={4}>{[0, 1].map((i) => <Skeleton key={i} className="aspect-[16/10] rounded-xl" />)}</Grid>
   if (!devices.length) return <Empty>None yet. Agents make one when they need a browser.</Empty>
   const hosts = new Set(devices.map((c) => c.on)).size
   const order = (c) => (c.borrowed ? 0 : paused(c) ? 2 : 1)
