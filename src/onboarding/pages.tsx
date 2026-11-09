@@ -1,6 +1,6 @@
 // What auth's pages show as they open, each @one/ui's Welcome: drawn to HTML when @one/ui is built (src/screen/ui/build.js
 // writes them to its dist/auth.json), with {{name}} and the rest for pages.js to fill in. pages.js serves them, with the
-// scripts that make them work, and draw.js draws them all to HTML files to look at.
+// scripts that make them work, and render.js draws them all to HTML files to look at.
 import { Problem } from "@/components/problem"
 import { List, ListRow } from "@/components/layout"
 import { Button } from "@/components/ui/button"
