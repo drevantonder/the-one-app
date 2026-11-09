@@ -8,7 +8,7 @@ const P = one.params
 
 function Issue() {
   useEffect(() => {
-    one.title(`#${P.number}`)
+    one.title(P.number ? `#${P.number}` : "Issue")
   }, [])
   return <div className="max-w-5xl"><IssueView repo={P.repo} number={P.number} onGone={() => one.close()} /></div>
 }
