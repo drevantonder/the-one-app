@@ -280,7 +280,12 @@ function showStill(f, html) {
   f.still = { frame, html: oneHost.look(html.replace("</head>", `${scrolled}</head>`), appearance(), false, platform.look()) };
   $(".screen-status", f.into)?.remove();
   f.into.prepend(frame);
-  if (html.includes("large-title")) f.into.dataset.large = "";
+  if (html.includes("large-title")) {
+    f.into.dataset.large = "";
+    // Its large title says its name, so the bar doesn't say it too while this shows.
+    f.said ??= "";
+    if (f.begun) saying(f);
+  }
   // One that never says it has drawn shows anyway, whatever it's waiting on.
   setTimeout(() => f.still?.frame === frame && screenDrew(f), 4000);
 }
