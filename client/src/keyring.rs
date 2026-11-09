@@ -178,6 +178,11 @@ impl<O: Opens> Keyring<O> {
         };
         let (epochs, steps) = match had {
             Some((kept, steps)) if reader.restart(&kept, now).is_ok() => {
+                if !reader.whole()
+                    && let Ok(Some((fresh, _))) = one::database::steps::read_again(bucket, reader.root(), reader.at(), &me, &self.opens, now).await
+                {
+                    reader = fresh;
+                }
                 if !steps.is_empty() {
                     reader.read(bucket, &steps, now).await.map_err(failed)?;
                 }

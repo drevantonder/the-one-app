@@ -24,6 +24,11 @@ impl Node {
 
     /// `read_steps`, while this device holds its writes.
     pub(super) async fn read_steps_now(&self) -> Result<bool> {
+        if self.with(|i| Ok(i.r.read_again))?
+            && let Err(err) = self.read_global_again().await
+        {
+            tracing::warn!("reading who's who again: {err:#}: it's tried again next time");
+        }
         let bucket = self.bucket()?;
         let from = self.with(|i| Ok(i.r.looked()))?;
         loop {
@@ -52,6 +57,23 @@ impl Node {
             self.keep_global();
         }
         Ok(read)
+    }
+
+    /// Reads `global`'s steps again from the first, for what an older build kept here, which lacks those it took for junk
+    /// (`steps::read_again`). What it read takes the place of what was kept, and if it doesn't reach as far, what's kept
+    /// stays until this device next starts.
+    async fn read_global_again(&self) -> Result<()> {
+        let (root, at) = self.with(|i| Ok((i.r.root(), i.r.looked())))?;
+        let Some((fresh, epochs)) = steps::read_again(&self.bucket()?, root, at, &hex(&self.0.id), &self.seal_secret(), now_ms()).await? else {
+            tracing::warn!("who's who read again doesn't reach step {at}, where this device was: it stays as it was");
+            self.with(|i| Ok(i.r.read_again = false))?;
+            return Ok(());
+        };
+        let handled = self.with(|i| i.r.replace(fresh))?;
+        self.0.databases.epochs.lock().unwrap().insert(Scope::Global, epochs);
+        self.after(handled).await?;
+        self.keep_global();
+        Ok(())
     }
 
     /// Where this device read `global`'s scope database to, and the database there, kept in its folder: what it starts
@@ -201,6 +223,11 @@ impl Node {
             let reader = self.with(|i| steps::ScopeReader::start(i.r.truth().context("global's log isn't frozen")?, scope, start.as_ref(), now_ms()))?;
             self.with(|i| Ok(i.scope_dbs.insert(scope.clone(), reader)))?;
         }
+        if self.with(|i| Ok(i.scope_dbs.get(scope).is_some_and(|r| !r.whole)))?
+            && let Err(err) = self.read_scope_again(scope, &keys).await
+        {
+            tracing::warn!("reading {scope} again: {err:#}: it's tried again next time");
+        }
         let (from, made) = self.with(|i| Ok((i.scope_dbs.get(scope).map_or(0, |r| r.at), i.r.db().epoch(scope)?)))?;
         let read = steps::read(&bucket, &keys, scope, from, made).await?;
         let (kept, took, forgotten) = self.with(|i| {
@@ -225,6 +252,22 @@ impl Node {
         // A newer release's step: this device reads no further until it's updated.
         took?;
         Ok(!read.steps.is_empty())
+    }
+
+    /// A scope's steps read again from its start, for what an older build kept here (`read_global_again`), in its place
+    /// if that reaches as far.
+    async fn read_scope_again(&self, scope: &Scope, keys: &crate::database::stored::Keys) -> Result<()> {
+        let bucket = self.bucket()?;
+        let start = steps::ScopeReader::fetch_start(&bucket, keys, scope).await?;
+        let (mut fresh, made) = self.with(|i| Ok((steps::ScopeReader::start(i.r.truth().context("global's log isn't frozen")?, scope, start.as_ref(), now_ms())?, i.r.db().epoch(scope)?)))?;
+        let read = steps::read(&bucket, keys, scope, 0, made).await?;
+        self.with(|i| {
+            fresh.take(0, &read, i.r.db(), scope, now_ms())?;
+            if read.waits.is_none() && i.scope_dbs.get(scope).is_some_and(|r| fresh.at >= r.at) {
+                i.scope_dbs.insert(scope.clone(), fresh);
+            }
+            Ok(())
+        })
     }
 
     /// Writes `content` to a scope's own database (not `global`'s) as a step this device signs as `user`, once

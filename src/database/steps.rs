@@ -443,12 +443,22 @@ pub fn started(freeze: &Freeze, global: &ScopeDb, scope: &Scope, given: Option<&
     normalize(copy, scope, now)
 }
 
+/// Whether what a reader kept came from a build that opens every sealed format this one does. One that doesn't took each
+/// step in a newer format for junk and kept a position past it, so what it kept lacks those steps and nothing says so.
+/// That's read again from the bucket, where every step stays (`read_again`), and serves until then: it's still how a
+/// device reaches the bucket at all.
+fn whole(kept: &Value) -> bool {
+    kept["sealed"] == crate::keys::FORMAT
+}
+
 /// `global`'s scope database as a reader has it: the freeze, the last position applied (or passed over), and the
 /// database there.
 pub struct Truth {
     pub freeze: Freeze,
     pub at: u64,
     pub db: ScopeDb,
+    /// Whether it read every step: false until what an older build kept is read again (`whole`).
+    pub whole: bool,
 }
 
 impl Truth {
@@ -485,7 +495,7 @@ impl Truth {
         let freeze = Freeze::of(&given.step, at)?;
         let copy = connection(given.copy.as_deref().context("a freeze carries its copy")?)?;
         ensure!(crate::database::stored::state_hash(&copy)? == freeze.hash, "a freeze's copy isn't what it says");
-        Ok(Truth { freeze, at, db: normalize(copy, &Scope::Global, now)? })
+        Ok(Truth { freeze, at, db: normalize(copy, &Scope::Global, now)?, whole: true })
     }
 
     /// Takes step `at`, the next, as of `now`: applied if it counts, passed over if not (or none). → the database before
@@ -507,10 +517,15 @@ impl Truth {
         }
     }
 
-    /// As a reader keeps it, to start from again: `{ freeze, freeze_at, at, hash, db }`, the database's bytes base64.
+    /// As a reader keeps it, to start from again: `{ freeze, freeze_at, at, hash, db }`, the database's bytes base64, and
+    /// `sealed`, the newest format it opens, once it read every step (`whole`).
     pub fn keep(&mut self) -> Result<Value> {
         let bytes = self.db.bytes()?;
-        Ok(json!({ "freeze": self.freeze.content().data, "freeze_at": self.freeze.at, "at": self.at, "hash": crate::database::stored::state_hash(self.db.conn())?, "db": data_encoding::BASE64.encode(&bytes) }))
+        let mut kept = json!({ "freeze": self.freeze.content().data, "freeze_at": self.freeze.at, "at": self.at, "hash": crate::database::stored::state_hash(self.db.conn())?, "db": data_encoding::BASE64.encode(&bytes) });
+        if self.whole {
+            kept["sealed"] = json!(crate::keys::FORMAT);
+        }
+        Ok(kept)
     }
 
     /// What `keep` kept, checked against the hash it kept with it, in this release's form.
@@ -519,7 +534,7 @@ impl Truth {
         let conn = connection(&bytes)?;
         ensure!(Some(crate::database::stored::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "who's who this device kept isn't what it was");
         let freeze = Freeze::from_data(&kept["freeze"], kept["freeze_at"].as_u64().context("no freeze kept")?)?;
-        Ok(Truth { freeze, at: kept["at"].as_u64().context("no position kept")?, db: normalize(conn, &Scope::Global, now)? })
+        Ok(Truth { freeze, at: kept["at"].as_u64().context("no position kept")?, db: normalize(conn, &Scope::Global, now)?, whole: whole(kept) })
     }
 }
 
@@ -590,7 +605,7 @@ impl Truth {
             (None, Some(_)) => bail!("no copy comes before the freeze's"),
         };
         ensure!(after.len() as u64 == welcome.at - at, "not every step up to where it was welcomed is here");
-        let mut t = Truth { freeze: anchored.freeze, at, db };
+        let mut t = Truth { freeze: anchored.freeze, at, db, whole: true };
         for given in after {
             t.take(t.at + 1, given.as_ref().map(|g| &g.step), now)?;
         }
@@ -711,6 +726,11 @@ impl Reader {
 
     pub fn at(&self) -> u64 {
         self.truth.as_ref().map_or(self.looked, |t| t.at)
+    }
+
+    /// Whether it read every step it holds, as `Truth::whole`.
+    pub fn whole(&self) -> bool {
+        self.truth.as_ref().is_none_or(|t| t.whole)
     }
 
     /// Starts from `truth`, unless it's read the freeze itself: as kept (`Truth::kept`) or worked out from a Welcome.
@@ -902,6 +922,14 @@ pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Re
     Ok((epochs, keys))
 }
 
+/// Who's who read again from the first step (`read_sealed_to`), for a reader of the network `root` at position `at` that
+/// isn't `whole`, if it reaches that far, and the epochs it opened: none if it doesn't, so what's kept stays.
+pub async fn read_again(bucket: &impl crate::bucket::Bucket, root: Option<Hash>, at: u64, to: &str, opens: &impl crate::keys::Opens, now: u64) -> Result<Option<(Reader, BTreeMap<u32, [u8; 32]>)>> {
+    let mut fresh = Reader::new(root);
+    let (epochs, _) = read_sealed_to(bucket, &mut fresh, to, opens, &mut None, now).await?;
+    Ok((fresh.truth.is_some() && fresh.at() >= at).then_some((fresh, epochs)))
+}
+
 pub struct Applied {
     pub db: Connection,
 }
@@ -931,6 +959,8 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Step)
 pub struct ScopeReader {
     pub at: u64,
     pub db: ScopeDb,
+    /// As `Truth::whole`.
+    pub whole: bool,
 }
 
 impl ScopeReader {
@@ -948,7 +978,7 @@ impl ScopeReader {
 
     /// Before its first step: its database from its start (`started`), with who's who `truth`.
     pub fn start(truth: &Truth, scope: &Scope, start: Option<&Given>, now: u64) -> Result<ScopeReader> {
-        Ok(ScopeReader { at: 0, db: started(&truth.freeze, &truth.db, scope, start, now)? })
+        Ok(ScopeReader { at: 0, db: started(&truth.freeze, &truth.db, scope, start, now)?, whole: true })
     }
 
     /// Takes the steps of `read` after its own position, `read` read from `from` on (`read`): each applied if it counts
@@ -973,9 +1003,14 @@ impl ScopeReader {
         Ok(took)
     }
 
-    /// As a reader keeps it, to start from again (`kept`): `{ at, hash, db }`, the database's bytes base64.
+    /// As a reader keeps it, to start from again (`kept`): `{ at, hash, db }`, the database's bytes base64, and `sealed`,
+    /// the newest format it opens, once it read every step (`whole`).
     pub fn keep(&mut self) -> Result<Value> {
-        Ok(json!({ "at": self.at, "hash": crate::database::stored::state_hash(self.db.conn())?, "db": data_encoding::BASE64.encode(&self.db.bytes()?) }))
+        let mut kept = json!({ "at": self.at, "hash": crate::database::stored::state_hash(self.db.conn())?, "db": data_encoding::BASE64.encode(&self.db.bytes()?) });
+        if self.whole {
+            kept["sealed"] = json!(crate::keys::FORMAT);
+        }
+        Ok(kept)
     }
 
     /// What `keep` kept, checked against the hash it kept with it, in this release's form.
@@ -983,7 +1018,7 @@ impl ScopeReader {
         let bytes = data_encoding::BASE64.decode(kept["db"].as_str().context("no database")?.as_bytes())?;
         let conn = connection(&bytes)?;
         ensure!(Some(crate::database::stored::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "it isn't what it was");
-        Ok(ScopeReader { at: kept["at"].as_u64().context("no position")?, db: normalize(conn, scope, now)? })
+        Ok(ScopeReader { at: kept["at"].as_u64().context("no position")?, db: normalize(conn, scope, now)?, whole: whole(kept) })
     }
 }
 
@@ -1223,9 +1258,9 @@ pub(crate) mod tests {
         newer.data["reads"] = json!(READS + 1);
         let newer = Some(Given { step: sign(&mac, &scope, 2, ANDRE, 1, 0, newer).unwrap(), copy: None });
         let read = |steps| Read { steps, waits: None };
-        let mut r = ScopeReader { at: 0, db: db() };
+        let mut r = ScopeReader { at: 0, db: db(), whole: true };
         assert!(r.take(0, &read(vec![None, newer, None]), &global, &scope, 0).err().unwrap().is::<Newer>() && r.at == 1, "stopped before it");
-        let mut r = ScopeReader { at: 0, db: db() };
+        let mut r = ScopeReader { at: 0, db: db(), whole: true };
         assert!(r.take(0, &read(vec![None, None]), &global, &scope, 0).unwrap() && r.at == 2);
     }
 

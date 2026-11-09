@@ -329,6 +329,34 @@ async fn a_settings_change_that_doesnt_read_is_refused() {
     assert_eq!(std::fs::read(dir.join("invites.json")).unwrap(), b"{ not json");
 }
 
+/// A build that couldn't open a sealed format took a step in it for junk and kept a position past it. What it kept is
+/// read again, so the device ends up with the step it passed over.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_position_kept_by_a_build_that_passed_over_a_step_is_read_again() {
+    let dir = temp("kept-before");
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
+    create(&a, "Home", "Andre").await;
+    let me = a.user().unwrap();
+    let kept = std::path::Path::new("network/scope-kept").join(data_encoding::HEXLOWER.encode(b"global"));
+    let read = |dir: &std::path::Path| serde_json::from_slice::<Value>(&std::fs::read(dir.join(&kept)).unwrap()).unwrap();
+    let mut before = read(&dir);
+    let answer = one::settings::answer(&a, "POST", "/v1/group", json!({ "name": "Team" }).to_string().as_bytes()).await.unwrap().unwrap();
+    let group = one::database::scopes::Scope::Group(answer["group"].as_str().unwrap().to_string());
+    let after = read(&dir);
+    assert!(after["at"].as_u64() > before["at"].as_u64(), "making a group is a step");
+
+    let copy = temp("kept-before-copy");
+    assert!(std::process::Command::new("cp").arg("-r").arg(dir.join(".")).arg(&copy).status().unwrap().success());
+    before["at"] = after["at"].clone();
+    before.as_object_mut().unwrap().remove("sealed").expect("what's kept says what it read");
+    std::fs::write(copy.join(&kept), before.to_string()).unwrap();
+
+    let b = Node::start(&copy, false).await.unwrap();
+    let is_admin = async || one::settings::Me::who(&b, |db| db.role_in(&me, &group)).ok().flatten() == Some(one::database::scopes::Role::Admin);
+    eventually("the step it passed over", &b, is_admin).await;
+}
+
 /// Erasing an app deletes its keys in the bucket whoever erases it: here Settings' own answer, as any client's.
 #[tokio::test(flavor = "multi_thread")]
 async fn erasing_an_app_deletes_its_keys_whoever_erases_it() {

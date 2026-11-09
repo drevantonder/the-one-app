@@ -43,7 +43,7 @@ pub const FRESH: u64 = 60_000;
 /// The first byte of everything sealed since formats were numbered, and authenticated with it, so taking it off, or
 /// putting it on what was sealed before, opens nothing. What was sealed before has no version and opens forever
 /// (`tests/sealed/`). A later format is one more, and reads one more in `database::READS`: an older build takes what it
-/// can't read for junk and passes over it.
+/// can't read for junk and passes over it, and what it kept is read again (`steps::read_again`).
 pub const FORMAT: u8 = 1;
 /// What's authenticated with a format, before what each seal adds.
 pub(crate) const NUMBERED: &[u8] = &[FORMAT];
@@ -160,7 +160,8 @@ pub fn permanent<'a>(app: &'a str, database: &'a str) -> Permanent<'a> {
 }
 
 fn permanent_in<'a>(renamed: &[Renamed], app: &'a str, database: &'a str) -> Permanent<'a> {
-    let Some(row) = renamed.iter().find(|r| r.app == app && r.database.is_none_or(|d| d == database)) else {
+    let row = |d: Option<&str>| renamed.iter().find(|r| r.app == app && r.database == d);
+    let Some(row) = row(Some(database)).or_else(|| row(None)) else {
         return Permanent { app, database, key: database };
     };
     let first = row.first_database.unwrap_or(database);
@@ -985,6 +986,8 @@ mod tests {
         assert_eq!(permanent_in(&renamed, "notes", "pages"), plain("notes", "main"), "a database renamed");
         assert_eq!(permanent_in(&renamed, "notes", "other"), plain("notes", "other"), "and not its neighbour");
         assert_eq!(permanent_in(&renamed, "tally", "main"), plain("tally", "main"), "its first name is still that name");
+        let both = [Renamed { app: "counter", database: None, first_app: "tally", first_database: None, key_only: false }, Renamed { app: "counter", database: Some("pages"), first_app: "tally", first_database: Some("main"), key_only: false }];
+        assert_eq!(permanent_in(&both, "counter", "pages"), plain("tally", "main"), "a database renamed in an app renamed, whichever row comes first");
     }
 
     #[test]

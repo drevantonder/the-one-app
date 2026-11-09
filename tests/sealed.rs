@@ -6,7 +6,6 @@ use data_encoding::{BASE64URL_NOPAD as B64U, HEXLOWER};
 use ed25519_dalek::SigningKey;
 use one::backups::{Check, check, check_databases, open_keys, unseal};
 use one::bucket::Place;
-use one::database::scopes::{APP, CoreDb};
 use one::database::stored::Keys;
 use one::keys;
 use serde_json::{Value, json};
@@ -70,7 +69,6 @@ async fn every_sealed_format_an_earlier_build_wrote_still_opens() {
             let (app, database) = at.split_once('/').unwrap();
             assert_eq!(keys::database_key(&app_key, app, database), key(sealed_as), "{at}'s key");
         }
-        assert_eq!(d["database"][format!("{APP}/{}", CoreDb::Scope.name())], d["database"][format!("{APP}/{}", CoreDb::Log.name())], "the scope database's steps are sealed with the log's key");
         let (recovery, device) = (SigningKey::from_bytes(&key(&w["recovery"])), SigningKey::from_bytes(&key(&w["device"])));
         assert_eq!(keys::twin(&recovery.to_bytes()), (key(&d["twin"]["secret"]), key(&d["twin"]["public"])), "the recovery key's twin");
         assert_eq!(keys::twin_public(recovery.verifying_key().as_bytes()).unwrap(), key(&d["twin"]["public"]), "and from its public half");

@@ -17,6 +17,8 @@ pub struct Replica {
     reader: Reader,
     /// Who's who until this device has read the freeze: nobody.
     nobody: ScopeDb,
+    /// Whether what it started from lacks steps it hasn't yet tried to read again (`steps::read_again`).
+    pub read_again: bool,
 }
 
 /// What reading the bucket changed here.
@@ -35,7 +37,7 @@ pub struct Handled {
 impl Replica {
     pub fn new(key: SigningKey, root: Option<Hash>, now: u64) -> Replica {
         let id = key.verifying_key().to_bytes();
-        Replica { key, id, reader: Reader::new(root), nobody: nobody(now) }
+        Replica { key, id, reader: Reader::new(root), nobody: nobody(now), read_again: false }
     }
 
     /// The network's root, its id.
@@ -83,7 +85,20 @@ impl Replica {
 
     /// Starts again from what `keep` kept, checked against its hash (`steps::Truth::kept`), as this device started.
     pub fn restart(&mut self, kept: &serde_json::Value, now: u64) -> Result<()> {
-        self.reader.resume(Truth::kept(kept, now)?)
+        self.reader.resume(Truth::kept(kept, now)?)?;
+        self.read_again = !self.reader.whole();
+        Ok(())
+    }
+
+    /// Who's who as `fresh` read it again from the bucket, in place of what it had. → what that changed here.
+    pub fn replace(&mut self, fresh: Reader) -> Result<Handled> {
+        let mut handled = Handled::default();
+        if let (Some(was), Some(now)) = (self.reader.truth(), fresh.truth()) {
+            changed_from(&self.id, &was.db, &now.db, &mut handled)?;
+        }
+        self.reader = fresh;
+        self.read_again = false;
+        Ok(handled)
     }
 
     /// `global`'s scope database as it is, to copy (`steps::written`).
