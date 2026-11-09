@@ -66,7 +66,7 @@ function where(a) {
   if (a.added?.length && !runs_on.some((r) => r.name && r.online && !r.problem)) {
     const r = runs_on[0];
     const text = !r ? "Choose the device it runs on." : !r.name ? "Its device was removed. Choose another." : !r.online ? `${r.name} is off. Turn it on, or move it.` : r.problem;
-    problem = nodes.length || r ? { title: `${title} needs a device that's on`, text, move: nodes.length > 0 } : { title: `${title} can't run on your devices yet`, text: "It isn’t built for any of them.", move: false };
+    problem = nodes.length || r ? { title: `${title} needs a device that's on`, text, move: nodes.length > 0 } : { title: `${title} can't run on your devices yet`, text: a.needs ? `${a.needs}.` : "It isn’t built for any of them.", move: false };
   }
   return { runs_on, nodes, problem };
 }
@@ -105,7 +105,7 @@ async function listed(ctx, { full, gone }) {
       from: a.from || null, forks: a.forks || [], deploys: a.deploys, added: a.added || [],
       added_names: (a.added || []).map(name), uses: a.uses || { apps: [], services: [] }, service: a.service || null, runs_on: a.runs_on || [],
       advanced: !!a.advanced, built_in: !!a.built_in, deployed, up_to_date: a.built_in && deployed ? a.bundle === a.built_in : null,
-      source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: !!a.offers?.screens, opens: !!a.offers?.opens, keeps_accounts: !!a.offers?.accounts,
+      source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: !!a.offers?.screens, opens: !!a.offers?.opens, keeps_accounts: !!a.offers?.accounts, signs_in: !!a.offers?.accounts && !!a.screens?.some?.((s) => s.name === "settings"),
     };
   });
   apps.sort((a, b) => a.advanced - b.advanced || a.title.localeCompare(b.title));

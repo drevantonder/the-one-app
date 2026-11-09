@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { AppIcon, Button, Empty, Grid, LargeTitle, Pending, Problem, SearchInput, Section, Split, useWidth } from "@one/ui"
 import { AppPage } from "../lib/app-page.jsx"
-import { onAPage, openApp, said, useApps } from "../lib/store.jsx"
+import { addAccount, onAPage, openApp, said, useApps } from "../lib/store.jsx"
 
 // The sections: the apps built into the release, and those made in this network (each network words that its own way,
 // in its settings).
@@ -23,7 +23,7 @@ function Tile({ a, list, selected, open, add, restore }) {
   const action = a.deleted
     ? a.mine && small("Restore", () => restore(a))
     : onAPage(a, places)
-      ? a.opens ? small("Open", () => openApp(a, places)) : <span className="text-sm text-muted-foreground">Added</span>
+      ? a.opens ? small("Open", () => openApp(a, places)) : a.signs_in ? small("Add Account", () => addAccount(a, places)) : <span className="text-sm text-muted-foreground">Added</span>
       : (a.deployed || admin) && small("Add", () => add(a))
   // The tile opens the app and its button does its own thing, so the tile is not a button itself (a button has none inside).
   return (
@@ -59,7 +59,8 @@ function Main() {
 
   const add = (a) => {
     setError("")
-    apps.add(a).catch((err) => setError(said(err).title))
+    // Nothing of it appears to open: its own page says what comes next (an account, or the device it needs).
+    apps.add(a).then(() => a.opens || (beside ? setShown(a.name) : one.open("app", { app: a.name }))).catch((err) => setError(said(err).title))
   }
   const restore = (a) => {
     setError("")

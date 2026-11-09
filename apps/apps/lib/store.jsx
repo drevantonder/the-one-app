@@ -37,3 +37,6 @@ export const onAPage = (a, places) => a.added.some((id) => places.some((p) => p.
 /// Opens an app on the first of its places that's the user's, You before a group or Everyone.
 export const openApp = (a, places) => one.open("main", {}, a.name, { scope: places.find((p) => a.added.includes(p.id))?.scope })
 
+/// Its sign-in, for an app with no screen of its own to open, on the same place.
+export const addAccount = (a, places) => one.open("settings", { add: true }, a.name, { scope: places.find((p) => a.added.includes(p.id))?.scope })
+

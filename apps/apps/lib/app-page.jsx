@@ -3,7 +3,7 @@
 // its activity and deleting it.
 import { useEffect, useRef, useState } from "react"
 import { AppIcon, Button, Empty, Hint, Icon, List, ListRow, ListSkeleton, Problem, Section, Switch, useCall } from "@one/ui"
-import { onAPage, openApp, said } from "./store.jsx"
+import { addAccount, onAPage, openApp, said } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
 const ago = (t) => (one.ago(t) === "now" ? "just now" : one.ago(t) + " ago")
@@ -140,7 +140,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
               {a.deleted
                 ? a.mine && <Button size="sm" disabled={busy === "restore"} onClick={() => retire("restore")}>Restore</Button>
                 : on
-                  ? a.opens ? <Button size="sm" onClick={() => openApp(a, places)}>Open</Button> : <span className="text-sm text-muted-foreground">Added</span>
+                  ? a.opens ? <Button size="sm" onClick={() => openApp(a, places)}>Open</Button> : a.signs_in ? <Button size="sm" onClick={() => addAccount(a, places)}>Add Account</Button> : <span className="text-sm text-muted-foreground">Added</span>
                   : adds ? <Button size="sm" onClick={() => run("add", () => store.add(a))}>Add</Button> : <span className="text-sm text-muted-foreground">Ask an admin to add it first</span>}
               {!a.deleted && adds && offered.length > 0 && <Button variant="secondary" size="sm" onClick={addTo}>Add to…</Button>}
               {more.length > 0 && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={showMore}><Icon name="dots-three" className="size-5" /></Button>}
