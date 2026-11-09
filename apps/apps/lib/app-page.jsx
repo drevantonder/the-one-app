@@ -74,7 +74,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
   const chooseDevice = (scope) => one.open("devices", { schedules: name, scope }, "settings")
 
   const link = (n) => apps.find((x) => x.name === n) || { name: n, title: n }
-  const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : [a.tagline, !a.screens && "Used by your AI"].filter(Boolean).join(" · ")
+  const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : !a.screens ? "Used by your AI" : ""
 
   // Schedules run only on a device chosen for the app's schedules: one that's on with none says so, with the fix.
   // One a deploy removed no longer runs: it isn't the app's any more.
@@ -115,6 +115,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
     if (i != null) run("add", () => store.add(a, offered[i]))
   }
   const more = [
+    ...(owner ? [{ title: a.source ? "Edit Source Link" : "Add Source Link", run: editSource }] : []),
     ...places.filter((p) => p.may && a.added.includes(p.id)).map((p) => ({ title: `Remove from ${p.name}`, run: () => run("remove", () => one.call("_remove", { app: name, scope: p.scope })) })),
     ...(owner ? [{ title: "Delete App", danger: true, section: true, run: () => retire("delete") }] : []),
     ...(a.mine && a.deleted ? [{ title: "Erase App", danger: true, run: () => retire("erase") }] : []),
@@ -144,7 +145,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
             </div>
           </div>
         </div>
-        {a.description && <p className="text-sm leading-relaxed">{a.description}</p>}
+        {a.description && <p className="max-w-2xl text-sm leading-relaxed">{a.description}</p>}
       </div>
 
       {error && <Problem title={error} />}
@@ -210,20 +211,16 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
         </Section>
       )}
 
-      {/* Where its code is kept: Source opens it, a repo in Repos or a page in the browser; its owners add or change it. */}
-      {(a.source || (owner)) && (
-        <div className="flex flex-col items-start gap-2">
-          {a.source && <List><ListRow title="Source" onClick={() => (repo ? one.open("repo", { repo }, "repos") : one.link(a.source))} /></List>}
-          {owner && <Button variant="outline" size="sm" onClick={editSource}>{a.source ? "Edit Source Link" : "Add Source Link"}</Button>}
-        </div>
+      {(a.source || code.data || busyAny) && (
+        <List>
+          {/* Where its code is kept: a repo in Repos or a page in the browser. */}
+          {a.source && <ListRow title="Source" onClick={() => (repo ? one.open("repo", { repo }, "repos") : one.link(a.source))} />}
+          {code.data && <ListRow title="Code" onClick={() => one.open("code", { app: a.name, dir: "" })} />}
+          {busyAny && <ListRow title="Activity" onClick={() => one.open("activity", { app: a.name })} />}
+        </List>
       )}
 
-      {busyAny && <List><ListRow title="Activity" onClick={() => one.open("activity", { app: a.name })} /></List>}
-
-      <p className="text-center text-sm text-muted-foreground">
-        Made by {a.owner_name}
-        {code.data && <> · <button className="underline-offset-4 hover:underline" onClick={() => one.open("code", { app: a.name, dir: "" })}>View code</button></>}
-      </p>
+      <p className="text-sm text-muted-foreground">Made by {a.owner_name}</p>
     </div>
   )
 }
