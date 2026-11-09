@@ -377,7 +377,7 @@ export default {
             plans.push({ name: PROVIDERS[id].title, mark: markOf(id).image, account, session: p.session_used, week: p.weekly_used, resets: p.session_resets ?? p.weekly_resets });
           }
         }
-        if (!plans.length) return { t: "text", text: "No readings yet.", size: "sm", tone: "muted" };
+        if (!plans.length) return { t: "text", text: "No readings yet.", tone: "muted" };
         const worst = (p) => Math.max(p.session ?? 0, p.week ?? 0);
         const fit = { small: 3, medium: 4, large: 8 }[ctx.size] || 4;
         const top = new Set([...plans].sort((a, b) => worst(b) - worst(a)).slice(0, fit));

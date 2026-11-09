@@ -24,7 +24,7 @@ const one = () => (globalThis as unknown as { one: { plain: (e: unknown) => { ti
 
 // Colour only where it means something: fine is plain text, warn and bad need you.
 const TONES = { muted: "var(--muted-foreground)", accent: "var(--foreground)", good: "var(--foreground)", warn: "var(--warning)", bad: "var(--destructive)" }
-const SIZES = { xl: "text-[22px] font-semibold", lg: "text-[15px] font-semibold", sm: "text-[11px]", xs: "text-[10px]" }
+const SIZES = { xl: "text-[26px] font-semibold", lg: "text-[17px] font-semibold", sm: "text-[13px]", xs: "text-xs" }
 const WEIGHTS = { medium: "font-medium", bold: "font-bold" }
 // A number from a tree, or `or` where it isn't one.
 const num = (v: any, or?: any): any => (v === null || v === "" || !Number.isFinite(Number(v)) ? or : Number(v))
@@ -50,16 +50,16 @@ function WidgetCard({ w, host, tree = w.root, className, style, ...props }: { w:
   return (
     <div
       data-slot="widget"
-      className={cn("flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-3xl bg-muted p-4 text-xs leading-snug text-foreground", tree?.link && "cursor-pointer active:opacity-80", className)}
+      className={cn("flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-3xl bg-muted p-4 text-[15px] leading-snug text-foreground", tree?.link && "cursor-pointer active:opacity-80", className)}
       style={{ zoom: "var(--unzoom, 1)", ...style }}
       onClick={tree?.link && !w.error ? (e) => !e.defaultPrevented && host.follow(tree.link, w) : undefined}
       {...props}
     >
-      {(tree?.header !== false || w.error) && <div className="truncate text-[11px] font-medium text-muted-foreground">{w.title || w.widget}</div>}
+      {(tree?.header !== false || w.error) && <div className="truncate text-[13px] font-medium text-muted-foreground">{w.title || w.widget}</div>}
       {w.error ? (
         <>
-          <div className="text-[13px] font-medium text-warning">This widget stopped working.</div>
-          {why && why !== "That didn't work." && <div className="select-text break-words text-[11px] text-muted-foreground">{why}</div>}
+          <div className="text-[15px] font-medium text-warning">This widget stopped working.</div>
+          {why && why !== "That didn't work." && <div className="select-text break-words text-[13px] text-muted-foreground">{why}</div>}
         </>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col [&>[data-w=col]]:flex-1">
@@ -109,10 +109,10 @@ function Node({ n, w, host }: { n?: Tree; w: Widget; host: WidgetHost }): React.
       el = (
         <div className="flex min-w-0 flex-col" style={colored}>
           <div className="flex min-w-0 items-baseline gap-[3px]">
-            <Fit className="text-[26px] font-semibold tabular-nums">{fmt(n.value)}</Fit>
-            {n.unit && <span className="shrink-0 text-[15px] font-medium text-muted-foreground">{n.unit}</span>}
+            <Fit className="text-[34px] font-semibold tabular-nums">{fmt(n.value)}</Fit>
+            {n.unit && <span className="shrink-0 text-[17px] font-medium text-muted-foreground">{n.unit}</span>}
           </div>
-          {n.label && <small className="truncate text-[11px] text-muted-foreground">{n.label}</small>}
+          {n.label && <small className="truncate text-[13px] text-muted-foreground">{n.label}</small>}
         </div>
       )
       break
@@ -133,7 +133,7 @@ function Node({ n, w, host }: { n?: Tree; w: Widget; host: WidgetHost }): React.
       const f = Math.max(0, Math.min(1, num(n.value, 0) / (num(n.max) || 1)))
       el = (
         <div className="flex min-w-0 flex-col gap-1" style={num(n.w) ? { width: num(n.w) } : undefined}>
-          {n.label && <span className="text-[11px] text-muted-foreground">{n.label}</span>}
+          {n.label && <span className="text-[13px] text-muted-foreground">{n.label}</span>}
           <div className="h-1.5 overflow-hidden rounded-full bg-foreground/15">
             <i className="block h-full" style={{ width: `${f * 100}%`, background: color || "var(--foreground)" }} />
           </div>
@@ -156,7 +156,7 @@ function Node({ n, w, host }: { n?: Tree; w: Widget; host: WidgetHost }): React.
           {n.icon && <span className="size-2 shrink-0 rounded-full" style={{ background: color || "var(--muted-foreground)" }} />}
           <div className="min-w-0">
             <div className="truncate">{n.title || ""}</div>
-            {n.subtitle && <div className="truncate text-[11px] text-muted-foreground">{n.subtitle}</div>}
+            {n.subtitle && <div className="truncate text-[13px] text-muted-foreground">{n.subtitle}</div>}
           </div>
           {(n.at || n.trailing) && <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{n.at ? time({ at: n.at }) : n.trailing}</span>}
         </div>
