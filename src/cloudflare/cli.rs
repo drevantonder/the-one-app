@@ -75,7 +75,6 @@ pub fn commands() -> Command {
             ("cloudflare".into(), "the network's Workers on Cloudflare, as this machine has them: their addresses and settings".into()),
             ("cloudflare serve [--address <url>]".into(), "run the network's Workers in workerd (auth, the relay, the URL signer, and the gateway users reach at the network's address) on this machine; the first time, with that address".into()),
             ("cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]".into(), format!("deploy the network's Workers to Cloudflare, with an API token that may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's domains ({CLI}-<service>.<domain>, the network's address {CLI}.<domain> unless --address says, for good: passkeys belong to it), or at its workers.dev address; and the Cloudflare node with it, once cloudflare node deploy put it there; beside a node of the network, whose devices its relay takes, unless --new")),
-            ("cloudflare invite <name> [--admin] [--user <id>] [--email <email>]".into(), "a link that lets someone join, once and for a few days, as who they'll be in the network (--user, or this machine's user if they're called that; else someone new, as devices invite does), signed with this machine's key, an admin's device's; where users sign in with Google, --email is the account they sign up with. Nobody joins uninvited, the first user too".into()),
             ("cloudflare node deploy [--account <id>]".into(), "put the network's Cloudflare node in its Workers' Cloudflare account (a node as a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over iroh when none of your machines answers".into()),
             ("cloudflare set <setting> <value>".into(), "change one: auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or android (the SHA-256 fingerprints of the certificates the Android app is signed with, comma-separated, or -: links to the address open the app)".into()),
             ("cloudflare use <address>".into(), "point this network at its Workers: its nodes take sign-ins made at the address".into()),
@@ -171,15 +170,6 @@ pub fn commands() -> Command {
                     // things run in.
                     node.post("/v1/settings", json!({ "name": crate::database::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
                     println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
-                }
-                ["cloudflare", "invite", name] => {
-                    // This machine's user, inviting themselves to their own network, is who they are in it.
-                    let user = match g.flag("user") {
-                        Some(user) => Some(user.to_string()),
-                        None => node.state().ok().and_then(|s| s.user).filter(|u| u.name.eq_ignore_ascii_case(name)).map(|u| u.id),
-                    };
-                    let invite = node.post("/v1/invite-link", json!({ "name": name, "admin": g.has("admin"), "user": user, "email": g.flag("email") }))?;
-                    println!("{}", crate::core_tools::devices::invited(name, &invite));
                 }
                 ["cloudflare", "set", name, value] => {
                     let mut settings = crate::cloudflare::Settings::load()?;

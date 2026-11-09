@@ -19,13 +19,6 @@ pub(super) fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// The key of the device whose home is `dir`, for what this machine signs as itself without its node (`cloudflare invite`).
-pub fn device_key(dir: &Path) -> Result<ed25519_dalek::SigningKey> {
-    let bytes = std::fs::read(dir.join("device.json")).with_context(|| format!("{} has no device: {} serve starts one", dir.display(), crate::config::CLI))?;
-    let file: DeviceFile = serde_json::from_slice(&bytes)?;
-    Ok(ed25519_dalek::SigningKey::from_bytes(&unhex(&file.secret)?))
-}
-
 /// The key (hex) and name of the device whose home is `dir`, as it last was.
 pub fn device_here(dir: &Path) -> Result<(String, String)> {
     let file = load_device(dir)?;

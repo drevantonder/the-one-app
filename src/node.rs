@@ -71,7 +71,7 @@ mod network;
 
 pub use caller::{Caller, Credential};
 use exclusive::*;
-pub use home::{device_here, device_key};
+pub use home::device_here;
 use home::*;
 use network::*;
 
