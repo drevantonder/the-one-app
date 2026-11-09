@@ -9,7 +9,7 @@ import { createRoot as r } from "react-dom/client";
 import { AppIcon as i, Card as a, Empty as o, Grid as s, Hint as c, LargeTitle as l, Problem as u, Progress as d, Skeleton as f } from "@one/ui";
 import { jsx as p, jsxs as m } from "react/jsx-runtime";
 function h(t) {
-	let n = e(12), { label: r, w: i } = t;
+	let n = e(14), { label: r, w: i } = t;
 	if (!i || i.used == null) return null;
 	let a;
 	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ p("span", {
@@ -17,21 +17,24 @@ function h(t) {
 		title: r,
 		children: r
 	}), n[0] = r, n[1] = a);
-	let o, s;
-	n[2] === i.used ? (o = n[3], s = n[4]) : (o = /* @__PURE__ */ p(d, {
+	let o;
+	n[2] !== r || n[3] !== i.used ? (o = /* @__PURE__ */ p(d, {
 		value: i.used,
-		meter: !0
-	}), s = /* @__PURE__ */ m("span", {
+		meter: !0,
+		"aria-label": r
+	}), n[2] = r, n[3] = i.used, n[4] = o) : o = n[4];
+	let s;
+	n[5] === i.used ? s = n[6] : (s = /* @__PURE__ */ m("span", {
 		className: "text-right tabular-nums",
 		children: [i.used, "%"]
-	}), n[2] = i.used, n[3] = o, n[4] = s);
+	}), n[5] = i.used, n[6] = s);
 	let c = i.countdown ? `resets ${i.countdown}` : "", l;
-	n[5] === c ? l = n[6] : (l = /* @__PURE__ */ p("span", {
+	n[7] === c ? l = n[8] : (l = /* @__PURE__ */ p("span", {
 		className: "col-span-3 -mt-0.5 text-xs text-muted-foreground @sm:col-span-1 @sm:mt-0 @sm:text-right @sm:whitespace-nowrap",
 		children: c
-	}), n[5] = c, n[6] = l);
+	}), n[7] = c, n[8] = l);
 	let u;
-	return n[7] !== a || n[8] !== o || n[9] !== s || n[10] !== l ? (u = /* @__PURE__ */ m("div", {
+	return n[9] !== a || n[10] !== o || n[11] !== s || n[12] !== l ? (u = /* @__PURE__ */ m("div", {
 		className: "grid grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem] items-center gap-x-3 gap-y-1 text-sm @sm:grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem_10rem]",
 		children: [
 			a,
@@ -39,7 +42,7 @@ function h(t) {
 			s,
 			l
 		]
-	}), n[7] = a, n[8] = o, n[9] = s, n[10] = l, n[11] = u) : u = n[11], u;
+	}), n[9] = a, n[10] = o, n[11] = s, n[12] = l, n[13] = u) : u = n[13], u;
 }
 var g = (e) => (e.devices || []).length ? `on ${e.devices.join(", ")}` : "";
 function _(t) {

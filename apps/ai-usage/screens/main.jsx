@@ -9,7 +9,7 @@ function Meter({ label, w }) {
   return (
     <div className="grid grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem] items-center gap-x-3 gap-y-1 text-sm @sm:grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem_10rem]">
       <span className="truncate text-muted-foreground" title={label}>{label}</span>
-      <Progress value={w.used} meter />
+      <Progress value={w.used} meter aria-label={label} />
       <span className="text-right tabular-nums">{w.used}%</span>
       <span className="col-span-3 -mt-0.5 text-xs text-muted-foreground @sm:col-span-1 @sm:mt-0 @sm:text-right @sm:whitespace-nowrap">
         {w.countdown ? `resets ${w.countdown}` : ""}
