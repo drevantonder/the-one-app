@@ -140,6 +140,10 @@ fn fit(described: &[&str], room: usize) -> Vec<String> {
 /// each app they're in; and the apps the user could add (`addable`) that match as well. A match is one whose name,
 /// app or description has most of the query's words, and as many as the best: fewer is a guess, not an answer.
 pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how: Reader) -> String {
+    // A skill by its name, for a host with no MCP resources.
+    if let Some(text) = crate::skills::read(apps, query.trim()) {
+        return text;
+    }
     // What users call the devices their One App runs on, and keeping something.
     let query: Vec<String> = words(query)
         .into_iter()
@@ -189,11 +193,16 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
         false => format!("Not added yet, and may do it:\n{}", could.iter().map(|(_, a)| add(a)).collect::<Vec<_>>().join("\n")),
     };
     if found.is_empty() {
+        let build = format!("{}-build", crate::skills::server_name());
+        let make = match how {
+            Reader::Cli => format!("If no app does it yet, make one: {CLI} skills {build} says how."),
+            Reader::Mcp | Reader::Code => format!("If no app does it yet, make one: search {{ query: \"{build}\" }} says how."),
+        };
         if !adds.is_empty() {
-            return format!("Nothing added does that.\n\n{adds}");
+            return format!("Nothing added does that.\n\n{adds}\n\n{make}");
         }
         let names: Vec<&str> = apps.iter().filter_map(|a| a["name"].as_str()).collect();
-        return format!("Nothing matches. Try other words, or an app's name: {}. If no app does it yet, make one: load the skill {}-build.", names.join(", "), crate::skills::server_name());
+        return format!("Nothing matches. Try other words, or an app's name: {}. {make}", names.join(", "));
     }
     let mut text = String::new();
     let mut shown: Vec<&Value> = Vec::new();
@@ -233,7 +242,7 @@ pub fn search_tool(mode: Mode) -> Value {
         "name": "search",
         "description": format!("Find the tools for a task in every app: give a few words, like \"unread email\" or \"list my repos\". Answers the best matches, each with {calls} and what it does, then the guide of each app they're in. Search before guessing, and to learn an app."),
         "inputSchema": { "type": "object", "required": ["query"], "properties": {
-            "query": { "type": "string", "description": "a few words for the task, or an app's name" },
+            "query": { "type": "string", "description": "a few words for the task, or an app's name; or a skill's name (like the build skill), for its text" },
             "limit": { "type": "integer", "description": "how many tools, 8 if not given" },
         } },
         "annotations": crate::skills::hints(true, false),

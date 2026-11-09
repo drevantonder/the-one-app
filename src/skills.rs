@@ -131,6 +131,12 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
     Skill { name: server_name(), description: root_description(), body, files: vec![] }
 }
 
+/// A skill's text by its name, or one of its other files as `<name>/<path>`.
+pub fn read(apps: &[Value], name: &str) -> Option<String> {
+    let (skill, file) = name.split_once('/').unwrap_or((name, "SKILL.md"));
+    all(apps).into_iter().find(|s| s.name == skill)?.file(file)
+}
+
 /// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those added for the user having their
 /// tools): the areas of their own, then one for each of the core's features and each app with a guide.
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
@@ -151,7 +157,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
         .collect();
     // The build skill carries the code that says what an app gets, as it is in this build, so an agent with only MCP
     // reads it here rather than on the web: what a call's ctx has, a screen's one, @one/ui (its widget nodes too), and
-    // the app with a React screen to copy.
+    // the app to copy.
     if let Some(build) = skills.iter_mut().find(|s| s.name.ends_with("-build")) {
         build.files = [
             ("ctx.js", include_str!("app/runtime/shim.js")),
@@ -163,8 +169,8 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             ("ui/icon.tsx", include_str!("screen/ui/src/components/icon.tsx")),
             ("ui/app-icon.tsx", include_str!("screen/ui/src/components/app-icon.tsx")),
             ("ui/widget.tsx", include_str!("screen/ui/src/components/widget.tsx")),
-            ("react/app.js", include_str!("../skills/build/react/app.js")),
-            ("react/screens/main.jsx", include_str!("../skills/build/react/screens/main.jsx")),
+            ("example/app.js", include_str!("../skills/build/example/app.js")),
+            ("example/screens/main.jsx", include_str!("../skills/build/example/screens/main.jsx")),
         ]
         .into_iter()
             .map(|(p, t)| (p.to_string(), t.to_string()))
@@ -300,7 +306,7 @@ pub fn instructions(mode: Mode, apps: &[Value], user: Option<&str>) -> String {
     };
     let user = user.filter(|p| !p.trim().is_empty()).map(|p| format!("\n\nYou act for {p}: groups_list says who else is in {YOURS}.")).unwrap_or_default();
     let mut text = format!(
-        "{}{user}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`. When the user asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
+        "{}{user}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or give `search` a skill's name, or `{CLI} skills`. When the user asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
         about(),
         rules(),
         server_name(),
