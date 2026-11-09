@@ -207,7 +207,7 @@ function L(t) {
 			v(!1);
 		}
 	}, r[0] = g, r[1] = u, r[2] = c, r[3] = y) : y = r[3];
-	let b = y, x = f ? f.link ? `Send ${f.who} This Link` : `${f.who} Can Sign In` : "Add Someone", S;
+	let b = y, x = f ? `Send ${f.who} This Link` : "Add Someone", S;
 	r[4] !== g || r[5] !== u || r[6] !== f || r[7] !== b || r[8] !== c || r[9] !== s || r[10] !== o ? (S = f ? /* @__PURE__ */ O(a, {
 		variant: "secondary",
 		size: "sm",
@@ -220,20 +220,9 @@ function L(t) {
 		children: s ? "Invite" : "Make Link"
 	}), r[4] = g, r[5] = u, r[6] = f, r[7] = b, r[8] = c, r[9] = s, r[10] = o, r[11] = S) : S = r[11];
 	let T;
-	r[12] !== u || r[13] !== m || r[14] !== f || r[15] !== b || r[16] !== c || r[17] !== s ? (T = f ? f.link ? /* @__PURE__ */ O(R, {
+	r[12] !== u || r[13] !== m || r[14] !== f || r[15] !== b || r[16] !== c || r[17] !== s ? (T = f ? /* @__PURE__ */ O(R, {
 		link: f.link,
-		days: f.days
-	}) : /* @__PURE__ */ k("p", {
-		className: "p-4 text-sm text-muted-foreground",
-		children: [
-			"With ",
-			f.email,
-			", for ",
-			f.days,
-			" day",
-			f.days > 1 ? "s" : "",
-			"."
-		]
+		hint: `${f.email ? `They sign in with ${f.email}` : "It works once"}, for ${f.days} day${f.days > 1 ? "s" : ""}.`
 	}) : /* @__PURE__ */ k("form", {
 		className: "flex flex-col gap-4 p-4",
 		onSubmit: (e) => (e.preventDefault(), b()),
@@ -269,7 +258,7 @@ function L(t) {
 	}), r[19] = i, r[20] = o, r[21] = x, r[22] = S, r[23] = T, r[24] = E) : E = r[24], E;
 }
 function R(t) {
-	let r = e(19), { link: i, days: o } = t, [s, c] = n(!1), l;
+	let r = e(18), { link: i, hint: o } = t, [s, c] = n(!1), l;
 	r[0] === i ? l = r[1] : (l = async function() {
 		await one.copy(i), one.tap("success"), c(!0), setTimeout(() => c(!1), 1500);
 	}, r[0] = i, r[1] = l);
@@ -278,31 +267,25 @@ function R(t) {
 		className: "truncate font-mono text-sm select-all",
 		children: i
 	}), r[2] = i, r[3] = d);
-	let f = o > 1 ? "s" : "", p;
-	r[4] !== o || r[5] !== f ? (p = /* @__PURE__ */ k(h, { children: [
-		"It works once, for ",
-		o,
-		" day",
-		f,
-		"."
-	] }), r[4] = o, r[5] = f, r[6] = p) : p = r[6];
-	let m;
-	r[7] !== d || r[8] !== p ? (m = /* @__PURE__ */ k("div", {
+	let f;
+	r[4] === o ? f = r[5] : (f = /* @__PURE__ */ O(h, { children: o }), r[4] = o, r[5] = f);
+	let p;
+	r[6] !== d || r[7] !== f ? (p = /* @__PURE__ */ k("div", {
 		className: "min-w-0",
-		children: [d, p]
-	}), r[7] = d, r[8] = p, r[9] = m) : m = r[9];
-	let _ = s ? "check" : "copy", v;
-	r[10] === _ ? v = r[11] : (v = /* @__PURE__ */ O(g, { name: _ }), r[10] = _, r[11] = v);
-	let y = s ? "Copied" : "Copy Link", b;
-	r[12] !== u || r[13] !== v || r[14] !== y ? (b = /* @__PURE__ */ k(a, {
+		children: [d, f]
+	}), r[6] = d, r[7] = f, r[8] = p) : p = r[8];
+	let m = s ? "check" : "copy", _;
+	r[9] === m ? _ = r[10] : (_ = /* @__PURE__ */ O(g, { name: m }), r[9] = m, r[10] = _);
+	let v = s ? "Copied" : "Copy Link", y;
+	r[11] !== u || r[12] !== _ || r[13] !== v ? (y = /* @__PURE__ */ k(a, {
 		onClick: u,
-		children: [v, y]
-	}), r[12] = u, r[13] = v, r[14] = y, r[15] = b) : b = r[15];
-	let x;
-	return r[16] !== m || r[17] !== b ? (x = /* @__PURE__ */ k("div", {
+		children: [_, v]
+	}), r[11] = u, r[12] = _, r[13] = v, r[14] = y) : y = r[14];
+	let b;
+	return r[15] !== p || r[16] !== y ? (b = /* @__PURE__ */ k("div", {
 		className: "flex flex-col gap-4 p-4",
-		children: [m, b]
-	}), r[16] = m, r[17] = b, r[18] = x) : x = r[18], x;
+		children: [p, y]
+	}), r[15] = p, r[16] = y, r[17] = b) : b = r[17], b;
 }
 function z(t) {
 	let r = e(30), { was: i, open: o, setOpen: s, saved: c } = t, [l, u] = n(i), [d, f] = n(""), [p, m] = n(!1), g;

@@ -404,7 +404,7 @@ fn auth_pages_drawn_by_hand_name_the_network_as_the_build_does() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(std::fs::read_to_string(dir.join("joined.html")).unwrap().contains(&format!("You&#x27;ve joined {}", one::config::YOURS)));
+    assert!(std::fs::read_to_string(dir.join("invite.html")).unwrap().contains(&format!("Join {}", one::config::NAME)));
 }
 
 /// A service answers its node in the words of `service/wire.json`, in whatever language it's written: started as its

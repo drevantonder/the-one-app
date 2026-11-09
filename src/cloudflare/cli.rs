@@ -55,7 +55,7 @@ fn cloudflare(g: &Given, settings: Option<&crate::cloudflare::Settings>) -> Resu
 
 /// Where a network's Workers are, and what they're set to, without their secrets.
 fn cloudflare_said(s: &crate::cloudflare::Settings) -> String {
-    let mut out = format!("{} on Cloudflare\n  address   {}\n", s.name, s.address);
+    let mut out = format!("{NAME} on Cloudflare\n  address   {}\n", s.address);
     if s.auth_url.starts_with("http://127.0.0.1") {
         out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth)\n", s.ports[1], s.ports[0]);
     }
@@ -90,7 +90,7 @@ pub fn commands() -> Command {
                         Err(err) => {
                             crate::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
                             let url = g.flag("address").context("say where users will reach the network, with --address https://…")?;
-                            let settings = crate::cloudflare::Settings::new(NAME, url);
+                            let settings = crate::cloudflare::Settings::new(url);
                             settings.save()?;
                             settings
                         }
@@ -120,7 +120,7 @@ pub fn commands() -> Command {
                             };
                             let at = |service: &str| format!("https://{}.{domain}", crate::cloudflare::worker_name(service));
                             let address = g.flag("address").map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
-                            let mut settings = crate::cloudflare::Settings::new(NAME, &address);
+                            let mut settings = crate::cloudflare::Settings::new(&address);
                             settings.auth_url = at("auth");
                             settings.save()?;
                             println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave a 1Password reference (op://…) in its place.\n", crate::cloudflare::Settings::path().with_file_name(".env.local").display());

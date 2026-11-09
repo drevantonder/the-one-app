@@ -25,13 +25,14 @@ pub fn asking(me: &Endpoint, name: &str, on: Option<&str>, platform: Option<&str
     asked
 }
 
-/// Asks auth, as the user signed in with `token`, to let it in with `asked`.
-pub async fn ask(at: &impl Address, token: &str, asked: &Value) -> Result<(), Error> {
+/// Asks auth, as the user signed in with `token`, to let it in with `asked`. → whether an invite already said yes, so
+/// no one has a code to approve.
+pub async fn ask(at: &impl Address, token: &str, asked: &Value) -> Result<bool, Error> {
     let (status, out) = at.ask("POST", &format!("{}/api/auth/devices/requests", at.address()), Some(("authorization", format!("Bearer {token}"))), Some(asked.clone())).await?;
     if status != 200 {
         return Err(crate::unsent(error(&out).unwrap_or_else(|| format!("Couldn't ask to be let in ({status})."))));
     }
-    Ok(())
+    Ok(out["invited"] == true)
 }
 
 /// What auth says now of the request of the device whose key is `key` (`keys::waited`): once approved, the network the

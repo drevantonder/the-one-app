@@ -47,6 +47,8 @@ async function start() {
   if (!platform.signedIn()) {
     // However the sign-in ended (it ran out, another tab signed out), nothing of who it was stays for the next person.
     forgetScreens().catch(() => {});
+    // Opened from an invite link (`/invite`): on to signing in, which is joining.
+    if (sessionStorage.getItem("one.invite")) return platform.signIn().catch((err) => showSignedOut(err.message));
     return showSignedOut(whySignedOut());
   }
   // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.

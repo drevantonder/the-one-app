@@ -139,7 +139,7 @@ impl Keyring {
 
     /// Asks auth to let this browser or app window in, as the user signed in with `token`, calling it `name`, saying
     /// it's built for `platform` (and with someone new's `invite` secret, its proof): `join::ask`.
-    pub async fn ask(&self, token: String, name: String, platform: Option<String>, invite: Option<String>) -> Result<(), Failed> {
+    pub async fn ask(&self, token: String, name: String, platform: Option<String>, invite: Option<String>) -> Result<bool, Failed> {
         crate::join::ask(&self.on, &token, &crate::join::asking(&self.me, &name, None, platform.as_deref(), invite.as_deref())).await.map_err(Failed::of)
     }
 

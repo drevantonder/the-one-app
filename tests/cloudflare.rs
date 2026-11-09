@@ -278,11 +278,11 @@ impl Workers {
 
     fn start_with(domain: Option<&str>, google: bool, devices: Vec<String>, recovery: Option<String>) -> Workers {
         let gateway = port();
-        let mut settings = cloudflare::Settings::new("Test", &format!("http://localhost:{gateway}"));
+        let mut settings = cloudflare::Settings::new(&format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         // The network's first devices, its admin's machines that run its calls.
-        settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
+        settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).chain(recovery.map(|key| json!({ "key": key, "role": "client", "admin": false, "recovery": true }))).collect();
         settings.root = Some(data_encoding::HEXLOWER.encode(&ROOT));
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "network", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let sites = port();

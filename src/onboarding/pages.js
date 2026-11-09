@@ -69,6 +69,15 @@ const webauthn = `
   const ASK = { in: "/api/auth/passkey/generate-authenticate-options" + FOR_DEVICE, new: "/api/auth/passkey/generate-register-options" };
   /// Gives the client this page's authorization names a code, for whoever just signed in: → where it goes on to.
   const consent = async (oauth_query) => (await api("/api/auth/oauth2/consent", { accept: true, oauth_query })).url;
+  /// A browser joining with an invite link is signing in to the web client as it does: that sign-in's page goes to the
+  /// invite, so joining is the sign-in, with nothing to do again after it.
+  const invited = () => {
+    const invite = sessionStorage.getItem("one.invite");
+    const query = location.search.slice(1);
+    if (!invite || !new URLSearchParams(query).get("client_id")) return false;
+    location.replace("/invite?" + query + "#" + invite);
+    return true;
+  };
   let early = null;
   function ready(path) {
     const asked = api(path);
@@ -138,6 +147,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
     const { providers = [], domain = "", back = "/" } = look;
     if (providers.length) return providersPage(look, providers, domain, back);
     const script = `${acts}
+      if (invited()) throw 0;
       const oauth_query = location.search.slice(1);
       const client_id = new URLSearchParams(oauth_query).get("client_id");
       const network = ${json(look.name)};
@@ -168,6 +178,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
 
   function providersPage(look, providers, domain, signedIn) {
     const script = `${acts}
+      if (invited()) throw 0;
       // A provider's answer comes back here, with an error added to the query if it said no.
       const raw = location.search.slice(1);
       const failed = /(^|&)error=/.test(raw);
@@ -243,6 +254,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
   /// a browser that won't go on to an app by itself.
   function throwawayPage(look) {
     const script = `
+      if (invited()) throw 0;
       const oauth_query = location.search.slice(1);
       const params = new URLSearchParams(oauth_query);
       const button = slot("action");
@@ -267,16 +279,25 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
     return page("sign-in-throwaway", look, script);
   }
 
-  /// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up: making a first passkey,
-  /// or signing in with a provider (`providers`, for an invite that names the account), or on a throwaway network
-  /// (`throwaway`), with nothing to make. With `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the
-  /// user who just joined.
+  /// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up. Opened as it was sent, it
+  /// goes on through the web client, whose sign-in comes back here (`invited`), so what joining makes is that sign-in and
+  /// nothing is asked twice. Then it makes a first passkey, or signs in with a provider (`providers`, for an invite that
+  /// names the account), or on a throwaway network (`throwaway`), with nothing to make. With `?code=`, the CLI's
+  /// (`sign-in --invite`), it goes on to sign that in, as the user who just joined.
   function invitePage(look) {
     const { throwaway, providers = [] } = look;
     const script = `
       const secret = location.hash.slice(1);
       const throwaway = ${throwaway ? "true" : "false"}, providers = ${json(providers)};
-      const code = new URLSearchParams(location.search).get("code");
+      const oauth_query = location.search.slice(1);
+      const params = new URLSearchParams(oauth_query);
+      const code = params.get("code"), client_id = params.get("client_id");
+      if (secret && !code && !client_id) {
+        localStorage.removeItem("one.signin");
+        sessionStorage.setItem("one.invite", secret);
+        location.replace("/");
+        throw 0;
+      }
       const button = slot("action");
       let provider = null;
       button.disabled = true;
@@ -286,6 +307,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
       // whose invite it is, and then the passkey's options, so the prompt comes the moment Join is tapped.
       const out = api("/api/auth/sign-out", {}).catch(() => {});
       if (!throwaway && !providers.length) out.then(() => ready(register(secret)));
+      const next = () => (code ? "/sign-in/code?c=" + encodeURIComponent(code) : client_id ? "/sign-in?" + oauth_query : "/");
       const withProvider = async (p, e) => {
         const undo = busy(e.currentTarget, "Opening " + p.name + "…");
         try {
@@ -293,7 +315,7 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
           await out;
           await api("/invite/provider", { secret });
           const back = "/invite" + location.search + "#" + secret;
-          location.href = (await api("/api/auth/sign-in/social", { provider: p.id, callbackURL: code ? "/sign-in/code?c=" + encodeURIComponent(code) : "/", errorCallbackURL: back })).url;
+          location.href = (await api("/api/auth/sign-in/social", { provider: p.id, callbackURL: next(), errorCallbackURL: back })).url;
         } catch (err) {
           undo();
           say(err.message);
@@ -316,7 +338,14 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
             }
           }
           button.disabled = false;
-        } catch (err) { say(err.message); }
+        } catch (err) {
+          // Used already, as when this tab joined: it signs in like anyone.
+          if (client_id) {
+            sessionStorage.removeItem("one.invite");
+            return location.replace("/sign-in?" + oauth_query);
+          }
+          say(err.message);
+        }
       })();
       button.onclick = async (e) => {
         say();
@@ -326,22 +355,16 @@ rise(document.querySelector("[data-slot=welcome-stack]"));</script></body></html
           // Kept in this tab for the web client, whose request to let in this user's first device proves it.
           sessionStorage.setItem("one.invite", secret);
           await out;
-          if (throwaway) await api("/api/auth/throwaway/join", { secret });
+          if (throwaway) await api("/api/auth/throwaway/join", { secret, join: params.get("join") || undefined });
           else await newPasskey(secret);
-          if (code) return void (location.href = "/sign-in/code?c=" + encodeURIComponent(code));
-          history.replaceState(null, "", "/invite");
-          transition(() => {
-            const joined = part("joined");
-            document.querySelector("[data-slot=welcome]").replaceWith(joined);
-            rise(joined.querySelector("[data-slot=welcome-stack]"));
-          });
+          location.href = client_id ? await consent(oauth_query) : next();
         } catch (err) {
           undo();
           if (!throwaway) ready(register(secret));
           quietly(err);
         }
       };`;
-    return page("invite", look, script, ["joined"]);
+    return page("invite", look, script);
   }
 
   /// Linking one more identity from a device (`join`, in the query), only just signed in: a provider's account, or a new

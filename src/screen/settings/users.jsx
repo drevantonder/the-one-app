@@ -144,8 +144,8 @@ function Role({ user, role, change }) {
   )
 }
 
-// Someone new. Where the network has providers: their name and email, and they sign in with it and go straight in.
-// Elsewhere: their name, then a link that lets them join, to send them.
+// Someone new. Where the network has providers: their name and email, then the network's address to send them, where
+// they sign in with it and go straight in. Elsewhere: their name, then a link that lets them join, to send them.
 function AddSomeone({ open, setOpen, providers }) {
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -170,12 +170,12 @@ function AddSomeone({ open, setOpen, providers }) {
     <ResponsiveDialog
       open={open}
       onOpenChange={setOpen}
-      title={made ? (made.link ? `Send ${made.who} This Link` : `${made.who} Can Sign In`) : "Add Someone"}
+      title={made ? `Send ${made.who} This Link` : "Add Someone"}
       action={made
         ? <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>
         : <Button size="sm" disabled={!name.trim() || (providers && !email.trim()) || busy} onClick={make}>{providers ? "Invite" : "Make Link"}</Button>}
     >
-      {made ? (made.link ? <Link link={made.link} days={made.days} /> : <p className="p-4 text-sm text-muted-foreground">With {made.email}, for {made.days} day{made.days > 1 ? "s" : ""}.</p>) : (
+      {made ? <Link link={made.link} hint={`${made.email ? `They sign in with ${made.email}` : "It works once"}, for ${made.days} day${made.days > 1 ? "s" : ""}.`} /> : (
         <form className="flex flex-col gap-4 p-4" onSubmit={(e) => (e.preventDefault(), make())}>
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="Name" autoComplete="off" enterKeyHint="done" />
           {providers && <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" aria-label="Email" autoComplete="off" enterKeyHint="done" />}
@@ -187,7 +187,7 @@ function AddSomeone({ open, setOpen, providers }) {
 }
 
 // The link made, to send them: copying it is what's left to do.
-function Link({ link, days }) {
+function Link({ link, hint }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
     await one.copy(link)
@@ -199,7 +199,7 @@ function Link({ link, days }) {
     <div className="flex flex-col gap-4 p-4">
       <div className="min-w-0">
         <p className="truncate font-mono text-sm select-all">{link}</p>
-        <Hint>It works once, for {days} day{days > 1 ? "s" : ""}.</Hint>
+        <Hint>{hint}</Hint>
       </div>
       <Button onClick={copy}><Icon name={copied ? "check" : "copy"} />{copied ? "Copied" : "Copy Link"}</Button>
     </div>

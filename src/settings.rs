@@ -926,8 +926,9 @@ async fn keep_invites(m: &impl Me, invites: &BTreeMap<String, Invited>) -> Resul
 /// An invite link for someone called `name`, as `role`, made by this admin's device: its secret stays here, to check
 /// the newcomer's device by when it asks to be let in; auth is told only its hash. A new user gets a new id; `user`
 /// invites someone who's in the network already, as who they are. Where the network has providers, `email` is an
-/// invite with no link: it's written where every device reads it, and they sign in with that email and go straight in
-/// (`Joining::New`). → `{ link, until }`, or `{ email, until }`.
+/// invite with no secret: it's written where every device reads it, and they sign in with that email at the network's
+/// address and go straight in (`Joining::New`). → `{ link, until }`, with `email` beside them if it's that: `link` is what
+/// to send them either way.
 async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: Option<&str>) -> Result<Value> {
     let name = name.trim();
     ensure!(!name.is_empty(), "Give their name.");
@@ -945,7 +946,7 @@ async fn invite(m: &impl Me, name: &str, role: Role, user: Option<&str>, email: 
     if let (true, Some(email), true) = (new, email, m.who(|who| Ok(who.setting(sign_in_proof::CLIENTS)?.is_some_and(|c| !c.trim().is_empty())))?) {
         let user = told["user"].as_str().unwrap_or(&user);
         m.write(content::invite_email(user, email, name, role, until)).await?;
-        return Ok(json!({ "email": email, "until": until }));
+        return Ok(json!({ "email": email, "link": m.address().unwrap_or_default(), "until": until }));
     }
     if new {
         kept.insert(user, Invited { secret: secret.clone(), name: name.to_string(), role, until });
@@ -959,7 +960,8 @@ pub enum Joining {
     /// One of this user's own: `proved` if its sign-in, checked here, is one they've signed in with, which only they
     /// could have made for that key. One that isn't is checked by its whole code, which can't be found to match.
     Own { proved: bool },
-    /// Someone new, from an invite link this device made.
+    /// Someone new, from an invite link this device made: the link is the approval, unless their sign-in was finished
+    /// from another link, which could be anyone's who sent it.
     Link(Invited),
     /// Someone new an admin may let in: named by an invite, or asking from the network's domain. `invite` is what lets
     /// them in with no tap, when an invite named them and they signed in on the device asking.
@@ -1107,7 +1109,12 @@ fn who_joins(r: &Asked, joining: &Joining) -> Value {
 pub async fn requests(m: &impl Me) -> Result<Value> {
     let mut out = Vec::new();
     for (r, joining) in waiting(m).await? {
-        if matches!(joining, Joining::New { invite: Some(_), .. }) {
+        let said_yes = match &joining {
+            Joining::New { invite, .. } => invite.is_some(),
+            Joining::Link(_) => r.said["sign_in"]["by_link"].is_null(),
+            _ => false,
+        };
+        if said_yes {
             match approve(m, &r, &joining).await {
                 Ok(_) => continue,
                 Err(err) => tracing::warn!("letting {} in by their invite: {err:#}", r.name),
@@ -1554,10 +1561,10 @@ fn said_removed(r: &Value) -> String {
 fn said_invited(name: &str, r: &Value) -> String {
     let days = crate::onboarding::sign_in_proof::INVITE_DAYS;
     if let Some(email) = r["email"].as_str() {
-        return format!("{name} can sign in with {email} for {days} days, and goes straight in.");
+        return format!("Send {name} {}: they sign in with {email}, for {days} days, and go straight in.", r["link"].as_str().unwrap_or(""));
     }
     let how = if crate::config::JOIN_DOMAIN.is_empty() { "they join" } else { "they sign in and join" };
-    format!("Send {name} this link. It works once, for {days} days: opening it, {how}. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
+    format!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", r["link"].as_str().unwrap_or(""))
 }
 
 #[cfg(test)]

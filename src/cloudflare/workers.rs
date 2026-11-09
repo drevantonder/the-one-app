@@ -146,8 +146,6 @@ fn schema(settings: &Settings) -> String {
 /// `op(op://…)` references to 1Password, for a real network, so no file here holds them.
 #[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct Settings {
-    /// The network's name, as sign-in screens say it.
-    pub name: String,
     /// The network's address, the one users use: the gateway's, which sends signing in to auth, MCP to the MCP
     /// Worker, the relay's paths to the relay and the rest to the web client. Passkeys belong to its host name, so it
     /// doesn't change.
@@ -434,12 +432,11 @@ impl Settings {
     }
 
     /// New settings, with new secrets.
-    pub fn new(name: &str, address: &str) -> Settings {
+    pub fn new(address: &str) -> Settings {
         let port = crate::config::PORT;
         let ports = [port + 10, port + 13];
         let secret = || B64U.encode(&rand::random::<[u8; 32]>());
         Settings {
-            name: name.into(),
             address: address.trim_end_matches('/').into(),
             auth_url: format!("http://127.0.0.1:{}", ports[0]),
             cloudflare_node: false,
@@ -466,7 +463,7 @@ impl Settings {
     pub fn for_throwaway(home: &Path, bucket: &str, user: (String, String)) -> Result<Settings> {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
         let ports = [free()?, free()?];
-        let mut settings = Settings::new("Throwaway", &format!("http://127.0.0.1:{}", ports[1]));
+        let mut settings = Settings::new(&format!("http://127.0.0.1:{}", ports[1]));
         settings.auth_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
         settings.throwaway_user = Some(user);
@@ -508,7 +505,7 @@ impl Settings {
         }
         let vault = text.split("op(op://").nth(1).and_then(|rest| rest.split('/').next()).filter(|v| !v.is_empty());
         let kept = match vault {
-            Some(vault) => format!("op(op://{vault}/{}/password)", in_1password(vault, &format!("{} Cloudflare {name}", self.name), value)?),
+            Some(vault) => format!("op(op://{vault}/{}/password)", in_1password(vault, &format!("{} Cloudflare {name}", crate::config::NAME), value)?),
             None => quoted(value),
         };
         lines.push(format!("{name}={kept}"));
@@ -548,7 +545,7 @@ fn push_bindings(settings: &Settings) -> Vec<Binding> {
     let mut out = vec![
         plain("RELAY", "service:relay"),
         plain("ADDRESS", settings.address.clone()),
-        plain("NAME", settings.name.clone()),
+        plain("NAME", crate::config::NAME),
         // The Apple apps' bundle ids (client/native/iphone/project.yml, mac/build.sh), which their pushes go to.
         plain("APNS_TOPICS", json!([format!("app.{cli}.phone"), format!("app.{cli}.mac")]).to_string()),
     ];
@@ -574,7 +571,7 @@ fn mcp_bindings(settings: &Settings) -> Vec<Binding> {
         plain("RELAY", "service:relay:McpDevices"),
         plain("SIGNER", "service:signer"),
         plain("ADDRESS", settings.address.clone()),
-        plain("NAME", settings.name.clone()),
+        plain("NAME", crate::config::NAME),
         plain("YOURS", crate::config::YOURS),
     ];
     out.extend(location());
@@ -590,7 +587,7 @@ fn node_bindings(settings: &Settings) -> Vec<Binding> {
         // Workers AI, for the services built for Cloudflare that use it.
         plain("AI", "ai:"),
         plain("ADDRESS", settings.address.clone()),
-        plain("NAME", settings.name.clone()),
+        plain("NAME", crate::config::NAME),
         secret("NODE_KEY", settings.cloudflare_node_key.clone()),
         plain("RELAY", "service:relay:CloudflareNode"),
     ];
@@ -620,7 +617,7 @@ fn auth_bindings(settings: &Settings) -> Vec<Binding> {
         // Pushes to a user's devices, by the push Worker's entrypoint for the network's own Workers.
         plain("PUSH", "service:push:Sender"),
         plain("ADDRESS", settings.address.clone()),
-        plain("NAME", settings.name.clone()),
+        plain("NAME", crate::config::NAME),
         plain("YOURS", crate::config::YOURS),
         // Its own apps' sign-ins come back to `<cli>://signed-in/`.
         plain("CLI", crate::config::CLI),

@@ -15,7 +15,6 @@ export const pages = {
   "sign-in-provider": <Welcome logo={logo} title="{{name}}" action={{ label: "Sign In with {{provider}}" }} other={{ label: "Use a Passkey" }} />,
   "sign-in-throwaway": <Welcome logo={logo} title="{{name}}" action={{ label: "Sign In as {{user}}" }} />,
   "invite": <Welcome logo={logo} title="Join {{name}}" action={{ label: "Join" }} />,
-  "joined": <Welcome logo={logo} title="You've joined {{yours}}" action={{ label: "Open {{name}}", href: "/" }} />,
   "passkeys": (
     <Welcome logo={logo} title="Passkeys" text="Each one signs you in to {{name}}." callout={ANOTHER} action={{ label: "Add a Passkey" }}>
       <Spinner className="size-5" />

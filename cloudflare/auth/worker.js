@@ -643,7 +643,8 @@ export class Auth extends DurableObject {
   /// A device signed in asks to join: `{ key, seal, name, reads, proof?, device?, platform? }`, its endpoint keys (hex), its name,
   /// what its build reads of who's who (`READS`), for a
   /// newcomer's first device, `keys::invite_proof` of its invite's secret, key and seal key, kept with that invite for the
-  /// inviting admin's device to check, and for a native app, the device it's on (64 hex). → until when it waits.
+  /// inviting admin's device to check, and for a native app, the device it's on (64 hex). → until when it waits, and
+  /// whether an invite already said yes (`invited`), so it shows no code to approve.
   async ask(request) {
     const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
     const { user, here } = (await this.asker(request)) || refuse(401, "Sign in first.");
@@ -676,11 +677,12 @@ export class Auth extends DurableObject {
     // Whoever asks names any key, so this never changes whose one already is.
     sql.exec("insert or ignore into devices (key, user, at) values (?, ?, ?)", key, user, made);
     await this.keepProviderProof(key, seal, user);
+    const invited = here && (proof != null || this.anInviteLetsIn(user, key));
     if (!told) {
-      if (this.anInviteLetsIn(user, key, here)) await this.wantsInBy(made + WANTS_IN);
+      if (invited) await this.wantsInBy(made + WANTS_IN);
       else await this.wantsIn({ key, seal, name: name.trim(), user, place });
     }
-    return { until: made + REQUEST };
+    return { until: made + REQUEST, invited };
   }
 
   /// The ID token a provider last gave `user`, if it names this device: what its request carries for whoever answers it.
@@ -695,10 +697,10 @@ export class Auth extends DurableObject {
   }
 
   /// Whether an admin's device that's online lets this request in by itself, an invite having said yes
-  /// (src/settings.rs's `Joining::New`): an invited email's first device, signed in on itself.
-  anInviteLetsIn(user, key, here) {
+  /// (src/settings.rs's `Joining::New`): an invited email's first device, once it has signed in on itself.
+  anInviteLetsIn(user, key) {
     const sql = this.ctx.storage.sql;
-    return here && sql.exec("select 1 from invites where user = ? and email is not null and used is not null", user).toArray().length > 0 && !sql.exec("select 1 from devices where user = ? and key != ?", user, key).toArray().length;
+    return sql.exec("select 1 from invites where user = ? and email is not null and used is not null", user).toArray().length > 0 && !sql.exec("select 1 from devices where user = ? and key != ?", user, key).toArray().length;
   }
 
   /// Tells a request's user it wants in, once, unless it was turned down before.

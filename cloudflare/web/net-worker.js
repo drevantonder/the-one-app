@@ -403,8 +403,7 @@ export function server(version, givenHost) {
           }
           // Asking auth to let this browser in, and what auth says of it while it waits (one-client's `join`).
           case "ask": {
-            await (await asking(m.user)).ask(m.token, m.name, m.platform ?? undefined, m.invite ?? undefined);
-            return post({ id });
+            return post({ id, invited: await (await asking(m.user)).ask(m.token, m.name, m.platform ?? undefined, m.invite ?? undefined) });
           }
           case "waited":
             return post({ id, said: await (await asking(m.user)).waited(m.token) });

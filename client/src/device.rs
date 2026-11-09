@@ -179,7 +179,7 @@ impl Device {
 
     /// Asks auth to let it in, as the user signed in with `token`, calling it `name` (and with someone new's invite
     /// secret, its proof).
-    pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
+    pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<bool, Error> {
         let on = self.on.lock().unwrap().clone();
         let asked = join::asking(&self.me, name, on.as_deref(), Some(PLATFORM), invite);
         if let Stage::Off { asked: kept } = &mut *self.stage.lock().await {

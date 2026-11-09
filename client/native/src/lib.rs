@@ -399,10 +399,10 @@ async fn join() -> Result<Value, Failure> {
         Err(e) => return Err(e.to_string().into()),
     }
     let invite = a.kept("invite");
-    device.ask(&token, &join_name(), invite.as_deref()).await.map_err(|e| e.to_string())?;
+    let invited = device.ask(&token, &join_name(), invite.as_deref()).await.map_err(|e| e.to_string())?;
     println!("Code: {}", device.code());
     platform::approve_here(device.code());
-    Ok(json!({ "code": device.code(), "invited": invite.is_some() }))
+    Ok(json!({ "code": device.code(), "invited": invited }))
 }
 
 /// What this device is called among its user's: a computer's "<name> on <computer>", a phone's its own name.

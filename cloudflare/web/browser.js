@@ -88,12 +88,12 @@ export function browser() {
     navigator.serviceWorker?.register("/sw.js", { type: "module" }).catch(() => {});
     const user = auth.user();
     const keys = await browserKeys(user);
-    if (await net.start(user).catch((err) => (err.unreachable ? Promise.reject(err) : false))) return (device = keys);
     const invite = sessionStorage.getItem("one.invite");
+    if (await net.start(user).catch((err) => (err.unreachable ? Promise.reject(err) : false))) return sessionStorage.removeItem("one.invite"), (device = keys);
     const ask = async () => net.ask(user, await auth.token(), browserName(), "browser", invite);
-    await ask();
+    const invited = await ask();
     if (await byPasskey(user, keys, api)) return (device = keys);
-    waiting(await codeOf(keys.key, keys.seal), !!invite);
+    waiting(await codeOf(keys.key, keys.seal), invited);
     await net.untilLetIn(user, () => auth.token(), ask);
     sessionStorage.removeItem("one.invite");
     return (device = keys);

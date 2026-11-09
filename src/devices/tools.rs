@@ -88,12 +88,12 @@ fn tools() -> Vec<Tool> {
         Tool::route(
             json!({
                 "name": "invite", "title": "Invite someone",
-                "description": "Lets someone new join, once, for a few days: a link to give them yourself, or, with their email where the network has providers, no link at all. It sends nothing.",
+                "description": "Lets someone new join, once, for a few days: a link to give them yourself: with their email, where the network has providers, it's the network's address, and they sign in with that email. It sends nothing.",
                 "input": { "type": "object", "required": ["name"], "properties": {
                     "name": { "type": "string", "description": "their name" },
                     "admin": { "type": "boolean", "description": "make them an admin" },
                     "user": { "type": "string", "description": "someone in the network already, by id, whose new device this lets in; omit for someone new" },
-                    "email": { "type": "string", "description": "where the network has providers: the email they sign in with, and they go straight in with no link" },
+                    "email": { "type": "string", "description": "where the network has providers: the email they sign in with, and they go straight in" },
                 } },
                 "output": said("the link to give them, and what happens when they open it"),
             }),

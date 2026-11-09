@@ -2,7 +2,7 @@
 // Bun runs it:
 //   sign-in <devtools port> <address> <picture> [invite link]: the web client is opened at the throwaway network's address
 //     and signed in, as a user would, pressing Sign In, the throwaway network's auth going straight on. With an invite
-//     link, its user first opens it and joins, pictured as <picture>-invite and -joined. Prints the code it shows to
+//     link, its user first opens it and joins, pictured as <picture>-invite. Prints the code it shows to
 //     be approved (pictured as <picture>-approve), or nothing if it's a device of its user's already.
 //   picture <devtools port> <address> <picture>: once the web client's window is drawn, a picture of it.
 const [command, port, address, picture, invite] = process.argv.slice(2);
@@ -46,14 +46,11 @@ if (command === "picture") {
 }
 if (invite) {
   await send("Page.navigate", { url: invite });
-  await until(`!!document.querySelector("button[data-slot=welcome-action]:not([disabled])")`, "the invite page didn't open");
+  // On through the web client's sign-in, which comes back to the invite to join.
+  await until(`location.pathname === "/invite" && location.search.includes("client_id") && !!document.querySelector("button[data-slot=welcome-action]:not([disabled])")`, "the invite page didn't open");
   await sleep(300);
   await shoot(named("invite"));
   await evaluate(`document.querySelector("[data-slot=welcome-action]").click()`);
-  await until(`!!document.querySelector("a[data-slot=welcome-action]")`, "joining didn't work");
-  await shoot(named("joined"));
-  await evaluate(`document.querySelector("a[data-slot=welcome-action]").click()`);
-  await sleep(500);
 }
 if (!(await evaluate("location.href")).startsWith(address)) await send("Page.navigate", { url: address });
 const by = Date.now() + 60_000;

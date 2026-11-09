@@ -194,6 +194,12 @@ export function showSignedOut(error, note) {
 /// "Waiting for Approval": its code, and the code as a QR, a link that opens Approve with it in the browser of a
 /// phone that scans it.
 export function showJoin(code, invited) {
+  // An invite already said yes: an admin's device lets this one in by itself as soon as one is online.
+  if (invited) {
+    document.title = "Letting You In";
+    windowShown = false;
+    return show(h(ui.Welcome, { key: "invited", logo, title: "Letting You In", text: "You'll be in as soon as an admin's device is online.", other: { label: "Sign Out", run: () => leave() } }));
+  }
   document.title = "Waiting for Approval";
   const link = `${platform.address()}/approve#${code.replaceAll(" ", "")}`;
   windowShown = false;
@@ -201,7 +207,7 @@ export function showJoin(code, invited) {
     logo,
     code,
     qr: qrSvg(link),
-    text: invited ? "Show whoever invited you this code, or have them scan it." : "Approve it on your other device, or ask an admin.",
+    text: "Approve it on your other device, or ask an admin.",
     onSignOut: () => leave(),
   }));
 }
