@@ -192,7 +192,10 @@ fn send(part: Part, at: &At, release: bool) -> Result<()> {
 /// device deploys what it was built with, once it runs this build), and the web client.
 fn send_node(at: &At) -> Result<()> {
     let key = release_key()?;
-    let folder = build_release(at)?;
+    let folder = match at.build() {
+        Some(folder) => folder,
+        None => build_release(at)?,
+    };
     let binary = folder.join("one");
     let version = Version::of(&binary).context("ask the new build what it is")?;
     println!("{}", build::published_said(&build::publish(&crate::node(), &binary, &key, &version, None)?, None));
@@ -220,6 +223,7 @@ fn front(at: &At, workers: bool, web: bool) -> Result<()> {
     let rust = (w && due(Part::Workers, at).node) || (b && due(Part::Web, at).node);
     let key = release_key()?;
     if rust {
+        ensure!(!due(Part::Node, at).node, "there's Rust in this change, and the node hasn't gone out with it: {CLI}-dev update node sends this with it");
         let folder = at.build().with_context(|| format!("there's Rust in this change, so it needs its build: {CLI}-dev update node sends this with it"))?;
         let version = Version::of(&folder.join("one")).context("ask the build what it is")?;
         deploy_cloudflare(Some(&version.commit))?;
@@ -270,8 +274,10 @@ fn send_dev(at: &At) -> Result<()> {
     let name = format!("{CLI}-dev");
     for device in devices().iter().filter(|d| d["online"] == true && d["here"] != true && d["target"] == TARGET) {
         let host = device["name"].as_str().unwrap_or("");
-        let copied = Command::new("scp").args(["-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]).arg(&built).arg(format!("{host}:.local/bin/{name}.new")).status().is_ok_and(|s| s.success())
-            && Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, &format!("chmod 755 .local/bin/{name}.new && mv .local/bin/{name}.new .local/bin/{name}")]).status().is_ok_and(|s| s.success());
+        // Over ssh's own channel: not every device's ssh server takes scp's.
+        let copied = std::fs::File::open(&built).is_ok_and(|program| {
+            Command::new("ssh").args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, &format!("cat > .local/bin/{name}.new && chmod 755 .local/bin/{name}.new && mv .local/bin/{name}.new .local/bin/{name}")]).stdin(program).status().is_ok_and(|s| s.success())
+        });
         println!("  {host}: {}", if copied { "installed" } else { "couldn't copy it there" });
     }
     Ok(())

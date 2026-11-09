@@ -86,8 +86,11 @@ fn build_release(at: &At) -> Result<PathBuf> {
     }
     let out = builds.join(&version.commit);
     std::fs::create_dir_all(&out)?;
-    std::fs::copy(&binary, out.join("one"))?;
-    std::fs::copy(src.join("target/release/one-dev"), out.join("one-dev"))?;
+    // Beside it and moved into place, so a program running from this folder isn't written over.
+    for (made, name) in [(binary, "one"), (src.join("target/release/one-dev"), "one-dev")] {
+        std::fs::copy(&made, out.join(format!("{name}.new")))?;
+        std::fs::rename(out.join(format!("{name}.new")), out.join(name))?;
+    }
     std::fs::write(out.join("config"), at.config_commit())?;
     Ok(out)
 }
