@@ -1,7 +1,6 @@
 // The web client in a browser (platform.js): it signs in as an OAuth client of the network's auth (PKCE, and the
 // user's passkey at its sign-in page), keeps its refresh token in this browser, and is its user's device
-// (device.js, and one-client's keyring in the SharedWorker, net.js), let in by another of theirs, by a passkey of theirs,
-// or by whoever invited them.
+// (device.js, and one-client's keyring in the SharedWorker, net.js), let in by someone already in the network saying yes.
 import { browserKeys, browserName, codeOf, passkeyKeysOf, signingInFor } from "./device.js";
 import { del } from "./kept.js";
 import { net } from "./net.js";
@@ -24,7 +23,7 @@ const auth = {
   client: () => ((kept) => (kept?.redirect === back() ? kept.id : null))(JSON.parse(localStorage.getItem(CLIENT) || "null")),
 
   /// Off to auth's sign-in page, registered the first time, coming back to /callback, then to where this was. The
-  /// device it signs in for (`join`) its sign-in then names, so the user's devices can let it in by it.
+  /// device it signs in for (`join`) its sign-in then names, for whoever answers it to check.
   async start() {
     const out = await net.auth({ step: "start", name: browserName(), back: back(), client: auth.client(), join: await signingInFor() });
     localStorage.setItem(CLIENT, JSON.stringify({ id: out.client, redirect: back() }));

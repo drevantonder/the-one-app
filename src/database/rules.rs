@@ -72,6 +72,7 @@ pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Res
         Some(Change::Vault) => c.vault(),
         Some(Change::Group) => c.group(),
         Some(Change::Invite) => c.invite(),
+        Some(Change::InviteEmail) => c.invite_email(),
         Some(Change::Accept) => c.accept(),
         Some(Change::Member) => c.member(),
         Some(Change::Rename) => c.rename(),
@@ -220,18 +221,53 @@ impl Rule<'_> {
         } else if self.who.user_ever(&user)?.is_some() {
             let verb = if machine.is(Kind::Client) || machine.is(Kind::Service) { "add-devices" } else { "add-machines" };
             let lists = self.who.user(&user)?.is_some() && self.may_make(verb, &user_principal(&user), &user_principal(&user), "owner", &super::scopes::device(&machine.key));
-            ensure!(lists, "only a user's own device lists their devices; an admin's lists compute and services");
+            ensure!(lists || self.lost(&user, &machine)?, "only a user's own device lists their devices; an admin's lists compute and services");
         } else {
             let r = self.role_of("role")?;
             allowed!(self.who.may_give(w, &user, role(r), NETWORK), "only admins add users");
-            add_user(self.out, &user, &self.text("user_name")?, r)?;
+            let mut name = self.text("user_name");
+            if self.data.get("invite").is_some() {
+                name = self.by_invite(&user, r, &mut machine).map(Ok)?;
+            }
+            add_user(self.out, &user, &name?, r)?;
         }
         put(self.out, &machine)?;
         self.devices_changed()
     }
 
+    /// Whether an admin may let in this next device of `user`, who has no device of theirs left to approve it: a device
+    /// people use, nothing else.
+    fn lost(&self, user: &str, machine: &Machine) -> Result<bool> {
+        let none_left = !self.who.clients()?.iter().any(|c| c.user == user && c.passkey.is_none());
+        Ok(none_left && machine.roles == BTreeSet::from([Kind::Client]) && machine.passkey.is_none() && self.who.user(user)?.is_some() && self.may("invite", NETWORK))
+    }
+
+    /// A newcomer's first device, joining by the invite that names them: only their device people use, only with that
+    /// invite, once, by an ID token for its email that names this device, checked with the key saved beside it, as its
+    /// issuer's keys change. The admin's device that writes it checked that key was its issuer's. → their name.
+    fn by_invite(&self, user: &str, r: Role, machine: &mut Machine) -> Result<String> {
+        use crate::onboarding::sign_in_proof::{self, Network};
+        let invite = self.who.email_invite(user)?.context("they weren't invited by their email")?;
+        ensure!(!invite.used, "that invite has been used");
+        ensure!(invite.role == r, "they were invited as something else");
+        ensure!(machine.roles == BTreeSet::from([Kind::Client]) && machine.passkey.is_none(), "an invite lets in a device people use");
+        let root = self.who.root()?.context("no network")?;
+        let address = self.who.setting("address")?.unwrap_or_default();
+        let network = Network::new(&address, *root.as_bytes(), self.who.setting(sign_in_proof::CLIENTS)?.as_deref());
+        let token = self.data["invite"]["token"].as_str().context("no token")?;
+        let endpoint = crate::keys::Endpoint { key: machine.key, seal: machine.seal };
+        let shown = sign_in_proof::id_token(token, &endpoint, &network, &self.data["invite"]["jwk"])?;
+        let sign_in_proof::Account::Provider { email: Some(email), .. } = &shown.account else { bail!("that sign-in names no email") };
+        ensure!(shown.email_verified && email.to_lowercase() == invite.email, "that sign-in isn't the invited email's");
+        ensure!(shown.issued <= invite.until, "that invite had expired");
+        self.out.execute("UPDATE email_invites SET used = ? WHERE user = ?", params![hex(&machine.key), user])?;
+        machine.by = user.to_string();
+        machine.sign_in = Some(shown.account);
+        Ok(invite.name)
+    }
+
     /// A device its user said isn't theirs ("Not Me"), before it was ever listed: its key is taken out now, so no
-    /// device of theirs lets it in, by its sign-in or its code, and nothing it writes counts.
+    /// device of theirs lets it in, and nothing it writes counts.
     fn refuse(&self) -> Result<()> {
         let key = self.key("key")?;
         ensure!(self.who.machine_ever(&key)?.is_none(), "that key is listed already: take it out instead");
@@ -405,6 +441,18 @@ impl Rule<'_> {
         allowed!(self.who.may_give(self.w, &user, role(to), &group(&g)), "only the group's admins invite");
         self.who.user(&user)?.context("no such user")?;
         self.out.execute("INSERT OR REPLACE INTO invites VALUES (?, ?, ?)", params![user_principal(&user), group(&g), role(to)])?;
+        Ok(())
+    }
+
+    /// Someone new, named by the email they'll sign in with: only by who may add them.
+    fn invite_email(&self) -> Result<()> {
+        let (user, to) = (self.id("user")?, self.role_of("role")?);
+        allowed!(self.who.may_give(self.w, &user, role(to), NETWORK), "only admins invite someone new");
+        ensure!(self.who.user_ever(&user)?.is_none(), "they're in the network already");
+        let (email, name) = (self.text("email")?.to_lowercase(), self.text("name")?);
+        ensure!(email.contains('@') && !name.trim().is_empty(), "an invite names an email and a name");
+        let until = self.data["until"].as_u64().context("no until")?;
+        self.out.execute("INSERT OR REPLACE INTO email_invites VALUES (?, ?, ?, ?, ?, NULL)", params![user, email, name.trim(), role(to), int(until)])?;
         Ok(())
     }
 
@@ -915,6 +963,105 @@ mod tests {
         assert_eq!(net.db.sign_ins(BOB)?, vec![serde_json::from_value(account("bobs-own")).unwrap()]);
         assert_eq!(net.db.seal_key(&mac.id())?, Some(mac.endpoint().seal), "the seal key it was listed with");
         Ok(())
+    }
+
+    mod invites {
+        use super::*;
+        use crate::database::scopes::Role;
+        use crate::onboarding::sign_in_proof::{CLIENTS, nonce};
+        use data_encoding::BASE64URL_NOPAD as B64U;
+        use ed25519_dalek::Signer;
+
+        const SAM: &str = "c000000000000003";
+        const ISSUER: &str = "https://login.example";
+        const EMAIL: &str = "sam@example.com";
+
+        /// The provider's key, as an admin's device saves it with a proof.
+        fn provider() -> (SigningKey, Value) {
+            let key = SigningKey::from_bytes(&[8; 32]);
+            let jwk = json!({ "kty": "OKP", "crv": "Ed25519", "alg": "EdDSA", "kid": "k", "x": B64U.encode(key.verifying_key().as_bytes()) });
+            (key, jwk)
+        }
+
+        fn token(key: &SigningKey, device: &Dev, root: [u8; 32], email: &str, iat: u64) -> String {
+            let head = B64U.encode(json!({ "alg": "EdDSA", "kid": "k" }).to_string().as_bytes());
+            let body = B64U.encode(json!({ "iss": ISSUER, "aud": "ours", "sub": "s1", "iat": iat, "email": email, "email_verified": true, "nonce": nonce(&root, &device.endpoint()) }).to_string().as_bytes());
+            let sig = key.sign(format!("{head}.{body}").as_bytes());
+            format!("{head}.{body}.{}", B64U.encode(&sig.to_bytes()))
+        }
+
+        fn joins(device: &Dev, user: &str, token: &str, jwk: &Value) -> Content {
+            let mut c = crate::database::content::device(&device.endpoint(), user, "Sam's phone", &[Kind::Client], Some(("Sam", Role::Member)));
+            c.data["invite"] = json!({ "token": token, "jwk": jwk });
+            c
+        }
+
+        /// A network whose users sign in at `ISSUER`, where an admin has named Sam by email.
+        fn invited() -> (Dev, Net, [u8; 32]) {
+            let (mac, mut net) = setup();
+            assert!(net.step(&mac, ANDRE, setting(CLIENTS, Some(&format!("{ISSUER} ours")))));
+            assert!(net.step(&mac, ANDRE, invite_email(SAM, EMAIL, "Sam", Role::Member, 2_000_000)));
+            let root = *net.db.root().unwrap().unwrap().as_bytes();
+            (mac, net, root)
+        }
+
+        #[test]
+        fn only_an_admin_names_someone_by_email() {
+            let (mac, mut net, _) = invited();
+            let bobs = Dev::new(3);
+            net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+            assert!(!net.step(&bobs, BOB, invite_email("d000000000000004", "x@example.com", "X", Role::Member, 2_000_000)), "a member names no one");
+            assert!(!net.step(&mac, ANDRE, invite_email(BOB, "bob@example.com", "Bob", Role::Member, 2_000_000)), "someone in already");
+        }
+
+        /// An invite lets in the device its ID token names, once, for its email, written by an admin's device; every
+        /// other try counts for nothing.
+        #[test]
+        fn an_invite_lets_in_only_its_own_user_once() -> anyhow::Result<()> {
+            let (mac, mut net, root) = invited();
+            let (key, jwk) = provider();
+            let (phone, other, bobs) = (Dev::new(3), Dev::new(4), Dev::new(5));
+            let good = token(&key, &phone, root, EMAIL, 1000);
+
+            assert!(!net.step(&mac, ANDRE, joins(&phone, SAM, &token(&key, &phone, root, "someone-else@example.com", 1000), &jwk)), "the wrong person's email");
+            assert!(!net.step(&mac, ANDRE, joins(&other, SAM, &good, &jwk)), "a token naming another device");
+            assert!(!net.step(&mac, ANDRE, joins(&phone, SAM, &token(&key, &phone, [9; 32], EMAIL, 1000), &jwk)), "a token for another network");
+            assert!(!net.step(&mac, ANDRE, joins(&phone, SAM, &token(&key, &phone, root, EMAIL, 3000), &jwk)), "made after the invite ended");
+            let (forger, _) = (SigningKey::from_bytes(&[9; 32]), ());
+            assert!(!net.step(&mac, ANDRE, joins(&phone, SAM, &token(&forger, &phone, root, EMAIL, 1000), &jwk)), "signed by a key that isn't the one saved");
+            assert!(!net.step(&mac, ANDRE, joins(&phone, "d000000000000004", &good, &jwk)), "no invite for that user");
+            assert!(net.db.user(SAM)?.is_none());
+
+            net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+            assert!(!net.step(&bobs, BOB, joins(&phone, SAM, &good, &jwk)), "only an admin's device writes it");
+            let mut more = joins(&phone, SAM, &good, &jwk);
+            more.data["roles"] = json!([Kind::Client, Kind::Compute]);
+            assert!(!net.step(&mac, ANDRE, more), "only a device people use");
+
+            assert!(net.step(&mac, ANDRE, joins(&phone, SAM, &good, &jwk)));
+            let sam = net.db.user(SAM)?.unwrap();
+            assert_eq!((sam.name.as_str(), sam.role), ("Sam", Role::Member));
+            assert_eq!(net.db.sign_ins(SAM)?.len(), 1, "what it signed in with is theirs");
+            assert!(!net.step(&mac, ANDRE, joins(&Dev::new(6), SAM, &token(&key, &Dev::new(6), root, EMAIL, 1000), &jwk)), "used twice");
+            assert!(net.db.machine(&Dev::new(6).id())?.is_none());
+            Ok(())
+        }
+
+        /// An admin lets in someone's next device only when they have no device of their own left.
+        #[test]
+        fn an_admin_lets_in_someone_with_no_device_left() -> anyhow::Result<()> {
+            let (mac, mut net) = setup();
+            let (bobs, next, later, carol) = (Dev::new(3), Dev::new(4), Dev::new(5), Dev::new(6));
+            net.step(&mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+            net.step(&mac, ANDRE, device(&carol.endpoint(), "e000000000000005", "carol's phone", &[Kind::Client], Some(("Carol", Role::Member))));
+            assert!(!net.step(&mac, ANDRE, device(&next.endpoint(), BOB, "new", &[Kind::Client], None)), "not while they have one");
+            net.step(&mac, ANDRE, remove_device(&bobs.id()));
+            assert!(!net.step(&carol, "e000000000000005", device(&next.endpoint(), BOB, "new", &[Kind::Client], None)), "only an admin");
+            assert!(!net.step(&mac, ANDRE, device(&next.endpoint(), BOB, "new", BOTH, None)), "only a device people use");
+            assert!(net.step(&mac, ANDRE, device(&next.endpoint(), BOB, "new", &[Kind::Client], None)));
+            assert!(!net.step(&mac, ANDRE, device(&later.endpoint(), BOB, "later", &[Kind::Client], None)), "and they have one again");
+            Ok(())
+        }
     }
 
     #[test]

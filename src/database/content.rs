@@ -70,6 +70,8 @@ pub enum Change {
     Vault,
     Group,
     Invite,
+    /// Names someone new by the email they sign in with, as an admin's yes in advance: `{ user, email, name, role, until }`.
+    InviteEmail,
     Accept,
     Member,
     Rename,
@@ -89,7 +91,7 @@ pub enum Change {
     Arrange,
 }
 
-const NAMES: [(Change, &str); 32] = [
+const NAMES: [(Change, &str); 33] = [
     (Change::Freeze, "freeze"),
     (Change::Start, "start"),
     (Change::Defaults, "defaults"),
@@ -105,6 +107,7 @@ const NAMES: [(Change, &str); 32] = [
     (Change::Vault, "vault"),
     (Change::Group, "group"),
     (Change::Invite, "invite"),
+    (Change::InviteEmail, "invite-email"),
     (Change::Accept, "accept"),
     (Change::Member, "member"),
     (Change::Rename, "rename"),
@@ -190,6 +193,11 @@ pub fn group(id: &str, name: &str) -> Content {
 
 pub fn invite(group: &str, user: &str, role: Role) -> Content {
     node(Change::Invite, json!({ "group": group, "user": user, "role": role }))
+}
+
+/// Says someone new may join as `user` by signing in as `email`, until `until` (ms): an admin's yes, given in advance.
+pub fn invite_email(user: &str, email: &str, name: &str, role: Role, until: u64) -> Content {
+    node(Change::InviteEmail, json!({ "user": user, "email": email, "name": name, "role": role, "until": until }))
 }
 
 pub fn accept(group: &str) -> Content {

@@ -340,7 +340,7 @@ fn address_of(typed: &str) -> Result<String, String> {
 }
 
 /// Signs in, in the system's browser, which comes back to this device; naming the device it's for, so the user's
-/// devices can let it in by this sign-in.
+/// devices can check this sign-in.
 #[tauri::command]
 async fn sign_in() -> Result<(), Failure> {
     let a = app();

@@ -74,6 +74,15 @@ CREATE TABLE devices (
   platform TEXT
 ) STRICT;
 -- What a user also signs in with, linked from their device `device`, which checked it (`sign_in_proof::Account`, JSON).
+-- Someone new an admin named by the email they sign in with: their device joins by an ID token for it, once (`used`, its key).
+CREATE TABLE email_invites (
+  user TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  until INTEGER NOT NULL,
+  used TEXT
+) STRICT;
 CREATE TABLE linked_sign_ins (
   device TEXT NOT NULL,
   account TEXT NOT NULL,

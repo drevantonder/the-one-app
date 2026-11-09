@@ -93,13 +93,7 @@ function Users() {
           })}
         </List>
         {error && <Problem title={error} />}
-        {admin && domain && (
-          <Section className="max-w-2xl" title="Add Someone">
-            <p className="text-sm text-muted-foreground">
-              Anyone with a Google account at {domain} joins {yours} by signing in with Google{address && <> at <b>{address.replace(/^https?:\/\//, "")}</b></>}.
-            </p>
-          </Section>
-        )}
+        {admin && domain && <p className="max-w-2xl text-sm text-muted-foreground">Anyone else at {domain} can sign in and ask.</p>}
       </>
     )
   }
@@ -107,10 +101,10 @@ function Users() {
   return (
     <>
       <div className="flex max-w-2xl flex-col gap-4">
-        <LargeTitle action={state && admin && !domain && <Button onClick={() => startAdd()}>Add Someone</Button>}>Users</LargeTitle>
+        <LargeTitle action={state && admin && <Button onClick={() => startAdd()}>Add Someone</Button>}>Users</LargeTitle>
         {body}
       </div>
-      {add.n > 0 && <AddSomeone key={`add${add.n}`} open={add.open} setOpen={setAddOpen} />}
+      {add.n > 0 && <AddSomeone key={`add${add.n}`} open={add.open} setOpen={setAddOpen} providers={!!state?.network?.settings?.sign_in_clients} />}
       {handle.n > 0 && <Handle key={`handle${handle.n}`} was={handleNow} open={handle.open} setOpen={setHandleOpen} saved={load} />}
     </>
   )
@@ -135,9 +129,11 @@ function Role({ user, role, change }) {
   )
 }
 
-// Someone new: their name, then a link that lets them join, to send them.
-function AddSomeone({ open, setOpen }) {
+// Someone new. Where the network has providers: their name and email, and they sign in with it and go straight in.
+// Elsewhere: their name, then a link that lets them join, to send them.
+function AddSomeone({ open, setOpen, providers }) {
   const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
   const [made, setMade] = useState(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -147,9 +143,9 @@ function AddSomeone({ open, setOpen }) {
     setBusy(true)
     setError("")
     try {
-      const { link, until } = await api("POST", "/v1/devices/invite", { name: who })
+      const { link, until } = await api("POST", "/v1/devices/invite", { name: who, ...(email.trim() ? { email: email.trim() } : {}) })
       one.tap("success")
-      setMade({ who, link, days: Math.max(1, Math.round((until - Date.now()) / 86_400_000)) })
+      setMade({ who, link, email: email.trim(), days: Math.max(1, Math.round((until - Date.now()) / 86_400_000)) })
     } catch (e) {
       setError(said(e))
     }
@@ -159,14 +155,15 @@ function AddSomeone({ open, setOpen }) {
     <ResponsiveDialog
       open={open}
       onOpenChange={setOpen}
-      title={made ? `Send ${made.who} This Link` : "Add Someone"}
+      title={made ? (made.link ? `Send ${made.who} This Link` : `${made.who} Can Sign In`) : "Add Someone"}
       action={made
         ? <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>
-        : <Button size="sm" disabled={!name.trim() || busy} onClick={make}>Make Link</Button>}
+        : <Button size="sm" disabled={!name.trim() || (providers && !email.trim()) || busy} onClick={make}>{providers ? "Invite" : "Make Link"}</Button>}
     >
-      {made ? <Link link={made.link} days={made.days} /> : (
+      {made ? (made.link ? <Link link={made.link} days={made.days} /> : <p className="p-4 text-sm text-muted-foreground">With {made.email}, for {made.days} day{made.days > 1 ? "s" : ""}.</p>) : (
         <form className="flex flex-col gap-4 p-4" onSubmit={(e) => (e.preventDefault(), make())}>
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="Name" autoComplete="off" enterKeyHint="done" />
+          {providers && <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" aria-label="Email" autoComplete="off" enterKeyHint="done" />}
           {error && <Problem title={error} />}
         </form>
       )}

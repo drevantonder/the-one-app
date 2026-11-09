@@ -28,7 +28,7 @@ fn tools() -> Vec<Tool> {
         Tool::route(
             json!({
                 "name": "requests", "title": "Devices waiting to join", "reads": true,
-                "description": "Devices waiting to join that you may approve: your own new devices, and the first device of each user you invited.",
+                "description": "Devices waiting to join that you may approve: your own new devices, the first device of someone you invited or an admin may let in, and someone with no device left.",
                 "input": { "type": "object", "properties": {} },
                 "output": { "type": "array", "items": { "type": "object", "required": ["device", "user", "code"], "properties": {
                     "device": { "type": "string" }, "user": { "type": "string" }, "code": { "type": "string", "description": "the 8 letters and digits it shows" },
@@ -88,12 +88,12 @@ fn tools() -> Vec<Tool> {
         Tool::route(
             json!({
                 "name": "invite", "title": "Invite someone",
-                "description": "A link for someone new to join, once, for a few days. Give it to them yourself; it sends nothing.",
+                "description": "Lets someone new join, once, for a few days: a link to give them yourself, or, with their email where the network has providers, no link at all. It sends nothing.",
                 "input": { "type": "object", "required": ["name"], "properties": {
                     "name": { "type": "string", "description": "their name" },
                     "admin": { "type": "boolean", "description": "make them an admin" },
                     "user": { "type": "string", "description": "someone in the network already, by id, whose new device this lets in; omit for someone new" },
-                    "email": { "type": "string", "description": "where users sign in with Google: the Google account they sign up with" },
+                    "email": { "type": "string", "description": "where the network has providers: the email they sign in with, and they go straight in with no link" },
                 } },
                 "output": said("the link to give them, and what happens when they open it"),
             }),

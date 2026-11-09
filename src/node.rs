@@ -332,7 +332,7 @@ impl Node {
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().pull_loop());
-        tokio::spawn(node.clone().sign_in_loop());
+        tokio::spawn(node.clone().invites_loop());
         let worker = node.clone();
         tokio::spawn(async move {
             loop {

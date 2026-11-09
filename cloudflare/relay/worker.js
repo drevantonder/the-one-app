@@ -152,6 +152,11 @@ export default class extends WorkerEntrypoint {
     return isKey(key) ? this.relay().allowed(key) : null;
   }
 
+  /// The keys of the network's admins' devices, for auth to push to.
+  admins(most) {
+    return this.relay().adminKeys(most);
+  }
+
   relay() {
     return relay(this.env);
   }
@@ -300,6 +305,10 @@ export class Relay extends DurableObject {
 
   admins() {
     return this.sql.exec("SELECT count(*) AS n FROM keys WHERE admin = 1").one().n;
+  }
+
+  adminKeys(most) {
+    return this.sql.exec("SELECT key FROM keys WHERE admin = 1 LIMIT ?", most).toArray().map((r) => r.key);
   }
 
   /// `{ admin, role }` if `key` is one of the network's endpoints; a computer let in by a pairing code isn't, until it's

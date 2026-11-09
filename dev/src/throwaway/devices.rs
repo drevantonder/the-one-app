@@ -113,9 +113,9 @@ pub(crate) fn is_code(text: &str) -> bool {
 pub(crate) fn approve_code(dir: &Path, code: &str) -> Result<()> {
     eprintln!("Approving the device that shows {code}…");
     let approved = super::network::node_in(dir)?.post("/v1/devices/approve", json!({ "code": code.replace(' ', ""), "confirm": true }));
-    // Let in already, by its sign-in, by that same machine: nothing waits.
+    // Let in already, by an invite naming their email, by that same machine: nothing waits.
     match approved {
-        Err(err) if format!("{err:#}").contains("no device is waiting") => Ok(()),
+        Err(err) if format!("{err:#}").contains("No device is waiting") => Ok(()),
         r => r.map(drop),
     }
 }

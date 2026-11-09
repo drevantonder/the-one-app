@@ -1,14 +1,13 @@
 //! A machine with a node as its user's own device (`crate::settings::Me`), as it's listed (`MACHINE`): what its CLI,
-//! MCP and Mac app change of who can do what is signed by it, with the one copy every client runs; and as a client of
-//! theirs, it lets in their new devices whose sign-in shows they're theirs, with no one tapping, as Settings does while
-//! it lists requests.
+//! MCP and Mac app change of who can do what is signed by it, with the one copy every client runs; and on an admin's,
+//! it lets in those an invite already said yes to, as Settings does while it lists requests.
 
 use super::*;
 use crate::bucket::Bucket;
 use crate::settings::Me;
 
-/// How often a client of its user's looks for their new devices whose sign-in lets them in.
-const SIGN_INS_EVERY: Duration = Duration::from_secs(4);
+/// How often an admin's client looks for someone their invite lets in.
+const INVITES_EVERY: Duration = Duration::from_secs(4);
 
 /// How long an issuer's keys are kept before they're fetched again: a key it no longer signs with goes within the hour.
 const ISSUER_KEYS_FOR: Duration = Duration::from_secs(3600);
@@ -166,18 +165,17 @@ impl Node {
         });
     }
 
-    /// Every few seconds, on a client of its user's, lets in each of their new devices whose sign-in shows it's
-    /// theirs (`settings::requests`), as their approving it would, with no one tapping; any other waits for them to
-    /// approve it by its code. Nodes that only run calls let in no one.
-    pub(super) async fn sign_in_loop(self) {
+    /// Every few seconds, on an admin's client, lets in each newcomer an invite already said yes to
+    /// (`settings::requests`). Everyone else waits for someone to tap Approve.
+    pub(super) async fn invites_loop(self) {
         loop {
-            tokio::time::sleep(SIGN_INS_EVERY).await;
-            let mine = self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == i.user)));
-            if !mine.unwrap_or(false) || Node::address(&self).is_err() {
+            tokio::time::sleep(INVITES_EVERY).await;
+            let admin = self.with(|i| Ok(i.r.db().client(&self.0.id)?.is_some_and(|c| c.user == i.user) && i.r.db().may(&i.user, "invite", scopes::NETWORK)));
+            if !admin.unwrap_or(false) || Node::address(&self).is_err() {
                 continue;
             }
             if let Err(err) = crate::settings::requests(&self).await {
-                tracing::debug!("looking for devices let in by their sign-in: {err:#}");
+                tracing::debug!("looking for someone an invite lets in: {err:#}");
             }
         }
     }

@@ -64,7 +64,7 @@ fn invited(secret: &str) -> one::settings::Invited {
 /// Sam, invited by `a`'s user as a member, let in with his first device, `key`, as `a` approves it: → his id.
 pub(crate) async fn let_sam_in(a: &Node, key: &ed25519_dalek::SigningKey) -> String {
     let sam = one::database::scopes::new_id();
-    one::settings::approve(a, &asks(key, &sam, Some(b"the-invites-secret")), Some(&invited("the-invites-secret"))).await.unwrap();
+    one::settings::approve(a, &asks(key, &sam, Some(b"the-invites-secret")), &one::settings::Joining::Link(invited("the-invites-secret"))).await.unwrap();
     sam
 }
 
@@ -274,20 +274,20 @@ async fn only_a_users_own_device_or_their_inviter_lets_a_device_in() {
 
     // Andre's new laptop, approved from his machine, opens global.
     let laptop = new_key();
-    one::settings::approve(&a, &asks(&laptop, &me.user, None), None).await.unwrap();
+    one::settings::approve(&a, &asks(&laptop, &me.user, None), &one::settings::Joining::Own).await.unwrap();
     assert_eq!(opens(&laptop, &global).await, vec![1]);
 
     // Sam is let in only with the proof of the secret Andre's invite made.
     let (sam, sams) = (one::database::scopes::new_id(), new_key());
-    let invite = invited("the-invites-secret");
-    assert!(one::settings::approve(&a, &asks(&sams, &sam, Some(b"another-secret")), Some(&invite)).await.is_err());
+    let invite = one::settings::Joining::Link(invited("the-invites-secret"));
+    assert!(one::settings::approve(&a, &asks(&sams, &sam, Some(b"another-secret")), &invite).await.is_err());
     assert!(!a.is_user(&sam), "a request whose proof doesn't match lets no one in");
-    one::settings::approve(&a, &asks(&sams, &sam, Some(b"the-invites-secret")), Some(&invite)).await.unwrap();
+    one::settings::approve(&a, &asks(&sams, &sam, Some(b"the-invites-secret")), &invite).await.unwrap();
     assert!(a.is_user(&sam));
     assert_eq!(opens(&sams, &global).await, vec![1]);
 
     // Sam's next device is his to approve, not Andre's.
-    let refused = one::settings::approve(&a, &asks(&new_key(), &sam, None), None).await.unwrap_err();
+    let refused = one::settings::approve(&a, &asks(&new_key(), &sam, None), &one::settings::Joining::Own).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only their own devices"), "{refused:#}");
 
     // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the notes go on.

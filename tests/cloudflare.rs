@@ -412,10 +412,11 @@ fn an_admin_signs_in_like_anyone_else() {
     // Signing up with Google takes the account the invite is for, and nobody signs up by the domain alone.
     let mut lees = k.browser();
     joins_with_google(&mut lees, &secret, "lee@test.example");
-    assert_eq!(signed_in_as(&mut lees), None, "someone else's Google account signed up with the invite");
+    assert_ne!(signed_in_as(&mut lees).as_deref(), Some(andre.as_str()), "someone else's Google account took up the invite");
+    // At the domain, anyone signs in, which only lets them ask: nothing about them is in the network until someone says yes.
     let mut kims = k.browser();
     google_callback(&mut kims, "/", "/", "kim@test.example");
-    assert_eq!(signed_in_as(&mut kims), None, "someone at the domain joined uninvited");
+    assert!(signed_in_as(&mut kims).is_some_and(|kim| kim != andre), "someone at the domain may ask");
     let mut andres = k.browser();
     assert_eq!(joins_with_google(&mut andres, &secret, "andre@test.example").as_deref(), Some("/"));
     assert_eq!(signed_in_as(&mut andres).as_deref(), Some(andre.as_str()));
@@ -432,6 +433,36 @@ fn an_admin_signs_in_like_anyone_else() {
     let mut elsewhere = k.browser();
     assert_eq!(signs_in_with_passkey(&mut elsewhere, &passkey), 200);
     assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(andre.as_str()));
+}
+
+/// An invite naming an email needs no link: that account signs in as who the invite says, and no other does; and what a
+/// request's sign-in showed, an ID token being a bearer's, reaches only an admin's device or the user's own.
+#[test]
+fn an_invited_email_signs_in_and_only_who_may_answer_reads_its_proof() {
+    use data_encoding::HEXLOWER;
+    let (admin, admin_hex) = endpoint();
+    let (member, member_hex) = endpoint();
+    let k = Workers::google(vec![admin_hex]);
+    assert_eq!(post(&format!("{}/relay/tell", k.address), &[], one::keys::signed_request(&admin, "one/relay", json!({ "add": member_hex, "role": "client" }), now())).0, 204);
+    let (_, sam) = invited(&k, &admin, "Sam", Some("sam@test.example"));
+    let mut sams = k.browser();
+    google_callback(&mut sams, "/", "/", "sam@test.example");
+    assert_eq!(signed_in_as(&mut sams).as_deref(), Some(sam.as_str()), "signed in as who the invite named");
+
+    let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let (status, out) = sams.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&device.key), "seal": HEXLOWER.encode(&device.seal), "name": "Sam's phone", "reads": one::database::READS }));
+    assert_eq!(status, 200, "{out}");
+    let proof = "a.proof.kept";
+    assert_eq!(post(&format!("{}/api/auth/test", k.address), &[], json!({ "keep_proof": { "key": HEXLOWER.encode(&device.key), "user": sam, "proof": { "id_token": proof } }, "advance": 0 })).0, 200);
+    let listed_to = |key: &ed25519_dalek::SigningKey| -> Value {
+        let asked = B64U.encode(signed(key, "GET /api/auth/devices/requests", json!({})).to_string().as_bytes());
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let mut got = agent.get(format!("{}/api/auth/devices/requests", k.address)).header("x-one-request", asked).call().unwrap();
+        got.body_mut().read_json::<Value>().unwrap()["requests"][0].clone()
+    };
+    assert_eq!(listed_to(&admin)["sign_in"]["id_token"], proof);
+    assert!(listed_to(&member).get("sign_in").is_none(), "another user's device read someone's ID token");
+    assert_eq!(listed_to(&member)["name"], "Sam's phone", "though it sees the request");
 }
 
 /// A passkey belongs to an account. An invite that names a provider's account can't be taken up by making a passkey, and
@@ -552,12 +583,12 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     };
     let proof: Proof = serde_json::from_value(asked(&mut new, &device)).expect("its request carries the assertion");
     let network = sign_in_proof::Network::new(&k.address, ROOT, None);
-    let account = sign_in_proof::check(&proof, &device, &network, None, now()).expect("the user's devices check it");
+    let account = sign_in_proof::check(&proof, &device, &network, None).expect("the user's devices check it");
     let Account::Passkey { public_key, .. } = &account else { panic!("{account:?}") };
-    let checked = sign_in_proof::vouches(&proof, &device, &network, None, std::slice::from_ref(&account), now());
-    assert!(checked.is_ok() && !public_key.is_empty(), "and let it in by it, once it's recorded: {checked:?}");
+    let checked = sign_in_proof::vouches(&proof, &device, &network, None, std::slice::from_ref(&account));
+    assert!(checked.is_ok() && !public_key.is_empty(), "and it's theirs, once it's recorded: {checked:?}");
     let elsewhere = sign_in_proof::Network::new(&k.address, [6; 32], None);
-    assert!(sign_in_proof::vouches(&proof, &device, &elsewhere, None, std::slice::from_ref(&account), now()).is_err(), "but not in another network");
+    assert!(sign_in_proof::vouches(&proof, &device, &elsewhere, None, std::slice::from_ref(&account)).is_err(), "but not in another network");
     // Turned down, its request goes, and what its sign-in showed with it: asking again, it carries nothing.
     let key = data_encoding::HEXLOWER.encode(&device.key);
     assert_eq!(new.delete(&format!("/api/auth/devices/requests/{key}")).0, 200);
@@ -585,12 +616,11 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(status, 403, "{out}");
 }
 
-/// A device is let in by its sign-in only when it signed in itself: one whose sign-in was finished from a link opened
-/// elsewhere (the CLI's sign-in code page, or a site that sent the user a link) could have been started by whoever
-/// sent it, who'd hold the token it gave. Sign-in passes that one's proof on as `by_link`, which records what it signed in
-/// with when the user taps Approve but lets nothing in by itself.
+/// A sign-in finished from a link opened elsewhere (the CLI's sign-in code page, or a site that sent the user a link)
+/// could have been started by whoever sent it, who'd hold the token it gave. Auth passes that one's proof on as `by_link`,
+/// which still shows who signed in, but is never enough for an invite to let it in with no tap.
 #[test]
-fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
+fn a_sign_in_finished_from_a_link_says_so() {
     use one::onboarding::sign_in_proof::{self, Proof};
     use sha2::Digest;
     let (admin, admin_hex) = endpoint();
@@ -632,20 +662,19 @@ fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
         let sign_in = resp.body_mut().read_json::<Value>().unwrap()["sign_in"].clone();
         // What the user's devices then do with it, with the passkey recorded as theirs.
         let proof: Proof = serde_json::from_value(sign_in.clone()).expect("a proof");
-        let account = sign_in_proof::check(&proof, &device, &network, None, now()).expect("it checks, to be recorded as it's approved by a tap");
-        let vouched = sign_in_proof::vouches(&proof, &device, &network, None, &[account], now());
-        json!({ "sign_in": sign_in, "lets_in": vouched.is_ok() })
+        sign_in_proof::check(&proof, &device, &network, None).expect("it checks, to be recorded as it's approved by a tap");
+        json!({ "sign_in": sign_in, "goes_straight_in": matches!(proof, Proof::IdToken(_) | Proof::Passkey { .. }) })
     };
-    // The web client signs in in the browser that asks, and is let in by it.
+    // The web client signs in in the browser that asks.
     let here = carried("/callback");
-    assert_eq!(here["lets_in"], true, "{here}");
+    assert_eq!(here["goes_straight_in"], true, "{here}");
     assert!(here["sign_in"]["by_link"].is_null());
     // The CLI's sign-in link comes back to the sign-in code page, from any browser: it waits for a tap.
     let linked = carried("/sign-in/code/done");
-    assert_eq!(linked["lets_in"], false, "{linked}");
+    assert_eq!(linked["goes_straight_in"], false, "{linked}");
     assert!(linked["sign_in"]["by_link"]["passkey"].is_object(), "{linked}");
     // As a site that sent the user a link does.
-    assert_eq!(carried("/elsewhere")["lets_in"], false);
+    assert_eq!(carried("/elsewhere")["goes_straight_in"], false);
 }
 
 /// A browser's push subscription, as its push service hands it to the push Worker and decrypts what's pushed to it

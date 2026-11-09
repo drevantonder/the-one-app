@@ -192,7 +192,7 @@ export function showJoin(code, invited) {
     logo,
     code,
     qr: qrSvg(link),
-    text: invited ? "Show whoever invited you this code, or have them scan it." : "Approve it on your other device, or scan this.",
+    text: invited ? "Show whoever invited you this code, or have them scan it." : "Approve it on your other device, or ask an admin.",
     onSignOut: () => leave(),
   }));
 }

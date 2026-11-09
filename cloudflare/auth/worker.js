@@ -6,10 +6,12 @@
 // offline. It opens nothing: keys are only on users' devices, so faking a sign-in opens nothing either. A passkey's
 // PRF output stays in the browser (pages.js).
 //
-// Nobody signs up uninvited, the network's first user too: an admin's device makes a secret, and tells auth its hash,
-// who it's for and until when, signed with its endpoint key (`POST /api/auth/invites`); opening `<address>/invite#
-// <secret>` lets that user sign up once, as the id and name the invite gives them. At a workplace too: signing in
-// with a provider's account makes someone only with an invite for that account's email.
+// Signing in only lets you ask: someone already in the network says yes. Nobody signs up uninvited, the network's first
+// user too: an admin's device makes a secret, and tells auth its hash, who it's for and until when, signed with its
+// endpoint key (`POST /api/auth/invites`); opening `<address>/invite#<secret>` lets that user sign up once, as the id and
+// name the invite gives them. An invite that names an email needs no link: signing in with a provider's account for that
+// email makes them, as the id it gives. At the network's domain (`JOIN_DOMAIN`, read from the provider's signed token)
+// anyone may sign in and ask, which writes nothing anywhere but here; anyone else is refused before they can.
 //
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
 // its user (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
@@ -21,24 +23,24 @@
 // its device's oned lists it.
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
-// hex), so a device of the user's can check it themselves (src/onboarding/sign_in_proof.rs) and let the device in with no one
-// tapping: with a provider, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
+// hex), so whoever answers its request can check it themselves (src/onboarding/sign_in_proof.rs): with a provider, auth asks for an ID token whose `nonce` names it in this network (`joinNonce`, with `ROOT`),
 // and keeps the token it gave; with a passkey, the prompt's challenge names it, the network and when
 // (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
-// request to join (`sign_in`), never checked here: only the user's devices count it, and only for an account their
-// own devices recorded. Refusing a request forgets its proof too. A throwaway network's auth signs its own ID token, with
+// request to join (`sign_in`), never checked here, and only to who may answer it: an admin's device, or one of that
+// user's own. Refusing a request forgets its proof too. A throwaway network's auth signs its own ID token, with
 // nothing else to show.
 //
-// Only a device that signed in itself is let in by its sign-in: a sign-in finished from a link opened on another device
-// (the CLI's sign-in link, or any link sent to the user) could have been started by anyone, who'd then hold the token
-// it gave. Auth tells them apart by the client whose token asks to join: one whose every sign-in comes back to the
+// Only a device that signed in itself goes straight in by an invite: a sign-in finished from a link opened on another
+// device (the CLI's sign-in link, or any link sent to the user) could have been started by anyone, who'd then hold the
+// token it gave. Auth tells them apart by the client whose token asks to join: one whose every sign-in comes back to the
 // device it was made on (the web client's page, the native apps' `<cli>://signed-in/` or loopback) signed in itself;
 // any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
-// which the user's devices approve only by a tap.
+// which is approved only by a tap.
 //
 // It pushes (`PUSH`, the push Worker's entrypoint for the network's own Workers) to the user's devices, never the one asking: "<device>
-// wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`; and
-// "<device> joined · <place>" once one is approved, opening Settings › Devices. It knows a user's devices as those that
+// wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`, or to the
+// network's admins if the user has no device left to ask; and "<device> joined · <place>" once one is approved, opening
+// Settings › Devices. It knows a user's devices as those that
 // asked to join as them here, or said they're theirs as they asked which wait (`devices`), and those that registered
 // with the push Worker as theirs, by a request each signed (`PUSH.theirs`): only for whom to push to, since a device
 // opens a note, and acts on its code, only as the network's signed steps say.
@@ -104,8 +106,9 @@ const refuse = (status, message) => {
   throw new APIError({ 400: "BAD_REQUEST", 401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 503: "SERVICE_UNAVAILABLE" }[status], { message });
 };
 const INVITE = 30 * 86_400_000;
-const REQUEST = 15 * 60_000;
-/// How long a request waits for a device to let it in by itself before its user is pushed "wants in".
+/// How long a request waits for someone to answer it: long enough for an admin who is asleep.
+const REQUEST = 3 * 86_400_000;
+/// How long a request waits for an invite to let it in before anyone is pushed "wants in".
 const WANTS_IN = 10_000;
 /// The most devices of one user pushed to, the newest.
 const PUSHED_TO = 20;
@@ -272,19 +275,23 @@ export class Auth extends DurableObject {
       databaseHooks: {
         user: {
           create: {
-            // Only someone invited signs up, as who the invite says they are in the network, so devices know them by
-            // the same id: with a passkey, as it's registered, or a throwaway network's link (`admit`); with a provider, as
-            // it says the email is theirs, with the invite this browser opened to join.
+            // Someone invited signs up as who the invite says they are in the network, so devices know them by the same
+            // id: with a passkey, as it's registered, or a throwaway network's link (`admit`); with a provider, as it says
+            // the email is theirs, by the invite this browser opened to join or the invite naming it. Anyone else only
+            // at the network's domain, which the provider's token said (`atDomain`), and only to ask.
             async before(user, ctx) {
               if (self.admitting && user.id === self.admitting) return;
               if (throwaway) return user.id === env.THROWAWAY_USER ? undefined : false;
               if (!providers.length) return false;
-              const secret = cookieOf(ctx?.headers, cookieName(env, "one-invite"));
-              const invite = secret && sql.exec("select * from invites where id = ?", await hash(secret)).toArray()[0];
               const email = String(user.email || "").toLowerCase();
-              if (!invite || invite.used || invite.until <= Date.now() || !user.emailVerified || invite.email !== email) return false;
-              sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
-              return { data: { ...user, id: invite.user, name: invite.name } };
+              const secret = cookieOf(ctx?.headers, cookieName(env, "one-invite"));
+              const opened = secret && sql.exec("select * from invites where id = ?", await hash(secret)).toArray()[0];
+              const invite = opened || sql.exec("select * from invites where email = ? and used is null and until > ?", email, Date.now()).toArray()[0];
+              if (invite && !invite.used && invite.until > Date.now() && user.emailVerified && invite.email === email) {
+                sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
+                return { data: { ...user, id: invite.user, name: invite.name } };
+              }
+              if (!env.JOIN_DOMAIN) return false;
             },
           },
         },
@@ -416,7 +423,9 @@ export class Auth extends DurableObject {
     const path = url.pathname;
     const method = request.method;
     if (path === "/api/auth/test" && method === "POST" && this.env.TEST) {
-      this.skew += (await request.json()).advance;
+      const { advance, keep_proof: kept } = await request.json();
+      if (kept) this.ctx.storage.sql.exec("insert or replace into proofs (key, user, proof, made) values (?, ?, ?, ?)", kept.key, kept.user, JSON.stringify(kept.proof), Date.now());
+      this.skew += advance;
       await this.alarm();
       return json({});
     }
@@ -492,9 +501,11 @@ export class Auth extends DurableObject {
     if (this.env.JOIN_DOMAIN && !String(email || "").toLowerCase().endsWith(`@${this.env.JOIN_DOMAIN}`)) refuse(400, `Give their email at ${this.env.JOIN_DOMAIN}.`);
     const sql = this.ctx.storage.sql;
     if (sql.exec("select 1 from user where id = ?", user).toArray().length) refuse(409, `${name.trim()} has joined already.`);
+    // Someone who has asked already keeps the id they asked as, which the invite then names.
+    const invited = (email && sql.exec("select id from user where lower(email) = ?", email.toLowerCase()).toArray()[0]?.id) || user;
     sql.exec("delete from invites where until <= ? and used is null", Date.now());
-    sql.exec("insert or replace into invites (id, name, user, email, until, by, used) values (?, ?, ?, ?, ?, ?, null)", id, name.trim(), user, email ? email.toLowerCase() : null, until, signed.by);
-    return { until };
+    sql.exec("insert or replace into invites (id, name, user, email, until, by, used) values (?, ?, ?, ?, ?, ?, null)", id, name.trim(), invited, email ? email.toLowerCase() : null, until, signed.by);
+    return { until, user: invited };
   }
 
   expire() {
@@ -682,10 +693,12 @@ export class Auth extends DurableObject {
   async push(r, note) {
     if (!this.env.PUSH) return;
     const known = this.ctx.storage.sql.exec("select key from devices where user = ? order by at desc limit ?", r.user, PUSHED_TO).toArray().map((d) => d.key);
-    const plain = { id: hex16(), app: "settings", screen: "devices", ...note };
     try {
-      const registered = await this.env.PUSH.theirs(r.user, PUSHED_TO);
-      const to = [...new Set([...registered, ...known])].filter((key) => key !== r.key).slice(0, PUSHED_TO);
+      // No device registered as theirs (someone new, or who lost every one): an admin answers.
+      const registered = (await this.env.PUSH.theirs(r.user, PUSHED_TO)).filter((key) => key !== r.key);
+      const admins = registered.length || !this.env.RELAY ? [] : await this.env.RELAY.admins(PUSHED_TO);
+      const to = [...new Set([...registered, ...known, ...admins])].filter((key) => key !== r.key).slice(0, PUSHED_TO);
+      const plain = { id: hex16(), app: "settings", screen: "devices", ...note };
       if (to.length) await this.env.PUSH.send(to.map((key) => ({ to: key, plain })));
     } catch (err) {
       console.error(`pushing "${note.title}": ${err.stack || err}`);
@@ -993,7 +1006,7 @@ function throwawayNetwork(auth, id, name) {
     return ctx.json({ user: user.name });
   };
   // For a sign-in for a device (`join`), an ID token of auth's own, as a provider's would be, naming that device:
-  // so the user's devices are seen to let it in by its sign-in. `spoil` names another device instead, as a token they
+  // for whoever answers its request to check. `spoil` names another device instead, as a token they
   // must refuse.
   const tryProof = async (ctx, user) => {
     const join = JOIN.test(ctx.body?.join || "") ? ctx.body.join : null;
@@ -1001,7 +1014,8 @@ function throwawayNetwork(auth, id, name) {
     if (!join || !root) return;
     const origin = new URL(auth.env.ADDRESS).origin;
     const named = ctx.body.spoil === true ? "0".repeat(128) : join;
-    const payload = { iss: `${origin}/api/auth`, aud: "one-throwaway", sub: user.id, iat: Math.floor(Date.now() / 1000), nonce: await joinNonce(root, ...endpointOf(named)) };
+    const email = isNoEmail(user.email) ? {} : { email: user.email, email_verified: true };
+    const payload = { iss: `${origin}/api/auth`, aud: "one-throwaway", sub: user.id, iat: Math.floor(Date.now() / 1000), nonce: await joinNonce(root, ...endpointOf(named)), ...email };
     const { token } = await auth.auth.api.signJWT({ body: { payload } });
     auth.keepProof(join, user.id, { id_token: token });
   };
@@ -1015,6 +1029,18 @@ function throwawayNetwork(auth, id, name) {
         if (wanted) {
           // Invited again, a name is two users here: the one with a device let in is who joined, else the latest to open a link.
           const [row] = auth.ctx.storage.sql.exec("select id from user where lower(name) = ? order by exists (select 1 from requests where requests.user = user.id and approved is not null) desc, createdAt desc limit 1", wanted).toArray();
+          // Someone named by an email invite signs in as that email's account, with no link.
+          const [named] = row ? [] : auth.ctx.storage.sql.exec("select * from invites where lower(name) = ? and email is not null and used is null and until > ?", wanted, Date.now()).toArray();
+          if (named) {
+            auth.admitting = named.user;
+            try {
+              await adapter.createUser({ id: named.user, name: named.name, email: named.email, emailVerified: true });
+            } finally {
+              auth.admitting = null;
+            }
+            auth.ctx.storage.sql.exec("update invites set used = ? where id = ?", Date.now(), named.id);
+            return signIn(ctx, await adapter.findUserById(named.user));
+          }
           if (!row && wanted !== name.toLowerCase()) refuse(404, `Nobody called ${ctx.body.user} has joined.`);
           return signIn(ctx, row ? await adapter.findUserById(row.id) : await first(adapter));
         }

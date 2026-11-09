@@ -129,7 +129,7 @@ impl Auth {
     }
 
     /// An authorization for `client`, coming back to `redirect`, for the device `join` names (its key ‖ seal key, hex),
-    /// which its user's devices then let in by this sign-in.
+    /// which whoever answers its request then checks.
     pub fn ask(&self, client: &str, redirect: &str, join: Option<&str>) -> Asked {
         let verifier = B64U.encode(&rand::random::<[u8; 32]>());
         let state = B64U.encode(&rand::random::<[u8; 32]>());

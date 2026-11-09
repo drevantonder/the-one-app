@@ -146,7 +146,7 @@ pub fn device_made(id: &str) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-/// The key the next sign-in is for, made the first time, so the user's devices can let it in by that sign-in.
+/// The key the next sign-in is for, made the first time, so whoever answers its request can check that sign-in.
 pub fn signing_in() -> Result<[u8; 32], String> {
     if let Some(key) = device(SIGNING_IN) {
         return Ok(key);

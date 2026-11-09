@@ -529,6 +529,31 @@ impl ScopeDb {
         Ok(out)
     }
 
+    /// Every account `user` signed in with that their own devices recorded, of clients taken out too: what someone with
+    /// no device left is checked against, since taking the lost ones out took their records.
+    pub fn sign_ins_ever(&self, user: &str) -> Result<Vec<crate::onboarding::sign_in_proof::Account>> {
+        let keys: Vec<String> = self.conn().prepare("SELECT key FROM devices WHERE principal = ? AND client = 1")?.query_map([user_principal(user)], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let mut out = Vec::new();
+        for key in keys {
+            let key = crate::keys::unhex(&key)?;
+            out.extend(self.machine_ever(&key)?.filter(|m| m.by == user).and_then(|m| m.sign_in));
+            out.extend(self.linked_sign_ins(&key)?);
+        }
+        Ok(out)
+    }
+
+    /// The invite naming `user` by the email they sign in with, if there is one.
+    pub fn email_invite(&self, user: &str) -> Result<Option<EmailInvite>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT email, name, role, until, used FROM email_invites WHERE user = ?", [user], |r| {
+                let role: String = r.get(2)?;
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, role, r.get::<_, i64>(3)?, r.get::<_, Option<String>>(4)?))
+            })
+            .optional()?
+            .and_then(|(email, name, role, until, used)| Some(EmailInvite { email, name, role: serde_json::from_value(json!(role)).ok()?, until: until as u64, used: used.is_some() })))
+    }
+
     /// What its user linked from client `key`.
     pub fn linked_sign_ins(&self, key: &Key) -> Result<Vec<crate::onboarding::sign_in_proof::Account>> {
         let accounts: Vec<String> = self.conn().prepare("SELECT account FROM linked_sign_ins WHERE device = ? ORDER BY account")?.query_map([crate::keys::hex(key)], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
@@ -926,6 +951,16 @@ impl Kind {
             Kind::Service => "service",
         }
     }
+}
+
+/// Someone new an admin named by the email they sign in with (`email_invites`).
+#[derive(Clone, Debug)]
+pub struct EmailInvite {
+    pub email: String,
+    pub name: String,
+    pub role: Role,
+    pub until: u64,
+    pub used: bool,
 }
 
 /// An endpoint of the network, listed by a `device` step (or a new network's first, `content::first`): its key, the key things are sealed to,

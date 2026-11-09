@@ -198,7 +198,7 @@ function model(x, again) {
     return cols
   }
 
-  // A device of theirs let in within the day, by its sign-in or by someone approving it: "MacBook Pro joined ·
+  // A device of theirs let in within the day: "MacBook Pro joined ·
   // Sydney", with Remove, in case it isn't theirs.
   function justJoined() {
     const since = Date.now() - 86_400_000
@@ -549,7 +549,7 @@ function DeviceRow({ icon, title, sub, children }) {
 // A device waiting to be let in: which it is, where from, what approving it records it signed in with, its code to
 // check, and the answers. Approve is the one that matters.
 function Waiting({ r, busy, answer }) {
-  const sub = [r.yours ? "" : `${r.user}’s first device`, r.place].filter(Boolean).join(" · ")
+  const sub = [r.yours ? "" : r.lost ? `${r.user}, with no device left` : `${r.user}’s first device`, r.place].filter(Boolean).join(" · ")
   return (
     <div role="group" aria-label={`${r.device} wants to join`} className="flex w-full max-w-2xl flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground @xl:flex-row @xl:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-3 text-sm">
@@ -603,7 +603,8 @@ function Scanned({ scan, done, cancel }) {
     <div role="group" aria-label={`Approve ${r.device}?`} className="flex w-full max-w-2xl flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground">
       <div>
         <div className="font-medium">Approve {r.device}?</div>
-        <div className="text-sm text-muted-foreground">{r.new ? `${r.user}’s first device. They join ${yours}.` : "It can open everything you can."}</div>
+        <div className="text-sm text-muted-foreground">{r.new ? `${r.user}’s first device. They join ${yours}.` : r.user === undefined || r.yours ? "It can open everything you can." : `${r.user}’s device.`}</div>
+        {signInLabel(r.sign_in) && <div className="text-sm text-muted-foreground">{signInLabel(r.sign_in)}</div>}
       </div>
       {error && <Problem title={error} />}
       <div className="flex justify-end gap-2">
@@ -1021,12 +1022,13 @@ function RemoveDevice({ name, keys, erasable, open, setOpen, done }) {
   )
 }
 
-/// What a device's sign-ins signed in with, and what its user linked from it: a new device that signs in with one is
-/// let in by itself. Each can be removed, by a change every device of theirs takes. This device links another in a
-/// page at the network's address, in a browser; what it linked is recorded when they come back here.
+/// What a device's sign-ins signed in with, and what its user linked from it. Each can be removed, on every device of
+/// theirs and at auth. This device links another in a page at the network's address, in a browser; coming back, what it
+/// linked is shown, and recorded only once they say so, as auth could have made it.
 function SignIns({ clients, me, open, setOpen, done }) {
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState("")
+  const [linked, setLinked] = useState(null)
   const rows = clients.flatMap((c) => [
     ...(c.sign_in ? [{ id: `${c.key}.`, key: c.key, label: signInLabel(c.sign_in) }] : []),
     ...(c.linked || []).map((a, n) => ({ id: `${c.key}.${n}`, key: c.key, account: a, label: signInLabel(a) })),
@@ -1043,14 +1045,26 @@ function SignIns({ clients, me, open, setOpen, done }) {
       setBusy(null)
     }
   }
-  const record = async () => {
+  const look = async () => {
     try {
-      if ((await api("POST", "/v1/devices/record-sign-in", {})).linked) done()
+      setLinked((await api("POST", "/v1/devices/record-sign-in", {})).account || null)
     } catch (e) { setError(said(e)) }
+  }
+  async function keep() {
+    setBusy("linked")
+    setError("")
+    try {
+      await api("POST", "/v1/devices/record-sign-in", { confirm: true })
+      one.tap("success")
+      setLinked(null)
+      done()
+    } catch (e) { setError(said(e)) }
+    setBusy(null)
   }
   useEffect(() => {
     if (!me || !open) return
-    const back = () => document.visibilityState === "visible" && record()
+    look()
+    const back = () => document.visibilityState === "visible" && look()
     document.addEventListener("visibilitychange", back)
     return () => document.removeEventListener("visibilitychange", back)
   }, [me, open])
@@ -1060,7 +1074,7 @@ function SignIns({ clients, me, open, setOpen, done }) {
     if (me && open) api("POST", "/v1/devices/link-sign-in", {}).then((r) => setUrl(r.url), (e) => setError(said(e)))
   }, [me, open])
   return (
-    <ResponsiveDialog open={open} onOpenChange={setOpen} title="Sign-Ins" action={<Button variant="secondary" size="sm" onClick={() => (me ? record() : null, setOpen(false))}>Done</Button>}>
+    <ResponsiveDialog open={open} onOpenChange={setOpen} title="Sign-Ins" action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Done</Button>}>
       <div className="flex flex-col gap-4 overflow-y-auto p-4">
         {!!rows.length && <List>
           {rows.map((r) => (
@@ -1070,8 +1084,11 @@ function SignIns({ clients, me, open, setOpen, done }) {
             </div>
           ))}
         </List>}
+        {linked && <div className="flex items-center gap-3 rounded-xl border p-3 text-sm">
+          <span className="min-w-0 flex-1 truncate font-medium">{signInLabel(linked)}</span>
+          <Button size="sm" disabled={busy !== null} onClick={keep}>Link It</Button>
+        </div>}
         {me && url && <Button variant="secondary" asChild><a href={url} target="_blank" rel="noopener">Link a Sign-In</a></Button>}
-        <Note>A new device that signs in with one of these is let in without asking.</Note>
         {error && <Problem title={error} />}
       </div>
     </ResponsiveDialog>

@@ -146,7 +146,7 @@ pub fn commands() -> Command {
                         if had.as_deref() != Some(clients.as_str())
                             && let Err(err) = node.post("/v1/settings", json!({ "name": crate::onboarding::sign_in_proof::CLIENTS, "value": clients }))
                         {
-                            eprintln!("A new device's Google sign-in won't let it in by itself until an admin's device runs {CLI} settings {} {clients}: {err:#}", crate::onboarding::sign_in_proof::CLIENTS);
+                            eprintln!("A new device's sign-in can't be checked until an admin's device runs {CLI} settings {} {clients}: {err:#}", crate::onboarding::sign_in_proof::CLIENTS);
                         }
                     }
                     print!("Deployed.\n{}", cloudflare_said(&settings));

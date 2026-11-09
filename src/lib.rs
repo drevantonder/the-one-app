@@ -111,6 +111,5 @@ pub mod ui_files;
 pub mod ui_folder;
 pub mod web;
 pub mod state;
-#[cfg(feature = "sign-in-proof")]
 pub mod settings;
 pub mod vault;
