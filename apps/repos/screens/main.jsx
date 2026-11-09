@@ -1,29 +1,34 @@
 // Repos: this network's repos, GitHub's beside them (connected, not copied), and Recently Deleted; searchable.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Icon, Input, List, ListRow, Problem, Spinner } from "@one/ui"
+import { Button, Empty, Grid, Icon, Input, List, ListRow, Problem, Spinner } from "@one/ui"
 import { RepoIcon } from "../lib/parts.jsx"
 import { Frame, Pending, Section, ago, go, plural, said, useAddress, useCall, where } from "../lib/use.jsx"
 
-function Row({ r, restoring, restore }) {
-  const deleted = r.deleted && !restoring.has(r.repo)
-  const sub = deleted
-    ? "Deleted " + ago(r.deleted.time)
-    : [r.github?.private && "Private", r.branch, ago(r.updated || r.created), r.from && "fork of " + r.from, r.open_issues && plural(r.open_issues, "open issue", "open issues")].filter(Boolean).join(" · ")
-  const owner = r.repo.slice(0, -r.name.length)
-  const action = deleted && r.yours && (
-    <Button variant="secondary" size="sm" onClick={(e) => (e.stopPropagation(), restore(r.name))}>Restore</Button>
-  )
+function Gone({ r, restore }) {
   return (
     <ListRow
       leading={<RepoIcon repo={r.repo} github={!!r.github} className="size-5 text-muted-foreground" />}
-      title={<><span className="font-normal text-muted-foreground">{owner}</span>{r.name}</>}
-      sub={sub}
-      trailing={action || undefined}
+      title={<><span className="font-normal text-muted-foreground">{r.repo.slice(0, -r.name.length)}</span>{r.name}</>}
+      sub={"Deleted " + ago(r.deleted.time)}
+      trailing={r.yours ? <Button variant="secondary" size="sm" onClick={(e) => (e.stopPropagation(), restore(r.name))}>Restore</Button> : undefined}
       onClick={() => go("repo", { repo: r.repo })}
     />
   )
 }
+
+// A repo that's here: no chevron, since the grid's rows sit side by side where there's room.
+function Tile({ r }) {
+  const owner = r.repo.slice(0, -r.name.length)
+  const sub = [r.github?.private && "Private", r.branch, ago(r.updated || r.created), r.from && "fork of " + r.from, r.open_issues && plural(r.open_issues, "open issue", "open issues")].filter(Boolean).join(" · ")
+  return (
+    <button type="button" className="min-w-0 cursor-pointer rounded-xl text-left outline-none hover:bg-accent/50 focus-visible:bg-accent/50" onClick={() => go("repo", { repo: r.repo })}>
+      <ListRow leading={<RepoIcon repo={r.repo} github={!!r.github} className="size-5 text-muted-foreground" />} title={<><span className="font-normal text-muted-foreground">{owner}</span>{r.name}</>} sub={sub} />
+    </button>
+  )
+}
+
+const Tiles = ({ of }) => <Grid min="22rem" max={4} gap="0.25rem">{of.map((r) => <Tile key={r.repo} r={r} />)}</Grid>
 
 function Main() {
   const { address, mine } = useAddress()
@@ -57,7 +62,6 @@ function Main() {
   const githubShown = (githubs || []).filter((r) => !q || r.repo.toLowerCase().includes(q))
   const gone = mineShown.filter((r) => r.deleted && !restoring.has(r.repo))
   const here = mineShown.filter((r) => !gone.includes(r))
-  const row = (r) => <Row key={r.repo} r={r} restoring={restoring} restore={restore} />
   const asked = githubs || github.error
 
   if (!own.data.length && !githubs?.length && asked && !githubTrouble) {
@@ -73,13 +77,13 @@ function Main() {
 
   return (
     <Frame>
-      <div className="flex max-w-2xl flex-col gap-6">
-        <div className="relative">
+      <div className="flex flex-col gap-6">
+        <div className="relative max-w-md">
           <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
           <Input className="pl-8" placeholder="Find a repo" aria-label="Find a repo" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
         {trouble && <Problem title={trouble} />}
-        {here.length > 0 && <List>{here.map(row)}</List>}
+        {here.length > 0 && <Tiles of={here} />}
         {githubTrouble ? (
           <Section title="GitHub"><Problem title={githubTrouble} action={{ label: "Settings", run: () => one.open("settings") }} /></Section>
         ) : !githubs ? (
@@ -87,9 +91,9 @@ function Main() {
             <p className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />Loading GitHub's repos…</p>
           </Section>
         ) : (
-          githubShown.length > 0 && <Section title="GitHub"><List>{githubShown.map(row)}</List></Section>
+          githubShown.length > 0 && <Section title="GitHub"><Tiles of={githubShown} /></Section>
         )}
-        {gone.length > 0 && <Section title="Recently Deleted"><List>{gone.map(row)}</List></Section>}
+        {gone.length > 0 && <Section title="Recently Deleted"><List>{gone.map((r) => <Gone key={r.repo} r={r} restore={restore} />)}</List></Section>}
         {!here.length && !githubShown.length && !gone.length && asked && !githubTrouble && <Empty>No repos match.</Empty>}
       </div>
     </Frame>

@@ -6,7 +6,7 @@ import { Avatar, Button, Empty, Icon, Input, List, ListRow, Problem, ResponsiveD
 import { RepoTabs } from "../lib/frame.jsx"
 import { IssueView } from "../lib/issue-view.jsx"
 import { LabelChip, MarkdownField, StateIcon } from "../lib/parts.jsx"
-import { Beside, Frame, Pending, ago, go, plural, said, useCall, useWide } from "../lib/use.jsx"
+import { Beside, Frame, Pending, ago, go, plural, said, useBeside, useCall } from "../lib/use.jsx"
 
 const P = one.params
 
@@ -45,13 +45,12 @@ function NewIssue({ done }) {
 }
 
 function Row({ i, selected, open }) {
-  const by = i.state === "open"
-    ? `#${i.number} opened ${ago(i.created)} by ${i.author.name}`
-    : `#${i.number} by ${i.author.name} was closed ${ago(i.closed)}`
+  const by = `#${i.number} · ${i.author.name} · ${i.state === "open" ? ago(i.created) : `closed ${ago(i.closed)}`}`
   return (
     <ListRow
       leading={<StateIcon issue={i} className="size-5" />}
-      title={<span className="flex items-center gap-2"><span className="truncate">{i.title}</span>{i.labels.map((l) => <LabelChip key={l.name} l={l} />)}</span>}
+      wrap
+      title={<span className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="min-w-0">{i.title}</span>{i.labels.map((l) => <LabelChip key={l.name} l={l} />)}</span>}
       sub={by}
       trailing={
         <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
@@ -65,12 +64,14 @@ function Row({ i, selected, open }) {
   )
 }
 
-function Filter({ title, value, choices, set }) {
+function Filter({ title, value, choices, set, also }) {
   const now = choices.find((c) => c.value === value)
   const pick = async (e) => {
-    const items = [{ title: `Any ${title.toLowerCase()}`, checked: !value }, ...choices.map((c) => ({ title: c.title, checked: c.value === value }))]
+    const items = [{ title: `Any ${title.toLowerCase()}`, checked: !value }, ...choices.map((c) => ({ title: c.title, checked: c.value === value })), ...(also ? [{ title: also.title, section: true }] : [])]
     const i = await one.menu(items, e.currentTarget)
-    if (i != null) set(i === 0 ? "" : choices[i - 1].value)
+    if (i == null) return
+    if (also && i === items.length - 1) return also.run()
+    set(i === 0 ? "" : choices[i - 1].value)
   }
   return (
     <Button variant="outline" size="sm" onClick={pick} aria-label={title}>
@@ -81,7 +82,7 @@ function Filter({ title, value, choices, set }) {
 }
 
 function Issues() {
-  const wide = useWide()
+  const beside = useBeside()
   const [f, setF] = useState({ state: P.state || "open", label: P.label || "", assignee: P.assignee || "", author: P.author || "", q: "" })
   const [page, setPage] = useState(0)
   const [typed, setTyped] = useState("")
@@ -102,17 +103,23 @@ function Issues() {
     one.title("Issues")
   }, [])
   useEffect(() => {
-    const t = setTimeout(() => (setF((x) => (x.q === typed.trim() ? x : { ...x, q: typed.trim() })), setPage(0)), 250)
+    const t = setTimeout(() => {
+      if (typed.trim() === f.q) return
+      setF((x) => ({ ...x, q: typed.trim() }))
+      setPage(0)
+      setShown(null)
+    }, 250)
     return () => clearTimeout(t)
   }, [typed])
 
-  const set = (key, value) => (setF((x) => ({ ...x, [key]: value })), setPage(0))
-  const open = (i) => (wide ? setShown(i.number) : go("issue", { repo: P.repo, number: i.number }))
+  const set = (key, value) => (setF((x) => ({ ...x, [key]: value })), setPage(0), setShown(null))
+  const turn = (to) => (setPage(to), setShown(null))
+  const open = (i) => (beside ? setShown(i.number) : go("issue", { repo: P.repo, number: i.number }))
   const made = (number) => {
     setCreating(false)
     if (!number) return
     list.reload()
-    if (wide) setShown(number)
+    if (beside) setShown(number)
     else go("issue", { repo: P.repo, number })
   }
 
@@ -129,35 +136,35 @@ function Issues() {
     )
   }
   const names = (users.data || []).map((p) => ({ value: p.handle, title: p.name }))
+  // Where there's room the newest is open from the start, so the page isn't half empty.
+  const current = beside ? shown ?? d.issues[0]?.number : null
   const none = filtered ? "No issues match." : f.state === "open" ? "No open issues." : "No closed issues."
   const left = (
     <div className="flex max-w-2xl flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <Tabs value={f.state} onValueChange={(v) => (set("state", v), setShown(null))}>
+        <Tabs value={f.state} onValueChange={(v) => set("state", v)}>
           <TabsList>
             <TabsTrigger value="open"><Icon name="record" />{d.open_issues.toLocaleString()} Open</TabsTrigger>
             <TabsTrigger value="closed"><Icon name="check" />{d.closed_issues.toLocaleString()} Closed</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button variant={shown ? "secondary" : "default"} onClick={() => setCreating(true)}>New Issue</Button>
+        <Button variant={beside ? "secondary" : "default"} onClick={() => setCreating(true)}>New Issue</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-48 flex-1">
+          <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
+          <Input className="pl-8" placeholder="Find an issue" aria-label="Find an issue" value={typed} onChange={(e) => setTyped(e.target.value)} />
+        </div>
         <Filter title="Author" value={f.author} choices={names} set={(v) => set("author", v)} />
-        <Filter title="Label" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} />
+        <Filter title="Label" value={f.label} choices={(labels.data || []).map((l) => ({ value: l.name, title: l.name }))} set={(v) => set("label", v)} also={{ title: "Edit Labels…", run: () => go("labels", { repo: P.repo }) }} />
         <Filter title="Assignee" value={f.assignee} choices={[{ value: "none", title: "Assigned to no one" }, ...names]} set={(v) => set("assignee", v)} />
-        <span className="flex-1" />
-        <Button variant="ghost" size="sm" onClick={() => go("labels", { repo: P.repo })}><Icon name="tag" />Labels</Button>
-      </div>
-      <div className="relative">
-        <Icon name="magnifying-glass" className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
-        <Input className="pl-8" placeholder="Find an issue" aria-label="Find an issue" value={typed} onChange={(e) => setTyped(e.target.value)} />
       </div>
       {list.error && <Problem title={said(list.error).title} />}
-      {d.issues.length ? <List>{d.issues.map((i) => <Row key={i.number} i={i} selected={wide && shown === i.number} open={open} />)}</List> : <Empty>{none}</Empty>}
+      {d.issues.length ? <List>{d.issues.map((i) => <Row key={i.number} i={i} selected={current === i.number} open={open} />)}</List> : <Empty>{none}</Empty>}
       {(page > 0 || d.more) && (
         <div className="flex gap-2">
-          <Button variant="outline" disabled={!page} onClick={() => setPage(page - 1)}>Previous</Button>
-          <Button variant="outline" disabled={!d.more} onClick={() => setPage(page + 1)}>Next</Button>
+          <Button variant="outline" disabled={!page} onClick={() => turn(page - 1)}>Previous</Button>
+          <Button variant="outline" disabled={!d.more} onClick={() => turn(page + 1)}>Next</Button>
         </div>
       )}
     </div>
@@ -165,7 +172,7 @@ function Issues() {
   return (
     <>
       {tabs}
-      <Beside size="34rem" list={left} detail={shown && <IssueView key={shown} repo={P.repo} number={shown} onGone={() => (setShown(null), list.reload())} />} />
+      <Beside size="34rem" list={left} detail={current && <IssueView key={current} repo={P.repo} number={current} onGone={() => (setShown(null), list.reload())} />} />
       {creating && <NewIssue done={made} />}
     </>
   )

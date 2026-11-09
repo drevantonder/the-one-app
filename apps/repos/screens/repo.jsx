@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client"
 import { Button, Card, CardContent, CopyButton, Empty, Icon, List, ListRow, Markdown, Problem, Spinner } from "@one/ui"
 import { CommitCard, PathBar, RepoTabs } from "../lib/frame.jsx"
 import { GitHubMark, RepoIcon } from "../lib/parts.jsx"
-import { Frame, Pending, ago, go, refOf, said, short, useAddress, useCall, useWide, where } from "../lib/use.jsx"
+import { Frame, Pending, ago, go, refOf, said, short, useAddress, useBeside, useCall, useWide, where } from "../lib/use.jsx"
 
 const P = one.params
 const at = P.path || ""
@@ -22,7 +22,7 @@ function Entry({ d, e, last }) {
       type={open ? "button" : undefined}
       onClick={open}
       className={`grid w-full min-w-0 items-center gap-3 px-3 py-2 text-left text-sm ${open ? "cursor-pointer outline-none hover:bg-accent/50 focus-visible:bg-accent/50" : ""}`}
-      style={{ gridTemplateColumns: wide ? "minmax(0, 16rem) minmax(0, 1fr) 8rem" : "minmax(0, 1fr)" }}
+      style={{ gridTemplateColumns: wide ? "minmax(0, 16rem) minmax(0, 1fr) 6rem" : "minmax(0, 1fr)" }}
     >
       <span className="flex min-w-0 items-center gap-2.5">
         <Icon name={ICONS[e.type]} className="size-4 text-muted-foreground" />
@@ -57,7 +57,7 @@ function Readme({ d }) {
   )
   const markdown = /\.(md|mdx|markdown)$/i.test(d.readme.name)
   return (
-    <Card className="max-w-5xl gap-0 py-0">
+    <Card className="min-w-0 gap-0 py-0">
       <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-medium"><Icon name="book" className="text-muted-foreground" />{d.readme.name}</div>
       <CardContent className="px-6 py-5">
         {markdown ? <Markdown text={text} onLink={link} /> : <pre className="font-mono text-sm break-words whitespace-pre-wrap">{text}</pre>}
@@ -66,60 +66,40 @@ function Readme({ d }) {
   )
 }
 
-function Head({ d }) {
-  const wide = useWide()
-  const { address } = useAddress()
-  const clone = `git clone ${d.clone || address(d.repo)}`
+function Deleted({ d }) {
   return (
-    <div className="flex flex-col gap-4">
-      {(!wide || d.deleted) && (
-        <div className="flex items-center gap-3">
-          <RepoIcon repo={d.repo} github={!!d.github} className="size-7 text-muted-foreground" />
-          <div className="min-w-0">
-            <div className="truncate text-sm text-muted-foreground">{d.owner.name}</div>
-            <h1 className="truncate text-xl font-semibold">{d.name}</h1>
-          </div>
-        </div>
-      )}
-      {d.from && (
-        <p className="text-sm text-muted-foreground">
-          Forked from <button type="button" className="underline underline-offset-4 hover:text-foreground" onClick={() => go("repo", { repo: d.from })}>{d.from}</button>
-        </p>
-      )}
-      {!d.deleted && (
-        <div className="flex max-w-xl flex-col gap-1.5">
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/40 py-1 pr-1 pl-3">
-            <code className="min-w-0 flex-1 truncate font-mono text-xs">{clone}</code>
-            <CopyButton text={clone} label="" />
-          </div>
-          {!d.clone && <p className="text-xs text-muted-foreground">{where}</p>}
-        </div>
-      )}
-      {d.github && (
-        <Button variant="outline" size="sm" className="self-start" onClick={() => one.link(d.github.url)}>
-          <GitHubMark />On GitHub{d.github.private ? " · Private" : ""}
-        </Button>
-      )}
-      {!wide && !d.deleted && (
-        <List>
-          <ListRow leading={<Icon name="record" className="size-5 text-muted-foreground" />} title="Issues" trailing={d.open_issues ? <span className="text-muted-foreground">{d.open_issues.toLocaleString()}</span> : undefined} onClick={() => go("issues", { repo: d.repo })} />
-          {d.yours && !d.github && <ListRow leading={<Icon name="gear" className="size-5 text-muted-foreground" />} title="Settings" onClick={() => go("repo_settings", { repo: d.repo })} />}
-        </List>
-      )}
+    <div className="flex items-center gap-3">
+      <RepoIcon repo={d.repo} github={!!d.github} className="size-7 text-muted-foreground" />
+      <div className="min-w-0">
+        <div className="truncate text-sm text-muted-foreground">{d.owner.name}</div>
+        <h1 className="truncate text-xl font-semibold">{d.name}</h1>
+      </div>
     </div>
   )
 }
 
-const few = (names) => (names.length <= 3 ? names.join(", ") : undefined)
+function Clone({ d }) {
+  const { address } = useAddress()
+  return <CopyButton variant="outline" text={`git clone ${d.clone || address(d.repo)}`} label="Clone" />
+}
 
-function More({ d }) {
+// On a phone there are no tabs, so a repo's other pages are rows above its files.
+function Pages({ d }) {
   return (
-    <List className="max-w-5xl">
-      <ListRow leading={<Icon name="git-branch" className="size-5 text-muted-foreground" />} title="Branches" trailing={<span className="truncate text-muted-foreground">{few(d.branches)}</span>} onClick={() => go("branches", { repo: d.repo })} />
-      {(d.forks || []).map((f) => (
+    <List className="max-w-none">
+      <ListRow leading={<Icon name="record" className="size-5 text-muted-foreground" />} title="Issues" trailing={d.open_issues ? <span className="text-muted-foreground">{d.open_issues.toLocaleString()}</span> : undefined} onClick={() => go("issues", { repo: d.repo })} />
+      {d.yours && !d.github && <ListRow leading={<Icon name="gear" className="size-5 text-muted-foreground" />} title="Settings" onClick={() => go("repo_settings", { repo: d.repo })} />}
+    </List>
+  )
+}
+
+function Forks({ d }) {
+  if (!d.forks?.length) return null
+  return (
+    <List className="max-w-none">
+      {d.forks.map((f) => (
         <ListRow key={f} leading={<Icon name="git-branch" className="size-5 text-muted-foreground" />} title="Fork" trailing={<span className="truncate text-muted-foreground">{f}</span>} onClick={() => go("repo", { repo: f })} />
       ))}
-      <ListRow leading={<Icon name="clock-counter-clockwise" className="size-5 text-muted-foreground" />} title="Commits" onClick={() => go("history", { repo: d.repo, ref: refOf(d) })} />
     </List>
   )
 }
@@ -170,7 +150,7 @@ function Files({ d }) {
   const latest = useCall("latest", wide && !d.empty ? { repo: d.repo, ref: refOf(d), path: at } : null)
   const last = latest.data || {}
   return d.entries.length ? (
-    <List className="max-w-5xl">
+    <List className="max-w-none">
       {at && (
         <button type="button" onClick={() => go("repo", { repo: d.repo, ref: refOf(d), path: at.split("/").slice(0, -1).join("/") })} className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-sm outline-none hover:bg-accent/50 focus-visible:bg-accent/50">
           <Icon name="folder" className="text-muted-foreground" />..
@@ -180,6 +160,39 @@ function Files({ d }) {
     </List>
   ) : (
     <Empty>This folder is empty.</Empty>
+  )
+}
+
+function Code({ d }) {
+  const wide = useWide()
+  const beside = useBeside() && d.readme
+  const files = (
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <PathBar d={d} />
+        {!at && (
+          <div className="flex items-center gap-2">
+            {d.github && <Button variant="outline" size="sm" onClick={() => one.link(d.github.url)}><GitHubMark />GitHub{d.github.private ? " · Private" : ""}</Button>}
+            <Clone d={d} />
+          </div>
+        )}
+      </div>
+      {!at && d.from && (
+        <p className="text-sm text-muted-foreground">
+          Forked from <button type="button" className="underline underline-offset-4 hover:text-foreground" onClick={() => go("repo", { repo: d.from })}>{d.from}</button>
+        </p>
+      )}
+      {!at && !wide && <Pages d={d} />}
+      <CommitCard c={d.latest} d={d} />
+      <Files d={d} />
+      {!at && <Forks d={d} />}
+    </div>
+  )
+  return (
+    <div className={beside ? "grid grid-cols-2 items-start gap-6" : "flex flex-col gap-6"}>
+      {files}
+      {d.readme && <Readme d={d} />}
+    </div>
   )
 }
 
@@ -203,7 +216,7 @@ function Repo() {
     return (
       <Frame>
         <div className="flex max-w-2xl flex-col gap-6">
-          <Head d={d} />
+          <Deleted d={d} />
           <p className="text-sm text-muted-foreground">Deleted {ago(d.deleted.time)}</p>
           {d.yours && <Restore />}
           {d.yours && <Erase />}
@@ -217,13 +230,10 @@ function Repo() {
     return (
       <Frame>
         <RepoTabs repo={d.repo} on="code" info={info} />
-        <div className="flex max-w-2xl flex-col gap-6">
-          {!at && <Head d={d} />}
-          <Empty>
-            <span className="block">No code yet.{d.push && ` ${d.clone ? "Push some" : `${where}, push some`}:`}</span>
-            {d.push && <code className="mt-2 block rounded-md bg-muted px-2 py-1 font-mono text-xs">git push {url} main</code>}
-          </Empty>
-        </div>
+        <Empty>
+          <span className="block">No code yet.{d.push && ` ${d.clone ? "Push some" : `${where}, push some`}:`}</span>
+          {d.push && <code className="mt-2 block rounded-md bg-muted px-2 py-1 font-mono text-xs">git push {url} main</code>}
+        </Empty>
       </Frame>
     )
   }
@@ -231,16 +241,7 @@ function Repo() {
   return (
     <Frame>
       <RepoTabs repo={d.repo} on="code" info={info} />
-      <div className="flex flex-col gap-6">
-        {!at && <Head d={d} />}
-        <div className="flex max-w-5xl flex-col gap-3">
-          <PathBar d={d} />
-          <CommitCard c={d.latest} d={d} />
-          <Files d={d} />
-        </div>
-        {d.readme && <Readme d={d} />}
-        {!at && <More d={d} />}
-      </div>
+      <Code d={d} />
     </Frame>
   )
 }

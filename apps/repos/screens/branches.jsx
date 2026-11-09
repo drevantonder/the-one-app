@@ -23,9 +23,7 @@ function Branches() {
   }
   const sorted = [...call.data].sort((a, b) => (b.branch === "main") - (a.branch === "main") || Date.parse(b.time) - Date.parse(a.time))
   return (
-    <div className="flex max-w-2xl flex-col gap-2">
-      <h2 className="text-sm font-medium text-muted-foreground">Branches</h2>
-      <List>
+    <List>
         {sorted.map((b) => (
           <ListRow
             key={b.branch}
@@ -36,8 +34,7 @@ function Branches() {
             onClick={() => go("repo", { repo: P.repo, ref: b.branch, path: P.path || "" })}
           />
         ))}
-      </List>
-    </div>
+    </List>
   )
 }
 

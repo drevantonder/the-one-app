@@ -46,10 +46,8 @@ function Comment({ d, c, body = false, editing, edit, done, menu, reload, fail }
               <Button disabled={busy} onClick={update}>{busy && <Spinner />}Update Comment</Button>
             </div>
           </div>
-        ) : c.body.trim() ? (
-          <Markdown text={c.body} />
         ) : (
-          <p className="text-sm text-muted-foreground italic">No description provided.</p>
+          <Markdown text={c.body} />
         )}
       </div>
     </Card>
@@ -218,6 +216,9 @@ export function IssueView({ repo, number, onGone }) {
     }
   }
 
+  const menu = async (e) => {
+    if ((await one.menu([{ title: "Delete Issue", icon: "trash", danger: true }], e.currentTarget)) === 0) remove()
+  }
   const state = d.state === "open" ? "Open" : reason(d) === "not planned" ? "Closed as not planned" : "Closed"
   const timeline = []
   let shown = d.state === "open"
@@ -249,19 +250,21 @@ export function IssueView({ repo, number, onGone }) {
     <div ref={room} className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
-          <h1 className="text-xl font-semibold break-words">{d.title} <span className="font-normal text-muted-foreground">#{d.number}</span></h1>
-          {d.can.edit && <Button variant="outline" size="sm" onClick={() => setDialog("edit")}>Edit</Button>}
+          <h1 className={cn("font-semibold break-words", withSide ? "text-xl" : "text-lg leading-snug")}>{d.title} <span className="font-normal text-muted-foreground">#{d.number}</span></h1>
+          <div className="flex shrink-0 items-center gap-1">
+            {d.can.edit && <Button variant="outline" size="sm" onClick={() => setDialog("edit")}>Edit</Button>}
+            {d.can.delete && <Button variant="ghost" size="icon-sm" aria-label="More" onClick={menu}><Icon name="dots-three" /></Button>}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-medium text-foreground"><StateIcon issue={d} />{state}</span>
+          <span className="inline-flex items-center gap-1.5 font-medium text-foreground"><StateIcon issue={d} />{state}</span>
           <span><strong className="font-semibold text-foreground">{d.author.name}</strong> opened this {ago(d.created)} · {plural(d.comments.length, "comment", "comments")}</span>
         </div>
       </div>
 
       <div className={cn("grid items-start gap-4", withSide ? "grid-cols-[minmax(0,1fr)_15rem]" : "grid-cols-1")}>
-        {!withSide && sidebar}
         <div className="flex min-w-0 flex-col gap-4">
-          <Comment d={d} c={{ ...d, author: d.author }} body editing={false} />
+          {d.body.trim() && <Comment d={d} c={{ ...d, author: d.author }} body editing={false} />}
           {timeline}
           <div className="flex flex-col gap-3">
             <MarkdownField value={draft} onChange={setDraft} placeholder="Add a comment" rows={4} />
@@ -273,9 +276,8 @@ export function IssueView({ repo, number, onGone }) {
               <Button disabled={!!busy || !draft.trim()} onClick={comment}>{busy === "comment" && <Spinner />}Comment</Button>
             </div>
           </div>
-          {d.can.delete && <Button variant="destructive" className="self-start" onClick={remove}>Delete Issue</Button>}
         </div>
-        {withSide && <div className="sticky top-4">{sidebar}</div>}
+        {withSide ? <div className="sticky top-4">{sidebar}</div> : sidebar}
       </div>
 
       {dialog === "edit" && <EditDialog d={d} act={act} done={() => setDialog(null)} />}
