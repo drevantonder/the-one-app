@@ -226,6 +226,8 @@ function Sidebar({
       />
       <div
         data-slot="sidebar-container"
+        // Slid out of sight, its rows aren't there: not for a keyboard's Tab, nor a screen reader.
+        inert={state === "collapsed" && collapsible === "offcanvas"}
         className={cn(
           "absolute inset-y-0 z-10 flex h-full w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear",
           side === "left"

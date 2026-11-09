@@ -77,6 +77,15 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onPress, onBar
   }
   return (
     <SidebarProvider open={open} onOpenChange={onOpenChange} className={cn("relative h-full", className)}>
+      {/* The first Tab, for a keyboard past the sidebar's rows: on to the screen, whose frame takes the next. */}
+      <Button
+        variant="secondary"
+        size="sm"
+        className="absolute top-1.5 left-[calc(var(--titlebar-area-x,0px)+5.5rem)] z-30 -translate-y-14 focus-visible:translate-y-0"
+        onClick={() => document.querySelector<HTMLElement>('[data-slot="shell-screen"] iframe:not([aria-hidden])')?.focus()}
+      >
+        Skip to Content
+      </Button>
       {/* The window’s buttons, where they stay as the sidebar slides under them, clear of a title bar lying over the page (`--titlebar-area-x`). */}
       <div className="pointer-events-none absolute top-0 left-[calc(var(--titlebar-area-x,0px)+0.75rem)] z-20 flex h-(--shell-bar) items-center gap-1">
         <SidebarTrigger className="pointer-events-auto" />
