@@ -417,7 +417,10 @@ pub fn commands() -> crate::cli::Command {
                     }
                 }
                 ["search", words @ ..] if !words.is_empty() => {
-                    let limit = g.flag("limit").and_then(|l| l.parse().ok()).unwrap_or(8);
+                    let limit = match (g.has("limit"), g.flag("limit")) {
+                        (false, _) => 8,
+                        (true, given) => given.and_then(|l| l.parse().ok()).ok_or_else(|| crate::cli::Failed::Typed(format!("--limit is how many tools, a number: not {}", given.unwrap_or("nothing"))))?,
+                    };
                     let (apps, addable) = catalogs(g.node)?;
                     println!("{}", search(&apps, &addable, &words.join(" "), limit, Reader::Cli));
                 }

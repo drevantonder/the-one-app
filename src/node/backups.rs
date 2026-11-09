@@ -589,7 +589,12 @@ impl Node {
                     json!({ "time": time, "devices": devices, "places": places, "scopes": scopes })
                 })
                 .collect();
-            Ok(json!({ "places": out, "snapshots": snapshots, "here": self.device_name(), "disks": disks() }))
+            let mut status = json!({ "places": out, "snapshots": snapshots, "here": self.device_name(), "disks": disks() });
+            // The tools say it alone (`core_tools::said`); the Settings screen reads the rest.
+            if out.is_empty() {
+                status["said"] = json!("No backups yet: backups_add_place adds a place to back up to, a folder or S3-compatible storage.");
+            }
+            Ok(status)
         })
     }
 

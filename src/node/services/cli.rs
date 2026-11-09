@@ -1,8 +1,11 @@
 //! Device services on the command line: what each device runs, and switching them on and off.
 
+use anyhow::Result;
 use serde_json::json;
+use std::collections::BTreeSet;
 
-use crate::cli::{Command, ago};
+use crate::api::Client;
+use crate::cli::{Command, Failed, ago};
 use crate::config::{CLI, NAME};
 
 pub fn commands() -> Command {
@@ -62,6 +65,10 @@ pub fn commands() -> Command {
                 // What lets this machine's user start services in their sandbox, for root to run once: `| sudo sh`.
                 ["services", "sandbox"] => print!("{}", crate::services::sandbox::setup_script()?),
                 ["services", how @ ("on" | "off"), name] => {
+                    let names = known(g.node)?;
+                    if !names.contains(*name) {
+                        return Err(Failed::Typed(format!("no service called {name}: {}", names.into_iter().collect::<Vec<_>>().join(", "))).into());
+                    }
                     let device = g.flag("device");
                     g.node.post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
                     let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
@@ -78,4 +85,20 @@ pub fn commands() -> Command {
             Ok(true)
         },
     }
+}
+
+/// Every service there is: those an app uses (an app's service may not be on a device yet, and is switched on there
+/// to put it on), and the parts devices list, with the Cloudflare node's.
+fn known(node: &Client) -> Result<BTreeSet<String>> {
+    let mut names: BTreeSet<String> = node.apps()?.iter().flat_map(|a| a["uses"]["services"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect::<Vec<_>>()).collect();
+    names.insert(crate::database::scopes::APPS_PART.into());
+    if let Some(network) = node.state()?.network {
+        for s in &network.devices {
+            names.extend(s.now.parts.iter().flatten().map(|p| p.name.clone()));
+            names.extend(s.now.installed_services.iter().map(|d| d.name.clone()));
+            names.extend(s.off_services.iter().map(|d| d.name.clone()));
+        }
+        names.extend(network.cloudflare_node.iter().flat_map(|c| c.parts.iter().map(|p| p.name.clone())));
+    }
+    Ok(names)
 }

@@ -56,6 +56,7 @@ pub fn commands() -> Command {
                         false => println!("This machine isn't signed in."),
                     }
                 }
+                ["status"] if g.json => println!("{}", serde_json::to_string(&g.node.state()?)?),
                 ["status"] => status(g.node, &g.node.state()?),
                 ["create", name @ ..] if !name.is_empty() => {
                     let user_name = g.flag("as").context("say what to call you with --as <your name>")?;
@@ -76,6 +77,11 @@ pub fn commands() -> Command {
                     }
                 }
                 ["settings", name, value @ ..] => {
+                    // A lab's setting is named when it's first set; any other name must be one of the network's.
+                    let names: Vec<String> = g.node.state()?.network.context("not in a network yet")?.settings.into_keys().collect();
+                    if !name.starts_with("lab.") && !names.iter().any(|n| n == name) {
+                        return Err(one::cli::Failed::Typed(format!("no setting called {name}: {}", names.join(", "))).into());
+                    }
                     let value = if g.has("default") { Value::Null } else { json!(value.join(" ")) };
                     g.node.post("/v1/settings", json!({ "name": name, "value": value }))?;
                     println!("Set {name}.");

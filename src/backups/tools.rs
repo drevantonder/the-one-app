@@ -36,6 +36,7 @@ fn tools() -> Vec<Tool> {
                     "snapshots": { "type": "array", "items": { "type": "object" }, "description": "the newest, each { time, devices, places, scopes }" },
                     "here": { "type": "string", "description": "this device's name" },
                     "disks": { "type": "array", "items": { "type": "object" }, "description": "the disks here a folder could be on" },
+                    "said": { "type": "string", "description": "with no place yet, what to do first: the tool answers with this alone" },
                 } },
             }),
             serves!(serve::status),
