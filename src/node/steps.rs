@@ -255,7 +255,7 @@ impl Node {
     }
 
     /// A scope's steps read again from its start, for what an older build kept here (`read_global_again`), in its place
-    /// if that reaches as far.
+    /// if it read to the end of them. Where that ends is the bucket's to say: what's kept can stand at a position past it.
     async fn read_scope_again(&self, scope: &Scope, keys: &crate::database::stored::Keys) -> Result<()> {
         let bucket = self.bucket()?;
         let start = steps::ScopeReader::fetch_start(&bucket, keys, scope).await?;
@@ -263,7 +263,7 @@ impl Node {
         let read = steps::read(&bucket, keys, scope, 0, made).await?;
         self.with(|i| {
             fresh.take(0, &read, i.r.db(), scope, now_ms())?;
-            if read.waits.is_none() && i.scope_dbs.get(scope).is_some_and(|r| fresh.at >= r.at) {
+            if read.waits.is_none() {
                 i.scope_dbs.insert(scope.clone(), fresh);
             }
             Ok(())
