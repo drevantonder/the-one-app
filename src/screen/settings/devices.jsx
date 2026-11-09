@@ -386,11 +386,13 @@ function Devices() {
     // What its sign-ins were let in with, which a new device's sign-in is checked against.
     const signedIn = (passkey ? [item] : item.clients).filter((c) => c.sign_in || c.linked?.length)
     if (signedIn.length || item.me) items.push({ title: "Sign-Ins…", icon: "key" })
+    if (item.me) items.push({ title: "This Device’s Code", icon: "info" })
     items.push(item.me ? { title: "Sign Out", icon: "sign-out", danger: true } : { title: "Remove…", icon: "minus-circle", danger: true })
     const i = await one.menu(items, at).catch(() => null)
     if (i == null) return
     if (items[i].title === "Rename") show({ rename: item })
     else if (items[i].title === "Sign-Ins…") show({ signIns: signedIn, me: item.me })
+    else if (items[i].title === "This Device’s Code") act(async () => one.alert({ title: "This Device’s Code", text: (await api("GET", "/v1/devices/code")).code }))
     else if (item.me) signOut()
     else remove(item.name, passkey ? [item.key] : item.keys, !passkey && item.node && item.online ? item.node.key : null)
   }

@@ -118,6 +118,7 @@ pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
     if invite.is_none() && crate::sign_in::has_screen() && crate::sign_in::open(&link) {
         println!("It's open in your browser here, to approve it there if that browser is one of your devices.");
     }
+    println!("\nThe owner of this network can see everything in it.");
     println!("\nWaiting for {} to approve it…", if invite.is_some() { "them" } else { "you" });
     loop {
         std::thread::sleep(Duration::from_secs(2));

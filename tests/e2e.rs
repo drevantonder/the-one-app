@@ -321,7 +321,11 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
         one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
         key
     };
-    let sealed_for = |key: &ed25519_dalek::SigningKey| B64U.encode(&seal_to(&Endpoint::of(key).seal, &secret).unwrap());
+    let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
+    let sealed_for = |key: &ed25519_dalek::SigningKey| {
+        let sealed = seal_to(&Endpoint::of(key).seal, &secret).unwrap();
+        B64U.encode(&one::keys::held_copy(&recovery, &hex(&key.verifying_key().to_bytes()), &sealed))
+    };
     let name = async |holds: bool| one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": holds }).to_string().as_bytes()).await.unwrap().unwrap();
     let (phone, browser) = (new_device("iphone").await, new_device("browser").await);
     let opens = async |key: &ed25519_dalek::SigningKey| a.sealed_keys(&me, &global, Some(&hex(&key.verifying_key().to_bytes())), None).await.unwrap()["sealed"].clone();
@@ -331,9 +335,21 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     assert!(a.seal_recovery(&to, &sealed_for(&phone)).await.is_err(), "no one is named yet");
     name(true).await;
     assert_eq!(opens(&phone).await, before, "naming a holder rewrites nothing sealed");
-    assert!(a.seal_recovery(&hex(&a.id()), &B64U.encode(&seal_to(&one::keys::public_of(&[9; 32]), &secret).unwrap())).await.is_err(), "not a node");
+    let sealed_to_node = seal_to(&one::keys::public_of(&[9; 32]), &secret).unwrap();
+    assert!(a.seal_recovery(&hex(&a.id()), &B64U.encode(&one::keys::held_copy(&recovery, &hex(&a.id()), &sealed_to_node))).await.is_err(), "not a node");
     assert!(a.seal_recovery(&hex(&browser.verifying_key().to_bytes()), &sealed_for(&browser)).await.is_err(), "not a browser");
 
+    let bad_key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let sealed = seal_to(&Endpoint::of(&phone).seal, &secret).unwrap();
+    assert!(a.seal_recovery(&to, &B64U.encode(&one::keys::held_copy(&bad_key, &to, &sealed))).await.is_err(), "only the recovery key signs a copy");
+    a.seal_recovery(&to, &sealed_for(&phone)).await.unwrap();
+    // Anyone who can reach the bucket can create an object at that name: it neither counts nor stands in the way.
+    let files: Vec<_> = walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_recovery/")).collect();
+    assert!(!files.is_empty());
+    for file in &files {
+        std::fs::write(file, b"anyone can make this").unwrap();
+    }
+    assert_eq!(a.recovery_holders(&me).await.unwrap()["holders"][0]["devices"][0]["holds"], false, "a fake isn't counted");
     a.seal_recovery(&to, &sealed_for(&phone)).await.unwrap();
     let listed = a.recovery_holders(&me).await.unwrap();
     assert_eq!(listed["holders"][0]["devices"][0]["holds"], true, "{listed}");
@@ -341,13 +357,44 @@ async fn the_recovery_key_is_sealed_only_to_a_named_holders_device() {
     assert!(a.seal_recovery(&to, &sealed_for(&phone)).await.is_err(), "the one there stays");
     let held: Vec<_> = walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_recovery/")).collect();
     assert_eq!(held.len(), 1, "{held:?}");
-    assert_eq!(open_sealed(&seal_secret(&phone), &std::fs::read(&held[0]).unwrap()).unwrap(), secret, "it opens to the key on that device alone");
-    assert!(open_sealed(&seal_secret(&browser), &std::fs::read(&held[0]).unwrap()).is_err());
+    let copy = std::fs::read(&held[0]).unwrap();
+    let opened = one::keys::held_sealed(&recovery.verifying_key().to_bytes(), &to, &copy).expect("signed by the recovery key");
+    assert_eq!(open_sealed(&seal_secret(&phone), opened).unwrap(), secret, "it opens to the key on that device alone");
+    assert!(open_sealed(&seal_secret(&browser), opened).is_err());
 
     name(false).await;
     let laptop = new_device("linux").await;
     assert!(a.seal_recovery(&hex(&laptop.verifying_key().to_bytes()), &sealed_for(&laptop)).await.is_err(), "taken off, none of their devices is sealed it");
     assert!(a.recovery_holders(&me).await.unwrap()["holders"].as_array().unwrap().is_empty());
+}
+
+/// A backup keeps the copies of the recovery key its holders' devices have, as they were signed, so a restored network
+/// still knows who held it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backup_keeps_a_holders_copy_of_the_recovery_key() {
+    use data_encoding::BASE64URL_NOPAD as B64U;
+    use one::keys::{Endpoint, hex, open_sealed, seal_secret, seal_to, unhex};
+    let a = start("holder-backup").await;
+    let secret = unhex(&create(&a, "Home", "Andre").await).unwrap();
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
+    let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
+    let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let e = Endpoint::of(&phone);
+    let asked = one::settings::Asked::of(&json!({ "key": hex(&e.key), "seal": hex(&e.seal), "name": "phone", "user": me.user, "platform": "iphone" })).unwrap();
+    one::settings::approve(&a, &asked, &one::settings::Joining::Own { proved: true }).await.unwrap();
+    one::settings::answer(&a, "POST", "/v1/devices/recovery-holder", json!({ "user": me.user, "holds": true }).to_string().as_bytes()).await.unwrap().unwrap();
+    let to = hex(&e.key);
+    let sealed = seal_to(&e.seal, &secret).unwrap();
+    a.seal_recovery(&to, &B64U.encode(&one::keys::held_copy(&recovery, &to, &sealed))).await.unwrap();
+
+    let dir = temp("holder-backup-disk").join("One Backups");
+    a.add_place(&me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
+    eventually("the first backup", &a, async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
+    let place = one::bucket::Place::Folder(dir.clone());
+    let network = one::backups::networks(&place).unwrap().remove(0);
+    let copied = place.get(&format!("{network}/bucket/{}", one::keys::recovery_held_name(&hex(&recovery.verifying_key().to_bytes()), &to))).unwrap().expect("the backup keeps it");
+    let opened = one::keys::held_sealed(&recovery.verifying_key().to_bytes(), &to, &copied).expect("still signed");
+    assert_eq!(open_sealed(&seal_secret(&phone), opened).unwrap(), secret, "and it opens with the holder's device alone");
 }
 
 /// A file put from elsewhere (a client device's, a sign-in's) is read back by whoever put it alone, or by someone who

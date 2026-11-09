@@ -381,6 +381,9 @@ function J() {
 		(i.length || e.me) && r.push({
 			title: "Sign-Ins…",
 			icon: "key"
+		}), e.me && r.push({
+			title: "This Device’s Code",
+			icon: "info"
 		}), r.push(e.me ? {
 			title: "Sign Out",
 			icon: "sign-out",
@@ -394,7 +397,10 @@ function J() {
 		a != null && (r[a].title === "Rename" ? N({ rename: e }) : r[a].title === "Sign-Ins…" ? N({
 			signIns: i,
 			me: e.me
-		}) : e.me ? le() : X(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
+		}) : r[a].title === "This Device’s Code" ? H(async () => one.alert({
+			title: "This Device’s Code",
+			text: (await A("GET", "/v1/devices/code")).code
+		})) : e.me ? le() : X(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
 	}
 	async function X(e, t, n) {
 		if (n) return N({ remove: {

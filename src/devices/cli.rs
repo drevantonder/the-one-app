@@ -16,7 +16,8 @@ pub fn commands() -> Command {
             ("devices approve <code> --recovery-key <file> [--confirm]".into(), format!("let back in someone who lost every device, on a computer running {NAME}, with {YOURS}'s recovery key from a file, or - for stdin; without --confirm, says whose device it is")),
             ("devices holders".into(), "who holds the recovery key, and which of their devices have it".into()),
             ("devices holders add|remove <user>".into(), "for an admin: name someone as holding the recovery key, or take them off".into()),
-            ("devices holders seal --recovery-key <file> [--confirm]".into(), "seal the recovery key, from a file or - for stdin, to the devices of those named; without --confirm, says which".into()),
+            ("devices holders seal [<code>] --recovery-key <file> [--confirm]".into(), "seal the recovery key, from a file or - for stdin, to the device of someone named that shows this code on its own screen (`devices code` there); with no code, says which are waiting".into()),
+            ("devices code".into(), "this device's code, for someone sealing it the recovery key or restoring you".into()),
         ],
         run,
     }
@@ -36,7 +37,8 @@ fn run(g: &Given) -> Result<bool> {
             let answer = g.node.post_for(g.agent, "/v1/devices/recovery-holder", json!({ "user": user, "holds": *how == "add" }))?;
             println!("{}", answer["said"].as_str().unwrap_or(""));
         }
-        ["devices", "holders", "seal"] => seal(g)?,
+        ["devices", "holders", "seal", code @ ..] => seal(g, code.first().copied())?,
+        ["devices", "code"] => println!("{}", g.node.get("/v1/devices/code")?["code"].as_str().unwrap_or("")),
         _ => return Ok(false),
     }
     Ok(true)
@@ -59,14 +61,16 @@ fn holders(said: &Value) {
     }
 }
 
-/// Seals the recovery key from its file to each named holder's device that doesn't have it, here on this machine: the
-/// node keeping them only ever sees what's sealed.
-fn seal(g: &Given) -> Result<()> {
+/// Seals the recovery key from its file to the one named holder's device showing `code`, here on this machine: the node
+/// keeping it only ever sees what's sealed. What's listed comes from a node, which could be hacked, and a device's
+/// `platform` is only what it says of itself, so the only thing that says this key is really that device is the code
+/// computed here from the very key and seal key used, against what a person read off that device's own screen.
+fn seal(g: &Given, code: Option<&str>) -> Result<()> {
     let file = g.flag("recovery-key").context("give --recovery-key: the file the recovery key is in, or - for stdin")?;
     let secret = keys::unhex(&keys::recovery_key_in(file)?)?;
     let said = g.node.get("/v1/devices/recovery-holders")?;
-    let public = ed25519_dalek::SigningKey::from_bytes(&secret).verifying_key().to_bytes();
-    ensure!(said["recovery"].as_str() == Some(keys::hex(&public).as_str()), "That file doesn't hold {YOURS}'s recovery key.");
+    let recovery = ed25519_dalek::SigningKey::from_bytes(&secret);
+    ensure!(said["recovery"].as_str() == Some(keys::hex(&recovery.verifying_key().to_bytes()).as_str()), "That file doesn't hold {YOURS}'s recovery key.");
     let mut owed = Vec::new();
     for holder in said["holders"].as_array().into_iter().flatten() {
         for device in holder["devices"].as_array().into_iter().flatten().filter(|d| d["holds"] != true) {
@@ -77,18 +81,30 @@ fn seal(g: &Given) -> Result<()> {
         println!("Every named holder's device that can hold it has it. `{CLI} devices holders` shows them.");
         return Ok(());
     }
-    for (name, device) in &owed {
-        let label = device["name"].as_str().unwrap_or("");
-        if !g.has("confirm") {
-            println!("Would seal it to {label}, {name}'s device.");
-            continue;
+    let Some(code) = code else {
+        for (name, device) in &owed {
+            println!("Waiting: {}, {name}'s device.", device["name"].as_str().unwrap_or(""));
         }
-        let (to, seal) = (device["key"].as_str().unwrap_or(""), keys::unhex(device["seal"].as_str().unwrap_or(""))?);
-        g.node.post_for(g.agent, "/v1/devices/recovery-holders/seal", json!({ "to": to, "sealed": B64U.encode(&keys::seal_to(&seal, &secret)?) }))?;
-        println!("Sealed it to {label}, {name}'s device.");
-    }
+        println!("Whoever holds it can read everything in {YOURS}. To seal it to one, run `{CLI} devices code` on that device and give what it shows, from its own screen, here.");
+        return Ok(());
+    };
+    let wanted: String = code.to_uppercase().chars().filter(char::is_ascii_alphanumeric).collect();
+    let (name, device, to, seal) = owed
+        .iter()
+        .find_map(|(name, device)| {
+            let endpoint = keys::Endpoint { key: keys::unhex(device["key"].as_str()?).ok()?, seal: keys::unhex(device["seal"].as_str()?).ok()? };
+            (keys::join_code(&endpoint) == wanted).then_some((*name, *device, endpoint.key, endpoint.seal))
+        })
+        .context("No device waiting for it shows that code. Read it again from that device's own screen: a different code means what this computer was told isn't that device.")?;
+    let label = device["name"].as_str().unwrap_or("");
     if !g.has("confirm") {
-        println!("Nothing sealed yet. Whoever holds it can read everything in {YOURS}. Run it again with --confirm.");
+        println!("Would seal it to {label}, {name}'s device. Whoever holds it can read everything in {YOURS}. Run it again with --confirm.");
+        return Ok(());
     }
+    let to = keys::hex(&to);
+    let sealed = keys::seal_to(&seal, &secret)?;
+    let copy = keys::held_copy(&recovery, &to, &sealed);
+    g.node.post_for(g.agent, "/v1/devices/recovery-holders/seal", json!({ "to": to, "copy": B64U.encode(&copy) }))?;
+    println!("Sealed it to {label}, {name}'s device.");
     Ok(())
 }

@@ -198,6 +198,14 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
     for n in bucket.list(&crate::keys::vault_keys_folder(scope))?.iter().filter_map(|n| n.parse().ok()) {
         copy(&crate::keys::vault_key_name(scope, n, "recovery"), true)?;
     }
+    // The recovery key's copies, sealed to its holders' devices: asked for again each run, as a bad one can be replaced.
+    if scope == "global" {
+        for recovery in bucket.list(&crate::keys::recovery_held_folder())? {
+            for to in bucket.list(&format!("{}/{recovery}", crate::keys::recovery_held_folder()))? {
+                copy(&crate::keys::recovery_held_name(&recovery, &to), false)?;
+            }
+        }
+    }
     for app in bucket.list(&folder)?.into_iter().filter(|a| crate::database::scopes::valid_app_name(a) || a == crate::database::scopes::APP) {
         for n in bucket.list(&crate::keys::app_keys_folder(scope, &app))?.iter().filter_map(|n| n.parse().ok()) {
             copy(&crate::keys::app_key_name(scope, &app, n), true)?;

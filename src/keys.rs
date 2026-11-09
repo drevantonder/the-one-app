@@ -522,7 +522,32 @@ pub fn vault_key_name(scope: &str, n: u32, to: &str) -> String {
 /// Where the network's recovery key (`recovery`, its public half) is kept sealed to a device (`to`) of someone who holds
 /// it, so a new recovery key starts with none of the old one's.
 pub fn recovery_held_name(recovery: &str, to: &str) -> String {
-    format!("{}/_recovery/{recovery}/{to}", crate::bucket::folder("global"))
+    format!("{}/{recovery}/{to}", recovery_held_folder())
+}
+
+/// Where each recovery key's copies are, one folder each.
+pub fn recovery_held_folder() -> String {
+    format!("{}/_recovery", crate::bucket::folder("global"))
+}
+
+const HELD_DOMAIN: &str = "one/recovery-held";
+
+/// What's signed for a copy of the recovery key kept for a device: who it's for and what's sealed, so anyone may create
+/// an object at its name (the URL signer lets any endpoint) and only the recovery key makes one that counts.
+fn held_signed(to: &str, sealed: &[u8]) -> Value {
+    serde_json::json!({ "to": to, "sealed": B64U.encode(sealed) })
+}
+
+/// A copy of the recovery key, sealed to the device `to` (its key in hex) on the machine with its file, as it's kept:
+/// the recovery key's signature, then what's sealed.
+pub fn held_copy(recovery: &SigningKey, to: &str, sealed: &[u8]) -> Vec<u8> {
+    [sign(recovery, HELD_DOMAIN, &held_signed(to, sealed)).as_slice(), sealed].concat()
+}
+
+/// What's sealed in a copy kept for `to`, if `recovery` (its public half) signed it: none for anything else there.
+pub fn held_sealed<'a>(recovery: &[u8; 32], to: &str, copy: &'a [u8]) -> Option<&'a [u8]> {
+    let (signature, sealed) = (copy.get(..64)?, copy.get(64..)?);
+    verify(recovery, HELD_DOMAIN, &held_signed(to, sealed), signature).ok().map(|()| sealed)
 }
 
 /// The folder of a scope's Vault secret keys, one folder each (`vault_key_name`).

@@ -92,10 +92,11 @@ async fn recovery_holders(State(node): State<Node>, me: Me) -> Reply {
 #[serde(deny_unknown_fields)]
 struct SealRecovery {
     to: String,
-    sealed: String,
+    /// What the recovery key signed and sealed for it (`keys::held_copy`).
+    copy: String,
 }
 
 async fn seal_recovery(State(node): State<Node>, Body(body): Body<SealRecovery>) -> Reply {
-    node.seal_recovery(given(&body.to, "to")?, given(&body.sealed, "sealed")?).await?;
+    node.seal_recovery(given(&body.to, "to")?, given(&body.copy, "copy")?).await?;
     done()
 }

@@ -97,6 +97,7 @@ enum Route {
     Seen,
     VaultGrant,
     RecoveryHolder,
+    Code,
 }
 
 /// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
@@ -130,6 +131,7 @@ const ROUTES: &[(&str, &str, Route, bool)] = &[
     // A machine with a node that opens the Vault seals what's in it to the new key at once.
     ("POST", "/v1/vault/grant", Route::VaultGrant, false),
     ("POST", "/v1/devices/recovery-holder", Route::RecoveryHolder, true),
+    ("GET", "/v1/devices/code", Route::Code, true),
 ];
 
 /// What the OpenAPI document says of a route: a line for whoever reads it (`Tool`'s own, for a tool's route), and the body
@@ -162,6 +164,7 @@ fn about(route: Route) -> (&'static str, Value) {
         Route::Seen => ("Say the waiting devices were seen", of::<body::Nothing>()),
         Route::VaultGrant => ("", of::<body::VaultGrant>()),
         Route::RecoveryHolder => ("Name someone as holding the recovery key, or take them off", of::<body::RecoveryHolder>()),
+        Route::Code => ("This device's code, read from its own screen", of::<body::Nothing>()),
     }
 }
 
@@ -575,6 +578,10 @@ async fn answered_by(m: &impl Me, route: Route, path: &str, raw: &[u8]) -> Resul
             seen(m).await?
         }
         Route::VaultGrant => vault_grant(m, read::<body::VaultGrant>(path, raw)?).await?,
+        Route::Code => {
+            read::<body::Nothing>(path, raw)?;
+            json!({ "code": keys::spaced_code(&keys::join_code(&Endpoint { key: m.public(), seal: m.seal() })) })
+        }
     })
 }
 
