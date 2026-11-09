@@ -499,7 +499,8 @@ impl Service {
         Router::new()
             .route("/v1/state", get(state))
             .route("/v1/call", post(call))
-            .route("/v1/blobs", post(put_blob))
+            // A file is as big as it is (a browser profile is hundreds of MB): the node gives each user their room.
+            .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::disable()))
             .route("/v1/blobs/{hash}", get(get_blob))
             // Its program's way out, from its sandbox: `CONNECT host:port`, to a host its app declares.
             .fallback(proxy)
