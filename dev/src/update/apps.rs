@@ -32,7 +32,7 @@ pub(super) fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Ve
 pub(super) fn add_where(moved: &[(String, Vec<String>)]) {
     for (app, scopes) in moved {
         for scope in scopes {
-            match crate::node().post("/v1/add", json!({ "app": app, "scope": scope, "added": true })) {
+            match crate::node().post("/v1/add/add", json!({ "app": app, "scope": scope })) {
                 Ok(_) => println!("Added {app} to {scope}, where its old name was"),
                 Err(err) => println!("  couldn't add {app} to {scope}: {err:#}"),
             }

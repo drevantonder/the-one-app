@@ -132,7 +132,7 @@ export const home = (() => {
     if (settings(a, p)) out.push({ title: "Settings", icon: "gear-six", run: settings(a, p) });
     if (inStore(a)) out.push({ title: "Open in App Store", icon: "bag", run: inStore(a) });
     if (canArrange(p.scope) && (a.deploys || 0) > 0) {
-      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/add", { app: a.name, scope: p.scope, added: false }),
+      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/remove/remove", { app: a.name, scope: p.scope }),
         (apps) => apps.map((x) => (x.name === a.name ? { ...x, added: (x.added || []).filter((s) => (s.startsWith("user:") ? "user" : s) !== p.scope) } : x))) });
     }
     if (owns(a) && (a.deploys || 0) > 0) {

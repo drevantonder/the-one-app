@@ -15,7 +15,6 @@ pub fn routes() -> Routes {
         .route("/v1/apps", Who::SignedIn, get(apps))
         .route("/v1/labs", Who::SignedIn, get(labs))
         .route("/v1/deploy", Who::SignedIn, post(deploy))
-        .route("/v1/add", Who::SignedIn, post(add))
         .route("/v1/schedule", Who::ThisMachine, post(schedule))
         .route("/v1/arrange", Who::SignedIn, post(arrange))
         .route("/v1/fork", Who::ThisMachine, post(fork))
@@ -76,27 +75,8 @@ struct SourceQuery {
     path: Option<String>,
 }
 
-/// Adds an app (or with `added: false` removes it) in `scope`: `user`, `group:<id>` (or a group's name) or
-/// `global`; `node`, the device (by name, or `cloudflare`) that runs its services. Adding an app also adds the apps
-/// it uses.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Add {
-    app: String,
-    scope: String,
-    #[serde(default = "yes")]
-    added: bool,
-    node: Option<String>,
-}
-
 fn yes() -> bool {
     true
-}
-
-async fn add(State(node): State<Node>, me: Me, Body(body): Body<Add>) -> Reply {
-    let scope = node.scope_for(&me.caller, given(&body.scope, "scope")?)?;
-    node.add(&me.caller, given(&body.app, "app")?, &scope, body.added, body.node.as_deref()).await?;
-    done()
 }
 
 #[derive(Deserialize)]

@@ -110,10 +110,9 @@ var j = (() => {
 			icon: "minus-circle",
 			danger: !0,
 			section: !0,
-			run: () => N(() => one.api("POST", "/v1/add", {
+			run: () => N(() => one.api("POST", "/v1/remove/remove", {
 				app: e.name,
-				scope: t.scope,
-				added: !1
+				scope: t.scope
 			}), (n) => n.map((n) => n.name === e.name ? {
 				...n,
 				added: (n.added || []).filter((e) => (e.startsWith("user:") ? "user" : e) !== t.scope)

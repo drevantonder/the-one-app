@@ -72,7 +72,7 @@ pub fn commands() -> Command {
                 }
                 ["remove", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    g.node.post("/v1/add", json!({ "app": app, "scope": scope, "added": false }))?;
+                    g.node.post("/v1/remove/remove", json!({ "app": app, "scope": scope }))?;
                     println!("{app} is no longer added to {scope}.");
                 }
                 ["fork", app, name] => {
@@ -81,7 +81,7 @@ pub fn commands() -> Command {
                 }
                 ["add", app] => {
                     let scope = g.flag("scope").unwrap_or("user");
-                    g.node.post("/v1/add", json!({ "app": app, "scope": scope, "added": true, "node": g.flag("node") }))?;
+                    g.node.post("/v1/add/add", json!({ "app": app, "scope": scope, "node": g.flag("node") }))?;
                     println!("{app} is added to {scope}.");
                 }
                 ["app", how @ ("delete" | "restore" | "erase"), app] => {

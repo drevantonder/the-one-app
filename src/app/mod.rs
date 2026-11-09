@@ -4,6 +4,7 @@
 //! node's outbound port (`outbound`), which fills in the Vault's secrets for their hosts.
 
 pub mod bundle;
+pub mod tools;
 #[cfg(feature = "node")]
 pub mod deploy;
 #[cfg(feature = "node")]
