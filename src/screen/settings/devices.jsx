@@ -1146,7 +1146,8 @@ function Line({ text }) {
   )
 }
 
-/// The three ways a device joins: an app that signs in and asks to be approved, a server by one line, a browser.
+/// The ways a device joins: a browser, a computer or a server by one line (the computer's installs the app, which signs
+/// in and asks to be approved).
 function AddDevice({ data, open, setOpen }) {
   const { state } = data
   const address = state.network?.settings?.address || ""
@@ -1174,7 +1175,7 @@ function AddDevice({ data, open, setOpen }) {
       <div className="overflow-y-auto p-4">
         <List>
           {address && way("browser", "A browser", "Open this and sign in. It shows up here to approve.", <Line text={address} />)}
-          {way("device-mobile", "Phone, tablet or computer", `Install ${state.config?.name || "the app"} and sign in. It shows up here to approve.`)}
+          {state.config?.install && way("desktop", "A computer", `Run this on a Mac or Linux computer, then sign in. It shows up here to approve.`, <Line text={state.config.install} />)}
           {line && way("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.",
             line.loading ? <div className="mt-2 flex items-center gap-2 text-muted-foreground"><Spinner />Making a code</div>
               : line.error ? <div className="mt-2"><Problem title={line.error} /></div>

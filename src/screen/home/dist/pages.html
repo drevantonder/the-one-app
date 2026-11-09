@@ -214,7 +214,7 @@ var j = (() => {
 		loadWidgets: V,
 		watch: U
 	};
-})(), { scope: M, swipe: N } = one.params || {}, P = "settings", F = 52, I = {
+})(), { scope: M, swipe: N } = one.params || {}, P = "settings", F = 58, I = {
 	small: [2, 2],
 	medium: [4, 2],
 	large: [4, 4],
@@ -260,7 +260,7 @@ var re = () => ({
 	at: U.at,
 	dialog: U.dialog,
 	refreshing: [...U.refreshing],
-	view: U.phase === "ready" ? pe() : [],
+	view: U.phase === "ready" ? me() : [],
 	attention: U.phase === "ready" && (j.data.state?.settings_items || []).some((e) => e.badge)
 }), ie = () => N ? [...j.pages().map((e) => e.scope), P] : [M || "user"], ae = (e) => e === P ? "Settings" : j.page(e)?.title || "", oe = (e) => !!j.page(e) && j.canArrange(e) && !U.view.find((t) => t.scope === e)?.empty, se = (e, t) => ({
 	slot: e,
@@ -281,34 +281,34 @@ var re = () => ({
 			t?.screen && one.open(t.screen, t.params || {}, n.app, { scope: e.scope });
 		}
 	}
-});
-function le(e, t, n) {
-	let r = j.app(e.app), i = `widget:${t.id}`, a = U.sizes[i] || e.size || "medium", o = j.tree(e, a), s = !e.error && (o?.t === "text" && o.tone === "muted" || o?.t === "list" && !o.c?.length), c = s ? "small" : a, l = e.title || j.label(r) || e.widget;
+}), le = (e, t) => !e.error && (t?.t === "text" && t.tone === "muted" || t?.t === "list" && !t.c?.length);
+function ue(e, t, n) {
+	let r = j.app(e.app), i = `widget:${t.id}`, a = U.sizes[i] || e.size || "medium", o = le(e, j.tree(e, a)), s = o ? "small" : a, c = e.title || j.label(r) || e.widget;
 	return {
 		slot: i,
 		key: i,
 		kind: "widget",
 		w: {
 			...e,
-			title: l
+			title: c
 		},
 		kept: t,
-		size: c,
-		bare: s,
-		name: l,
+		size: s,
+		bare: o,
+		name: c,
 		host: ce(n),
 		p: n,
-		open: !j.tree(e, c)?.link && r && j.hasScreens(r) ? j.open(r, n) : null,
-		menu: (r) => j.menu(Ee(e, t, n, te(c, ne(n.scope)), ne(n.scope), s), r)
+		open: !j.tree(e, s)?.link && r && j.hasScreens(r) ? j.open(r, n) : null,
+		menu: (r) => j.menu(De(e, t, n, te(s, ne(n.scope)), ne(n.scope), o), r)
 	};
 }
-function ue(e, t) {
+function de(e, t) {
 	let n = `widget:${e.id}`, r = I[U.sizes[n] || e.size] ? U.sizes[n] || e.size : "medium", i = j.canArrange(t.scope) ? (e) => j.menu([H, {
 		title: "Remove Widget",
 		icon: "minus-circle",
 		danger: !0,
 		section: !0,
-		run: () => Se(t, { key: n })
+		run: () => Ce(t, { key: n })
 	}], e) : void 0;
 	return {
 		slot: n,
@@ -320,10 +320,10 @@ function ue(e, t) {
 		menu: i
 	};
 }
-function de(e) {
+function fe(e) {
 	let t = j.canArrange(e.scope), n = e.scope === j.pages()[0]?.scope, r = !j.appsOn(e).length && !j.widgetsOn(e).length && !j.waiting(e), i = j.forAiOn(e), a = j.items(e).map((n) => {
-		if (n.pending) return ue(n.kept, e);
-		if (n.widget) return le(n.widget, n.kept, e);
+		if (n.pending) return de(n.kept, e);
+		if (n.widget) return ue(n.widget, n.kept, e);
 		let r = n.app, i = j.actions(r, j.page(e.scope) || e);
 		return se(`app:${r.name}`, {
 			key: `app:${r.name}`,
@@ -361,12 +361,12 @@ function de(e) {
 		empty: r,
 		store: !!j.store(),
 		list: a,
-		addable: !!j.store() || j.widgetsOn(e).length > 0 || ge(e).length > 0,
+		addable: !!j.store() || j.widgetsOn(e).length > 0 || _e(e).length > 0,
 		groups: j.allPages().some((e) => e.scope.startsWith("group:")),
 		said: r ? i.length ? `Your AI can use ${new Intl.ListFormat("en").format(i.map(j.label))}.` : "No apps yet." : ""
 	};
 }
-var fe = () => ({
+var pe = () => ({
 	scope: P,
 	title: "Settings",
 	subtitle: j.network()?.name || "",
@@ -382,14 +382,14 @@ var fe = () => ({
 		open: e.url ? () => one.link(e.url) : e.app ? j.opens("main", {}, e.app) : j.opens(e.name, {})
 	}))
 });
-function pe() {
-	return ie().map((e) => e === P ? fe() : j.page(e) ? de(j.page(e)) : {
+function me() {
+	return ie().map((e) => e === P ? pe() : j.page(e) ? fe(j.page(e)) : {
 		scope: e,
 		missing: !0,
 		list: []
 	});
 }
-function me(e, t) {
+function he(e, t) {
 	let n = [];
 	return e.map((e) => {
 		let r = e.kind === "widget" || e.kind === "pending", i = r ? te(e.size, t) : null, [a, o] = r ? I[i] : [1, 1];
@@ -413,15 +413,15 @@ function me(e, t) {
 		}
 	});
 }
-var Y = (e) => j.data.state.arrangements?.[e.scope]?.hidden || [], he = (e) => e.widget ? `widget:${e.id}` : `app:${e.app}`, ge = (e) => Y(e).map(j.app).filter((t) => t && j.appsOn(e).includes(t));
+var Y = (e) => j.data.state.arrangements?.[e.scope]?.hidden || [], ge = (e) => e.widget ? `widget:${e.id}` : `app:${e.app}`, _e = (e) => Y(e).map(j.app).filter((t) => t && j.appsOn(e).includes(t));
 function X(e, t = j.items(e).map((e) => e.app ? { app: e.app.name } : e.kept)) {
 	let n = [...t], r = Y(e);
 	return (j.data.state.arrangements?.[e.scope]?.items || []).forEach((e, t) => {
-		!e.widget && r.includes(e.app) && !n.some((t) => he(t) === he(e)) && n.splice(Math.min(t, n.length), 0, e);
+		!e.widget && r.includes(e.app) && !n.some((t) => ge(t) === ge(e)) && n.splice(Math.min(t, n.length), 0, e);
 	}), n;
 }
-var _e, ve = () => {
-	clearTimeout(_e), _e = setTimeout(() => one.cache("pages", {
+var ve, ye = () => {
+	clearTimeout(ve), ve = setTimeout(() => one.cache("pages", {
 		state: j.data.state,
 		apps: j.data.apps,
 		widgets: j.data.widgets,
@@ -446,18 +446,18 @@ async function Z(e, t, n = Y(e), { reload: r = !1 } = {}) {
 			items: t,
 			hidden: n,
 			...o.pages ? { pages: o.pages } : {}
-		}), r && (await j.loadWidgets([e.scope]), J()), ve();
+		}), r && (await j.loadWidgets([e.scope]), J()), ye();
 	} catch (e) {
 		j.data.state.arrangements === s && (j.data.state.arrangements = a, J()), U.undo = [], j.failed(e);
 	}
 }
-var ye = (e, t, n) => Z(e, X(e).map((e) => e.widget && e.id === t.id ? {
+var be = (e, t, n) => Z(e, X(e).map((e) => e.widget && e.id === t.id ? {
 	...e,
 	size: n
-} : e)), be = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
-function xe(e) {
+} : e)), xe = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+function Se(e) {
 	let t = document.querySelector(`[data-cell="${CSS.escape(e)}"]`);
-	if (!t || (K = !0, be())) return;
+	if (!t || (K = !0, xe())) return;
 	let n = t.getBoundingClientRect(), r = parseFloat(getComputedStyle(document.documentElement).zoom) || 1, i = t.cloneNode(!0);
 	i.removeAttribute("data-cell"), i.className = "pointer-events-none fixed left-0 top-0 z-20 m-0 grid", Object.assign(i.style, {
 		width: `${n.width / r}px`,
@@ -478,35 +478,35 @@ function xe(e) {
 		fill: "forwards"
 	}).finished.then(() => i.remove());
 }
-function Se(e, t) {
-	one.tap("medium"), xe(t.key);
-	let n = X(e), r = n.findIndex((e) => he(e) === t.key);
+function Ce(e, t) {
+	one.tap("medium"), Se(t.key);
+	let n = X(e), r = n.findIndex((e) => ge(e) === t.key);
 	U.undo.push({
 		p: e,
 		gone: n[r],
 		at: r
 	}), n[r]?.widget ? Z(e, n.filter((e, t) => t !== r)) : Z(e, n, [.../* @__PURE__ */ new Set([...Y(e), n[r]?.app || t.key.slice(4)])]);
 }
-function Ce() {
+function we() {
 	let { p: e, gone: t, at: n } = U.undo.pop();
-	one.tap(), K = !0, t.widget ? Z(e, X(e).toSpliced(Math.min(n, X(e).length), 0, t)) : we(e, t.app);
-}
-function we(e, t) {
-	K = !0;
-	let n = X(e);
-	Z(e, n.some((e) => e.app === t) ? n : n.toSpliced(Te(e, n), 0, { app: t }), Y(e).filter((e) => e !== t));
+	one.tap(), K = !0, t.widget ? Z(e, X(e).toSpliced(Math.min(n, X(e).length), 0, t)) : Te(e, t.app);
 }
 function Te(e, t) {
-	let n = document.querySelector(`[data-page="${CSS.escape(e.scope)}"]`).getBoundingClientRect().top, r = Me(e.scope).find((e) => e.dataset.cell !== "accounts" && e.getBoundingClientRect().top >= n), i = r ? t.findIndex((e) => he(e) === r.dataset.cell) : -1;
+	K = !0;
+	let n = X(e);
+	Z(e, n.some((e) => e.app === t) ? n : n.toSpliced(Ee(e, n), 0, { app: t }), Y(e).filter((e) => e !== t));
+}
+function Ee(e, t) {
+	let n = document.querySelector(`[data-page="${CSS.escape(e.scope)}"]`).getBoundingClientRect().top, r = Ne(e.scope).find((e) => e.dataset.cell !== "accounts" && e.getBoundingClientRect().top >= n), i = r ? t.findIndex((e) => ge(e) === r.dataset.cell) : -1;
 	return i < 0 ? t.length : i;
 }
-function Ee(e, t, n, r, i, a) {
+function De(e, t, n, r, i, a) {
 	let o = j.canArrange(n.scope), s = o && !a ? j.supported(e).filter((e) => I[e][0] <= i) : [], c = s.length > 1 ? s.map((e) => ({
 		title: L[e],
 		icon: R[e],
 		row: !0,
 		checked: e === r,
-		run: () => e !== r && ye(n, t, e)
+		run: () => e !== r && be(n, t, e)
 	})) : [];
 	return o && (e.options || []).length && c.push({
 		title: "Edit Widget",
@@ -531,16 +531,16 @@ function Ee(e, t, n, r, i, a) {
 		icon: "minus-circle",
 		danger: !0,
 		section: !0,
-		run: () => Se(n, { key: `widget:${t.id}` })
+		run: () => Ce(n, { key: `widget:${t.id}` })
 	}), c;
 }
-function De() {
+function Oe() {
 	U.dialog = {
 		kind: "pages",
 		groups: j.allPages().filter((e) => e.scope.startsWith("group:"))
 	}, U.render();
 }
-function Oe(e) {
+function ke(e) {
 	let t = j.data.state, n = t.arrangements, r = n?.user, i = r?.items || X(j.page("user") || { scope: "user" }), a = t.pages;
 	t.arrangements = {
 		...n || {},
@@ -564,23 +564,23 @@ function Oe(e) {
 		items: i,
 		hidden: r?.hidden || [],
 		pages: e
-	}).then(ve, (e) => {
+	}).then(ye, (e) => {
 		j.data.state.arrangements === o && (j.data.state.arrangements = n, j.data.state.pages = a, J()), j.failed(e);
 	});
 }
-var ke;
+var Ae;
 function Q(e) {
-	U.editing !== e && (U.editing = e, clearTimeout(ke), U.leaving = !e && !be(), e ? one.tap("medium") : U.undo = [], U.leaving && (ke = setTimeout(() => {
+	U.editing !== e && (U.editing = e, clearTimeout(Ae), U.leaving = !e && !xe(), e ? one.tap("medium") : U.undo = [], U.leaving && (Ae = setTimeout(() => {
 		U.leaving = !1, U.render();
 	}, B)), U.render());
 }
 one.on("left", () => {
 	U.editing = U.leaving = !1, U.undo = [], U.dialog = null, U.render();
 });
-function Ae(e) {
+function je(e) {
 	U.at = e, U.editing = U.leaving = !1, U.undo = [], U.render();
 }
-function je(e) {
+function Me(e) {
 	let t = e.closest?.("[data-cell]"), n = t?.closest("[data-page]")?.dataset.page, r = t && U.view.find((e) => e.scope === n)?.list.find((e) => e.slot === t.dataset.cell);
 	return r && {
 		item: r,
@@ -589,8 +589,8 @@ function je(e) {
 		p: j.page(n)
 	};
 }
-var Me = (e) => [...document.querySelectorAll(`[data-page="${CSS.escape(e)}"] [data-cell]`)];
-function Ne(e, t, n, r) {
+var Ne = (e) => [...document.querySelectorAll(`[data-page="${CSS.escape(e)}"] [data-cell]`)];
+function Pe(e, t, n, r) {
 	e.preventDefault(), e.stopPropagation();
 	let i = t.size, { cell: a, gap: o, columns: s } = U.geometry[n.scope], { left: c, top: l } = r.getBoundingClientRect(), u = j.supported(t.w).filter((e) => I[e][0] <= s);
 	W = { resize: !0 };
@@ -600,19 +600,19 @@ function Ne(e, t, n, r) {
 	}, f = () => {
 		W = null, removeEventListener("pointermove", d), removeEventListener("pointerup", f), removeEventListener("pointercancel", f);
 		let e = U.sizes[t.key];
-		delete U.sizes[t.key], e && e !== i ? ye(n, t.kept, e) : U.render();
+		delete U.sizes[t.key], e && e !== i ? be(n, t.kept, e) : U.render();
 	};
 	addEventListener("pointermove", d), addEventListener("pointerup", f), addEventListener("pointercancel", f);
 }
-function Pe() {
+function Fe() {
 	if (W && !W.ready) {
 		if (W.ready = !0, ee = Date.now() + 600, W.page) return W = null, Q(!0);
 		one.tap("medium"), W.el.style.scale = "1.06";
 	}
 }
-var Fe = !1, Ie = (e) => G && e.pointerId === G.id || W && !W.resize && e.pointerId === W.id;
-function Le(e, t) {
-	if (G) return void Be(e, t);
+var Ie = !1, Le = (e) => G && e.pointerId === G.id || W && !W.resize && e.pointerId === W.id;
+function Re(e, t) {
+	if (G) return void Ve(e, t);
 	let n = Math.hypot(e - W.x, t - W.y);
 	if (!W.ready) {
 		n > 8 && (clearTimeout(W.timer), W = null);
@@ -620,17 +620,17 @@ function Le(e, t) {
 	}
 	if (W.page || n < (U.editing ? 4 : 10) || !j.canArrange(W.scope)) return;
 	let { item: r, el: i, scope: a, p: o, id: s, x: c, y: l } = W;
-	W = null, i.style.scale = "", Q(!0), ze(o, a, r.slot, c, l, s), Be(e, t);
+	W = null, i.style.scale = "", Q(!0), Be(o, a, r.slot, c, l, s), Ve(e, t);
 }
-function Re(e) {
-	if (G) return void Ve();
+function ze(e) {
+	if (G) return void He();
 	clearTimeout(W.timer);
 	let t = W;
 	if (W = null, t.el && (t.el.style.scale = ""), U.editing && t.page && !e.closest?.("[data-cell], [role=dialog]")) return Q(!1);
 	!U.editing && t.ready && t.item?.menu && (ee = Date.now() + 400, t.item.menu(t.el));
 }
-function ze(e, t, n, r, i, a) {
-	let o = Me(t).find((e) => e.dataset.cell === n);
+function Be(e, t, n, r, i, a) {
+	let o = Ne(t).find((e) => e.dataset.cell === n);
 	if (!o) return;
 	let s = o.getBoundingClientRect(), c = o.cloneNode(!0);
 	c.removeAttribute("data-cell"), c.className = "pointer-events-none fixed left-0 top-0 z-20 m-0 grid scale-[1.07] drop-shadow-xl transition-[scale] duration-150 [&>[data-ctl]]:hidden", Object.assign(c.style, {
@@ -652,20 +652,20 @@ function ze(e, t, n, r, i, a) {
 		dx: r - s.left,
 		dy: i - s.top,
 		before: l.list.map((e) => e.slot)
-	}, one.tap("medium"), Be(r, i);
+	}, one.tap("medium"), Ve(r, i);
 }
-function Be(e, t) {
+function Ve(e, t) {
 	let n = G;
 	n.ghost.style.transform = `translate(${e - n.dx}px, ${t - n.dy}px)`;
 	let r = U.view.find((e) => e.scope === n.scope).list.map((e) => e.slot), i = r.filter((e) => e !== "accounts"), a = null, o = 0;
-	for (let r of Me(n.scope)) {
+	for (let r of Ne(n.scope)) {
 		let i = r.getBoundingClientRect(), s = r.dataset.cell;
 		o = Math.max(o, i.bottom), s !== n.slot && s !== "accounts" && e >= i.left && e <= i.right && t >= i.top && t <= i.bottom && (a = s);
 	}
 	let s = r.indexOf(n.slot), c = -1;
 	a && a !== n.over ? c = r.indexOf(a) : !a && t > o && n.slot !== i.at(-1) && (c = r.indexOf(i.at(-1))), n.over = a, c < 0 || c === s || (r.splice(s, 1), r.splice(c, 0, n.slot), U.order[n.scope] = r, K = !0, U.render(!0), one.tap());
 }
-function Ve() {
+function He() {
 	let e = G;
 	G = null, ee = Date.now() + 300;
 	let t = e.el.getBoundingClientRect();
@@ -677,19 +677,19 @@ function Ve() {
 }
 window.__oneDrag = (e, t, n) => {
 	if (e === "start" && !G) {
-		let e = document.querySelector("[data-one-lifted]") || document.elementFromPoint(t, n), r = e && je(e);
+		let e = document.querySelector("[data-one-lifted]") || document.elementFromPoint(t, n), r = e && Me(e);
 		if (!r?.item.key || !r.p || !j.canArrange(r.p.scope)) return !1;
 		e.style?.removeProperty("visibility"), e.removeAttribute?.("data-one-lifted"), Q(!0);
 		let i = r.el.getBoundingClientRect();
-		return ze(r.p, r.scope, r.item.slot, Math.min(Math.max(t, i.left), i.right), Math.min(Math.max(n, i.top), i.bottom), "shell"), !0;
+		return Be(r.p, r.scope, r.item.slot, Math.min(Math.max(t, i.left), i.right), Math.min(Math.max(n, i.top), i.bottom), "shell"), !0;
 	}
-	return G?.id === "shell" && (e === "move" ? Be(t, n) : Ve(), !0);
+	return G?.id === "shell" && (e === "move" ? Ve(t, n) : He(), !0);
 };
-function He(e) {
+function Ue(e) {
 	if (U.undo.length && !U.editing && !e.target.closest("[data-undo]") && (U.undo = [], U.render()), e.button !== 0 || G || W || e.target.closest("[data-ctl]")) return;
 	let t = e.target.closest("[data-page]")?.dataset.page;
 	if (!t || t === P || !j.page(t)) return;
-	let n = je(e.target), r = n?.item.key || n?.item.menu ? n : void 0;
+	let n = Me(e.target), r = n?.item.key || n?.item.menu ? n : void 0;
 	(r?.item.menu || oe(t)) && (U.editing ? W = r?.item.key ? {
 		...r,
 		x: e.clientX,
@@ -710,18 +710,18 @@ function He(e) {
 		y: e.clientY,
 		id: e.pointerId,
 		touch: e.pointerType !== "mouse"
-	}, W.timer = setTimeout(() => Pe(), z)));
+	}, W.timer = setTimeout(() => Fe(), z)));
 }
-function Ue(e) {
+function We(e) {
 	if (!e.target.closest("[data-page]") || e.target.closest("[data-ctl]")) return;
-	if (e.preventDefault(), W && W.touch) return void Pe();
+	if (e.preventDefault(), W && W.touch) return void Fe();
 	if (U.editing || G) return;
-	let t = je(e.target);
+	let t = Me(e.target);
 	if (t?.item.menu) return one.tap("medium"), t.item.menu(t.el);
 	oe(e.target.closest("[data-page]")?.dataset.page) && Q(!0);
 }
-var $ = "motion-safe:animate-[comes_200ms_ease-out]", We = "pointer-events-none motion-safe:animate-[goes_200ms_ease-in_forwards]";
-function Ge(t) {
+var $ = "motion-safe:animate-[comes_200ms_ease-out]", Ge = "pointer-events-none motion-safe:animate-[goes_200ms_ease-in_forwards]";
+function Ke(t) {
 	let n = e(16), { name: r, icon: i, size: a, badge: o, onClick: l, onPointerDown: u, children: d } = t, f;
 	n[0] !== d || n[1] !== i || n[2] !== a ? (f = d || /* @__PURE__ */ k(s, {
 		app: i,
@@ -752,7 +752,7 @@ function Ge(t) {
 		children: [m, h]
 	}), n[11] = l, n[12] = u, n[13] = m, n[14] = h, n[15] = g) : g = n[15], g;
 }
-function Ke(t) {
+function qe(t) {
 	let n = e(15), { apps: r, size: i } = t, a = i * .64 / 3, o = i * .225, c = `repeat(3, ${a}px)`, l = `${a}px`, u = i * .05, d = i * .13, f;
 	n[0] !== i || n[1] !== o || n[2] !== c || n[3] !== l || n[4] !== u || n[5] !== d ? (f = {
 		width: i,
@@ -778,7 +778,7 @@ function Ke(t) {
 		children: p
 	}), n[12] = f, n[13] = p, n[14] = m) : m = n[14], m;
 }
-function qe({ page: e, at: t, tall: n, editing: i, leaving: a, refreshing: o, nth: s, icon: c }) {
+function Je({ page: e, at: t, tall: n, editing: i, leaving: a, refreshing: o, nth: s, icon: c }) {
 	let { item: u, size: d, col: p, row: m, w: h, h: g } = t, _ = r(null), v = r(!1), y = v.current || u.kind === "pending";
 	v.current = y;
 	let b = u.kind === "widget" || u.kind === "pending", x = !!u.key, S = (i || a) && x, w = S && u.kind === "widget" && !u.bare && j.supported(u.w).length > 1, T;
@@ -792,14 +792,14 @@ function qe({ page: e, at: t, tall: n, editing: i, leaving: a, refreshing: o, nt
 		"aria-hidden": "true",
 		className: "h-full animate-pulse rounded-3xl bg-muted motion-reduce:animate-none",
 		style: { zoom: "var(--unzoom, 1)" }
-	}) : /* @__PURE__ */ k(Ge, {
+	}) : /* @__PURE__ */ k(Ke, {
 		name: u.name,
 		icon: u.icon,
 		size: c,
 		badge: u.badge,
 		onPointerDown: (e) => !e.button && !U.editing && !q() && u.open.press?.(),
 		onClick: (e) => !U.editing && !q() && (one.tap(), u.open(e.currentTarget.querySelector("[data-slot=app-icon]"))),
-		children: u.kind === "accounts" && /* @__PURE__ */ k(Ke, {
+		children: u.kind === "accounts" && /* @__PURE__ */ k(qe, {
 			apps: u.apps,
 			size: c
 		})
@@ -828,10 +828,10 @@ function qe({ page: e, at: t, tall: n, editing: i, leaving: a, refreshing: o, nt
 				variant: "outline",
 				size: "icon-xs",
 				"aria-label": `Remove ${u.name}`,
-				className: E("absolute -top-2 z-10 size-6 rounded-full shadow-md", i ? $ : We),
+				className: E("absolute -top-2 z-10 size-6 rounded-full shadow-md", i ? $ : Ge),
 				style: { left: b ? -8 : `calc(50% - ${c / 2}px - 8px)` },
 				onClick: (t) => {
-					t.stopPropagation(), Se(e.p, u);
+					t.stopPropagation(), Ce(e.p, u);
 				},
 				children: /* @__PURE__ */ k(f, { name: "minus" })
 			}),
@@ -839,21 +839,21 @@ function qe({ page: e, at: t, tall: n, editing: i, leaving: a, refreshing: o, nt
 				"data-ctl": !0,
 				type: "button",
 				"aria-label": "Resize",
-				className: E("absolute -bottom-1.5 -right-1.5 z-10 size-[30px] cursor-nwse-resize touch-none", i ? $ : We),
-				onPointerDown: (t) => Ne(t, u, e.p, _.current),
+				className: E("absolute -bottom-1.5 -right-1.5 z-10 size-[30px] cursor-nwse-resize touch-none", i ? $ : Ge),
+				onPointerDown: (t) => Pe(t, u, e.p, _.current),
 				children: /* @__PURE__ */ k("span", { className: "absolute bottom-1.5 right-1.5 size-3.5 rounded-br-[10px] border-b-[3px] border-r-[3px] border-foreground/55" })
 			})
 		]
 	});
 }
-function Je(e, t) {
+function Ye(e, t) {
 	let n = (n) => (e - t * (n - 1)) / n, r = 4;
 	for (; n(r + 2) >= 76;) r += 2;
 	let i = r - r % 4;
 	return n(i) <= 104 ? i : r;
 }
-function Ye({ page: e, editing: t, leaving: i, refreshing: a }) {
-	let [o, s] = D(), c = s < 500, l = c ? 14 : 18, u = c ? 4 : Je(s, l), d = (s - l * (u - 1)) / u, f = Math.round(Math.max(32, Math.min(68, d - 24))), p = s ? me(e.list, u) : [];
+function Xe({ page: e, editing: t, leaving: i, refreshing: a }) {
+	let [o, s] = D(), c = s < 500, l = c ? 14 : 18, u = c ? 4 : Ye(s, l), d = (s - l * (u - 1)) / u, f = Math.round(Math.max(32, Math.min(68, d - 24))), p = s ? he(e.list, u) : [];
 	n(() => {
 		U.geometry[e.scope] = {
 			columns: u,
@@ -866,7 +866,7 @@ function Ye({ page: e, editing: t, leaving: i, refreshing: a }) {
 		let e = /* @__PURE__ */ new Map();
 		for (let t of o.current.children) {
 			let n = t.getBoundingClientRect(), r = g.current.get(t.dataset.cell);
-			if (e.set(t.dataset.cell, n), !r && g.current.size && !be() && t.animate([{
+			if (e.set(t.dataset.cell, n), !r && g.current.size && !xe() && t.animate([{
 				scale: .4,
 				opacity: 0
 			}, {
@@ -889,7 +889,7 @@ function Ye({ page: e, editing: t, leaving: i, refreshing: a }) {
 			gridTemplateColumns: `repeat(${u}, minmax(0, 1fr))`,
 			"--icon": `${f}px`
 		},
-		children: p.map((n, r) => /* @__PURE__ */ k(qe, {
+		children: p.map((n, r) => /* @__PURE__ */ k(Je, {
 			page: e,
 			at: n,
 			tall: n.h * d + (n.h - 1) * l,
@@ -901,7 +901,7 @@ function Ye({ page: e, editing: t, leaving: i, refreshing: a }) {
 		}, n.item.slot))
 	});
 }
-function Xe({ page: e, editing: i, leaving: a, undone: o, refreshing: s, bottom: c }) {
+function Ze({ page: e, editing: i, leaving: a, undone: o, refreshing: s, bottom: c }) {
 	let { scope: p, title: m, subtitle: h, arrange: g } = e, _ = i || a, v = r(null), y = r(1), b = r(null), x = r(null), S = r(_);
 	return t(() => {
 		S.current !== _ && (S.current = _, document.activeElement === document.body && (_ ? b : x).current?.focus());
@@ -929,12 +929,12 @@ function Xe({ page: e, editing: i, leaving: a, undone: o, refreshing: s, bottom:
 					variant: "ghost",
 					size: "sm",
 					className: $,
-					onClick: Ce,
+					onClick: we,
 					children: "Undo"
 				}), _ ? /* @__PURE__ */ A(O, { children: [e.addable && /* @__PURE__ */ k(l, {
 					variant: "outline",
 					size: "sm",
-					className: i ? $ : We,
+					className: i ? $ : Ge,
 					onClick: () => (U.dialog = {
 						kind: "add",
 						p: j.page(p)
@@ -943,7 +943,7 @@ function Xe({ page: e, editing: i, leaving: a, undone: o, refreshing: s, bottom:
 				}), /* @__PURE__ */ k(l, {
 					ref: b,
 					size: "sm",
-					className: i ? $ : We,
+					className: i ? $ : Ge,
 					onClick: () => Q(!1),
 					children: "Done"
 				})] }) : /* @__PURE__ */ k(l, {
@@ -963,7 +963,7 @@ function Xe({ page: e, editing: i, leaving: a, undone: o, refreshing: s, bottom:
 			},
 			children: "This page isn’t here. The link may be old or mistyped."
 		}) : /* @__PURE__ */ A(O, { children: [
-			/* @__PURE__ */ k(Ye, {
+			/* @__PURE__ */ k(Xe, {
 				page: e,
 				editing: i && !!g,
 				leaving: a && !!g,
@@ -983,22 +983,22 @@ function Xe({ page: e, editing: i, leaving: a, undone: o, refreshing: s, bottom:
 				children: /* @__PURE__ */ k(l, {
 					variant: "ghost",
 					size: "sm",
-					className: E("-ml-3", i ? $ : We),
-					onClick: De,
+					className: E("-ml-3", i ? $ : Ge),
+					onClick: Oe,
 					children: "Edit Pages"
 				})
 			})
 		] })]
 	});
 }
-function Ze(t) {
+function Qe(t) {
 	let n = e(39), { scopes: r, at: a, strip: o, attention: s } = t, [c, l] = i(!1), u;
 	n[0] !== r || n[1] !== o ? (u = (e, t) => {
 		let n = t !== void 0 && t, i = o.current, a = r.indexOf(e);
 		n ? (i.scrollTo({
 			left: a * i.clientWidth,
 			behavior: "instant"
-		}), Ae(e)) : i.scrollTo({
+		}), je(e)) : i.scrollTo({
 			left: a * i.clientWidth,
 			behavior: "smooth"
 		});
@@ -1069,7 +1069,7 @@ function Ze(t) {
 		})
 	}), n[34] = m, n[35] = M, n[36] = _, n[37] = S, n[38] = N) : N = n[38], N;
 }
-function Qe(t) {
+function $e(t) {
 	let n = e(30), { w: r, kept: a, p: o, close: s } = t, c;
 	n[0] === a ? c = n[1] : (c = (e, t) => e.name in t ? t[e.name] : a.options && e.name in a.options ? a.options[e.name] : e.default ?? null, n[0] = a, n[1] = c);
 	let u = c, d;
@@ -1123,7 +1123,7 @@ function Qe(t) {
 					id: `opt-${t}`,
 					className: "max-w-[60%]",
 					children: /* @__PURE__ */ k(b, {})
-				}), /* @__PURE__ */ k(_, { children: e.choices.map($e) })]
+				}), /* @__PURE__ */ k(_, { children: e.choices.map(et) })]
 			}) : /* @__PURE__ */ k(S, {
 				id: `opt-${t}`,
 				checked: u(e, f) === !0,
@@ -1145,28 +1145,28 @@ function Qe(t) {
 		children: M
 	}), n[25] = M, n[26] = T, n[27] = E, n[28] = D, n[29] = N) : N = n[29], N;
 }
-function $e(e, t) {
+function et(e, t) {
 	return /* @__PURE__ */ k(v, {
 		value: String(t),
 		children: e.title
 	}, t);
 }
-function et(t) {
+function tt(t) {
 	let n = e(41), { p: r, close: i } = t, a;
 	n[0] === Symbol.for("react.memo_cache_sentinel") ? (a = j.store(), n[0] = a) : a = n[0];
 	let o = a, c, u, d, p, m, g, _, v, y;
 	if (n[1] !== i || n[2] !== r) {
-		let e = ge(r), t;
+		let e = _e(r), t;
 		n[12] === r ? t = n[13] : (t = j.widgetsOn(r).map((e) => ({
 			w: e,
 			sizes: j.supported(e).filter((e) => I[e][0] <= ne(r.scope))
-		})).filter(nt), n[12] = r, n[13] = t), y = t;
+		})).filter(rt), n[12] = r, n[13] = t), y = t;
 		let a;
 		n[14] === i ? a = n[15] : (a = (e) => (one.tap("success"), i(), e()), n[14] = i, n[15] = a);
 		let o = a, s;
 		n[16] !== r || n[17] !== o ? (s = (e, t) => o(() => {
-			let n = [...crypto.getRandomValues(/* @__PURE__ */ new Uint8Array(5))].map(tt).join(""), i = X(r);
-			K = !0, Z(r, i.toSpliced(Te(r, i), 0, {
+			let n = [...crypto.getRandomValues(/* @__PURE__ */ new Uint8Array(5))].map(nt).join(""), i = X(r);
+			K = !0, Z(r, i.toSpliced(Ee(r, i), 0, {
 				app: e.app,
 				widget: e.widget,
 				id: n,
@@ -1182,11 +1182,11 @@ function et(t) {
 			children: "Put Back"
 		}), /* @__PURE__ */ k("div", {
 			className: "grid grid-cols-[repeat(auto-fill,minmax(76px,1fr))] gap-y-3",
-			children: e.map((e) => /* @__PURE__ */ k(Ge, {
+			children: e.map((e) => /* @__PURE__ */ k(Ke, {
 				name: j.label(e),
 				icon: e,
 				size: 56,
-				onClick: () => o(() => we(r, e.name))
+				onClick: () => o(() => Te(r, e.name))
 			}, e.name))
 		})] }), n[1] = i, n[2] = r, n[3] = c, n[4] = u, n[5] = d, n[6] = p, n[7] = m, n[8] = g, n[9] = _, n[10] = v, n[11] = y;
 	} else c = n[3], u = n[4], d = n[5], p = n[6], m = n[7], g = n[8], _ = n[9], v = n[10], y = n[11];
@@ -1194,7 +1194,7 @@ function et(t) {
 	n[23] !== u || n[24] !== r || n[25] !== y ? (b = y.length > 0 && /* @__PURE__ */ A("section", { children: [/* @__PURE__ */ k("h3", {
 		className: "px-1 pb-2 text-sm font-medium text-muted-foreground",
 		children: "Widgets"
-	}), /* @__PURE__ */ k(it, {
+	}), /* @__PURE__ */ k(at, {
 		scope: r.scope,
 		widgets: y,
 		add: u
@@ -1237,43 +1237,43 @@ function et(t) {
 		children: S
 	}), n[34] = c, n[35] = S, n[36] = m, n[37] = g, n[38] = _, n[39] = v, n[40] = C) : C = n[40], C;
 }
-function tt(e) {
+function nt(e) {
 	return e.toString(16).padStart(2, "0");
 }
-function nt(e) {
+function rt(e) {
 	return e.sizes.length;
 }
-var rt = {
+var it = {
 	run: async () => {},
 	follow: () => {}
 };
-function it(t) {
+function at(t) {
 	let n = e(12), { scope: r, widgets: i, add: a } = t, [o, s] = D(), c;
 	n[0] === r ? c = n[1] : (c = U.geometry[r] || {}, n[0] = r, n[1] = c);
 	let { cell: l, gap: u } = c, d = l === void 0 ? 80 : l, f = u === void 0 ? 14 : u, p = (s - 12) / 2, m;
 	n[2] !== a || n[3] !== d || n[4] !== p || n[5] !== f || n[6] !== s || n[7] !== i ? (m = s > 0 && i.map((e) => {
-		let { w: t, sizes: n } = e, r = n.includes(t.size) ? t.size : n[0], [i, o] = I[r], s = t.title || j.label(j.app(t.app)) || t.widget, c = i * d + (i - 1) * f, l = o * d + (o - 1) * f, u = Math.min(2, i / 2), m = Math.min(1, (u * p + (u - 1) * 12) / c);
+		let { w: t, sizes: n } = e, r = n.includes(t.size) ? t.size : n[0], i = le(t, j.tree(t, r)) ? "small" : r, [o, s] = I[i], c = t.title || j.label(j.app(t.app)) || t.widget, l = o * d + (o - 1) * f, u = s * d + (s - 1) * f, m = Math.min(2, o / 2), h = Math.min(1, (m * p + (m - 1) * 12) / l);
 		return /* @__PURE__ */ k("button", {
 			type: "button",
-			"aria-label": `Add ${s}`,
+			"aria-label": `Add ${c}`,
 			className: "rounded-3xl text-left outline-none [-webkit-tap-highlight-color:transparent] focus-visible:ring-[3px] focus-visible:ring-ring/50 active:opacity-70",
 			style: {
-				gridColumn: `span ${u}`,
-				height: l * m
+				gridColumn: `span ${m}`,
+				height: u * h
 			},
 			onClick: () => a(t, r),
 			children: /* @__PURE__ */ k(C, {
 				className: "pointer-events-none",
 				w: {
 					...t,
-					title: s
+					title: c
 				},
-				host: rt,
-				tree: j.tree(t, r),
+				host: it,
+				tree: j.tree(t, i),
 				style: {
-					width: c,
-					height: l,
-					transform: `scale(${m})`,
+					width: l,
+					height: u,
+					transform: `scale(${h})`,
 					transformOrigin: "0 0"
 				}
 			})
@@ -1286,11 +1286,11 @@ function it(t) {
 		children: m
 	}), n[9] = o, n[10] = m, n[11] = h) : h = n[11], h;
 }
-function at(t) {
+function ot(t) {
 	let n = e(26), { groups: a, close: o } = t, s;
-	n[0] === a ? s = n[1] : (s = () => a.map(dt), n[0] = a, n[1] = s);
+	n[0] === a ? s = n[1] : (s = () => a.map(ft), n[0] = a, n[1] = s);
 	let [c, u] = i(s), d;
-	n[2] === a ? d = n[3] : (d = () => new Set(a.filter(ut).map(lt)), n[2] = a, n[3] = d);
+	n[2] === a ? d = n[3] : (d = () => new Set(a.filter(dt).map(ut)), n[2] = a, n[3] = d);
 	let [p, m] = i(d), [g, _] = i(null), v = r(null), y;
 	n[4] === a ? y = n[5] : (y = (e) => a.find((t) => t.scope === e)?.title, n[4] = a, n[5] = y);
 	let b = y, x = function(e, t) {
@@ -1318,9 +1318,9 @@ function at(t) {
 			hidden: c.filter((e) => p.has(e))
 		};
 		JSON.stringify(e) !== JSON.stringify({
-			order: a.map(ct),
-			hidden: a.filter(st).map(ot)
-		}) && Oe(e);
+			order: a.map(lt),
+			hidden: a.filter(ct).map(st)
+		}) && ke(e);
 	}, n[6] = o, n[7] = a, n[8] = p, n[9] = c, n[10] = C) : C = n[10];
 	let w = C, T = h, D;
 	n[11] === w ? D = n[12] : (D = (e) => !e && w(), n[11] = w, n[12] = D);
@@ -1383,31 +1383,31 @@ function at(t) {
 		children: P
 	}), n[21] = T, n[22] = P, n[23] = D, n[24] = O, n[25] = F) : F = n[25], F;
 }
-function ot(e) {
-	return e.scope;
-}
 function st(e) {
-	return e.hidden;
+	return e.scope;
 }
 function ct(e) {
-	return e.scope;
+	return e.hidden;
 }
 function lt(e) {
 	return e.scope;
 }
 function ut(e) {
-	return e.hidden;
-}
-function dt(e) {
 	return e.scope;
 }
-function ft(t) {
+function dt(e) {
+	return e.hidden;
+}
+function ft(e) {
+	return e.scope;
+}
+function pt(t) {
 	let n = e(8), { dialog: r } = t;
 	if (!r) return null;
-	let i = pt;
+	let i = mt;
 	if (r.kind === "options") {
 		let e;
-		return n[0] !== r.kept || n[1] !== r.p || n[2] !== r.w ? (e = /* @__PURE__ */ k(Qe, {
+		return n[0] !== r.kept || n[1] !== r.p || n[2] !== r.w ? (e = /* @__PURE__ */ k($e, {
 			w: r.w,
 			kept: r.kept,
 			p: r.p,
@@ -1416,38 +1416,38 @@ function ft(t) {
 	}
 	if (r.kind === "add") {
 		let e;
-		return n[4] === r.p ? e = n[5] : (e = /* @__PURE__ */ k(et, {
+		return n[4] === r.p ? e = n[5] : (e = /* @__PURE__ */ k(tt, {
 			p: r.p,
 			close: i
 		}), n[4] = r.p, n[5] = e), e;
 	}
 	let a;
-	return n[6] === r.groups ? a = n[7] : (a = /* @__PURE__ */ k(at, {
+	return n[6] === r.groups ? a = n[7] : (a = /* @__PURE__ */ k(ot, {
 		groups: r.groups,
 		close: i
 	}), n[6] = r.groups, n[7] = a), a;
 }
-function pt() {
+function mt() {
 	return U.dialog = null, U.render();
 }
-var mt = () => {
+var ht = () => {
 	let t = e(1), n;
 	return t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ k("div", {
 		role: "status",
 		"aria-label": "Loading",
 		className: "grid gap-4 p-5",
 		style: { gridTemplateColumns: "repeat(4, minmax(0, 1fr))" },
-		children: Array.from({ length: 12 }, kt)
+		children: Array.from({ length: 12 }, At)
 	}), t[0] = n) : n = t[0], n;
 };
-function ht() {
+function gt() {
 	let o = e(44), s;
 	o[0] === Symbol.for("react.memo_cache_sentinel") ? (s = {
 		phase: "loading",
 		view: [],
 		refreshing: []
 	}, o[0] = s) : s = o[0];
-	let [c, l] = i(s), [u, d] = i(!1), f = r(null), { view: p, phase: h, editing: g, leaving: _, undo: v, at: y, dialog: b, refreshing: x, attention: S } = c, C = p.map(Tt), w, T;
+	let [c, l] = i(s), [u, d] = i(!1), f = r(null), { view: p, phase: h, editing: g, leaving: _, undo: v, at: y, dialog: b, refreshing: x, attention: S } = c, C = p.map(Et), w, T;
 	o[1] === Symbol.for("react.memo_cache_sentinel") ? (w = () => {
 		U.render = (e) => {
 			let t = re();
@@ -1460,9 +1460,9 @@ function ht() {
 		return () => clearTimeout(e);
 	}, D = [], o[3] = E, o[4] = D) : (E = o[3], D = o[4]), t(E, D);
 	let O;
-	o[5] === Symbol.for("react.memo_cache_sentinel") ? (O = [], o[5] = O) : O = o[5], t(vt, O);
+	o[5] === Symbol.for("react.memo_cache_sentinel") ? (O = [], o[5] = O) : O = o[5], t(yt, O);
 	let j;
-	o[6] === Symbol.for("react.memo_cache_sentinel") ? (j = [], o[6] = j) : j = o[6], n(gt, j);
+	o[6] === Symbol.for("react.memo_cache_sentinel") ? (j = [], o[6] = j) : j = o[6], n(_t, j);
 	let M = C.join(" "), P;
 	o[7] === C ? P = o[8] : (P = () => {
 		N && f.current && C.length && (C.includes(U.at) || (U.at = "user"), f.current.scrollLeft = C.indexOf(U.at) * f.current.clientWidth);
@@ -1480,19 +1480,19 @@ function ht() {
 	}
 	if (h !== "ready") {
 		let e;
-		return o[13] === u ? e = o[14] : (e = u ? /* @__PURE__ */ k(mt, {}) : null, o[13] = u, o[14] = e), e;
+		return o[13] === u ? e = o[14] : (e = u ? /* @__PURE__ */ k(ht, {}) : null, o[13] = u, o[14] = e), e;
 	}
 	let I;
 	o[15] === Symbol.for("react.memo_cache_sentinel") ? (I = /* @__PURE__ */ k("style", { children: "@property --wobble { syntax: '<angle>'; inherits: true; initial-value: 0deg; } @keyframes jiggle { 0% { rotate: calc(var(--wobble) * -1); } 50% { rotate: var(--wobble); } 100% { rotate: calc(var(--wobble) * -1); } } @keyframes comes { from { opacity: 0; scale: 0.9; } } @keyframes goes { to { opacity: 0; scale: 0.9; } } @keyframes appears { from { opacity: 0; } }" }), o[15] = I) : I = o[15];
 	let L;
 	o[16] === C ? L = o[17] : (L = N ? (e) => {
 		let t = Math.round(e.currentTarget.scrollLeft / Math.max(1, e.currentTarget.clientWidth));
-		C[t] && C[t] !== U.at && Ae(C[t]);
+		C[t] && C[t] !== U.at && je(C[t]);
 	} : void 0, o[16] = C, o[17] = L);
 	let R;
 	if (o[18] !== y || o[19] !== g || o[20] !== _ || o[21] !== x || o[22] !== v || o[23] !== p) {
 		let e;
-		o[25] !== y || o[26] !== g || o[27] !== _ || o[28] !== x || o[29] !== v ? (e = (e) => /* @__PURE__ */ k(Xe, {
+		o[25] !== y || o[26] !== g || o[27] !== _ || o[28] !== x || o[29] !== v ? (e = (e) => /* @__PURE__ */ k(Ze, {
 			page: e,
 			editing: g && e.scope === y && !e.empty,
 			leaving: _ && e.scope === y,
@@ -1509,14 +1509,14 @@ function ht() {
 		children: R
 	}), o[31] = L, o[32] = R, o[33] = z) : z = o[33];
 	let B;
-	o[34] !== y || o[35] !== S || o[36] !== C ? (B = N && /* @__PURE__ */ k(Ze, {
+	o[34] !== y || o[35] !== S || o[36] !== C ? (B = N && /* @__PURE__ */ k(Qe, {
 		scopes: C,
 		at: y,
 		strip: f,
 		attention: S
 	}), o[34] = y, o[35] = S, o[36] = C, o[37] = B) : B = o[37];
 	let V;
-	o[38] === b ? V = o[39] : (V = /* @__PURE__ */ k(ft, { dialog: b }), o[38] = b, o[39] = V);
+	o[38] === b ? V = o[39] : (V = /* @__PURE__ */ k(pt, { dialog: b }), o[38] = b, o[39] = V);
 	let H;
 	return o[40] !== z || o[41] !== B || o[42] !== V ? (H = /* @__PURE__ */ A("div", {
 		className: "fixed inset-0 select-none overflow-hidden [-webkit-touch-callout:none] [-webkit-user-select:none]",
@@ -1528,68 +1528,68 @@ function ht() {
 		]
 	}), o[40] = z, o[41] = B, o[42] = V, o[43] = H) : H = o[43], H;
 }
-function gt() {
-	let e = _t;
+function _t() {
+	let e = vt;
 	e();
 	let t = new ResizeObserver(e);
 	return t.observe(document.documentElement), () => t.disconnect();
 }
-function _t() {
+function vt() {
 	return document.documentElement.style.setProperty("--unzoom", 1 / (parseFloat(getComputedStyle(document.documentElement).zoom) || 1));
 }
-function vt() {
-	let e = wt, t = Ct, n = St, r = xt, i = bt, a = yt;
-	return document.addEventListener("pointerdown", He), addEventListener("pointermove", t), addEventListener("pointerup", e), addEventListener("pointercancel", n), document.addEventListener("touchmove", r, { passive: !1 }), document.addEventListener("touchend", i), document.addEventListener("touchcancel", i), addEventListener("keydown", a), document.oncontextmenu = Ue, () => {
-		document.removeEventListener("pointerdown", He), removeEventListener("pointermove", t), removeEventListener("pointerup", e), removeEventListener("pointercancel", n), document.removeEventListener("touchmove", r), document.removeEventListener("touchend", i), document.removeEventListener("touchcancel", i), removeEventListener("keydown", a), document.oncontextmenu = null;
+function yt() {
+	let e = Tt, t = wt, n = Ct, r = St, i = xt, a = bt;
+	return document.addEventListener("pointerdown", Ue), addEventListener("pointermove", t), addEventListener("pointerup", e), addEventListener("pointercancel", n), document.addEventListener("touchmove", r, { passive: !1 }), document.addEventListener("touchend", i), document.addEventListener("touchcancel", i), addEventListener("keydown", a), document.oncontextmenu = We, () => {
+		document.removeEventListener("pointerdown", Ue), removeEventListener("pointermove", t), removeEventListener("pointerup", e), removeEventListener("pointercancel", n), document.removeEventListener("touchmove", r), document.removeEventListener("touchend", i), document.removeEventListener("touchcancel", i), removeEventListener("keydown", a), document.oncontextmenu = null;
 	};
 }
-function yt(e) {
+function bt(e) {
 	e.key === "Escape" && U.editing && !document.querySelector("[role=dialog]") && Q(!1);
 }
-function bt(e) {
-	Fe && (Fe = !1, (G || W) && Re(e.target));
-}
 function xt(e) {
-	(G || W?.ready || W?.resize) && e.preventDefault(), Fe && e.touches[0] && Le(e.touches[0].clientX, e.touches[0].clientY);
+	Ie && (Ie = !1, (G || W) && ze(e.target));
 }
 function St(e) {
-	Ie(e) && (e.pointerType === "touch" && (G || W?.ready) ? Fe = !0 : G ? Ve() : (clearTimeout(W.timer), W.el && (W.el.style.scale = ""), W = null));
+	(G || W?.ready || W?.resize) && e.preventDefault(), Ie && e.touches[0] && Re(e.touches[0].clientX, e.touches[0].clientY);
 }
 function Ct(e) {
-	return Ie(e) && Le(e.clientX, e.clientY);
+	Le(e) && (e.pointerType === "touch" && (G || W?.ready) ? Ie = !0 : G ? He() : (clearTimeout(W.timer), W.el && (W.el.style.scale = ""), W = null));
 }
 function wt(e) {
-	return Ie(e) && Re(e.target);
+	return Le(e) && Re(e.clientX, e.clientY);
 }
 function Tt(e) {
+	return Le(e) && ze(e.target);
+}
+function Et(e) {
 	return e.scope;
 }
-var Et = !1;
-function Dt() {
+var Dt = !1;
+function Ot() {
 	return new Promise((e, t) => {
 		j.load(() => {
-			U.phase = "ready", J(), ve(), e();
+			U.phase = "ready", J(), ye(), e();
 		}).then(() => {
-			J(), ve(), Et ||= (j.watch(() => {
-				J(), ve();
+			J(), ye(), Dt ||= (j.watch(() => {
+				J(), ye();
 			}), !0);
 		}, t);
 	});
 }
-async function Ot() {
+async function kt() {
 	let e = await one.cache("pages").catch(() => null), t = !e?.state;
 	t || (Object.assign(j.data, e), U.phase = "ready", U.render()), U.retry = () => {
-		one.tap(), U.phase = "loading", U.render(), Ot();
+		one.tap(), U.phase = "loading", U.render(), kt();
 	};
 	for (let e = 2e3;; e = Math.min(e * 2, 3e4)) try {
-		return await Dt();
+		return await Ot();
 	} catch (n) {
 		if (t) return U.phase = "error", U.problem = one.plain(n), U.render();
 		await new Promise((t) => setTimeout(t, e));
 	}
 }
-o(document.getElementById("root")).render(/* @__PURE__ */ k(ht, {})), Ot();
-function kt(e, t) {
+o(document.getElementById("root")).render(/* @__PURE__ */ k(gt, {})), kt();
+function At(e, t) {
 	return /* @__PURE__ */ k(x, { className: E("aspect-square", t === 0 || t === 1 ? "col-span-2 row-span-2 rounded-3xl" : "rounded-2xl") }, t);
 }
 </script>

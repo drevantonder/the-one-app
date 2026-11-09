@@ -17,7 +17,7 @@ import { home } from "./lib/model.js"
 const { scope: chosen, swipe } = one.params || {}
 const SETTINGS = "settings"
 // What an icon's name needs under it: the space above the icon and between them, two lines, and clear of what's below.
-const NAME = 52
+const NAME = 58
 const CELLS = { small: [2, 2], medium: [4, 2], large: [4, 4], xl: [8, 4] }
 const NAMES = { small: "Small", medium: "Medium", large: "Large", xl: "Extra Large" }
 const SHAPES = { small: "square", medium: "rectangle", large: "squares-four", xl: "columns" }
@@ -80,14 +80,15 @@ const widgetHost = (p) => ({
   },
 })
 
+/// Nothing to show is one grey line (a muted text, or a list with nothing in it), which needs no more than the smallest
+/// card: the size chosen is kept for when there's something.
+const bareTree = (w, tree) => !w.error && ((tree?.t === "text" && tree.tone === "muted") || (tree?.t === "list" && !tree.c?.length))
+
 /// A widget on a page: where it opens (its own link, else its app), and what its menu offers.
 function widgetItem(w, kept, p) {
   const a = home.app(w.app), key = `widget:${kept.id}`
   const picked = S.sizes[key] || w.size || "medium"
-  // Nothing to show is one grey line (a muted text, or a list with nothing in it), which needs no more than the smallest
-  // card; the size chosen is kept for when there's something.
-  const tree = home.tree(w, picked)
-  const bare = !w.error && ((tree?.t === "text" && tree.tone === "muted") || (tree?.t === "list" && !tree.c?.length))
+  const bare = bareTree(w, home.tree(w, picked))
   const size = bare ? "small" : picked
   const name = w.title || home.label(a) || w.widget
   return {
@@ -916,11 +917,11 @@ function Choices({ scope, widgets, add }) {
   return (
     <div ref={ref} className="grid grid-cols-2 gap-3 [grid-auto-flow:dense]">
       {room > 0 && widgets.map(({ w, sizes }) => {
-        const size = sizes.includes(w.size) ? w.size : sizes[0], [cw, ch] = CELLS[size], title = w.title || home.label(home.app(w.app)) || w.widget
+        const chosen = sizes.includes(w.size) ? w.size : sizes[0], size = bareTree(w, home.tree(w, chosen)) ? "small" : chosen, [cw, ch] = CELLS[size], title = w.title || home.label(home.app(w.app)) || w.widget
         const width = cw * cell + (cw - 1) * gap, height = ch * cell + (ch - 1) * gap, span = Math.min(2, cw / 2)
         const fit = Math.min(1, (span * column + (span - 1) * 12) / width)
         return (
-          <button key={`${w.app}:${w.widget}`} type="button" aria-label={`Add ${title}`} className="rounded-3xl text-left outline-none [-webkit-tap-highlight-color:transparent] focus-visible:ring-[3px] focus-visible:ring-ring/50 active:opacity-70" style={{ gridColumn: `span ${span}`, height: height * fit }} onClick={() => add(w, size)}>
+          <button key={`${w.app}:${w.widget}`} type="button" aria-label={`Add ${title}`} className="rounded-3xl text-left outline-none [-webkit-tap-highlight-color:transparent] focus-visible:ring-[3px] focus-visible:ring-ring/50 active:opacity-70" style={{ gridColumn: `span ${span}`, height: height * fit }} onClick={() => add(w, chosen)}>
             <WidgetCard className="pointer-events-none" w={{ ...w, title }} host={quietHost} tree={home.tree(w, size)} style={{ width, height, transform: `scale(${fit})`, transformOrigin: "0 0" }} />
           </button>
         )

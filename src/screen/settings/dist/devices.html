@@ -1673,33 +1673,33 @@ function je(n) {
 	}), i[5] = c, i[6] = b);
 	let S;
 	i[7] === u ? S = i[8] : (S = u && _("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ k(Ae, { text: u })), i[7] = u, i[8] = S);
-	let C = `Install ${l.config?.name || "the app"} and sign in. It shows up here to approve.`, w;
-	i[9] === C ? w = i[10] : (w = _("device-mobile", "Phone, tablet or computer", C), i[9] = C, i[10] = w);
-	let T;
-	i[11] === f ? T = i[12] : (T = f && _("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.", f.loading ? /* @__PURE__ */ A("div", {
+	let C;
+	i[9] === l.config ? C = i[10] : (C = l.config?.install && _("desktop", "A computer", "Run this on a Mac or Linux computer, then sign in. It shows up here to approve.", /* @__PURE__ */ k(Ae, { text: l.config.install })), i[9] = l.config, i[10] = C);
+	let w;
+	i[11] === f ? w = i[12] : (w = f && _("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.", f.loading ? /* @__PURE__ */ A("div", {
 		className: "mt-2 flex items-center gap-2 text-muted-foreground",
 		children: [/* @__PURE__ */ k(x, {}), "Making a code"]
 	}) : f.error ? /* @__PURE__ */ k("div", {
 		className: "mt-2",
 		children: /* @__PURE__ */ k(v, { title: f.error })
-	}) : /* @__PURE__ */ k(Ae, { text: f.text })), i[11] = f, i[12] = T);
-	let E;
-	i[13] !== S || i[14] !== w || i[15] !== T ? (E = /* @__PURE__ */ k("div", {
+	}) : /* @__PURE__ */ k(Ae, { text: f.text })), i[11] = f, i[12] = w);
+	let T;
+	i[13] !== S || i[14] !== C || i[15] !== w ? (T = /* @__PURE__ */ k("div", {
 		className: "overflow-y-auto p-4",
 		children: /* @__PURE__ */ A(p, { children: [
 			S,
-			w,
-			T
+			C,
+			w
 		] })
-	}), i[13] = S, i[14] = w, i[15] = T, i[16] = E) : E = i[16];
-	let D;
-	return i[17] !== s || i[18] !== c || i[19] !== b || i[20] !== E ? (D = /* @__PURE__ */ k(y, {
+	}), i[13] = S, i[14] = C, i[15] = w, i[16] = T) : T = i[16];
+	let E;
+	return i[17] !== s || i[18] !== c || i[19] !== b || i[20] !== T ? (E = /* @__PURE__ */ k(y, {
 		open: s,
 		onOpenChange: c,
 		title: "Add Device",
 		action: b,
-		children: E
-	}), i[17] = s, i[18] = c, i[19] = b, i[20] = E, i[21] = D) : D = i[21], D;
+		children: T
+	}), i[17] = s, i[18] = c, i[19] = b, i[20] = T, i[21] = E) : E = i[21], E;
 }
 function Me(e, t, n, r) {
 	return /* @__PURE__ */ A("div", {
