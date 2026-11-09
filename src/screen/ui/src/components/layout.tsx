@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CaretRightIcon } from "@phosphor-icons/react"
+import { CaretRightIcon, PlusIcon } from "@phosphor-icons/react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 
@@ -69,6 +69,21 @@ function ListRow({ leading, title, sub, trailing, selected, wrap, onClick, class
   )
 }
 
+/// A row of a List that adds to it: a plus and what it adds, so the list's own place says how to grow it.
+function ListAdd({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-slot="list-add"
+      onClick={onClick}
+      className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-sm font-medium outline-none hover:bg-accent/50 focus-visible:bg-accent/50"
+    >
+      <PlusIcon className="size-4 shrink-0" />
+      {children}
+    </button>
+  )
+}
+
 /// A grey line under what it's about.
 function Hint({ children, className }: { children: React.ReactNode; className?: string }) {
   return <p data-slot="hint" className={cn("text-sm text-muted-foreground", className)}>{children}</p>
@@ -117,7 +132,7 @@ function Split({ list, detail, title, onClose, wide = 720, className }: {
     >
       <div className="min-w-0">{list}</div>
       {beside ? (
-        detail && <div className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 max-w-2xl overflow-y-auto">{detail}</div>
+        detail && <div className="sticky top-4 max-h-[calc(100dvh-2rem)] min-w-0 max-w-2xl animate-in overflow-y-auto duration-200 fade-in-0 motion-reduce:animate-none">{detail}</div>
       ) : (
         <Sheet open={!!detail && width > 0} onOpenChange={(open) => !open && onClose?.()}>
           <SheetContent side="bottom" className="max-h-[90svh] overflow-y-auto rounded-t-xl">
@@ -133,4 +148,4 @@ function Split({ list, detail, title, onClose, wide = 720, className }: {
   )
 }
 
-export { Grid, Hint, List, ListNote, ListRow, Split, useWidth }
+export { Grid, Hint, List, ListAdd, ListNote, ListRow, Split, useWidth }

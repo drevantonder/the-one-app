@@ -7,8 +7,8 @@
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
-  AppIcon, Button, Empty, Icon, Input, Label, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Split, Switch, Tabs,
-  TabsList, TabsTrigger,
+  AppIcon, Button, Empty, Icon, Input, Label, List, ListAdd, ListRow, ListSkeleton, Problem, ResponsiveDialog, Split, Switch,
+  Tabs, TabsList, TabsTrigger,
 } from "@one/ui"
 import { appNamed } from "./agents.js"
 
@@ -205,10 +205,10 @@ function Vault() {
           <div className="flex max-w-2xl flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <h1 className="large-title text-3xl font-bold tracking-tight">Vault</h1>
-              <Button onClick={startNew} aria-label="New Item"><Icon name="plus" />New Item</Button>
+              <Button onClick={startNew}><Icon name="plus" />New Item</Button>
             </div>
             {pages.length > 1 && <Pages pages={pages} value={scope} onChange={show} />}
-            <Search value={query} onChange={setQuery} />
+            {!!items?.length && <Search value={query} onChange={setQuery} />}
             {body}
           </div>
         }
@@ -275,6 +275,8 @@ const Section = ({ title, children }) => (
 )
 
 const quiet = { autoCapitalize: "none", autoCorrect: "off", spellCheck: false }
+// An input that's a row of a List: the list's lines are its edges.
+const inRow = "h-11 rounded-none border-x-0 border-t-0 bg-transparent px-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
 
 // An item's page: its fields (a plain one to copy, a secret one only to replace), where they're sent, the apps that
 // want it, each with a switch, and deleting it (signing out, for an account a sign-in made).
@@ -377,10 +379,7 @@ function Item({ item, k, following: f, follow, refresh, deleted }) {
           ) : (
             <h2 className="text-xl font-semibold break-words select-text">{item.title}</h2>
           )}
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            {item.scope_name && <span className="mr-2">{item.scope_name}</span>}
-            {!renaming && <Button variant="ghost" size="xs" className="-mx-2 text-muted-foreground" onClick={() => setRenaming(true)}>Rename</Button>}
-          </div>
+          {!renaming && <Button variant="ghost" size="xs" className="-mx-2 text-muted-foreground" onClick={() => setRenaming(true)}>Rename</Button>}
         </div>
       </div>
 
@@ -399,11 +398,7 @@ function Item({ item, k, following: f, follow, refresh, deleted }) {
 
       <List>
         {shown(item).map((field) => <Field key={field.name} field={field} save={save} />)}
-        {adding ? <NewField save={save} done={() => setAdding(false)} /> : (
-          <button className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium outline-none hover:bg-accent/50 focus-visible:bg-accent/50" onClick={() => setAdding(true)}>
-            <Icon name="plus" />Add Field
-          </button>
-        )}
+        {adding ? <NewField save={save} done={() => setAdding(false)} /> : <ListAdd onClick={() => setAdding(true)}>Add Field</ListAdd>}
       </List>
 
       {hostsShown && (
@@ -420,7 +415,7 @@ function Item({ item, k, following: f, follow, refresh, deleted }) {
         </Section>
       )}
 
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {error && <Problem title={error} />}
 
       <Button variant="destructive" className="self-start" disabled={busy === "delete"} onClick={remove}>
         {item.account ? "Sign Out" : "Delete Item"}
@@ -429,7 +424,8 @@ function Item({ item, k, following: f, follow, refresh, deleted }) {
   )
 }
 
-// A field: a plain one is changed by tapping it, a secret one only replaced, typed unseen; either can be removed.
+// A field: a plain one is changed by tapping it, a secret one only replaced, typed unseen. Editing, it's a row of its
+// own, the whole width to type in; taking it out is asked first, as a secret can't be got back.
 function Field({ field, save }) {
   const [editing, setEditing] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -442,9 +438,13 @@ function Field({ field, save }) {
       if (await save({ fields: { [field.name]: { value } } })) setEditing(false)
       else if (!field.secret) input.value = value
     }
+    const remove = async () => {
+      const ok = await one.alert({ title: `Remove ${label}?`, text: field.secret ? "It can’t be undone." : undefined, action: "Remove", danger: true })
+      if (ok) save({ fields: { [field.name]: null } })
+    }
     return (
-      <form className="flex items-center gap-2 px-3 py-2" onSubmit={(e) => (e.preventDefault(), put(e.currentTarget.elements.value))}>
-        <span className="shrink-0 text-sm font-medium">{label}</span>
+      <form className="flex flex-col gap-2 p-3" onSubmit={(e) => (e.preventDefault(), put(e.currentTarget.elements.value))}>
+        <span className="text-sm font-medium">{label}</span>
         <Input
           name="value"
           autoFocus
@@ -454,11 +454,13 @@ function Field({ field, save }) {
           aria-label={label}
           placeholder={field.secret ? "New value" : undefined}
           defaultValue={field.secret ? undefined : field.value || ""}
-          className="h-8 min-w-0 flex-1"
           onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
         />
-        <Button type="submit" size="sm">Save</Button>
-        <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={() => save({ fields: { [field.name]: null } })}>Remove</Button>
+        <div className="flex items-center gap-2">
+          <Button type="submit" size="sm">Save</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+          <Button type="button" size="sm" variant="ghost" className="ml-auto text-destructive" onClick={remove}>Remove</Button>
+        </div>
       </form>
     )
   }
@@ -495,10 +497,13 @@ function NewField({ save, done }) {
   const put = async () => name.current.value.trim() && value.current.value && (await save({ fields: { [name.current.value.trim()]: { value: value.current.value, secret } } })) && done()
   return (
     <div className="flex flex-col gap-2 p-3">
-      <Input ref={name} autoFocus placeholder="Name" aria-label="Name" {...quiet} />
+      <Input ref={name} autoFocus placeholder="Field name" aria-label="Field name" {...quiet} />
       <Input ref={value} type={secret ? "password" : "text"} placeholder="Value" aria-label="Value" autoComplete="off" onKeyDown={(e) => e.key === "Enter" && put()} />
       <Label className="justify-between py-1 font-normal">Secret<Switch checked={secret} onCheckedChange={setSecret} /></Label>
-      <Button variant="secondary" className="self-start" onClick={put}>Save Field</Button>
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={put}>Save</Button>
+        <Button size="sm" variant="ghost" onClick={done}>Cancel</Button>
+      </div>
     </div>
   )
 }
@@ -545,10 +550,10 @@ function Using({ app, title, on, set }) {
 // The New dialog's choice: an item a user types, or one an app makes.
 function Choose({ k, made, open, setOpen, pick }) {
   return (
-    <ResponsiveDialog open={open} onOpenChange={setOpen} title="New" action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>}>
+    <ResponsiveDialog open={open} onOpenChange={setOpen} title="New Item" action={<Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>}>
       <div className="overflow-y-auto p-4">
         <List>
-          <ListRow leading={<AppIcon app={KEY} size={30} />} title="Item" onClick={() => pick(null)} />
+          <ListRow leading={<AppIcon app={KEY} size={30} />} title="Key or Password" onClick={() => pick(null)} />
           {made.map((m) => <ListRow key={`${m.app}.${m.type}`} leading={<AppIcon app={k.app(m.app) || { name: m.app }} size={30} />} title={m.type} onClick={() => pick(m)} />)}
         </List>
       </div>
@@ -556,7 +561,8 @@ function Choose({ k, made, open, setOpen, pick }) {
   )
 }
 
-// A new item a user types: its page, title, fields (each secret or not) and the sites they're sent to.
+// A new item a user types: its page, title, fields (each secret or not) and the sites they're sent to, which a secret
+// must have.
 function NewItem({ pages, scope, open, setOpen, done }) {
   const [page, setPage] = useState(scope)
   const [drafts, setDrafts] = useState([{ n: 0, secret: true }])
@@ -566,16 +572,19 @@ function NewItem({ pages, scope, open, setOpen, done }) {
   async function save() {
     const el = form.current
     const title = el.elements.title.value.trim()
+    const hosts = sites(el.elements.hosts.value)
     const fields = {}
     for (const d of drafts) {
       const name = el.elements[`name${d.n}`].value.trim(), value = el.elements[`value${d.n}`].value
       if (name && value) fields[name] = { value, secret: d.secret }
     }
-    if (!title || !Object.keys(fields).length) return setError(title ? "Give a field a name and a value" : "Give it a title")
+    if (!title) return setError("Give it a title.")
+    if (!Object.keys(fields).length) return setError("Give a field a name and a value.")
+    if (!hosts.length && Object.values(fields).some((f) => f.secret)) return setError("Say which site a secret is sent to.")
     setSaving(true)
     setError("")
     try {
-      await setItem(page, null, { title, fields, hosts: sites(el.elements.hosts.value), apps: [] })
+      await setItem(page, null, { title, fields, hosts, apps: [] })
       el.reset()
       done(page)
     } catch (e) {
@@ -585,13 +594,23 @@ function NewItem({ pages, scope, open, setOpen, done }) {
   }
   const draft = (d, set) => (
     <List key={d.n}>
-      <div className="p-2"><Input name={`name${d.n}`} autoFocus={d.n > 0} placeholder="Name" aria-label="Name" {...quiet} className="border-0 shadow-none focus-visible:ring-0" /></div>
-      <div className="p-2"><Input name={`value${d.n}`} type={d.secret ? "password" : "text"} placeholder="Value" aria-label="Value" autoComplete="off" className="border-0 shadow-none focus-visible:ring-0" /></div>
+      <Input name={`name${d.n}`} autoFocus={d.n > 0} placeholder="Field name" aria-label="Field name" {...quiet} className={inRow} />
+      <Input name={`value${d.n}`} type={d.secret ? "password" : "text"} placeholder="Value" aria-label="Value" autoComplete="off" className={inRow} />
       <Label className="justify-between px-3 py-3 font-normal">Secret<Switch checked={d.secret} onCheckedChange={set} /></Label>
     </List>
   )
   return (
-    <ResponsiveDialog open={open} onOpenChange={setOpen} title="New Item" action={<Button size="sm" disabled={saving} onClick={save}>Save</Button>}>
+    <ResponsiveDialog
+      open={open}
+      onOpenChange={setOpen}
+      title="New Item"
+      action={(
+        <>
+          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button size="sm" disabled={saving} onClick={save}>Save</Button>
+        </>
+      )}
+    >
       <form ref={form} className="flex flex-col gap-4 overflow-y-auto p-4" onSubmit={(e) => (e.preventDefault(), save())}>
         <Input name="title" autoFocus placeholder="Title" aria-label="Title" />
         {pages.length > 1 && <Pages pages={pages} value={page} onChange={setPage} />}
@@ -602,7 +621,7 @@ function NewItem({ pages, scope, open, setOpen, done }) {
         <Section title="Sent only to">
           <Input name="hosts" placeholder="api.example.com" aria-label="Sent only to" inputMode="url" {...quiet} />
         </Section>
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {error && <Problem title={error} />}
         <button type="submit" hidden />
       </form>
     </ResponsiveDialog>
@@ -628,10 +647,20 @@ function MakeItem({ maker, open, setOpen, done }) {
     }
   }
   return (
-    <ResponsiveDialog open={open} onOpenChange={setOpen} title={`New ${maker.type}`} action={<Button size="sm" disabled={adding} onClick={make}>Add</Button>}>
+    <ResponsiveDialog
+      open={open}
+      onOpenChange={setOpen}
+      title={`New ${maker.type}`}
+      action={(
+        <>
+          <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button size="sm" disabled={adding} onClick={make}>Add</Button>
+        </>
+      )}
+    >
       <div className="flex flex-col gap-4 p-4">
         <Input ref={input} autoFocus placeholder="Name" aria-label="Name" onKeyDown={(e) => e.key === "Enter" && make()} />
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {error && <Problem title={error} />}
       </div>
     </ResponsiveDialog>
   )
