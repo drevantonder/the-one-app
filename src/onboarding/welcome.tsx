@@ -18,7 +18,7 @@ function Centered({ className, children }: { className?: string; children: React
 /// `action`, the one thing to do, if any, as a button that runs or a link, named `invite` instead when what's typed is an invite
 /// link; `other`, a second way in (a Mac's Join with a Pairing Code), or back from it; `note`, a grey line under them;
 /// `problem`, why the last try didn't work. Near the top, not centred: what comes in later (a problem, a client's name)
-/// grows it down, never moving what's already there. A callout and a problem have their places even when empty, for a
+/// grows it down, never moving what's already there. A text, a callout and a problem have their places even when empty, for a
 /// page's script to fill.
 function Welcome({ logo, title, text, field, callout, children, action, other, note, problem }: {
   logo?: string
@@ -41,7 +41,7 @@ function Welcome({ logo, title, text, field, callout, children, action, other, n
       <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
         {logo && <img data-slot="welcome-logo" src={logo} alt="" className="size-28" />}
         <h1 data-slot="welcome-title" className="mt-2 text-3xl font-semibold tracking-tight text-balance">{title}</h1>
-        {text && <p data-slot="welcome-text" className="text-sm text-balance text-muted-foreground">{text}</p>}
+        <p data-slot="welcome-text" className="text-sm text-balance text-muted-foreground empty:hidden">{text}</p>
         {field && (
           <form className="mt-2 w-full max-w-xs" onSubmit={(e) => (e.preventDefault(), typed.trim() && !busy && run())}>
             <Input data-slot="welcome-field" aria-label={field.label} placeholder={field.placeholder} value={typed} onChange={(e) => setTyped(e.target.value)}

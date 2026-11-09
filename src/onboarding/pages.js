@@ -267,7 +267,7 @@ export function pages(drawn) {
       // Google's answer comes back here with an error if it didn't sign them up.
       if (/(^|&)error=/.test(location.search.slice(1))) say("That Google account isn't the one this invite is for.");
       // Whoever was signed in here before, the invite is for its user: signed out as the page opens, beside asking
-      // whose invite it is, and then the passkey's options, so the prompt comes the moment Make a Passkey is tapped.
+      // whose invite it is, and then the passkey's options, so the prompt comes the moment Join is tapped.
       const out = api("/api/auth/sign-out", {}).catch(() => {});
       if (!throwaway && !google) out.then(() => ready(register(secret)));
       (async () => {
@@ -295,14 +295,14 @@ export function pages(drawn) {
           else await newPasskey(secret);
           if (code) return void (location.href = "/sign-in/code?c=" + encodeURIComponent(code));
           history.replaceState(null, "", "/invite");
-          document.querySelector("[data-slot=welcome]").replaceWith(part(throwaway ? "joined-throwaway" : "joined"));
+          document.querySelector("[data-slot=welcome]").replaceWith(part("joined"));
         } catch (err) {
           undo();
           if (!throwaway && !google) ready(register(secret));
           quietly(err);
         }
       };`;
-    return page(throwaway ? "invite-throwaway" : google ? "invite-google" : "invite", look, script, google ? [] : [throwaway ? "joined-throwaway" : "joined"]);
+    return page(google ? "invite-google" : "invite", look, script, google ? [] : ["joined"]);
   }
 
   /// A user's passkeys: each one, with Remove while there's another, and Add a Passkey; or, signed out, signing in.
@@ -378,7 +378,7 @@ export function pages(drawn) {
   /// Signing in with a code another device shows (the CLI on one with no screen): typing it here goes on to signing in with a
   /// passkey (or Google); `done` says how that went, once it's back.
   function codePage(look) {
-    const { google, error = "", done } = look;
+    const { error = "", done } = look;
     if (done !== undefined) return page(done ? "code-signed-in" : "code-not-signed-in", look);
     const script = `
       say(${json(error)});
@@ -393,7 +393,7 @@ export function pages(drawn) {
       };
       field.form.onsubmit = go;
       button.onclick = go;`;
-    return page(google ? "code-google" : "code", look, script);
+    return page("code", look, script);
   }
 
   return { page, signInPage, throwawayPage, invitePage, passkeysPage, codePage };
