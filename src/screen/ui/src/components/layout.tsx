@@ -13,26 +13,10 @@ function Grid({ min = "14rem", max = 6, gap = "1rem", className, style, ref, ...
   max?: number
   gap?: string
 }) {
-  const grid = React.useRef<HTMLDivElement>(null)
-  React.useImperativeHandle(ref, () => grid.current!)
-  // Tiles the room's change sends to another row dim and settle there, rather than snap or fly through each other.
-  React.useLayoutEffect(() => {
-    const el = grid.current!
-    let room = 0
-    let was = new Map<Element, number>()
-    const seen = new ResizeObserver(() => {
-      const now = new Map([...(el.children as HTMLCollectionOf<HTMLElement>)].map((tile) => [tile as Element, tile.offsetTop]))
-      if (room && room !== el.offsetWidth && [...now].some(([tile, top]) => was.has(tile) && was.get(tile) !== top)) appear(el, 0.4)
-      room = el.offsetWidth
-      was = now
-    })
-    seen.observe(el)
-    return () => seen.disconnect()
-  }, [])
   const column = `minmax(min(100%, max(${min}, (100% - ${max - 1} * ${gap}) / ${max})), 1fr)`
   return (
     <div
-      ref={grid}
+      ref={ref}
       data-slot="grid"
       className={cn("grid", className)}
       style={{ gridTemplateColumns: `repeat(auto-fill, ${column})`, gap, ...style }}
@@ -221,9 +205,9 @@ function Split({ list, detail, title, onClose, wide = 720, size = "26rem", class
   }, [open])
   const before = React.useRef({ side, tracks: "" })
   React.useLayoutEffect(() => {
-    const tracks = getComputedStyle(ref.current!).gridTemplateColumns
-    if (before.current.tracks && before.current.side !== side) slideColumns(ref.current!, side ? `${before.current.tracks} 0px` : before.current.tracks, side ? tracks : `${tracks} 0px`, side)
-    before.current = { side, tracks }
+    const el = ref.current!, was = before.current
+    if (was.tracks && was.side !== side) before.current = { side, tracks: slideColumns(el, was.tracks, side) }
+    else if (!el.getAnimations().length) before.current = { side, tracks: getComputedStyle(el).gridTemplateColumns }
   })
   return (
     <div

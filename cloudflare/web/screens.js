@@ -405,7 +405,7 @@ export const screen = {
   ready(detail, r) {
     const key = JSON.stringify(r);
     const box = $(".screen", detail);
-    if (!box || readied?.key === key || showing?.key === key || coming?.key === key || !showing?.into.isConnected || parked.has(parkKey(r))) return;
+    if (!box || readied?.key === key || coming?.key === key || showing?.key === key || !showing?.into.isConnected || parked.has(parkKey(r))) return;
     if (r.kind === "own" && settingsItems().some((i) => i.name === r.name && i.url && here(i.url))) return;
     if (readied) drop(readied.into);
     readied = screenIn(box, r, showing.into);
@@ -414,12 +414,15 @@ export const screen = {
   /// Shows `r` where the window shows screens. What shows stays until `r`'s next has drawn; a nav away from it goes the
   /// same way. `begin` puts the window's bar on it, when it starts to show (as a phone's goes back, when it's left).
   show(detail, r, begin = () => {}, opened) {
+    const key = JSON.stringify(r);
+    // A second tap of what's coming or moving in leaves it to finish.
+    if (coming?.key === key) return;
+    if (!coming && showing?.key === key && showing.into.isConnected) return (showing.leaving = false), void announced(showing, begin);
     tabTitled(titleOf(r));
     devtools.since = Date.now();
     devtools.draw();
     settle();
     if (coming) (drop(coming.into), (coming = null));
-    const key = JSON.stringify(r);
     const early = readied?.key === key ? readied : null;
     if (readied && readied !== early) drop(readied.into);
     readied = null;

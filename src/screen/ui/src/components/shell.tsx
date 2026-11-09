@@ -132,7 +132,7 @@ function Shell({ pages = [], settings, title, back, onBack, onGo, onPress, onBar
         <BarStart back={back} onChange={onBarStart} />
         {/* Over the screen, whose large title lies in this row until it scrolls away and the title here takes over. Above the
             title bar’s drag region only for its buttons: the rest lets the drag through. */}
-        <header data-slot="shell-bar" className={cn("pointer-events-none relative z-12 flex h-(--shell-bar) shrink-0 items-center gap-2 pr-3 pl-(--shell-bar-start) transition-[padding] duration-200 ease-linear [&>button]:pointer-events-auto", title && "pointer-events-auto border-b bg-background wco:pointer-events-none wco:border-b-0")}>
+        <header data-slot="shell-bar" className={cn("pointer-events-none relative z-12 flex h-(--shell-bar) shrink-0 items-center gap-2 pr-3 pl-(--shell-bar-start) transition-[padding] duration-(--move-settle) ease-(--ease-settle) [&>button]:pointer-events-auto", title && "pointer-events-auto border-b bg-background wco:pointer-events-none wco:border-b-0")}>
           {back && (
             <Button variant="ghost" size="icon" className="size-7" onClick={onBack} aria-label="Back">
               <CaretLeftIcon />
@@ -176,7 +176,7 @@ function Selected({ rows }: { rows: ShellPage[] }) {
     list.addEventListener("scroll", place, { passive: true })
     return () => list.removeEventListener("scroll", place)
   }, [rows])
-  return <span ref={ref} aria-hidden="true" className="absolute top-0 left-0 rounded-md bg-sidebar-accent data-[placed]:transition-[translate] data-[placed]:duration-200 data-[placed]:ease-out motion-reduce:transition-none" />
+  return <span ref={ref} aria-hidden="true" className="absolute top-0 left-0 rounded-md bg-sidebar-accent data-[placed]:transition-[translate] data-[placed]:duration-(--move-settle) data-[placed]:ease-(--ease-settle) motion-reduce:transition-none" />
 }
 
 function ShellRow({ row, onGo, onPress, className, children }: { row: ShellItem; onGo?: (href: string) => void; onPress?: (href: string) => void; className?: string; children?: React.ReactNode }) {

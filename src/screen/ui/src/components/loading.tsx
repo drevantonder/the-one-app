@@ -47,7 +47,7 @@ function ListSkeleton({ rows = 2, tiles, icon = tiles ? 56 : 32 }: { rows?: numb
   }, [late])
   if (!late) return null
   const each = Array.from({ length: rows }, (_, i) => <SkeletonRow key={i} icon={icon} className={icon > 32 ? "p-2" : "px-3 py-2.5"} />)
-  const fades = "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+  const fades = "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-(--move-settle) motion-safe:ease-(--ease-settle)"
   return tiles
     ? <Grid ref={shapes} data-slot="list-skeleton" aria-busy="true" min={tiles} max={4} gap="0.25rem" className={fades}>{each}</Grid>
     : <div ref={shapes} data-slot="list-skeleton" aria-busy="true" className={cn("w-full max-w-2xl divide-y overflow-hidden rounded-xl border bg-card", fades)}>{each}</div>
@@ -119,7 +119,7 @@ function Swap<T>({ call, rows = 3, children }: { call: Call<T>; rows?: number; c
   const data = call.moving && call.error ? null : call.data
   if (data === null) return <Pending call={call} rows={rows} />
   return (
-    <div ref={pane} data-slot="swap" className={cn("min-w-0 transition-opacity duration-150", call.moving && "opacity-50 delay-200")}>
+    <div ref={pane} data-slot="swap" className={cn("min-w-0 transition-opacity", call.moving && "opacity-50 delay-200")}>
       <React.Fragment key={call.of}>{children(data)}</React.Fragment>
     </div>
   )

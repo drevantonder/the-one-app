@@ -8,8 +8,6 @@ import { appear, rise, transition } from "./motion"
 // What a client shows before its window, and auth's pages: signing in, waiting to be let in, starting. One screen at a
 // time, each with the logo in the same place.
 
-const pressed = "active:scale-[.97]"
-
 /// A screen before the window: its logo, and what's under it, which rises in as the screen arrives (a new `key` is a new
 /// screen; the same one drawn again doesn't rise).
 function Stage({ logo, children }: { logo?: string; children: React.ReactNode }) {
@@ -51,7 +49,7 @@ function Welcome({ logo, title, text, field, callout, children, action, other, n
     setBusy(true)
     try { await action?.run?.(field ? typed : undefined) } finally { setBusy(false) }
   }
-  const wide = `mt-2 min-w-56 ${pressed}`
+  const wide = "mt-2 min-w-56"
   const told = React.useRef<HTMLDivElement>(null)
   React.useLayoutEffect(() => { if (problem) appear(told.current!) }, [problem])
   return (
@@ -72,8 +70,8 @@ function Welcome({ logo, title, text, field, callout, children, action, other, n
           <Button size="lg" data-slot="welcome-action" className={wide} disabled={busy || (!!field && !typed.trim())} onClick={run}>{action.invite && typed.includes("/invite#") ? action.invite : action.label}</Button>
         ))}
         {other && (other.href
-          ? <Button variant="ghost" className={pressed} data-slot="welcome-other" asChild><a href={other.href}>{other.label}</a></Button>
-          : <Button variant="ghost" className={pressed} data-slot="welcome-other" onClick={() => other.run?.()}>{other.label}</Button>)}
+          ? <Button variant="ghost" data-slot="welcome-other" asChild><a href={other.href}>{other.label}</a></Button>
+          : <Button variant="ghost" data-slot="welcome-other" onClick={() => other.run?.()}>{other.label}</Button>)}
         <p data-slot="welcome-note" className="text-sm text-balance text-muted-foreground empty:hidden">{note}</p>
         <div ref={told} data-slot="welcome-problem" className="mt-3 w-full text-left empty:hidden">{problem && <Problem title={problem} />}</div>
     </Stage>

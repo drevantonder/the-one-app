@@ -35,7 +35,7 @@
       if (!m) return;
       if (m.oneEvent) one.__event(m.oneEvent);
       if (m.oneFocus && lastFocus?.isConnected) lastFocus.focus({ preventScroll: true });
-      if (m.oneBar !== undefined) ((barStart = m.oneBar), placeLargeTitle("margin-inline-start 200ms linear"));
+      if (m.oneBar !== undefined) ((barStart = m.oneBar), placeLargeTitle("margin-inline-start var(--move-settle) var(--ease-settle)"));
       if (m.oneEscape) (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       if (m.oneLeft) (handlers.left || []).forEach((f) => f());
       if (m.oneOffline !== undefined) {

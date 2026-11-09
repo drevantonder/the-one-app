@@ -35,4 +35,4 @@ function AppIcon({ app, size = 36, className }: { app: App; size?: number; class
   )
 }
 
-export { AppIcon, iconBackground, type App }
+export { AppIcon, type App }

@@ -1,6 +1,8 @@
 /* The theme's names for Tailwind: each colour, radius and font a utility like bg-card or rounded-lg reads, from the
    variables ui.css sets. A screen built with its own Tailwind imports this, and gets only the utilities it uses. */
 @theme inline {
+  --default-transition-duration: var(--move-quick);
+  --default-transition-timing-function: var(--ease-quick);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

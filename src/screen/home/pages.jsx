@@ -11,7 +11,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Badge, badgeCount, Button, Empty, Hint, Icon, Label, LoadFailure, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, WidgetCard, cn, useWidth } from "@one/ui"
+import { animate, AppIcon, Badge, badgeCount, Button, Empty, Hint, Icon, Label, LoadFailure, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, WidgetCard, cn, moves, still, useWidth } from "@one/ui"
 import { home } from "./lib/model.js"
 
 const { scope: chosen, swipe } = one.params || {}
@@ -23,7 +23,7 @@ const NAMES = { small: "Small", medium: "Medium", large: "Large", xl: "Extra Lar
 const SHAPES = { small: "square", medium: "rectangle", large: "squares-four", xl: "columns" }
 const HOLD = 450
 // How long arranging takes to die away once it's ended.
-const LEAVING = 200
+const LEAVING = moves.settle.duration * 1000
 // Whether the shell lifts what a finger holds itself (the iPhone's), and answers its own `contextmenu`.
 const lifts = !!window.__oneLifts
 const editHomePage = { title: "Edit Home Page", icon: "dots-nine", run: () => edit(true) }
@@ -213,21 +213,19 @@ async function save(p, items, hidden = hiddenOf(p), { reload = false } = {}) {
 
 const resize = (p, kept, size) => save(p, keptOf(p).map((k) => (k.widget && k.id === kept.id ? { ...k, size } : k)))
 
-const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches
-
 /// What's being taken off a page, shrinking away where it was as its neighbours glide into its place.
 function shrinkAway(key) {
   const el = document.querySelector(`[data-cell="${CSS.escape(key)}"]`)
   if (!el) return
   flipNext = true
-  if (calm()) return
+  if (still()) return
   const r = el.getBoundingClientRect(), z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
   const ghost = el.cloneNode(true)
   ghost.removeAttribute("data-cell")
   ghost.className = "pointer-events-none fixed left-0 top-0 z-20 m-0 grid"
   Object.assign(ghost.style, { width: `${r.width / z}px`, height: `${r.height / z}px`, gridColumn: "", gridRow: "", animation: "none", transform: `translate(${r.left / z}px, ${r.top / z}px)` })
   document.body.append(ghost)
-  ghost.animate([{ scale: 1, opacity: 1 }, { scale: 0.4, opacity: 0 }], { duration: 180, easing: "ease-in", fill: "forwards" }).finished.then(() => ghost.remove())
+  animate(ghost, { scale: [1, 0.4], opacity: [1, 0] }, moves.quick).finished.then(() => ghost.remove())
 }
 
 /// Takes a widget off a page, or an app's icon: the app stays added there and keeps its place, for Undo, or the Add
@@ -309,7 +307,7 @@ function edit(on) {
   if (S.editing === on) return
   S.editing = on
   clearTimeout(dying)
-  S.leaving = !on && !calm()
+  S.leaving = !on && !still()
   if (on) one.tap("medium")
   else S.undo = []
   if (S.leaving) dying = setTimeout(() => { S.leaving = false; S.render() }, LEAVING)
@@ -427,7 +425,7 @@ function begin(p, scope, slot, x, y, id) {
   const r = el.getBoundingClientRect()
   const ghost = el.cloneNode(true)
   ghost.removeAttribute("data-cell")
-  ghost.className = "pointer-events-none fixed left-0 top-0 z-20 m-0 grid scale-[1.07] drop-shadow-xl transition-[scale] duration-150 [&>[data-ctl]]:hidden"
+  ghost.className = "pointer-events-none fixed left-0 top-0 z-20 m-0 grid scale-[1.07] drop-shadow-xl transition-[scale] [&>[data-ctl]]:hidden"
   Object.assign(ghost.style, { width: `${r.width}px`, height: `${r.height}px`, gridColumn: "", gridRow: "", translate: "", animation: "none" })
   document.body.append(ghost)
   el.style.visibility = "hidden"
@@ -471,7 +469,7 @@ function drop() {
   drag = null
   quietUntil = Date.now() + 300
   const r = d.el.getBoundingClientRect()
-  d.ghost.style.transition = "transform 0.22s ease, scale 0.22s ease"
+  d.ghost.style.transition = "transform var(--move-settle) var(--ease-settle), scale var(--move-settle) var(--ease-settle)"
   d.ghost.style.scale = "1"
   d.ghost.style.transform = `translate(${r.left}px, ${r.top}px)`
   setTimeout(() => {
@@ -485,7 +483,7 @@ function drop() {
     if (changed) save(d.p, keptOf(d.p, order.map((i) => i.kept)))
     else S.render()
     redrawLater = false
-  }, 220)
+  }, LEAVING)
 }
 
 // The iPhone's shell: a finger that moves what it lifted carries it, the menu gone, as on the Home Screen.
@@ -549,8 +547,8 @@ function contextMenu(e) {
 // MARK: Drawing
 
 // What arranging brings, easing in; and easing out as it dies away.
-const COMES = "motion-safe:animate-[comes_200ms_ease-out]"
-const GOES = "pointer-events-none motion-safe:animate-[goes_200ms_ease-in_forwards]"
+const COMES = "motion-safe:animate-[comes_var(--move-settle)_var(--ease-settle)]"
+const GOES = "pointer-events-none motion-safe:animate-[goes_var(--move-settle)_var(--ease-settle)_forwards]"
 
 /// An icon and its name; badged with what needs attention.
 function Tile({ name, icon, size, badge, onClick, onPointerDown, children }) {
@@ -599,7 +597,7 @@ function Cell({ page, at, tall, editing, leaving, refreshing, nth, icon }) {
         w={item.w}
         host={item.host}
         tree={home.tree(item.w, size)}
-        className={cn("h-full", item.open && "cursor-pointer active:opacity-80", refreshing && "opacity-50 transition-opacity", arrived && "motion-safe:animate-[appears_160ms]")}
+        className={cn("h-full", item.open && "cursor-pointer active:opacity-80", refreshing && "opacity-50 transition-opacity", arrived && "motion-safe:animate-[appears_var(--move-quick)_var(--ease-quick)]")}
         onClick={item.open ? (e) => !S.editing && !quiet() && !e.defaultPrevented && !e.target.closest("button, input, label, a") && item.open() : undefined}
       />
     )
@@ -618,7 +616,7 @@ function Cell({ page, at, tall, editing, leaving, refreshing, nth, icon }) {
       data-cell={item.slot}
       data-one-held={lifts && !editing && !!item.menu ? "" : undefined}
       className={cn(
-        "relative grid min-h-0 min-w-0 [transition:scale_200ms,opacity_200ms,--wobble_200ms]",
+        "relative grid min-h-0 min-w-0 [transition-property:scale,opacity,--wobble] duration-(--move-settle) ease-(--ease-settle)",
         arrange && "motion-safe:animate-[jiggle_0.28s_ease-in-out_infinite]",
         editing && "[&>*]:pointer-events-none [&>[data-ctl]]:pointer-events-auto",
         editing && (movable ? "cursor-grab touch-none" : "opacity-50"),
@@ -696,14 +694,15 @@ function Grid({ page, editing, leaving, refreshing }) {
       const r = el.getBoundingClientRect(), before = was.current.get(el.dataset.cell)
       next.set(el.dataset.cell, r)
       // Someone new on a page already drawn pops in.
-      if (!before && was.current.size && !calm()) el.animate([{ scale: 0.4, opacity: 0 }, { scale: 1, opacity: 1 }], { duration: 220, easing: "cubic-bezier(0.22, 1, 0.36, 1)" })
+      if (!before && was.current.size && !still()) animate(el, { scale: [0.4, 1], opacity: [0, 1] }, moves.settle).finished.then(() => (el.style.scale = el.style.opacity = ""))
       if (!flipNext || !before) continue
       const dx = before.left - r.left, dy = before.top - r.top
       if (!dx && !dy) continue
       el.style.transition = "none"
       el.style.translate = `${dx}px ${dy}px`
       el.getBoundingClientRect()
-      el.style.transition = "translate 0.25s ease, scale 0.2s, opacity 0.2s, --wobble 0.2s"
+      el.style.transition = ""
+      el.style.transitionProperty = "translate, scale, opacity, --wobble"
       el.style.translate = ""
     }
     was.current = next

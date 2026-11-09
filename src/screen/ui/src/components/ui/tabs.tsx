@@ -80,7 +80,7 @@ function TabsList({
         aria-hidden
         data-slot="tabs-highlight"
         className={cn(
-          "absolute top-0 left-0 rounded-md transition-[transform,width,height] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          "absolute top-0 left-0 rounded-md transition-[transform,width,height] duration-(--move-settle) ease-(--ease-settle)",
           variant === "line"
             ? "after:absolute after:inset-x-0 after:bottom-[-5px] after:h-0.5 after:bg-foreground"
             : "border border-transparent bg-background shadow-sm dark:border-input dark:bg-input/30"

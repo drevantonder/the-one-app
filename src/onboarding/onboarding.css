@@ -20,12 +20,12 @@
     navigation: auto;
   }
   ::view-transition-group(*) {
-    animation-duration: 130ms;
+    animation-duration: var(--move-quick);
   }
   ::view-transition-old(root) {
     z-index: 1;
     mix-blend-mode: normal;
-    animation: 130ms ease-out both one-out;
+    animation: var(--move-quick) var(--ease-quick) both one-out;
   }
   ::view-transition-new(root),
   ::view-transition-old(welcome-logo),

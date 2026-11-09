@@ -28,8 +28,8 @@ export function reveal() {
   const leaving = cover;
   cover = null;
   if (!leaving) return;
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return leaving.remove();
-  ui.animate(leaving, { opacity: [1, 0] }, { duration: 0.2, ease: "linear" }).finished.then(() => leaving.remove());
+  if (ui.still()) return leaving.remove();
+  ui.animate(leaving, { opacity: [1, 0] }, ui.moves.settle).finished.then(() => leaving.remove());
 }
 
 export function show(element) {
