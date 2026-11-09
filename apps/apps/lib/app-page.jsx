@@ -2,7 +2,7 @@
 // isn't (app.jsx): its icon and name, where it runs, its schedules, what it works with, its source, and, for its owners,
 // its activity and deleting it.
 import { useEffect, useRef, useState } from "react"
-import { AppIcon, Button, Empty, Hint, Icon, List, ListRow, ListSkeleton, Problem, Section, Switch, useCall } from "@one/ui"
+import { AppIcon, Button, Empty, Grid, Hint, Icon, List, ListRow, ListSkeleton, Problem, Section, Switch, useCall } from "@one/ui"
 import { addAccount, onAPage, openApp, said } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
@@ -154,6 +154,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
 
       {answered ? <>
       {w?.problem && <Problem warn title={w.problem.title} text={w.problem.text} action={w.problem.move ? { label: "Move", run: () => move() } : undefined} />}
+      <Grid min="24rem" max={3} gap="1.5rem" className="items-start">
       {w && w.runs_on.length > 0 && (
         <Section title="Runs On">
           <List>
@@ -221,6 +222,7 @@ export function AppPage({ name, apps: store, onOpen, onGone, bar = false }) {
           {busyAny && <ListRow title="Activity" onClick={() => one.open("activity", { app: a.name })} />}
         </List>
       )}
+      </Grid>
 
       <Hint>Made by {a.owner_name}</Hint>
       </> : <ListSkeleton rows={3} />}
