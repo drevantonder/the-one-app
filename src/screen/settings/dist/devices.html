@@ -38,6 +38,7 @@ var E = one.api, D = (e) => one.plain(e).title, O = one.config.yours, k = (e) =>
 	android: "android-logo"
 }, B = (e) => {
 	if (e.platform === "browser") return P.test(e.name) ? R(e.name) : L("browser");
+	if (e.platform === "cloudflare") return L("cloud");
 	let t = I(e.name);
 	return L(t === "desktop" && /iphone|android/.test(e.platform || "") ? "device-mobile" : t, z[e.platform] || F("", e.name));
 }, V = { cloud: !0 };
@@ -662,77 +663,80 @@ function X(t) {
 	}), n[9] = o, n[10] = s, n[11] = u, n[12] = d) : d = n[12], d;
 }
 function ie(t) {
-	let n = e(46), { r, busy: i, answer: a } = t, s = r.yours ? "" : `${r.user}’s first device`, c;
+	let n = e(47), { r, busy: i, answer: a } = t, s = r.yours ? "" : `${r.user}’s first device`, c;
 	n[0] !== r.place || n[1] !== s ? (c = [s, r.place].filter(Boolean), n[0] = r.place, n[1] = s, n[2] = c) : c = n[2];
 	let l = c.join(" · "), u = `${r.device} wants to join`, d;
-	n[3] === r.device ? d = n[4] : (d = R(r.device), n[3] = r.device, n[4] = d);
+	n[3] !== r.device || n[4] !== r.platform ? (d = B({
+		name: r.device,
+		platform: r.platform
+	}), n[3] = r.device, n[4] = r.platform, n[5] = d) : d = n[5];
 	let f;
-	n[5] === d ? f = n[6] : (f = /* @__PURE__ */ w(Y, { icon: d }), n[5] = d, n[6] = f);
+	n[6] === d ? f = n[7] : (f = /* @__PURE__ */ w(Y, { icon: d }), n[6] = d, n[7] = f);
 	let p;
-	n[7] === r.device ? p = n[8] : (p = /* @__PURE__ */ w("span", {
+	n[8] === r.device ? p = n[9] : (p = /* @__PURE__ */ w("span", {
 		className: "block font-medium break-words",
 		children: r.device
-	}), n[7] = r.device, n[8] = p);
+	}), n[8] = r.device, n[9] = p);
 	let m;
-	n[9] === l ? m = n[10] : (m = l && /* @__PURE__ */ w("span", {
+	n[10] === l ? m = n[11] : (m = l && /* @__PURE__ */ w("span", {
 		className: "block break-words text-muted-foreground",
 		children: l
-	}), n[9] = l, n[10] = m);
+	}), n[10] = l, n[11] = m);
 	let h;
-	n[11] === r.sign_in ? h = n[12] : (h = H(r.sign_in) && /* @__PURE__ */ w("span", {
+	n[12] === r.sign_in ? h = n[13] : (h = H(r.sign_in) && /* @__PURE__ */ w("span", {
 		className: "block break-words text-muted-foreground",
 		children: H(r.sign_in)
-	}), n[11] = r.sign_in, n[12] = h);
+	}), n[12] = r.sign_in, n[13] = h);
 	let _;
-	n[13] !== p || n[14] !== m || n[15] !== h ? (_ = /* @__PURE__ */ T("span", {
+	n[14] !== p || n[15] !== m || n[16] !== h ? (_ = /* @__PURE__ */ T("span", {
 		className: "min-w-0 flex-1",
 		children: [
 			p,
 			m,
 			h
 		]
-	}), n[13] = p, n[14] = m, n[15] = h, n[16] = _) : _ = n[16];
+	}), n[14] = p, n[15] = m, n[16] = h, n[17] = _) : _ = n[17];
 	let v;
-	n[17] !== f || n[18] !== _ ? (v = /* @__PURE__ */ T("div", {
+	n[18] !== f || n[19] !== _ ? (v = /* @__PURE__ */ T("div", {
 		className: "flex min-w-0 flex-1 items-center gap-3 text-sm",
 		children: [f, _]
-	}), n[17] = f, n[18] = _, n[19] = v) : v = n[19];
+	}), n[18] = f, n[19] = _, n[20] = v) : v = n[20];
 	let y;
-	n[20] === r.code ? y = n[21] : (y = /* @__PURE__ */ w("div", {
+	n[21] === r.code ? y = n[22] : (y = /* @__PURE__ */ w("div", {
 		className: "text-center font-mono text-3xl font-semibold tracking-widest select-all",
 		children: r.code
-	}), n[20] = r.code, n[21] = y);
+	}), n[21] = r.code, n[22] = y);
 	let b;
-	n[22] !== a || n[23] !== r.code ? (b = () => a(r.code, () => E("POST", "/v1/devices/refuse", { code: r.code })), n[22] = a, n[23] = r.code, n[24] = b) : b = n[24];
+	n[23] !== a || n[24] !== r.code ? (b = () => a(r.code, () => E("POST", "/v1/devices/refuse", { code: r.code })), n[23] = a, n[24] = r.code, n[25] = b) : b = n[25];
 	let x = r.yours ? "Not Me" : "Not Them", S;
-	n[25] !== i || n[26] !== b || n[27] !== x ? (S = /* @__PURE__ */ w(o, {
+	n[26] !== i || n[27] !== b || n[28] !== x ? (S = /* @__PURE__ */ w(o, {
 		variant: "outline",
 		className: "flex-1 @xl:flex-none",
 		disabled: i,
 		onClick: b,
 		children: x
-	}), n[25] = i, n[26] = b, n[27] = x, n[28] = S) : S = n[28];
+	}), n[26] = i, n[27] = b, n[28] = x, n[29] = S) : S = n[29];
 	let C;
-	n[29] !== a || n[30] !== r.code ? (C = () => a(r.code, () => E("POST", "/v1/devices/approve", {
+	n[30] !== a || n[31] !== r.code ? (C = () => a(r.code, () => E("POST", "/v1/devices/approve", {
 		code: r.code,
 		confirm: !0
-	})), n[29] = a, n[30] = r.code, n[31] = C) : C = n[31];
+	})), n[30] = a, n[31] = r.code, n[32] = C) : C = n[32];
 	let D;
-	n[32] === i ? D = n[33] : (D = i && /* @__PURE__ */ w(g, { className: "text-primary-foreground" }), n[32] = i, n[33] = D);
+	n[33] === i ? D = n[34] : (D = i && /* @__PURE__ */ w(g, { className: "text-primary-foreground" }), n[33] = i, n[34] = D);
 	let O;
-	n[34] !== i || n[35] !== C || n[36] !== D ? (O = /* @__PURE__ */ T(o, {
+	n[35] !== i || n[36] !== C || n[37] !== D ? (O = /* @__PURE__ */ T(o, {
 		className: "flex-1 @xl:flex-none",
 		disabled: i,
 		onClick: C,
 		children: [D, "Approve"]
-	}), n[34] = i, n[35] = C, n[36] = D, n[37] = O) : O = n[37];
+	}), n[35] = i, n[36] = C, n[37] = D, n[38] = O) : O = n[38];
 	let k;
-	n[38] !== S || n[39] !== O ? (k = /* @__PURE__ */ T("div", {
+	n[39] !== S || n[40] !== O ? (k = /* @__PURE__ */ T("div", {
 		className: "flex gap-2 @xl:justify-end",
 		children: [S, O]
-	}), n[38] = S, n[39] = O, n[40] = k) : k = n[40];
+	}), n[39] = S, n[40] = O, n[41] = k) : k = n[41];
 	let A;
-	return n[41] !== v || n[42] !== y || n[43] !== k || n[44] !== u ? (A = /* @__PURE__ */ T("div", {
+	return n[42] !== v || n[43] !== y || n[44] !== k || n[45] !== u ? (A = /* @__PURE__ */ T("div", {
 		role: "group",
 		"aria-label": u,
 		className: "flex w-full max-w-2xl flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground @xl:flex-row @xl:items-center",
@@ -741,11 +745,11 @@ function ie(t) {
 			y,
 			k
 		]
-	}), n[41] = v, n[42] = y, n[43] = k, n[44] = u, n[45] = A) : A = n[45], A;
+	}), n[42] = v, n[43] = y, n[44] = k, n[45] = u, n[46] = A) : A = n[46], A;
 }
 function ae(t) {
 	let n = e(14), { c: r, remove: i } = t, a;
-	n[0] === r.name ? a = n[1] : (a = R(r.name), n[0] = r.name, n[1] = a);
+	n[0] === r ? a = n[1] : (a = B(r), n[0] = r, n[1] = a);
 	let s = `${r.name} joined`, c = r.place, l;
 	n[2] === r.since ? l = n[3] : (l = A(r.since), n[2] = r.since, n[3] = l);
 	let u;

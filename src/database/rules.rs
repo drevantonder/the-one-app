@@ -733,7 +733,7 @@ fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
 }
 
 /// What a client can say it's built for.
-const PLATFORMS: [&str; 6] = ["mac", "windows", "linux", "iphone", "android", "browser"];
+pub const PLATFORMS: [&str; 7] = ["mac", "windows", "linux", "iphone", "android", "browser", "cloudflare"];
 
 #[cfg(test)]
 mod tests {

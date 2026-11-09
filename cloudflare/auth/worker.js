@@ -174,10 +174,12 @@ export class Auth extends DurableObject {
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
     // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`;
     // `approved`, when a device said it let it in, `root`, the network it said it let it into, and `welcome`, where
-    // it said to start reading who's who from; `place`, the city it asked from; `device`, the device it's part of;
+    // it said to start reading who's who from; `place`, the city it asked from; `device`, the device it's part of; `platform`, what it says it's built for;
     // `by_link`, whether its sign-in was finished from a link opened elsewhere (`signsInHere`); and `told`, when its
     // user was pushed that it wants in.
     sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, root text, welcome text, place text, device text, by_link integer, told integer)");
+    // A Durable Object keeps its table from before this column.
+    if (!sql.exec("select 1 from pragma_table_info('requests') where name = 'platform'").toArray().length) sql.exec("alter table requests add column platform text");
     // A user's devices, by key, as they asked to join here or said they're theirs, for pushes.
     sql.exec("create table if not exists devices (key text primary key, user text not null, at integer not null)");
     // Devices whose request was turned down, whose user isn't pushed again when they ask again.
@@ -535,14 +537,14 @@ export class Auth extends DurableObject {
     return new Response(JSON.stringify(out), { status: resp.status, headers });
   }
 
-  /// A device signed in asks to join: `{ key, seal, name, reads, proof?, device? }`, its endpoint keys (hex), its name,
+  /// A device signed in asks to join: `{ key, seal, name, reads, proof?, device?, platform? }`, its endpoint keys (hex), its name,
   /// what its build reads of who's who (`READS`), for a
   /// newcomer's first device, `keys::invite_proof` of its invite's secret, key and seal key, kept with that invite for the
   /// inviting admin's device to check, and for a native app, the device it's on (64 hex). → until when it waits.
   async ask(request) {
     const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
     const { user, here } = (await this.asker(request)) || refuse(401, "Sign in first.");
-    const { key, seal, name, proof, device, reads } = body;
+    const { key, seal, name, proof, device, platform, reads } = body;
     if (!isKey(key) || !isKey(seal)) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
     // A device whose build reads less of who's who than this one (an older one says nothing) would be let in to what it
     // can't read: it's told to update first.
@@ -550,6 +552,7 @@ export class Auth extends DurableObject {
     if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the device's name, up to 64 characters");
     if (proof != null && !isKey(proof)) refuse(400, "a proof is 64 hex characters");
     if (device != null && !isKey(device)) refuse(400, "a device is 64 hex characters");
+    if (platform != null && (typeof platform !== "string" || platform.length > 16)) refuse(400, "a platform is a short word");
     this.expire();
     const sql = this.ctx.storage.sql;
     const [had] = sql.exec("select user, seal, approved, told from requests where key = ?", key).toArray();
@@ -566,7 +569,7 @@ export class Auth extends DurableObject {
     const place = typeof request.cf?.city === "string" ? request.cf.city.slice(0, 64) : null;
     // Asked again while it waits: its user isn't pushed again.
     const told = had && had.user === user && had.seal === seal ? had.told : null;
-    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link, told) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1, told);
+    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link, told, platform) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1, told, platform ?? null);
     this.theirs(key, user);
     if (!told) await this.wantsInBy(made + WANTS_IN);
     return { until: made + REQUEST };
@@ -615,7 +618,7 @@ export class Auth extends DurableObject {
       const user_name = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
       const [signed] = sql.exec("select proof from proofs where key = ? and user = ?", r.key, r.user).toArray();
       const signIn = signed && (r.by_link ? { by_link: JSON.parse(signed.proof) } : JSON.parse(signed.proof));
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, user_name, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.root ? { root: r.root } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, user_name, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.root ? { root: r.root } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), ...(r.platform ? { platform: r.platform } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
     });
   }
 

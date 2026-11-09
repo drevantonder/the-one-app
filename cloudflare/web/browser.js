@@ -91,7 +91,7 @@ export function browser() {
     const keys = await browserKeys(user);
     if (await net.start(user).catch(() => false)) return (device = keys);
     const invite = sessionStorage.getItem("one.invite");
-    const ask = async () => net.ask(user, await auth.token(), browserName(), invite);
+    const ask = async () => net.ask(user, await auth.token(), browserName(), "browser", invite);
     await ask();
     if (await byPasskey(user, keys, api)) return (device = keys);
     waiting(await codeOf(keys.key, keys.seal), !!invite);

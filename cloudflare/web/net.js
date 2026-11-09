@@ -193,8 +193,8 @@ export const net = {
 
   /// Asks auth to let this browser in as `user`'s device, signed in with `token`, called `name` (and with someone new's
   /// `invite` secret, its proof).
-  async ask(user, token, name, invite) {
-    await ask({ op: "ask", user, token, name, invite });
+  async ask(user, token, name, platform, invite) {
+    await ask({ op: "ask", user, token, name, platform, invite });
   },
 
   /// What auth says of this browser's request now, acted on as every client does: "signedOut", "approved", "gone" or

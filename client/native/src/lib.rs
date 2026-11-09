@@ -308,6 +308,7 @@ fn native() -> Value {
         "behind": bundle::behind(&a.data),
         // What it's called among its user's devices, and its invite: for its own client, in the page, to ask to be let in.
         "joinName": join_name(),
+        "joinPlatform": one_client::PLATFORM,
         "invite": a.kept("invite"),
     })
 }

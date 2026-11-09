@@ -90,7 +90,7 @@ export function app(native) {
       const user = about.user;
       keys = await native.keys();
       if (!(await net.start(user))) {
-        const ask = async () => net.ask(user, await native.token(), about.joinName, about.invite || undefined);
+        const ask = async () => net.ask(user, await native.token(), about.joinName, about.joinPlatform, about.invite || undefined);
         await ask();
         const code = await codeOf(keys.key, keys.seal);
         waiting(code, !!about.invite);

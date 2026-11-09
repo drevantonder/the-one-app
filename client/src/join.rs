@@ -9,11 +9,15 @@ use crate::Error;
 use crate::keyring::{Address, Keep, error};
 
 /// What a device asks auth to let it in with: its keys, what it's called (`name`) and the kinds of request it reads;
-/// the device it's on, if its app says (`on`); and for someone new, their invite's proof.
-pub fn asking(me: &Endpoint, name: &str, on: Option<&str>, invite: Option<&str>) -> Value {
+/// the device it's on, if its app says (`on`); what it's built for (`platform`); and for someone new, their invite's
+/// proof.
+pub fn asking(me: &Endpoint, name: &str, on: Option<&str>, platform: Option<&str>, invite: Option<&str>) -> Value {
     let mut asked = json!({ "key": keys::hex(&me.key), "seal": keys::hex(&me.seal), "name": name, "reads": one::database::READS });
     if let Some(on) = on {
         asked["device"] = json!(on);
+    }
+    if let Some(platform) = platform {
+        asked["platform"] = json!(platform);
     }
     if let Some(invite) = invite.filter(|i| !i.is_empty()) {
         asked["proof"] = json!(keys::invite_proof(invite.as_bytes(), me));

@@ -51,6 +51,7 @@ const iconByName = (name) => {
 const OS = { mac: "apple-logo", iphone: "apple-logo", windows: "windows-logo", linux: "linux-logo", android: "android-logo" }
 const iconOf = (c) => {
   if (c.platform === "browser") return BROWSER.test(c.name) ? iconByName(c.name) : glyph("browser")
+  if (c.platform === "cloudflare") return glyph("cloud")
   const type = typeOf(c.name)
   return glyph(type === "desktop" && /iphone|android/.test(c.platform || "") ? "device-mobile" : type, OS[c.platform] || osOf("", c.name))
 }
@@ -558,7 +559,7 @@ function Waiting({ r, busy, answer }) {
   return (
     <div role="group" aria-label={`${r.device} wants to join`} className="flex w-full max-w-2xl flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground @xl:flex-row @xl:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-3 text-sm">
-        <DeviceIcon icon={iconByName(r.device)} />
+        <DeviceIcon icon={iconOf({ name: r.device, platform: r.platform })} />
         <span className="min-w-0 flex-1">
           <span className="block font-medium break-words">{r.device}</span>
           {sub && <span className="block break-words text-muted-foreground">{sub}</span>}
@@ -580,7 +581,7 @@ function Waiting({ r, busy, answer }) {
 function Joined({ c, remove }) {
   return (
     <List>
-      <DeviceRow icon={iconByName(c.name)} title={`${c.name} joined`} sub={[c.place, ago(c.since)].filter(Boolean).join(" · ")}>
+      <DeviceRow icon={iconOf(c)} title={`${c.name} joined`} sub={[c.place, ago(c.since)].filter(Boolean).join(" · ")}>
         <Button variant="ghost" size="sm" className="text-destructive" onClick={remove}>Remove</Button>
       </DeviceRow>
     </List>

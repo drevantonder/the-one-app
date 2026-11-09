@@ -58,7 +58,7 @@ enum Stage {
 }
 
 /// What this client is built for, as it says in its listing.
-const PLATFORM: &str = if cfg!(target_os = "ios") {
+pub const PLATFORM: &str = if cfg!(target_os = "ios") {
     "iphone"
 } else if cfg!(target_os = "android") {
     "android"
@@ -182,7 +182,7 @@ impl Device {
     /// secret, its proof).
     pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
         let on = self.on.lock().unwrap().clone();
-        let asked = join::asking(&self.me, name, on.as_deref(), invite);
+        let asked = join::asking(&self.me, name, on.as_deref(), Some(PLATFORM), invite);
         if let Stage::Off { asked: kept } = &mut *self.stage.lock().await {
             *kept = Some(asked.clone());
         }

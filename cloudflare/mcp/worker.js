@@ -238,7 +238,7 @@ export class Client extends DurableObject {
       const r = await this.env.AUTH.fetch(`${origin(this.env)}/api/auth/devices/requests`, {
         method: "POST",
         headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
-        body: JSON.stringify({ key: device.key, seal: device.seal, name: device.name, reads: READS }),
+        body: JSON.stringify({ key: device.key, seal: device.seal, name: device.name, platform: "cloudflare", reads: READS }),
       });
       if (r.ok) until = Math.max(until, Number((await r.json().catch(() => ({}))).until) - JOIN_EARLY || 0);
       else console.log(JSON.stringify({ join: "refused", status: r.status, why: (await r.text()).slice(0, 200) }));

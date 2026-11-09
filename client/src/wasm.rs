@@ -137,10 +137,10 @@ impl Keyring {
         Ok(Keyring { keyring: crate::keyring::Keyring::new(self::key(&key)?, opens), me, on: crate::js::On::of(on, self::key(&key)?), client: Default::default(), answers: Default::default() })
     }
 
-    /// Asks auth to let this browser in, as the user signed in with `token`, calling it `name` (and with someone
-    /// new's `invite` secret, its proof): `join::ask`.
-    pub async fn ask(&self, token: String, name: String, invite: Option<String>) -> Result<(), Failed> {
-        crate::join::ask(&self.on, &token, &crate::join::asking(&self.me, &name, None, invite.as_deref())).await.map_err(Failed::of)
+    /// Asks auth to let this browser or app window in, as the user signed in with `token`, calling it `name`, saying
+    /// it's built for `platform` (and with someone new's `invite` secret, its proof): `join::ask`.
+    pub async fn ask(&self, token: String, name: String, platform: Option<String>, invite: Option<String>) -> Result<(), Failed> {
+        crate::join::ask(&self.on, &token, &crate::join::asking(&self.me, &name, None, platform.as_deref(), invite.as_deref())).await.map_err(Failed::of)
     }
 
     /// What auth says of its request now, acted on (`join::waited`): "signedOut", "approved", "gone" or "waiting".

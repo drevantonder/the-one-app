@@ -424,9 +424,10 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(new.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
     assert_eq!(signed_in_as(&mut new).as_deref(), Some(andre.as_str()));
     let asked = |b: &mut Browser, d: &one::keys::Endpoint| {
-        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": data_encoding::HEXLOWER.encode(&d.key), "seal": data_encoding::HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "reads": one::database::READS }));
+        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": data_encoding::HEXLOWER.encode(&d.key), "seal": data_encoding::HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "platform": "mac", "reads": one::database::READS }));
         assert_eq!(status, 200, "{out}");
         let (_, out, _) = b.get(&format!("/api/auth/devices/requests/{}", data_encoding::HEXLOWER.encode(&d.key)));
+        assert_eq!(out["platform"], "mac", "what a device says it is reaches the devices that approve it");
         out["sign_in"].clone()
     };
     let proof: Proof = serde_json::from_value(asked(&mut new, &device)).expect("its request carries the assertion");

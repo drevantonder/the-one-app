@@ -883,7 +883,7 @@ pub async fn requests(m: &impl Me) -> Result<Value> {
                 Err(err) => tracing::warn!("letting {} in by its sign-in: {err:#}", r.name),
             }
         }
-        let mut shown = json!({ "device": r.name, "user": invite.as_ref().map_or(r.said["user_name"].clone(), |i| json!(i.name)), "code": r.code, "made": r.said["made"], "place": r.said["place"] });
+        let mut shown = json!({ "device": r.name, "user": invite.as_ref().map_or(r.said["user_name"].clone(), |i| json!(i.name)), "code": r.code, "made": r.said["made"], "place": r.said["place"], "platform": r.said["platform"] });
         shown[if invite.is_some() { "new" } else { "yours" }] = json!(true);
         if let Some(account) = signed_in_with(m, &r, None).await {
             shown["sign_in"] = json!(account);
@@ -952,6 +952,10 @@ pub async fn approve(m: &impl Me, r: &Asked, invite: Option<&Invited>) -> Result
         }
         if r.said["place"].is_string() {
             listing.data["place"] = r.said["place"].clone();
+        }
+        // What it said it is, kept out if it isn't a platform: a word from a device not yet let in doesn't refuse its listing.
+        if r.said["platform"].as_str().is_some_and(|p| crate::database::rules::PLATFORMS.contains(&p)) {
+            listing.data["platform"] = r.said["platform"].clone();
         }
         m.write(listing).await?;
         m.read().await?;

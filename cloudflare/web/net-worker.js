@@ -377,7 +377,7 @@ export function server(version, givenHost) {
           }
           // Asking auth to let this browser in, and what auth says of it while it waits (one-client's `join`).
           case "ask": {
-            await (await asking(m.user)).ask(m.token, m.name, m.invite ?? undefined);
+            await (await asking(m.user)).ask(m.token, m.name, m.platform ?? undefined, m.invite ?? undefined);
             return post({ id });
           }
           case "waited":
